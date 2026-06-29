@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Analytics · Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --cream: #FBF6EC;
+    --oat: #F3E9D6;
+    --surface: #FFFDF8;
+    --terracotta: #D9744B;
+    --terracotta-deep: #C25E37;
+    --terracotta-soft: #F6E2D6;
+    --amber: #E8A33D;
+    --sage: #7C8C5A;
+    --sage-deep: #5F6F42;
+    --sage-soft: #E6EAD6;
+    --ink: #41372E;
+    --ink-soft: #6E6055;
+    --ink-faint: #9A8C7E;
+    --line: #E8DCC7;
+    --good: #5F8C5A;
+    --good-soft: #E2EFDC;
+    --bad: #C25E37;
+    --radius-md: 20px;
+    --radius-sm: 14px;
+    --radius-xs: 10px;
+    --shadow-card: 0 4px 18px -8px rgba(120, 86, 54, 0.22);
+    --font: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font);
+    background: var(--cream);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+
+  .gallery-bar {
+    position: sticky; top: 0; z-index: 60;
+    backdrop-filter: blur(8px);
+    background: rgba(251, 246, 236, 0.85);
+    border-bottom: 1px solid var(--line);
+  }
+  .gallery-bar a {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 18px; color: var(--ink-soft);
+    text-decoration: none; font-weight: 700; font-size: 0.84rem;
+  }
+  .gallery-bar a:hover { color: var(--terracotta-deep); }
+  .gallery-bar a:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; border-radius: 8px; }
+
+  .shell { flex: 1; display: grid; grid-template-columns: 232px 1fr; min-height: 0; }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--surface); border-right: 1px solid var(--line);
+    padding: 20px 14px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 11px; padding: 4px 8px 18px;
+  }
+  .brand .logo-mark {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--terracotta), var(--amber));
+    display: grid; place-items: center; color: #fff; font-size: 1.05rem; flex-shrink: 0;
+  }
+  .brand .bn { font-weight: 900; font-size: 0.98rem; letter-spacing: -0.01em; }
+  .brand .bs { font-size: 0.72rem; color: var(--ink-faint); font-weight: 700; }
+  .nav-link {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 14px; border-radius: var(--radius-xs);
+    color: var(--ink-soft); text-decoration: none; font-weight: 700; font-size: 0.9rem;
+    transition: all .12s;
+  }
+  .nav-link i { width: 18px; text-align: center; color: var(--ink-faint); }
+  .nav-link:hover { background: var(--cream); color: var(--ink); }
+  .nav-link.active { background: var(--terracotta-soft); color: var(--terracotta-deep); }
+  .nav-link.active i { color: var(--terracotta); }
+  .nav-link:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; }
+  .nav-spacer { flex: 1; }
+  .nav-foot {
+    background: var(--sage-soft); border-radius: var(--radius-sm); padding: 13px;
+    font-size: 0.76rem; font-weight: 600; color: var(--sage-deep);
+  }
+  .nav-foot .nf-top { font-weight: 800; display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+
+  /* Main */
+  .main { overflow-y: auto; padding: 24px 28px 40px; }
+  .pagehead {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 22px;
+  }
+  .pagehead h1 { margin: 0 0 3px; font-size: 1.5rem; font-weight: 900; letter-spacing: -0.02em; }
+  .pagehead .crumb { font-size: 0.8rem; color: var(--ink-faint); font-weight: 700; }
+  .pagehead .crumb .live { color: var(--good); }
+  .head-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .date-ctrl {
+    display: inline-flex; align-items: center; gap: 9px;
+    background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--radius-xs);
+    padding: 9px 14px; font-weight: 700; font-size: 0.85rem; color: var(--ink-soft); cursor: pointer;
+  }
+  .date-ctrl i { color: var(--terracotta); }
+  .date-ctrl:hover { border-color: var(--sage); }
+  .btn {
+    font-family: var(--font); font-weight: 800; font-size: 0.85rem;
+    border-radius: var(--radius-xs); padding: 9px 16px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid transparent;
+    background: linear-gradient(135deg, var(--terracotta), var(--terracotta-deep));
+    color: #fff; box-shadow: 0 8px 18px -8px rgba(194,94,55,.7); transition: transform .1s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; }
+
+  /* KPI cards */
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 22px; }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md);
+    padding: 18px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;
+  }
+  .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; }
+  .kpi.k1::before { background: var(--terracotta); }
+  .kpi.k2::before { background: var(--sage); }
+  .kpi.k3::before { background: var(--amber); }
+  .kpi.k4::before { background: var(--sage-deep); }
+  .kpi-top { display: flex; align-items: center; gap: 9px; color: var(--ink-soft); font-weight: 700; font-size: 0.82rem; }
+  .kpi-top .ic { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; font-size: 0.8rem; }
+  .kpi.k1 .ic { background: var(--terracotta-soft); color: var(--terracotta-deep); }
+  .kpi.k2 .ic { background: var(--sage-soft); color: var(--sage-deep); }
+  .kpi.k3 .ic { background: #FAEFD4; color: #9A7416; }
+  .kpi.k4 .ic { background: var(--sage-soft); color: var(--sage-deep); }
+  .kpi-val { font-size: 2rem; font-weight: 900; letter-spacing: -0.02em; margin: 12px 0 4px; }
+  .kpi-delta { font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; gap: 5px; }
+  .delta-up { color: var(--good); }
+  .delta-down { color: var(--bad); }
+  .kpi-sub { font-size: 0.74rem; color: var(--ink-faint); font-weight: 600; margin-left: 6px; }
+
+  /* Chart grid */
+  .charts { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md);
+    padding: 20px; box-shadow: var(--shadow-card);
+  }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 10px; }
+  .card-head h2 { margin: 0; font-size: 1.02rem; font-weight: 800; letter-spacing: -0.01em; }
+  .card-head .hint { font-size: 0.74rem; color: var(--ink-faint); font-weight: 700; }
+  .legend { display: inline-flex; gap: 14px; font-size: 0.74rem; font-weight: 700; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 4px; }
+
+  /* Area chart */
+  .area-wrap { width: 100%; }
+  svg { display: block; width: 100%; height: auto; }
+
+  /* Per-question bars */
+  .qbar { margin-bottom: 15px; }
+  .qbar-top { display: flex; justify-content: space-between; font-size: 0.84rem; font-weight: 700; margin-bottom: 6px; }
+  .qbar-top .pct { color: var(--ink-soft); }
+  .qbar-track { height: 14px; background: var(--oat); border-radius: 999px; overflow: hidden; }
+  .qbar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--sage), var(--sage-deep)); }
+  .qbar-fill.t { background: linear-gradient(90deg, var(--amber), var(--terracotta)); }
+
+  /* second row */
+  .charts2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 16px; margin-bottom: 16px; }
+
+  /* NPS donut */
+  .nps-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .nps-donut { position: relative; flex-shrink: 0; }
+  .nps-center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .nps-center .big { font-size: 2rem; font-weight: 900; letter-spacing: -0.02em; color: var(--sage-deep); }
+  .nps-center .lbl { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); }
+  .nps-key { display: grid; gap: 9px; font-size: 0.84rem; font-weight: 700; }
+  .nps-key .row { display: flex; align-items: center; gap: 9px; }
+  .nps-key .sw { width: 13px; height: 13px; border-radius: 5px; flex-shrink: 0; }
+  .nps-key .num { margin-left: auto; color: var(--ink-soft); font-weight: 800; }
+
+  /* Funnel */
+  .funnel { display: grid; gap: 10px; }
+  .fn-row { display: flex; align-items: center; gap: 12px; }
+  .fn-label { width: 132px; flex-shrink: 0; font-size: 0.82rem; font-weight: 700; color: var(--ink-soft); }
+  .fn-bar-wrap { flex: 1; }
+  .fn-bar {
+    height: 34px; border-radius: var(--radius-xs);
+    background: linear-gradient(90deg, var(--terracotta), var(--amber));
+    display: flex; align-items: center; padding: 0 12px; color: #fff; font-weight: 800; font-size: 0.84rem;
+    box-shadow: 0 4px 10px -6px rgba(194,94,55,.6);
+  }
+  .fn-row:nth-child(2) .fn-bar { background: linear-gradient(90deg, var(--terracotta-deep), var(--terracotta)); }
+  .fn-row:nth-child(3) .fn-bar { background: linear-gradient(90deg, var(--sage), var(--amber)); }
+  .fn-row:nth-child(4) .fn-bar { background: linear-gradient(90deg, var(--sage-deep), var(--sage)); }
+  .fn-drop { font-size: 0.74rem; color: var(--ink-faint); font-weight: 700; margin-left: 4px; white-space: nowrap; }
+
+  /* Table */
+  .table-card { padding: 0; overflow: hidden; }
+  .table-head { padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .table-head h2 { margin: 0; font-size: 1.02rem; font-weight: 800; }
+  .table-head a { color: var(--terracotta-deep); font-weight: 800; font-size: 0.82rem; text-decoration: none; }
+  .table-head a:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-faint); font-weight: 800; padding: 11px 20px; border-top: 1px solid var(--line);
+    background: var(--cream);
+  }
+  tbody td { padding: 13px 20px; border-top: 1px solid var(--line); font-size: 0.88rem; font-weight: 600; color: var(--ink); }
+  tbody tr:hover { background: var(--cream); }
+  .person { display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 0.8rem; flex-shrink: 0; }
+  .av1 { background: var(--terracotta); } .av2 { background: var(--sage); } .av3 { background: var(--amber); } .av4 { background: var(--sage-deep); } .av5 { background: var(--terracotta-deep); }
+  .badge {
+    font-size: 0.72rem; font-weight: 800; padding: 3px 10px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .badge.done { background: var(--good-soft); color: var(--good); }
+  .badge.partial { background: #FAEFD4; color: #9A7416; }
+  .nps-chip { font-weight: 900; }
+  .nps-chip.p { color: var(--good); } .nps-chip.n { color: var(--bad); } .nps-chip.pa { color: var(--ink-faint); }
+  .muted { color: var(--ink-faint); font-weight: 600; }
+
+  @media (max-width: 1100px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .charts, .charts2 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .main { padding: 18px 16px 36px; }
+    .fn-label { width: 96px; }
+  }
+</style>
+</head>
+<body>
+  <div class="gallery-bar">
+    <a href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+  </div>
+
+  <div class="shell">
+    <!-- Sidebar -->
+    <nav class="sidebar" aria-label="Main navigation">
+      <div class="brand">
+        <div class="logo-mark"><i class="fa-solid fa-seedling"></i></div>
+        <div>
+          <div class="bn">MJ Forms</div>
+          <div class="bs">Riverbend Alliance</div>
+        </div>
+      </div>
+      <a class="nav-link" href="#"><i class="fa-regular fa-file-lines"></i> Forms</a>
+      <a class="nav-link" href="#"><i class="fa-regular fa-comment-dots"></i> Responses</a>
+      <a class="nav-link active" href="#" aria-current="page"><i class="fa-solid fa-chart-pie"></i> Analytics</a>
+      <a class="nav-link" href="#"><i class="fa-solid fa-share-nodes"></i> Distributions</a>
+      <a class="nav-link" href="#"><i class="fa-solid fa-gear"></i> Settings</a>
+      <div class="nav-spacer"></div>
+      <div class="nav-foot">
+        <div class="nf-top"><i class="fa-solid fa-circle-check"></i> Survey is live</div>
+        Closes June 30 · 12 days left to gather voices.
+      </div>
+    </nav>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="pagehead">
+        <div>
+          <h1>Spring 2026 Member Survey</h1>
+          <div class="crumb">Analytics · <span class="live">● collecting responses</span></div>
+        </div>
+        <div class="head-controls">
+          <button class="date-ctrl"><i class="fa-regular fa-calendar"></i> Last 30 days <i class="fa-solid fa-chevron-down" style="font-size:.65rem;color:var(--ink-faint)"></i></button>
+          <button class="btn"><i class="fa-solid fa-download"></i> Export</button>
+        </div>
+      </header>
+
+      <!-- KPIs -->
+      <section class="kpis" aria-label="Key metrics">
+        <div class="kpi k1">
+          <div class="kpi-top"><span class="ic"><i class="fa-solid fa-inbox"></i></span> Total responses</div>
+          <div class="kpi-val">1,284</div>
+          <div><span class="kpi-delta delta-up"><i class="fa-solid fa-arrow-up"></i> 18%</span><span class="kpi-sub">vs. last month</span></div>
+        </div>
+        <div class="kpi k2">
+          <div class="kpi-top"><span class="ic"><i class="fa-solid fa-circle-check"></i></span> Completion rate</div>
+          <div class="kpi-val">82%</div>
+          <div><span class="kpi-delta delta-up"><i class="fa-solid fa-arrow-up"></i> 4 pts</span><span class="kpi-sub">vs. last month</span></div>
+        </div>
+        <div class="kpi k3">
+          <div class="kpi-top"><span class="ic"><i class="fa-regular fa-clock"></i></span> Avg. time</div>
+          <div class="kpi-val">2:48</div>
+          <div><span class="kpi-delta delta-down"><i class="fa-solid fa-arrow-down"></i> 0:22</span><span class="kpi-sub">faster than before</span></div>
+        </div>
+        <div class="kpi k4">
+          <div class="kpi-top"><span class="ic"><i class="fa-solid fa-heart"></i></span> NPS score</div>
+          <div class="kpi-val">+64</div>
+          <div><span class="kpi-delta delta-up"><i class="fa-solid fa-arrow-up"></i> 7</span><span class="kpi-sub">members love you</span></div>
+        </div>
+      </section>
+
+      <!-- Charts row 1 -->
+      <section class="charts">
+        <!-- Area chart -->
+        <div class="card">
+          <div class="card-head">
+            <h2>Responses over time</h2>
+            <div class="legend"><span><span class="sw" style="background:var(--terracotta)"></span> Started</span><span><span class="sw" style="background:var(--sage)"></span> Completed</span></div>
+          </div>
+          <div class="area-wrap">
+            <svg viewBox="0 0 640 240" role="img" aria-label="Area chart of responses over the last 30 days, trending upward">
+              <defs>
+                <linearGradient id="gradTerra" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#D9744B" stop-opacity="0.32" />
+                  <stop offset="100%" stop-color="#D9744B" stop-opacity="0.02" />
+                </linearGradient>
+                <linearGradient id="gradSage" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#7C8C5A" stop-opacity="0.34" />
+                  <stop offset="100%" stop-color="#7C8C5A" stop-opacity="0.02" />
+                </linearGradient>
+              </defs>
+              <!-- gridlines -->
+              <g stroke="#E8DCC7" stroke-width="1">
+                <line x1="0" y1="40" x2="640" y2="40" /><line x1="0" y1="90" x2="640" y2="90" />
+                <line x1="0" y1="140" x2="640" y2="140" /><line x1="0" y1="190" x2="640" y2="190" />
+              </g>
+              <!-- Started area -->
+              <path d="M0,170 L70,150 L140,158 L210,120 L280,128 L350,92 L420,100 L490,66 L560,74 L640,44 L640,210 L0,210 Z" fill="url(#gradTerra)" />
+              <path d="M0,170 L70,150 L140,158 L210,120 L280,128 L350,92 L420,100 L490,66 L560,74 L640,44" fill="none" stroke="#D9744B" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+              <!-- Completed area -->
+              <path d="M0,188 L70,176 L140,180 L210,150 L280,154 L350,124 L420,130 L490,100 L560,106 L640,82 L640,210 L0,210 Z" fill="url(#gradSage)" />
+              <path d="M0,188 L70,176 L140,180 L210,150 L280,154 L350,124 L420,130 L490,100 L560,106 L640,82" fill="none" stroke="#7C8C5A" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+              <!-- end dots -->
+              <circle cx="640" cy="44" r="5" fill="#D9744B" /><circle cx="640" cy="82" r="5" fill="#7C8C5A" />
+              <!-- x labels -->
+              <g fill="#9A8C7E" font-size="12" font-weight="700" font-family="Nunito, sans-serif">
+                <text x="0" y="232">Jun 1</text><text x="200" y="232">Jun 10</text><text x="395" y="232">Jun 20</text><text x="595" y="232">Jun 29</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Per-question breakdown -->
+        <div class="card">
+          <div class="card-head">
+            <h2>Top program interests</h2>
+            <span class="hint">% who chose</span>
+          </div>
+          <div class="qbar">
+            <div class="qbar-top"><span>Youth mentorship &amp; tutoring</span><span class="pct">71%</span></div>
+            <div class="qbar-track"><div class="qbar-fill t" style="width:71%"></div></div>
+          </div>
+          <div class="qbar">
+            <div class="qbar-top"><span>Community garden &amp; food share</span><span class="pct">64%</span></div>
+            <div class="qbar-track"><div class="qbar-fill" style="width:64%"></div></div>
+          </div>
+          <div class="qbar">
+            <div class="qbar-top"><span>Arts &amp; cultural celebrations</span><span class="pct">52%</span></div>
+            <div class="qbar-track"><div class="qbar-fill" style="width:52%"></div></div>
+          </div>
+          <div class="qbar">
+            <div class="qbar-top"><span>Workforce &amp; skills workshops</span><span class="pct">38%</span></div>
+            <div class="qbar-track"><div class="qbar-fill" style="width:38%"></div></div>
+          </div>
+          <div class="qbar">
+            <div class="qbar-top"><span>Senior companionship visits</span><span class="pct">29%</span></div>
+            <div class="qbar-track"><div class="qbar-fill" style="width:29%"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Charts row 2 -->
+      <section class="charts2">
+        <!-- NPS donut -->
+        <div class="card">
+          <div class="card-head"><h2>Net Promoter</h2><span class="hint">1,052 rated</span></div>
+          <div class="nps-wrap">
+            <div class="nps-donut">
+              <svg width="150" height="150" viewBox="0 0 42 42" role="img" aria-label="NPS donut: 72% promoters, 20% passives, 8% detractors">
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#F3E9D6" stroke-width="6" />
+                <!-- detractors 8% -->
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#C25E37" stroke-width="6" stroke-dasharray="8 92" stroke-dashoffset="25" />
+                <!-- passives 20% -->
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#E8A33D" stroke-width="6" stroke-dasharray="20 80" stroke-dashoffset="17" />
+                <!-- promoters 72% -->
+                <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#7C8C5A" stroke-width="6" stroke-dasharray="72 28" stroke-dashoffset="-3" />
+              </svg>
+              <div class="nps-center"><div><div class="big">+64</div><div class="lbl">NPS</div></div></div>
+            </div>
+            <div class="nps-key">
+              <div class="row"><span class="sw" style="background:var(--sage)"></span> Promoters <span class="num">72%</span></div>
+              <div class="row"><span class="sw" style="background:var(--amber)"></span> Passives <span class="num">20%</span></div>
+              <div class="row"><span class="sw" style="background:var(--terracotta-deep)"></span> Detractors <span class="num">8%</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Funnel -->
+        <div class="card">
+          <div class="card-head"><h2>Completion funnel</h2><span class="hint">where folks drop off</span></div>
+          <div class="funnel">
+            <div class="fn-row"><div class="fn-label">Opened link</div><div class="fn-bar-wrap"><div class="fn-bar" style="width:100%">1,564 <span style="font-weight:600;opacity:.85;margin-left:6px">100%</span></div></div></div>
+            <div class="fn-row"><div class="fn-label">Started form</div><div class="fn-bar-wrap"><div class="fn-bar" style="width:90%">1,402 <span style="font-weight:600;opacity:.85;margin-left:6px">90%</span></div></div><span class="fn-drop">−10%</span></div>
+            <div class="fn-row"><div class="fn-label">Reached page 2</div><div class="fn-bar-wrap"><div class="fn-bar" style="width:79%">1,231 <span style="font-weight:600;opacity:.85;margin-left:6px">79%</span></div></div><span class="fn-drop">−11%</span></div>
+            <div class="fn-row"><div class="fn-label">Submitted</div><div class="fn-bar-wrap"><div class="fn-bar" style="width:72%">1,128 <span style="font-weight:600;opacity:.85;margin-left:6px">72%</span></div></div><span class="fn-drop">−7%</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent responses table -->
+      <section class="card table-card" aria-label="Recent responses">
+        <div class="table-head">
+          <h2>Recent responses</h2>
+          <a href="#">View all responses <i class="fa-solid fa-arrow-right" style="font-size:.7rem"></i></a>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Member</th><th>Submitted</th><th>Rating</th><th>NPS</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><div class="person"><div class="avatar av1">MA</div> Maria Alvarez</div></td>
+              <td class="muted">Today · 9:42 AM</td>
+              <td>★★★★★</td>
+              <td><span class="nps-chip p">9</span></td>
+              <td><span class="badge done"><i class="fa-solid fa-check"></i> Complete</span></td>
+            </tr>
+            <tr>
+              <td><div class="person"><div class="avatar av2">JT</div> James Thornton</div></td>
+              <td class="muted">Today · 8:15 AM</td>
+              <td>★★★★☆</td>
+              <td><span class="nps-chip p">8</span></td>
+              <td><span class="badge done"><i class="fa-solid fa-check"></i> Complete</span></td>
+            </tr>
+            <tr>
+              <td><div class="person"><div class="avatar av3">PN</div> Priya Nair</div></td>
+              <td class="muted">Yesterday · 6:50 PM</td>
+              <td>★★★★★</td>
+              <td><span class="nps-chip p">10</span></td>
+              <td><span class="badge done"><i class="fa-solid fa-check"></i> Complete</span></td>
+            </tr>
+            <tr>
+              <td><div class="person"><div class="avatar av4">DO</div> Daniel Owens</div></td>
+              <td class="muted">Yesterday · 4:03 PM</td>
+              <td>★★★☆☆</td>
+              <td><span class="nps-chip pa">7</span></td>
+              <td><span class="badge partial"><i class="fa-solid fa-hourglass-half"></i> Partial</span></td>
+            </tr>
+            <tr>
+              <td><div class="person"><div class="avatar av5">LC</div> Lucia Castro</div></td>
+              <td class="muted">Jun 27 · 11:21 AM</td>
+              <td>★★★★★</td>
+              <td><span class="nps-chip p">9</span></td>
+              <td><span class="badge done"><i class="fa-solid fa-check"></i> Complete</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+<script>
+  document.querySelectorAll('.nav-link').forEach(function (l) {
+    l.addEventListener('click', function (e) {
+      e.preventDefault();
+      document.querySelectorAll('.nav-link').forEach(function (x) { x.classList.remove('active'); x.removeAttribute('aria-current'); });
+      this.classList.add('active');
+      this.setAttribute('aria-current', 'page');
+    });
+  });
+</script>
+</body>
+</html>
