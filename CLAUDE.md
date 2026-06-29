@@ -20,8 +20,10 @@ These capabilities are all present in published **MJ 5.43.0**. We pin `@memberju
 - **npm scope:** `@mj-biz-apps/forms-*` (packages: `forms-entities`, `forms-actions`, `forms-server`, `forms-ng`)
 - **Database schema:** `__mj_BizAppsForms` (follows the bizapps-common / bizapps-tasks `__mj_BizApps*` convention; never put Forms tables in `__mj`)
 - **Ports:** MJAPI `4121`, MJExplorer `4321`
-- **Entity-name prefix:** Forms entities get the `MJ Forms: ` prefix (set in `mj.config.cjs`).
-- **Caliber seam (do NOT build now):** keep `FormResponse` carrying a polymorphic `SubjectEntityName + SubjectID` and the response/version data cleanly mappable to a JSON `IntakeSubmission`, so the sibling Caliber app can later consume MJ Forms as native intake. Don't build any Caliber integration in this repo.
+- **Entity-name prefix:** Forms entities get the `MJ_BizApps_Forms: ` prefix (set in `mj.config.cjs`), matching the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` sibling convention.
+- **Hard dependencies (auto-installed Open Apps):** MJ Forms **requires** `bizapps-common` (identity — `MJ_BizApps_Common: People`, hard FK from `FormResponse.RespondentPersonID`) and `bizapps-tasks` (review/approve-before-publish routing). Both are declared in `mj-app.json` `dependencies` and installed automatically by `mj app install` (leaf-first: common → tasks → forms). They're free OSS and part of our stack — build on them directly with hard FKs; do **not** use soft polymorphic links to avoid the dependency.
+- **Approval routing (Phase 2):** publish gating uses `bizapps-tasks` — a `FormVersion` going to review creates a Task + TaskLink(→FormVersion) + TaskAssignment(→approver People); the Task's `TaskType` `OnComplete`/`OnReject` action hooks call back into Forms actions to publish or return-to-draft. Forms owns the `FormVersion` status state machine; tasks owns assignment/decisions/UI/audit/notifications.
+- **Caliber seam:** the sibling Caliber app consumes MJ Forms as native intake by binding to the `RespondentPersonID` Person (and the response/version data, cleanly mappable to a JSON `IntakeSubmission`). Don't build any Caliber integration in this repo.
 
 ## Structure
 ```

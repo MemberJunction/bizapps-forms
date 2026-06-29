@@ -52,7 +52,7 @@ module.exports = {
   newEntityDefaults: {
     NameRulesBySchema: [
       { SchemaName: '${mj_core_schema}', EntityNamePrefix: 'MJ: ' },
-      { SchemaName: '__mj_BizAppsForms', EntityNamePrefix: 'MJ Forms: ', EntityNameSuffix: '' },
+      { SchemaName: '__mj_BizAppsForms', EntityNamePrefix: 'MJ_BizApps_Forms: ', EntityNameSuffix: '' },
     ],
   },
 

@@ -14,15 +14,23 @@
 **Phase 0 — ✅ COMPLETE.** Repo scaffolded from the bizapps-common Open App skeleton
 (5 packages: `forms-{entities,actions,core-entities-server,server,ng}`; 2 apps: MJAPI/MJExplorer),
 pinned to MJ **`5.43.0`** (`mjVersionRange >=5.43.0 <6.0.0`), schema `__mj_BizAppsForms`, entity
-prefix `MJ Forms: `, ports **4121 / 4321**. `npm install --ignore-scripts && npm run build` is green
-for all 5 packages **and** MJAPI; the only failure is the MJExplorer *production* `ng build`
-font-inline step, which needs internet (`fonts.googleapis.com`) and is an environment-only issue.
-Scaffold is on **`main`**.
+prefix `MJ_BizApps_Forms: ` (matches the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` siblings), ports
+**4121 / 4321**. `npm install --ignore-scripts && npm run build` is green for all 5 packages **and**
+MJAPI; the only failure is the MJExplorer *production* `ng build` font-inline step, which needs
+internet (`fonts.googleapis.com`) and is an environment-only issue. Scaffold is on **`main`**.
+
+**Hard Open-App dependencies.** MJ Forms **requires** and auto-installs two sibling apps (declared in
+`mj-app.json` `dependencies`; `mj app install` resolves leaf-first **common → tasks → forms**):
+**`bizapps-common`** (`>=5.31.0 <6.0.0`) for identity — `FormResponse.RespondentPersonID` is a hard
+cross-schema FK to `MJ_BizApps_Common: People`; and **`bizapps-tasks`** (`>=1.1.0 <2.0.0`) for the
+review/approve-before-publish routing (its v1.1.x `Task Decisions` model). The polymorphic
+`FormResponse` subject seam was **removed** in favour of hard FKs (we build directly on common/tasks
+as part of the stack). Caliber consumes MJ Forms by binding to the `RespondentPersonID` Person.
 
 **Phase 1 — 🟡 IN PROGRESS.** Schema + Phase-1 tables migration **authored**:
 `migrations/B202606281200__v0.1.x_Schema_and_Tables.sql` (all 10 tables, value-list CHECKs,
-extended-property descriptions, the polymorphic `FormResponse` subject seam, cross-schema FKs to
-`__mj.[User]` / `__mj.[File]`).
+extended-property descriptions, the hard `FormResponse.RespondentPersonID` FK to
+`__mj_BizAppsCommon.Person`, cross-schema FKs to `__mj.[User]` / `__mj.[File]`).
 
 ### 🎨 Design system & themeable prototypes (live on GitHub Pages)
 
@@ -652,3 +660,18 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
       migrate + CodeGen, public submit endpoint, `<mj-form>` widget, builder/admin, AI authoring,
       reporting) needs a live DB and is the next session's work after a local pull.
     - **Not committed** — awaiting explicit approval (per CLAUDE.md rule 1).
+- **2026-06-29 — Design system tokenized + hard Open-App dependencies adopted.** (a) The three
+  design directions (Editorial default · Aurora · Warm) were rebuilt as one MJ-token-driven design
+  system (`docs/app/design-system.css`) where each theme is a `[data-theme]` token-override block =
+  a `FormStyle.CSSVariables` row; live at the GitHub Pages gallery. (b) Owner decided MJ Forms
+  **hard-depends** on `bizapps-common` + `bizapps-tasks` (free OSS, auto-installed). Research
+  confirmed app-to-app deps are first-class (`mj-app.json` `dependencies`, transitive topological
+  install, proven by `bizapps-tasks → bizapps-common`) and that `bizapps-tasks` v1.1.x already ships
+  an approval/decision model (Task Decisions/Outcomes, polymorphic Task Links + Assignments, TaskType
+  `OnComplete`/`OnReject` action hooks) — so approve-before-publish is wiring, not building. Changes
+  landed: entity prefix `MJ Forms:` → **`MJ_BizApps_Forms:`** (sibling convention; set before first
+  CodeGen); `mj-app.json` `dependencies` on common (`>=5.31.0`) + tasks (`>=1.1.0`); the polymorphic
+  `FormResponse` subject seam **removed** and replaced by a hard `RespondentPersonID` FK →
+  `__mj_BizAppsCommon.Person`. Consequence: the forms migration now requires `bizapps-common`'s schema
+  present first (install order / local-dev ordering). The bizapps-tasks approval routing is **Phase 2**
+  (FormVersion status state machine + 3 Forms actions + a "Form Approval" TaskType).

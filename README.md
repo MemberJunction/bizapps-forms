@@ -141,9 +141,15 @@ bizapps-forms/
 ### 📐 Data model (Phase 1)
 
 `FormCategory` (hierarchical) · `FormStyle` (themeable CSS) · **`Form`** · `FormVersion` (immutable
-snapshots) · `FormPage` · `FormQuestion` · `FormQuestionOption` · **`FormResponse`** (polymorphic
-`SubjectEntityName` + `SubjectID`) · `FormResponseAnswer` (typed columns + JSON fallback) ·
-`FormDistribution`. _Phase 2 adds `FormGroup` carrying the optional `MaterializedEntityID` RSU bridge._
+snapshots) · `FormPage` · `FormQuestion` · `FormQuestionOption` · **`FormResponse`** (identified
+respondents link to a `bizapps-common` Person via `RespondentPersonID`) · `FormResponseAnswer`
+(typed columns + JSON fallback) · `FormDistribution`. _Phase 2 adds `FormGroup` carrying the optional
+`MaterializedEntityID` RSU bridge._
+
+> **Hard dependencies:** MJ Forms builds on two sibling Open Apps —
+> [`bizapps-common`](https://github.com/MemberJunction/bizapps-common) (identity) and
+> [`bizapps-tasks`](https://github.com/MemberJunction/bizapps-tasks) (review/approve-before-publish
+> routing). Both are free OSS and **auto-install** with MJ Forms (declared in `mj-app.json`).
 
 ### 🧱 ~70% is reuse, not new build
 
@@ -167,7 +173,7 @@ npm run start:explorer      # MJExplorer    → http://localhost:4321
 | | |
 |---|---|
 | **Database schema** | `__mj_BizAppsForms` |
-| **Entity prefix** | `MJ Forms: ` |
+| **Entity prefix** | `MJ_BizApps_Forms: ` |
 | **npm scope** | `@mj-biz-apps/forms-*` |
 | **MJ version** | pinned to exactly **`5.43.0`** — the earliest published version carrying anonymous magic-link `mj_scopes` enforcement **and** the RSU pipeline MJ Forms depends on |
 | **Ports** | MJAPI `4121` · MJExplorer `4321` |
