@@ -96,9 +96,16 @@
   footer a { color: var(--ink-soft); border-bottom: 1px solid var(--line); }
   footer a:hover { color: var(--ink); }
   .foot-row { display:flex; flex-wrap:wrap; gap: 22px; justify-content: space-between; align-items:center; }
+  .repo-cta { position: fixed; top: 16px; right: 16px; z-index: 20; display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; text-decoration: none; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); padding: 9px 15px; border-radius: 999px; box-shadow: var(--shadow);
+    transition: border-color .18s ease, transform .18s ease; }
+  .repo-cta:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .repo-cta i { font-size: 15px; }
 </style>
 </head>
 <body>
+  <a class="repo-cta" href="https://github.com/MemberJunction/bizapps-forms" target="_blank" rel="noopener"><i class="fa-brands fa-github"></i> View on GitHub</a>
   <div class="wrap">
     <header class="hero">
       <span class="eyebrow"><span class="dot"></span> MemberJunction Open App · Design Explorations</span>
