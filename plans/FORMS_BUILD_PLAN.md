@@ -33,7 +33,7 @@ HTML pages + a gallery, under [`docs/`](../docs/). These are visual explorations
 have **zero dependency on the CodeGen gate**, so they progress in parallel. Published via GitHub Pages
 (`main` → `/docs`):
 
-➡️ **Live gallery: https://memberjunction.github.io/bizapps-forms/** — published via GitHub Pages from `main` / `/docs`.
+➡️ **https://memberjunction.github.io/bizapps-forms/**  *(enable once: repo Settings → Pages → Deploy from branch → `main` / `/docs`)*
 
 > Screenshots below are rendered captures committed under [`docs/screenshots/`](../docs/screenshots/);
 > click any image to open the live page (once Pages is enabled).
