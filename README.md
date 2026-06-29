@@ -62,7 +62,6 @@ A standalone survey tool traps responses in a silo. MJ Forms inverts that — re
 | 🧩 | **Responses are records, not exports** | A submission can _become_ (or link to) a [bizapps-common](https://github.com/MemberJunction/bizapps-common) **Person / Organization / ContactMethod** — instantly actionable in the same system that runs the org's CRM, committees, and tasks. No CSV round-trip, no Zapier tax. |
 | ⚡ | **On-submit automation — free** | Send an email, create a Task, upsert a Person, route to an agent, run an LLM-judge on a free-text answer. The "integrations + logic + AI" that incumbents charge the most for, MJ already has. |
 | 🧬 | **Promote responses to first-class entities** | A recurring instrument can be projected — via a live SQL view, or an opt-in **RSU-materialized table** — into something the whole MJ toolchain (viewing system, query builder, dashboards, **Skip**) treats natively. _No form tool on the market does this._ |
-| 🎙️ | **Optional conversational upgrade** | When text + uploads aren't enough, a question can hand off to a voice agent via the sibling [Caliber](https://github.com/MemberJunction/bizapps-caliber) app. |
 
 > **Philosophy:** _beat the meter_ — free and unlimited at the core — and differentiate on **native
 > data integration**, not on out-feature-ing the long tail.
@@ -199,7 +198,7 @@ npm run start:explorer      # MJExplorer    → http://localhost:4321
 - `FormGroup` + **view-projection** & opt-in **RSU materialization**
 - Advanced question types (Matrix, Ranking, Address, Signature, Payment)
 - **LLM-judge** scoring on free-text answers
-- **Caliber** conversational hand-off
+- **Review/approve-before-publish** routing via bizapps-tasks
 - Partial-response resume · advanced quotas · richer logic
 
 </td></tr>

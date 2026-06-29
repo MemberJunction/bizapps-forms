@@ -46,7 +46,7 @@ module.exports = {
 
   /**
    * New-entity defaults. Forms entities live in the __mj_BizAppsForms schema
-   * and get a "MJ Forms: " entity-name prefix to avoid collisions with MJ core
+   * and get a "MJ_BizApps_Forms: " entity-name prefix to avoid collisions with MJ core
    * and other apps. (MJ core entities use the "MJ: " prefix.)
    */
   newEntityDefaults: {

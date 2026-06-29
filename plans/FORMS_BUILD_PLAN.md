@@ -5,7 +5,7 @@
 > A fresh session should pull this file byte-for-byte into that repo (e.g. as
 > `plans/FORMS_BUILD_PLAN.md`) and treat it as the durable task state — read the Status
 > Snapshot + Progress Log at the start of every session, pick up the first unfinished task
-> in dependency order, and update task state here as you work (the Caliber plan convention).
+> in dependency order, and update task state here as you work.
 
 ---
 
@@ -25,7 +25,7 @@ internet (`fonts.googleapis.com`) and is an environment-only issue. Scaffold is 
 cross-schema FK to `MJ_BizApps_Common: People`; and **`bizapps-tasks`** (`>=1.1.0 <2.0.0`) for the
 review/approve-before-publish routing (its v1.1.x `Task Decisions` model). The polymorphic
 `FormResponse` subject seam was **removed** in favour of hard FKs (we build directly on common/tasks
-as part of the stack). Caliber consumes MJ Forms by binding to the `RespondentPersonID` Person.
+as part of the stack).
 
 **Phase 1 — 🟡 IN PROGRESS.** Schema + Phase-1 tables migration **authored**:
 `migrations/B202606281200__v0.1.x_Schema_and_Tables.sql` (all 10 tables, value-list CHECKs,
@@ -79,7 +79,7 @@ from the gallery as "v1".)*
 
 1. **`npm run mj:migrate`** — apply the migration to a SQL Server instance (creates the
    `__mj_BizAppsForms` schema + the 10 Phase-1 tables).
-2. **`npm run mj:codegen`** — generate the `MJ Forms: …` entity / action / GraphQL-resolver /
+2. **`npm run mj:codegen`** — generate the `MJ_BizApps_Forms: …` entity / action / GraphQL-resolver /
    Angular-form subclasses into `packages/*/src/generated/`, plus the SQL views & SPs.
 3. **`npm run build`** — verify the generated entity types compile end-to-end.
 
@@ -89,7 +89,7 @@ from the gallery as "v1".)*
 > + anti-abuse hardening layer, the mobile-first `<mj-form>` widget, the builder/admin app, AI
 > authoring, reporting, on-submit hooks) depends on this gate.
 
-Once CodeGen has run and the build is green, resume Phase 1 in the **§10** dependency order — the
+Once CodeGen has run and the build is green, resume Phase 1 in the **§9** dependency order — the
 first code task is the **public submit endpoint** (forms-server) with its anonymous-scope check +
 Turnstile / rate-limit / quota hardening (§4), followed by the **respondent widget** (forms-ng).
 
@@ -148,9 +148,6 @@ A standalone survey tool traps responses in a silo. MJ Forms inverts that:
    (e.g. "Annual Meeting Survey") can be projected into a real, evolving table that the whole
    MJ toolchain — viewing system, query builder, dashboards, **Skip** — treats natively. No
    form tool on the market does this.
-4. **Optional conversational/voice upgrade via Caliber.** When text + uploads aren't enough,
-   a question can hand off to a voice agent that transcribes, records, and rubric-scores —
-   see §9.
 
 ### 1.3 Competitive landscape (summary — VERIFY PRICING before any customer-facing use)
 
@@ -183,7 +180,7 @@ integration*, not on out-feature-ing the long tail.
 - No statistical analysis suite (significance testing, weighting). Reporting is solid, not
   SPSS.
 - No multi-tenant SaaS billing. This is an installable open app; any hosted offering is a
-  separate concern (and may live with Caliber commercially — out of scope here).
+  separate concern (out of scope here).
 
 ---
 
@@ -240,7 +237,7 @@ flowchart TB
 
 ```
 bizapps-forms/
-  mj-app.json            # OpenApp manifest (see §12)
+  mj-app.json            # OpenApp manifest (see §11)
   mj.config.cjs          # schema + entity prefix + CodeGen output paths
   package.json           # npm workspace (apps/* + packages/*), turbo
   turbo.json
@@ -282,7 +279,6 @@ and no FK indexes — CodeGen adds those).
 | Promote responses → first-class entity | **Runtime Schema Update (RSU)** pipeline: `SchemaEngine.generateDDL()` → migration → CodeGen → restart; `SchemaEvolution` adds columns over time | `packages/SchemaEngine/src/RuntimeSchemaManager.ts`, `SchemaEvolution.ts`, `MJServer/src/resolvers/RSUResolver.ts` |
 | On-submit automation | **Actions / Agents / AI Prompts** | core framework |
 | Reporting | RunView/RunViews, RunQuery, BaseDashboard + AG Grid | core framework |
-| Conversational/voice upgrade | **bizapps-caliber** + MJ 5.44 realtime, bound via polymorphic subject + `IntakeSubmission` | Caliber `plans/CALIBER_BUILD_PLAN.md` §2.1, §5 |
 
 > **NOTE — do NOT reuse MJ Interactive Forms as the survey schema.** Interactive Forms
 > (`Type='Form'` Components + `Entity Form Overrides`) are **entity-bound** — they override
@@ -393,7 +389,7 @@ erDiagram
 - **FormVersion** — immutable published snapshots. `FormID, VersionNumber, Status
   (Draft|Published|Retired), PublishedAt, DefinitionSnapshot (JSON — the full
   pages/questions/options/logic as-published)`. Responses pin a `FormVersionID` so a form can
-  evolve without corrupting historical data (Caliber's immutable-`ResolvedConfig` pattern).
+  evolve without corrupting historical data.
 - **FormPage** — `FormID, Title, Description, DisplayOrder, ConditionalRule (JSON,
   show-if logic — §6)`.
 - **FormQuestion** — `FormID, PageID, QuestionType (value-list — §5.3), Prompt, HelpText,
@@ -402,8 +398,8 @@ erDiagram
   Settings (JSON, per-type)`.
 - **FormQuestionOption** — `QuestionID, Label, Value, DisplayOrder, IsDefault`.
 - **FormResponse** — `FormID, FormVersionID, Status (Partial|Complete), AnonymousSessionID
-  (mj_sid), SubjectEntityName (nullable), SubjectID (nullable — polymorphic link to
-  Person/anything, Caliber pattern), SubmittedAt, StartedAt, SourceMetadata (JSON: ip-hash,
+  (mj_sid), RespondentPersonID (nullable FK → `MJ_BizApps_Common` Person, for identified
+  respondents), StartedAt, SubmittedAt, SourceMetadata (JSON: ip-hash,
   ua, distribution id, referrer)`.
 - **FormResponseAnswer** — `ResponseID, QuestionID, TextValue, NumericValue, DateValue,
   BooleanValue, JSONValue (for multi/complex), FileID (→ MJ: Files), Score (nullable),
@@ -429,7 +425,7 @@ erDiagram
 (radio), MultiChoice (checkbox), Dropdown, Rating (stars/scale), NPS, YesNo, Date, Time,
 FileUpload, Statement (display-only/section header).
 **Advanced (Phase 2):** Matrix/Grid, Ranking, Address (→ bizapps-common), Signature,
-Payment, Calculated, Conversational (→ Caliber hand-off, §9).
+Payment, Calculated.
 
 ### 5.4 Dual persistence (the design you locked)
 
@@ -502,38 +498,14 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ---
 
-## 9. Caliber Integration Seam (Forms ← consumed by Caliber)
-
-MJ Forms is the **text/structured/upload** input layer; **Caliber** is the
-**conversational/voice** layer with rubric scoring. They **compose** (siblings), they are not
-parent/child. The seam is **data-level, in-process, zero schema coupling**:
-
-- A `FormResponse` is a **subject**: Caliber binds an `Engagement`/`AssessmentSession` via
-  `SubjectEntityName='Forms: Responses' + SubjectID`.
-- Form answers flow into Caliber as an **`IntakeSubmission`** (`MappedData` JSON), read by a
-  `ContextProvider` to brief the voice agent.
-- A `Conversational` question type (§5.3, P2) hands a respondent off to a Caliber voice agent
-  via an **anonymous magic link** scoped to that agent; the transcript/recording/score
-  return and attach to the originating `FormResponse`.
-- Caliber's `Criterion.AppliesTo=Both` already allows one rubric to score **written +
-  spoken** answers together.
-
-> A companion PR is being opened in the **Caliber repo** proposing that MJ Forms become
-> Caliber's **native intake mechanism** (text + uploads) rather than the current
-> external-form (TypeForm) bolt-on — and that Caliber's intake design (Protocol
-> `IntakeMode`, the `ExternalFormType` lookup) be updated to treat MJ Forms as a
-> first-class, in-process intake source. It points at this plan.
-
----
-
-## 10. Phases & Tasks
+## 9. Phases & Tasks
 
 ### Phase 0 — Repo bootstrap ✅ COMPLETE
 - [x] Create `bizapps-forms` repo from the bizapps-common skeleton (mj-app.json, mj.config.cjs,
       package.json workspace, turbo.json, packages/{Entities,Actions,**CoreEntitiesServer**,Server,Angular},
-      apps/{MJAPI,MJExplorer}). _Built from the bizapps-caliber fresh-scaffold variant of the common
+      apps/{MJAPI,MJExplorer}). _Built from a fresh-scaffold variant of the bizapps-common Open App
       skeleton, then `CoreEntitiesServer` added to fully mirror bizapps-common's package set._
-- [x] Set schema `__mj_BizAppsForms`, scope `@mj-biz-apps/forms-*`, prefix `MJ Forms:` (DG-2),
+- [x] Set schema `__mj_BizAppsForms`, scope `@mj-biz-apps/forms-*`, prefix `MJ_BizApps_Forms:` (DG-2),
       ports 4121/4321, `mjVersionRange >=5.43.0 <6.0.0` (DG-1 — see Progress Log).
 - [x] Pull this plan into `plans/FORMS_BUILD_PLAN.md` (byte-for-byte from MJ PR #2971).
 
@@ -561,12 +533,12 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
       materialization** (opt-in, admin-triggered, batched) — §5.4 / §8.2.
 - [ ] Advanced question types (Matrix, Ranking, Address→bizapps-common, Signature, Payment).
 - [ ] LLM-judge scoring pipeline on free-text answers (ScoringConfig).
-- [ ] Caliber `Conversational` question type hand-off (§9).
+- [ ] Review/approve-before-publish routing via **bizapps-tasks** (FormVersion status state machine + a "Form Approval" TaskType whose OnComplete/OnReject hooks call Forms actions).
 - [ ] Partial-response resume, advanced quotas, richer conditional logic.
 
 ---
 
-## 11. Decision Gates / Open Questions
+## 10. Decision Gates / Open Questions
 
 - **DG-1 — Min MJ version.** Confirm earliest version with anonymous magic-link `mj_scopes`
   enforcement **and** RSU; pin `mjVersionRange`. (Default `>=5.44.0 <6.0.0`.)
@@ -583,7 +555,7 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
 
 ---
 
-## 12. Repo Bootstrap Specifics (defaults for the build session)
+## 11. Repo Bootstrap Specifics (defaults for the build session)
 
 `mj-app.json` (mirroring `bizapps-common/mj-app.json`):
 
@@ -619,39 +591,38 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
 
 - `mj.config.cjs`: `entityPackageName: '@mj-biz-apps/forms-entities'`, the same `output[]`
   block as bizapps-common (SQL / Angular / GraphQLServer / ActionSubclasses /
-  EntitySubclasses / DBSchemaJSON), entity name prefix `Forms:`, post-codegen build commands.
+  EntitySubclasses / DBSchemaJSON), entity name prefix `MJ_BizApps_Forms:`, post-codegen build commands.
 - `package.json`: workspaces `apps/*` + `packages/*`; `mj:migrate --schema __mj_BizAppsForms
   --dir ./migrations`; `mj:codegen`; turbo build/start filters for `mj_api` / `mj_explorer`.
-- Ports: MJAPI **4121**, MJExplorer **4321** (common=4101/4301, caliber=4111/4311).
+- Ports: MJAPI **4121**, MJExplorer **4321** (common=4101/4301).
 - Branching: `next` (integration) → `main` (release), feature branches track same-named
   remote (bizapps convention).
 
 ---
 
-## 13. Progress Log
+## 12. Progress Log
 
 - *(pre-build)* Plan authored in MJ repo as portable seed. Competitive pricing (§1.3) flagged
   for live re-verification. Next: pull into `bizapps-forms`, execute Phase 0.
 - **2026-06-28 — Phase 0 complete; Phase 1 started.** Scaffolded `bizapps-forms` from the
-  bizapps-common Open App skeleton (used the bizapps-caliber fresh-scaffold variant as the concrete
+  bizapps-common Open App skeleton (used a fresh-scaffold variant of the bizapps-common skeleton as the concrete
   base, then added `packages/CoreEntitiesServer` = `@mj-biz-apps/forms-core-entities-server`, wired
-  into the Server bootstrap, to fully mirror common's 5-package set). All Caliber identifiers,
-  semantics, branding, ports, and version pins rewritten to Forms. Authored `mj-app.json`, a
+  into the Server bootstrap, to fully mirror common's 5-package set). All scaffold identifiers,
+  semantics, branding, ports, and version pins set to Forms. Authored `mj-app.json`, a
   world-class root `README.md`, and a Forms-specific `CLAUDE.md`.
     - **DG-1 (min MJ version) resolved → pin `5.43.0`.** Verified directly: `@memberjunction/*@5.44.0`
       is NOT published to npm (404); latest published is `5.43.0`. The two capabilities Forms depends
       on — anonymous magic-link `mj_scopes` enforcement (`@memberjunction/server`) and the RSU pipeline
       (`@memberjunction/schema-engine`: `RuntimeSchemaManager`, `SchemaEvolution`, `RSUResolver`) — are
-      both present in published `5.43.0`. The 5.44 realtime/media work (MJ PR #2941) is Caliber's
-      dependency, not Forms'. So `mjVersionRange = >=5.43.0 <6.0.0`, npm deps pinned to `5.43.0`.
+      both present in published `5.43.0`. The 5.44 realtime/media work (MJ PR #2941) is not a Forms
+      dependency. So `mjVersionRange = >=5.43.0 <6.0.0`, npm deps pinned to `5.43.0`.
     - **DG-2 (naming) resolved →** schema `__mj_BizAppsForms` (PascalCase `__mj_BizApps*` convention,
-      confirmed against common + tasks), entity prefix **`MJ Forms: `**, root table **`Form`**
-      (plan default; entity reads "MJ Forms: Forms"). *Open: the `MJ Forms: Forms` mild stutter, and
-      whether to match tasks' longer `MJ_BizApps_Tasks:`-style prefix — owner chose `MJ Forms:`.*
+      confirmed against common + tasks), entity prefix `MJ_BizApps_Forms:` (aligned to the
+      MJ_BizApps_Common: / MJ_BizApps_Tasks: sibling convention), root table `Form`.
     - **Build status:** `npm install` (with `--ignore-scripts` to skip `sharp`'s blocked libvips
       binary download in this sandbox) + `npm run build` → all 5 packages **and** MJAPI build green
       after one fix (gave `forms-server` `"types": ["node"]` for its `node:url`/`node:path` imports —
-      a latent bug inherited from the never-built caliber scaffold). The only remaining failure is the
+      a latent bug inherited from the fresh scaffold (never built before this)). The only remaining failure is the
       MJExplorer **production** `ng build` trying to inline an external Google Font over the internet
       (no `fonts.googleapis.com` access in this sandbox) — an environment/network limitation, not a
       code defect; it will build locally with internet, and `ng serve` is unaffected.

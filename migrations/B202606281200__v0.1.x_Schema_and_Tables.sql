@@ -2,7 +2,7 @@
 -- MJ Forms — Schema and Tables (Phase 1)
 -- =============================================================================
 -- Free, open-source forms / surveys / intake for MemberJunction.
--- Schema: __mj_BizAppsForms  ·  Entity prefix (set in mj.config.cjs): "MJ Forms: "
+-- Schema: __mj_BizAppsForms  ·  Entity prefix (set in mj.config.cjs): "MJ_BizApps_Forms: "
 --
 -- Conventions (see CLAUDE.md / plans/FORMS_BUILD_PLAN.md §5.1):
 --   * Business columns + PK/FK/CHECK/UNIQUE constraints only.
@@ -11,7 +11,7 @@
 --   * sp_addextendedproperty on every non-PK, non-FK business column (CodeGen
 --     turns these into entity-field descriptions).
 --   * CHECK constraints on value-list columns — CodeGen parses them into value lists.
---   * Root table is `Form` (DG-2 default) → entity "MJ Forms: Forms".
+--   * Root table is `Form` (DG-2 default) → entity "MJ_BizApps_Forms: Forms".
 --   * Cross-schema FKs to MJ core: __mj.[User], __mj.[File].
 -- Phase-2 entities (FormGroup + MaterializedEntityID RSU bridge) are deliberately
 -- NOT created here — see plan §5.2.
