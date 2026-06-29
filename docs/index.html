@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MJ Forms — Design Explorations</title>
+<meta name="description" content="Three contemporary UX directions for MJ Forms — the free, open-source forms, surveys & intake app for MemberJunction. Each direction shown across the respondent form, the visual builder, and the analytics dashboard." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --bg-soft: #121829;
+    --card: #161d31;
+    --card-hover: #1b2440;
+    --line: #28324f;
+    --ink: #eef2ff;
+    --ink-soft: #aeb8d4;
+    --ink-mute: #7a85a6;
+    --accent: #7c5cff;
+    --accent-2: #29d0c4;
+    --radius: 18px;
+    --shadow: 0 24px 60px -20px rgba(0,0,0,.6);
+    font-family: 'Sora', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    -webkit-font-smoothing: antialiased; line-height: 1.5;
+    background-image:
+      radial-gradient(1100px 600px at 12% -10%, rgba(124,92,255,.22), transparent 60%),
+      radial-gradient(900px 520px at 100% 0%, rgba(41,208,196,.16), transparent 55%);
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+  /* Hero */
+  header.hero { padding: 84px 0 36px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft);
+    border: 1px solid var(--line); padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,.02);
+  }
+  .eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 12px var(--accent-2); }
+  h1 {
+    font-size: clamp(38px, 6vw, 70px); line-height: 1.02; margin: 22px 0 0; font-weight: 800; letter-spacing: -.02em;
+    background: linear-gradient(120deg, #fff 20%, #b9a8ff 55%, #6ee7df 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lede { max-width: 660px; color: var(--ink-soft); font-size: 18px; margin: 20px 0 0; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+  .pill { font-size: 13px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; background: rgba(255,255,255,.02); }
+  .pill i { color: var(--accent-2); margin-right: 6px; }
+
+  /* Direction section */
+  .section { padding: 40px 0; border-top: 1px solid var(--line); margin-top: 40px; }
+  .section:first-of-type { border-top: 0; }
+  .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-bottom: 26px; }
+  .section-head .title { font-size: 26px; font-weight: 700; letter-spacing: -.01em; display:flex; align-items:center; gap: 14px; }
+  .swatches { display: inline-flex; gap: 6px; }
+  .swatches span { width: 18px; height: 18px; border-radius: 6px; border: 1px solid rgba(255,255,255,.18); }
+  .section-head p { color: var(--ink-mute); max-width: 560px; margin: 6px 0 0; font-size: 15px; }
+  .num { font-size: 13px; color: var(--ink-mute); font-weight: 600; }
+
+  /* Cards grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; display: flex; flex-direction: column;
+  }
+  .card:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: var(--shadow); }
+  .thumb { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: #fff; border-bottom: 1px solid var(--line); }
+  .thumb iframe {
+    width: 1440px; height: 900px; border: 0; transform: scale(.3194); transform-origin: top left;
+    pointer-events: none; background: #fff;
+  }
+  .thumb .open {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .18s ease; background: linear-gradient(0deg, rgba(11,15,26,.55), rgba(11,15,26,.15));
+  }
+  .card:hover .thumb .open { opacity: 1; }
+  .thumb .open span {
+    background: rgba(255,255,255,.95); color: #111; font-weight: 600; font-size: 14px;
+    padding: 10px 18px; border-radius: 999px; display: inline-flex; gap: 8px; align-items: center;
+  }
+  .card .meta { padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; }
+  .card .meta .s-name { font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 10px; }
+  .card .meta .s-name i { color: var(--accent); width: 18px; text-align: center; }
+  .card .meta .arrow { color: var(--ink-mute); transition: transform .18s ease, color .18s ease; }
+  .card:hover .meta .arrow { color: var(--accent); transform: translateX(3px); }
+
+  footer { border-top: 1px solid var(--line); margin-top: 56px; padding: 34px 0 70px; color: var(--ink-mute); font-size: 14px; }
+  footer a { color: var(--ink-soft); border-bottom: 1px solid var(--line); }
+  footer a:hover { color: var(--ink); }
+  .foot-row { display:flex; flex-wrap:wrap; gap: 22px; justify-content: space-between; align-items:center; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <span class="eyebrow"><span class="dot"></span> MemberJunction Open App · Design Explorations</span>
+      <h1>MJ Forms</h1>
+      <p class="lede">Three divergent, contemporary UX directions for the free &amp; open-source forms, surveys &amp; intake app — each shown across the public <strong>respondent form</strong>, the visual <strong>builder</strong>, and the analytics <strong>dashboard</strong>. Pick a direction; we'll tokenize the winner into MemberJunction's <code>--mj-*</code> design system.</p>
+      <div class="meta-row">
+        <span class="pill"><i class="fa-solid fa-mobile-screen"></i> Mobile-first respondent UX</span>
+        <span class="pill"><i class="fa-solid fa-wand-magic-sparkles"></i> Visual + AI authoring</span>
+        <span class="pill"><i class="fa-solid fa-chart-line"></i> Native analytics</span>
+        <span class="pill"><i class="fa-solid fa-shield-halved"></i> Anonymous-friendly</span>
+      </div>
+    </header>
+
+    <!-- AURORA -->
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="title">
+            <span class="swatches"><span style="background:#6d5efc"></span><span style="background:#22d3ee"></span><span style="background:#0b1020"></span></span>
+            Aurora
+          </div>
+          <p>Vibrant, modern SaaS — gradient depth, frosted glassmorphism, soft glow. Energetic but premium.</p>
+        </div>
+        <span class="num">01 / 03</span>
+      </div>
+      <div class="grid">
+        <a class="card" href="aurora/respondent.html">
+          <div class="thumb"><iframe src="aurora/respondent.html" scrolling="no" tabindex="-1" title="Aurora respondent form"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-mobile-screen-button"></i> Respondent form</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+        <a class="card" href="aurora/builder.html">
+          <div class="thumb"><iframe src="aurora/builder.html" scrolling="no" tabindex="-1" title="Aurora builder"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-pen-ruler"></i> Form builder</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+        <a class="card" href="aurora/dashboard.html">
+          <div class="thumb"><iframe src="aurora/dashboard.html" scrolling="no" tabindex="-1" title="Aurora dashboard"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-chart-pie"></i> Analytics dashboard</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+      </div>
+    </section>
+
+    <!-- EDITORIAL -->
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="title">
+            <span class="swatches"><span style="background:#faf8f3"></span><span style="background:#0f1410"></span><span style="background:#1f7a55"></span></span>
+            Editorial
+          </div>
+          <p>Refined &amp; minimal — paper-white calm, confident display type, hairline structure, one quiet accent.</p>
+        </div>
+        <span class="num">02 / 03</span>
+      </div>
+      <div class="grid">
+        <a class="card" href="editorial/respondent.html">
+          <div class="thumb"><iframe src="editorial/respondent.html" scrolling="no" tabindex="-1" title="Editorial respondent form"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-mobile-screen-button"></i> Respondent form</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+        <a class="card" href="editorial/builder.html">
+          <div class="thumb"><iframe src="editorial/builder.html" scrolling="no" tabindex="-1" title="Editorial builder"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-pen-ruler"></i> Form builder</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+        <a class="card" href="editorial/dashboard.html">
+          <div class="thumb"><iframe src="editorial/dashboard.html" scrolling="no" tabindex="-1" title="Editorial dashboard"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-chart-pie"></i> Analytics dashboard</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+      </div>
+    </section>
+
+    <!-- WARM -->
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="title">
+            <span class="swatches"><span style="background:#f6ede0"></span><span style="background:#d8744a"></span><span style="background:#7f8f5a"></span></span>
+            Warm / Humanist
+          </div>
+          <p>Friendly &amp; approachable — cream &amp; terracotta, soft rounded shapes, built for nonprofits &amp; associations.</p>
+        </div>
+        <span class="num">03 / 03</span>
+      </div>
+      <div class="grid">
+        <a class="card" href="warm/respondent.html">
+          <div class="thumb"><iframe src="warm/respondent.html" scrolling="no" tabindex="-1" title="Warm respondent form"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-mobile-screen-button"></i> Respondent form</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+        <a class="card" href="warm/builder.html">
+          <div class="thumb"><iframe src="warm/builder.html" scrolling="no" tabindex="-1" title="Warm builder"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-pen-ruler"></i> Form builder</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+        <a class="card" href="warm/dashboard.html">
+          <div class="thumb"><iframe src="warm/dashboard.html" scrolling="no" tabindex="-1" title="Warm dashboard"></iframe><div class="open"><span><i class="fa-solid fa-up-right-from-square"></i> Open</span></div></div>
+          <div class="meta"><span class="s-name"><i class="fa-solid fa-chart-pie"></i> Analytics dashboard</span><i class="fa-solid fa-arrow-right arrow"></i></div>
+        </a>
+      </div>
+    </section>
+
+    <footer>
+      <div class="foot-row">
+        <div>MJ Forms — design explorations · prototypes only (no backend). Built on <a href="https://github.com/MemberJunction/MJ">MemberJunction</a>.</div>
+        <div><a href="https://github.com/MemberJunction/bizapps-forms">Repo</a> &nbsp;·&nbsp; <a href="https://github.com/MemberJunction/bizapps-forms/blob/main/plans/FORMS_BUILD_PLAN.md">Build plan</a></div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

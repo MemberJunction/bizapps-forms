@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Form Builder · Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --cream: #FBF6EC;
+    --oat: #F3E9D6;
+    --surface: #FFFDF8;
+    --terracotta: #D9744B;
+    --terracotta-deep: #C25E37;
+    --terracotta-soft: #F6E2D6;
+    --amber: #E8A33D;
+    --sage: #7C8C5A;
+    --sage-deep: #5F6F42;
+    --sage-soft: #E6EAD6;
+    --ink: #41372E;
+    --ink-soft: #6E6055;
+    --ink-faint: #9A8C7E;
+    --line: #E8DCC7;
+    --radius-md: 20px;
+    --radius-sm: 14px;
+    --radius-xs: 10px;
+    --shadow-card: 0 4px 18px -8px rgba(120, 86, 54, 0.22);
+    --shadow-pop: 0 14px 34px -14px rgba(120, 86, 54, 0.4);
+    --font: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font);
+    background: var(--cream);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+    min-height: 100vh;
+  }
+
+  .gallery-bar {
+    position: sticky; top: 0; z-index: 60;
+    backdrop-filter: blur(8px);
+    background: rgba(251, 246, 236, 0.85);
+    border-bottom: 1px solid var(--line);
+  }
+  .gallery-bar a {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 18px; color: var(--ink-soft);
+    text-decoration: none; font-weight: 700; font-size: 0.84rem;
+  }
+  .gallery-bar a:hover { color: var(--terracotta-deep); }
+  .gallery-bar a:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; border-radius: 8px; }
+
+  /* Top bar */
+  .topbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 22px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .topbar .logo-mark {
+    width: 38px; height: 38px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--terracotta), var(--amber));
+    display: grid; place-items: center; color: #fff; font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .name-edit {
+    display: flex; flex-direction: column;
+  }
+  .name-edit .nm {
+    font-weight: 900; font-size: 1.05rem; letter-spacing: -0.01em;
+    border: 1.5px dashed transparent; border-radius: 8px;
+    padding: 2px 6px; margin: -2px -6px;
+    cursor: text; display: inline-flex; align-items: center; gap: 8px;
+  }
+  .name-edit .nm:hover { border-color: var(--line); }
+  .name-edit .nm i { color: var(--ink-faint); font-size: 0.8rem; }
+  .name-edit .sub { font-size: 0.74rem; color: var(--ink-faint); font-weight: 700; padding-left: 6px; }
+  .pill {
+    font-size: 0.72rem; font-weight: 800; padding: 4px 11px; border-radius: 999px;
+    background: var(--oat); color: var(--ink-soft);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .pill.draft { background: #FAEFD4; color: #9A7416; }
+  .pill.draft i { color: var(--amber); }
+  .spacer { flex: 1; }
+
+  .seg {
+    display: inline-flex; background: var(--oat); border-radius: 999px; padding: 4px; gap: 2px;
+  }
+  .seg button {
+    border: 0; background: transparent; font-family: var(--font);
+    font-weight: 700; font-size: 0.8rem; color: var(--ink-soft);
+    padding: 6px 14px; border-radius: 999px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--terracotta-deep); box-shadow: var(--shadow-card); }
+  .seg button:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; }
+
+  .btn {
+    font-family: var(--font); font-weight: 800; font-size: 0.86rem;
+    border-radius: var(--radius-xs); padding: 9px 16px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; border: 1.5px solid var(--line);
+    background: var(--surface); color: var(--ink-soft); transition: all .12s;
+  }
+  .btn:hover { border-color: var(--sage); color: var(--sage-deep); }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--terracotta), var(--terracotta-deep));
+    color: #fff; border-color: transparent;
+    box-shadow: 0 8px 18px -8px rgba(194, 94, 55, 0.7);
+  }
+  .btn-primary:hover { transform: translateY(-1px); color: #fff; }
+  .btn:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; }
+
+  /* 3-pane layout */
+  .app {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 250px 1fr 320px;
+    min-height: 0;
+  }
+  .pane { overflow-y: auto; padding: 18px; }
+  .pane-left { border-right: 1px solid var(--line); background: var(--surface); }
+  .pane-center { background: var(--cream); }
+  .pane-right { border-left: 1px solid var(--line); background: var(--surface); }
+
+  .pane-title {
+    font-size: 0.74rem; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--ink-faint); margin: 0 0 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Palette */
+  .palette { display: grid; gap: 7px; }
+  .pal-item {
+    display: flex; align-items: center; gap: 11px;
+    padding: 10px 12px; border-radius: var(--radius-xs);
+    border: 1.5px solid transparent; background: var(--cream);
+    cursor: grab; font-weight: 700; font-size: 0.86rem; color: var(--ink);
+    transition: all .12s;
+  }
+  .pal-item:hover { border-color: var(--amber); background: var(--surface); transform: translateX(2px); }
+  .pal-item .ic {
+    width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+    display: grid; place-items: center; background: var(--sage-soft); color: var(--sage-deep);
+    font-size: 0.82rem;
+  }
+  .pal-item:hover .ic { background: var(--terracotta-soft); color: var(--terracotta-deep); }
+  .pal-hint {
+    margin-top: 14px; font-size: 0.76rem; color: var(--ink-faint); font-weight: 600;
+    background: var(--oat); padding: 10px 12px; border-radius: var(--radius-xs);
+    display: flex; gap: 8px; align-items: flex-start;
+  }
+  .pal-hint i { color: var(--amber); margin-top: 2px; }
+
+  /* Canvas */
+  .canvas { max-width: 620px; margin: 0 auto; }
+  .canvas-head {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-md); padding: 18px 20px; margin-bottom: 16px;
+    border-top: 5px solid var(--terracotta);
+  }
+  .canvas-head h2 { margin: 0 0 4px; font-size: 1.2rem; font-weight: 900; letter-spacing: -0.01em; }
+  .canvas-head p { margin: 0; color: var(--ink-soft); font-size: 0.88rem; }
+
+  .qcard {
+    background: var(--surface); border: 1.5px solid var(--line);
+    border-radius: var(--radius-md); padding: 16px 16px 16px 14px;
+    margin-bottom: 12px; display: flex; gap: 12px;
+    transition: border-color .12s, box-shadow .12s;
+    position: relative;
+  }
+  .qcard:hover { border-color: var(--amber); }
+  .qcard.selected {
+    border-color: var(--terracotta);
+    box-shadow: 0 0 0 4px rgba(217, 116, 75, 0.14), var(--shadow-card);
+  }
+  .qcard.selected::before {
+    content: ""; position: absolute; left: -1.5px; top: 14px; bottom: 14px;
+    width: 4px; border-radius: 4px; background: var(--terracotta);
+  }
+  .handle { color: var(--ink-faint); cursor: grab; padding-top: 4px; font-size: 0.95rem; }
+  .handle:hover { color: var(--terracotta); }
+  .qc-body { flex: 1; min-width: 0; }
+  .qc-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .type-badge {
+    font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    background: var(--sage-soft); color: var(--sage-deep);
+    padding: 3px 9px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .type-badge.terra { background: var(--terracotta-soft); color: var(--terracotta-deep); }
+  .qc-num { font-size: 0.74rem; font-weight: 800; color: var(--ink-faint); }
+  .qc-label { font-weight: 800; font-size: 1rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .qc-preview {
+    background: var(--cream); border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+    padding: 11px 13px; color: var(--ink-faint); font-size: 0.9rem; font-weight: 600;
+  }
+  .mini-opts { display: grid; gap: 7px; }
+  .mini-opt { display: flex; align-items: center; gap: 9px; font-size: 0.88rem; font-weight: 600; color: var(--ink-soft); }
+  .mini-opt .r { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink-faint); flex-shrink: 0; }
+  .mini-opt .c { width: 16px; height: 16px; border-radius: 5px; border: 2px solid var(--ink-faint); flex-shrink: 0; }
+  .mini-stars { color: var(--amber); font-size: 1.1rem; letter-spacing: 3px; }
+
+  /* required toggle */
+  .qc-foot { display: flex; align-items: center; gap: 14px; margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--line); }
+  .toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 0.8rem; font-weight: 700; color: var(--ink-soft); cursor: pointer;
+  }
+  .switch {
+    width: 38px; height: 22px; border-radius: 999px; background: var(--oat);
+    position: relative; transition: background .15s; flex-shrink: 0;
+  }
+  .switch::after {
+    content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; top: 3px; left: 3px; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+  }
+  .toggle input { position: absolute; opacity: 0; }
+  .toggle input:checked + .switch { background: var(--terracotta); }
+  .toggle input:checked + .switch::after { left: 19px; }
+  .toggle input:focus-visible + .switch { outline: 3px solid var(--sage); outline-offset: 2px; }
+  .icon-btn {
+    border: 0; background: transparent; color: var(--ink-faint); cursor: pointer;
+    font-size: 0.85rem; padding: 4px 6px; border-radius: 6px;
+  }
+  .icon-btn:hover { color: var(--terracotta); background: var(--terracotta-soft); }
+  .qc-foot .spacer2 { flex: 1; }
+
+  /* Right properties panel */
+  .prop-group { margin-bottom: 18px; }
+  .prop-label {
+    font-size: 0.78rem; font-weight: 800; color: var(--ink); margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .prop-input {
+    width: 100%; font-family: var(--font); font-size: 0.9rem; color: var(--ink);
+    background: var(--cream); border: 1.5px solid var(--line); border-radius: var(--radius-xs);
+    padding: 10px 12px; transition: all .12s;
+  }
+  .prop-input:focus { outline: none; border-color: var(--terracotta); background: var(--surface); box-shadow: 0 0 0 3px rgba(217,116,75,.15); }
+  textarea.prop-input { resize: vertical; min-height: 60px; }
+  .prop-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .prop-help { font-size: 0.72rem; color: var(--ink-faint); font-weight: 600; margin-top: 5px; }
+
+  .opt-edit { display: grid; gap: 7px; }
+  .opt-edit-row {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--cream); border: 1.5px solid var(--line); border-radius: var(--radius-xs);
+    padding: 4px 6px 4px 10px;
+  }
+  .opt-edit-row .grip { color: var(--ink-faint); cursor: grab; font-size: 0.78rem; }
+  .opt-edit-row input {
+    flex: 1; border: 0; background: transparent; font-family: var(--font);
+    font-size: 0.88rem; color: var(--ink); padding: 6px 2px;
+  }
+  .opt-edit-row input:focus { outline: none; }
+  .opt-del { border: 0; background: transparent; color: var(--ink-faint); cursor: pointer; padding: 5px 7px; border-radius: 6px; }
+  .opt-del:hover { color: var(--terracotta); background: var(--terracotta-soft); }
+  .add-opt {
+    border: 1.5px dashed var(--line); background: transparent; color: var(--sage-deep);
+    font-family: var(--font); font-weight: 800; font-size: 0.82rem; cursor: pointer;
+    padding: 9px; border-radius: var(--radius-xs); width: 100%;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px; margin-top: 2px;
+  }
+  .add-opt:hover { border-color: var(--sage); background: var(--sage-soft); }
+
+  .logic-teaser {
+    background: linear-gradient(135deg, var(--sage-soft), var(--cream));
+    border: 1.5px solid var(--sage-soft); border-radius: var(--radius-sm);
+    padding: 14px; margin-top: 6px;
+  }
+  .logic-teaser .lt-top { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 0.86rem; color: var(--sage-deep); }
+  .logic-teaser p { margin: 7px 0 10px; font-size: 0.78rem; color: var(--ink-soft); font-weight: 600; }
+  .logic-teaser .btn { width: 100%; justify-content: center; background: var(--surface); }
+
+  .sel-head {
+    background: var(--terracotta-soft); border-radius: var(--radius-sm);
+    padding: 10px 13px; margin-bottom: 16px; font-size: 0.8rem; font-weight: 800;
+    color: var(--terracotta-deep); display: flex; align-items: center; gap: 8px;
+  }
+
+  @media (max-width: 1080px) {
+    .app { grid-template-columns: 200px 1fr; }
+    .pane-right { display: none; }
+  }
+  @media (max-width: 720px) {
+    .app { grid-template-columns: 1fr; }
+    .pane-left { display: none; }
+    .topbar { gap: 10px; }
+    .name-edit .sub { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="gallery-bar">
+    <a href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+  </div>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="logo-mark"><i class="fa-solid fa-seedling"></i></div>
+    <div class="name-edit">
+      <span class="nm" tabindex="0" role="textbox" aria-label="Form name, editable">Spring 2026 Member Survey <i class="fa-solid fa-pen"></i></span>
+      <span class="sub">Riverbend Community Alliance · last saved 2 min ago</span>
+    </div>
+    <span class="pill draft"><i class="fa-solid fa-circle-half-stroke"></i> Draft</span>
+    <div class="spacer"></div>
+    <div class="seg" role="group" aria-label="Display mode">
+      <button type="button" aria-pressed="true"><i class="fa-solid fa-list"></i> Scroll</button>
+      <button type="button" aria-pressed="false"><i class="fa-solid fa-square"></i> One question</button>
+    </div>
+    <button class="btn"><i class="fa-regular fa-eye"></i> Preview</button>
+    <button class="btn btn-primary"><i class="fa-solid fa-rocket"></i> Publish</button>
+  </div>
+
+  <!-- 3-pane app -->
+  <div class="app">
+    <!-- LEFT: palette -->
+    <aside class="pane pane-left" aria-label="Add question palette">
+      <p class="pane-title"><i class="fa-solid fa-plus"></i> Add question</p>
+      <div class="palette">
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-font"></i></span> Short text</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-align-left"></i></span> Long text</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-envelope"></i></span> Email</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-phone"></i></span> Phone</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-hashtag"></i></span> Number</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-circle-dot"></i></span> Single choice</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-square-check"></i></span> Multi choice</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-caret-down"></i></span> Dropdown</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-star"></i></span> Rating</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-gauge-high"></i></span> NPS</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-toggle-on"></i></span> Yes / No</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-calendar-day"></i></span> Date</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-paperclip"></i></span> File upload</div>
+        <div class="pal-item" draggable="true"><span class="ic"><i class="fa-solid fa-quote-left"></i></span> Statement</div>
+      </div>
+      <div class="pal-hint"><i class="fa-solid fa-lightbulb"></i> Drag a type onto the canvas, or click to add it to the end.</div>
+    </aside>
+
+    <!-- CENTER: canvas -->
+    <main class="pane pane-center" aria-label="Form canvas">
+      <div class="canvas">
+        <div class="canvas-head">
+          <h2>Spring 2026 Member Survey</h2>
+          <p>Member voices shape what we do next — about 3 minutes, 7 questions.</p>
+        </div>
+
+        <!-- Q1 -->
+        <article class="qcard">
+          <div class="handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="qc-body">
+            <div class="qc-top">
+              <span class="type-badge"><i class="fa-solid fa-font"></i> Short text</span>
+              <span class="qc-num">Question 1</span>
+            </div>
+            <p class="qc-label">What's your full name?</p>
+            <div class="qc-preview">Short answer text…</div>
+            <div class="qc-foot">
+              <label class="toggle"><input type="checkbox" checked /><span class="switch"></span> Required</label>
+              <span class="spacer2"></span>
+              <button class="icon-btn" title="Duplicate"><i class="fa-regular fa-copy"></i></button>
+              <button class="icon-btn" title="Delete"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q2 -->
+        <article class="qcard">
+          <div class="handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="qc-body">
+            <div class="qc-top">
+              <span class="type-badge"><i class="fa-solid fa-envelope"></i> Email</span>
+              <span class="qc-num">Question 2</span>
+            </div>
+            <p class="qc-label">Your email address</p>
+            <div class="qc-preview">name@example.org</div>
+            <div class="qc-foot">
+              <label class="toggle"><input type="checkbox" checked /><span class="switch"></span> Required</label>
+              <span class="spacer2"></span>
+              <button class="icon-btn" title="Duplicate"><i class="fa-regular fa-copy"></i></button>
+              <button class="icon-btn" title="Delete"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q3 SELECTED -->
+        <article class="qcard selected" aria-current="true">
+          <div class="handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="qc-body">
+            <div class="qc-top">
+              <span class="type-badge terra"><i class="fa-solid fa-square-check"></i> Multi choice</span>
+              <span class="qc-num">Question 4 · editing</span>
+            </div>
+            <p class="qc-label">Which programs interest you most?</p>
+            <div class="qc-preview">
+              <div class="mini-opts">
+                <div class="mini-opt"><span class="c"></span> Youth mentorship &amp; tutoring</div>
+                <div class="mini-opt"><span class="c"></span> Community garden &amp; food share</div>
+                <div class="mini-opt"><span class="c"></span> Senior companionship visits</div>
+                <div class="mini-opt"><span class="c"></span> Workforce &amp; skills workshops</div>
+              </div>
+            </div>
+            <div class="qc-foot">
+              <label class="toggle"><input type="checkbox" /><span class="switch"></span> Required</label>
+              <span class="spacer2"></span>
+              <button class="icon-btn" title="Duplicate"><i class="fa-regular fa-copy"></i></button>
+              <button class="icon-btn" title="Delete"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>
+        </article>
+
+        <!-- Q4 -->
+        <article class="qcard">
+          <div class="handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="qc-body">
+            <div class="qc-top">
+              <span class="type-badge"><i class="fa-solid fa-star"></i> Rating</span>
+              <span class="qc-num">Question 5</span>
+            </div>
+            <p class="qc-label">How would you rate your experience so far?</p>
+            <div class="qc-preview"><span class="mini-stars">★ ★ ★ ★ ★</span></div>
+            <div class="qc-foot">
+              <label class="toggle"><input type="checkbox" /><span class="switch"></span> Required</label>
+              <span class="spacer2"></span>
+              <button class="icon-btn" title="Duplicate"><i class="fa-regular fa-copy"></i></button>
+              <button class="icon-btn" title="Delete"><i class="fa-regular fa-trash-can"></i></button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </main>
+
+    <!-- RIGHT: properties -->
+    <aside class="pane pane-right" aria-label="Question properties">
+      <p class="pane-title"><i class="fa-solid fa-sliders"></i> Question settings</p>
+      <div class="sel-head"><i class="fa-solid fa-square-check"></i> Multi choice · Question 4</div>
+
+      <div class="prop-group">
+        <div class="prop-label">Question label</div>
+        <input class="prop-input" type="text" value="Which programs interest you most?" />
+      </div>
+
+      <div class="prop-group">
+        <div class="prop-label">Help text</div>
+        <textarea class="prop-input">Choose as many as you like.</textarea>
+        <div class="prop-help">Shown beneath the question in a softer tone.</div>
+      </div>
+
+      <div class="prop-group">
+        <div class="prop-row">
+          <div class="prop-label" style="margin:0;">Required</div>
+          <label class="toggle"><input type="checkbox" /><span class="switch"></span></label>
+        </div>
+        <div class="prop-help">Respondents must pick at least one option.</div>
+      </div>
+
+      <div class="prop-group">
+        <div class="prop-label">Validation</div>
+        <select class="prop-input" aria-label="Validation rule">
+          <option>No limit on selections</option>
+          <option>Select at least 1</option>
+          <option>Select up to 3</option>
+          <option>Select an exact number</option>
+        </select>
+      </div>
+
+      <div class="prop-group">
+        <div class="prop-label"><i class="fa-solid fa-list-ul"></i> Options</div>
+        <div class="opt-edit">
+          <div class="opt-edit-row"><span class="grip"><i class="fa-solid fa-grip-vertical"></i></span><input type="text" value="Youth mentorship & tutoring" /><button class="opt-del" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="opt-edit-row"><span class="grip"><i class="fa-solid fa-grip-vertical"></i></span><input type="text" value="Community garden & food share" /><button class="opt-del" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="opt-edit-row"><span class="grip"><i class="fa-solid fa-grip-vertical"></i></span><input type="text" value="Senior companionship visits" /><button class="opt-del" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="opt-edit-row"><span class="grip"><i class="fa-solid fa-grip-vertical"></i></span><input type="text" value="Workforce & skills workshops" /><button class="opt-del" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+        </div>
+        <button class="add-opt"><i class="fa-solid fa-plus"></i> Add option</button>
+      </div>
+
+      <div class="prop-group">
+        <div class="prop-label"><i class="fa-solid fa-code-branch"></i> Conditional logic</div>
+        <div class="logic-teaser">
+          <div class="lt-top"><i class="fa-solid fa-wand-magic-sparkles"></i> Show this only when it matters</div>
+          <p>Reveal or hide this question based on earlier answers — like only asking about workshops if they're interested.</p>
+          <button class="btn"><i class="fa-solid fa-plus"></i> Add a rule</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+<script>
+  // Top bar mode toggle
+  document.querySelectorAll('.seg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      this.parentElement.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+      this.setAttribute('aria-pressed', 'true');
+    });
+  });
+
+  // Click a card to "select" it
+  document.querySelectorAll('.qcard').forEach(function (c) {
+    c.addEventListener('click', function (e) {
+      if (e.target.closest('.icon-btn') || e.target.closest('.toggle')) return;
+      document.querySelectorAll('.qcard').forEach(function (x) { x.classList.remove('selected'); x.removeAttribute('aria-current'); });
+      this.classList.add('selected');
+      this.setAttribute('aria-current', 'true');
+    });
+  });
+</script>
+</body>
+</html>

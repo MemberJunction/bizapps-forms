@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Builder · Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --ink: #0b1020;
+    --indigo: #4f46e5;
+    --violet: #7c3aed;
+    --teal: #14b8a6;
+    --aurora: linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #14b8a6 100%);
+    --aurora-soft: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #2dd4bf 100%);
+    --text: #1e2438;
+    --text-soft: #5b6480;
+    --muted: #8a93ad;
+    --line: rgba(124, 58, 237, 0.12);
+    --panel: rgba(255, 255, 255, 0.74);
+    --panel-2: rgba(255, 255, 255, 0.55);
+    --radius: 18px;
+    --shadow: 0 24px 60px -28px rgba(43, 30, 120, 0.45);
+    --shadow-sm: 0 8px 24px -14px rgba(43, 30, 120, 0.42);
+    --focus: 0 0 0 4px rgba(124, 58, 237, 0.28);
+    --font: "Sora", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background:
+      radial-gradient(900px 600px at 0% 0%, rgba(124,58,237,0.4), transparent 55%),
+      radial-gradient(900px 700px at 100% 0%, rgba(20,184,166,0.35), transparent 55%),
+      radial-gradient(900px 700px at 50% 120%, rgba(79,70,229,0.38), transparent 60%),
+      linear-gradient(160deg, #0c1124 0%, #141a36 55%, #0e1430 100%);
+  }
+  @media (max-width: 980px) { body { height: auto; overflow: auto; } }
+
+  .gallery-link {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 18px;
+    font-size: 12.5px; font-weight: 600;
+    color: #e7e9ff; text-decoration: none;
+    background: rgba(11,16,32,0.5);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .gallery-link:hover { color: #fff; }
+  .gallery-link i { transition: transform .2s; }
+  .gallery-link:hover i { transform: translateX(-3px); }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 20px;
+    background: rgba(11,16,32,0.42);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    color: #fff;
+  }
+  .tb-brand { display:flex; align-items:center; gap:10px; }
+  .tb-logo {
+    width: 36px; height: 36px; border-radius: 11px;
+    display: grid; place-items: center; font-size: 16px; color: #fff;
+    background: var(--aurora-soft);
+    box-shadow: 0 10px 22px -10px rgba(124,58,237,0.8), inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+  .form-name {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 16px; font-weight: 700; letter-spacing: -0.01em;
+    padding: 7px 13px; border-radius: 11px;
+    border: 1px solid transparent;
+    cursor: text; transition: all .18s;
+  }
+  .form-name:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.12); }
+  .form-name i { color: rgba(231,233,255,0.5); font-size: 13px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-weight: 700; letter-spacing: .03em;
+    padding: 6px 12px; border-radius: 999px;
+    color: #fde68a;
+    background: rgba(245,158,11,0.16);
+    border: 1px solid rgba(245,158,11,0.4);
+  }
+  .status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+  .spacer { flex: 1; }
+
+  .seg {
+    display: flex; gap: 3px; padding: 4px;
+    border-radius: 11px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.13);
+  }
+  .seg button {
+    border: 0; background: transparent; cursor: pointer;
+    font-family: var(--font); font-size: 12.5px; font-weight: 600;
+    color: rgba(231,233,255,0.75);
+    padding: 7px 14px; border-radius: 8px;
+    display: inline-flex; align-items: center; gap: 7px;
+    transition: all .18s;
+  }
+  .seg button.active { background: #fff; color: var(--violet); box-shadow: var(--shadow-sm); }
+  .seg button:focus-visible { outline: none; box-shadow: var(--focus); }
+
+  .btn {
+    font-family: var(--font); font-size: 13px; font-weight: 700;
+    padding: 9px 17px; border-radius: 11px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.08); color: #e7e9ff;
+    transition: all .18s;
+  }
+  .btn:hover { background: rgba(255,255,255,0.16); }
+  .btn:focus-visible { outline: none; box-shadow: var(--focus); }
+  .btn-primary {
+    border: 0; color: #fff;
+    background: var(--aurora); background-size: 160% 160%;
+    box-shadow: 0 12px 26px -12px rgba(124,58,237,0.8);
+  }
+  .btn-primary:hover { background-position: 100% 0; transform: translateY(-1px); }
+
+  /* ---------- 3-pane layout ---------- */
+  .workspace {
+    flex: 1; min-height: 0;
+    display: grid;
+    grid-template-columns: 268px 1fr 320px;
+    gap: 16px;
+    padding: 16px 18px;
+  }
+  @media (max-width: 980px) {
+    .workspace { grid-template-columns: 1fr; height: auto; }
+  }
+
+  .pane {
+    background: var(--panel);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.8);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex; flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .pane-head {
+    flex: 0 0 auto;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .pane-head h2 {
+    margin: 0; font-size: 12px; font-weight: 700;
+    letter-spacing: .07em; text-transform: uppercase;
+    color: var(--text-soft);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .pane-head p { margin: 5px 0 0; font-size: 12px; color: var(--muted); }
+  .pane-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; }
+
+  /* ---------- LEFT: palette ---------- */
+  .palette-group-title {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted);
+    margin: 8px 6px 8px;
+  }
+  .pal-item {
+    display: flex; align-items: center; gap: 11px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid transparent;
+    cursor: grab;
+    font-size: 13.5px; font-weight: 600; color: var(--text);
+    transition: all .15s;
+    margin-bottom: 3px;
+  }
+  .pal-item:hover { background: #fff; border-color: var(--line); box-shadow: var(--shadow-sm); transform: translateX(2px); }
+  .pal-item:active { cursor: grabbing; }
+  .pal-ico {
+    width: 32px; height: 32px; flex: 0 0 auto;
+    border-radius: 9px; display: grid; place-items: center;
+    font-size: 13px; color: #fff;
+    background: var(--aurora);
+  }
+  .pal-item:nth-child(odd) .pal-ico { background: linear-gradient(135deg,#6366f1,#8b5cf6); }
+  .pal-item:nth-child(even) .pal-ico { background: linear-gradient(135deg,#7c3aed,#14b8a6); }
+  .pal-drag { margin-left: auto; color: var(--muted); font-size: 11px; opacity: 0; transition: opacity .15s; }
+  .pal-item:hover .pal-drag { opacity: 1; }
+
+  /* ---------- CENTER: canvas ---------- */
+  .canvas-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .canvas-title { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; }
+  .canvas-sub { font-size: 12.5px; color: var(--text-soft); }
+
+  .q-block {
+    background: var(--panel-2);
+    border: 1.5px solid var(--line);
+    border-radius: 16px;
+    padding: 16px 16px 16px 14px;
+    margin-bottom: 13px;
+    display: flex; gap: 12px;
+    transition: all .18s;
+    cursor: pointer;
+  }
+  .q-block:hover { border-color: rgba(124,58,237,0.35); box-shadow: var(--shadow-sm); background: rgba(255,255,255,0.75); }
+  .q-block.selected {
+    border-color: var(--violet);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(124,58,237,0.16), var(--shadow);
+  }
+  .drag-handle {
+    flex: 0 0 auto; color: var(--muted); font-size: 13px;
+    padding-top: 4px; cursor: grab;
+  }
+  .q-block.selected .drag-handle { color: var(--violet); }
+  .q-main { flex: 1; min-width: 0; }
+  .q-top { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; flex-wrap: wrap; }
+  .type-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700;
+    padding: 4px 9px; border-radius: 7px;
+    color: var(--violet);
+    background: rgba(124,58,237,0.1);
+  }
+  .q-label-text { font-size: 15px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
+  .q-preview { font-size: 13px; color: var(--text-soft); }
+  .q-preview .chip {
+    display: inline-block; margin: 4px 6px 0 0;
+    padding: 5px 11px; border-radius: 8px;
+    font-size: 12px;
+    background: rgba(124,58,237,0.07);
+    border: 1px solid var(--line);
+    color: var(--text-soft);
+  }
+  .fake-input {
+    margin-top: 8px; height: 38px; border-radius: 10px;
+    background: rgba(124,58,237,0.05);
+    border: 1.5px dashed rgba(124,58,237,0.2);
+    display: flex; align-items: center; padding: 0 13px;
+    font-size: 13px; color: var(--muted);
+  }
+  .q-actions { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .req-toggle {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 11px; font-weight: 600; color: var(--text-soft);
+  }
+  /* switch */
+  .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+  .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .slider {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: rgba(124,58,237,0.2); transition: .2s; cursor: pointer;
+  }
+  .switch .slider::before {
+    content: ""; position: absolute; height: 16px; width: 16px; left: 3px; top: 3px;
+    border-radius: 50%; background: #fff; transition: .2s;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  }
+  .switch input:checked + .slider { background: var(--aurora); }
+  .switch input:checked + .slider::before { transform: translateX(16px); }
+  .switch input:focus-visible + .slider { box-shadow: var(--focus); }
+  .icon-btn {
+    width: 28px; height: 28px; border-radius: 8px;
+    border: 1px solid var(--line); background: rgba(255,255,255,0.6);
+    color: var(--text-soft); cursor: pointer; font-size: 12px;
+    display: grid; place-items: center; transition: all .15s;
+  }
+  .icon-btn:hover { color: var(--violet); border-color: var(--violet); }
+
+  .add-zone {
+    margin-top: 6px;
+    border: 1.5px dashed rgba(124,58,237,0.3);
+    border-radius: 14px;
+    padding: 18px;
+    text-align: center;
+    color: var(--violet);
+    font-size: 13px; font-weight: 600;
+    background: rgba(124,58,237,0.04);
+    cursor: pointer; transition: all .18s;
+  }
+  .add-zone:hover { background: rgba(124,58,237,0.09); border-color: var(--violet); }
+
+  /* ---------- RIGHT: properties ---------- */
+  .prop-group { margin-bottom: 20px; }
+  .prop-label {
+    display: block; font-size: 12px; font-weight: 700;
+    color: var(--text); margin-bottom: 7px;
+  }
+  .prop-input, .prop-select {
+    width: 100%; font-family: var(--font); font-size: 13.5px; color: var(--text);
+    padding: 10px 12px; border-radius: 11px;
+    border: 1.5px solid var(--line); background: rgba(255,255,255,0.7);
+    transition: all .18s;
+  }
+  .prop-input:focus, .prop-select:focus { outline: none; border-color: var(--violet); background: #fff; box-shadow: var(--focus); }
+  textarea.prop-input { resize: vertical; min-height: 62px; line-height: 1.5; }
+
+  .prop-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 13px; border-radius: 12px;
+    background: rgba(124,58,237,0.05); border: 1px solid var(--line);
+  }
+  .prop-row .label { font-size: 13px; font-weight: 600; }
+  .prop-row .hint { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+
+  .opt-list { display: grid; gap: 8px; }
+  .opt-row {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 9px; border-radius: 10px;
+    background: rgba(255,255,255,0.65); border: 1px solid var(--line);
+  }
+  .opt-row .grip { color: var(--muted); font-size: 11px; cursor: grab; }
+  .opt-row input {
+    flex: 1; border: 0; background: transparent; font-family: var(--font);
+    font-size: 13px; color: var(--text); padding: 4px 2px;
+  }
+  .opt-row input:focus { outline: none; }
+  .opt-row .rm { color: var(--muted); cursor: pointer; font-size: 13px; padding: 4px; border:0; background:transparent; transition: color .15s; }
+  .opt-row .rm:hover { color: #e11d48; }
+  .add-opt {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12.5px; font-weight: 600; color: var(--violet);
+    background: transparent; border: 0; cursor: pointer; padding: 8px 2px;
+  }
+  .add-opt:hover { text-decoration: underline; }
+
+  .logic-teaser {
+    border-radius: 13px; padding: 14px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(20,184,166,0.1));
+    border: 1px solid rgba(124,58,237,0.2);
+  }
+  .logic-teaser .lt-title { display:flex; align-items:center; gap:8px; font-size: 13px; font-weight: 700; }
+  .logic-teaser .lt-title .badge { font-size: 9.5px; font-weight: 800; letter-spacing: .05em; padding: 2px 7px; border-radius: 999px; color:#fff; background: var(--aurora); }
+  .logic-teaser p { margin: 8px 0 11px; font-size: 12px; color: var(--text-soft); }
+  .logic-rule {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 12px; color: var(--text-soft);
+    padding: 9px 11px; border-radius: 9px; background: rgba(255,255,255,0.6);
+    border: 1px dashed var(--line);
+  }
+  .logic-rule b { color: var(--violet); }
+
+  .pane-body::-webkit-scrollbar { width: 9px; }
+  .pane-body::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.25); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+</style>
+</head>
+<body>
+  <a class="gallery-link" href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="tb-brand">
+      <div class="tb-logo"><i class="fa-solid fa-feather-pointed"></i></div>
+    </div>
+    <div class="form-name" tabindex="0" role="textbox" aria-label="Form name, editable">
+      Spring 2026 Member Survey <i class="fa-solid fa-pen"></i>
+    </div>
+    <span class="status-pill"><span class="dot"></span> Draft</span>
+
+    <div class="spacer"></div>
+
+    <div class="seg" role="group" aria-label="Render mode">
+      <button class="active" id="modeScroll"><i class="fa-solid fa-list"></i> Scroll</button>
+      <button id="modeOne"><i class="fa-solid fa-square-poll-vertical"></i> One question</button>
+    </div>
+    <button class="btn"><i class="fa-regular fa-eye"></i> Preview</button>
+    <button class="btn btn-primary"><i class="fa-solid fa-rocket"></i> Publish</button>
+  </header>
+
+  <!-- WORKSPACE -->
+  <div class="workspace">
+
+    <!-- LEFT PANE -->
+    <aside class="pane">
+      <div class="pane-head">
+        <h2><i class="fa-solid fa-shapes"></i> Add question</h2>
+        <p>Drag a type onto the canvas</p>
+      </div>
+      <div class="pane-body">
+        <div class="palette-group-title">Text &amp; contact</div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-font"></i></span> Short text <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-align-left"></i></span> Long text <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-regular fa-envelope"></i></span> Email <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-phone"></i></span> Phone <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-hashtag"></i></span> Number <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+
+        <div class="palette-group-title">Choices</div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-regular fa-circle-dot"></i></span> Single choice <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-regular fa-square-check"></i></span> Multi choice <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-caret-down"></i></span> Dropdown <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-toggle-on"></i></span> Yes / No <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+
+        <div class="palette-group-title">Scales &amp; more</div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-star"></i></span> Rating <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-gauge-high"></i></span> NPS <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-regular fa-calendar"></i></span> Date <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-cloud-arrow-up"></i></span> File upload <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+        <div class="pal-item" draggable="true"><span class="pal-ico"><i class="fa-solid fa-quote-left"></i></span> Statement <span class="pal-drag"><i class="fa-solid fa-grip-vertical"></i></span></div>
+      </div>
+    </aside>
+
+    <!-- CENTER CANVAS -->
+    <main class="pane">
+      <div class="pane-head">
+        <div class="canvas-head">
+          <div>
+            <div class="canvas-title">Survey canvas</div>
+            <div class="canvas-sub">6 questions · ~5 min to complete</div>
+          </div>
+          <button class="btn" style="background:rgba(124,58,237,0.08);color:var(--violet);border-color:var(--line)"><i class="fa-solid fa-wand-magic-sparkles"></i> AI assist</button>
+        </div>
+      </div>
+      <div class="pane-body">
+
+        <div class="q-block">
+          <div class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-top">
+              <span class="type-badge"><i class="fa-solid fa-font"></i> Short text</span>
+              <span class="q-label-text">Full name</span>
+            </div>
+            <div class="fake-input">Jordan Rivera…</div>
+          </div>
+          <div class="q-actions">
+            <label class="req-toggle">Req
+              <span class="switch"><input type="checkbox" checked aria-label="Required"><span class="slider"></span></span>
+            </label>
+            <button class="icon-btn" aria-label="Duplicate"><i class="fa-regular fa-copy"></i></button>
+          </div>
+        </div>
+
+        <div class="q-block">
+          <div class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-top">
+              <span class="type-badge"><i class="fa-regular fa-envelope"></i> Email</span>
+              <span class="q-label-text">Email address</span>
+            </div>
+            <div class="fake-input">you@example.org</div>
+          </div>
+          <div class="q-actions">
+            <label class="req-toggle">Req
+              <span class="switch"><input type="checkbox" checked aria-label="Required"><span class="slider"></span></span>
+            </label>
+            <button class="icon-btn" aria-label="Duplicate"><i class="fa-regular fa-copy"></i></button>
+          </div>
+        </div>
+
+        <!-- SELECTED CARD -->
+        <div class="q-block selected">
+          <div class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-top">
+              <span class="type-badge"><i class="fa-regular fa-square-check"></i> Multi choice</span>
+              <span class="q-label-text">Which programs interest you?</span>
+            </div>
+            <div class="q-preview">
+              <span class="chip"><i class="fa-regular fa-square"></i> Youth mentorship</span>
+              <span class="chip"><i class="fa-regular fa-square"></i> Community gardens</span>
+              <span class="chip"><i class="fa-regular fa-square"></i> Arts &amp; culture workshops</span>
+              <span class="chip"><i class="fa-regular fa-square"></i> Food &amp; nutrition support</span>
+              <span class="chip"><i class="fa-regular fa-square"></i> Senior connection circles</span>
+            </div>
+          </div>
+          <div class="q-actions">
+            <label class="req-toggle">Req
+              <span class="switch"><input type="checkbox" aria-label="Required"><span class="slider"></span></span>
+            </label>
+            <button class="icon-btn" aria-label="Duplicate"><i class="fa-regular fa-copy"></i></button>
+          </div>
+        </div>
+
+        <div class="q-block">
+          <div class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-top">
+              <span class="type-badge"><i class="fa-solid fa-gauge-high"></i> NPS</span>
+              <span class="q-label-text">How likely are you to recommend us?</span>
+            </div>
+            <div class="q-preview"><span class="chip">0</span><span class="chip">1</span><span class="chip">…</span><span class="chip">9</span><span class="chip">10</span></div>
+          </div>
+          <div class="q-actions">
+            <label class="req-toggle">Req
+              <span class="switch"><input type="checkbox" checked aria-label="Required"><span class="slider"></span></span>
+            </label>
+            <button class="icon-btn" aria-label="Duplicate"><i class="fa-regular fa-copy"></i></button>
+          </div>
+        </div>
+
+        <div class="q-block">
+          <div class="drag-handle"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-top">
+              <span class="type-badge"><i class="fa-solid fa-align-left"></i> Long text</span>
+              <span class="q-label-text">Anything else you'd like us to know?</span>
+            </div>
+            <div class="fake-input">Share your thoughts…</div>
+          </div>
+          <div class="q-actions">
+            <label class="req-toggle">Req
+              <span class="switch"><input type="checkbox" aria-label="Required"><span class="slider"></span></span>
+            </label>
+            <button class="icon-btn" aria-label="Duplicate"><i class="fa-regular fa-copy"></i></button>
+          </div>
+        </div>
+
+        <div class="add-zone"><i class="fa-solid fa-plus"></i> Drop a question here or click to add</div>
+      </div>
+    </main>
+
+    <!-- RIGHT PANE -->
+    <aside class="pane">
+      <div class="pane-head">
+        <h2><i class="fa-solid fa-sliders"></i> Question properties</h2>
+        <p>Editing: <strong style="color:var(--violet)">Which programs interest you?</strong></p>
+      </div>
+      <div class="pane-body">
+        <div class="prop-group">
+          <label class="prop-label" for="p-label">Question label</label>
+          <input class="prop-input" id="p-label" value="Which programs interest you?" />
+        </div>
+
+        <div class="prop-group">
+          <label class="prop-label" for="p-help">Help text</label>
+          <textarea class="prop-input" id="p-help">Choose all that apply.</textarea>
+        </div>
+
+        <div class="prop-group">
+          <div class="prop-row">
+            <div>
+              <div class="label">Required</div>
+              <div class="hint">Respondents must answer</div>
+            </div>
+            <span class="switch"><input type="checkbox" aria-label="Required field"><span class="slider"></span></span>
+          </div>
+        </div>
+
+        <div class="prop-group">
+          <label class="prop-label" for="p-valid">Validation</label>
+          <select class="prop-select" id="p-valid">
+            <option>No limit</option>
+            <option selected>Select at least 1</option>
+            <option>Select exactly 3</option>
+            <option>Select at most 3</option>
+          </select>
+        </div>
+
+        <div class="prop-group">
+          <label class="prop-label">Options</label>
+          <div class="opt-list" id="optList">
+            <div class="opt-row"><i class="fa-solid fa-grip-vertical grip"></i><input value="Youth mentorship" /><button class="rm" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="opt-row"><i class="fa-solid fa-grip-vertical grip"></i><input value="Community gardens" /><button class="rm" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="opt-row"><i class="fa-solid fa-grip-vertical grip"></i><input value="Arts &amp; culture workshops" /><button class="rm" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="opt-row"><i class="fa-solid fa-grip-vertical grip"></i><input value="Food &amp; nutrition support" /><button class="rm" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+            <div class="opt-row"><i class="fa-solid fa-grip-vertical grip"></i><input value="Senior connection circles" /><button class="rm" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button></div>
+          </div>
+          <button class="add-opt" id="addOpt"><i class="fa-solid fa-circle-plus"></i> Add option</button>
+        </div>
+
+        <div class="prop-group">
+          <label class="prop-label">Conditional logic</label>
+          <div class="logic-teaser">
+            <div class="lt-title"><i class="fa-solid fa-code-branch"></i> Smart branching <span class="badge">PRO</span></div>
+            <p>Show or skip questions based on earlier answers.</p>
+            <div class="logic-rule">
+              <span>Show</span> <b>this question</b> <span>when</span> <b>Member type</b> <span>is</span> <b>Active</b>
+            </div>
+            <button class="add-opt" style="margin-top:6px"><i class="fa-solid fa-plus"></i> Add a rule</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    // render mode segmented
+    const ms = document.getElementById('modeScroll');
+    const mo = document.getElementById('modeOne');
+    [ms, mo].forEach(b => b.addEventListener('click', () => {
+      ms.classList.toggle('active', b === ms);
+      mo.classList.toggle('active', b === mo);
+    }));
+
+    // selecting a question card highlights it
+    document.querySelectorAll('.q-block').forEach(block => {
+      block.addEventListener('click', (e) => {
+        if (e.target.closest('.switch') || e.target.closest('.icon-btn')) return;
+        document.querySelectorAll('.q-block').forEach(b => b.classList.remove('selected'));
+        block.classList.add('selected');
+      });
+    });
+
+    // add / remove options
+    const optList = document.getElementById('optList');
+    document.getElementById('addOpt').addEventListener('click', () => {
+      const row = document.createElement('div');
+      row.className = 'opt-row';
+      row.innerHTML = '<i class="fa-solid fa-grip-vertical grip"></i><input placeholder="New option" /><button class="rm" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button>';
+      optList.appendChild(row);
+      row.querySelector('input').focus();
+      bindRemove(row.querySelector('.rm'));
+    });
+    function bindRemove(btn) {
+      btn.addEventListener('click', () => btn.closest('.opt-row').remove());
+    }
+    document.querySelectorAll('.opt-row .rm').forEach(bindRemove);
+  </script>
+</body>
+</html>
