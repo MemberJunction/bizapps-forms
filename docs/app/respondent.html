@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="editorial">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MJ Forms — Respondent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="design-system.css">
+<style>
+  /* Page-specific layout only — every color comes from a token. */
+  .resp-page {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 88px 18px 56px;
+  }
+  @media (min-width: 700px) { .resp-page { padding-top: 96px; } }
+
+  /* Branded header */
+  .resp-header { text-align: center; margin-bottom: 28px; }
+  .resp-logo {
+    width: 56px; height: 56px; margin: 0 auto 18px;
+    display: grid; place-items: center;
+    border-radius: var(--mjf-card-radius);
+    background: var(--mjf-accent-gradient);
+    color: var(--mjf-on-accent);
+    font-size: 24px;
+    box-shadow: var(--mj-shadow-md);
+  }
+  .resp-title { font-size: clamp(28px, 7vw, 42px); line-height: 1.1; margin: 12px 0 12px; }
+  .resp-intro { color: var(--mj-text-secondary); font-size: 16px; max-width: 30em; margin: 0 auto; }
+
+  /* Progress block */
+  .resp-progress-wrap { margin: 28px 0 22px; }
+  .resp-progress-meta {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 8px; font-size: 13px; font-weight: 600;
+    color: var(--mj-text-secondary);
+  }
+  .resp-progress-meta .pct { color: var(--mjf-accent); }
+
+  /* Mode toggle row */
+  .resp-moderow { display: flex; justify-content: center; margin-bottom: 30px; }
+
+  /* Question cards */
+  .resp-q { padding: 22px 22px 24px; margin-bottom: 18px; }
+  @media (min-width: 700px) { .resp-q { padding: 26px 28px 28px; } }
+  .resp-q-eyebrow { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+  .resp-q-label {
+    font-size: 18px; font-weight: 600; line-height: 1.35;
+    color: var(--mj-text-primary); margin: 0 0 6px;
+  }
+  .resp-q-hint { font-size: 13px; color: var(--mj-text-muted); margin: 0 0 16px; }
+  .resp-req { color: var(--mjf-accent); margin-left: 2px; }
+  .resp-field-label {
+    display: block; font-size: 14px; font-weight: 600;
+    color: var(--mj-text-secondary); margin-bottom: 7px;
+  }
+
+  /* Stacks for choices */
+  .resp-stack { display: flex; flex-direction: column; gap: 10px; }
+  .mjf-choice .mjf-marker .dot {
+    width: 9px; height: 9px; border-radius: 50%; background: var(--mjf-on-accent);
+    opacity: 0; transition: var(--mj-transition-base);
+  }
+  .mjf-choice.is-selected .mjf-marker .dot { opacity: 1; }
+  .mjf-choice .mjf-marker .fa-check { font-size: 12px; opacity: 0; transition: var(--mj-transition-base); }
+  .mjf-choice.is-selected .mjf-marker .fa-check { opacity: 1; }
+  .resp-choice-text { font-size: 15px; }
+
+  /* NPS row + endpoint labels */
+  .resp-nps-labels {
+    display: flex; justify-content: space-between;
+    margin-top: 10px; font-size: 12px; color: var(--mj-text-muted);
+  }
+
+  /* Footer */
+  .resp-footer { margin-top: 30px; text-align: center; }
+  .resp-submitrow { display: flex; justify-content: flex-start; }
+  .resp-submit { font-size: 16px; padding: 14px 30px; }
+  .resp-powered {
+    margin-top: 22px; display: inline-flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 600; color: var(--mj-text-muted);
+  }
+  .resp-powered .mark {
+    display: inline-grid; place-items: center; width: 18px; height: 18px;
+    border-radius: 5px; background: var(--mjf-accent-soft); color: var(--mjf-accent);
+    font-size: 10px;
+  }
+  .resp-privacy { margin-top: 12px; font-size: 12px; color: var(--mj-text-disabled); line-height: 1.5; }
+  .resp-privacy a { font-weight: 600; }
+</style>
+</head>
+<body>
+<a class="mjf-backlink" href="../index.html"><i class="fa-solid fa-arrow-left"></i> Gallery</a>
+<div class="mjf-theme-switch" id="themeSwitch">
+  <button data-t="editorial">Editorial</button><button data-t="aurora">Aurora</button><button data-t="warm">Warm</button>
+</div>
+<script>
+(function(){var sw=document.getElementById('themeSwitch');function set(t){document.documentElement.dataset.theme=t;sw.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b.dataset.t===t);});try{var u=new URL(location);u.searchParams.set('theme',t);history.replaceState(null,'',u);}catch(e){}}var i=new URLSearchParams(location.search).get('theme')||'editorial';set(['editorial','aurora','warm'].indexOf(i)>=0?i:'editorial');sw.addEventListener('click',function(e){var b=e.target.closest('button');if(b)set(b.dataset.t);});})();
+</script>
+
+<main class="resp-page">
+
+  <!-- ============ Branded header ============ -->
+  <header class="resp-header">
+    <div class="resp-logo" aria-hidden="true"><i class="fa-solid fa-people-group"></i></div>
+    <p class="mjf-eyebrow">Member Survey</p>
+    <h1 class="mjf-display resp-title">Spring 2026 Member Survey</h1>
+    <p class="resp-intro">Help shape the year ahead. This takes about 4 minutes, and every answer goes straight to the people planning our programs.</p>
+  </header>
+
+  <!-- ============ Progress ============ -->
+  <div class="resp-progress-wrap">
+    <div class="resp-progress-meta">
+      <span>Your progress</span>
+      <span class="pct">40% complete</span>
+    </div>
+    <div class="mjf-progress" role="progressbar" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" aria-label="Survey completion">
+      <i style="width:40%"></i>
+    </div>
+  </div>
+
+  <!-- ============ Render-mode toggle ============ -->
+  <div class="resp-moderow">
+    <div class="mjf-seg" role="tablist" aria-label="Display mode">
+      <button class="on" role="tab" aria-selected="true">Classic</button>
+      <button role="tab" aria-selected="false">One question</button>
+    </div>
+  </div>
+
+  <form id="surveyForm">
+
+    <!-- Q1 — Short text -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 01</span></div>
+      <h2 class="resp-q-label">What's your full name?<span class="resp-req" aria-hidden="true">*</span></h2>
+      <p class="resp-q-hint">We use this only to thank you by name — never shared publicly.</p>
+      <label class="resp-field-label" for="q-name">Full name</label>
+      <input class="mjf-input" type="text" id="q-name" name="name" placeholder="Jordan Avery" autocomplete="name" required>
+    </section>
+
+    <!-- Q2 — Email -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 02</span></div>
+      <h2 class="resp-q-label">Where can we reach you?<span class="resp-req" aria-hidden="true">*</span></h2>
+      <p class="resp-q-hint">Optional follow-ups about the topics you flag below.</p>
+      <label class="resp-field-label" for="q-email">Email address</label>
+      <input class="mjf-input" type="email" id="q-email" name="email" placeholder="you@example.org" autocomplete="email" inputmode="email" required>
+    </section>
+
+    <!-- Q3 — Single choice (radios) -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 03</span></div>
+      <h2 class="resp-q-label">How long have you been a member?</h2>
+      <p class="resp-q-hint">Choose one.</p>
+      <div class="resp-stack" role="radiogroup" aria-label="Length of membership">
+        <label class="mjf-choice js-radio" data-group="tenure">
+          <span class="mjf-marker" aria-hidden="true"><span class="dot"></span></span>
+          <input type="radio" name="tenure" value="new" class="visually-hidden" hidden>
+          <span class="resp-choice-text">Less than a year</span>
+        </label>
+        <label class="mjf-choice js-radio" data-group="tenure">
+          <span class="mjf-marker" aria-hidden="true"><span class="dot"></span></span>
+          <input type="radio" name="tenure" value="1-3" class="visually-hidden" hidden>
+          <span class="resp-choice-text">1–3 years</span>
+        </label>
+        <label class="mjf-choice js-radio" data-group="tenure">
+          <span class="mjf-marker" aria-hidden="true"><span class="dot"></span></span>
+          <input type="radio" name="tenure" value="4-9" class="visually-hidden" hidden>
+          <span class="resp-choice-text">4–9 years</span>
+        </label>
+        <label class="mjf-choice js-radio" data-group="tenure">
+          <span class="mjf-marker" aria-hidden="true"><span class="dot"></span></span>
+          <input type="radio" name="tenure" value="10+" class="visually-hidden" hidden>
+          <span class="resp-choice-text">10 years or more</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Q4 — Multi choice (checkboxes) -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 04</span></div>
+      <h2 class="resp-q-label">Which programs matter most to you?</h2>
+      <p class="resp-q-hint">Select all that apply.</p>
+      <div class="resp-stack" role="group" aria-label="Programs of interest">
+        <label class="mjf-choice is-checkbox js-check">
+          <span class="mjf-marker" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <input type="checkbox" name="programs" value="education" hidden>
+          <span class="resp-choice-text">Education &amp; workshops</span>
+        </label>
+        <label class="mjf-choice is-checkbox js-check">
+          <span class="mjf-marker" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <input type="checkbox" name="programs" value="networking" hidden>
+          <span class="resp-choice-text">Networking events</span>
+        </label>
+        <label class="mjf-choice is-checkbox js-check">
+          <span class="mjf-marker" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <input type="checkbox" name="programs" value="advocacy" hidden>
+          <span class="resp-choice-text">Advocacy &amp; policy</span>
+        </label>
+        <label class="mjf-choice is-checkbox js-check">
+          <span class="mjf-marker" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <input type="checkbox" name="programs" value="mentorship" hidden>
+          <span class="resp-choice-text">Mentorship</span>
+        </label>
+        <label class="mjf-choice is-checkbox js-check">
+          <span class="mjf-marker" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
+          <input type="checkbox" name="programs" value="volunteering" hidden>
+          <span class="resp-choice-text">Volunteering opportunities</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Q5 — NPS 0-10 -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 05</span></div>
+      <h2 class="resp-q-label">How likely are you to recommend us to a colleague?</h2>
+      <p class="resp-q-hint">0 = not at all likely, 10 = extremely likely.</p>
+      <div class="mjf-nps js-nps" role="radiogroup" aria-label="Likelihood to recommend, 0 to 10">
+        <button type="button" aria-label="0">0</button>
+        <button type="button" aria-label="1">1</button>
+        <button type="button" aria-label="2">2</button>
+        <button type="button" aria-label="3">3</button>
+        <button type="button" aria-label="4">4</button>
+        <button type="button" aria-label="5">5</button>
+        <button type="button" aria-label="6">6</button>
+        <button type="button" aria-label="7">7</button>
+        <button type="button" aria-label="8">8</button>
+        <button type="button" aria-label="9">9</button>
+        <button type="button" aria-label="10">10</button>
+      </div>
+      <div class="resp-nps-labels"><span>Not likely</span><span>Extremely likely</span></div>
+    </section>
+
+    <!-- Q6 — Star rating -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 06</span></div>
+      <h2 class="resp-q-label">How would you rate your overall experience this year?</h2>
+      <p class="resp-q-hint">Tap a star.</p>
+      <div class="mjf-rating js-stars" role="radiogroup" aria-label="Overall experience rating, 1 to 5 stars">
+        <i class="fa-solid fa-star star" role="radio" tabindex="0" aria-checked="false" aria-label="1 star" data-val="1"></i>
+        <i class="fa-solid fa-star star" role="radio" tabindex="0" aria-checked="false" aria-label="2 stars" data-val="2"></i>
+        <i class="fa-solid fa-star star" role="radio" tabindex="0" aria-checked="false" aria-label="3 stars" data-val="3"></i>
+        <i class="fa-solid fa-star star" role="radio" tabindex="0" aria-checked="false" aria-label="4 stars" data-val="4"></i>
+        <i class="fa-solid fa-star star" role="radio" tabindex="0" aria-checked="false" aria-label="5 stars" data-val="5"></i>
+      </div>
+    </section>
+
+    <!-- Q7 — Long text -->
+    <section class="mjf-card resp-q">
+      <div class="resp-q-eyebrow"><span class="mjf-eyebrow">Question 07</span></div>
+      <h2 class="resp-q-label">What's one thing we should do differently next year?</h2>
+      <p class="resp-q-hint">Anything goes — ideas, frustrations, wins.</p>
+      <label class="resp-field-label" for="q-feedback">Your answer</label>
+      <textarea class="mjf-textarea" id="q-feedback" name="feedback" rows="5" placeholder="Tell us what's on your mind…"></textarea>
+    </section>
+
+    <!-- ============ Footer ============ -->
+    <footer class="resp-footer">
+      <div class="resp-submitrow">
+        <button type="submit" class="mjf-btn mjf-btn--primary resp-submit">
+          <i class="fa-solid fa-paper-plane"></i> Submit response
+        </button>
+      </div>
+      <div class="resp-powered">
+        <span class="mark" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
+        Powered by MJ Forms
+      </div>
+      <p class="resp-privacy">
+        Your responses are stored securely and used only to improve our programs.
+        Read our <a href="#privacy">privacy notice</a>.
+      </p>
+    </footer>
+
+  </form>
+</main>
+
+<script>
+(function(){
+  // --- Single-choice (radio cards) ---
+  document.querySelectorAll('.js-radio').forEach(function(card){
+    card.addEventListener('click', function(){
+      var group = card.getAttribute('data-group');
+      document.querySelectorAll('.js-radio[data-group="'+group+'"]').forEach(function(c){
+        c.classList.remove('is-selected');
+        var inp = c.querySelector('input'); if(inp) inp.checked = false;
+      });
+      card.classList.add('is-selected');
+      var input = card.querySelector('input'); if(input) input.checked = true;
+    });
+  });
+
+  // --- Multi-choice (checkbox cards) ---
+  document.querySelectorAll('.js-check').forEach(function(card){
+    card.addEventListener('click', function(){
+      var input = card.querySelector('input');
+      var next = !card.classList.contains('is-selected');
+      card.classList.toggle('is-selected', next);
+      if(input) input.checked = next;
+    });
+  });
+
+  // --- NPS ---
+  document.querySelectorAll('.js-nps').forEach(function(row){
+    row.querySelectorAll('button').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        row.querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); b.setAttribute('aria-checked','false'); });
+        btn.classList.add('on'); btn.setAttribute('aria-checked','true');
+      });
+    });
+  });
+
+  // --- Stars ---
+  document.querySelectorAll('.js-stars').forEach(function(row){
+    var stars = Array.prototype.slice.call(row.querySelectorAll('.star'));
+    function pick(val){
+      stars.forEach(function(s){
+        var on = parseInt(s.getAttribute('data-val'),10) <= val;
+        s.classList.toggle('on', on);
+        s.setAttribute('aria-checked', parseInt(s.getAttribute('data-val'),10) === val ? 'true' : 'false');
+      });
+    }
+    stars.forEach(function(star){
+      var val = parseInt(star.getAttribute('data-val'),10);
+      star.addEventListener('click', function(){ pick(val); });
+      star.addEventListener('keydown', function(e){
+        if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick(val); }
+      });
+    });
+  });
+
+  // --- Render-mode segmented toggle ---
+  document.querySelectorAll('.mjf-seg').forEach(function(seg){
+    seg.querySelectorAll('button').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        seg.querySelectorAll('button').forEach(function(b){ b.classList.remove('on'); b.setAttribute('aria-selected','false'); });
+        btn.classList.add('on'); btn.setAttribute('aria-selected','true');
+      });
+    });
+  });
+
+  // --- Prevent demo submit ---
+  var form = document.getElementById('surveyForm');
+  if(form) form.addEventListener('submit', function(e){ e.preventDefault(); });
+})();
+</script>
+</body>
+</html>
