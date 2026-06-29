@@ -12,10 +12,13 @@ And every response is a **first-class record in your MemberJunction database** �
 
 <br/>
 
+[![Live design gallery](https://img.shields.io/badge/%F0%9F%8E%A8_live_design_gallery-view_now-7c5cff?style=for-the-badge)](https://memberjunction.github.io/bizapps-forms/)
 [![Built on MemberJunction](https://img.shields.io/badge/built%20on-MemberJunction-264FAF?style=for-the-badge)](https://github.com/MemberJunction/MJ)
 [![MemberJunction 5.43.0](https://img.shields.io/badge/MJ-5.43.0-264FAF?style=for-the-badge)](https://www.npmjs.com/package/@memberjunction/core)
 [![License: ISC](https://img.shields.io/badge/license-ISC-2c7be5?style=for-the-badge)](#-license)
 [![Status: scaffold](https://img.shields.io/badge/status-Phase%201-e8a33d?style=for-the-badge)](plans/FORMS_BUILD_PLAN.md)
+
+**🎨 Live design explorations →** [**memberjunction.github.io/bizapps-forms**](https://memberjunction.github.io/bizapps-forms/) — three contemporary UX directions (Aurora · Editorial · Warm) across the respondent form, builder, and analytics dashboard.
 
 <br/>
 
