@@ -9,6 +9,41 @@
 
 ---
 
+## Status Snapshot
+
+**Phase 0 — ✅ COMPLETE.** Repo scaffolded from the bizapps-common Open App skeleton
+(5 packages: `forms-{entities,actions,core-entities-server,server,ng}`; 2 apps: MJAPI/MJExplorer),
+pinned to MJ **`5.43.0`** (`mjVersionRange >=5.43.0 <6.0.0`), schema `__mj_BizAppsForms`, entity
+prefix `MJ Forms: `, ports **4121 / 4321**. `npm install --ignore-scripts && npm run build` is green
+for all 5 packages **and** MJAPI; the only failure is the MJExplorer *production* `ng build`
+font-inline step, which needs internet (`fonts.googleapis.com`) and is an environment-only issue.
+Scaffold is on **`main`**.
+
+**Phase 1 — 🟡 IN PROGRESS.** Schema + Phase-1 tables migration **authored**:
+`migrations/B202606281200__v0.1.x_Schema_and_Tables.sql` (all 10 tables, value-list CHECKs,
+extended-property descriptions, the polymorphic `FormResponse` subject seam, cross-schema FKs to
+`__mj.[User]` / `__mj.[File]`).
+
+### ▶ NEXT — blocking gate (requires a SQL Server database)
+
+1. **`npm run mj:migrate`** — apply the migration to a SQL Server instance (creates the
+   `__mj_BizAppsForms` schema + the 10 Phase-1 tables).
+2. **`npm run mj:codegen`** — generate the `MJ Forms: …` entity / action / GraphQL-resolver /
+   Angular-form subclasses into `packages/*/src/generated/`, plus the SQL views & SPs.
+3. **`npm run build`** — verify the generated entity types compile end-to-end.
+
+> **Do NOT write entity-dependent code before CodeGen runs.** With no generated types yet, it would
+> produce nothing but TypeScript errors and tempt `any`/`unknown` casting — an explicit MJ
+> antipattern (see CLAUDE.md rules 2 / 2b). Everything else in Phase 1 (the public submit endpoint
+> + anti-abuse hardening layer, the mobile-first `<mj-form>` widget, the builder/admin app, AI
+> authoring, reporting, on-submit hooks) depends on this gate.
+
+Once CodeGen has run and the build is green, resume Phase 1 in the **§10** dependency order — the
+first code task is the **public submit endpoint** (forms-server) with its anonymous-scope check +
+Turnstile / rate-limit / quota hardening (§4), followed by the **respondent widget** (forms-ng).
+
+---
+
 ## 0. What this is
 
 **MJ Forms** is a free, open-source MemberJunction **Open App** for **forms, surveys, and
