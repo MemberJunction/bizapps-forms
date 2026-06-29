@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en" data-theme="editorial">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MJ Forms — Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="design-system.css">
+<style>
+  /* ---- Layout shell (tokens only) ---- */
+  .dash {
+    display: grid;
+    grid-template-columns: 248px 1fr;
+    min-height: 100vh;
+  }
+  .dash__side {
+    display: flex; flex-direction: column;
+    padding: 16px 14px;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .dash__main { display: flex; flex-direction: column; min-width: 0; }
+
+  /* ---- Sidebar ---- */
+  .brand { display: flex; align-items: center; gap: 11px; padding: 8px 10px 18px; }
+  .brand__mark {
+    width: 34px; height: 34px; flex: none; border-radius: 9px;
+    display: grid; place-items: center;
+    background: var(--mjf-accent-gradient); color: var(--mjf-on-accent);
+    font-size: 16px;
+  }
+  .brand__name { font-family: var(--mjf-font-display); font-weight: var(--mjf-display-weight); font-size: 18px; color: var(--mj-text-primary); }
+  .brand__sub { font-size: 11px; color: var(--mj-text-muted); letter-spacing: .04em; }
+  .nav { display: flex; flex-direction: column; gap: 4px; }
+  .nav__label { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--mj-text-muted); padding: 14px 12px 6px; }
+  .mjf-navitem i { width: 18px; text-align: center; font-size: 14px; }
+  .mjf-navitem .badge {
+    margin-left: auto; font-size: 11px; font-weight: 700;
+    background: var(--mjf-accent-soft); color: var(--mjf-accent-strong);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  .org {
+    margin-top: auto; display: flex; align-items: center; gap: 11px;
+    padding: 11px 10px; border-radius: var(--mj-radius-md);
+    border: 1px solid var(--mjf-chrome-border); background: var(--mjf-panel-bg);
+  }
+  .org__avatar {
+    width: 34px; height: 34px; flex: none; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 800; font-size: 13px;
+    background: var(--mjf-accent); color: var(--mjf-on-accent);
+  }
+  .org__name { font-size: 13px; font-weight: 700; color: var(--mj-text-primary); }
+  .org__role { font-size: 11px; color: var(--mj-text-muted); }
+
+  /* ---- Header ---- */
+  .head {
+    display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap;
+    padding: 26px 30px 20px;
+  }
+  .head__titles { min-width: 0; }
+  .head__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .head h1.mjf-display { font-size: 30px; margin: 4px 0 0; }
+  .head__sub { color: var(--mj-text-muted); font-size: 13px; margin-top: 6px; }
+  .head__actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .pill-live { background: color-mix(in srgb, var(--mj-status-success) 16%, transparent); color: var(--mj-status-success); }
+  .pill-live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mj-status-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mj-status-success) 25%, transparent); }
+
+  /* ---- Content grid ---- */
+  .content { padding: 0 30px 36px; display: flex; flex-direction: column; gap: 20px; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .mjf-kpi { display: flex; flex-direction: column; gap: 9px; }
+  .kpi__top { display: flex; align-items: center; justify-content: space-between; }
+  .kpi__icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--mjf-accent-soft); color: var(--mjf-accent-strong); font-size: 14px; }
+  .kpi__delta { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; }
+  .kpi .v { line-height: 1.05; }
+  .kpi__foot { font-size: 12px; color: var(--mj-text-muted); }
+
+  .grid-2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .panel { padding: 20px 22px; }
+  .panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .panel__title { font-size: 15px; font-weight: 700; color: var(--mj-text-primary); font-family: var(--mjf-font-display); letter-spacing: var(--mjf-display-tracking); }
+  .panel__meta { font-size: 12px; color: var(--mj-text-muted); }
+
+  /* legend */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--mj-text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+  /* svg chart sizing */
+  .chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .axis-text { font-size: 10px; fill: var(--mj-text-muted); font-family: var(--mjf-font-body); }
+  .grid-line { stroke: var(--mj-border-subtle); stroke-width: 1; }
+
+  /* bar chart rows */
+  .qbars { display: flex; flex-direction: column; gap: 14px; }
+  .qbar__top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+  .qbar__label { color: var(--mj-text-secondary); font-weight: 600; }
+  .qbar__val { color: var(--mj-text-muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .qbar__track { height: 12px; border-radius: 999px; background: var(--mjf-progress-track); overflow: hidden; }
+  .qbar__fill { height: 100%; border-radius: 999px; background: var(--mjf-accent-gradient); }
+  .qbar__fill--alt { background: color-mix(in srgb, var(--mjf-accent) 55%, var(--mj-text-muted)); }
+
+  /* donut */
+  .donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .donut-center { font-family: var(--mjf-font-display); font-weight: var(--mjf-display-weight); font-size: 30px; fill: var(--mj-text-primary); }
+  .donut-sub { font-size: 11px; fill: var(--mj-text-muted); }
+  .nps-split { display: flex; gap: 8px; width: 100%; }
+  .nps-cell { flex: 1; text-align: center; padding: 9px 6px; border-radius: var(--mj-radius-md); border: 1px solid var(--mjf-card-border); }
+  .nps-cell .n { font-weight: 800; font-size: 16px; color: var(--mj-text-primary); }
+  .nps-cell .t { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--mj-text-muted); }
+
+  /* funnel */
+  .funnel { display: flex; flex-direction: column; gap: 12px; }
+  .fstep { display: flex; align-items: center; gap: 14px; }
+  .fstep__bar { height: 46px; border-radius: var(--mj-radius-md); background: var(--mjf-accent-gradient); display: flex; align-items: center; padding: 0 14px; color: var(--mjf-on-accent); font-weight: 700; min-width: 64px; }
+  .fstep__bar.s2 { opacity: .82; }
+  .fstep__bar.s3 { opacity: .64; }
+  .fstep__meta { font-size: 12px; }
+  .fstep__meta .nm { font-weight: 700; color: var(--mj-text-primary); font-size: 13px; }
+  .fstep__meta .pc { color: var(--mj-text-muted); }
+  .fstep__drop { color: var(--mj-status-error); font-weight: 700; }
+
+  /* table */
+  .table-wrap { overflow-x: auto; }
+  .resp { display: flex; align-items: center; gap: 11px; }
+  .resp__av { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; background: var(--mjf-accent-soft); color: var(--mjf-accent-strong); }
+  .resp__nm { font-weight: 600; color: var(--mj-text-primary); font-size: 13px; }
+  .resp__em { font-size: 11px; color: var(--mj-text-muted); }
+  .pill-done { background: color-mix(in srgb, var(--mj-status-success) 16%, transparent); color: var(--mj-status-success); }
+  .pill-partial { background: color-mix(in srgb, var(--mj-status-warning) 18%, transparent); color: var(--mj-status-warning); }
+  .pill-new { background: var(--mjf-accent-soft); color: var(--mjf-accent-strong); }
+  .nps-chip { display: inline-flex; min-width: 38px; justify-content: center; font-weight: 800; font-variant-numeric: tabular-nums; padding: 3px 9px; border-radius: 7px; font-size: 12px; }
+  .nps-chip.prom { background: color-mix(in srgb, var(--mj-status-success) 16%, transparent); color: var(--mj-status-success); }
+  .nps-chip.pass { background: color-mix(in srgb, var(--mj-status-warning) 18%, transparent); color: var(--mj-status-warning); }
+  .nps-chip.det { background: color-mix(in srgb, var(--mj-status-error) 16%, transparent); color: var(--mj-status-error); }
+  table.mjf-table td { color: var(--mj-text-secondary); font-size: 13px; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* responsive */
+  @media (max-width: 1100px) {
+    .dash { grid-template-columns: 1fr; }
+    .dash__side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; }
+    .nav { flex-direction: row; flex-wrap: wrap; }
+    .nav__label { display: none; }
+    .org { margin: 0; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .kpis { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .kpis { grid-template-columns: 1fr; }
+    .head, .content { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<a class="mjf-backlink" href="../index.html"><i class="fa-solid fa-arrow-left"></i> Gallery</a>
+<div class="mjf-theme-switch" id="themeSwitch">
+  <button data-t="editorial">Editorial</button><button data-t="aurora">Aurora</button><button data-t="warm">Warm</button>
+</div>
+<script>
+(function(){var sw=document.getElementById('themeSwitch');function set(t){document.documentElement.dataset.theme=t;sw.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b.dataset.t===t);});try{var u=new URL(location);u.searchParams.set('theme',t);history.replaceState(null,'',u);}catch(e){}}var i=new URLSearchParams(location.search).get('theme')||'editorial';set(['editorial','aurora','warm'].indexOf(i)>=0?i:'editorial');sw.addEventListener('click',function(e){var b=e.target.closest('button');if(b)set(b.dataset.t);});})();
+</script>
+
+<div class="mjf-app">
+  <div class="dash">
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="dash__side mjf-sidebar" aria-label="Primary">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true"><i class="fa-solid fa-wpforms"></i></div>
+        <div>
+          <div class="brand__name">MJ Forms</div>
+          <div class="brand__sub">Surveys &amp; Intake</div>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="Sections">
+        <div class="nav__label">Workspace</div>
+        <a class="mjf-navitem" href="#"><i class="fa-solid fa-table-list" aria-hidden="true"></i> Forms <span class="badge">12</span></a>
+        <a class="mjf-navitem" href="#"><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses <span class="badge">847</span></a>
+        <a class="mjf-navitem on" href="#" aria-current="page"><i class="fa-solid fa-chart-line" aria-hidden="true"></i> Analytics</a>
+        <a class="mjf-navitem" href="#"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Distributions</a>
+        <a class="mjf-navitem" href="#"><i class="fa-solid fa-gear" aria-hidden="true"></i> Settings</a>
+      </nav>
+
+      <div class="org">
+        <div class="org__avatar" aria-hidden="true">RG</div>
+        <div>
+          <div class="org__name">Riverside Guild</div>
+          <div class="org__role">Amith — Admin</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="dash__main">
+
+      <header class="head">
+        <div class="head__titles">
+          <div class="head__row">
+            <span class="mjf-eyebrow">Analytics</span>
+            <span class="mjf-pill pill-live"><span class="dot" aria-hidden="true"></span> Live</span>
+          </div>
+          <h1 class="mjf-display">Spring 2026 Member Survey</h1>
+          <div class="head__sub">847 responses · opened Mar 1, 2026 · 9 questions across 3 pages</div>
+        </div>
+        <div class="head__actions">
+          <button class="mjf-btn mjf-btn--primary" type="button"><i class="fa-solid fa-file-export" aria-hidden="true"></i> Export</button>
+          <button class="mjf-btn mjf-btn--ghost" type="button"><i class="fa-regular fa-calendar" aria-hidden="true"></i> Last 30 days <i class="fa-solid fa-chevron-down" aria-hidden="true" style="font-size:10px"></i></button>
+        </div>
+      </header>
+
+      <main class="content">
+
+        <!-- ===== KPI ROW ===== -->
+        <section class="kpis" aria-label="Key metrics">
+          <div class="mjf-kpi kpi">
+            <div class="kpi__top">
+              <div class="kpi__icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></div>
+              <span class="kpi__delta mjf-up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> 18%</span>
+            </div>
+            <div class="v">847</div>
+            <div class="l">Total responses</div>
+            <div class="kpi__foot">vs. 718 prior period</div>
+          </div>
+
+          <div class="mjf-kpi kpi">
+            <div class="kpi__top">
+              <div class="kpi__icon"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
+              <span class="kpi__delta mjf-up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> 4.2%</span>
+            </div>
+            <div class="v">73.4%</div>
+            <div class="l">Completion rate</div>
+            <div class="kpi__foot">622 of 847 finished</div>
+          </div>
+
+          <div class="mjf-kpi kpi">
+            <div class="kpi__top">
+              <div class="kpi__icon"><i class="fa-regular fa-clock" aria-hidden="true"></i></div>
+              <span class="kpi__delta mjf-down"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i> 11s</span>
+            </div>
+            <div class="v">4m 12s</div>
+            <div class="l">Avg. time to complete</div>
+            <div class="kpi__foot">Faster is better</div>
+          </div>
+
+          <div class="mjf-kpi kpi">
+            <div class="kpi__top">
+              <div class="kpi__icon"><i class="fa-solid fa-heart" aria-hidden="true"></i></div>
+              <span class="kpi__delta mjf-up"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i> 6 pts</span>
+            </div>
+            <div class="v">+62</div>
+            <div class="l">Net Promoter Score</div>
+            <div class="kpi__foot">622 rated · world-class</div>
+          </div>
+        </section>
+
+        <!-- ===== ROW: responses over time + question breakdown ===== -->
+        <section class="grid-2">
+
+          <!-- Responses over time (area + line) -->
+          <article class="mjf-card panel" aria-label="Responses over time">
+            <div class="panel__head">
+              <div>
+                <div class="panel__title">Responses over time</div>
+                <div class="panel__meta">Daily submissions · last 30 days</div>
+              </div>
+              <div class="legend">
+                <span><i style="background:var(--mjf-accent)"></i> Submitted</span>
+                <span><i style="background:color-mix(in srgb, var(--mjf-accent) 45%, var(--mj-text-muted))"></i> Started</span>
+              </div>
+            </div>
+
+            <svg class="chart" viewBox="0 0 720 240" role="img" aria-label="Area chart of daily started and submitted responses trending upward over 30 days" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="var(--mjf-accent)" stop-opacity="0.32"/>
+                  <stop offset="100%" stop-color="var(--mjf-accent)" stop-opacity="0.02"/>
+                </linearGradient>
+              </defs>
+              <!-- gridlines -->
+              <line class="grid-line" x1="0" y1="30"  x2="720" y2="30"/>
+              <line class="grid-line" x1="0" y1="80"  x2="720" y2="80"/>
+              <line class="grid-line" x1="0" y1="130" x2="720" y2="130"/>
+              <line class="grid-line" x1="0" y1="180" x2="720" y2="180"/>
+              <!-- started (muted line) -->
+              <polyline fill="none" stroke="color-mix(in srgb, var(--mjf-accent) 45%, var(--mj-text-muted))" stroke-width="2" stroke-dasharray="4 4" stroke-linecap="round" stroke-linejoin="round"
+                points="0,150 48,140 96,148 144,120 192,128 240,104 288,112 336,90 384,98 432,72 480,82 528,58 576,66 624,44 672,52 720,34"/>
+              <!-- submitted (area) -->
+              <path fill="url(#areaFill)" stroke="none"
+                d="M0,175 L48,166 96,170 144,150 192,156 240,138 288,144 336,124 384,130 432,108 480,116 528,96 576,102 624,80 672,86 720,70 L720,210 L0,210 Z"/>
+              <polyline fill="none" stroke="var(--mjf-accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+                points="0,175 48,166 96,170 144,150 192,156 240,138 288,144 336,124 384,130 432,108 480,116 528,96 576,102 624,80 672,86 720,70"/>
+              <!-- end marker -->
+              <circle cx="720" cy="70" r="4.5" fill="var(--mjf-accent)" stroke="var(--mjf-card-bg)" stroke-width="2"/>
+              <!-- x labels -->
+              <text class="axis-text" x="0"   y="232">Mar 1</text>
+              <text class="axis-text" x="336" y="232" text-anchor="middle">Mar 15</text>
+              <text class="axis-text" x="720" y="232" text-anchor="end">Mar 30</text>
+            </svg>
+          </article>
+
+          <!-- Per-question breakdown (bars) -->
+          <article class="mjf-card panel" aria-label="Top answers by question">
+            <div class="panel__head">
+              <div>
+                <div class="panel__title">Top answers</div>
+                <div class="panel__meta">“Which programs interest you?”</div>
+              </div>
+            </div>
+            <div class="qbars">
+              <div>
+                <div class="qbar__top"><span class="qbar__label">Mentorship</span><span class="qbar__val">71%</span></div>
+                <div class="qbar__track"><div class="qbar__fill" style="width:71%"></div></div>
+              </div>
+              <div>
+                <div class="qbar__top"><span class="qbar__label">Workshops</span><span class="qbar__val">58%</span></div>
+                <div class="qbar__track"><div class="qbar__fill" style="width:58%"></div></div>
+              </div>
+              <div>
+                <div class="qbar__top"><span class="qbar__label">Networking</span><span class="qbar__val">44%</span></div>
+                <div class="qbar__track"><div class="qbar__fill qbar__fill--alt" style="width:44%"></div></div>
+              </div>
+              <div>
+                <div class="qbar__top"><span class="qbar__label">Certifications</span><span class="qbar__val">37%</span></div>
+                <div class="qbar__track"><div class="qbar__fill qbar__fill--alt" style="width:37%"></div></div>
+              </div>
+              <div>
+                <div class="qbar__top"><span class="qbar__label">Conferences</span><span class="qbar__val">29%</span></div>
+                <div class="qbar__track"><div class="qbar__fill qbar__fill--alt" style="width:29%"></div></div>
+              </div>
+              <div>
+                <div class="qbar__top"><span class="qbar__label">Volunteering</span><span class="qbar__val">18%</span></div>
+                <div class="qbar__track"><div class="qbar__fill qbar__fill--alt" style="width:18%"></div></div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <!-- ===== ROW: NPS donut + funnel ===== -->
+        <section class="grid-2">
+
+          <!-- NPS gauge/donut -->
+          <article class="mjf-card panel" aria-label="Net Promoter Score breakdown">
+            <div class="panel__head">
+              <div>
+                <div class="panel__title">NPS distribution</div>
+                <div class="panel__meta">622 rated responses</div>
+              </div>
+            </div>
+            <div class="donut-wrap">
+              <svg class="chart" viewBox="0 0 220 150" role="img" aria-label="Donut gauge showing 71% promoters, 20% passives, 9% detractors for a net score of plus 62" style="max-width:300px">
+                <!-- track -->
+                <circle cx="110" cy="110" r="74" fill="none" stroke="var(--mjf-progress-track)" stroke-width="22"/>
+                <!-- semicircle gauge: total arc length for 180deg of r=74 ≈ 232.5 -->
+                <!-- promoters 71% -->
+                <circle cx="110" cy="110" r="74" fill="none" stroke="var(--mj-status-success)" stroke-width="22" stroke-linecap="round"
+                  stroke-dasharray="165 465" transform="rotate(180 110 110)"/>
+                <!-- passives 20% (offset by promoters) -->
+                <circle cx="110" cy="110" r="74" fill="none" stroke="var(--mj-status-warning)" stroke-width="22"
+                  stroke-dasharray="46 465" stroke-dashoffset="-167" transform="rotate(180 110 110)"/>
+                <!-- detractors 9% -->
+                <circle cx="110" cy="110" r="74" fill="none" stroke="var(--mj-status-error)" stroke-width="22"
+                  stroke-dasharray="21 465" stroke-dashoffset="-215" transform="rotate(180 110 110)"/>
+                <text class="donut-center" x="110" y="104" text-anchor="middle">+62</text>
+                <text class="donut-sub" x="110" y="124" text-anchor="middle">NET SCORE</text>
+              </svg>
+              <div class="nps-split">
+                <div class="nps-cell">
+                  <div class="n" style="color:var(--mj-status-success)">71%</div>
+                  <div class="t">Promoters</div>
+                </div>
+                <div class="nps-cell">
+                  <div class="n" style="color:var(--mj-status-warning)">20%</div>
+                  <div class="t">Passives</div>
+                </div>
+                <div class="nps-cell">
+                  <div class="n" style="color:var(--mj-status-error)">9%</div>
+                  <div class="t">Detractors</div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Completion funnel -->
+          <article class="mjf-card panel" aria-label="Completion funnel">
+            <div class="panel__head">
+              <div>
+                <div class="panel__title">Completion funnel</div>
+                <div class="panel__meta">Where respondents drop off</div>
+              </div>
+            </div>
+            <div class="funnel">
+              <div class="fstep">
+                <div class="fstep__bar" style="width:100%" aria-hidden="true">847</div>
+                <div class="fstep__meta">
+                  <div class="nm">Started</div>
+                  <div class="pc">100% · page 1 loaded</div>
+                </div>
+              </div>
+              <div class="fstep">
+                <div class="fstep__bar s2" style="width:82%" aria-hidden="true">694</div>
+                <div class="fstep__meta">
+                  <div class="nm">Reached page 2</div>
+                  <div class="pc">82% · <span class="fstep__drop">−18%</span> drop</div>
+                </div>
+              </div>
+              <div class="fstep">
+                <div class="fstep__bar s3" style="width:73%" aria-hidden="true">622</div>
+                <div class="fstep__meta">
+                  <div class="nm">Submitted</div>
+                  <div class="pc">73.4% · <span class="fstep__drop">−8.5%</span> drop</div>
+                </div>
+              </div>
+            </div>
+            <div class="panel__meta" style="margin-top:18px; padding-top:14px; border-top:1px solid var(--mjf-card-border)">
+              <i class="fa-solid fa-lightbulb" aria-hidden="true" style="color:var(--mjf-accent)"></i>
+              Biggest drop is the page-1 → page-2 transition (long-text question). Consider making it optional.
+            </div>
+          </article>
+        </section>
+
+        <!-- ===== RECENT RESPONSES TABLE ===== -->
+        <section class="mjf-card panel" aria-label="Recent responses">
+          <div class="panel__head">
+            <div>
+              <div class="panel__title">Recent responses</div>
+              <div class="panel__meta">Latest submissions, newest first</div>
+            </div>
+            <button class="mjf-btn mjf-btn--ghost" type="button"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i> View all</button>
+          </div>
+          <div class="table-wrap">
+            <table class="mjf-table">
+              <caption class="mjf-muted" style="text-align:left; font-size:12px; padding:0 0 8px; caption-side:top;">A list of the most recent survey responses.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Respondent</th>
+                  <th scope="col">Submitted</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">NPS</th>
+                  <th scope="col">Top program</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="resp">
+                      <div class="resp__av" aria-hidden="true">MA</div>
+                      <div><div class="resp__nm">Maya Anand</div><div class="resp__em">maya.anand@riverside.org</div></div>
+                    </div>
+                  </td>
+                  <td class="tnum">2 min ago</td>
+                  <td><span class="mjf-pill pill-done"><i class="fa-solid fa-check" aria-hidden="true"></i> Complete</span></td>
+                  <td><span class="nps-chip prom">9</span></td>
+                  <td>Mentorship</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="resp">
+                      <div class="resp__av" aria-hidden="true">JT</div>
+                      <div><div class="resp__nm">Jordan Tran</div><div class="resp__em">j.tran@gmail.com</div></div>
+                    </div>
+                  </td>
+                  <td class="tnum">14 min ago</td>
+                  <td><span class="mjf-pill pill-done"><i class="fa-solid fa-check" aria-hidden="true"></i> Complete</span></td>
+                  <td><span class="nps-chip pass">7</span></td>
+                  <td>Workshops</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="resp">
+                      <div class="resp__av" aria-hidden="true">??</div>
+                      <div><div class="resp__nm">Anonymous</div><div class="resp__em">via public link</div></div>
+                    </div>
+                  </td>
+                  <td class="tnum">31 min ago</td>
+                  <td><span class="mjf-pill pill-partial"><i class="fa-solid fa-clock" aria-hidden="true"></i> Partial</span></td>
+                  <td><span class="mjf-muted">—</span></td>
+                  <td><span class="mjf-muted">—</span></td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="resp">
+                      <div class="resp__av" aria-hidden="true">DO</div>
+                      <div><div class="resp__nm">Devi Okafor</div><div class="resp__em">devi.o@riverside.org</div></div>
+                    </div>
+                  </td>
+                  <td class="tnum">48 min ago</td>
+                  <td><span class="mjf-pill pill-done"><i class="fa-solid fa-check" aria-hidden="true"></i> Complete</span></td>
+                  <td><span class="nps-chip prom">10</span></td>
+                  <td>Networking</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="resp">
+                      <div class="resp__av" aria-hidden="true">RP</div>
+                      <div><div class="resp__nm">Reza Pakzad</div><div class="resp__em">reza@northstar.co</div></div>
+                    </div>
+                  </td>
+                  <td class="tnum">1 hr ago</td>
+                  <td><span class="mjf-pill pill-new"><i class="fa-solid fa-sparkles" aria-hidden="true"></i> New</span></td>
+                  <td><span class="nps-chip det">4</span></td>
+                  <td>Certifications</td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="resp">
+                      <div class="resp__av" aria-hidden="true">SK</div>
+                      <div><div class="resp__nm">Sofia Klein</div><div class="resp__em">sofia.klein@guild.org</div></div>
+                    </div>
+                  </td>
+                  <td class="tnum">2 hr ago</td>
+                  <td><span class="mjf-pill pill-done"><i class="fa-solid fa-check" aria-hidden="true"></i> Complete</span></td>
+                  <td><span class="nps-chip prom">9</span></td>
+                  <td>Mentorship</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

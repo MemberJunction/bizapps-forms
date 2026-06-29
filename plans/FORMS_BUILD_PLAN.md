@@ -24,50 +24,48 @@ Scaffold is on **`main`**.
 extended-property descriptions, the polymorphic `FormResponse` subject seam, cross-schema FKs to
 `__mj.[User]` / `__mj.[File]`).
 
-### 🎨 Design prototypes (live on GitHub Pages)
+### 🎨 Design system & themeable prototypes (live on GitHub Pages)
 
-Three divergent, contemporary UX directions — **Aurora** (vibrant glass/gradient SaaS), **Editorial**
-(refined minimal, big type), and **Warm / Humanist** (nonprofit-forward) — each shown across the
-public **respondent form**, the visual **builder**, and the analytics **dashboard**: 9 self-contained
-HTML pages + a gallery, under [`docs/`](../docs/). These are visual explorations only (no backend) and
-have **zero dependency on the CodeGen gate**, so they progress in parallel. Published via GitHub Pages
-(`main` → `/docs`):
+All three looks are now **one MemberJunction-token-driven design system**
+([`docs/app/design-system.css`](../docs/app/design-system.css)): the base layer mirrors MJ's real
+`--mj-*` semantic tokens, a new `--mjf-*` layer adds form-specific concepts (question card, choice
+option, progress, rating, app chrome), and **each theme is just a `[data-theme]` block overriding
+~25 tokens** — the same mechanism as MJ dark mode, and exactly what a `FormStyle.CSSVariables` row will
+store. **Editorial is the default**; Aurora and Warm flip live via an in-page switcher (or a `?theme=`
+deep-link). The HTML is identical across all three — only tokens change, and the prototypes carry
+**zero hardcoded colors** below the token layer. Three surfaces (respondent form, builder, dashboard)
+live under [`docs/app/`](../docs/app/); visual only (no backend), no CodeGen dependency.
 
-➡️ **https://memberjunction.github.io/bizapps-forms/**  *(enable once: repo Settings → Pages → Deploy from branch → `main` / `/docs`)*
+➡️ **Live gallery: https://memberjunction.github.io/bizapps-forms/**
 
-> Screenshots below are rendered captures committed under [`docs/screenshots/`](../docs/screenshots/);
-> click any image to open the live page (once Pages is enabled).
+> One HTML, three themes — proof the token system re-skins every surface (chrome, cards, even chart
+> fills). Click any image to open the live, switchable page.
 
-#### 🌌 Aurora — vibrant glass / gradient SaaS
+#### 📱 Respondent form — Editorial · Aurora · Warm
 <table><tr>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/aurora/respondent.html"><img src="../docs/screenshots/aurora-respondent.png" width="100%"></a><div align="center"><sub><b>Respondent form</b></sub></div></td>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/aurora/builder.html"><img src="../docs/screenshots/aurora-builder.png" width="100%"></a><div align="center"><sub><b>Form builder</b></sub></div></td>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/aurora/dashboard.html"><img src="../docs/screenshots/aurora-dashboard.png" width="100%"></a><div align="center"><sub><b>Analytics dashboard</b></sub></div></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/respondent.html?theme=editorial"><img src="../docs/screenshots/app-respondent-editorial.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/respondent.html?theme=aurora"><img src="../docs/screenshots/app-respondent-aurora.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/respondent.html?theme=warm"><img src="../docs/screenshots/app-respondent-warm.png" width="100%"></a></td>
 </tr></table>
 
-#### 📄 Editorial — refined minimal, big type
+#### 🛠️ Form builder — Editorial · Aurora · Warm
 <table><tr>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/editorial/respondent.html"><img src="../docs/screenshots/editorial-respondent.png" width="100%"></a><div align="center"><sub><b>Respondent form</b></sub></div></td>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/editorial/builder.html"><img src="../docs/screenshots/editorial-builder.png" width="100%"></a><div align="center"><sub><b>Form builder</b></sub></div></td>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/editorial/dashboard.html"><img src="../docs/screenshots/editorial-dashboard.png" width="100%"></a><div align="center"><sub><b>Analytics dashboard</b></sub></div></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/builder.html?theme=editorial"><img src="../docs/screenshots/app-builder-editorial.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/builder.html?theme=aurora"><img src="../docs/screenshots/app-builder-aurora.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/builder.html?theme=warm"><img src="../docs/screenshots/app-builder-warm.png" width="100%"></a></td>
 </tr></table>
 
-#### 🌻 Warm / Humanist — friendly, nonprofit-forward
+#### 📊 Analytics dashboard — Editorial · Aurora · Warm
 <table><tr>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/warm/respondent.html"><img src="../docs/screenshots/warm-respondent.png" width="100%"></a><div align="center"><sub><b>Respondent form</b></sub></div></td>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/warm/builder.html"><img src="../docs/screenshots/warm-builder.png" width="100%"></a><div align="center"><sub><b>Form builder</b></sub></div></td>
-<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/warm/dashboard.html"><img src="../docs/screenshots/warm-dashboard.png" width="100%"></a><div align="center"><sub><b>Analytics dashboard</b></sub></div></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/dashboard.html?theme=editorial"><img src="../docs/screenshots/app-dashboard-editorial.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/dashboard.html?theme=aurora"><img src="../docs/screenshots/app-dashboard-aurora.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/dashboard.html?theme=warm"><img src="../docs/screenshots/app-dashboard-warm.png" width="100%"></a></td>
 </tr></table>
 
-#### 📱 Mobile-first respondent (each direction on a phone)
-<table><tr>
-<td width="33%"><img src="../docs/screenshots/aurora-respondent-mobile.png" width="100%"></td>
-<td width="33%"><img src="../docs/screenshots/editorial-respondent-mobile.png" width="100%"></td>
-<td width="33%"><img src="../docs/screenshots/warm-respondent-mobile.png" width="100%"></td>
-</tr></table>
-
-Once a direction is chosen, tokenize it into MemberJunction's `--mj-*` design system and apply it to
-the real Angular respondent widget + Explorer builder/dashboards during Phase 1.
+When Phase 1 builds the real Angular respondent widget + Explorer builder/dashboards, they consume the
+same `--mj-*`/`--mjf-*` tokens, so these themes drop in as `FormStyle` rows with no component changes.
+*(The original per-direction explorations remain under `docs/{aurora,editorial,warm}/` and are linked
+from the gallery as "v1".)*
 
 ### ▶ NEXT — blocking gate (requires a SQL Server database)
 

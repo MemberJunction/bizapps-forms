@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en" data-theme="editorial">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MJ Forms — Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800;900&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="design-system.css">
+<style>
+  /* ----------------------------------------------------------------
+     Builder surface layout — TOKENS ONLY (no hardcoded colors).
+     ---------------------------------------------------------------- */
+  .builder {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    height: 100vh;
+    background: var(--mjf-chrome-bg);
+  }
+
+  /* Top bar overrides for sticky full-width */
+  .builder-topbar {
+    position: sticky; top: 0; z-index: 20;
+    gap: 14px;
+  }
+  .builder-topbar .form-name {
+    font-family: var(--mjf-font-display);
+    font-weight: var(--mjf-display-weight);
+    letter-spacing: var(--mjf-display-tracking);
+    font-size: 19px;
+    color: var(--mj-text-primary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--mj-radius-md);
+    padding: 6px 10px;
+    min-width: 220px;
+    transition: var(--mj-transition-base);
+  }
+  .builder-topbar .form-name:hover { background: var(--mj-bg-surface-hover); }
+  .builder-topbar .form-name:focus { outline: none; background: var(--mj-bg-surface); border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+  .builder-topbar .spacer { flex: 1; }
+  .builder-topbar .form-meta { display: flex; align-items: center; gap: 10px; }
+  .builder-topbar .form-edit-hint { color: var(--mj-text-disabled); font-size: 13px; }
+
+  /* Three-pane body */
+  .builder-body {
+    display: grid;
+    grid-template-columns: 268px 1fr 320px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  @media (max-width: 1100px) {
+    .builder-body { grid-template-columns: 220px 1fr 280px; }
+  }
+
+  /* Pane scroll regions */
+  .pane { min-height: 0; overflow-y: auto; }
+  .pane-left { padding: 18px 14px; }
+  .pane-center { padding: 26px 28px 80px; }
+  .pane-right { padding: 18px; border-left: 1px solid var(--mjf-chrome-border); background: var(--mjf-sidebar-bg); }
+
+  .pane-title {
+    font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--mj-text-muted); margin: 2px 4px 12px;
+  }
+
+  /* Palette */
+  .palette { display: grid; gap: 6px; }
+  .palette-item {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    font: inherit; font-weight: 600; font-size: 13.5px; text-align: left;
+    color: var(--mj-text-secondary);
+    background: transparent; border: 1px solid transparent;
+    border-radius: var(--mj-radius-md); padding: 9px 11px; cursor: grab;
+    transition: var(--mj-transition-base);
+  }
+  .palette-item:hover { background: var(--mjf-panel-bg); border-color: var(--mjf-card-border); color: var(--mj-text-primary); }
+  .palette-item:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+  .palette-item .pi-icon {
+    width: 30px; height: 30px; flex: none; display: grid; place-items: center;
+    border-radius: var(--mj-radius-md);
+    background: var(--mjf-accent-soft); color: var(--mjf-accent-strong);
+    font-size: 13px;
+  }
+  .palette-group + .palette-group { margin-top: 18px; }
+
+  /* Canvas */
+  .canvas { max-width: 720px; margin: 0 auto; display: grid; gap: 14px; }
+  .canvas-head { margin-bottom: 4px; }
+  .canvas-head .mjf-eyebrow { display: block; margin-bottom: 8px; }
+  .canvas-head h1 { font-size: 26px; margin: 0 0 6px; }
+  .canvas-head p { margin: 0; color: var(--mj-text-secondary); }
+
+  .q-card {
+    display: grid;
+    grid-template-columns: 26px 1fr auto;
+    align-items: start; gap: 14px;
+    padding: 16px 18px;
+    cursor: pointer;
+    border-width: 1.5px;
+    transition: var(--mj-transition-base);
+    position: relative;
+  }
+  .q-card:hover { border-color: var(--mjf-accent); }
+  .q-card.is-selected {
+    border-color: var(--mjf-accent);
+    box-shadow: var(--mjf-focus-ring), var(--mjf-card-shadow);
+  }
+  .q-handle {
+    color: var(--mj-text-disabled); cursor: grab; padding-top: 3px;
+    display: grid; place-items: center; font-size: 14px;
+  }
+  .q-main { min-width: 0; display: grid; gap: 8px; }
+  .q-toprow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .q-num { font-size: 12px; font-weight: 700; color: var(--mj-text-muted); }
+  .q-label { font-size: 16px; font-weight: 600; color: var(--mj-text-primary); }
+  .q-sub { color: var(--mj-text-muted); font-size: 13px; }
+  .q-preview { margin-top: 4px; }
+  .q-preview .ghost-input {
+    border: 1px dashed var(--mjf-input-border); border-radius: var(--mjf-input-radius);
+    padding: 11px 14px; color: var(--mj-text-disabled); font-size: 14px;
+    background: var(--mj-bg-surface-sunken);
+  }
+  .q-preview .ghost-choices { display: grid; gap: 8px; }
+  .q-preview .ghost-choice {
+    display: flex; align-items: center; gap: 10px;
+    border: 1.5px solid var(--mjf-choice-border); border-radius: var(--mjf-choice-radius);
+    padding: 9px 13px; font-size: 14px; color: var(--mj-text-secondary);
+    background: var(--mjf-choice-bg);
+  }
+  .q-preview .ghost-choice .dot { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--mjf-rating-inactive); flex: none; }
+  .q-preview .ghost-rating { display: flex; gap: 6px; color: var(--mjf-rating-inactive); font-size: 22px; }
+  .q-preview .ghost-nps { display: flex; gap: 5px; flex-wrap: wrap; }
+  .q-preview .ghost-nps span {
+    width: 32px; height: 32px; display: grid; place-items: center; font-size: 12px; font-weight: 600;
+    border: 1.5px solid var(--mjf-choice-border); border-radius: var(--mj-radius-sm);
+    color: var(--mj-text-muted); background: var(--mjf-choice-bg);
+  }
+  .q-side { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .q-required { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--mj-text-secondary); }
+
+  .add-q-row { display: flex; justify-content: center; padding-top: 6px; }
+
+  /* Properties (right) */
+  .prop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .prop-head .prop-icon {
+    width: 34px; height: 34px; flex: none; display: grid; place-items: center;
+    border-radius: var(--mj-radius-md); background: var(--mjf-accent-soft); color: var(--mjf-accent-strong);
+  }
+  .prop-head .prop-title { font-weight: 700; font-size: 14px; color: var(--mj-text-primary); }
+  .prop-head .prop-kind { font-size: 12px; color: var(--mj-text-muted); }
+
+  .prop-section { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--mjf-card-border); }
+  .prop-section:last-of-type { border-bottom: 0; }
+  .prop-label { font-size: 12px; font-weight: 700; color: var(--mj-text-secondary); letter-spacing: .02em; }
+  .prop-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .prop-row .prop-row-label { font-size: 13.5px; font-weight: 600; color: var(--mj-text-primary); }
+  .prop-row .prop-row-hint { font-size: 12px; color: var(--mj-text-muted); }
+  .prop-input-sm { padding: 9px 12px; font-size: 13.5px; }
+
+  /* Options editor */
+  .opt-list { display: grid; gap: 8px; }
+  .opt-row { display: flex; align-items: center; gap: 8px; }
+  .opt-row .opt-grip { color: var(--mj-text-disabled); cursor: grab; font-size: 12px; }
+  .opt-row .opt-remove {
+    flex: none; width: 32px; height: 32px; border-radius: var(--mj-radius-md);
+    display: grid; place-items: center; cursor: pointer;
+    background: transparent; border: 1px solid var(--mjf-card-border); color: var(--mj-text-muted);
+    transition: var(--mj-transition-base);
+  }
+  .opt-row .opt-remove:hover { color: var(--mj-status-error); border-color: var(--mj-status-error); }
+  .opt-row .opt-remove:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+
+  /* Conditional logic teaser */
+  .logic-teaser {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 14px; border-radius: var(--mj-radius-md);
+    background: var(--mjf-accent-soft);
+    border: 1px dashed var(--mjf-choice-selected-border);
+  }
+  .logic-teaser .lt-icon { color: var(--mjf-accent-strong); font-size: 15px; }
+  .logic-teaser .lt-text { font-size: 12.5px; color: var(--mj-text-secondary); }
+  .logic-teaser .lt-text b { color: var(--mj-text-primary); }
+
+  .req-flag { color: var(--mj-status-error); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<a class="mjf-backlink" href="../index.html"><i class="fa-solid fa-arrow-left"></i> Gallery</a>
+<div class="mjf-theme-switch" id="themeSwitch">
+  <button data-t="editorial">Editorial</button><button data-t="aurora">Aurora</button><button data-t="warm">Warm</button>
+</div>
+<script>
+(function(){var sw=document.getElementById('themeSwitch');function set(t){document.documentElement.dataset.theme=t;sw.querySelectorAll('button').forEach(function(b){b.classList.toggle('on',b.dataset.t===t);});try{var u=new URL(location);u.searchParams.set('theme',t);history.replaceState(null,'',u);}catch(e){}}var i=new URLSearchParams(location.search).get('theme')||'editorial';set(['editorial','aurora','warm'].indexOf(i)>=0?i:'editorial');sw.addEventListener('click',function(e){var b=e.target.closest('button');if(b)set(b.dataset.t);});})();
+</script>
+
+<main class="builder">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="mjf-topbar builder-topbar">
+    <label class="visually-hidden" for="formName" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Form name</label>
+    <input id="formName" class="form-name" value="Spring 2026 Member Survey" aria-label="Form name">
+    <div class="form-meta">
+      <span class="mjf-pill"><i class="fa-solid fa-circle" style="font-size:7px"></i> Draft</span>
+      <span class="form-edit-hint"><i class="fa-regular fa-clock"></i> Saved 2m ago</span>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="mjf-seg" role="tablist" aria-label="Layout mode">
+      <button class="on" role="tab" aria-selected="true">Scroll</button>
+      <button role="tab" aria-selected="false">One question</button>
+    </div>
+
+    <button class="mjf-btn mjf-btn--primary"><i class="fa-solid fa-rocket"></i> Publish</button>
+    <button class="mjf-btn mjf-btn--ghost"><i class="fa-regular fa-eye"></i> Preview</button>
+  </header>
+
+  <!-- ============ BODY: 3 PANES ============ -->
+  <div class="builder-body">
+
+    <!-- ---------- LEFT: Palette ---------- -->
+    <nav class="pane pane-left mjf-sidebar" aria-label="Add question palette">
+      <div class="pane-title">Add question</div>
+
+      <div class="palette-group">
+        <div class="palette" role="list">
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-font"></i></span> Short text</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-align-left"></i></span> Long text</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-envelope"></i></span> Email</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-phone"></i></span> Phone</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-hashtag"></i></span> Number</button>
+        </div>
+      </div>
+
+      <div class="palette-group">
+        <div class="pane-title">Choice</div>
+        <div class="palette" role="list">
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-regular fa-circle-dot"></i></span> Single choice</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-regular fa-square-check"></i></span> Multi choice</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-caret-down"></i></span> Dropdown</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-star"></i></span> Rating</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-gauge-high"></i></span> NPS</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-toggle-on"></i></span> Yes/No</button>
+        </div>
+      </div>
+
+      <div class="palette-group">
+        <div class="pane-title">Advanced</div>
+        <div class="palette" role="list">
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-regular fa-calendar"></i></span> Date</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-paperclip"></i></span> File upload</button>
+          <button class="palette-item" role="listitem"><span class="pi-icon"><i class="fa-solid fa-quote-left"></i></span> Statement</button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ---------- CENTER: Canvas ---------- -->
+    <section class="pane pane-center" aria-label="Form canvas">
+      <div class="canvas">
+
+        <div class="canvas-head">
+          <span class="mjf-eyebrow">Spring 2026</span>
+          <h1>Member Survey</h1>
+          <p>Help us shape next year's programming. Takes about 3 minutes.</p>
+        </div>
+
+        <!-- Q1 -->
+        <article class="q-card mjf-card" tabindex="0" data-q>
+          <div class="q-handle" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-toprow">
+              <span class="q-num">01</span>
+              <span class="mjf-pill"><i class="fa-solid fa-font"></i> Short text</span>
+            </div>
+            <div class="q-label">What is your full name?</div>
+            <div class="q-preview"><div class="ghost-input">Type your answer…</div></div>
+          </div>
+          <div class="q-side">
+            <div class="q-required"><span>Required</span><span class="mjf-switch on" data-req role="switch" aria-checked="true" tabindex="0" aria-label="Required"></span></div>
+          </div>
+        </article>
+
+        <!-- Q2 (SELECTED) -->
+        <article class="q-card mjf-card is-selected" tabindex="0" data-q>
+          <div class="q-handle" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-toprow">
+              <span class="q-num">02</span>
+              <span class="mjf-pill"><i class="fa-regular fa-circle-dot"></i> Single choice</span>
+            </div>
+            <div class="q-label">How did you first hear about us?</div>
+            <div class="q-sub">Pick the one that fits best.</div>
+            <div class="q-preview">
+              <div class="ghost-choices">
+                <div class="ghost-choice"><span class="dot"></span> A friend or colleague</div>
+                <div class="ghost-choice"><span class="dot"></span> Social media</div>
+                <div class="ghost-choice"><span class="dot"></span> A local event</div>
+                <div class="ghost-choice"><span class="dot"></span> Search engine</div>
+              </div>
+            </div>
+          </div>
+          <div class="q-side">
+            <div class="q-required"><span>Required</span><span class="mjf-switch on" data-req role="switch" aria-checked="true" tabindex="0" aria-label="Required"></span></div>
+          </div>
+        </article>
+
+        <!-- Q3 -->
+        <article class="q-card mjf-card" tabindex="0" data-q>
+          <div class="q-handle" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-toprow">
+              <span class="q-num">03</span>
+              <span class="mjf-pill"><i class="fa-solid fa-star"></i> Rating</span>
+            </div>
+            <div class="q-label">How would you rate this year's events?</div>
+            <div class="q-preview"><div class="ghost-rating"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div></div>
+          </div>
+          <div class="q-side">
+            <div class="q-required"><span>Required</span><span class="mjf-switch" data-req role="switch" aria-checked="false" tabindex="0" aria-label="Required"></span></div>
+          </div>
+        </article>
+
+        <!-- Q4 -->
+        <article class="q-card mjf-card" tabindex="0" data-q>
+          <div class="q-handle" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-toprow">
+              <span class="q-num">04</span>
+              <span class="mjf-pill"><i class="fa-solid fa-gauge-high"></i> NPS</span>
+            </div>
+            <div class="q-label">How likely are you to recommend us to a friend?</div>
+            <div class="q-preview"><div class="ghost-nps"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div></div>
+          </div>
+          <div class="q-side">
+            <div class="q-required"><span>Required</span><span class="mjf-switch on" data-req role="switch" aria-checked="true" tabindex="0" aria-label="Required"></span></div>
+          </div>
+        </article>
+
+        <!-- Q5 -->
+        <article class="q-card mjf-card" tabindex="0" data-q>
+          <div class="q-handle" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></div>
+          <div class="q-main">
+            <div class="q-toprow">
+              <span class="q-num">05</span>
+              <span class="mjf-pill"><i class="fa-solid fa-align-left"></i> Long text</span>
+            </div>
+            <div class="q-label">Anything else you'd like us to know?</div>
+            <div class="q-preview"><div class="ghost-input">Type your answer…</div></div>
+          </div>
+          <div class="q-side">
+            <div class="q-required"><span>Required</span><span class="mjf-switch" data-req role="switch" aria-checked="false" tabindex="0" aria-label="Required"></span></div>
+          </div>
+        </article>
+
+        <div class="add-q-row">
+          <button class="mjf-btn mjf-btn--ghost"><i class="fa-solid fa-plus"></i> Add question</button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ---------- RIGHT: Properties ---------- -->
+    <aside class="pane pane-right" aria-label="Question properties">
+      <div class="prop-head">
+        <span class="prop-icon"><i class="fa-regular fa-circle-dot"></i></span>
+        <div>
+          <div class="prop-title">Question 02</div>
+          <div class="prop-kind">Single choice</div>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <label class="prop-label" for="pLabel">Label</label>
+        <input id="pLabel" class="mjf-input prop-input-sm" value="How did you first hear about us?">
+        <label class="prop-label" for="pHelp" style="margin-top:6px">Help text</label>
+        <input id="pHelp" class="mjf-input prop-input-sm" value="Pick the one that fits best.">
+      </div>
+
+      <div class="prop-section">
+        <div class="prop-row">
+          <div>
+            <div class="prop-row-label">Required <span class="req-flag">*</span></div>
+            <div class="prop-row-hint">Respondent must answer</div>
+          </div>
+          <span class="mjf-switch on" data-req role="switch" aria-checked="true" tabindex="0" aria-label="Required"></span>
+        </div>
+        <div class="prop-row">
+          <div>
+            <div class="prop-row-label">Allow "Other"</div>
+            <div class="prop-row-hint">Free-text fallback option</div>
+          </div>
+          <span class="mjf-switch" data-req role="switch" aria-checked="false" tabindex="0" aria-label="Allow other"></span>
+        </div>
+      </div>
+
+      <div class="prop-section">
+        <label class="prop-label" for="pValid">Validation</label>
+        <select id="pValid" class="mjf-input prop-input-sm">
+          <option>No constraint</option>
+          <option selected>Exactly one selection</option>
+          <option>At least one selection</option>
+        </select>
+      </div>
+
+      <div class="prop-section">
+        <label class="prop-label">Options</label>
+        <div class="opt-list">
+          <div class="opt-row">
+            <i class="fa-solid fa-grip-vertical opt-grip" aria-hidden="true"></i>
+            <input class="mjf-input prop-input-sm" value="A friend or colleague" aria-label="Option 1">
+            <button class="opt-remove" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="opt-row">
+            <i class="fa-solid fa-grip-vertical opt-grip" aria-hidden="true"></i>
+            <input class="mjf-input prop-input-sm" value="Social media" aria-label="Option 2">
+            <button class="opt-remove" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="opt-row">
+            <i class="fa-solid fa-grip-vertical opt-grip" aria-hidden="true"></i>
+            <input class="mjf-input prop-input-sm" value="A local event" aria-label="Option 3">
+            <button class="opt-remove" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="opt-row">
+            <i class="fa-solid fa-grip-vertical opt-grip" aria-hidden="true"></i>
+            <input class="mjf-input prop-input-sm" value="Search engine" aria-label="Option 4">
+            <button class="opt-remove" aria-label="Remove option"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+        <button class="mjf-btn mjf-btn--ghost" style="justify-content:center;margin-top:4px"><i class="fa-solid fa-plus"></i> Add option</button>
+      </div>
+
+      <div class="prop-section">
+        <label class="prop-label">Conditional logic</label>
+        <div class="logic-teaser">
+          <i class="fa-solid fa-code-branch lt-icon" aria-hidden="true"></i>
+          <div class="lt-text">Show this question only when <b>a previous answer</b> matches a rule. <a href="#">Add a rule →</a></div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</main>
+
+<script>
+(function(){
+  // Select a question card on click — move the selected style.
+  var cards = Array.prototype.slice.call(document.querySelectorAll('[data-q]'));
+  function select(card){
+    cards.forEach(function(c){ c.classList.toggle('is-selected', c === card); });
+  }
+  cards.forEach(function(card){
+    card.addEventListener('click', function(e){
+      if (e.target.closest('[data-req]')) return; // don't select when toggling switch
+      select(card);
+    });
+    card.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ') {
+        if (e.target === card) { e.preventDefault(); select(card); }
+      }
+    });
+  });
+
+  // Toggle Required (and any) switches.
+  function toggleSwitch(sw){
+    var on = sw.classList.toggle('on');
+    sw.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
+  Array.prototype.slice.call(document.querySelectorAll('[data-req]')).forEach(function(sw){
+    sw.addEventListener('click', function(e){ e.stopPropagation(); toggleSwitch(sw); });
+    sw.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleSwitch(sw); }
+    });
+  });
+})();
+</script>
+</body>
+</html>
