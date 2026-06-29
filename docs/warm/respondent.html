@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --cream: #FBF6EC;
+    --oat: #F3E9D6;
+    --surface: #FFFDF8;
+    --terracotta: #D9744B;
+    --terracotta-deep: #C25E37;
+    --terracotta-soft: #F6E2D6;
+    --amber: #E8A33D;
+    --sage: #7C8C5A;
+    --sage-deep: #5F6F42;
+    --sage-soft: #E6EAD6;
+    --ink: #41372E;
+    --ink-soft: #6E6055;
+    --ink-faint: #9A8C7E;
+    --line: #E8DCC7;
+    --radius-lg: 26px;
+    --radius-md: 20px;
+    --radius-sm: 14px;
+    --shadow-soft: 0 10px 30px -12px rgba(120, 86, 54, 0.28);
+    --shadow-card: 0 4px 18px -8px rgba(120, 86, 54, 0.22);
+    --font: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(232, 163, 61, 0.14), transparent 60%),
+      radial-gradient(900px 500px at -10% 20%, rgba(124, 140, 90, 0.12), transparent 55%),
+      var(--cream);
+    color: var(--ink);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  /* Sticky gallery back link */
+  .gallery-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(8px);
+    background: rgba(251, 246, 236, 0.82);
+    border-bottom: 1px solid var(--line);
+  }
+  .gallery-bar a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.86rem;
+  }
+  .gallery-bar a:hover { color: var(--terracotta-deep); }
+  .gallery-bar a:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; border-radius: 8px; }
+
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 18px 16px 64px;
+  }
+
+  /* Branded header */
+  .form-head {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 26px 24px 22px;
+    box-shadow: var(--shadow-soft);
+    position: relative;
+    overflow: hidden;
+  }
+  .form-head::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 6px;
+    background: linear-gradient(90deg, var(--terracotta), var(--amber), var(--sage));
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .logo-mark {
+    width: 46px; height: 46px;
+    border-radius: 15px;
+    background: linear-gradient(135deg, var(--terracotta), var(--amber));
+    display: grid; place-items: center;
+    color: #fff;
+    font-size: 1.25rem;
+    box-shadow: 0 6px 14px -6px rgba(217, 116, 75, 0.7);
+    flex-shrink: 0;
+  }
+  .brand-name { font-weight: 800; font-size: 1rem; letter-spacing: -0.01em; }
+  .brand-sub { font-size: 0.78rem; color: var(--ink-faint); font-weight: 600; }
+  .form-title {
+    margin: 4px 0 6px;
+    font-size: 1.65rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+  }
+  .form-intro { margin: 0; color: var(--ink-soft); font-size: 0.97rem; }
+
+  /* Mode toggle */
+  .mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 18px;
+    flex-wrap: wrap;
+  }
+  .seg {
+    display: inline-flex;
+    background: var(--oat);
+    border-radius: 999px;
+    padding: 4px;
+    gap: 2px;
+  }
+  .seg button {
+    border: 0;
+    background: transparent;
+    font-family: var(--font);
+    font-weight: 700;
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+    padding: 7px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--terracotta-deep);
+    box-shadow: var(--shadow-card);
+  }
+  .seg button:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; }
+  .seg-label { font-size: 0.74rem; color: var(--ink-faint); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* Progress */
+  .progress-shell {
+    margin: 22px 2px 6px;
+  }
+  .progress-meta {
+    display: flex; justify-content: space-between;
+    font-size: 0.78rem; font-weight: 700; color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .progress-track {
+    height: 12px;
+    background: var(--oat);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 40%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--sage), var(--terracotta));
+    transition: width .4s ease;
+  }
+
+  /* Question cards */
+  .q-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 22px 22px 24px;
+    margin-top: 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .q-head { display: flex; gap: 12px; align-items: flex-start; }
+  .q-num {
+    flex-shrink: 0;
+    width: 30px; height: 30px;
+    border-radius: 10px;
+    background: var(--sage-soft);
+    color: var(--sage-deep);
+    font-weight: 900; font-size: 0.85rem;
+    display: grid; place-items: center;
+    margin-top: 2px;
+  }
+  .q-label {
+    font-size: 1.08rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .req { color: var(--terracotta); font-weight: 900; margin-left: 3px; }
+  .q-help { margin: 4px 0 0; color: var(--ink-faint); font-size: 0.85rem; font-weight: 600; }
+  .q-body { margin-top: 16px; padding-left: 42px; }
+  @media (max-width: 480px) { .q-body { padding-left: 0; } }
+
+  /* Inputs */
+  .field {
+    width: 100%;
+    font-family: var(--font);
+    font-size: 1rem;
+    color: var(--ink);
+    background: var(--cream);
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+  .field::placeholder { color: var(--ink-faint); }
+  .field:focus {
+    outline: none;
+    border-color: var(--terracotta);
+    background: var(--surface);
+    box-shadow: 0 0 0 4px rgba(217, 116, 75, 0.16);
+  }
+  textarea.field { min-height: 120px; resize: vertical; }
+
+  /* Radio / checkbox options */
+  .opt-list { display: grid; gap: 10px; }
+  .opt {
+    display: flex; align-items: center; gap: 13px;
+    padding: 14px 16px;
+    border: 1.5px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--cream);
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .08s;
+    font-weight: 600;
+  }
+  .opt:hover { border-color: var(--amber); transform: translateY(-1px); }
+  .opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .opt .dot {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--ink-faint);
+    flex-shrink: 0;
+    display: grid; place-items: center;
+    transition: border-color .15s;
+  }
+  .opt .box {
+    width: 22px; height: 22px;
+    border-radius: 7px;
+    border: 2px solid var(--ink-faint);
+    flex-shrink: 0;
+    display: grid; place-items: center;
+    color: #fff;
+    transition: all .15s;
+  }
+  .opt .box i { opacity: 0; font-size: 0.72rem; }
+  .opt input:checked ~ .dot { border-color: var(--terracotta); }
+  .opt input:checked ~ .dot::after {
+    content: ""; width: 11px; height: 11px; border-radius: 50%;
+    background: var(--terracotta);
+  }
+  .opt input:checked ~ .box { background: var(--terracotta); border-color: var(--terracotta); }
+  .opt input:checked ~ .box i { opacity: 1; }
+  .opt:has(input:checked) { border-color: var(--terracotta); background: var(--terracotta-soft); }
+  .opt:focus-within { box-shadow: 0 0 0 4px rgba(124, 140, 90, 0.18); border-color: var(--sage); }
+
+  /* Star rating */
+  .stars { display: flex; gap: 8px; }
+  .star-btn {
+    border: 0; background: transparent; cursor: pointer;
+    font-size: 2rem; color: var(--oat);
+    transition: transform .1s, color .12s;
+    padding: 4px;
+    line-height: 1;
+  }
+  .star-btn:hover { transform: scale(1.12); }
+  .star-btn.on { color: var(--amber); }
+  .star-btn:focus-visible { outline: 3px solid var(--sage); outline-offset: 2px; border-radius: 8px; }
+  .star-caption { margin-top: 10px; font-weight: 700; color: var(--ink-soft); font-size: 0.88rem; min-height: 1.2em; }
+
+  /* NPS scale */
+  .nps-row { display: flex; flex-wrap: wrap; gap: 7px; }
+  .nps-btn {
+    border: 1.5px solid var(--line);
+    background: var(--cream);
+    color: var(--ink-soft);
+    font-family: var(--font);
+    font-weight: 800;
+    width: 42px; height: 42px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all .12s;
+  }
+  .nps-btn:hover { border-color: var(--sage); transform: translateY(-2px); }
+  .nps-btn.on { background: var(--sage); border-color: var(--sage); color: #fff; }
+  .nps-btn:focus-visible { outline: 3px solid var(--terracotta); outline-offset: 2px; }
+  .nps-ends { display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--ink-faint); font-weight: 700; margin-top: 8px; }
+
+  .char-count { text-align: right; font-size: 0.76rem; color: var(--ink-faint); margin-top: 6px; font-weight: 600; }
+
+  /* Footer */
+  .form-foot {
+    margin-top: 26px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 22px;
+    box-shadow: var(--shadow-card);
+    text-align: center;
+  }
+  .btn-submit {
+    width: 100%;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(135deg, var(--terracotta), var(--terracotta-deep));
+    color: #fff;
+    font-family: var(--font);
+    font-weight: 900;
+    font-size: 1.08rem;
+    padding: 16px;
+    cursor: pointer;
+    box-shadow: 0 12px 24px -10px rgba(194, 94, 55, 0.8);
+    transition: transform .1s, box-shadow .15s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 16px 30px -10px rgba(194, 94, 55, 0.85); }
+  .btn-submit:focus-visible { outline: 3px solid var(--sage); outline-offset: 3px; }
+  .powered {
+    margin: 16px 0 6px;
+    font-size: 0.82rem; color: var(--ink-soft); font-weight: 700;
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .powered i { color: var(--terracotta); }
+  .privacy { margin: 0; font-size: 0.74rem; color: var(--ink-faint); }
+  .privacy i { color: var(--sage); }
+</style>
+</head>
+<body>
+  <div class="gallery-bar">
+    <a href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+  </div>
+
+  <main class="wrap">
+    <!-- Branded header -->
+    <header class="form-head">
+      <div class="brand">
+        <div class="logo-mark"><i class="fa-solid fa-seedling"></i></div>
+        <div>
+          <div class="brand-name">Riverbend Community Alliance</div>
+          <div class="brand-sub">Member voices shape what we do next</div>
+        </div>
+      </div>
+      <h1 class="form-title">Spring 2026 Member Survey</h1>
+      <p class="form-intro">Hi friend 👋 — this takes about 3 minutes, and every answer helps us plan a stronger year for our community. Thank you for being part of it.</p>
+
+      <div class="mode-row">
+        <span class="seg-label">View as</span>
+        <div class="seg" role="group" aria-label="Form display mode">
+          <button type="button" aria-pressed="true"><i class="fa-solid fa-list"></i> Classic</button>
+          <button type="button" aria-pressed="false"><i class="fa-solid fa-square"></i> One question</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Progress -->
+    <div class="progress-shell">
+      <div class="progress-meta">
+        <span>Your progress</span>
+        <span>40% complete</span>
+      </div>
+      <div class="progress-track" role="progressbar" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" aria-label="Survey progress">
+        <div class="progress-fill"></div>
+      </div>
+    </div>
+
+    <form onsubmit="return false;">
+      <!-- Q1 Short text -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">1</span>
+          <div>
+            <label class="q-label" for="q-name">What's your full name?<span class="req">*</span></label>
+            <p class="q-help">So we can say a proper thank-you.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <input class="field" id="q-name" type="text" placeholder="e.g. Maria Alvarez" autocomplete="name" />
+        </div>
+      </section>
+
+      <!-- Q2 Email -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">2</span>
+          <div>
+            <label class="q-label" for="q-email">Your email address<span class="req">*</span></label>
+            <p class="q-help">We'll only use this to send you the results — no spam, ever.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <input class="field" id="q-email" type="email" inputmode="email" placeholder="you@example.org" autocomplete="email" />
+        </div>
+      </section>
+
+      <!-- Q3 Single choice -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">3</span>
+          <div>
+            <p class="q-label" id="lbl-hear">How did you first hear about us?</p>
+            <p class="q-help">Pick the one that fits best.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <div class="opt-list" role="radiogroup" aria-labelledby="lbl-hear">
+            <label class="opt"><input type="radio" name="hear" /><span class="dot"></span> A friend or family member</label>
+            <label class="opt"><input type="radio" name="hear" /><span class="dot"></span> Social media</label>
+            <label class="opt"><input type="radio" name="hear" /><span class="dot"></span> A community event or fair</label>
+            <label class="opt"><input type="radio" name="hear" /><span class="dot"></span> Our newsletter or website</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Q4 Multi choice -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">4</span>
+          <div>
+            <p class="q-label" id="lbl-prog">Which programs interest you most?</p>
+            <p class="q-help">Choose as many as you like.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <div class="opt-list" role="group" aria-labelledby="lbl-prog">
+            <label class="opt"><input type="checkbox" name="prog" /><span class="box"><i class="fa-solid fa-check"></i></span> Youth mentorship &amp; tutoring</label>
+            <label class="opt"><input type="checkbox" name="prog" /><span class="box"><i class="fa-solid fa-check"></i></span> Community garden &amp; food share</label>
+            <label class="opt"><input type="checkbox" name="prog" /><span class="box"><i class="fa-solid fa-check"></i></span> Senior companionship visits</label>
+            <label class="opt"><input type="checkbox" name="prog" /><span class="box"><i class="fa-solid fa-check"></i></span> Workforce &amp; skills workshops</label>
+            <label class="opt"><input type="checkbox" name="prog" /><span class="box"><i class="fa-solid fa-check"></i></span> Arts &amp; cultural celebrations</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Q5 Star rating -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">5</span>
+          <div>
+            <p class="q-label">How would you rate your experience with us so far?</p>
+            <p class="q-help">Tap a star.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <div class="stars" role="group" aria-label="Star rating, 1 to 5">
+            <button type="button" class="star-btn" data-val="1" aria-label="1 star"><i class="fa-solid fa-star"></i></button>
+            <button type="button" class="star-btn" data-val="2" aria-label="2 stars"><i class="fa-solid fa-star"></i></button>
+            <button type="button" class="star-btn" data-val="3" aria-label="3 stars"><i class="fa-solid fa-star"></i></button>
+            <button type="button" class="star-btn" data-val="4" aria-label="4 stars"><i class="fa-solid fa-star"></i></button>
+            <button type="button" class="star-btn" data-val="5" aria-label="5 stars"><i class="fa-solid fa-star"></i></button>
+          </div>
+          <div class="star-caption" id="starCaption" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- Q6 NPS -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">6</span>
+          <div>
+            <p class="q-label">How likely are you to recommend us to a friend?</p>
+            <p class="q-help">0 = not likely, 10 = absolutely.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <div class="nps-row" role="group" aria-label="Likelihood to recommend, 0 to 10" id="npsRow">
+            <button type="button" class="nps-btn" aria-label="0">0</button>
+            <button type="button" class="nps-btn" aria-label="1">1</button>
+            <button type="button" class="nps-btn" aria-label="2">2</button>
+            <button type="button" class="nps-btn" aria-label="3">3</button>
+            <button type="button" class="nps-btn" aria-label="4">4</button>
+            <button type="button" class="nps-btn" aria-label="5">5</button>
+            <button type="button" class="nps-btn" aria-label="6">6</button>
+            <button type="button" class="nps-btn" aria-label="7">7</button>
+            <button type="button" class="nps-btn" aria-label="8">8</button>
+            <button type="button" class="nps-btn" aria-label="9">9</button>
+            <button type="button" class="nps-btn" aria-label="10">10</button>
+          </div>
+          <div class="nps-ends"><span>Not likely</span><span>Very likely</span></div>
+        </div>
+      </section>
+
+      <!-- Q7 Long text -->
+      <section class="q-card">
+        <div class="q-head">
+          <span class="q-num">7</span>
+          <div>
+            <label class="q-label" for="q-more">Anything else you'd like to share?</label>
+            <p class="q-help">Ideas, kind words, or things we could do better — we read every one.</p>
+          </div>
+        </div>
+        <div class="q-body">
+          <textarea class="field" id="q-more" maxlength="600" placeholder="Tell us what's on your mind…" oninput="document.getElementById('cc').textContent = this.value.length + ' / 600'"></textarea>
+          <div class="char-count" id="cc">0 / 600</div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <div class="form-foot">
+        <button type="submit" class="btn-submit"><i class="fa-solid fa-paper-plane"></i> Submit my answers</button>
+        <p class="powered"><i class="fa-solid fa-seedling"></i> Powered by MJ Forms</p>
+        <p class="privacy"><i class="fa-solid fa-lock"></i> Your responses are private and stored securely in Riverbend's MemberJunction database.</p>
+      </div>
+    </form>
+  </main>
+
+<script>
+  // Mode toggle
+  document.querySelectorAll('.seg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      this.parentElement.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
+      this.setAttribute('aria-pressed', 'true');
+    });
+  });
+
+  // Stars
+  var starCaptions = ['', 'We hear you — thanks for the honesty', 'Noted, we can do better', 'Pretty good!', 'Great to hear!', 'You made our day ✨'];
+  var stars = document.querySelectorAll('.star-btn');
+  var caption = document.getElementById('starCaption');
+  stars.forEach(function (s) {
+    s.addEventListener('click', function () {
+      var v = parseInt(this.dataset.val, 10);
+      stars.forEach(function (x) { x.classList.toggle('on', parseInt(x.dataset.val, 10) <= v); });
+      caption.textContent = starCaptions[v];
+    });
+  });
+
+  // NPS
+  var npsBtns = document.querySelectorAll('#npsRow .nps-btn');
+  npsBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      npsBtns.forEach(function (x) { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); });
+      this.classList.add('on');
+      this.setAttribute('aria-pressed', 'true');
+    });
+  });
+</script>
+</body>
+</html>
