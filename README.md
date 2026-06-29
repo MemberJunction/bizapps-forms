@@ -84,7 +84,7 @@ is **already solved by MJ.**
 ```mermaid
 sequenceDiagram
   actor V as Anonymous Visitor
-  participant W as &lt;mj-form&gt; Widget
+  participant W as mj-form Widget
   participant S as Submit Endpoint
   participant A as MJ Auth (mj_scopes)
   participant DB as Forms Tables
