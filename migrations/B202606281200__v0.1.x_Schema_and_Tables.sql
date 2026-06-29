@@ -2,7 +2,7 @@
 -- MJ Forms — Schema and Tables (Phase 1)
 -- =============================================================================
 -- Free, open-source forms / surveys / intake for MemberJunction.
--- Schema: __mj_BizAppsForms  ·  Entity prefix (set in mj.config.cjs): "MJ Forms: "
+-- Schema: __mj_BizAppsForms  ·  Entity prefix (set in mj.config.cjs): "MJ_BizApps_Forms: "
 --
 -- Conventions (see CLAUDE.md / plans/FORMS_BUILD_PLAN.md §5.1):
 --   * Business columns + PK/FK/CHECK/UNIQUE constraints only.
@@ -11,7 +11,7 @@
 --   * sp_addextendedproperty on every non-PK, non-FK business column (CodeGen
 --     turns these into entity-field descriptions).
 --   * CHECK constraints on value-list columns — CodeGen parses them into value lists.
---   * Root table is `Form` (DG-2 default) → entity "MJ Forms: Forms".
+--   * Root table is `Form` (DG-2 default) → entity "MJ_BizApps_Forms: Forms".
 --   * Cross-schema FKs to MJ core: __mj.[User], __mj.[File].
 -- Phase-2 entities (FormGroup + MaterializedEntityID RSU bridge) are deliberately
 -- NOT created here — see plan §5.2.
@@ -189,14 +189,15 @@ CREATE TABLE __mj_BizAppsForms.FormResponse (
     FormVersionID UNIQUEIDENTIFIER NOT NULL,
     Status NVARCHAR(20) NOT NULL DEFAULT 'Partial',
     AnonymousSessionID NVARCHAR(255) NULL,
-    SubjectEntityName NVARCHAR(255) NULL,
-    SubjectID NVARCHAR(450) NULL,
+    RespondentPersonID UNIQUEIDENTIFIER NULL,
     StartedAt DATETIMEOFFSET NULL,
     SubmittedAt DATETIMEOFFSET NULL,
     SourceMetadata NVARCHAR(MAX) NULL,
     CONSTRAINT PK_FormResponse PRIMARY KEY (ID),
     CONSTRAINT FK_FormResponse_Form FOREIGN KEY (FormID) REFERENCES __mj_BizAppsForms.Form(ID),
     CONSTRAINT FK_FormResponse_FormVersion FOREIGN KEY (FormVersionID) REFERENCES __mj_BizAppsForms.FormVersion(ID),
+    -- Hard cross-schema FK to bizapps-common (a required dependency — see mj-app.json).
+    CONSTRAINT FK_FormResponse_RespondentPerson FOREIGN KEY (RespondentPersonID) REFERENCES __mj_BizAppsCommon.Person(ID),
     CONSTRAINT CK_FormResponse_Status CHECK (Status IN ('Partial', 'Complete'))
 );
 GO
@@ -393,16 +394,12 @@ GO
 ---------------------------------------------------------------------------
 -- EXTENDED PROPERTIES: FormResponse
 ---------------------------------------------------------------------------
-EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'One submission of a form. Anonymous or identified; pins the FormVersion it was filled against. Carries a polymorphic subject link (SubjectEntityName + SubjectID).',
+EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'One submission of a form. Anonymous or identified; pins the FormVersion it was filled against. Identified respondents link to a bizapps-common Person via RespondentPersonID.',
     @level0type = N'SCHEMA', @level0name = N'__mj_BizAppsForms', @level1type = N'TABLE', @level1name = N'FormResponse';
 EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Completion status: Partial or Complete',
     @level0type = N'SCHEMA', @level0name = N'__mj_BizAppsForms', @level1type = N'TABLE', @level1name = N'FormResponse', @level2type = N'COLUMN', @level2name = N'Status';
 EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Opaque anonymous session id (mj_sid) correlating this response to one anonymous magic-link session',
     @level0type = N'SCHEMA', @level0name = N'__mj_BizAppsForms', @level1type = N'TABLE', @level1name = N'FormResponse', @level2type = N'COLUMN', @level2name = N'AnonymousSessionID';
-EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Optional polymorphic subject: the MJ entity name this response is about (e.g. a Person). Enables consumption by Caliber and others.',
-    @level0type = N'SCHEMA', @level0name = N'__mj_BizAppsForms', @level1type = N'TABLE', @level1name = N'FormResponse', @level2type = N'COLUMN', @level2name = N'SubjectEntityName';
-EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Optional polymorphic subject: the primary-key value of the subject record (string to support any key shape)',
-    @level0type = N'SCHEMA', @level0name = N'__mj_BizAppsForms', @level1type = N'TABLE', @level1name = N'FormResponse', @level2type = N'COLUMN', @level2name = N'SubjectID';
 EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Timestamp the respondent began the form',
     @level0type = N'SCHEMA', @level0name = N'__mj_BizAppsForms', @level1type = N'TABLE', @level1name = N'FormResponse', @level2type = N'COLUMN', @level2name = N'StartedAt';
 EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Timestamp the response was submitted (null while Partial)',
