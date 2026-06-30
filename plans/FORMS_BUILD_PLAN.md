@@ -316,6 +316,16 @@ form = effectively a **public form URL**.
 3. **A `FormDistribution` object (entity, §5).** "Publish public URL" is a first-class
    record wrapping an anonymous, multi-use, scoped link — with its own quota, expiry,
    open/close window, and per-link analytics.
+4. **Provisioning the distribution's magic-link invite (new server code).** When a
+   `FormDistribution` is created/activated, mint the anonymous, multi-use, scoped magic-link
+   invite — carrying `mj_scopes` that grant the **Form Respondent** role, scoped to the
+   distribution, with configurable `maxUses`/expiry — via MJ core's `MagicLinkService`, and
+   store its `MagicLinkInviteID` on the record. Implemented as a server-side `FormDistribution`
+   entity lifecycle hook so it fires however the distribution is created (builder, AI, import).
+   **Install prerequisite:** the host MJ instance must enable core `magicLink` and allow the
+   Form Respondent role to be granted (`restrictedRoleName`/`grantableRoleNames`); MJ
+   auto-generates its signing keys. _(Added 2026-06-30 — the original plan named
+   `MagicLinkInviteID` but never assigned who mints it; this closes that gap.)_
 
 **Submission path:** anonymous multi-use magic link scoped to a `FormDistribution`
 → widget loads published `FormVersion` (read) → respondent answers → public submit endpoint
@@ -528,6 +538,10 @@ native entities. This is the reporting differentiator no incumbent has.
       CSV/Excel export — RunView/RunQuery only, registered as `FormsReportingDashboard`. 12 tests.
 - [x] On-submit hooks (forms-actions, seam S3): `Forms: Upsert Respondent Person`,
       `Forms: Send Confirmation Email` (pluggable sender), `Forms: Create Followup Task`.
+- [ ] **Distribution magic-link provisioning** (§4 item 4): server-side `FormDistribution`
+      lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite via MJ core
+      `MagicLinkService` and stores `MagicLinkInviteID`. Configurable; gated on host `magicLink` config.
+      Unblocks the full anonymous-submit e2e.
 - [~] Tests: **158 Vitest passing** across all packages. CI gates (UI tokens, mj-btn) still TODO.
 - **Remaining for Phase 1 close:** full anonymous-submit headless e2e (mint magic link → PublishedForm
       → SubmitFormResponse → verify saved + hooks); push not yet to org remote (read-only access);
