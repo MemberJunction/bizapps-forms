@@ -1,0 +1,17 @@
+[
+  {
+    "fields": {
+      "Name": "Forms",
+      "Description": "Actions for MJ Forms — AI form authoring, starter-template instantiation, and on-submit response hooks (upsert respondent person, confirmation email, follow-up task).",
+      "ParentID": null,
+      "Status": "Active"
+    },
+    "primaryKey": {
+      "ID": "7F0C0001-A1B2-4C3D-8E4F-000000000001"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T19:18:03.105Z",
+      "checksum": "0096a68f1312cefbab4203d6df05cf27fba60896546141f5446d9959535f0947"
+    }
+  }
+]

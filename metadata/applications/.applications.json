@@ -18,13 +18,6 @@
       "DefaultForNewUser": false,
       "DefaultNavItems": [
         {
-          "Label": "Forms",
-          "Icon": "fa-solid fa-clipboard-list",
-          "ResourceType": "Records",
-          "Entity": "MJ_BizApps_Forms: Forms",
-          "isDefault": true
-        },
-        {
           "Label": "Responses & Analytics",
           "Icon": "fa-solid fa-chart-column",
           "ResourceType": "Dashboards",
@@ -146,8 +139,8 @@
       "ID": "BFB97C57-4552-4643-8933-A0B2D76544D8"
     },
     "sync": {
-      "lastModified": "2026-06-30T17:14:17.562Z",
-      "checksum": "492e6a68c4101ddd9686d926d430f927929a53e8af9fc8f94011ada8d76c55af"
+      "lastModified": "2026-06-30T19:18:03.137Z",
+      "checksum": "555510e1d63f10ec3917e33499af779a941e44e1fa5183c7b3948fe85fca9b90"
     }
   }
 ]

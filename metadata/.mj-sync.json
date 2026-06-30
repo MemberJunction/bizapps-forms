@@ -6,12 +6,14 @@
   "directoryOrder": [
     "schema-info",
     "roles",
+    "action-categories",
     "form-categories",
     "form-styles",
     "applications",
     "dashboards",
     "application-roles",
-    "entity-permissions"
+    "entity-permissions",
+    "actions"
   ],
   "emitSyncNotes": false
 }
