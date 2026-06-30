@@ -11,7 +11,12 @@ import '@mj-biz-apps/forms-entities';
 import '@mj-biz-apps/forms-actions';
 
 // Import server-side entity subclasses (lifecycle hooks / hardening) to trigger @RegisterClass
-import '@mj-biz-apps/forms-core-entities-server';
+import { MagicLinkMinterRegistry } from '@mj-biz-apps/forms-core-entities-server';
+
+// Concrete magic-link invite minter, registered into the entity-hook seam so the
+// FormDistribution lifecycle hook can provision anonymous links via MJ core's
+// magic-link tables without that lightweight package depending on @memberjunction/server.
+import { MagicLinkInviteMinter } from './magic-link/MagicLinkInviteMinter.js';
 
 // Import generated GraphQL resolvers
 import './generated/generated.js';
@@ -41,5 +46,8 @@ RESOLVER_PATHS.push(resolve(__dirname, 'public-submit/*Resolver.{js,ts}'));
  * the module is fully evaluated.
  */
 export function LoadBizAppsFormsServer(): void {
-    // Static imports above ensure all classes are registered.
+    // Static imports above ensure all classes are registered. Register the concrete
+    // magic-link minter so the FormDistribution hook can provision anonymous links.
+    // Idempotent: re-registering simply replaces the instance.
+    MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
 }
