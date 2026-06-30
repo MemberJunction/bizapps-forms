@@ -13,11 +13,13 @@ import {
   input,
   output,
   signal,
+  untracked,
   ElementRef,
 } from '@angular/core';
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { FormRuntime } from '../core/form-runtime';
+import { clampCursor } from '../core/one-question-stepper';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 
@@ -35,35 +37,54 @@ export class FormOneQuestionComponent {
   public readonly submit = output<void>();
 
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+
+  /**
+   * Raw cursor. Always written through {@link setIndex} so it stays inside the valid
+   * range; the re-clamp {@link effect} below also corrects it whenever conditional logic
+   * resizes the visible-question path, so the stored value never drifts out of bounds.
+   */
   protected readonly index = signal(0);
 
   /** The ordered, currently-visible answerable questions (recomputed reactively). */
   protected readonly steps = computed(() => this.runtime().visibleAnswerableQuestions());
   protected readonly total = computed(() => this.steps().length);
   protected readonly current = computed<PublishedFormQuestion | null>(
-    () => this.steps()[this.clampedIndex()] ?? null,
+    () => this.steps()[this.index()] ?? null,
   );
-  protected readonly isFirst = computed(() => this.clampedIndex() === 0);
-  protected readonly isLast = computed(() => this.clampedIndex() >= this.total() - 1);
+  protected readonly isFirst = computed(() => this.index() === 0);
+  protected readonly isLast = computed(() => this.index() >= this.total() - 1);
   protected readonly progress = computed(() => {
     const t = this.total();
-    return t === 0 ? 1 : (this.clampedIndex() + 1) / t;
+    return t === 0 ? 1 : (this.index() + 1) / t;
   });
-  protected readonly stepLabel = computed(() => `${this.clampedIndex() + 1} of ${this.total()}`);
+  protected readonly stepLabel = computed(() => `${this.index() + 1} of ${this.total()}`);
 
   constructor() {
-    // When conditional logic shrinks the path below the cursor, keep the index valid
-    // and move focus to whatever question is now current.
+    // When conditional logic resizes the path, re-clamp the stored cursor so it never
+    // drifts above the new last index. Without this, hiding questions below the cursor
+    // (then revealing them again) would let the cursor "jump ahead", skipping steps.
+    // We track `total()` and read/write the cursor untracked, so the effect re-runs only
+    // when the path size changes — never as a self-feeding loop on the cursor write.
+    effect(() => {
+      const total = this.total();
+      untracked(() => {
+        const clamped = clampCursor(this.index(), total);
+        if (clamped !== this.index()) {
+          this.index.set(clamped);
+        }
+      });
+    });
+
+    // Move focus to the current question only when the question itself changes — not on
+    // every answer edit — so typing or selecting an answer never yanks focus mid-input.
+    let lastFocusedId: string | null = null;
     effect(() => {
       const c = this.current();
-      if (c) {
+      if (c && c.id !== lastFocusedId) {
+        lastFocusedId = c.id;
         queueMicrotask(() => this.focusCurrent());
       }
     });
-  }
-
-  protected clampedIndex(): number {
-    return Math.min(this.index(), Math.max(0, this.total() - 1));
   }
 
   protected onValueChange(question: PublishedFormQuestion, value: AnswerValue): void {
@@ -84,14 +105,19 @@ export class FormOneQuestionComponent {
     if (this.isLast()) {
       this.submit.emit();
     } else {
-      this.index.set(this.clampedIndex() + 1);
+      this.setIndex(this.index() + 1);
     }
   }
 
   protected onBack(): void {
     if (!this.isFirst()) {
-      this.index.set(this.clampedIndex() - 1);
+      this.setIndex(this.index() - 1);
     }
+  }
+
+  /** Move the cursor to `next`, clamped to the currently-valid range. */
+  private setIndex(next: number): void {
+    this.index.set(clampCursor(next, this.total()));
   }
 
   /** Enter on the question advances (except in a multiline textarea). */

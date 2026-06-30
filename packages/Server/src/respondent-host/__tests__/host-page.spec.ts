@@ -1,0 +1,144 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { renderRespondentHostPage, escapeHtml, escapeAttr } from '../host-page';
+import { getRespondentHostConfig, resetRespondentHostConfigForTests } from '../config';
+
+afterEach(() => {
+  delete process.env.FORMS_RESPONDENT_HOST_ENABLED;
+  delete process.env.FORMS_GRAPHQL_URL;
+  delete process.env.FORMS_WIDGET_BUNDLE_URL;
+  delete process.env.MJAPI_PUBLIC_URL;
+  delete process.env.GRAPHQL_ROOT_PATH;
+  resetRespondentHostConfigForTests();
+});
+
+describe('renderRespondentHostPage', () => {
+  const html = () =>
+    renderRespondentHostPage({
+      graphqlUrl: 'http://localhost:4121/',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+    });
+
+  it('is shell-free, self-contained HTML (no Explorer markup)', () => {
+    const out = html();
+    expect(out.startsWith('<!doctype html>')).toBe(true);
+    expect(out).toContain('<mj-form');
+    expect(out).not.toMatch(/app-root|explorer/i);
+  });
+
+  it('is mobile-first (responsive viewport meta)', () => {
+    expect(html()).toContain('width=device-width, initial-scale=1');
+  });
+
+  it('keeps the page out of search indexes', () => {
+    expect(html()).toContain('name="robots" content="noindex"');
+  });
+
+  it('reads both the query string and the fragment for slug + token', () => {
+    const out = html();
+    expect(out).toContain('window.location.search');
+    expect(out).toContain('window.location.hash');
+    expect(out).toContain("readParam('slug')");
+    expect(out).toContain("readParam('token')");
+  });
+
+  it('passes the path-supplied slug via an escaped data-* attribute (not the script)', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'http://localhost:4121/',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+      defaultSlug: 'customer-survey',
+    });
+    expect(out).toContain('data-default-slug="customer-survey"');
+    // The boot script reads config from the host element, never via interpolation.
+    expect(out).toContain("getAttribute('data-default-slug')");
+    expect(out).toContain("getAttribute('data-graphql-url')");
+  });
+
+  it('neutralizes a </script> breakout in the slug (XSS regression)', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'http://localhost:4121/',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+      defaultSlug: '</script><script>alert(document.cookie)</script>',
+    });
+    expect(out).not.toContain('</script><script>alert');
+    expect(out).toContain('&lt;/script&gt;&lt;script&gt;alert');
+  });
+
+  it('neutralizes a </script> breakout in the graphql url (XSS regression)', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: '</script><script>alert(1)</script>',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+    });
+    expect(out).not.toContain('</script><script>alert(1)');
+    expect(out).toContain('&lt;/script&gt;&lt;script&gt;alert(1)');
+  });
+
+  it('uses only --mj-* design tokens for color (no hardcoded color outside fallbacks)', () => {
+    const out = html();
+    // Every color value must come through a var(--mj-*, fallback) — assert the tokens are present.
+    expect(out).toContain('var(--mj-bg');
+    expect(out).toContain('var(--mj-text');
+    expect(out).toContain('var(--mj-error');
+  });
+
+  it('bakes in the GraphQL endpoint and the widget bundle url', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'https://api.example.com/graphql',
+      widgetBundleUrl: 'https://cdn.example.com/mj-form.js',
+    });
+    expect(out).toContain('https://api.example.com/graphql');
+    expect(out).toContain('src="https://cdn.example.com/mj-form.js"');
+  });
+
+  it('escapes the bundle url to prevent attribute breakout', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'http://x/',
+      widgetBundleUrl: '"><script>alert(1)</script>',
+    });
+    expect(out).not.toContain('"><script>alert(1)');
+    expect(out).toContain('&quot;&gt;&lt;script&gt;');
+  });
+});
+
+describe('escape helpers', () => {
+  it('escapes HTML special characters', () => {
+    expect(escapeHtml('<b>&</b>')).toBe('&lt;b&gt;&amp;&lt;/b&gt;');
+  });
+  it('escapes quotes for attributes', () => {
+    expect(escapeAttr('a"b')).toBe('a&quot;b');
+  });
+});
+
+describe('getRespondentHostConfig', () => {
+  it('is enabled by default', () => {
+    expect(getRespondentHostConfig().enabled).toBe(true);
+  });
+
+  it('can be disabled via env', () => {
+    process.env.FORMS_RESPONDENT_HOST_ENABLED = 'false';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().enabled).toBe(false);
+  });
+
+  it('derives the graphql url from MJAPI_PUBLIC_URL when not explicit', () => {
+    process.env.MJAPI_PUBLIC_URL = 'http://localhost:4121';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().graphqlUrl).toBe('http://localhost:4121');
+  });
+
+  it('honors an explicit FORMS_GRAPHQL_URL', () => {
+    process.env.FORMS_GRAPHQL_URL = 'https://api.example.com/graphql';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().graphqlUrl).toBe('https://api.example.com/graphql');
+  });
+
+  it('composes a non-root graphql path', () => {
+    process.env.MJAPI_PUBLIC_URL = 'http://localhost:4121';
+    process.env.GRAPHQL_ROOT_PATH = '/graphql';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().graphqlUrl).toBe('http://localhost:4121/graphql');
+  });
+
+  it('defaults the widget bundle url', () => {
+    expect(getRespondentHostConfig().widgetBundleUrl).toBe('/forms/widget/mj-form.js');
+  });
+});

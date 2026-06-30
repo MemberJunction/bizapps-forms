@@ -21,6 +21,7 @@ export { FormProgressComponent } from './components/form-progress.component';
 
 // Headless runtime + helpers
 export { FormRuntime } from './core/form-runtime';
+export { clampCursor } from './core/one-question-stepper';
 export { applyStyleTokens } from './core/theming';
 export { validateQuestion, hasValue, type FieldValidationResult } from './core/validation';
 export { toAnswerInputs, type AnswerMap } from './core/answer-value';

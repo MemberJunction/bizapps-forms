@@ -24,6 +24,10 @@ import './generated/generated.js';
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
 
+// TASK 2: import the respondent host-page middleware so its @RegisterClass fires and MJ
+// server bootstrap discovers the public /f/:slug route (anonymous, shell-free host page).
+import './respondent-host/RespondentHostMiddleware.js';
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
