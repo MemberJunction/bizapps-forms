@@ -6,7 +6,7 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from './entity-names';
 import {
-  publicUrl as buildPublicUrl,
+  shareUrl as buildShareUrl,
   embedSnippet as buildEmbedSnippet,
   slugify as buildSlug,
   randomSuffix,
@@ -147,14 +147,19 @@ export class DistributionService {
     return ok;
   }
 
-  /** The public respondent URL for a slug, using the configured public base. */
-  public publicUrl(slug: string, baseUrl: string): string {
-    return buildPublicUrl(slug, baseUrl);
+  /**
+   * The shareable public URL for a distribution. Once its anonymous link has been
+   * provisioned (a `PublicLinkToken` exists), this is the redeemable magic-link URL
+   * (`/magic-link/redeem?token=...`) that establishes the scoped session; before
+   * provisioning it falls back to the slug URL.
+   */
+  public publicUrl(dist: mjBizAppsFormsFormDistributionEntity, baseUrl: string): string {
+    return buildShareUrl(dist.PublicLinkToken, dist.Slug ?? '', baseUrl);
   }
 
-  /** An `<iframe>` embed snippet pointing at the public URL. */
-  public embedSnippet(slug: string, baseUrl: string): string {
-    return buildEmbedSnippet(slug, baseUrl);
+  /** An `<iframe>` embed snippet pointing at the distribution's shareable public URL. */
+  public embedSnippet(dist: mjBizAppsFormsFormDistributionEntity, baseUrl: string): string {
+    return buildEmbedSnippet(dist.PublicLinkToken, dist.Slug ?? '', baseUrl);
   }
 
   /** Slugify a name to a URL-friendly token. */

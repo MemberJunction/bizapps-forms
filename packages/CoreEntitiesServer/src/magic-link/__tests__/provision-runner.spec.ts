@@ -47,13 +47,18 @@ function recordingMinter(result: MintAnonymousInviteResult): {
 
 describe('runProvisioning', () => {
   it('mints and stores when warranted, passing the correct CreateInvite params', async () => {
-    const { minter, calls } = recordingMinter({ success: true, inviteId: 'invite-99' });
+    const { minter, calls } = recordingMinter({
+      success: true,
+      inviteId: 'invite-99',
+      rawToken: 'mj_ml_raw99',
+    });
     const store = vi.fn(async () => true);
 
     const outcome = await runProvisioning(ctx(), config, minter, contextUser, store);
 
     expect(outcome).toEqual({ result: 'minted', inviteId: 'invite-99' });
-    expect(store).toHaveBeenCalledExactlyOnceWith('invite-99');
+    // The runner hands the store BOTH the invite id and the raw public-link token.
+    expect(store).toHaveBeenCalledExactlyOnceWith({ inviteId: 'invite-99', rawToken: 'mj_ml_raw99' });
     expect(calls).toHaveLength(1);
     expect(calls[0].user).toBe(contextUser);
     expect(calls[0].params).toEqual({

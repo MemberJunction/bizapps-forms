@@ -45,6 +45,15 @@ export interface MintAnonymousInviteResult {
   /** The created `MJ: Magic Link Invites` row ID — stored on `FormDistribution.MagicLinkInviteID`. */
   inviteId?: string;
   /**
+   * The RAW redeemable magic-link token (the secret half of the link). The invite
+   * row persists only its SHA-256 hash; this raw value travels in the result so the
+   * caller can store it on `FormDistribution.PublicLinkToken` and build the shareable
+   * public redeem URL. A public form link is low-secrecy by design (the URL is meant
+   * to be shared), so persisting the raw token on the distribution is intentional —
+   * the raw token is NOT stored on the invite row.
+   */
+  rawToken?: string;
+  /**
    * True when minting was deliberately skipped because the host has not enabled
    * magic links (or the minter is otherwise unavailable). The caller must NOT
    * treat this as a failure: it leaves `MagicLinkInviteID` null and logs a warning.

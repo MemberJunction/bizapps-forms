@@ -125,11 +125,11 @@ export class DistributionManagerComponent implements OnInit {
   }
 
   protected publicUrl(dist: mjBizAppsFormsFormDistributionEntity): string {
-    return this.service.publicUrl(dist.Slug ?? '', this.effectiveBaseUrl);
+    return this.service.publicUrl(dist, this.effectiveBaseUrl);
   }
 
   protected embedSnippet(dist: mjBizAppsFormsFormDistributionEntity): string {
-    return this.service.embedSnippet(dist.Slug ?? '', this.effectiveBaseUrl);
+    return this.service.embedSnippet(dist, this.effectiveBaseUrl);
   }
 
   /** Render the QR for a distribution's public URL; returns null if encoding fails. */

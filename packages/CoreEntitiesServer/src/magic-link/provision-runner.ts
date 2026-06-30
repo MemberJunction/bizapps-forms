@@ -19,6 +19,17 @@ export interface ProvisionContext extends DistributionProvisioningState {
   distributionId: string;
 }
 
+/** The persistable artifacts of a successful mint, written back onto the distribution. */
+export interface MintedLink {
+  /** The `MJ: Magic Link Invites` row ID → `FormDistribution.MagicLinkInviteID`. */
+  inviteId: string;
+  /**
+   * The raw redeemable token → `FormDistribution.PublicLinkToken`. May be absent
+   * if a (non-default) minter does not surface it; the invite is still linked.
+   */
+  rawToken?: string;
+}
+
 /** Outcome of a provisioning run (for logging/assertions; never throws). */
 export interface ProvisionOutcome {
   /** What happened: minted+stored, or why it was skipped. */
@@ -36,14 +47,15 @@ export interface ProvisionOutcome {
  * @param config       provisioning configuration
  * @param minter       the registered minter, or `undefined` when none is registered
  * @param contextUser  the internal staff user saving the record (the invite issuer)
- * @param storeInviteId  persists the minted id back onto the record; returns its save success
+ * @param storeMintResult  persists the minted invite id + raw public-link token back
+ *                         onto the record in a single write; returns its save success
  */
 export async function runProvisioning(
   ctx: ProvisionContext,
   config: MagicLinkProvisioningConfig,
   minter: IAnonymousMagicLinkMinter | undefined,
   contextUser: UserInfo | undefined,
-  storeInviteId: (inviteId: string) => Promise<boolean>,
+  storeMintResult: (mint: MintedLink) => Promise<boolean>,
 ): Promise<ProvisionOutcome> {
   const decision = decideProvisioning(ctx, config);
   if (!decision.shouldMint) {
@@ -92,7 +104,7 @@ export async function runProvisioning(
     return { result: 'mint-failed' };
   }
 
-  const stored = await storeInviteId(mint.inviteId);
+  const stored = await storeMintResult({ inviteId: mint.inviteId, rawToken: mint.rawToken });
   if (!stored) {
     LogError(
       `[FormDistribution] Minted invite ${mint.inviteId} but failed to store it on distribution ${ctx.distributionId}. ` +

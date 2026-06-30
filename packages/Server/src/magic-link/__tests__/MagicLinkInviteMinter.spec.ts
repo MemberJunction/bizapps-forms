@@ -119,7 +119,13 @@ describe('MagicLinkInviteMinter', () => {
 
     expect(result.success).toBe(true);
     expect(result.inviteId).toBe('invite-new');
+    // The RAW token travels back in the result (for FormDistribution.PublicLinkToken)...
+    expect(typeof result.rawToken).toBe('string');
+    expect(result.rawToken).toMatch(/^mj_ml_/);
     const saved = mockState.lastSavedInvite!;
+    // ...but the invite row persists ONLY the hash, never the raw token.
+    expect(saved.rawToken).toBeUndefined();
+    expect(result.rawToken).not.toBe(saved.TokenHash);
     expect(saved.IdentityMode).toBe('anonymous');
     expect(saved.Kind).toBe('resource-share');
     expect(saved.ApplicationID).toBe('app-forms');

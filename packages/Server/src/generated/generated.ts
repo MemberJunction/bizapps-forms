@@ -2683,6 +2683,10 @@ export class mjBizAppsFormsFormDistribution_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true, description: `Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.`}) 
+    @MaxLength(255)
+    PublicLinkToken?: string;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -2733,6 +2737,9 @@ export class CreatemjBizAppsFormsFormDistributionInput {
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
 
+    @Field({ nullable: true })
+    PublicLinkToken: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2781,6 +2788,9 @@ export class UpdatemjBizAppsFormsFormDistributionInput {
 
     @Field(() => Boolean, { nullable: true })
     IsActive?: boolean;
+
+    @Field({ nullable: true })
+    PublicLinkToken?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -3303,6 +3313,10 @@ export class mjBizAppsFormsFormQuestion_ {
     @Field() 
     @MaxLength(255)
     Form: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    Page?: string;
         
     @Field(() => [mjBizAppsFormsFormQuestionOption_])
     mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions_QuestionIDArray: mjBizAppsFormsFormQuestionOption_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions

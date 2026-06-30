@@ -810,7 +810,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form ID
+        * * Display Name: Form
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     Name: z.string().describe(`
@@ -820,7 +820,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: Internal name for this distribution`),
     Slug: z.string().nullable().describe(`
         * * Field Name: Slug
-        * * Display Name: URL Slug
+        * * Display Name: Slug
         * * SQL Data Type: nvarchar(255)
         * * Description: URL-friendly slug used in the public link (unique when set)`),
     ChannelType: z.union([z.literal('Email'), z.literal('Embed'), z.literal('PublicLink'), z.literal('QR')]).describe(`
@@ -858,7 +858,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: When this distribution stops accepting responses (null = no end)`),
     MaxResponses: z.number().nullable().describe(`
         * * Field Name: MaxResponses
-        * * Display Name: Maximum Responses
+        * * Display Name: Max Responses
         * * SQL Data Type: int
         * * Description: Maximum number of responses allowed through this distribution (null = unlimited)`),
     ResponseCount: z.number().describe(`
@@ -869,18 +869,18 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: Running count of responses received through this distribution`),
     MagicLinkInviteID: z.string().nullable().describe(`
         * * Field Name: MagicLinkInviteID
-        * * Display Name: Magic Link Invite ID
+        * * Display Name: Magic Link Invite
         * * SQL Data Type: uniqueidentifier
         * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution`),
     CaptchaRequired: z.boolean().describe(`
         * * Field Name: CaptchaRequired
-        * * Display Name: CAPTCHA Required
+        * * Display Name: Captcha Required
         * * SQL Data Type: bit
         * * Default Value: 1
         * * Description: Whether a CAPTCHA (Cloudflare Turnstile) challenge is required for submissions via this distribution`),
     IsActive: z.boolean().describe(`
         * * Field Name: IsActive
-        * * Display Name: Active
+        * * Display Name: Is Active
         * * SQL Data Type: bit
         * * Default Value: 1
         * * Description: Whether this distribution is active and usable`),
@@ -894,9 +894,14 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    PublicLinkToken: z.string().nullable().describe(`
+        * * Field Name: PublicLinkToken
+        * * Display Name: Public Link Token
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form
+        * * Display Name: Form Name
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -1100,7 +1105,11 @@ export const mjBizAppsFormsFormQuestionSchema = z.object({
         * * Default Value: getutcdate()`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
+        * * SQL Data Type: nvarchar(255)`),
+    Page: z.string().nullable().describe(`
+        * * Field Name: Page
+        * * Display Name: Page
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -4870,7 +4879,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form ID
+    * * Display Name: Form
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -4896,7 +4905,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: Slug
-    * * Display Name: URL Slug
+    * * Display Name: Slug
     * * SQL Data Type: nvarchar(255)
     * * Description: URL-friendly slug used in the public link (unique when set)
     */
@@ -4974,7 +4983,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: MaxResponses
-    * * Display Name: Maximum Responses
+    * * Display Name: Max Responses
     * * SQL Data Type: int
     * * Description: Maximum number of responses allowed through this distribution (null = unlimited)
     */
@@ -5001,7 +5010,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: MagicLinkInviteID
-    * * Display Name: Magic Link Invite ID
+    * * Display Name: Magic Link Invite
     * * SQL Data Type: uniqueidentifier
     * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution
     */
@@ -5014,7 +5023,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: CaptchaRequired
-    * * Display Name: CAPTCHA Required
+    * * Display Name: Captcha Required
     * * SQL Data Type: bit
     * * Default Value: 1
     * * Description: Whether a CAPTCHA (Cloudflare Turnstile) challenge is required for submissions via this distribution
@@ -5028,7 +5037,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: IsActive
-    * * Display Name: Active
+    * * Display Name: Is Active
     * * SQL Data Type: bit
     * * Default Value: 1
     * * Description: Whether this distribution is active and usable
@@ -5061,8 +5070,21 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
     }
 
     /**
+    * * Field Name: PublicLinkToken
+    * * Display Name: Public Link Token
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.
+    */
+    get PublicLinkToken(): string | null {
+        return this.Get('PublicLinkToken');
+    }
+    set PublicLinkToken(value: string | null) {
+        this.Set('PublicLinkToken', value);
+    }
+
+    /**
     * * Field Name: Form
-    * * Display Name: Form
+    * * Display Name: Form Name
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -5570,11 +5592,20 @@ export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsF
 
     /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
         return this.Get('Form');
+    }
+
+    /**
+    * * Field Name: Page
+    * * Display Name: Page
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Page(): string | null {
+        return this.Get('Page');
     }
 }
 

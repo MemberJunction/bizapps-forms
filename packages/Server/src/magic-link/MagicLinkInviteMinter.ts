@@ -109,7 +109,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
       };
     }
 
-    return { success: true, inviteId: invite.ID };
+    return { success: true, inviteId: invite.ID, rawToken };
   }
 
   /** Resolve the Application ID by name (case-insensitive). */

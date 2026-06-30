@@ -21,7 +21,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 import { getMagicLinkProvisioningConfig } from './config.js';
 import { MagicLinkMinterRegistry } from './minter.js';
-import { runProvisioning, DISTRIBUTION_ENTITY_NAME } from './provision-runner.js';
+import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
 
 @RegisterClass(BaseEntity, DISTRIBUTION_ENTITY_NAME)
 export class FormDistributionEntityServer extends mjBizAppsFormsFormDistributionEntity {
@@ -49,7 +49,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
         getMagicLinkProvisioningConfig(),
         MagicLinkMinterRegistry.Instance.Minter,
         this.ContextCurrentUser,
-        (inviteId) => this.persistInviteId(inviteId),
+        (mint) => this.persistMintResult(mint),
       );
     } catch (e) {
       // Defensive: the runner is fail-soft, but a thrown error must never undo a
@@ -65,16 +65,21 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
   }
 
   /**
-   * Writes the freshly minted invite ID back onto this record with a targeted
-   * second save. The re-entry is idempotent: the now-set `MagicLinkInviteID`
-   * makes the provisioning decision short-circuit on the recursive `Save()`,
-   * so no re-mint occurs.
+   * Writes the freshly minted invite ID and raw public-link token back onto this
+   * record with a single targeted second save. The re-entry is idempotent: the
+   * now-set `MagicLinkInviteID` makes the provisioning decision short-circuit on
+   * the recursive `Save()`, so no re-mint occurs. The raw token is written only
+   * when the column is still empty, so a repeat call never clobbers it (a public
+   * link's redeem URL must stay stable).
    */
-  private async persistInviteId(inviteId: string): Promise<boolean> {
-    this.MagicLinkInviteID = inviteId;
+  private async persistMintResult(mint: MintedLink): Promise<boolean> {
+    this.MagicLinkInviteID = mint.inviteId;
+    if (mint.rawToken && !this.PublicLinkToken) {
+      this.PublicLinkToken = mint.rawToken;
+    }
     if (!(await this.Save())) {
       LogError(
-        `[FormDistributionEntityServer] Failed to store invite ${inviteId} on distribution ${this.ID}: ` +
+        `[FormDistributionEntityServer] Failed to store invite ${mint.inviteId} on distribution ${this.ID}: ` +
           `${this.LatestResult?.CompleteMessage ?? 'unknown error'}`,
       );
       return false;
