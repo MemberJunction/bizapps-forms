@@ -4,8 +4,9 @@
       "MJ Forms admin/builder Explorer application. The builder is NOT a custom nav",
       "resource: WP-D registered it as an entity form override",
       "(@RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Forms', 10)), so opening a",
-      "Form record renders the visual builder. The 'Forms' nav item is therefore a",
-      "Records view on the Forms entity — pick/create a form, open it, build it.",
+      "Form record renders the visual builder. The 'Forms' nav item is a 'User Views'",
+      "resource pointing at the 'All Forms' saved view (a records grid) — pick/create a",
+      "form, open it, build it. ('Records' resource type = a SINGLE record, not a list.)",
       "The 'Responses & Analytics' item points at the FormsReportingDashboard Dashboard",
       "record (DriverClass 'FormsReportingDashboard', registered by WP-F via",
       "@RegisterClass(BaseDashboard, 'FormsReportingDashboard')) by RecordID.",
@@ -17,6 +18,13 @@
       "Icon": "fa-solid fa-clipboard-list",
       "DefaultForNewUser": false,
       "DefaultNavItems": [
+        {
+          "Label": "Forms",
+          "Icon": "fa-solid fa-clipboard-list",
+          "ResourceType": "User Views",
+          "RecordID": "7F0D0001-A1B2-4C3D-8E4F-000000000001",
+          "isDefault": true
+        },
         {
           "Label": "Responses & Analytics",
           "Icon": "fa-solid fa-chart-column",
@@ -139,8 +147,8 @@
       "ID": "BFB97C57-4552-4643-8933-A0B2D76544D8"
     },
     "sync": {
-      "lastModified": "2026-06-30T19:18:03.137Z",
-      "checksum": "555510e1d63f10ec3917e33499af779a941e44e1fa5183c7b3948fe85fca9b90"
+      "lastModified": "2026-06-30T19:24:51.764Z",
+      "checksum": "2f24877bab27b744adf661e8b6694ffeaafc052a5b316612d3d72a7c3060a2d0"
     }
   }
 ]
