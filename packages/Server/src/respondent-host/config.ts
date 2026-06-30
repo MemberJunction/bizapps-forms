@@ -13,6 +13,10 @@
  *                                     (served once the widget bundle build is wired — see
  *                                     FORMS_BUILD_PLAN; until then set this to a CDN/built
  *                                     bundle URL).
+ *  - `FORMS_MAGICLINK_REDEEM_URL`     Absolute URL of core's magic-link redeem endpoint the
+ *                                     route POSTs the raw token to (server-side redeem). The
+ *                                     mount path is fixed at `/magic-link/redeem` in MJ core, so
+ *                                     this defaults to `MJAPI_PUBLIC_URL` + `/magic-link/redeem`.
  */
 
 /** Frozen configuration for the respondent host page. */
@@ -20,9 +24,13 @@ export interface RespondentHostConfig {
   enabled: boolean;
   graphqlUrl: string;
   widgetBundleUrl: string;
+  /** Absolute URL of core's magic-link redeem endpoint (server-side redeem target). */
+  magicLinkRedeemUrl: string;
 }
 
 const DEFAULT_WIDGET_BUNDLE_URL = '/forms/widget/mj-form.js';
+/** Core mounts the magic-link redeem route at this fixed path (not configurable in MJ 5.43.0). */
+const MAGIC_LINK_REDEEM_PATH = '/magic-link/redeem';
 
 let cached: RespondentHostConfig | undefined;
 
@@ -35,8 +43,23 @@ export function getRespondentHostConfig(): RespondentHostConfig {
     enabled: process.env.FORMS_RESPONDENT_HOST_ENABLED?.trim() !== 'false',
     graphqlUrl: resolveGraphqlUrl(),
     widgetBundleUrl: process.env.FORMS_WIDGET_BUNDLE_URL?.trim() || DEFAULT_WIDGET_BUNDLE_URL,
+    magicLinkRedeemUrl: resolveMagicLinkRedeemUrl(),
   });
   return cached;
+}
+
+/**
+ * Resolve the magic-link redeem endpoint the route POSTs the raw token to. Prefers an explicit
+ * `FORMS_MAGICLINK_REDEEM_URL`; otherwise composes it from the API's public URL + the fixed
+ * `/magic-link/redeem` mount path (same MJAPI origin the GraphQL endpoint is derived from).
+ */
+function resolveMagicLinkRedeemUrl(): string {
+  const explicit = process.env.FORMS_MAGICLINK_REDEEM_URL?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  const base = (process.env.MJAPI_PUBLIC_URL?.trim() || 'http://localhost:4121').replace(/\/$/, '');
+  return `${base}${MAGIC_LINK_REDEEM_PATH}`;
 }
 
 /**

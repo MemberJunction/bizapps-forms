@@ -33,6 +33,13 @@ export interface RespondentHostPageOptions {
    * still also reads a `?slug=` query param, so this may be empty for direct `?slug=` use.
    */
   defaultSlug?: string;
+  /**
+   * The anonymous session JWT, redeemed SERVER-SIDE by the route (see {@link redeemSlugToToken}).
+   * Baked into a `data-token` attribute so `<mj-form>` receives it without the token ever being
+   * in the URL or interpolated into an inline script. When present it takes precedence over any
+   * `#fragment` / `?token=` value (which remain for manual testing / embeds).
+   */
+  token?: string;
 }
 
 /**
@@ -49,6 +56,10 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
   const graphqlUrl = escapeAttr(options.graphqlUrl);
   const bundleUrl = escapeAttr(options.widgetBundleUrl);
   const defaultSlug = escapeAttr(options.defaultSlug ?? '');
+  // The server-redeemed JWT reaches the boot script the same XSS-safe way as everything else:
+  // an HTML-escaped data-* attribute read with dataset.* at runtime — never spliced into the
+  // inline <script>. Emit the attribute only when a token was redeemed.
+  const tokenAttr = options.token ? ` data-token="${escapeAttr(options.token)}"` : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -63,12 +74,44 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
     class="mjf-host"
     id="mjf-host"
     data-graphql-url="${graphqlUrl}"
-    data-default-slug="${defaultSlug}"
+    data-default-slug="${defaultSlug}"${tokenAttr}
   >
     <div class="mjf-host__loading" role="status" aria-live="polite">Loading…</div>
   </main>
   <script>${BOOT_SCRIPT}</script>
   <script src="${bundleUrl}" defer onerror="window.__mjFormBundleError && window.__mjFormBundleError()"></script>
+</body>
+</html>`;
+}
+
+/** A respondent-facing error to render in place of the form (server-side redeem failed, etc.). */
+export interface RespondentHostErrorOptions {
+  /** Human-readable message shown to the respondent. Plain text — HTML-escaped at render time. */
+  message: string;
+  /** Optional page title shown in the browser tab. */
+  pageTitle?: string;
+}
+
+/**
+ * Render a friendly, shell-free error page reusing the host page's styling. Static (no boot
+ * script, no bundle) so it cannot itself fail to load. Pure: same options → same string.
+ */
+export function renderRespondentHostErrorPage(options: RespondentHostErrorOptions): string {
+  const title = escapeHtml(options.pageTitle ?? 'Form unavailable');
+  const message = escapeHtml(options.message);
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <title>${title}</title>
+  <style>${PAGE_CSS}</style>
+</head>
+<body>
+  <main class="mjf-host">
+    <p class="mjf-host__error" role="alert">${message}</p>
+  </main>
 </body>
 </html>`;
 }
@@ -126,6 +169,9 @@ const BOOT_SCRIPT = `
   var host = document.getElementById('mjf-host');
   var GRAPHQL_URL = host.getAttribute('data-graphql-url') || '';
   var DEFAULT_SLUG = host.getAttribute('data-default-slug') || '';
+  // Server-redeemed anonymous session JWT (see redeem.service). When present it WINS over any
+  // URL-supplied token, so the respondent never has to carry a raw token in the link.
+  var SERVER_TOKEN = host.getAttribute('data-token') || '';
 
   function showError(msg) {
     host.innerHTML = '';
@@ -148,7 +194,8 @@ const BOOT_SCRIPT = `
 
   // Slug: the path-supplied default (/f/:slug) wins; ?slug= is a direct-test fallback.
   var slug = DEFAULT_SLUG || readParam('slug');
-  var token = readParam('token');
+  // Token: the server-redeemed JWT wins; #fragment / ?token= remain a manual-testing fallback.
+  var token = SERVER_TOKEN || readParam('token');
 
   if (!slug) {
     showError('This form link is missing its form reference. Please check the link and try again.');

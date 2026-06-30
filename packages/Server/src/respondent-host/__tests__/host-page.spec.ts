@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { renderRespondentHostPage, escapeHtml, escapeAttr } from '../host-page';
+import { renderRespondentHostPage, renderRespondentHostErrorPage, escapeHtml, escapeAttr } from '../host-page';
 import { getRespondentHostConfig, resetRespondentHostConfigForTests } from '../config';
 
 afterEach(() => {
@@ -8,6 +8,7 @@ afterEach(() => {
   delete process.env.FORMS_WIDGET_BUNDLE_URL;
   delete process.env.MJAPI_PUBLIC_URL;
   delete process.env.GRAPHQL_ROOT_PATH;
+  delete process.env.FORMS_MAGICLINK_REDEEM_URL;
   resetRespondentHostConfigForTests();
 });
 
@@ -97,6 +98,57 @@ describe('renderRespondentHostPage', () => {
     expect(out).not.toContain('"><script>alert(1)');
     expect(out).toContain('&quot;&gt;&lt;script&gt;');
   });
+
+  it('bakes a server-redeemed token into an escaped data-token attribute', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'http://localhost:4121/',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+      defaultSlug: 'customer-survey',
+      token: 'header.payload.sig',
+    });
+    expect(out).toContain('data-token="header.payload.sig"');
+    // The boot script reads it from the host element and prefers it over the URL token.
+    expect(out).toContain("getAttribute('data-token')");
+    expect(out).toContain("SERVER_TOKEN || readParam('token')");
+  });
+
+  it('omits the data-token attribute entirely when no token is supplied', () => {
+    expect(html()).not.toContain('data-token=');
+  });
+
+  it('escapes a server-injected token to prevent attribute breakout (XSS regression)', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'http://localhost:4121/',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+      token: '"><script>alert(1)</script>',
+    });
+    expect(out).not.toContain('"><script>alert(1)');
+    expect(out).toContain('data-token="&quot;&gt;&lt;script&gt;');
+  });
+});
+
+describe('renderRespondentHostErrorPage', () => {
+  it('renders a shell-free, self-contained error page with the message', () => {
+    const out = renderRespondentHostErrorPage({ message: 'This form was not found.' });
+    expect(out.startsWith('<!doctype html>')).toBe(true);
+    expect(out).toContain('This form was not found.');
+    expect(out).toContain('class="mjf-host__error"');
+    expect(out).toContain('role="alert"');
+    expect(out).not.toContain('<mj-form');
+    expect(out).not.toContain('<script');
+  });
+
+  it('keeps the error page out of search indexes and uses --mj-* tokens', () => {
+    const out = renderRespondentHostErrorPage({ message: 'closed' });
+    expect(out).toContain('name="robots" content="noindex"');
+    expect(out).toContain('var(--mj-error');
+  });
+
+  it('escapes an HTML-bearing error message (XSS regression)', () => {
+    const out = renderRespondentHostErrorPage({ message: '<img src=x onerror=alert(1)>' });
+    expect(out).not.toContain('<img src=x');
+    expect(out).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
 });
 
 describe('escape helpers', () => {
@@ -140,5 +192,21 @@ describe('getRespondentHostConfig', () => {
 
   it('defaults the widget bundle url', () => {
     expect(getRespondentHostConfig().widgetBundleUrl).toBe('/forms/widget/mj-form.js');
+  });
+
+  it('derives the magic-link redeem url from MJAPI_PUBLIC_URL with the fixed mount path', () => {
+    process.env.MJAPI_PUBLIC_URL = 'https://forms.example.com';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('https://forms.example.com/magic-link/redeem');
+  });
+
+  it('defaults the redeem url to the local MJAPI origin', () => {
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('http://localhost:4121/magic-link/redeem');
+  });
+
+  it('honors an explicit FORMS_MAGICLINK_REDEEM_URL', () => {
+    process.env.FORMS_MAGICLINK_REDEEM_URL = 'https://api.example.com/ml/redeem';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('https://api.example.com/ml/redeem');
   });
 });
