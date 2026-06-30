@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "ngc",
+    "build:widget": "node scripts/build-widget.mjs",
     "test": "vitest run"
   },
   "author": "MemberJunction.com",
@@ -40,6 +41,8 @@
   "devDependencies": {
     "@angular/compiler": "21.1.3",
     "@angular/compiler-cli": "21.1.3",
+    "@babel/core": "^7.28.0",
+    "esbuild": "^0.27.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

@@ -28,6 +28,10 @@ import './public-submit/PublicFormResolver.js';
 // server bootstrap discovers the public /f/:slug route (anonymous, shell-free host page).
 import './respondent-host/RespondentHostMiddleware.js';
 
+// DG-5: import the widget-bundle middleware so its @RegisterClass fires and MJ server bootstrap
+// discovers the public /forms/widget/mj-form.js route that serves the built <mj-form> element.
+import './widget-bundle/WidgetBundleMiddleware.js';
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
