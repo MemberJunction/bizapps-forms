@@ -1,0 +1,52 @@
+<div class="mjf-shell">
+  @switch (phase()) {
+    @case ('loading') {
+      <div class="mjf-state" role="status" aria-live="polite">
+        <span class="mjf-spinner" aria-hidden="true"></span>
+        <span>Loading form…</span>
+      </div>
+    }
+    @case ('error') {
+      <div class="mjf-state mjf-state--error" role="alert">
+        <p class="mjf-state__msg">{{ errorText() }}</p>
+        <button type="button" class="mjf-retry" (click)="retry()">Try again</button>
+      </div>
+    }
+    @case ('done') {
+      <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
+        <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
+        <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
+      </div>
+    }
+    @default {
+      @if (definition(); as def) {
+        <header class="mjf-header">
+          <h1 class="mjf-header__title">{{ def.name }}</h1>
+          @if (def.description) {
+            <p class="mjf-header__desc">{{ def.description }}</p>
+          }
+        </header>
+
+        @if (errorText()) {
+          <p class="mjf-banner-error" role="alert">{{ errorText() }}</p>
+        }
+
+        @if (runtime(); as rt) {
+          @if (isScroll()) {
+            <mjf-form-scroll
+              [runtime]="rt"
+              [submitting]="phase() === 'submitting'"
+              (submit)="onSubmit()"
+            />
+          } @else {
+            <mjf-form-one-question
+              [runtime]="rt"
+              [submitting]="phase() === 'submitting'"
+              (submit)="onSubmit()"
+            />
+          }
+        }
+      }
+    }
+  }
+</div>

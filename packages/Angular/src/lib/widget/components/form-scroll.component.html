@@ -1,0 +1,38 @@
+<div class="mjf-scroll">
+  <div class="mjf-scroll__progress">
+    <mjf-form-progress [value]="progress()" />
+  </div>
+
+  <form class="mjf-scroll__body" (ngSubmit)="onSubmit()" novalidate>
+    @for (page of pages(); track page.id) {
+      <section class="mjf-page" [attr.aria-label]="page.title || 'Section'">
+        @if (page.title) {
+          <h2 class="mjf-page__title">{{ page.title }}</h2>
+        }
+        @if (page.description) {
+          <p class="mjf-page__desc">{{ page.description }}</p>
+        }
+        <div class="mjf-page__questions">
+          @for (q of questionsFor(page); track q.id) {
+            <mjf-form-question
+              [question]="q"
+              [value]="runtime().valueFor(q.id)"
+              [errorMessage]="runtime().visibleErrorFor(q)"
+              (valueChange)="onValueChange(q, $event)"
+            />
+          }
+        </div>
+      </section>
+    }
+
+    <div class="mjf-scroll__actions">
+      <button type="submit" class="mjf-submit" [disabled]="submitting()">
+        @if (submitting()) {
+          <span>Submitting…</span>
+        } @else {
+          <span>Submit</span>
+        }
+      </button>
+    </div>
+  </form>
+</div>

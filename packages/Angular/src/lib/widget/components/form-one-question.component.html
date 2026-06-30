@@ -1,0 +1,41 @@
+<div class="mjf-oneq">
+  <div class="mjf-oneq__progress">
+    <mjf-form-progress [value]="progress()" />
+    <span class="mjf-oneq__step" aria-live="polite">{{ stepLabel() }}</span>
+  </div>
+
+  @if (current(); as q) {
+    <div class="mjf-oneq__card" tabindex="-1" (keydown)="onKeydown($event)">
+      <mjf-form-question
+        [question]="q"
+        [value]="runtime().valueFor(q.id)"
+        [errorMessage]="runtime().visibleErrorFor(q)"
+        (valueChange)="onValueChange(q, $event)"
+      />
+
+      <div class="mjf-oneq__nav">
+        <button
+          type="button"
+          class="mjf-oneq__btn mjf-oneq__btn--ghost"
+          [disabled]="isFirst() || submitting()"
+          (click)="onBack()"
+        >Back</button>
+
+        <button
+          type="button"
+          class="mjf-oneq__btn mjf-oneq__btn--primary"
+          [disabled]="submitting()"
+          (click)="onNext()"
+        >
+          @if (isLast()) {
+            @if (submitting()) { <span>Submitting…</span> } @else { <span>Submit</span> }
+          } @else {
+            <span>Next</span>
+          }
+        </button>
+      </div>
+    </div>
+  } @else {
+    <p class="mjf-oneq__empty">This form has no questions to display.</p>
+  }
+</div>

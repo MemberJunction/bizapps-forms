@@ -26,3 +26,6 @@ export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
 export function LoadBizAppsFormsClient(): void {
     // Static imports ensure all classes are registered.
 }
+
+// WP-C — respondent widget (<mj-form> custom element + S1 API seam + runtime)
+export * from './lib/widget/index';

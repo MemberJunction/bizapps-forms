@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "build": "ngc",
-    "test": "echo \"No tests configured yet\""
+    "test": "vitest run src/lib/widget"
   },
   "author": "MemberJunction.com",
   "license": "ISC",
