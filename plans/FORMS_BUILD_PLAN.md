@@ -509,24 +509,29 @@ native entities. This is the reporting differentiator no incumbent has.
       ports 4121/4321, `mjVersionRange >=5.43.0 <6.0.0` (DG-1 — see Progress Log).
 - [x] Pull this plan into `plans/FORMS_BUILD_PLAN.md` (byte-for-byte from MJ PR #2971).
 
-### Phase 1 — MVP (the differentiating slice)
-- [~] Migration: schema + Phase-1 tables (§5.1) **authored** as
-      `migrations/B202606281200__v0.1.x_Schema_and_Tables.sql` (all 10 tables + extended props +
-      value-list CHECKs + cross-schema FKs to `__mj.[User]` / `__mj.[File]`). **Run migrate + CodeGen
-      pending a DB connection** (do on local pull).
-- [ ] `Forms: …` entity subclasses generated; verify types.
-- [ ] mj-sync seed: FormCategory starter tree, FormStyle defaults, **Form Respondent role +
-      entity permissions** (CanCreate on responses only), Application + nav metadata.
-- [ ] **Public submit endpoint** (forms-server): anonymous magic-link scope check +
-      Turnstile + rate-limit + quota → Save response/answers → fire on-submit Actions.
-- [ ] **Respondent widget** (forms-ng → Angular element): both render modes, mobile-first,
-      themed via FormStyle, basic conditional logic (§6), file upload to MJ: Files, a11y.
-- [ ] **Builder/admin app** (MJExplorer): visual form builder (pages/questions/options/logic),
-      publish→FormVersion, FormDistribution management (public link/embed/QR).
-- [ ] **AI authoring** action/agent (§7) + starter template gallery.
-- [ ] **Reporting dashboard** (§8.1): summaries, breakdowns, funnel, response view, export.
-- [ ] On-submit hooks: create/link bizapps-common Person; email confirmation; create Task.
-- [ ] Tests (Vitest) for engine/server logic; CI gates (UI tokens, mj-btn).
+### Phase 1 — MVP (the differentiating slice) — ✅ BUILD COMPLETE (2026-06-30)
+- [x] Migration: schema + Phase-1 tables (§5.1) applied to `MJ_Forms` (localhost:1456); all 10 tables live.
+- [x] `MJ_BizApps_Forms: …` entity subclasses generated (CodeGen) + verified (build green).
+- [x] mj-sync seed: FormCategory starter tree (9), FormStyle defaults (3 — Editorial/Aurora/Warm),
+      **Form Respondent role + 9 entity permissions** (CanCreate on Form Responses/Answers only),
+      Application + nav + reporting Dashboard record. **Pushed to DB: 33 records, 0 errors.**
+- [x] **Public submit endpoint** (forms-server): `PublishedForm` + `SubmitFormResponse` custom
+      resolvers — anon mj_scopes/CanCreate check + Turnstile (fail-closed) + rate-limit + dual quota
+      + dedupe + IP-hash(session) → Save response/answers → fire on-submit Actions by name. In schema. 33 tests.
+- [x] **Respondent widget** (forms-ng → Angular element): both render modes, mobile-first/WCAG-AA,
+      FormStyle token theming, §6 conditional logic (shared evaluator), file upload, partial save. 18 tests.
+- [x] **Builder/admin app** (MJExplorer): visual builder (registers as Forms entity-form override),
+      publish→FormVersion snapshot, FormDistribution management (public link/embed/QR). 40 tests.
+- [x] **AI authoring** action (`Forms: Generate Form From Brief`, highest-power Claude, zod-validated
+      blueprint) + 5 starter templates. 31 tests (with on-submit actions).
+- [x] **Reporting dashboard** (§8.1): summaries, per-question breakdowns, NPS, funnel, response view,
+      CSV/Excel export — RunView/RunQuery only, registered as `FormsReportingDashboard`. 12 tests.
+- [x] On-submit hooks (forms-actions, seam S3): `Forms: Upsert Respondent Person`,
+      `Forms: Send Confirmation Email` (pluggable sender), `Forms: Create Followup Task`.
+- [~] Tests: **158 Vitest passing** across all packages. CI gates (UI tokens, mj-btn) still TODO.
+- **Remaining for Phase 1 close:** full anonymous-submit headless e2e (mint magic link → PublishedForm
+      → SubmitFormResponse → verify saved + hooks); push not yet to org remote (read-only access);
+      real Turnstile/email/file-upload provider wiring; CI token/mj-btn gate.
 
 ### Phase 2 — Power
 - [ ] FormGroup + MaterializedEntityID; **view-projection** (default) and **RSU
@@ -646,3 +651,22 @@ native entities. This is the reporting differentiator no incumbent has.
   `__mj_BizAppsCommon.Person`. Consequence: the forms migration now requires `bizapps-common`'s schema
   present first (install order / local-dev ordering). The bizapps-tasks approval routing is **Phase 2**
   (FormVersion status state machine + 3 Forms actions + a "Form Approval" TaskType).
+- **2026-06-30 — Phase 1 built end-to-end via parallel multi-agent orchestration.** Ran migrate +
+  CodeGen against the live `MJ_Forms` DB (localhost:1456) and committed the generated gate
+  (`feature/phase1-foundation`). A supervisor decomposed Phase 1 into a shared **contract** (Wave 0)
+  + **6 work packages** built concurrently in isolated git worktrees:
+  - **Contract** (forms-entities): `PublishedFormDefinition` snapshot model, `ConditionalRule`/`ValidationRule`
+    + pure `evaluateConditionalRule`, submit transport types, zod parse helpers — the seam all packages import.
+  - **WP-A** metadata, **WP-B** submit endpoint + anti-abuse, **WP-C** `<mj-form>` widget, **WP-D** builder,
+    **WP-E** AI authoring + on-submit actions, **WP-F** reporting dashboard. Three seams (S1 submit/read API,
+    S2 conditional JSON, S3 action names) kept them coherent. All 6 merged into the foundation; two seam
+    reconciliations applied (C's GraphQL field names → B's real SDL; A's nav → builder-as-entity-form-override
+    + `FormsReportingDashboard`). **Full build green; 158 Vitest tests pass.**
+  - **e2e validation:** MJAPI boots clean against the live DB; emitted `schema.graphql` confirms
+    `PublishedForm`/`SubmitFormResponse` + types + all 10 Forms entities. **mj sync push → 33 records created**
+    (Form Respondent role + 9 permissions, 9 categories, 3 styles, Forms app + nav, dashboard), 0 errors.
+  - **Branch reality:** `next`/`main` realigned locally; all work local (account has read-only on the org remote —
+    nothing pushed). Worktree agents based off the contract-equipped foundation (verified codegen+contract present).
+  - **Not yet:** full anonymous-submit headless e2e (needs a published form + minted magic link — best driven
+    through the builder UI), real Turnstile/email/MJ:Files provider wiring, CI token/mj-btn gate, push to remote.
+  - See `plans/PHASE1_DECOMPOSITION.md` for the work-package boundaries, seams, and per-branch commits.
