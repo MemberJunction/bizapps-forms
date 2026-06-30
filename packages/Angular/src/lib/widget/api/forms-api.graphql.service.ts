@@ -12,6 +12,7 @@
 import { Injectable, inject } from '@angular/core';
 import type {
   PublishedFormDefinition,
+  FormAnswerInput,
   FormSubmissionInput,
   FormSubmissionResult,
 } from '@mj-biz-apps/forms-entities';
@@ -25,9 +26,18 @@ interface GraphQLEnvelope<TData> {
   errors?: Array<{ message: string }>;
 }
 
+/**
+ * Raw `PublishedFormType` row from WP-B's SDL. The deep pages/questions/options tree
+ * lives ONLY inside `definitionJSON` (a JSON string); the top-level scalars are
+ * redundant once it is parsed, so we select + parse `definitionJSON`.
+ */
+interface PublishedFormType {
+  definitionJSON: string;
+}
+
 /** Result wrapper for the `PublishedForm` query. */
 interface PublishedFormQueryData {
-  PublishedForm: PublishedFormDefinition | null;
+  PublishedForm: PublishedFormType | null;
 }
 
 /** Result wrapper for the `SubmitFormResponse` mutation. */
@@ -35,23 +45,41 @@ interface SubmitFormResponseData {
   SubmitFormResponse: FormSubmissionResult;
 }
 
+/**
+ * `FormAnswerInputType` per WP-B's SDL: `jsonValue` is a JSON STRING (not an object)
+ * and `dateValue` is a String. Mirrors {@link FormAnswerInput} except `jsonValue`.
+ */
+interface FormAnswerInputType {
+  questionId: string;
+  textValue?: string;
+  numericValue?: number;
+  dateValue?: string;
+  booleanValue?: boolean;
+  jsonValue?: string;
+  fileId?: string;
+}
+
+/** `FormSubmissionInputType` per WP-B's SDL (answers use {@link FormAnswerInputType}). */
+interface FormSubmissionInputType {
+  distributionSlug: string;
+  formVersionId: string;
+  partial?: boolean;
+  startedAt?: string;
+  turnstileToken?: string;
+  clientMeta?: { referrer?: string; userAgent?: string };
+  answers: FormAnswerInputType[];
+}
+
 const PUBLISHED_FORM_QUERY = `
   query PublishedForm($distributionSlug: String!) {
     PublishedForm(distributionSlug: $distributionSlug) {
-      formId
-      formVersionId
-      name
-      description
-      renderMode
-      settings
-      styleTokens
-      pages
+      definitionJSON
     }
   }
 `;
 
 const SUBMIT_RESPONSE_MUTATION = `
-  mutation SubmitFormResponse($input: FormSubmissionInput!) {
+  mutation SubmitFormResponse($input: FormSubmissionInputType!) {
     SubmitFormResponse(input: $input) {
       success
       responseId
@@ -73,14 +101,49 @@ export class FormsGraphQLApiService implements IFormsApiService {
     const data = await this.execute<PublishedFormQueryData>(PUBLISHED_FORM_QUERY, {
       distributionSlug,
     });
-    return data.PublishedForm;
+    if (!data.PublishedForm) {
+      return null;
+    }
+    // The full nested pages/questions/options graph is delivered as a JSON string in
+    // `definitionJSON`; parse it into the contract's PublishedFormDefinition.
+    return JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition;
   }
 
   public async submitResponse(input: FormSubmissionInput): Promise<FormSubmissionResult> {
     const data = await this.execute<SubmitFormResponseData>(SUBMIT_RESPONSE_MUTATION, {
-      input,
+      input: this.toInputType(input),
     });
     return data.SubmitFormResponse;
+  }
+
+  /**
+   * Map the contract {@link FormSubmissionInput} onto WP-B's `FormSubmissionInputType`.
+   * Only `jsonValue` differs: the contract carries a structured `JSONValue`, the SDL
+   * expects a JSON STRING, so each answer's `jsonValue` is stringified here.
+   */
+  private toInputType(input: FormSubmissionInput): FormSubmissionInputType {
+    return {
+      distributionSlug: input.distributionSlug,
+      formVersionId: input.formVersionId,
+      partial: input.partial,
+      startedAt: input.startedAt,
+      turnstileToken: input.turnstileToken,
+      clientMeta: input.clientMeta,
+      answers: input.answers.map((a) => this.toAnswerInputType(a)),
+    };
+  }
+
+  /** Map one contract answer onto `FormAnswerInputType`, stringifying `jsonValue`. */
+  private toAnswerInputType(answer: FormAnswerInput): FormAnswerInputType {
+    return {
+      questionId: answer.questionId,
+      textValue: answer.textValue,
+      numericValue: answer.numericValue,
+      dateValue: answer.dateValue,
+      booleanValue: answer.booleanValue,
+      jsonValue: answer.jsonValue === undefined ? undefined : JSON.stringify(answer.jsonValue),
+      fileId: answer.fileId,
+    };
   }
 
   /** POST a GraphQL operation and unwrap its `data`, throwing on transport/GraphQL errors. */
