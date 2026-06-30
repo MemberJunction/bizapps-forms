@@ -4,7 +4,13 @@
     "autoCreateMissingRecords": true
   },
   "directoryOrder": [
-    "schema-info"
+    "schema-info",
+    "roles",
+    "form-categories",
+    "form-styles",
+    "applications",
+    "application-roles",
+    "entity-permissions"
   ],
   "emitSyncNotes": false
 }

@@ -1,0 +1,11 @@
+[
+  {
+    "fields": {
+      "Name": "Form Respondent",
+      "Description": "Restricted role for anonymous/external respondents who reach a published MJ Form via a scoped magic-link distribution. The ONE deliberate exception to the magic-link read-only convention: it grants CanCreate on Form Responses and Form Response Answers ONLY (no read/update/delete on those), plus read-only on the published form-definition entities the respondent widget must load. It grants nothing else. Authorization is enforced server-side from the session's mj_scopes union; this role is the entity-permission boundary. Never assign to internal/SSO users."
+    },
+    "primaryKey": {
+      "ID": "A18E13FC-B2C1-4E77-A3D7-EE775BDE098C"
+    }
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "entity": "MJ: Applications",
+  "filePattern": "**/.*.json",
+  "defaults": {},
+  "pull": {
+    "createNewFileIfNotFound": true,
+    "newFileName": ".applications.json",
+    "appendRecordsToExistingFile": true,
+    "updateExistingRecords": true,
+    "preserveFields": [],
+    "excludeFields": [],
+    "mergeStrategy": "merge",
+    "backupBeforeUpdate": true,
+    "backupDirectory": ".backups",
+    "filter": "Name='Forms'",
+    "externalizeFields": [],
+    "ignoreNullFields": true,
+    "ignoreVirtualFields": true,
+    "lookupFields": {},
+    "relatedEntities": {
+      "MJ: Application Entities": {
+        "entity": "MJ: Application Entities",
+        "foreignKey": "ApplicationID"
+      }
+    }
+  }
+}

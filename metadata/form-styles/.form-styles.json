@@ -1,0 +1,138 @@
+[
+  {
+    "fields": {
+      "Name": "Editorial",
+      "Description": "Default theme. Warm paper background, serif display headings (Fraunces) with Inter body, and a deep-green accent. Light, calm, magazine-like. Lifted from the [data-theme=\"editorial\"] block in docs/app/design-system.css.",
+      "CSSVariables": {
+        "--mjf-font-body": "'Inter', system-ui, sans-serif",
+        "--mjf-font-display": "'Fraunces', Georgia, 'Times New Roman', serif",
+        "--mjf-display-weight": "600",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#1a1815",
+        "--mj-text-secondary": "#4a463f",
+        "--mj-text-muted": "#837d72",
+        "--mj-border-default": "#e2ddd2",
+        "--mj-border-strong": "#cfc8b9",
+        "--mjf-page-bg": "#faf8f4",
+        "--mjf-page-bg-image": "none",
+        "--mjf-accent": "#1f5d4c",
+        "--mjf-accent-strong": "#164437",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#e8f0ec",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#e2ddd2",
+        "--mjf-card-radius": "14px",
+        "--mjf-card-shadow": "none",
+        "--mjf-input-radius": "8px",
+        "--mjf-choice-radius": "10px",
+        "--mjf-btn-radius": "10px",
+        "--mjf-pill-radius": "999px",
+        "--mjf-chrome-bg": "#f3f0e9",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#faf8f4"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "7930BAB7-94A1-4AAF-BB3C-8D834EC40272"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Aurora",
+      "Description": "Dark, vivid theme. Deep indigo background with violet/cyan radial glows, glassmorphic cards (backdrop blur), Sora display + body, and a purple accent gradient. Lifted from the [data-theme=\"aurora\"] block in docs/app/design-system.css.",
+      "CSSVariables": {
+        "color-scheme": "dark",
+        "--mjf-font-body": "'Sora', system-ui, sans-serif",
+        "--mjf-font-display": "'Sora', system-ui, sans-serif",
+        "--mjf-display-weight": "800",
+        "--mjf-display-tracking": "-0.02em",
+        "--mj-text-primary": "#eef2ff",
+        "--mj-text-secondary": "#aeb8d4",
+        "--mj-text-muted": "#7a85a6",
+        "--mj-text-inverse": "#0b1020",
+        "--mj-border-default": "#28324f",
+        "--mj-border-strong": "#3a4670",
+        "--mj-bg-surface-sunken": "#0e1430",
+        "--mjf-page-bg": "#0b1020",
+        "--mjf-page-bg-image": "radial-gradient(1100px 600px at 12% -10%, rgba(124,92,255,.30), transparent 60%), radial-gradient(900px 520px at 100% 0%, rgba(34,211,238,.20), transparent 55%)",
+        "--mjf-accent": "#6d5efc",
+        "--mjf-accent-strong": "#5b4ee0",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "color-mix(in srgb, #6d5efc 22%, transparent)",
+        "--mjf-accent-gradient": "linear-gradient(135deg, #6d5efc, #7c3aed 50%, #22d3ee)",
+        "--mjf-eyebrow": "#34e3d2",
+        "--mjf-card-bg": "rgba(255,255,255,.06)",
+        "--mjf-card-border": "rgba(255,255,255,.12)",
+        "--mjf-card-radius": "20px",
+        "--mjf-card-shadow": "0 24px 60px -20px rgba(0,0,0,.6)",
+        "--mjf-card-backdrop": "blur(16px)",
+        "--mjf-input-bg": "rgba(255,255,255,.05)",
+        "--mjf-input-border": "rgba(255,255,255,.16)",
+        "--mjf-input-radius": "14px",
+        "--mjf-choice-bg": "rgba(255,255,255,.05)",
+        "--mjf-choice-border": "rgba(255,255,255,.14)",
+        "--mjf-choice-radius": "16px",
+        "--mjf-btn-radius": "14px",
+        "--mjf-progress-track": "rgba(255,255,255,.10)",
+        "--mjf-rating-inactive": "rgba(255,255,255,.20)",
+        "--mjf-chrome-bg": "#0b1020",
+        "--mjf-panel-bg": "rgba(255,255,255,.05)",
+        "--mjf-sidebar-bg": "rgba(255,255,255,.04)",
+        "--mjf-sidebar-active-text": "#ffffff"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "2534ED4A-E45E-4013-ABA5-5D8CA7C9E61C"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Warm",
+      "Description": "Warm humanist theme. Cream/sand background with a soft amber glow, rounded cards, heavy Nunito display, and a terracotta accent. Friendly and approachable. Lifted from the [data-theme=\"warm\"] block in docs/app/design-system.css.",
+      "CSSVariables": {
+        "--mjf-font-body": "'Nunito', system-ui, sans-serif",
+        "--mjf-font-display": "'Nunito', system-ui, sans-serif",
+        "--mjf-display-weight": "900",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#41372e",
+        "--mj-text-secondary": "#6e6055",
+        "--mj-text-muted": "#9a8c7e",
+        "--mj-border-default": "#e8dcc7",
+        "--mj-border-strong": "#d8c8ad",
+        "--mjf-page-bg": "#f6ede0",
+        "--mjf-page-bg-image": "radial-gradient(900px 500px at 100% -5%, rgba(232,163,61,.18), transparent 60%)",
+        "--mjf-accent": "#d8744a",
+        "--mjf-accent-strong": "#c25e37",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#f6e4d6",
+        "--mjf-accent-gradient": "linear-gradient(135deg, #d8744a, #e8a33d)",
+        "--mjf-eyebrow": "#7c8c5a",
+        "--mjf-card-bg": "#fffdf8",
+        "--mjf-card-border": "#e8dcc7",
+        "--mjf-card-radius": "22px",
+        "--mjf-card-shadow": "0 10px 24px -12px rgba(120,86,54,.35)",
+        "--mjf-input-radius": "14px",
+        "--mjf-choice-radius": "16px",
+        "--mjf-btn-radius": "14px",
+        "--mjf-chrome-bg": "#f1e6d4",
+        "--mjf-panel-bg": "#fffdf8",
+        "--mjf-sidebar-bg": "#fbf4e8"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "8F319B4E-D65D-46D9-B247-AE3F5D2A7EEB"
+    }
+  }
+]

@@ -1,0 +1,125 @@
+[
+  {
+    "_comments": [
+      "MJ Forms admin/builder Explorer application. Two Custom nav surfaces are driver",
+      "classes registered by WP-D (the form builder/admin) and WP-F (the reporting",
+      "dashboard) in MJExplorer; until those land the items render once their resources",
+      "are registered. The Records nav item browses the Forms entity directly via MJ's",
+      "generated entity forms. The embedded Application Entities make the Forms admin",
+      "entities visible/browsable within this application."
+    ],
+    "fields": {
+      "Name": "Forms",
+      "Description": "Build, distribute, and analyze forms, surveys, and intake. Author forms with the visual builder or AI, publish public/embed/QR distributions, and review responses as first-class MemberJunction records.",
+      "Icon": "fa-solid fa-clipboard-list",
+      "DefaultForNewUser": false,
+      "DefaultNavItems": [
+        {
+          "Label": "Form Builder",
+          "Icon": "fa-solid fa-pen-ruler",
+          "ResourceType": "Custom",
+          "DriverClass": "FormsBuilderResource",
+          "isDefault": true
+        },
+        {
+          "Label": "All Forms",
+          "Icon": "fa-solid fa-clipboard-list",
+          "ResourceType": "Records",
+          "Entity": "MJ_BizApps_Forms: Forms",
+          "isDefault": true
+        },
+        {
+          "Label": "Responses & Analytics",
+          "Icon": "fa-solid fa-chart-column",
+          "ResourceType": "Custom",
+          "DriverClass": "FormsDashboardResource",
+          "isDefault": true
+        }
+      ]
+    },
+    "relatedEntities": {
+      "MJ: Application Entities": [
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms",
+            "Sequence": 10,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "245E7F5E-1EB5-4B15-BDC2-5ABF2816BBE7"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Categories",
+            "Sequence": 20,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "C7C9BF71-6955-47F2-8B0B-1033B2414DC2"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Styles",
+            "Sequence": 30,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "0B8026EE-E84C-4533-B922-3605B949FB35"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Versions",
+            "Sequence": 40,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "9B35C777-ED4D-46EF-A8BB-3E80C26C1D92"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Distributions",
+            "Sequence": 50,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "C840628B-FFBA-446E-861F-7D8CACDDDB0C"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Responses",
+            "Sequence": 60,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "6D9B03F2-B276-496D-8752-604CD025FED9"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Response Answers",
+            "Sequence": 70,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "926C118D-4A68-4771-98CF-899B66AD4B41"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "BFB97C57-4552-4643-8933-A0B2D76544D8"
+    }
+  }
+]
