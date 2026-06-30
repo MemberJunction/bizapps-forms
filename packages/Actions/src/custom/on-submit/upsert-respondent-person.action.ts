@@ -49,22 +49,24 @@ export class UpsertRespondentPersonAction extends BaseAction {
     }
 
     const identity = extractIdentity(ctx.answers);
-    if (!identity.email) {
+    const email = identity.email;
+    if (!email) {
       return skip('No email answer found; cannot match or create a Person.');
     }
 
-    return this.upsertAndLink(ctx, identity, params);
+    return this.upsertAndLink(ctx, identity, email, params);
   }
 
   private async upsertAndLink(
     ctx: FormResponseContext,
     identity: RespondentIdentity,
+    email: string,
     params: RunActionParams,
   ): Promise<ActionResultSimple> {
     const contextUser = params.ContextUser;
-    const existing = await findPersonByEmail(identity.email as string, contextUser);
+    const existing = await findPersonByEmail(email, contextUser);
     const created = !existing;
-    const person = existing ?? (await createPerson(identity, contextUser));
+    const person = existing ?? (await createPerson(identity, email, contextUser));
     if (!person) {
       return fail('Failed to create Person record.', 'PERSON_SAVE_FAILED');
     }
@@ -73,7 +75,7 @@ export class UpsertRespondentPersonAction extends BaseAction {
     const linked = await ctx.response.Save();
     if (!linked) {
       return fail(
-        `Failed to link Person to response: ${ctx.response.LatestResult?.Message ?? 'unknown error'}`,
+        `Failed to link Person to response: ${ctx.response.LatestResult?.CompleteMessage ?? 'unknown error'}`,
         'RESPONSE_SAVE_FAILED',
       );
     }
@@ -153,16 +155,17 @@ async function findPersonByEmail(
 
 async function createPerson(
   identity: RespondentIdentity,
+  email: string,
   contextUser: UserInfo,
 ): Promise<mjBizAppsCommonPersonEntity | null> {
   const md = new Metadata();
   const person = await md.GetEntityObject<mjBizAppsCommonPersonEntity>(PERSON_ENTITY, contextUser);
   person.NewRecord();
   // FirstName / LastName are required on People; derive sensible fallbacks from email.
-  const fallback = (identity.email as string).split('@')[0];
+  const fallback = email.split('@')[0];
   person.FirstName = identity.firstName ?? fallback;
   person.LastName = identity.lastName ?? '(unknown)';
-  person.Email = identity.email ?? null;
+  person.Email = email;
   if (identity.phone) {
     person.Phone = identity.phone;
   }

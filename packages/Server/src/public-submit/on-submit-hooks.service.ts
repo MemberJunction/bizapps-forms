@@ -6,9 +6,10 @@
  * SKIPPED-with-log when absent. A hook failure never fails the submit — the
  * response is already persisted; hooks are best-effort side effects.
  *
- * Each hook receives the `ResponseID` (and `FormID`) as input ActionParams so the
+ * Each hook receives the `FormResponseID` (and `FormID`) as input ActionParams so the
  * action can load the response and do its work (upsert Person, send email, create
- * a follow-up Task).
+ * a follow-up Task). `FormResponseID` is the S3 input-param contract every WP-E
+ * on-submit action reads — keep producer and consumers on the same name.
  */
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
@@ -41,7 +42,7 @@ export interface OnSubmitContext {
 /** Build the standard input params passed to every on-submit action. */
 function buildHookParams(ctx: OnSubmitContext): ActionParam[] {
   return [
-    Object.assign(new ActionParam(), { Name: 'ResponseID', Value: ctx.responseId, Type: 'Input' as const }),
+    Object.assign(new ActionParam(), { Name: 'FormResponseID', Value: ctx.responseId, Type: 'Input' as const }),
     Object.assign(new ActionParam(), { Name: 'FormID', Value: ctx.formId, Type: 'Input' as const }),
     Object.assign(new ActionParam(), { Name: 'FormVersionID', Value: ctx.formVersionId, Type: 'Input' as const }),
     Object.assign(new ActionParam(), { Name: 'DistributionID', Value: ctx.distributionId, Type: 'Input' as const }),
