@@ -35,3 +35,6 @@ export function LoadBizAppsFormsClient(): void {
 
 // WP-D builder — registers the Forms form-component override (visual builder) + re-exports.
 export * from './lib/builder';
+// Forms home/studio dashboard — the first-class "Forms" Explorer surface (plan §3.2).
+import './lib/home';
+export * from './lib/home';

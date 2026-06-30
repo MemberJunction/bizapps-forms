@@ -24,5 +24,31 @@
       "lastModified": "2026-06-30T17:14:17.694Z",
       "checksum": "2b0e506e92a48ae60ab2c80b2a82d1f2d8e756c45ea97b352b71288f882c94c8"
     }
+  },
+  {
+    "_comments": [
+      "App-scoped code dashboard: the first-class Forms home/studio surface (FORMS_BUILD_PLAN §3.2).",
+      "DriverClass matches @RegisterClass(BaseDashboard, 'FormsHomeDashboard'). The Forms app's",
+      "default 'Forms' nav item references this record by ID. Selecting a form opens the builder."
+    ],
+    "fields": {
+      "Name": "Forms",
+      "Description": "Forms home/studio for MJ Forms: browse all forms, create a new form, author one with AI from a brief, or scaffold from a starter template. Selecting a form opens the visual builder.",
+      "UserID": "ECAFCCEC-6A37-EF11-86D4-000D3A4E707E",
+      "CategoryID": null,
+      "Type": "Code",
+      "Scope": "App",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "DriverClass": "FormsHomeDashboard",
+      "UIConfigDetails": "{}",
+      "EnvironmentID": "@lookup:MJ: Environments.Name=Default"
+    },
+    "primaryKey": {
+      "ID": "3F8A6B12-9C4D-4E7A-B1F2-5A6D7E8C9012"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T20:02:04.567Z",
+      "checksum": "7c43196d58bbab7a59310ecdf9f76215081ca6e69304ba623e4baa1b73c062fc"
+    }
   }
 ]

@@ -1,0 +1,123 @@
+<div class="home">
+  <header class="home-header">
+    <div class="title-row">
+      <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>
+      <h1 class="home-title">Forms</h1>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" (click)="newForm()" [disabled]="busy">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> New form
+      </button>
+      <button type="button" class="btn" (click)="openPanel('ai')" [disabled]="busy">
+        <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Author with AI
+      </button>
+      <button type="button" class="btn" (click)="openPanel('template')" [disabled]="busy">
+        <i class="fa-solid fa-layer-group" aria-hidden="true"></i> From template
+      </button>
+    </div>
+  </header>
+
+  @if (errorMessage) {
+    <div class="alert" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span>{{ errorMessage }}</span>
+    </div>
+  }
+
+  @switch (panel) {
+    @case ('ai') {
+      <section class="panel" aria-label="Author with AI">
+        <label class="panel-label" for="brief">
+          Describe the form you want and AI will draft it.
+        </label>
+        <textarea
+          id="brief"
+          class="brief-input"
+          rows="3"
+          placeholder="e.g. A 5-question event RSVP with dietary preferences and a guest count"
+          [(ngModel)]="brief"
+          [disabled]="busy"
+        ></textarea>
+        <div class="panel-actions">
+          <button type="button" class="btn btn-primary" (click)="authorWithAI()" [disabled]="busy">
+            <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Generate
+          </button>
+          <button type="button" class="btn" (click)="closePanel()" [disabled]="busy">Cancel</button>
+        </div>
+      </section>
+    }
+    @case ('template') {
+      <section class="panel" aria-label="From template">
+        <span class="panel-label">Start from a curated template.</span>
+        <div class="template-grid">
+          @for (t of templates; track t.key) {
+            <button
+              type="button"
+              class="template-card"
+              [class.selected]="selectedTemplateKey === t.key"
+              (click)="selectedTemplateKey = t.key"
+              [disabled]="busy"
+            >
+              <i [class]="t.icon" aria-hidden="true"></i>
+              <span>{{ t.label }}</span>
+            </button>
+          }
+        </div>
+        <div class="panel-actions">
+          <button
+            type="button"
+            class="btn btn-primary"
+            (click)="createFromTemplate()"
+            [disabled]="busy"
+          >
+            <i class="fa-solid fa-layer-group" aria-hidden="true"></i> Create
+          </button>
+          <button type="button" class="btn" (click)="closePanel()" [disabled]="busy">Cancel</button>
+        </div>
+      </section>
+    }
+  }
+
+  @if (loading) {
+    <div class="state-msg"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading forms…</div>
+  } @else if (forms.length === 0) {
+    <div class="empty-state">
+      <i class="fa-solid fa-clipboard-list" aria-hidden="true"></i>
+      <p>No forms yet. Create your first one to get started.</p>
+      <button type="button" class="btn btn-primary" (click)="newForm()">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> New form
+      </button>
+    </div>
+  } @else {
+    <div class="grid-wrap">
+      <table class="forms-grid">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Status</th>
+            <th scope="col">Category</th>
+            <th scope="col" class="num">Responses</th>
+            <th scope="col">Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of forms; track row.id) {
+            <tr class="form-row" (click)="openForm(row)" tabindex="0"
+                (keydown.enter)="openForm(row)">
+              <td class="name-cell">
+                <i class="fa-solid fa-file-lines" aria-hidden="true"></i>
+                <span>{{ row.name }}</span>
+              </td>
+              <td>
+                <span class="status-pill" [attr.data-status]="row.status">{{ row.status }}</span>
+              </td>
+              <td>{{ row.categoryName ?? '—' }}</td>
+              <td class="num">{{ row.responseCount }}</td>
+              <td>{{ row.updatedAt ? (row.updatedAt | date: 'medium') : '—' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>

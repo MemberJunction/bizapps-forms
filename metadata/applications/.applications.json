@@ -19,6 +19,13 @@
       "DefaultForNewUser": false,
       "DefaultNavItems": [
         {
+          "Label": "Forms",
+          "Icon": "fa-solid fa-clipboard-list",
+          "ResourceType": "Dashboards",
+          "RecordID": "3F8A6B12-9C4D-4E7A-B1F2-5A6D7E8C9012",
+          "isDefault": true
+        },
+        {
           "Label": "Responses & Analytics",
           "Icon": "fa-solid fa-chart-column",
           "ResourceType": "Dashboards",
@@ -140,8 +147,8 @@
       "ID": "BFB97C57-4552-4643-8933-A0B2D76544D8"
     },
     "sync": {
-      "lastModified": "2026-06-30T19:32:04.332Z",
-      "checksum": "555510e1d63f10ec3917e33499af779a941e44e1fa5183c7b3948fe85fca9b90"
+      "lastModified": "2026-06-30T20:02:04.524Z",
+      "checksum": "3d8eef15f73d497bd25e1d07e07e3e49741b9cbf37d88406328d68efa54aeedc"
     }
   }
 ]
