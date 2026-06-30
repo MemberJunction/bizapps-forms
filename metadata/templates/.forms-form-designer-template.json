@@ -1,0 +1,65 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Form Designer",
+    "Description": "System + user prompt for the Forms AI authoring Designer. Turns a natural-language brief (the {{ Brief }} parameter) into a structured FormBlueprint JSON object validated against the Phase-1 question taxonomy. Used by the 'Forms: Form Designer' AI Prompt.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-form-designer.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F60"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Brief",
+          "Description": "The natural-language description of the form to design.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E5F"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PreviousAttempt",
+          "Description": "Optional: the model's prior invalid output, fed back on a retry attempt.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "2D3E4F5A-6B7C-4D8E-9F0A-1B2C3D4E5F60"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "ValidationError",
+          "Description": "Optional: the blueprint validation error from the prior attempt, fed back on a retry.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "3E4F5A6B-7C8D-4E9F-0A1B-2C3D4E5F6071"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61"
+  }
+}

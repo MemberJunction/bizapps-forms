@@ -8,7 +8,8 @@
  * It reuses the deterministic Designer→Builder split proven by MJ's Form Builder
  * agent: the LLM (Designer) emits a structured JSON {@link FormBlueprint}; deterministic
  * code (Builder) validates it against the §5.3 taxonomy and persists it. The model is
- * the highest-power **Anthropic Claude** via AIEngine (never a pinned legacy id).
+ * chosen by MemberJunction from the 'Forms: Form Designer' AI Prompt's metadata — there
+ * is no model or vendor name in code (see {@link AIPromptFormDesignerModel}).
  *
  * Input params:
  *   - `Brief` (string, required) — the natural-language description.
@@ -28,12 +29,12 @@ import type { UserInfo } from '@memberjunction/core';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { buildFormFromBlueprint, FormPersistError } from './form-blueprint-builder';
 import {
-  AIEngineFormDesignerModel,
+  AIPromptFormDesignerModel,
   designFormFromBrief,
   type FormDesignerModel,
 } from './llm-form-designer';
 
-let activeDesignerModel: FormDesignerModel = new AIEngineFormDesignerModel();
+let activeDesignerModel: FormDesignerModel = new AIPromptFormDesignerModel();
 
 /** Override the Designer model (e.g. a deterministic stub in tests). */
 export function setFormDesignerModel(model: FormDesignerModel): void {

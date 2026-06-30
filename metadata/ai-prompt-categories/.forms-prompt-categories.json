@@ -1,0 +1,11 @@
+[
+  {
+    "fields": {
+      "Name": "MJ_BizApps_Forms",
+      "Description": "AI Prompts for the MJ Forms Open App (AI form authoring, etc.)."
+    },
+    "primaryKey": {
+      "ID": "4F5A6B7C-8D9E-4F0A-1B2C-3D4E5F607182"
+    }
+  }
+]

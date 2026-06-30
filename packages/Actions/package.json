@@ -35,7 +35,9 @@
     "@memberjunction/core-entities": "^5.43.0",
     "@memberjunction/core-entities-server": "^5.43.0",
     "@memberjunction/ai": "^5.43.0",
-    "@memberjunction/aiengine": "^5.43.0"
+    "@memberjunction/aiengine": "^5.43.0",
+    "@memberjunction/ai-core-plus": "^5.43.0",
+    "@memberjunction/ai-prompts": "^5.43.0"
   },
   "repository": {
     "type": "git",
