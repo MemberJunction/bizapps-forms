@@ -681,6 +681,17 @@ native entities. This is the reporting differentiator no incumbent has.
     (Form Respondent role + 9 permissions, 9 categories, 3 styles, Forms app + nav, dashboard), 0 errors.
   - **Branch reality:** `next`/`main` realigned locally; all work local (account has read-only on the org remote —
     nothing pushed). Worktree agents based off the contract-equipped foundation (verified codegen+contract present).
-  - **Not yet:** full anonymous-submit headless e2e (needs a published form + minted magic link — best driven
-    through the builder UI), real Turnstile/email/MJ:Files provider wiring, CI token/mj-btn gate, push to remote.
+  - **Anonymous e2e PROVEN (live):** added the distribution magic-link provisioning hook (server-side, via
+    a dependency-inversion seam — on 5.43.0 core `MagicLinkService.CreateInvite` can't set anonymous/
+    resource-share fields, so the minter writes the `MJ: Magic Link Invites` row directly), enabled
+    `magicLink` in `apps/MJAPI/mj.config.cjs` (the file cosmiconfig loads — NOT repo-root), and fixed
+    `MJAPI_PUBLIC_URL` to the real port so the magic-link JWKS self-fetch resolves. Full chain green:
+    anonymous redeem → scoped JWT (`mj_anon`, role `Form Respondent`, `resourceId`=distribution) →
+    `PublishedForm` (200) → `SubmitFormResponse` (200, `Complete`) → `FormResponse` + 2 answers persisted
+    with session-hash source metadata, scope-enforced.
+  - **Still open:** (a) the public-link raw token isn't yet surfaced/stored on the distribution — agent
+    building the `FormDistribution.PublicLinkToken` column + migration died on the org spend limit, so the
+    auto-mint produces an invite whose redeemable URL isn't yet persisted (the e2e used a controlled token);
+    (b) the `Forms: Upsert Respondent Person` on-submit hook didn't create/link a Person — investigate;
+    (c) real Turnstile/email/MJ:Files provider wiring; (d) CI token/mj-btn gate; (e) push to remote.
   - See `plans/PHASE1_DECOMPOSITION.md` for the work-package boundaries, seams, and per-branch commits.
