@@ -1,0 +1,24 @@
+[
+  {
+    "_comments": [
+      "App-scoped code dashboard for Forms reporting/analytics. DriverClass must match",
+      "exactly what WP-F registered: @RegisterClass(BaseDashboard, 'FormsReportingDashboard').",
+      "The Forms application's 'Responses & Analytics' nav item references this record by ID."
+    ],
+    "fields": {
+      "Name": "Forms Reporting",
+      "Description": "Response analytics for MJ Forms: summary stats, per-question breakdowns, completion and drop-off funnel, individual response view, and CSV/Excel export.",
+      "UserID": null,
+      "CategoryID": null,
+      "Type": "Code",
+      "Scope": "App",
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "DriverClass": "FormsReportingDashboard",
+      "UIConfigDetails": "{}",
+      "EnvironmentID": "@lookup:MJ: Environments.Name=Default"
+    },
+    "primaryKey": {
+      "ID": "EB23CCFD-AAF5-48BE-8B81-33A3944AD898"
+    }
+  }
+]

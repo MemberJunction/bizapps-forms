@@ -1,12 +1,15 @@
 [
   {
     "_comments": [
-      "MJ Forms admin/builder Explorer application. Two Custom nav surfaces are driver",
-      "classes registered by WP-D (the form builder/admin) and WP-F (the reporting",
-      "dashboard) in MJExplorer; until those land the items render once their resources",
-      "are registered. The Records nav item browses the Forms entity directly via MJ's",
-      "generated entity forms. The embedded Application Entities make the Forms admin",
-      "entities visible/browsable within this application."
+      "MJ Forms admin/builder Explorer application. The builder is NOT a custom nav",
+      "resource: WP-D registered it as an entity form override",
+      "(@RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Forms', 10)), so opening a",
+      "Form record renders the visual builder. The 'Forms' nav item is therefore a",
+      "Records view on the Forms entity — pick/create a form, open it, build it.",
+      "The 'Responses & Analytics' item points at the FormsReportingDashboard Dashboard",
+      "record (DriverClass 'FormsReportingDashboard', registered by WP-F via",
+      "@RegisterClass(BaseDashboard, 'FormsReportingDashboard')) by RecordID.",
+      "The embedded Application Entities make the Forms admin entities browsable here."
     ],
     "fields": {
       "Name": "Forms",
@@ -15,14 +18,7 @@
       "DefaultForNewUser": false,
       "DefaultNavItems": [
         {
-          "Label": "Form Builder",
-          "Icon": "fa-solid fa-pen-ruler",
-          "ResourceType": "Custom",
-          "DriverClass": "FormsBuilderResource",
-          "isDefault": true
-        },
-        {
-          "Label": "All Forms",
+          "Label": "Forms",
           "Icon": "fa-solid fa-clipboard-list",
           "ResourceType": "Records",
           "Entity": "MJ_BizApps_Forms: Forms",
@@ -31,8 +27,8 @@
         {
           "Label": "Responses & Analytics",
           "Icon": "fa-solid fa-chart-column",
-          "ResourceType": "Custom",
-          "DriverClass": "FormsDashboardResource",
+          "ResourceType": "Dashboards",
+          "RecordID": "EB23CCFD-AAF5-48BE-8B81-33A3944AD898",
           "isDefault": true
         }
       ]
