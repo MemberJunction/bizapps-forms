@@ -695,3 +695,29 @@ native entities. This is the reporting differentiator no incumbent has.
     (b) the `Forms: Upsert Respondent Person` on-submit hook didn't create/link a Person — investigate;
     (c) real Turnstile/email/MJ:Files provider wiring; (d) CI token/mj-btn gate; (e) push to remote.
   - See `plans/PHASE1_DECOMPOSITION.md` for the work-package boundaries, seams, and per-branch commits.
+- **2026-06-30 (later) — UI-test-driven fixes + handoff.** Integration branch is
+  **`feature/phase1-foundation`** (local only; account is read-only on the org remote — nothing pushed).
+  HEAD `69239ad`. Landed since the parallel build: builder fix (codegen resync regenerated
+  `spCreateFormQuestion` + added `PublicLinkToken` to entity/resolver/Angular form), `PublicLinkToken`
+  minter→hook→builder wiring, **codegen appended into `V202606301305`** migration (checksum repaired on the
+  shared DB), **AI authoring reworked to a metadata-driven MJ AIPrompt** (`Forms: Form Designer` + Template +
+  `AIPromptModel` → Gemini 2.5 Pro; model lives in metadata, NOT code — see [[ai-model-selection-via-metadata]]),
+  **Forms home dashboard** tab (BaseDashboard, the §3.2 surface), Actions catalog seeded, and the
+  **OneQuestion render-mode bug** fixed. Metadata pushed to `MJ_Forms` (localhost:1456).
+  - **NEXT (resume here) — last mile for clickable public anonymous forms:**
+    1. **Build the `<mj-form>` widget element bundle** (DG-5) — `register-element.ts` compiles via `ngc` but is
+       never bundled; need an esbuild/`@angular/elements` `build:widget` → served at `/forms/widget/mj-form.js`.
+    2. **`/f/:slug` internal redeem (#2a)** in `packages/Server/src/respondent-host/` — resolve slug →
+       `FormDistribution.PublicLinkToken` → **POST** `http://localhost:<GRAPHQL_PORT>/magic-link/redeem?format=json`
+       (⚠️ GET is side-effect-free / returns 405 — redemption is POST only) → inject the anon JWT (XSS-safe,
+       data-attrs) → render. Then `GET /f/:slug` renders a live anonymous form end-to-end.
+  - **Then to close Phase 1:** real Turnstile/email(CommunicationEngine)/file(MJ:Files) provider wiring;
+    confirm Gemini AIPrompt actually runs in MJAPI (AI credential resolution); `Forms: Upsert Respondent Person`
+    hook not linking a Person; CI token/mj-btn gate; push once write access exists.
+  - **🚨 SUPERVISOR GOTCHAS (cost real time this session):** (a) Agent-tool **worktrees mis-fork off `main`** —
+    EVERY spawned agent must `git checkout -b <b> feature/phase1-foundation` AND verify (`git log` shows
+    foundation HEAD + `grep -c PublicLinkToken …/entity_subclasses.ts` >0) or STOP. (b) The **main checkout's
+    branch silently flips** on worktree creation — `git branch --show-current` before every commit (this is how
+    7 commits once landed on the wrong branch). (c) **User runs MJAPI/Explorer themselves — never start/restart
+    them.** (d) **`MJ_Forms` is the shared dev DB — never DROP it** (the `consolidate-migration` skill wants to;
+    don't). (e) AI keys are in `.env` (present); redeem is POST. State tracked in the task list + this log.
