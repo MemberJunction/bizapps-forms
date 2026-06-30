@@ -1,0 +1,162 @@
+<div class="fb">
+  <!-- Topbar -->
+  <header class="fb-top">
+    <input
+      #nameInput
+      class="fb-name"
+      [value]="record.Name"
+      (change)="setName(nameInput.value)"
+      aria-label="Form name"
+    />
+
+    <div class="fb-seg" role="group" aria-label="Render mode">
+      <button
+        type="button"
+        [class.is-on]="record.RenderMode === 'Scroll'"
+        [attr.aria-pressed]="record.RenderMode === 'Scroll'"
+        (click)="setRenderMode('Scroll')"
+      >Scroll</button>
+      <button
+        type="button"
+        [class.is-on]="record.RenderMode === 'OneQuestion'"
+        [attr.aria-pressed]="record.RenderMode === 'OneQuestion'"
+        (click)="setRenderMode('OneQuestion')"
+      >One question</button>
+    </div>
+
+    <div class="fb-spacer"></div>
+
+    @if (statusMessage) {
+      <span class="fb-status" role="status">{{ statusMessage }}</span>
+    }
+    <button type="button" class="mjf-btn mjf-btn--primary" [disabled]="busy" (click)="publish()">
+      <i class="fa-solid fa-rocket" aria-hidden="true"></i> Publish
+    </button>
+  </header>
+
+  <!-- Tabs -->
+  <nav class="fb-tabs" role="tablist" aria-label="Builder workspace">
+    <button
+      type="button"
+      class="fb-tab"
+      role="tab"
+      [class.is-on]="activeTab === 'build'"
+      [attr.aria-selected]="activeTab === 'build'"
+      (click)="setTab('build')"
+    >Build</button>
+    <button
+      type="button"
+      class="fb-tab"
+      role="tab"
+      [class.is-on]="activeTab === 'distribute'"
+      [attr.aria-selected]="activeTab === 'distribute'"
+      (click)="setTab('distribute')"
+    >Distribute</button>
+  </nav>
+
+  @if (activeTab === 'build') {
+    <div class="fb-body">
+      <!-- LEFT: palette -->
+      <nav class="fb-pane fb-pane--left" aria-label="Add question palette">
+        @for (group of paletteGroups; track group) {
+          <div class="fb-palette-group">
+            <p class="fb-palette-title">{{ group }}</p>
+            <div class="fb-palette" role="list">
+              @for (meta of typesInGroup(group); track meta.type) {
+                <button
+                  type="button"
+                  class="fb-palette-item"
+                  role="listitem"
+                  [disabled]="busy"
+                  (click)="addQuestion(meta.type)"
+                >
+                  <i [class]="meta.icon" aria-hidden="true"></i> {{ meta.label }}
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </nav>
+
+      <!-- CENTER: canvas -->
+      <section class="fb-pane fb-pane--center" aria-label="Form canvas">
+        <div class="fb-canvas">
+          <div class="fb-canvas-head">
+            <h2>{{ record.Name }}</h2>
+            @if (record.Description) {
+              <p>{{ record.Description }}</p>
+            }
+          </div>
+
+          @for (page of pages; track page.entity.ID) {
+            @if (page.questions.length === 0) {
+              <p class="fb-canvas-empty">Add a question from the palette to get started.</p>
+            }
+            @for (node of page.questions; track node.entity.ID) {
+              <article
+                class="fb-q"
+                [class.is-selected]="node.entity.ID === selectedQuestionId"
+                tabindex="0"
+                (click)="selectQuestion(node)"
+                (keydown.enter)="selectQuestion(node)"
+                [attr.aria-label]="'Edit question ' + node.entity.Prompt"
+              >
+                <div class="fb-q-main">
+                  <div class="fb-q-top">
+                    <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
+                    <span class="mjf-pill"><i [class]="metaFor(node).icon" aria-hidden="true"></i> {{ metaFor(node).label }}</span>
+                    @if (node.entity.IsRequired) {
+                      <span class="mjf-pill">Required</span>
+                    }
+                  </div>
+                  <div class="fb-q-label">{{ node.entity.Prompt }}</div>
+                  @if (node.entity.HelpText) {
+                    <div class="fb-q-help">{{ node.entity.HelpText }}</div>
+                  }
+                </div>
+                <div class="fb-q-side">
+                  <button
+                    type="button"
+                    class="fb-q-btn"
+                    [disabled]="busy"
+                    (click)="moveQuestion(page, node, -1); $event.stopPropagation()"
+                    aria-label="Move up"
+                  ><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
+                  <button
+                    type="button"
+                    class="fb-q-btn"
+                    [disabled]="busy"
+                    (click)="moveQuestion(page, node, 1); $event.stopPropagation()"
+                    aria-label="Move down"
+                  ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+                  <button
+                    type="button"
+                    class="fb-q-btn"
+                    [disabled]="busy"
+                    (click)="deleteQuestion(page, node); $event.stopPropagation()"
+                    aria-label="Delete question"
+                  ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+                </div>
+              </article>
+            }
+          }
+        </div>
+      </section>
+
+      <!-- RIGHT: properties -->
+      <aside class="fb-pane fb-pane--right" aria-label="Question properties">
+        <mjf-question-editor
+          [node]="selectedNode"
+          [conditionalSources]="conditionalSources"
+          (questionChanged)="onQuestionChanged($event)"
+          (addOptionRequested)="onAddOption($event)"
+          (removeOptionRequested)="onRemoveOption($event)"
+        ></mjf-question-editor>
+      </aside>
+    </div>
+  } @else {
+    <div class="fb-distribute">
+      <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
+    </div>
+  }
+</div>

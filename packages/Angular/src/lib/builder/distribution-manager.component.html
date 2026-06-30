@@ -1,0 +1,116 @@
+<div class="dm">
+  <div class="dm-create">
+    <div class="mjf-field" style="margin:0">
+      <label class="mjf-field-label" for="dm-name">New distribution name</label>
+      <input
+        id="dm-name"
+        type="text"
+        class="mjf-input"
+        [(ngModel)]="newName"
+        placeholder="e.g. Public link — homepage"
+      />
+    </div>
+    <div class="mjf-field" style="margin:0">
+      <label class="mjf-field-label" for="dm-channel">Channel</label>
+      <select id="dm-channel" class="mjf-input" [(ngModel)]="newChannel">
+        @for (ch of channels; track ch) {
+          <option [value]="ch">{{ ch }}</option>
+        }
+      </select>
+    </div>
+    <button
+      type="button"
+      class="mjf-btn mjf-btn--primary"
+      [disabled]="creating || newName.trim().length === 0"
+      (click)="create()"
+    >
+      <i class="fa-solid fa-plus" aria-hidden="true"></i> Create
+    </button>
+  </div>
+
+  @if (loading) {
+    <p class="dm-empty">Loading distributions&hellip;</p>
+  } @else if (distributions.length === 0) {
+    <p class="dm-empty">No distributions yet. Create one above to share this form.</p>
+  } @else {
+    <div class="dm-list">
+      @for (dist of distributions; track dist.ID) {
+        <div class="dm-card">
+          <div class="dm-card-head">
+            <span class="dm-card-name">{{ dist.Name }}</span>
+            <span class="mjf-pill">{{ dist.ChannelType }}</span>
+            <span [class]="statusClass(dist)">{{ dist.Status }}</span>
+          </div>
+
+          <div class="dm-card-body">
+            <div class="dm-artifact">
+              <span class="mjf-field-label">Public link</span>
+              <div class="dm-code">
+                <code>{{ publicUrl(dist) }}</code>
+                <button
+                  type="button"
+                  class="mjf-btn mjf-btn--ghost dm-copy"
+                  (click)="copy(publicUrl(dist))"
+                  aria-label="Copy public link"
+                >
+                  <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                </button>
+              </div>
+
+              @if (dist.ChannelType === 'Embed') {
+                <span class="mjf-field-label" style="margin-top:8px">Embed snippet</span>
+                <div class="dm-code">
+                  <code>{{ embedSnippet(dist) }}</code>
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--ghost dm-copy"
+                    (click)="copy(embedSnippet(dist))"
+                    aria-label="Copy embed snippet"
+                  >
+                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                  </button>
+                </div>
+              }
+            </div>
+
+            @if (dist.ChannelType === 'QR' && qrSvg(dist)) {
+              <div class="dm-qr" [innerHTML]="qrSvg(dist)"></div>
+            }
+          </div>
+
+          <div class="dm-meta">
+            <label>
+              Max responses
+              <input
+                #maxInput
+                type="number"
+                min="0"
+                class="mjf-input dm-num"
+                [value]="dist.MaxResponses ?? ''"
+                (change)="setMax(dist, maxInput.value)"
+                placeholder="∞"
+              />
+            </label>
+            <span>{{ dist.ResponseCount }} received</span>
+          </div>
+
+          <div class="dm-actions">
+            <button
+              type="button"
+              class="mjf-btn"
+              [class.mjf-btn--primary]="dist.Status !== 'Active'"
+              [class.mjf-btn--ghost]="dist.Status === 'Active'"
+              (click)="toggleOpen(dist)"
+            >
+              @if (dist.Status === 'Active') {
+                <i class="fa-solid fa-lock" aria-hidden="true"></i> Close
+              } @else {
+                <i class="fa-solid fa-lock-open" aria-hidden="true"></i> Open
+              }
+            </button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+</div>

@@ -1,16 +1,16 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Vitest config for the forms-ng package.
- *
- * Scoped to pure (Angular-free) logic — currently the reporting-dashboard
- * aggregation helpers. The Angular components themselves are exercised by the
- * Explorer build (ngc strictTemplates) rather than unit tests here.
+ * Vitest config for the forms-ng package. Targets the pure-logic builder modules
+ * (snapshot builder, JSON field codecs, question-type catalog, distribution-link
+ * helpers, QR encoder) — none of which need Angular TestBed or a DOM. Component
+ * classes are intentionally NOT unit-tested here; their behaviour is covered by the
+ * pure services they delegate to.
  */
 export default defineConfig({
   test: {
-    include: ['src/**/*.spec.ts'],
     environment: 'node',
-    globals: true,
+    include: ['src/lib/builder/**/*.spec.ts'],
+    globals: false,
   },
 });
