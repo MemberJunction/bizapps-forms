@@ -1,0 +1,92 @@
+<div class="reporting">
+  <header class="rep-header">
+    <div class="title-row">
+      <h2 class="rep-title"><i class="fa-solid fa-chart-column"></i> Forms Reporting</h2>
+      @if (useMock) {
+        <span class="mock-badge" title="Showing seeded sample data until live responses exist">Sample data</span>
+      }
+    </div>
+
+    <div class="controls">
+      @if (forms.length > 0) {
+        <label class="form-picker">
+          <span class="sr-only">Select a form</span>
+          <select
+            [ngModel]="selectedForm?.formId"
+            (ngModelChange)="onFormChange($event)"
+            aria-label="Select a form to report on">
+            @for (f of forms; track f.formId) {
+              <option [value]="f.formId">{{ f.name }} ({{ f.responseCount }})</option>
+            }
+          </select>
+        </label>
+      }
+      <div class="export-group" role="group" aria-label="Export responses">
+        <button type="button" class="btn" [disabled]="!report || loading" (click)="export('csv')">
+          <i class="fa-solid fa-file-csv"></i> CSV
+        </button>
+        <button type="button" class="btn" [disabled]="!report || loading" (click)="export('excel')">
+          <i class="fa-solid fa-file-excel"></i> Excel
+        </button>
+      </div>
+    </div>
+  </header>
+
+  @if (errorMessage) {
+    <div class="alert" role="alert">
+      <i class="fa-solid fa-triangle-exclamation"></i> {{ errorMessage }}
+    </div>
+  }
+
+  @if (loading) {
+    <div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>
+  }
+
+  @if (!loading && forms.length === 0) {
+    <div class="empty-state">
+      <i class="fa-solid fa-inbox"></i>
+      <p>No published forms to report on yet.</p>
+    </div>
+  }
+
+  @if (report; as r) {
+    <nav class="tabs" role="tablist">
+      @for (t of tabs; track t.key) {
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.tab--active]="activeTab === t.key"
+          [attr.aria-selected]="activeTab === t.key"
+          (click)="setTab(t.key)">
+          <i [class]="t.icon"></i> {{ t.label }}
+        </button>
+      }
+    </nav>
+
+    <section class="tab-body">
+      @switch (activeTab) {
+        @case ('summary') {
+          <mj-forms-summary-stats [stats]="r.summary"></mj-forms-summary-stats>
+        }
+        @case ('questions') {
+          <div class="breakdowns">
+            @for (b of r.breakdowns; track b.questionId) {
+              <mj-forms-question-breakdown [breakdown]="b"></mj-forms-question-breakdown>
+            }
+          </div>
+        }
+        @case ('funnel') {
+          <mj-forms-funnel-chart [steps]="r.funnel"></mj-forms-funnel-chart>
+        }
+        @case ('responses') {
+          @if (responseDetail; as d) {
+            <mj-forms-response-detail [detail]="d" (back)="closeResponse()"></mj-forms-response-detail>
+          } @else {
+            <mj-forms-response-list [rows]="r.responses" (open)="openResponse($event)"></mj-forms-response-list>
+          }
+        }
+      }
+    </section>
+  }
+</div>

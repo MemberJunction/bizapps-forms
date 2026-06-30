@@ -15,9 +15,15 @@ import './lib/generated/generated-forms.module';
 // Import class registrations manifest
 import { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 
+// WP-F (reporting dashboard): side-effect import fires @RegisterClass(BaseDashboard, 'FormsReportingDashboard')
+import './lib/dashboard';
+
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
+
+// WP-F (reporting dashboard) public surface
+export * from './lib/dashboard';
 
 /**
  * Bootstrap function called during MJExplorer initialization.
