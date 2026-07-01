@@ -2,7 +2,7 @@
   {
     "fields": {
       "Name": "Forms: Response Analyzer",
-      "Description": "On-submit analyzer for the MJ Forms Open App. Given a form response's free-text (ShortText/LongText) answers as an Answers array, scores each answer 0-100 for quality and returns a parallel answers array (same order) with score, rationale, sentiment, and theme. One call per response. The model/vendor is metadata-driven: SelectionStrategy=Specific pins the related AI Prompt Model below, so installers swap the model here (in metadata) rather than in code.",
+      "Description": "On-submit analyzer for the MJ Forms Open App. Given a form response's free-text (ShortText/LongText) answers as an Answers array, scores each answer 0-100 for quality and returns a parallel answers array (same order) with score and rationale. One call per response. The model/vendor is metadata-driven: SelectionStrategy=Specific pins the related AI Prompt Model below, so installers swap the model here (in metadata) rather than in code.",
       "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Response Analyzer",
       "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
       "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",

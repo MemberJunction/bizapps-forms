@@ -87,6 +87,51 @@ describe('AutosaveController', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it('settle() awaits an in-flight save so a submit never overlaps it', async () => {
+    let resolveSave!: (id: string) => void;
+    const order: string[] = [];
+    const save = vi.fn().mockImplementation(
+      () => new Promise<string>((res) => (resolveSave = (id) => { order.push('save-done'); res(id); })),
+    );
+    const c = new AutosaveController(save, () => {}, 100);
+
+    c.ping();
+    await vi.advanceTimersByTimeAsync(100); // save is now in flight
+    expect(save).toHaveBeenCalledTimes(1);
+
+    const settled = c.settle().then(() => order.push('settle-resolved'));
+    // settle() must NOT resolve while the save is still in flight.
+    await Promise.resolve();
+    expect(order).toEqual([]);
+
+    resolveSave('r1');
+    await settled;
+    // settle resolved only AFTER the in-flight save completed.
+    expect(order).toEqual(['save-done', 'settle-resolved']);
+  });
+
+  it('settle() cancels a pending (not-yet-fired) save and resolves immediately', async () => {
+    const save = vi.fn().mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 500);
+
+    c.ping();
+    await c.settle();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('settle() is fail-soft: a rejected in-flight save does not reject settle()', async () => {
+    let rejectSave!: (e: Error) => void;
+    const save = vi.fn().mockImplementation(() => new Promise<string>((_res, rej) => (rejectSave = rej)));
+    const c = new AutosaveController(save, () => {}, 100);
+
+    c.ping();
+    await vi.advanceTimersByTimeAsync(100);
+    const settled = c.settle();
+    rejectSave(new Error('network'));
+    await expect(settled).resolves.toBeUndefined();
+  });
+
   it('dispose() stops future pings from saving', async () => {
     const save = vi.fn().mockResolvedValue('r1');
     const c = new AutosaveController(save, () => {}, 500);

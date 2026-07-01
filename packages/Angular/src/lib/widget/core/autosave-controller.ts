@@ -35,6 +35,8 @@ const DEFAULT_DEBOUNCE_MS = 1500;
 export class AutosaveController {
   private timer: number | null = null;
   private inFlight = false;
+  /** The promise for the currently-running save, so callers can await it settling. */
+  private inFlightSave: Promise<void> | null = null;
   /** A ping arrived while a save was in flight — save again once it settles. */
   private rearm = false;
   private disposed = false;
@@ -71,6 +73,21 @@ export class AutosaveController {
     this.rearm = false;
   }
 
+  /**
+   * Cancel the pending debounce AND await any save that is already in flight, so a caller
+   * (the final submit) can guarantee no autosave write is still on the wire carrying the
+   * same `clientResponseId`. This is what prevents the widget from firing two overlapping
+   * writes with the same idempotency key (the source of the cosmetic PK-collision noise).
+   * Never re-arms and never throws — a failed in-flight save is swallowed (fail-soft).
+   */
+  public async settle(): Promise<void> {
+    this.clearTimer();
+    this.rearm = false;
+    if (this.inFlightSave) {
+      await this.inFlightSave;
+    }
+  }
+
   /** Stop all activity; a controller is dead after this. */
   public dispose(): void {
     this.disposed = true;
@@ -81,17 +98,25 @@ export class AutosaveController {
     this.clearTimer();
     this.timer = this.timers.setTimeout(() => {
       this.timer = null;
-      void this.flush();
+      this.flush();
     }, this.debounceMs);
   }
 
   /** Perform one save now; re-arm if a ping arrived meanwhile. */
-  private async flush(): Promise<void> {
+  private flush(): void {
     if (this.disposed || this.inFlight) {
       return;
     }
     this.inFlight = true;
     this.setStatus('saving');
+    // Track the running save so settle() can await it (a submit must not overlap an
+    // in-flight autosave sharing the same clientResponseId).
+    this.inFlightSave = this.runSave();
+    void this.inFlightSave;
+  }
+
+  /** The awaited body of one save; always resolves (fail-soft), then re-arms if needed. */
+  private async runSave(): Promise<void> {
     try {
       await this.save();
       this.setStatus('saved');
@@ -100,6 +125,7 @@ export class AutosaveController {
       this.setStatus('error');
     } finally {
       this.inFlight = false;
+      this.inFlightSave = null;
       if (this.rearm && !this.disposed) {
         this.rearm = false;
         this.setStatus('pending');

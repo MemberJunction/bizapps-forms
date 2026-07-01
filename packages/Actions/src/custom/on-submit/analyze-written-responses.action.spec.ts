@@ -180,8 +180,8 @@ describe('Forms: Analyze Written Responses', () => {
       { ID: 'q3', QuestionType: 'LongText', Prompt: 'What to improve?' },
     ];
     const model = stubModel([
-      { score: 90, rationale: 'Clear and positive.', sentiment: 'positive', theme: 'venue' },
-      { score: 55, rationale: 'Somewhat vague.', sentiment: 'neutral', theme: 'length' },
+      { score: 90, rationale: 'Clear and positive.' },
+      { score: 55, rationale: 'Somewhat vague.' },
     ]);
     setResponseAnalyzerModel(model);
 

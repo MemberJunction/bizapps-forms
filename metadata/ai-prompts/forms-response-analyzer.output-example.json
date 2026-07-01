@@ -3,16 +3,12 @@
     {
       "questionPrompt": "What did you like most about the event?",
       "score": 85,
-      "rationale": "Specific, constructive feedback naming the keynote and the networking format; clearly positive and actionable.",
-      "sentiment": "positive",
-      "theme": "event content"
+      "rationale": "Specific, constructive feedback naming the keynote and the networking format; clearly positive and actionable."
     },
     {
       "questionPrompt": "How could we improve next time?",
       "score": 40,
-      "rationale": "Very brief and vague ('make it better'); offers little the organizers can act on.",
-      "sentiment": "neutral",
-      "theme": "logistics"
+      "rationale": "Very brief and vague ('make it better'); offers little the organizers can act on."
     }
   ]
 }
