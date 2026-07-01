@@ -48,6 +48,14 @@ export interface PersistenceInputs {
    * and for promoting a Partial to Complete on final submit.
    */
   existingResponseId?: string;
+  /**
+   * The widget's stable, client-generated response id (a v4 UUID). On CREATE it becomes the
+   * FormResponse primary key, so every subsequent autosave/submit carrying the same id
+   * upserts THIS row — the correctness key that works even when the anonymous session id is
+   * blank. Absent only for callers that predate the client-id contract (then the DB default
+   * PK is used).
+   */
+  clientResponseId?: string;
 }
 
 /**
@@ -60,6 +68,12 @@ export interface PersistenceResult {
   responseId?: string;
   status?: 'Complete' | 'Partial';
   message?: string;
+  /**
+   * True when this submission was an idempotent no-op against a row a CONCURRENT request had
+   * already Completed (duplicate-key recovery hit a terminal row). The caller must NOT re-fire
+   * on-submit hooks — the winning request already did — so double-firing is avoided on the race.
+   */
+  deduped?: boolean;
 }
 
 /** Internal result of saving the parent response row. */
@@ -67,6 +81,24 @@ interface SaveResponseResult {
   ok: boolean;
   entity?: mjBizAppsFormsFormResponseEntity;
   message?: string;
+  /**
+   * True when this write targeted a PRE-EXISTING row (a normal upsert, or a duplicate-key
+   * recovery) — its answers must be cleared before re-inserting so the persisted set mirrors
+   * the latest submission. A fresh CREATE leaves this false (nothing to clear).
+   */
+  replacedExisting?: boolean;
+  /**
+   * True when this write TRANSITIONED the row to Complete for the first time (fresh Complete
+   * create, or Partial→Complete promotion) and the distribution ResponseCount should be
+   * incremented exactly once. Re-completing an already-Complete row is not countable.
+   */
+  countable?: boolean;
+  /**
+   * True when the row is already terminal (Complete) and this write left it untouched — the
+   * caller must NOT clear/re-insert answers or count. Used by the duplicate-key recovery when a
+   * concurrent request already Completed the row (idempotent no-op).
+   */
+  skipAnswers?: boolean;
 }
 
 /** Internal result of saving a single answer row. */
@@ -78,6 +110,27 @@ interface SaveAnswerResult {
 /** Read a failed Save/Delete's detail message in the MJ-prescribed way. */
 function saveError(entity: BaseEntity, fallback: string): string {
   return entity.LatestResult?.CompleteMessage ?? fallback;
+}
+
+/**
+ * True when a failed Save was rejected by the database for a duplicate PRIMARY KEY / UNIQUE
+ * constraint — i.e. a row with our adopted `clientResponseId` already exists. This is the
+ * signal that a CONCURRENT submit (double-click, autosave+submit overlap, or a network retry)
+ * won the race to create the row; the loser recovers by reconciling with it rather than
+ * surfacing a hard PK error. Matched on the SQL Server error text since the provider surfaces
+ * the raw message on `LatestResult.CompleteMessage`.
+ */
+function isDuplicateKeyError(entity: BaseEntity): boolean {
+  const message = entity.LatestResult?.CompleteMessage ?? '';
+  return /duplicate key|primary key constraint|unique (?:key )?constraint/i.test(message);
+}
+
+/** Canonical v4/v-agnostic UUID shape — a malformed client id is never used as a PK. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** True iff `value` is a syntactically valid uniqueidentifier string. */
+export function isValidUuid(value: string | undefined | null): boolean {
+  return typeof value === 'string' && UUID_RE.test(value);
 }
 
 /** Apply the (non-answer) column values common to create + update onto the response row. */
@@ -107,11 +160,59 @@ async function createResponse(
     contextUser,
   );
   response.NewRecord();
+  // Adopt the client-generated id as the primary key so every later autosave/submit carrying
+  // the same id upserts THIS row (works even with a blank session — see PersistenceInputs).
+  const adoptedId = isValidUuid(inputs.clientResponseId) ? (inputs.clientResponseId as string) : undefined;
+  if (adoptedId) {
+    response.ID = adoptedId;
+  }
+  applyResponseFields(response, inputs);
+  if (await response.Save()) {
+    return { ok: true, entity: response, replacedExisting: false, countable: inputs.complete };
+  }
+  // Save failed. If a CONCURRENT request already created the row at our adopted client id, the
+  // dedupe/adopt SELECTs missed it (they ran before that insert committed) and we collided on
+  // the PK. Recover by reconciling with the existing row — an idempotent upsert under the race
+  // that the DB primary key, not the pre-write lookups, is what actually serializes.
+  if (adoptedId && isDuplicateKeyError(response)) {
+    return reconcileDuplicate(provider, inputs, adoptedId, contextUser);
+  }
+  return { ok: false, message: saveError(response, 'Failed to save form response.') };
+}
+
+/**
+ * Reconcile with a row that a concurrent request created at our adopted client id (recovering
+ * from the duplicate-key collision in {@link createResponse}). Loads the existing row and:
+ *   - if it is already Complete, leaves it untouched (terminal — never downgrade to Partial, and
+ *     never double-count/re-write answers): the concurrent final submit already won;
+ *   - otherwise applies this submission's fields (updating a Partial in place, or promoting it to
+ *     Complete) and counts once only when it newly transitions to Complete.
+ */
+async function reconcileDuplicate(
+  provider: DatabaseProviderBase,
+  inputs: PersistenceInputs,
+  existingResponseId: string,
+  contextUser: UserInfo,
+): Promise<SaveResponseResult> {
+  const response = await provider.GetEntityObject<mjBizAppsFormsFormResponseEntity>(
+    FORM_RESPONSE_ENTITY,
+    contextUser,
+  );
+  if (!(await response.Load(existingResponseId))) {
+    // The colliding row could not be loaded (vanished again) — surface the original failure.
+    return { ok: false, message: 'Failed to save form response (duplicate id could not be reconciled).' };
+  }
+  if (response.Status === 'Complete') {
+    // Terminal: a concurrent final submit already recorded this response. Return it as-is.
+    return { ok: true, entity: response, replacedExisting: false, countable: false, skipAnswers: true };
+  }
+  // The existing row is Partial: update it in place, or promote it to Complete. It was never
+  // counted as a Partial, so a promotion counts once here.
   applyResponseFields(response, inputs);
   if (!(await response.Save())) {
-    return { ok: false, message: saveError(response, 'Failed to save form response.') };
+    return { ok: false, message: saveError(response, 'Failed to reconcile form response.') };
   }
-  return { ok: true, entity: response };
+  return { ok: true, entity: response, replacedExisting: true, countable: inputs.complete };
 }
 
 /** UPDATE/PROMOTE an existing parent FormResponse row in place; returns it or a failure. */
@@ -129,11 +230,13 @@ async function updateResponse(
     // The row vanished between lookup and save — fall back to creating a fresh one.
     return createResponse(provider, inputs, contextUser);
   }
+  // Count a promotion once: only when this write flips a not-yet-Complete row to Complete.
+  const wasComplete = response.Status === 'Complete';
   applyResponseFields(response, inputs);
   if (!(await response.Save())) {
     return { ok: false, message: saveError(response, 'Failed to update form response.') };
   }
-  return { ok: true, entity: response };
+  return { ok: true, entity: response, replacedExisting: true, countable: inputs.complete && !wasComplete };
 }
 
 /** Map one validated answer onto the FormResponseAnswer typed columns and Save it. */
@@ -270,9 +373,16 @@ export async function persistSubmission(
   }
   const responseId = saved.entity.ID;
 
-  // On an upsert the prior answers must be cleared first so the persisted set mirrors the
-  // latest submission (no stale/duplicate answers across autosaves or promotion).
-  if (isUpsert) {
+  // A concurrent request already Completed this row (duplicate-key recovery): it is terminal, so
+  // its answers and count are already recorded — return the existing id/status untouched.
+  if (saved.skipAnswers) {
+    return { ok: true, responseId, status: saved.entity.Status as 'Complete' | 'Partial', deduped: true };
+  }
+
+  // When this write targeted a pre-existing row (upsert or duplicate-key recovery), clear its
+  // prior answers first so the persisted set mirrors the latest submission (no stale/duplicate
+  // answers across autosaves or promotion).
+  if (saved.replacedExisting) {
     const cleared = await replaceAnswersClear(provider, responseId, contextUser);
     if (!cleared.ok) {
       return { ok: false, message: cleared.message };
@@ -284,7 +394,9 @@ export async function persistSubmission(
     return { ok: false, message: inserted.message };
   }
 
-  if (inputs.complete) {
+  // Count once, only when this write newly transitioned the row to Complete (fresh Complete or
+  // Partial→Complete promotion) — never when re-completing an already-counted row.
+  if (saved.countable) {
     await incrementResponseCount(provider, inputs.distributionId, contextUser);
   }
   return { ok: true, responseId, status: inputs.complete ? 'Complete' : 'Partial' };

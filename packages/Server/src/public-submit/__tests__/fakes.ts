@@ -34,6 +34,8 @@ export interface ExistingResponseRow {
   Status: 'Complete' | 'Partial';
   FormVersionID: string;
   AnonymousSessionID: string;
+  /** Optional stored SourceMetadata JSON, exercised by the client-id LIKE proof lookups. */
+  SourceMetadata?: string;
 }
 
 /** Configuration for {@link makeFakeProvider}. */
@@ -53,6 +55,14 @@ export interface FakeProviderConfig {
    * (a Complete row) and partial upsert/promotion (a Partial row).
    */
   existingResponses?: ExistingResponseRow[];
+  /**
+   * FormResponse rows that already exist in the "database" for PK-collision + Load purposes but
+   * are INVISIBLE to `RunView` lookups — modeling the TOCTOU race window in which a concurrent
+   * request has committed the row after this request's dedupe/adopt SELECTs already ran and
+   * missed. A CREATE targeting one of these ids collides on the primary key (as real SQL Server
+   * would), and the subsequent recovery `Load` finds it.
+   */
+  concurrentlyCreated?: ExistingResponseRow[];
 }
 
 /** The fake provider plus inspection handles for tests. */
@@ -67,26 +77,74 @@ const FORM_RESPONSE_ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
 const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 const FORM_VERSION_ENTITY = 'MJ_BizApps_Forms: Form Versions';
 
+/**
+ * A shared "row store" keyed by FormResponse ID — the persistent side of the fake DB. Seeded with
+ * both `RunView`-visible rows and race-only rows, it powers PK-collision detection on CREATE and
+ * field population on the recovery Load.
+ */
+type ResponseStore = Map<string, ExistingResponseRow>;
+
 /** Build a minimal BaseEntity-like record that records its field writes. */
-function makeFakeEntity(entityName: string, saved: SavedRecord[], failSave: boolean) {
+function makeFakeEntity(
+  entityName: string,
+  saved: SavedRecord[],
+  failSave: boolean,
+  responseStore: ResponseStore,
+) {
   const values: Record<string, unknown> = {};
+  const isResponse = entityName === FORM_RESPONSE_ENTITY;
+  let isNew = false;
   const record = new Proxy(
     {
       ID: `id-${entityName}-${saved.length + 1}`,
       LatestResult: { CompleteMessage: 'forced save failure' },
-      NewRecord: () => true,
+      NewRecord: () => {
+        isNew = true;
+        return true;
+      },
       Load: async (id?: string) => {
-        // Emulate loading an existing row: adopt its id so update/promote key on it correctly.
+        // Emulate loading an existing row: adopt its id so update/promote key on it correctly,
+        // and hydrate the persisted fields (Status especially) so promote-vs-update count logic
+        // reads the row's PRIOR status.
         if (typeof id === 'string' && id.length > 0) {
           record.ID = id;
+          const stored = isResponse ? responseStore.get(id) : undefined;
+          if (stored) {
+            values.Status = stored.Status;
+            values.FormVersionID = stored.FormVersionID;
+            values.AnonymousSessionID = stored.AnonymousSessionID;
+            if (stored.SourceMetadata !== undefined) {
+              values.SourceMetadata = stored.SourceMetadata;
+            }
+          }
         }
+        isNew = false;
         return true;
       },
       Save: async () => {
         if (failSave) {
           return false;
         }
+        // Emulate the DB PRIMARY KEY: a fresh insert whose id already exists is rejected exactly
+        // as SQL Server would — the signal the persistence layer recovers from under a race.
+        if (isResponse && isNew && responseStore.has(record.ID)) {
+          record.LatestResult = {
+            CompleteMessage:
+              `Violation of PRIMARY KEY constraint 'PK_FormResponse'. Cannot insert duplicate key ` +
+              `in object '__mj_BizAppsForms.FormResponse'. The duplicate key value is (${record.ID}).`,
+          };
+          return false;
+        }
         saved.push({ entityName, values: { ...values } });
+        if (isResponse) {
+          responseStore.set(record.ID, {
+            ID: record.ID,
+            Status: values.Status as 'Complete' | 'Partial',
+            FormVersionID: values.FormVersionID as string,
+            AnonymousSessionID: (values.AnonymousSessionID as string) ?? '',
+            SourceMetadata: values.SourceMetadata as string | undefined,
+          });
+        }
         return true;
       },
       Delete: async () => true,
@@ -125,6 +183,14 @@ function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo 
 export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   const saved: SavedRecord[] = [];
 
+  // The persistent row store. RunView-visible rows AND race-only rows both live here (so a
+  // CREATE collides and the recovery Load resolves); only `existingResponses` is returned by
+  // RunView, so `concurrentlyCreated` rows are the invisible-to-SELECT race window.
+  const responseStore: ResponseStore = new Map();
+  for (const row of [...(config.existingResponses ?? []), ...(config.concurrentlyCreated ?? [])]) {
+    responseStore.set(row.ID, row);
+  }
+
   const runView = async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
     const name = params.EntityName;
     if (config.failRunViewFor && name === config.failRunViewFor) {
@@ -153,7 +219,7 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     RunView: runView,
     RunViews: async () => [],
     GetEntityObject: async (entityName: string) =>
-      makeFakeEntity(entityName, saved, config.failSaveFor === entityName),
+      makeFakeEntity(entityName, saved, config.failSaveFor === entityName, responseStore),
     EntityByName: (entityName: string) =>
       makeFakeEntityInfo(entityName, config.createPermissions[entityName] ?? false),
   };
@@ -177,12 +243,28 @@ function matchesResponseFilter(row: ExistingResponseRow, filter: string): boolea
     const m = filter.match(new RegExp(`(?:^|\\W)${column}='([^']*)'`));
     return m === null || m[1] === value;
   };
+  // A bare `Status='Partial'` predicate (no explicit `=`) is emitted literally by the adopt/by-id
+  // lookups; the eq() form above already covers it.
   return (
     eq('Status', row.Status) &&
     eq('ID', row.ID) &&
     eq('AnonymousSessionID', row.AnonymousSessionID) &&
-    eq('FormVersionID', row.FormVersionID)
+    eq('FormVersionID', row.FormVersionID) &&
+    matchesSourceMetadataLike(row, filter)
   );
+}
+
+/**
+ * Emulate the `SourceMetadata LIKE '%...%' ESCAPE '\'` predicate the client-id proof lookups add:
+ * the stored SourceMetadata must contain the (unescaped) needle. Absent from the filter => matches.
+ */
+function matchesSourceMetadataLike(row: ExistingResponseRow, filter: string): boolean {
+  const m = filter.match(/SourceMetadata\s+LIKE\s+'%(.*?)%'\s+ESCAPE/i);
+  if (m === null) {
+    return true;
+  }
+  const needle = m[1].replace(/\\([\\%_])/g, '$1');
+  return (row.SourceMetadata ?? '').includes(needle);
 }
 
 /** Shape a RunViewResult with sensible defaults. */

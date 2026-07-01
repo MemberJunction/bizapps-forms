@@ -35,6 +35,7 @@ function validSubmission(overrides?: Partial<PipelineSubmission>): PipelineSubmi
 
 interface BuildOptions {
   existingResponses?: ExistingResponseRow[];
+  concurrentlyCreated?: ExistingResponseRow[];
   failRunViewFor?: string;
   fireHooks?: PipelineContext['fireHooks'];
 }
@@ -46,11 +47,13 @@ function build(options: BuildOptions = {}): { ctx: PipelineContext; fake: FakePr
     version: makeVersion(definition),
     createPermissions: respondentPermissions(),
     existingResponses: options.existingResponses,
+    concurrentlyCreated: options.concurrentlyCreated,
     failRunViewFor: options.failRunViewFor,
   });
   const ctx: PipelineContext = {
     provider: fake.provider,
     contextUser: makeContextUser(),
+    elevatedUser: makeContextUser(),
     sessionId: SESSION,
     fireHooks: options.fireHooks,
   };
@@ -211,5 +214,219 @@ describe('client-supplied responseId ownership guard (autosave seam)', () => {
 
     expect(result.success).toBe(true);
     expect(result.responseId).toBe('resp-partial-1');
+  });
+});
+
+const CLIENT_ID = '11111111-2222-4333-8444-555555555555';
+
+/** Build a pipeline ctx with a BLANK session — the routine public-submit case. */
+function buildBlankSession(options: BuildOptions = {}): { ctx: PipelineContext; fake: FakeProvider } {
+  const { ctx, fake } = build(options);
+  return { ctx: { ...ctx, sessionId: '' }, fake };
+}
+
+/** A stored Partial row created by the widget under a blank session (client id in SourceMetadata). */
+function clientPartialRow(): ExistingResponseRow {
+  return {
+    ID: CLIENT_ID,
+    Status: 'Partial',
+    FormVersionID: 'ver-1',
+    AnonymousSessionID: '',
+    SourceMetadata: JSON.stringify({ clientResponseId: CLIENT_ID }),
+  };
+}
+
+describe('client-id upsert idempotency with a BLANK session (the core bug)', () => {
+  it('CREATE: first partial adopts the client id as the FormResponse primary key', async () => {
+    const { ctx, fake } = buildBlankSession();
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    expect(result.responseId).toBe(CLIENT_ID);
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.ID).toBe(CLIENT_ID);
+    // The client id is persisted into SourceMetadata for later id-proof adoption.
+    expect(String(savedResponse?.values.SourceMetadata)).toContain(CLIENT_ID);
+  });
+
+  it('UPDATE: repeated partials with the same client id upsert ONE row (no duplicates)', async () => {
+    // The row from the first save already exists (blank session, client id in SourceMetadata).
+    const { ctx, fake } = buildBlankSession({ existingResponses: [clientPartialRow()] });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    // Adopted by id (not session), updated in place — still the same single row.
+    expect(result.responseId).toBe(CLIENT_ID);
+    const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(responseSaves).toHaveLength(1);
+    expect(responseSaves[0].values.Status).toBe('Partial');
+  });
+
+  it('PROMOTE: final submit with the same client id promotes the Partial to Complete in place', async () => {
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx, fake } = buildBlankSession({ existingResponses: [clientPartialRow()], fireHooks });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    const savedResponse = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(savedResponse?.values.Status).toBe('Complete');
+    expect(savedResponse?.values.SubmittedAt).toBeInstanceOf(Date);
+    expect(fireHooks).toHaveBeenCalledOnce();
+  });
+
+  it('idempotent repeat FINAL submit returns the SAME id without a second Complete row', async () => {
+    // Row already Complete under this client id (a re-fired submit / retry).
+    const completeByClientId: ExistingResponseRow = {
+      ID: CLIENT_ID,
+      Status: 'Complete',
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: '',
+      SourceMetadata: JSON.stringify({ clientResponseId: CLIENT_ID }),
+    };
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx, fake } = buildBlankSession({ existingResponses: [completeByClientId], fireHooks });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    // No new rows written, hooks not re-fired.
+    expect(fake.saved).toHaveLength(0);
+    expect(fireHooks).not.toHaveBeenCalled();
+  });
+
+  it('does NOT adopt a client id whose SourceMetadata proof is absent (guessed PK)', async () => {
+    // A Partial row exists at the guessed id, but WITHOUT the client-id proof in SourceMetadata.
+    const noProofRow: ExistingResponseRow = {
+      ID: CLIENT_ID,
+      Status: 'Partial',
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: '',
+      SourceMetadata: JSON.stringify({ distributionId: 'dist-1' }),
+    };
+    const { ctx, fake } = buildBlankSession({ existingResponses: [noProofRow] });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    // The proof lookup misses, so a fresh row is created (adopting the id as its own PK) rather
+    // than overwriting the unproven row.
+    expect(result.success).toBe(true);
+    const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(responseSaves).toHaveLength(1);
+  });
+});
+
+describe('concurrent duplicate-key recovery (the PK-violation race)', () => {
+  /** A row a concurrent request committed AFTER our SELECTs ran — invisible to RunView, collides on insert. */
+  function concurrentRow(status: 'Complete' | 'Partial'): ExistingResponseRow {
+    return {
+      ID: CLIENT_ID,
+      Status: status,
+      FormVersionID: 'ver-1',
+      AnonymousSessionID: '',
+      SourceMetadata: JSON.stringify({ clientResponseId: CLIENT_ID }),
+    };
+  }
+
+  it('final submit collides with a concurrent Partial: recovers by promoting it (one row, counted once, hooks once)', async () => {
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx, fake } = buildBlankSession({ concurrentlyCreated: [concurrentRow('Partial')], fireHooks });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    // Only the recovery UPDATE persisted — no duplicate row, and it is Complete.
+    const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(responseSaves).toHaveLength(1);
+    expect(responseSaves[0].values.Status).toBe('Complete');
+    // Counted once (promotion) and hooks fired once.
+    expect(fake.saved.map((r) => r.entityName)).toContain('MJ_BizApps_Forms: Form Distributions');
+    expect(fireHooks).toHaveBeenCalledOnce();
+  });
+
+  it('final submit collides with a row a concurrent request already Completed: idempotent no-op (no row/count/hooks)', async () => {
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx, fake } = buildBlankSession({ concurrentlyCreated: [concurrentRow('Complete')], fireHooks });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: false, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    // Nothing written: no duplicate response, no answers, no count — and hooks did NOT re-fire.
+    expect(fake.saved).toHaveLength(0);
+    expect(fireHooks).not.toHaveBeenCalled();
+  });
+
+  it('a late partial autosave collides with an already-Completed row: never downgrades it to Partial', async () => {
+    const { ctx, fake } = buildBlankSession({ concurrentlyCreated: [concurrentRow('Complete')] });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    // Reports the terminal status, and leaves the Complete row untouched (no Partial overwrite).
+    expect(result.status).toBe('Complete');
+    expect(result.responseId).toBe(CLIENT_ID);
+    expect(fake.saved).toHaveLength(0);
+  });
+});
+
+describe('submission shape validation (loud failure, not a throw)', () => {
+  it('returns a clear error result when distributionSlug is missing', async () => {
+    const { ctx } = build();
+    const result = await runSubmitPipeline(ctx, validSubmission({ distributionSlug: '' }));
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/distributionSlug/i);
+  });
+
+  it('returns a clear error result when formVersionId is missing', async () => {
+    const { ctx } = build();
+    const result = await runSubmitPipeline(ctx, validSubmission({ formVersionId: '' }));
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/formVersionId/i);
+  });
+
+  it('returns a clear error result when an answer is missing its question id', async () => {
+    const { ctx } = build();
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ answers: [{ questionId: '', textValue: 'x' }] }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/question id/i);
   });
 });

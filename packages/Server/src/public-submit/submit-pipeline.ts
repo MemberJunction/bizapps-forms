@@ -19,7 +19,12 @@ import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.servic
 import { persistSubmission } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
 import { FormsRateLimiter } from './rate-limit.service';
-import { findOwnedResponseById, findSessionResponse } from './response-lookup.service';
+import {
+  findAdoptableResponseById,
+  findOwnedResponseById,
+  findResponseById,
+  findSessionResponse,
+} from './response-lookup.service';
 import { checkRespondentScope } from './scope-check.service';
 import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
@@ -35,11 +40,14 @@ export interface PipelineSubmission {
   clientMeta?: { referrer?: string; userAgent?: string };
   answers: FormAnswerInput[];
   /**
-   * Transport-level autosave hint from the widget: the FormResponse it believes it is already
-   * editing this session. It is a hint ONLY — it is honored strictly after being verified to
-   * belong to the CURRENT anonymous session (see the ownership guard in the pipeline); an
-   * unverifiable / foreign id is ignored and the session-key lookup takes over. This is what
-   * lets one session hijacking another's partial (via a guessed/leaked id) fail closed.
+   * The widget's stable, client-generated response id (v4 UUID), sent on every autosave AND the
+   * final submit. It is the PRIMARY idempotency key: on first save it becomes the FormResponse
+   * primary key, and every repeat upserts THAT row — so autosave + submit collapse to ONE row
+   * even when the anonymous session id is blank (the routine public-submit case).
+   *
+   * Adopting an EXISTING row is guarded so a guessed/leaked id can never hijack another's partial:
+   * with a session, the row must be owned by it (`findOwnedResponseById`); with no session, the
+   * row must carry the same id in its SourceMetadata proof (`findAdoptableResponseById`).
    */
   clientResponseId?: string;
 }
@@ -47,21 +55,68 @@ export interface PipelineSubmission {
 /** Everything the pipeline needs from the request context. */
 export interface PipelineContext {
   provider: DatabaseProviderBase;
+  /**
+   * The anonymous magic-link principal. Used ONLY as the authorization GATE
+   * (`checkRespondentScope`) and for reading the (anon-readable) published definition — it has
+   * CanCreate-on-responses and cannot READ Form Responses.
+   */
   contextUser: UserInfo;
+  /**
+   * Elevated service principal (MJ system user) that performs the Form Response reads AND writes:
+   * dedupe/adoption lookups, quota counts, and the response/answer persistence. The anonymous
+   * respondent scope can't read responses (no privilege accretion), so those operations run here
+   * AFTER the anon scope check has authorized the request. See ON_SUBMIT_AUTOMATION_SPEC §7.
+   */
+  elevatedUser: UserInfo;
   /** Anonymous magic-link session id (mj_sid) from the UserPayload. */
   sessionId: string;
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
-  /** Injectable hook firing for tests; defaults to the real ActionEngine path. */
+  /**
+   * Injectable hook firing for tests; defaults to the real ActionEngine path. Hooks run under
+   * the system user (resolved inside {@link fireOnSubmitHooks}), NOT the anonymous respondent,
+   * so no context user is threaded here.
+   */
   fireHooks?: (
     ctx: { responseId: string; formId: string; formVersionId: string; distributionId: string },
-    contextUser: UserInfo,
   ) => Promise<HookFireResult[]>;
 }
 
 /** Convenience for a single-error failure result. */
 function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
   return { success: false, status: undefined, errors: errors ?? [{ message }] };
+}
+
+/**
+ * Explicit required-field validation of the incoming submission shape. Returns a clean failure
+ * RESULT (never throws) when a required transport field is missing/malformed, so the widget
+ * always gets a rendered error rather than a blank screen. This is the loud-failure backstop for
+ * contract drift between the widget mapping, the GraphQL DTO, and this pipeline.
+ */
+export function validateSubmissionShape(submission: PipelineSubmission): FormSubmissionResult | undefined {
+  if (!submission || typeof submission !== 'object') {
+    return fail('Malformed submission.');
+  }
+  if (!isNonEmptyString(submission.distributionSlug)) {
+    return fail('Missing form link (distributionSlug).');
+  }
+  if (!isNonEmptyString(submission.formVersionId)) {
+    return fail('Missing form version (formVersionId).');
+  }
+  if (!Array.isArray(submission.answers)) {
+    return fail('Missing answers.');
+  }
+  for (const answer of submission.answers) {
+    if (!answer || !isNonEmptyString(answer.questionId)) {
+      return fail('An answer is missing its question id.');
+    }
+  }
+  return undefined;
+}
+
+/** True for a present, non-blank string. */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 /** The post-submit confirmation/redirect lifted from the form settings. */
@@ -78,6 +133,14 @@ export async function runSubmitPipeline(
   ctx: PipelineContext,
   submission: PipelineSubmission,
 ): Promise<FormSubmissionResult> {
+  // 0. Shape guard: the required transport fields must be present and well-formed. A drift or a
+  //    malformed client payload fails LOUDLY here with a clear result — never a throw that would
+  //    yield a blank screen, and never a silent partial write.
+  const shape = validateSubmissionShape(submission);
+  if (shape) {
+    return shape;
+  }
+
   // 1. Anonymous scope: CanCreate on responses only (no privilege accretion).
   const scope = checkRespondentScope(ctx.provider, ctx.contextUser);
   if (!scope.allowed) {
@@ -109,11 +172,11 @@ export async function runSubmitPipeline(
     return fail('Too many submissions; please retry shortly.');
   }
 
-  // 5. Dedupe (Task 1) — only on completion. If this session already Completed this form,
-  //    short-circuit rather than writing a second row. FAIL-CLOSED: a lookup-query error
-  //    rejects the resubmit (never silently creates a duplicate).
+  // 5. Dedupe (Task 1) — only on completion. If this session (or this client response id)
+  //    already Completed this form, short-circuit rather than writing a second row.
+  //    FAIL-CLOSED: a lookup-query error rejects the resubmit (never silently duplicates).
   if (complete) {
-    const dedupe = await checkDuplicate(ctx, resolved);
+    const dedupe = await checkDuplicate(ctx, resolved, submission);
     if (dedupe) {
       return dedupe;
     }
@@ -158,18 +221,22 @@ export async function runSubmitPipeline(
         sessionId: ctx.sessionId,
         distributionId: resolved.distribution.ID,
         clientMeta: submission.clientMeta,
+        clientResponseId: submission.clientResponseId,
       }),
       answers: validation.answers,
       existingResponseId: existingPartial.response?.ID,
+      clientResponseId: submission.clientResponseId,
     },
-    ctx.contextUser,
+    ctx.elevatedUser,
   );
   if (!persisted.ok) {
     return fail(persisted.message);
   }
 
-  // 10. Fire on-submit hooks (complete only; best-effort, never fails the submit).
-  if (complete) {
+  // 10. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
+  //     persistence reports a `deduped` no-op — a concurrent request already Completed this row
+  //     and fired its hooks, so re-firing here would double-run on-submit automations.
+  if (complete && !persisted.deduped) {
     await fireHooksSafely(ctx, resolved, persisted.responseId);
   }
 
@@ -201,6 +268,7 @@ async function resolveExistingPartial(
   submission: PipelineSubmission,
 ): Promise<{ response?: { ID: string } }> {
   if (submission.clientResponseId) {
+    // 1a. Session present: adopt the client id only if the row is owned by THIS session.
     const owned = await findOwnedResponseById(
       ctx.provider,
       {
@@ -208,19 +276,33 @@ async function resolveExistingPartial(
         formVersionId: resolved.version.ID,
         sessionId: ctx.sessionId,
       },
-      ctx.contextUser,
+      ctx.elevatedUser,
     );
     if (owned.ok && owned.response) {
       return { response: owned.response };
     }
-    // Hint did not resolve to a row owned by THIS session (foreign id, wrong version, already
-    // Complete, or lookup error): ignore it and fall through to the session-key lookup.
+    // 1b. No usable session (the routine public-submit case — sessionId is blank): adopt the
+    //     row keyed by the client id itself, gated on the SourceMetadata client-id proof so a
+    //     guessed PK can never be adopted. THIS is what makes autosave upsert work with a blank
+    //     session (the original duplicate-row bug).
+    if (!ctx.sessionId) {
+      const adoptable = await findAdoptableResponseById(
+        ctx.provider,
+        { responseId: submission.clientResponseId, formVersionId: resolved.version.ID },
+        ctx.elevatedUser,
+      );
+      if (adoptable.ok && adoptable.response) {
+        return { response: adoptable.response };
+      }
+    }
+    // Hint did not resolve to an adoptable row (foreign id, wrong version, already Complete, or
+    // lookup error): ignore it and fall through to the session-key lookup.
   }
   return findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
     'Partial',
-    ctx.contextUser,
+    ctx.elevatedUser,
   );
 }
 
@@ -230,12 +312,38 @@ async function resolveExistingPartial(
  * Complete row exists, so the client sees a clean idempotent outcome rather than an error or
  * a second row. Returns a hard failure if the dedupe lookup itself errored (fail-closed).
  */
-async function checkDuplicate(ctx: PipelineContext, resolved: ResolvedDefinition): Promise<FormSubmissionResult | undefined> {
+async function checkDuplicate(
+  ctx: PipelineContext,
+  resolved: ResolvedDefinition,
+  submission: PipelineSubmission,
+): Promise<FormSubmissionResult | undefined> {
+  // First, an idempotent repeat of THIS client's final submit: the same client response id
+  // already promoted to Complete. Keyed on the id (+ SourceMetadata proof), so it works even
+  // with a blank session — a re-fired submit returns the original id instead of duplicating.
+  if (submission.clientResponseId) {
+    const byId = await findResponseById(
+      ctx.provider,
+      { responseId: submission.clientResponseId, formVersionId: resolved.version.ID },
+      ctx.elevatedUser,
+    );
+    if (!byId.ok) {
+      return fail('Could not verify submission status; please retry shortly.');
+    }
+    if (byId.response && byId.response.Status === 'Complete') {
+      return {
+        success: true,
+        responseId: byId.response.ID,
+        status: 'Complete',
+        ...confirmationFields(resolved),
+      };
+    }
+  }
+
   const existing = await findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
     'Complete',
-    ctx.contextUser,
+    ctx.elevatedUser,
   );
   if (!existing.ok) {
     // Lookup failed — do NOT risk creating a duplicate. Reject and let the client retry.
@@ -266,7 +374,7 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
     ctx.provider,
     resolved.definition.formId,
     resolved.definition.settings,
-    ctx.contextUser,
+    ctx.elevatedUser,
   );
   if (formCapped) {
     return fail('This form is no longer accepting responses (quota reached).');
@@ -276,17 +384,16 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
 
 /** Invoke the (injectable) hook firer; swallow any error so the submit still succeeds. */
 async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinition, responseId: string): Promise<void> {
-  const fire = ctx.fireHooks ?? fireOnSubmitHooks;
+  // Default firer runs under the system user internally; the anonymous ctx.contextUser is
+  // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
+  const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
   try {
-    await fire(
-      {
-        responseId,
-        formId: resolved.definition.formId,
-        formVersionId: resolved.version.ID,
-        distributionId: resolved.distribution.ID,
-      },
-      ctx.contextUser,
-    );
+    await fire({
+      responseId,
+      formId: resolved.definition.formId,
+      formVersionId: resolved.version.ID,
+      distributionId: resolved.distribution.ID,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] on-submit hooks failed for response ${responseId}: ${message}`);
