@@ -116,6 +116,22 @@ describe('renderRespondentHostPage', () => {
     expect(html()).not.toContain('data-token=');
   });
 
+  it('forwards the Turnstile site key to <mj-form> via an escaped data-* attribute', () => {
+    const out = renderRespondentHostPage({
+      graphqlUrl: 'http://localhost:4121/',
+      widgetBundleUrl: '/forms/widget/mj-form.js',
+      defaultSlug: 'customer-survey',
+      turnstileSiteKey: '0x4AAAAAADuC2gEeDWckbQ5O',
+    });
+    expect(out).toContain('data-turnstile-site-key="0x4AAAAAADuC2gEeDWckbQ5O"');
+    expect(out).toContain("getAttribute('data-turnstile-site-key')");
+    expect(out).toContain("el.setAttribute('turnstile-site-key', TURNSTILE_SITE_KEY)");
+  });
+
+  it('omits the site-key attribute entirely when Turnstile is not configured', () => {
+    expect(html()).not.toContain('data-turnstile-site-key=');
+  });
+
   it('escapes a server-injected token to prevent attribute breakout (XSS regression)', () => {
     const out = renderRespondentHostPage({
       graphqlUrl: 'http://localhost:4121/',

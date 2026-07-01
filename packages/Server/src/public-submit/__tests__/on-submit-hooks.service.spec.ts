@@ -17,14 +17,14 @@ function makeFakeEngine(registered: Set<string>, runResult: { Success: boolean; 
 describe('fireOnSubmitHooks', () => {
   it('skips-with-log when an action is not registered', async () => {
     const { engine, runAction } = makeFakeEngine(new Set());
-    const results = await fireOnSubmitHooks(hookContext, makeContextUser(), engine);
+    const results = await fireOnSubmitHooks(hookContext, engine, makeContextUser());
     expect(results.every((r) => r.status === 'skipped-not-registered')).toBe(true);
     expect(runAction).not.toHaveBeenCalled();
   });
 
   it('fires each registered action and configures the engine once', async () => {
     const { engine, config, runAction } = makeFakeEngine(new Set(ON_SUBMIT_ACTION_NAMES));
-    const results = await fireOnSubmitHooks(hookContext, makeContextUser(), engine);
+    const results = await fireOnSubmitHooks(hookContext, engine, makeContextUser());
     expect(config).toHaveBeenCalledOnce();
     expect(runAction).toHaveBeenCalledTimes(ON_SUBMIT_ACTION_NAMES.length);
     expect(results.every((r) => r.status === 'fired')).toBe(true);
@@ -32,7 +32,7 @@ describe('fireOnSubmitHooks', () => {
 
   it('marks a failing action as failed without throwing', async () => {
     const { engine } = makeFakeEngine(new Set(ON_SUBMIT_ACTION_NAMES), { Success: false, Message: 'nope' });
-    const results = await fireOnSubmitHooks(hookContext, makeContextUser(), engine);
+    const results = await fireOnSubmitHooks(hookContext, engine, makeContextUser());
     expect(results.every((r) => r.status === 'failed')).toBe(true);
   });
 });

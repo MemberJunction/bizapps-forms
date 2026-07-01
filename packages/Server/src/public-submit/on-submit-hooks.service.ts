@@ -14,6 +14,7 @@
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import type { UserInfo } from '@memberjunction/core';
+import { UserCache } from '@memberjunction/sqlserver-dataprovider';
 
 /** The S3 action names — the frozen contract WP-E implements. */
 export const ON_SUBMIT_ACTION_NAMES = [
@@ -90,13 +91,18 @@ async function fireOne(
  */
 export async function fireOnSubmitHooks(
   ctx: OnSubmitContext,
-  contextUser: UserInfo,
   engine: ActionEngineServer = ActionEngineServer.Instance,
+  runAsUser: UserInfo = UserCache.Instance.GetSystemUser(),
 ): Promise<HookFireResult[]> {
-  await engine.Config(false, contextUser);
+  // On-submit automations run under the MJ **system user** (service principal), NOT the anonymous
+  // respondent. The respondent scope is CanCreate-on-responses only, so it cannot read the response
+  // back, run privileged actions (upsert Person, create Task, analyze answers), or write MJ's
+  // Action Execution Logs. Elevating here keeps the public submit path itself minimally-scoped
+  // (no privilege accretion on the respondent). See ON_SUBMIT_AUTOMATION_SPEC §7.
+  await engine.Config(false, runAsUser);
   const results: HookFireResult[] = [];
   for (const name of ON_SUBMIT_ACTION_NAMES) {
-    results.push(await fireOne(engine, name, ctx, contextUser));
+    results.push(await fireOne(engine, name, ctx, runAsUser));
   }
   return results;
 }

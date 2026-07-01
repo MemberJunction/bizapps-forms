@@ -40,6 +40,12 @@ export interface RespondentHostPageOptions {
    * `#fragment` / `?token=` value (which remain for manual testing / embeds).
    */
   token?: string;
+  /**
+   * Public Cloudflare Turnstile site key. Baked into a `data-turnstile-site-key` attribute and
+   * forwarded to `<mj-form turnstile-site-key=…>` so captcha-required forms render the challenge.
+   * Omitted when unconfigured (the widget then shows its config-gap message on a captcha-on form).
+   */
+  turnstileSiteKey?: string;
 }
 
 /**
@@ -60,6 +66,10 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
   // an HTML-escaped data-* attribute read with dataset.* at runtime — never spliced into the
   // inline <script>. Emit the attribute only when a token was redeemed.
   const tokenAttr = options.token ? ` data-token="${escapeAttr(options.token)}"` : '';
+  // Public site key (safe to expose); routed through an escaped data-* attr like everything else.
+  const siteKeyAttr = options.turnstileSiteKey
+    ? ` data-turnstile-site-key="${escapeAttr(options.turnstileSiteKey)}"`
+    : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -74,7 +84,7 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
     class="mjf-host"
     id="mjf-host"
     data-graphql-url="${graphqlUrl}"
-    data-default-slug="${defaultSlug}"${tokenAttr}
+    data-default-slug="${defaultSlug}"${tokenAttr}${siteKeyAttr}
   >
     <div class="mjf-host__loading" role="status" aria-live="polite">Loading…</div>
   </main>
@@ -133,16 +143,20 @@ body {
   font-family: var(--mj-font-body, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
   -webkit-text-size-adjust: 100%;
 }
+/* The host is full-bleed: the mounted form element paints the FormStyle page background
+   (--mjf-page-bg via its :host) across the whole viewport and centers its own content
+   internally (.mjf-shell max-width), so there's no unthemed white gutter around a themed
+   (e.g. dark) form. The narrow-column loading/error states get their own centered padding. */
 .mjf-host {
   display: block;
   width: 100%;
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: clamp(1rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2rem);
+  min-height: 100vh;
 }
 .mjf-host__loading,
 .mjf-host__error {
-  padding: 2rem 0;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 5vw, 3rem) clamp(1rem, 4vw, 2rem);
   font-size: 1.0625rem;
   line-height: 1.5;
 }
@@ -152,6 +166,7 @@ body {
 mj-form {
   display: block;
   width: 100%;
+  min-height: 100vh;
 }
 `;
 
@@ -172,6 +187,7 @@ const BOOT_SCRIPT = `
   // Server-redeemed anonymous session JWT (see redeem.service). When present it WINS over any
   // URL-supplied token, so the respondent never has to carry a raw token in the link.
   var SERVER_TOKEN = host.getAttribute('data-token') || '';
+  var TURNSTILE_SITE_KEY = host.getAttribute('data-turnstile-site-key') || '';
 
   function showError(msg) {
     host.innerHTML = '';
@@ -212,6 +228,7 @@ const BOOT_SCRIPT = `
     el.setAttribute('slug', slug);
     el.setAttribute('api-url', GRAPHQL_URL);
     if (token) { el.setAttribute('token', token); }
+    if (TURNSTILE_SITE_KEY) { el.setAttribute('turnstile-site-key', TURNSTILE_SITE_KEY); }
     host.appendChild(el);
   }
 

@@ -108,6 +108,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       widgetBundleUrl: cfg.widgetBundleUrl,
       defaultSlug: slug,
       token: outcome.token,
+      turnstileSiteKey: cfg.turnstileSiteKey,
     });
     res
       .status(200)

@@ -17,6 +17,10 @@
  *                                     route POSTs the raw token to (server-side redeem). The
  *                                     mount path is fixed at `/magic-link/redeem` in MJ core, so
  *                                     this defaults to `MJAPI_PUBLIC_URL` + `/magic-link/redeem`.
+ *  - `FORMS_TURNSTILE_SITE_KEY`       Public Cloudflare Turnstile site key, passed to `<mj-form>`
+ *                                     so captcha-required forms can render the challenge. Unset =
+ *                                     no challenge rendered (a captcha-on form then shows the
+ *                                     widget's config-gap message).
  */
 
 /** Frozen configuration for the respondent host page. */
@@ -26,6 +30,8 @@ export interface RespondentHostConfig {
   widgetBundleUrl: string;
   /** Absolute URL of core's magic-link redeem endpoint (server-side redeem target). */
   magicLinkRedeemUrl: string;
+  /** Public Turnstile site key baked into `<mj-form>` (undefined when captcha isn't configured). */
+  turnstileSiteKey: string | undefined;
 }
 
 const DEFAULT_WIDGET_BUNDLE_URL = '/forms/widget/mj-form.js';
@@ -44,6 +50,7 @@ export function getRespondentHostConfig(): RespondentHostConfig {
     graphqlUrl: resolveGraphqlUrl(),
     widgetBundleUrl: process.env.FORMS_WIDGET_BUNDLE_URL?.trim() || DEFAULT_WIDGET_BUNDLE_URL,
     magicLinkRedeemUrl: resolveMagicLinkRedeemUrl(),
+    turnstileSiteKey: process.env.FORMS_TURNSTILE_SITE_KEY?.trim() || undefined,
   });
   return cached;
 }

@@ -7,9 +7,14 @@
 import type { FormAnswerInput, JSONValue } from '@mj-biz-apps/forms-entities';
 import type { FormAnswerInputType } from './graphql-types';
 
-/** Parse an answer's `jsonValue` string into a {@link JSONValue}, or `undefined`. */
-function parseJsonValue(raw: string | undefined): JSONValue | undefined {
-  if (raw === undefined || raw.trim() === '') {
+/**
+ * Parse an answer's `jsonValue` string into a {@link JSONValue}, or `undefined`. The GraphQL
+ * transport field is a NULLABLE string, so `null` arrives for every answer that carries no JSON
+ * (the common case — ShortText/SingleChoice/etc. send `jsonValue: null`); it must be handled or
+ * `null.trim()` throws and 500s the entire submit.
+ */
+function parseJsonValue(raw: string | null | undefined): JSONValue | undefined {
+  if (raw == null || raw.trim() === '') {
     return undefined;
   }
   try {

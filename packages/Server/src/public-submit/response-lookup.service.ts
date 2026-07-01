@@ -82,11 +82,99 @@ export async function findSessionResponse(
   return { ok: true, response: result.Results[0] };
 }
 
+/**
+ * Escape a value for a SQL `LIKE` predicate, then wrap it as a quoted literal. Escapes the
+ * ESCAPE-designated `\`, plus the wildcards `%` and `_`, so a client id embedded in the JSON
+ * is matched literally (defense-in-depth — a valid UUID has none of these characters).
+ */
+function sqlLikeLiteral(value: string): string {
+  const escaped = value.replace(/[\\%_]/g, (ch) => `\\${ch}`).replace(/'/g, "''");
+  return `'%${escaped}%'`;
+}
+
+/**
+ * Load a response by its exact id + version in ANY status, guarded by the SourceMetadata
+ * client-id proof. Used to detect an idempotent repeat FINAL submit that carries the same
+ * client response id (the row was already promoted to Complete, so the `Partial`-only
+ * adopt/session lookups miss it). Returns the row so the pipeline can short-circuit to the
+ * existing id instead of writing a second Complete. Fail-open on a query error.
+ */
+export async function findResponseById(
+  provider: DefinitionRunViewProvider,
+  key: { responseId: string; formVersionId: string },
+  contextUser: UserInfo,
+): Promise<ResponseLookupResult> {
+  if (!key.responseId) {
+    return { ok: true, response: undefined };
+  }
+  const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
+    {
+      EntityName: FORM_RESPONSE_ENTITY,
+      ExtraFilter:
+        `ID=${sqlString(key.responseId)} ` +
+        `AND FormVersionID=${sqlString(key.formVersionId)} ` +
+        `AND SourceMetadata LIKE ${sqlLikeLiteral(`"clientResponseId":"${key.responseId}"`)} ESCAPE '\\'`,
+      OrderBy: '__mj_CreatedAt DESC',
+      ResultType: 'entity_object',
+      MaxRows: 1,
+    },
+    contextUser,
+  );
+  if (!result.Success) {
+    return { ok: false };
+  }
+  return { ok: true, response: result.Results[0] };
+}
+
 /** Identity for adopting a client-supplied response id: the id PLUS its required owner/version. */
 export interface OwnedResponseLookupKey {
   responseId: string;
   formVersionId: string;
   sessionId: string;
+}
+
+/**
+ * Resolve a client-supplied `responseId` to an adoptable Partial row when the anonymous
+ * session id is BLANK (the common public-submit case — see source-metadata.service for why
+ * `sessionId` is routinely empty). Ownership is proven by the id itself: the widget mints a
+ * 122-bit random UUID, uses it as the FormResponse primary key, AND records it in
+ * `SourceMetadata.clientResponseId`. We adopt the row only when it matches on
+ * `(ID, FormVersionID)`, is still `Partial`, AND its stored `SourceMetadata` carries that same
+ * client id — so a row created WITHOUT a client id (legacy / different flow) is never adopted
+ * by a guessed PK.
+ *
+ * A blank/absent `responseId` returns "no match" without querying. A query error returns
+ * `ok:false` so the caller falls back (never adopts an unverified row).
+ */
+export async function findAdoptableResponseById(
+  provider: DefinitionRunViewProvider,
+  key: Pick<OwnedResponseLookupKey, 'responseId' | 'formVersionId'>,
+  contextUser: UserInfo,
+): Promise<ResponseLookupResult> {
+  if (!key.responseId) {
+    return { ok: true, response: undefined };
+  }
+  const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
+    {
+      EntityName: FORM_RESPONSE_ENTITY,
+      ExtraFilter:
+        `ID=${sqlString(key.responseId)} ` +
+        `AND FormVersionID=${sqlString(key.formVersionId)} ` +
+        `AND Status='Partial' ` +
+        // Require the row to carry this exact client id in its SourceMetadata JSON — proves the
+        // PK was minted by the widget (not a guessed/foreign id), the ownership capability when
+        // there is no session to key on.
+        `AND SourceMetadata LIKE ${sqlLikeLiteral(`"clientResponseId":"${key.responseId}"`)} ESCAPE '\\'`,
+      OrderBy: '__mj_CreatedAt DESC',
+      ResultType: 'entity_object',
+      MaxRows: 1,
+    },
+    contextUser,
+  );
+  if (!result.Success) {
+    return { ok: false };
+  }
+  return { ok: true, response: result.Results[0] };
 }
 
 /**

@@ -6517,7 +6517,7 @@ input FormSubmissionInputType {
   partial: Boolean
 
   """
-  Transport-level autosave target: the FormResponse the widget is already editing this session. Honored ONLY if it belongs to the current anonymous session (server-validated); otherwise ignored and the session-key lookup is used. Not part of the frozen FormSubmissionInput contract — it is a widget-session concern.
+  Stable client-generated response id (v4 UUID) — the widget mints one per form load and sends it on every autosave AND the final submit. It is the PRIMARY idempotency key: the server adopts it as the FormResponse primary key on first save and upserts THIS row on every repeat, so it works even when the anonymous session id is blank. Adoption of an EXISTING row is gated on session ownership (when a session exists) or a SourceMetadata client-id proof (when it does not), so a guessed id can never hijack another row. Not part of the frozen FormSubmissionInput contract — a widget-session concern.
   """
   responseId: ID
   startedAt: String

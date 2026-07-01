@@ -3,7 +3,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
-import { findSessionResponse } from '../response-lookup.service';
+import {
+  findAdoptableResponseById,
+  findResponseById,
+  findSessionResponse,
+} from '../response-lookup.service';
 
 const USER = { ID: 'anon' } as unknown as UserInfo;
 
@@ -74,5 +78,55 @@ describe('findSessionResponse', () => {
     const provider = makeProvider({ capture: (p) => (captured = p) });
     await findSessionResponse(provider, { formVersionId: 'v', sessionId: "a'b" }, 'Partial', USER);
     expect(captured?.ExtraFilter).toContain("AnonymousSessionID='a''b'");
+  });
+});
+
+describe('findAdoptableResponseById', () => {
+  it('filters by id + version + Partial + the SourceMetadata client-id proof', async () => {
+    let captured: RunViewParams | undefined;
+    const provider = makeProvider({ rows: [{ ID: 'resp-1' }], capture: (p) => (captured = p) });
+
+    const result = await findAdoptableResponseById(
+      provider,
+      { responseId: 'resp-1', formVersionId: 'ver-1' },
+      USER,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.response?.ID).toBe('resp-1');
+    const filter = captured?.ExtraFilter ?? '';
+    expect(filter).toContain("ID='resp-1'");
+    expect(filter).toContain("FormVersionID='ver-1'");
+    expect(filter).toContain("Status='Partial'");
+    expect(filter).toContain('SourceMetadata LIKE');
+    expect(filter).toContain('"clientResponseId":"resp-1"');
+  });
+
+  it('returns no match (without querying) for a blank response id', async () => {
+    const provider = makeProvider({ rows: [{ ID: 'x' }] });
+    const result = await findAdoptableResponseById(provider, { responseId: '', formVersionId: 'v' }, USER);
+    expect(result.ok).toBe(true);
+    expect(result.response).toBeUndefined();
+  });
+
+  it('reports NOT ok on a query failure (caller falls back, never adopts unverified)', async () => {
+    const provider = makeProvider({ success: false });
+    const result = await findAdoptableResponseById(provider, { responseId: 'r', formVersionId: 'v' }, USER);
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('findResponseById', () => {
+  it('matches any status by id + version + client-id proof (idempotent repeat submit)', async () => {
+    let captured: RunViewParams | undefined;
+    const provider = makeProvider({ rows: [{ ID: 'resp-9' }], capture: (p) => (captured = p) });
+
+    const result = await findResponseById(provider, { responseId: 'resp-9', formVersionId: 'ver-2' }, USER);
+
+    expect(result.response?.ID).toBe('resp-9');
+    const filter = captured?.ExtraFilter ?? '';
+    expect(filter).toContain("ID='resp-9'");
+    expect(filter).not.toContain("Status='Partial'"); // any status
+    expect(filter).toContain('SourceMetadata LIKE');
   });
 });

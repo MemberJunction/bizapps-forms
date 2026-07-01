@@ -1,6 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-import { validateSubmission } from '../validation.service';
+import type { FormAnswerInput, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { answerValueOf, validateSubmission } from '../validation.service';
+
+/** A required-MultiChoice form (the RSVP "dietary" shape that was rejecting every complete submit). */
+function multiChoiceRequiredDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'Dietary',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-diet', type: 'MultiChoice', prompt: 'Dietary?', isRequired: true, displayOrder: 1, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('answerValueOf (null typed-column precedence)', () => {
+  it('reads a MultiChoice answer from jsonValue even when textValue is null (GraphQL coerces omitted → null)', () => {
+    const input = { questionId: 'q-diet', textValue: null, jsonValue: ['none'] } as unknown as FormAnswerInput;
+    expect(answerValueOf(input)).toEqual(['none']);
+  });
+
+  it('still returns falsy-but-present scalars (0 / false)', () => {
+    expect(answerValueOf({ questionId: 'n', numericValue: 0 } as unknown as FormAnswerInput)).toBe(0);
+    expect(answerValueOf({ questionId: 'b', booleanValue: false } as unknown as FormAnswerInput)).toBe(false);
+  });
+});
+
+describe('validateSubmission — required MultiChoice via jsonValue', () => {
+  it('accepts a required multi-select answered through jsonValue with textValue null (regression)', () => {
+    const answers: FormAnswerInput[] = [
+      { questionId: 'q-diet', textValue: null, jsonValue: ['none'] } as unknown as FormAnswerInput,
+    ];
+    const outcome = validateSubmission(multiChoiceRequiredDefinition(), answers, false);
+    expect(outcome.errors).toEqual([]);
+  });
+});
 
 /** A definition where q-other is shown only when q-choice equals 'Other'. */
 function conditionalDefinition(): PublishedFormDefinition {

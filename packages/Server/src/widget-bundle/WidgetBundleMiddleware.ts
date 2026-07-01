@@ -47,8 +47,12 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
       res
         .status(200)
         .type('text/javascript')
-        // Bundle is content-built per release; cache for a day but allow revalidation.
-        .set('Cache-Control', 'public, max-age=86400')
+        // The bundle URL is UNVERSIONED (/forms/widget/mj-form.js), so it must never be blindly
+        // cached — a stale copy silently pins respondents (and devs) to an old widget across
+        // rebuilds. `no-cache` = the browser may store it but MUST revalidate every load; Express's
+        // ETag/Last-Modified then yields a cheap 304 when unchanged and the fresh bundle when it
+        // changes. (Switch to a content-hashed URL + immutable if long-term CDN caching is wanted.)
+        .set('Cache-Control', 'no-cache')
         .sendFile(bundlePath, (err) => {
           if (err && !res.headersSent) {
             LogError(`[Forms] Failed to send widget bundle ${bundlePath}: ${String(err)}`);

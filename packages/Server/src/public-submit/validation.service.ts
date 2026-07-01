@@ -41,16 +41,21 @@ export interface ValidationOutcome {
  * answer input. Mirrors the typed-column spread of `FormResponseAnswer`.
  */
 export function answerValueOf(input: FormAnswerInput): AnswerValue {
-  if (input.textValue !== undefined) {
+  // Use `!= null` (not `!== undefined`): the GraphQL transport coerces every OMITTED typed field
+  // to `null` on the server, so a MultiChoice answer arrives as `{ textValue: null, jsonValue: [...] }`.
+  // A `!== undefined` check would return that `null` and mask the real (jsonValue) answer, making a
+  // required multi-select read as empty and rejecting the whole submit. `!= null` skips the empty
+  // typed columns and falls through to the populated one. (0 and false are still returned.)
+  if (input.textValue != null) {
     return input.textValue;
   }
-  if (input.numericValue !== undefined) {
+  if (input.numericValue != null) {
     return input.numericValue;
   }
-  if (input.booleanValue !== undefined) {
+  if (input.booleanValue != null) {
     return input.booleanValue;
   }
-  if (input.dateValue !== undefined) {
+  if (input.dateValue != null) {
     return input.dateValue;
   }
   if (Array.isArray(input.jsonValue)) {

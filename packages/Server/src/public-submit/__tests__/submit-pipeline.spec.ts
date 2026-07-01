@@ -63,6 +63,7 @@ function makeContext(
   const ctx: PipelineContext = {
     provider: fake.provider,
     contextUser: makeContextUser(),
+    elevatedUser: makeContextUser(),
     sessionId: 'sess-abc',
     fetchImpl: options.fetchImpl,
     fireHooks: options.fireHooks,

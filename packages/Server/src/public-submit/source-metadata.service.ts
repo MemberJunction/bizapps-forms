@@ -25,10 +25,23 @@ export function hashSessionId(sessionId: string): string {
 
 /** Inputs available to the resolver for building source metadata. */
 export interface SourceMetadataInputs {
-  /** Anonymous session id (`mj_sid`) from the magic-link UserPayload. */
+  /**
+   * Anonymous session correlator. NOTE (investigated 2026-07): this is
+   * `UserPayload.sessionId`, which MJ core populates from the `x-session-id` HTTP request
+   * header (`@memberjunction/server` context.js `extractAuthInputs`), NOT from a JWT
+   * `mj_sid` claim. The widget's plain-`fetch` transport does not send that header, so this
+   * is routinely blank for public submissions — which is exactly why the client-generated
+   * response id (below) is the authoritative dedupe/upsert key.
+   */
   sessionId: string;
   distributionId: string;
   clientMeta?: ClientMeta;
+  /**
+   * The widget's stable client response id. Recorded so a row created under a BLANK session
+   * can still be safely re-adopted by that id on later autosaves (the id is a 122-bit random
+   * UUID — unguessable — so possessing it is proof of ownership when no session exists).
+   */
+  clientResponseId?: string;
 }
 
 /**
@@ -48,6 +61,10 @@ export function buildSourceMetadata(inputs: SourceMetadataInputs): JSONObject {
     sessionHash: hashSessionId(inputs.sessionId),
     distributionId: inputs.distributionId,
   };
+  const clientResponseId = inputs.clientResponseId?.trim();
+  if (clientResponseId) {
+    meta.clientResponseId = clientResponseId;
+  }
   const ua = inputs.clientMeta?.userAgent?.trim();
   if (ua) {
     meta.userAgent = ua;

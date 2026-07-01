@@ -12,6 +12,7 @@
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql';
 import { AppContext, GetReadOnlyProvider, GetReadWriteProvider, ResolverBase } from '@memberjunction/server';
 import type { UserInfo } from '@memberjunction/core';
+import { UserCache } from '@memberjunction/sqlserver-dataprovider';
 import type { FieldError, FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition } from './definition-loader.service';
 import {
@@ -79,8 +80,12 @@ export class PublicFormResolver extends ResolverBase {
       clientResponseId: input.responseId,
     };
 
+    // Response reads/writes (dedupe, adoption, quota, persistence) run under the elevated system
+    // user: the anonymous respondent can CREATE but not READ Form Responses. The anon `contextUser`
+    // still gates authorization via the pipeline's scope check (no privilege accretion).
+    const elevatedUser = UserCache.Instance.GetSystemUser();
     const result = await runSubmitPipeline(
-      { provider, contextUser, sessionId: userPayload.sessionId },
+      { provider, contextUser, elevatedUser, sessionId: userPayload.sessionId },
       submission,
     );
     return toResultType(result);
