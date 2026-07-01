@@ -33,7 +33,8 @@ export class FormsMockApiService implements IFormsApiService {
     await this.simulateLatency();
     return {
       success: true,
-      // Echo an existing id back on autosave so the widget keeps upserting one record.
+      // Echo the client-supplied id back (it is the widget's stable idempotency key), falling
+      // back to a minted id only if none was sent.
       responseId: existingResponseId ?? `mock-${Date.now().toString(36)}`,
       status: input.partial ? 'Partial' : 'Complete',
       confirmationMessage: input.partial

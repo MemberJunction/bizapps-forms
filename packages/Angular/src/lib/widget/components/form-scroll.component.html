@@ -27,7 +27,7 @@
     }
 
     <div class="mjf-scroll__actions">
-      <button type="submit" class="mjf-submit" [disabled]="submitting()">
+      <button type="submit" class="mjf-submit" [disabled]="submitting() || submitDisabled()">
         @if (submitting()) {
           <span>Submitting…</span>
         } @else {

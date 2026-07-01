@@ -8,6 +8,8 @@
  */
 import { InjectionToken } from '@angular/core';
 
+import { DEFAULT_TURNSTILE_SCRIPT_URL } from '../core/turnstile-loader';
+
 /** Resolved connection settings for {@link FormsGraphQLApiService}. */
 export interface FormsApiConfig {
   /** Absolute URL of the MJAPI GraphQL endpoint, e.g. `https://api.example.com/graphql`. */
@@ -25,6 +27,30 @@ export interface FormsApiConfig {
    * bearer {@link token}.
    */
   uploadUrl?: string;
+  /**
+   * PUBLIC Cloudflare Turnstile site key (DG-4). Global — one Cloudflare widget across
+   * all forms, NOT per-form — and safe to expose client-side. Only used when a form's
+   * `settings.captchaRequired` is on: the widget renders a challenge against this key and
+   * sends the resulting token as `turnstileToken`. When captcha-required forms are served
+   * with no site key, the widget shows a config-gap message instead of failing silently.
+   * Comes from the `<mj-form>` `turnstile-site-key` attribute.
+   */
+  turnstileSiteKey?: string;
+  /**
+   * Optional override for the Cloudflare Turnstile script URL. Defaults to
+   * {@link DEFAULT_TURNSTILE_SCRIPT_URL}; overridable only for tests/self-hosting.
+   */
+  turnstileScriptUrl: string;
+}
+
+/** Build a {@link FormsApiConfig}, filling in derived defaults (script URL). */
+export function normalizeApiConfig(
+  partial: Omit<FormsApiConfig, 'turnstileScriptUrl'> & { turnstileScriptUrl?: string },
+): FormsApiConfig {
+  return {
+    ...partial,
+    turnstileScriptUrl: partial.turnstileScriptUrl?.trim() || DEFAULT_TURNSTILE_SCRIPT_URL,
+  };
 }
 
 /**

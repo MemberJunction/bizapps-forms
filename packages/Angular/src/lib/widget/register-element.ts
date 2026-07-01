@@ -3,8 +3,13 @@
  * `<script>` tag with no Explorer shell:
  *
  * ```html
- * <mj-form slug="my-survey" api-url="https://api.example.com/graphql" token="…"></mj-form>
+ * <mj-form slug="my-survey" api-url="https://api.example.com/graphql" token="…"
+ *          turnstile-site-key="0x4AAAAAAA…"></mj-form>
  * ```
+ *
+ * `turnstile-site-key` is the PUBLIC Cloudflare Turnstile site key (global, one widget
+ * for all forms). It is only consulted when a form has captcha turned on; leave it off
+ * for forms that don't require a challenge.
  *
  * This is a thin, dependency-free Angular Elements equivalent: it bootstraps a
  * standalone Angular application per element instance via `createApplication` +
@@ -20,7 +25,7 @@ import { ApplicationRef, ComponentRef, createComponent } from '@angular/core';
 import { createApplication } from '@angular/platform-browser';
 
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
-import { FORMS_API_CONFIG, type FormsApiConfig } from './api/forms-api.config';
+import { FORMS_API_CONFIG, normalizeApiConfig, type FormsApiConfig } from './api/forms-api.config';
 import { FormsGraphQLApiService } from './api/forms-api.graphql.service';
 import { FormsMockApiService } from './api/forms-api.mock.service';
 import { FormUploadService } from './api/form-upload.service';
@@ -30,7 +35,7 @@ import { MjFormComponent } from './mj-form.component';
 export const MJ_FORM_TAG = 'mj-form';
 
 /** Attributes the element reflects onto the root component. */
-const OBSERVED_ATTRS = ['slug', 'api-url', 'token'] as const;
+const OBSERVED_ATTRS = ['slug', 'api-url', 'token', 'turnstile-site-key'] as const;
 
 /**
  * Define the `<mj-form>` custom element. Idempotent: a second call is a no-op if the
@@ -59,10 +64,11 @@ class MjFormElement extends HTMLElement {
     if (this.componentRef) {
       return;
     }
-    const config: FormsApiConfig = {
+    const config: FormsApiConfig = normalizeApiConfig({
       graphqlUrl: this.getAttribute('api-url') ?? '',
       token: this.getAttribute('token') ?? undefined,
-    };
+      turnstileSiteKey: this.getAttribute('turnstile-site-key') ?? undefined,
+    });
     const apiServiceProvider = config.graphqlUrl
       ? { provide: FORMS_API_SERVICE, useClass: FormsGraphQLApiService }
       : { provide: FORMS_API_SERVICE, useClass: FormsMockApiService };

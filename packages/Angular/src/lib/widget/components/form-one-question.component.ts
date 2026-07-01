@@ -34,6 +34,8 @@ import { FormQuestionComponent } from './questions/form-question.component';
 export class FormOneQuestionComponent {
   public readonly runtime = input.required<FormRuntime>();
   public readonly submitting = input<boolean>(false);
+  /** When true, the final-step submit control is disabled (e.g. captcha not yet solved). */
+  public readonly submitDisabled = input<boolean>(false);
   /** Distribution slug, forwarded to FileUpload questions for scoped uploads. */
   public readonly distributionSlug = input<string>('');
   public readonly submit = output<void>();
@@ -62,6 +64,11 @@ export class FormOneQuestionComponent {
     return t === 0 ? 1 : (this.index() + 1) / t;
   });
   protected readonly stepLabel = computed(() => `${this.index() + 1} of ${this.total()}`);
+
+  /** Disable the primary control while submitting, or on the final (submit) step when blocked. */
+  protected readonly primaryDisabled = computed(
+    () => this.submitting() || (this.isLast() && this.submitDisabled()),
+  );
 
   constructor() {
     // When conditional logic resizes the path, re-clamp the stored cursor so it never

@@ -21,6 +21,8 @@ import { FormQuestionComponent } from './questions/form-question.component';
 export class FormScrollComponent {
   public readonly runtime = input.required<FormRuntime>();
   public readonly submitting = input<boolean>(false);
+  /** When true, the submit control is disabled (e.g. captcha not yet solved). */
+  public readonly submitDisabled = input<boolean>(false);
   /** Distribution slug, forwarded to FileUpload questions for scoped uploads. */
   public readonly distributionSlug = input<string>('');
   public readonly submit = output<void>();

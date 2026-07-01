@@ -12,13 +12,14 @@
 import { Injectable, inject } from '@angular/core';
 import type {
   PublishedFormDefinition,
-  FormAnswerInput,
   FormSubmissionInput,
   FormSubmissionResult,
 } from '@mj-biz-apps/forms-entities';
 
 import type { IFormsApiService } from './forms-api.interface';
 import { FORMS_API_CONFIG } from './forms-api.config';
+import { generateClientResponseId } from '../core/client-id';
+import { toInputType } from './submission-mapping';
 
 /** Shape of a GraphQL HTTP response envelope. */
 interface GraphQLEnvelope<TData> {
@@ -43,33 +44,6 @@ interface PublishedFormQueryData {
 /** Result wrapper for the `SubmitFormResponse` mutation. */
 interface SubmitFormResponseData {
   SubmitFormResponse: FormSubmissionResult;
-}
-
-/**
- * `FormAnswerInputType` per WP-B's SDL: `jsonValue` is a JSON STRING (not an object)
- * and `dateValue` is a String. Mirrors {@link FormAnswerInput} except `jsonValue`.
- */
-interface FormAnswerInputType {
-  questionId: string;
-  textValue?: string;
-  numericValue?: number;
-  dateValue?: string;
-  booleanValue?: boolean;
-  jsonValue?: string;
-  fileId?: string;
-}
-
-/** `FormSubmissionInputType` per WP-B's SDL (answers use {@link FormAnswerInputType}). */
-interface FormSubmissionInputType {
-  distributionSlug: string;
-  formVersionId: string;
-  partial?: boolean;
-  /** Prior partial's id, so the server UPSERTs the same response on autosave. */
-  responseId?: string;
-  startedAt?: string;
-  turnstileToken?: string;
-  clientMeta?: { referrer?: string; userAgent?: string };
-  answers: FormAnswerInputType[];
 }
 
 const PUBLISHED_FORM_QUERY = `
@@ -97,6 +71,14 @@ const SUBMIT_RESPONSE_MUTATION = `
 export class FormsGraphQLApiService implements IFormsApiService {
   private readonly config = inject(FORMS_API_CONFIG);
 
+  /**
+   * Per-widget-instance anonymous session correlator, sent as the `x-session-id` header MJ
+   * core reads into `UserPayload.sessionId` (and thence `FormResponse.AnonymousSessionID`).
+   * Best-effort telemetry ONLY — correctness (dedupe/upsert) rides the stable client
+   * response id in the payload, never this header — so a stripped header degrades gracefully.
+   */
+  private readonly sessionId = generateClientResponseId();
+
   public async loadPublishedForm(
     distributionSlug: string,
   ): Promise<PublishedFormDefinition | null> {
@@ -116,45 +98,9 @@ export class FormsGraphQLApiService implements IFormsApiService {
     existingResponseId?: string,
   ): Promise<FormSubmissionResult> {
     const data = await this.execute<SubmitFormResponseData>(SUBMIT_RESPONSE_MUTATION, {
-      input: this.toInputType(input, existingResponseId),
+      input: toInputType(input, existingResponseId),
     });
     return data.SubmitFormResponse;
-  }
-
-  /**
-   * Map the contract {@link FormSubmissionInput} onto WP-B's `FormSubmissionInputType`.
-   * Only `jsonValue` differs: the contract carries a structured `JSONValue`, the SDL
-   * expects a JSON STRING, so each answer's `jsonValue` is stringified here. The
-   * transport-level `existingResponseId` (autosave upsert target) is folded in here so
-   * it need not pollute the frozen `FormSubmissionInput` contract.
-   */
-  private toInputType(
-    input: FormSubmissionInput,
-    existingResponseId?: string,
-  ): FormSubmissionInputType {
-    return {
-      distributionSlug: input.distributionSlug,
-      formVersionId: input.formVersionId,
-      partial: input.partial,
-      responseId: existingResponseId,
-      startedAt: input.startedAt,
-      turnstileToken: input.turnstileToken,
-      clientMeta: input.clientMeta,
-      answers: input.answers.map((a) => this.toAnswerInputType(a)),
-    };
-  }
-
-  /** Map one contract answer onto `FormAnswerInputType`, stringifying `jsonValue`. */
-  private toAnswerInputType(answer: FormAnswerInput): FormAnswerInputType {
-    return {
-      questionId: answer.questionId,
-      textValue: answer.textValue,
-      numericValue: answer.numericValue,
-      dateValue: answer.dateValue,
-      booleanValue: answer.booleanValue,
-      jsonValue: answer.jsonValue === undefined ? undefined : JSON.stringify(answer.jsonValue),
-      fileId: answer.fileId,
-    };
   }
 
   /** POST a GraphQL operation and unwrap its `data`, throwing on transport/GraphQL errors. */
@@ -162,7 +108,12 @@ export class FormsGraphQLApiService implements IFormsApiService {
     query: string,
     variables: Record<string, unknown>,
   ): Promise<TData> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // Anonymous session correlator (see this.sessionId). Best-effort — captured server-side
+      // into AnonymousSessionID when present; never the idempotency key.
+      'x-session-id': this.sessionId,
+    };
     if (this.config.token) {
       headers['Authorization'] = `Bearer ${this.config.token}`;
     }

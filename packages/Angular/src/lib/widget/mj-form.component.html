@@ -36,6 +36,7 @@
             <mjf-form-scroll
               [runtime]="rt"
               [submitting]="phase() === 'submitting'"
+              [submitDisabled]="!submitAllowed()"
               [distributionSlug]="distributionSlug()"
               (submit)="onSubmit()"
               (progressChange)="onProgress()"
@@ -44,10 +45,26 @@
             <mjf-form-one-question
               [runtime]="rt"
               [submitting]="phase() === 'submitting'"
+              [submitDisabled]="!submitAllowed()"
               [distributionSlug]="distributionSlug()"
               (submit)="onSubmit()"
               (progressChange)="onProgress()"
             />
+          }
+
+          @if (showChallenge()) {
+            <mjf-turnstile-challenge
+              [siteKey]="resolvedSiteKey()"
+              (solved)="onTurnstileSolved($event)"
+              (expired)="onTurnstileExpired()"
+              (errored)="onTurnstileErrored()"
+            />
+          } @else if (captchaConfigGap()) {
+            <p class="mjf-captcha-gap" role="alert">
+              <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+              This form requires a security challenge, but it has not been configured yet.
+              It can't be submitted until the site owner adds a Turnstile site key.
+            </p>
           }
 
           @switch (autosaveStatus()) {
