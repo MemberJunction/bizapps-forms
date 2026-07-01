@@ -15,13 +15,18 @@ import type {
   mjBizAppsFormsFormEntity,
   FormQuestionType,
   FormRenderMode,
+  FormStyleTokens,
+  PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from './entity-names';
 import { BuilderStateService } from './builder-state.service';
+import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { DesignPanelComponent } from './design-panel.component';
+import { FormPreviewModalComponent } from './form-preview-modal.component';
+import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import {
   QUESTION_PALETTE_GROUPS,
@@ -65,8 +70,9 @@ type BuilderTab = 'build' | 'design' | 'distribute';
     QuestionEditorComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
+    FormPreviewModalComponent,
   ],
-  providers: [BuilderStateService, PublishService],
+  providers: [BuilderStateService, DesignStateService, PublishService],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
@@ -74,6 +80,7 @@ export class FormBuilderComponent extends BaseFormComponent {
   declare public record: mjBizAppsFormsFormEntity;
 
   private readonly state = inject(BuilderStateService);
+  private readonly design = inject(DesignStateService);
   private readonly publisher = inject(PublishService);
 
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
@@ -83,6 +90,22 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected busy = false;
   protected statusMessage = '';
 
+  /**
+   * True when the draft has edits not yet in the published snapshot. The public link serves
+   * the last published `FormVersion`, so theme/content changes only go live on Publish — this
+   * drives the "unpublished changes" hint so that isn't surprising.
+   */
+  protected dirty = false;
+
+  /** Non-null while the full-screen WYSIWYG Preview is open (holds the draft definition). */
+  protected previewDef: PublishedFormDefinition | null = null;
+
+  /** Mark the draft as having changes not yet published, and refresh the view. */
+  private markDirty(): void {
+    this.dirty = true;
+    this.cdr.markForCheck();
+  }
+
   override async ngOnInit(): Promise<void> {
     await super.ngOnInit();
     await this.loadBuilder();
@@ -90,6 +113,14 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   private async loadBuilder(): Promise<void> {
     this.busy = true;
+    // A Form opened via the "new record" flow isn't persisted yet, so its child
+    // Pages/Questions would violate FK_FormPage_Form / FK_FormQuestion_Form. Persist
+    // the Form shell first (the builder is immediate-persist by design).
+    if (!(await this.ensureFormSaved())) {
+      this.busy = false;
+      this.cdr.markForCheck();
+      return;
+    }
     this.tree = await this.state.loadTree(this.record);
     if (this.tree.pages.length === 0) {
       const page = await this.state.addPage(this.tree, 'Page 1');
@@ -99,6 +130,21 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.busy = false;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Guarantee the Form record exists in the DB before any child insert. New records
+   * (Explorer "create") arrive unsaved with a client-generated ID; `Name` is the only
+   * required column without a DB default, so we seed a placeholder the author renames.
+   */
+  private async ensureFormSaved(): Promise<boolean> {
+    if (this.record.IsSaved) {
+      return true;
+    }
+    if (!this.record.Name) {
+      this.record.Name = 'Untitled form';
+    }
+    return this.state.save(this.record);
   }
 
   // -- palette --------------------------------------------------------------
@@ -120,6 +166,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (node) {
       page.questions.push(node);
       this.selectedQuestionId = node.entity.ID;
+      this.markDirty();
     }
     this.busy = false;
     this.cdr.markForCheck();
@@ -199,14 +246,14 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected async onQuestionChanged(node: QuestionNode): Promise<void> {
     await this.state.save(node.entity);
-    this.cdr.markForCheck();
+    this.markDirty();
   }
 
   protected async onAddOption(node: QuestionNode): Promise<void> {
     const option = await this.state.addOption(node, `Option ${node.options.length + 1}`);
     if (option) {
       node.options.push(option);
-      this.cdr.markForCheck();
+      this.markDirty();
     }
   }
 
@@ -216,7 +263,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (option && (await this.state.deleteOption(option))) {
       node.options.splice(optionIndex, 1);
       await this.state.persistOptionOrder(node);
-      this.cdr.markForCheck();
+      this.markDirty();
     }
   }
 
@@ -229,7 +276,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (this.selectedQuestionId === node.entity.ID) {
       this.selectedQuestionId = null;
     }
-    this.cdr.markForCheck();
+    this.markDirty();
   }
 
   protected async moveQuestion(page: PageNode, node: QuestionNode, delta: number): Promise<void> {
@@ -249,7 +296,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     moveItemInArray(page.questions, from, to);
     await this.state.persistQuestionOrder(page);
-    this.cdr.markForCheck();
+    this.markDirty();
   }
 
   // -- form-level settings --------------------------------------------------
@@ -260,13 +307,13 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.record.RenderMode = mode;
     await this.state.save(this.record);
-    this.cdr.markForCheck();
+    this.markDirty();
   }
 
   protected async setName(name: string): Promise<void> {
     this.record.Name = name;
     await this.state.save(this.record);
-    this.cdr.markForCheck();
+    this.markDirty();
   }
 
   // -- publish --------------------------------------------------------------
@@ -281,6 +328,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = false;
     if (result.success) {
       this.statusMessage = `Published version ${result.versionNumber}.`;
+      this.dirty = false;
     } else {
       this.statusMessage = result.error ?? 'Publish failed.';
     }
@@ -292,8 +340,36 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.cdr.markForCheck();
   }
 
-  /** The Design panel persisted `Form.StyleID`; refresh the shell. */
+  /** The Design panel persisted `Form.StyleID`; the theme reaches the live link only on Publish. */
   protected onStyleApplied(): void {
+    this.markDirty();
+  }
+
+  // -- WYSIWYG preview ------------------------------------------------------
+
+  /** Toolbar "Preview": render the draft with the form's currently-assigned style. */
+  protected async openPreview(): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    const style = this.record.StyleID
+      ? (await this.design.loadStyleById(this.record.StyleID)) ?? undefined
+      : undefined;
+    this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview');
+    this.cdr.markForCheck();
+  }
+
+  /** Design-tab "Preview form": render the draft with the current (possibly unsaved) theme. */
+  protected previewWithTokens(tokens: FormStyleTokens): void {
+    if (!this.tree) {
+      return;
+    }
+    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', tokens);
+    this.cdr.markForCheck();
+  }
+
+  protected closePreview(): void {
+    this.previewDef = null;
     this.cdr.markForCheck();
   }
 }

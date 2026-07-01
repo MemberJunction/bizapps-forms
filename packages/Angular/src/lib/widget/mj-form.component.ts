@@ -45,6 +45,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** Distribution slug identifying which published form to load (element attribute). */
   public readonly distributionSlug = input<string>('', { alias: 'slug' });
 
+  /**
+   * Pre-built definition to render directly, bypassing the API fetch. Used by the
+   * builder's WYSIWYG Preview to render the unpublished draft (fillable, themed) with no
+   * publish/DB round-trip. When set, {@link load} skips `loadPublishedForm`.
+   */
+  public readonly definitionInput = input<PublishedFormDefinition | null>(null, { alias: 'definition' });
+
   private readonly api = inject(FORMS_API_SERVICE);
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
   private readonly startedAt = new Date().toISOString();
@@ -70,11 +77,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.autosave?.dispose();
   }
 
-  /** Fetch the published form, theme the host, and build the runtime. */
+  /** Fetch (or accept) the form definition, theme the host, and build the runtime. */
   private async load(): Promise<void> {
     this.phase.set('loading');
     try {
-      const def = await this.api.loadPublishedForm(this.distributionSlug());
+      const def = this.definitionInput() ?? (await this.api.loadPublishedForm(this.distributionSlug()));
       if (!def) {
         this.fail('This form is not available.');
         return;

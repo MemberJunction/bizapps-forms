@@ -39,6 +39,19 @@ const ENTITY = {
   answers: 'MJ_BizApps_Forms: Form Response Answers',
 } as const;
 
+/** DB schema for the Forms tables/views — the IN-subquery view must be qualified. */
+const FORMS_SCHEMA = '__mj_BizAppsForms';
+
+/**
+ * Build the answers `ExtraFilter` that scopes to a form's responses across all versions.
+ * The `vwFormResponses` view MUST be schema-qualified: the connection's default schema is
+ * not `__mj_BizAppsForms`, so a bare name resolves against `dbo` and throws
+ * "Invalid object name 'vwFormResponses'". Exported for unit testing.
+ */
+export function answersForFormFilter(formId: string): string {
+  return `ResponseID IN (SELECT ID FROM ${FORMS_SCHEMA}.vwFormResponses WHERE FormID='${formId}')`;
+}
+
 @Injectable()
 export class FormsReportingService {
   private readonly rv = new RunView();
@@ -142,7 +155,7 @@ export class FormsReportingService {
       },
       {
         EntityName: ENTITY.answers,
-        ExtraFilter: `ResponseID IN (SELECT ID FROM ${this.responsesViewName()} WHERE FormID='${form.formId}')`,
+        ExtraFilter: answersForFormFilter(form.formId),
         ResultType: 'simple',
         Fields: [
           'ID',
@@ -226,7 +239,7 @@ export class FormsReportingService {
   ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
     const res = (await this.rv.RunView({
       EntityName: ENTITY.answers,
-      ExtraFilter: `ResponseID IN (SELECT ID FROM ${this.responsesViewName()} WHERE FormID='${formId}')`,
+      ExtraFilter: answersForFormFilter(formId),
       ResultType: 'simple',
       Fields: [
         'ID',
@@ -263,10 +276,5 @@ export class FormsReportingService {
       throw new Error('This form version has no published definition snapshot.');
     }
     return JSON.parse(snapshot) as PublishedFormDefinition;
-  }
-
-  /** The DB view name backing the responses entity (for the IN subquery). */
-  private responsesViewName(): string {
-    return 'vwFormResponses';
   }
 }

@@ -11,6 +11,7 @@ const S3_ACTION_NAMES = [
   'Forms: Upsert Respondent Person',
   'Forms: Send Confirmation Email',
   'Forms: Create Followup Task',
+  'Forms: Analyze Written Responses',
 ] as const;
 
 const AUTHORING_ACTION_NAMES = [
@@ -19,8 +20,8 @@ const AUTHORING_ACTION_NAMES = [
 ] as const;
 
 describe('action registration', () => {
-  it('LoadFormsActions reports all five action classes', () => {
-    expect(LoadFormsActions()).toBe(5);
+  it('LoadFormsActions reports all six action classes', () => {
+    expect(LoadFormsActions()).toBe(6);
   });
 
   it.each([...S3_ACTION_NAMES, ...AUTHORING_ACTION_NAMES])(

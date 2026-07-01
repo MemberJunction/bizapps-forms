@@ -29,7 +29,15 @@
     @if (statusMessage) {
       <span class="fb-status" role="status">{{ statusMessage }}</span>
     }
-    <button type="button" class="mjf-btn mjf-btn--primary" [disabled]="busy" (click)="publish()">
+    @if (dirty) {
+      <span class="fb-dirty" role="status" title="Your changes go live on the public link only after you Publish.">
+        <i class="fa-solid fa-circle" aria-hidden="true"></i> Unpublished changes
+      </span>
+    }
+    <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="busy || !tree" (click)="openPreview()">
+      <i class="fa-solid fa-eye" aria-hidden="true"></i> Preview
+    </button>
+    <button type="button" class="mjf-btn mjf-btn--primary" [class.is-attention]="dirty" [disabled]="busy" (click)="publish()">
       <i class="fa-solid fa-rocket" aria-hidden="true"></i> Publish
     </button>
   </header>
@@ -185,11 +193,19 @@
     </div>
   } @else if (activeTab === 'design') {
     <div class="fb-design">
-      <mjf-design-panel [form]="record" (styleApplied)="onStyleApplied()"></mjf-design-panel>
+      <mjf-design-panel
+        [form]="record"
+        (styleApplied)="onStyleApplied()"
+        (previewRequested)="previewWithTokens($event)"
+      ></mjf-design-panel>
     </div>
   } @else {
     <div class="fb-distribute">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>
+  }
+
+  @if (previewDef) {
+    <mjf-form-preview-modal [definition]="previewDef" (closed)="closePreview()"></mjf-form-preview-modal>
   }
 </div>

@@ -3,10 +3,15 @@
   <div class="dp-controls">
     <section aria-labelledby="dp-styles-title">
       <h3 id="dp-styles-title" class="dp-title">Theme</h3>
-      <p class="dp-hint">Pick a preset. The preview updates instantly; “Apply” saves it to this form.</p>
+      <p class="dp-hint">Pick a preset. The sample updates instantly; “Apply” saves it to this form. Use “Preview form” to fill the real form before publishing.</p>
 
-      @if (styles.length === 0) {
-        <p class="dp-empty">No styles available yet.</p>
+      @if (loadError) {
+        <div class="dp-empty" role="alert">
+          <p>Couldn’t load themes: {{ loadError }}</p>
+          <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="busy" (click)="reload()">Retry</button>
+        </div>
+      } @else if (styles.length === 0) {
+        <p class="dp-empty">No themes exist yet. Ask an admin to seed the theme gallery.</p>
       }
       <ul class="dp-style-list" role="list">
         @for (style of styles; track style.ID) {
@@ -44,6 +49,12 @@
           [disabled]="busy || !selected"
           (click)="duplicateSelected()"
         >Duplicate &amp; edit</button>
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--ghost"
+          [disabled]="busy"
+          (click)="requestPreview()"
+        ><i class="fa-solid fa-eye" aria-hidden="true"></i> Preview form</button>
       </div>
     </section>
 
@@ -96,6 +107,55 @@
             />
           </div>
         </div>
+
+        <div class="mjf-field">
+          <span class="mjf-field-label">Page background</span>
+          <div class="dp-color-row">
+            <input type="color" class="dp-color" [(ngModel)]="brandPageBg" (ngModelChange)="onBrandInput()" aria-label="Page background color" />
+            <input class="mjf-input" [(ngModel)]="brandPageBg" (ngModelChange)="onBrandInput()" placeholder="Hex or CSS color" aria-label="Page background hex" />
+          </div>
+        </div>
+
+        <div class="mjf-field">
+          <span class="mjf-field-label">Card background</span>
+          <div class="dp-color-row">
+            <input type="color" class="dp-color" [(ngModel)]="brandCardBg" (ngModelChange)="onBrandInput()" aria-label="Card background color" />
+            <input class="mjf-input" [(ngModel)]="brandCardBg" (ngModelChange)="onBrandInput()" placeholder="Hex or CSS color" aria-label="Card background hex" />
+          </div>
+        </div>
+
+        <label class="mjf-field">
+          <span class="mjf-field-label">Body font</span>
+          <select class="mjf-input" [(ngModel)]="fontBody" (ngModelChange)="onBrandInput()">
+            <option value="">Theme default</option>
+            @for (font of fontOptions; track font.stack) {
+              <option [value]="font.stack">{{ font.label }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="mjf-field">
+          <span class="mjf-field-label">Heading font</span>
+          <select class="mjf-input" [(ngModel)]="fontDisplay" (ngModelChange)="onBrandInput()">
+            <option value="">Theme default</option>
+            @for (font of fontOptions; track font.stack) {
+              <option [value]="font.stack">{{ font.label }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="mjf-field">
+          <span class="mjf-field-label">Corner radius — {{ radiusPx }}px</span>
+          <input
+            type="range"
+            min="0"
+            max="28"
+            step="2"
+            [(ngModel)]="radiusPx"
+            (ngModelChange)="onBrandInput()"
+            aria-label="Corner radius in pixels"
+          />
+        </label>
 
         <label class="mjf-field">
           <span class="mjf-field-label">Logo URL</span>

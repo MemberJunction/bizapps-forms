@@ -25,6 +25,7 @@ const ENTITY = {
 
 /** One answer paired with the type of the question it answers. */
 export interface AnswerWithType {
+  answerId: string;
   questionId: string;
   questionType: FormQuestionType;
   prompt: string;
@@ -88,6 +89,7 @@ async function loadAnswers(responseId: string, contextUser: UserInfo): Promise<A
   return answerResult.Results.map((a) => {
     const q = questionsById.get(a.QuestionID);
     return {
+      answerId: a.ID,
       questionId: a.QuestionID,
       questionType: q?.QuestionType ?? 'ShortText',
       prompt: q?.Prompt ?? '',

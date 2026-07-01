@@ -1,0 +1,69 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Response Analyzer",
+    "Description": "System + user prompt for the Forms response analyzer. Given a form response's free-text answers (the {{ Answers }} parameter, each { questionPrompt, text }) and optional {{ FormContext }}, scores each answer and returns a parallel JSON answers array in the same order. Used by the 'Forms: Response Analyzer' AI Prompt.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-response-analyzer.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "C3D4E5F6-A7B8-4C9D-0E1F-2A3B4C5D6E7F"
+        },
+        "sync": {
+          "lastModified": "2026-07-01T16:45:08.289Z",
+          "checksum": "4d34d7d50f41fec11fa6d5169e378ee3dabb5508e2a5c83c9fec24a20a7627a0"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Answers",
+          "Description": "The free-text answers to analyze; an array of { questionPrompt, text } in the order they should be scored.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "D4E5F6A7-B8C9-4D0E-1F2A-3B4C5D6E7F80"
+        },
+        "sync": {
+          "lastModified": "2026-07-01T16:45:06.936Z",
+          "checksum": "a852d3582d082b1960423d81e021804d6ca66a38dea30d9d4c54ea03127a5224"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "FormContext",
+          "Description": "Optional: the name/purpose of the form, to help the model judge relevance.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "E5F6A7B8-C9D0-4E1F-2A3B-4C5D6E7F8091"
+        },
+        "sync": {
+          "lastModified": "2026-07-01T16:45:06.947Z",
+          "checksum": "cf393530431c869291871b7ed855f09fc3cfecd0e9437b20ac50e664c18e0681"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "F6A7B8C9-D0E1-4F2A-3B4C-5D6E7F809102"
+  },
+  "sync": {
+    "lastModified": "2026-07-01T16:45:06.907Z",
+    "checksum": "b0a966e17bbfea4f89b3f22f1c384ffa0153c92cc82fb23be05b9533c899d8c9"
+  }
+}

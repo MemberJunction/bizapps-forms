@@ -11,6 +11,15 @@ const LAYOUT_CSS = /* css */ `
 .fb-name:focus { outline: 2px solid var(--mjf-focus-ring, var(--mj-brand-primary)); border-color: var(--mj-brand-primary); }
 .fb-spacer { flex: 1; }
 .fb-status { font-size: 0.8125rem; color: var(--mj-text-secondary); }
+.fb-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  color: var(--mj-status-warning, var(--mj-text-secondary));
+}
+.fb-dirty i { font-size: 0.5rem; }
+.mjf-btn.is-attention { box-shadow: 0 0 0 3px var(--mj-brand-primary-subtle, transparent); }
 
 /* Segmented control */
 .fb-seg { display: inline-flex; border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-full, 999px); overflow: hidden; }

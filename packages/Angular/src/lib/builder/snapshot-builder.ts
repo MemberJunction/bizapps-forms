@@ -1,5 +1,6 @@
 import type {
   mjBizAppsFormsFormStyleEntity,
+  FormStyleTokens,
   PublishedFormDefinition,
   PublishedFormPage,
   PublishedFormQuestion,
@@ -23,11 +24,15 @@ import {
  * Pages and questions are re-numbered to a dense 0-based `displayOrder` reflecting
  * their sorted position, so the snapshot order is canonical regardless of any gaps
  * in the stored DisplayOrder values.
+ *
+ * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
+ * supplied it is used verbatim instead of deriving tokens from `style`.
  */
 export function buildPublishedDefinition(
   tree: FormTree,
   style: mjBizAppsFormsFormStyleEntity | undefined,
   formVersionId: string,
+  styleTokensOverride?: FormStyleTokens,
 ): PublishedFormDefinition {
   const form = tree.form;
   return {
@@ -37,11 +42,13 @@ export function buildPublishedDefinition(
     description: form.Description ?? undefined,
     renderMode: form.RenderMode as FormRenderMode,
     settings: parseFormSettings(form.Settings),
-    styleTokens: buildStyleTokens(
-      style?.CSSVariables ?? null,
-      style?.CustomCSS ?? null,
-      style?.LogoURL ?? null,
-    ),
+    styleTokens:
+      styleTokensOverride ??
+      buildStyleTokens(
+        style?.CSSVariables ?? null,
+        style?.CustomCSS ?? null,
+        style?.LogoURL ?? null,
+      ),
     pages: [...tree.pages]
       .sort((a, b) => a.entity.DisplayOrder - b.entity.DisplayOrder)
       .map((p, index) => buildPage(p, index)),

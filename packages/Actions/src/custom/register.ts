@@ -11,12 +11,14 @@
  *   - 'Forms: Upsert Respondent Person'
  *   - 'Forms: Send Confirmation Email'
  *   - 'Forms: Create Followup Task'
+ *   - 'Forms: Analyze Written Responses'
  *   - 'Forms: Generate Form From Brief'
  *   - 'Forms: Create Form From Template'
  */
 import { UpsertRespondentPersonAction } from './on-submit/upsert-respondent-person.action';
 import { SendConfirmationEmailAction } from './on-submit/send-confirmation-email.action';
 import { CreateFollowupTaskAction } from './on-submit/create-followup-task.action';
+import { AnalyzeWrittenResponsesAction } from './on-submit/analyze-written-responses.action';
 import { GenerateFormFromBriefAction } from './authoring/generate-form.action';
 import { CreateFormFromTemplateAction } from './templates/create-form-from-template.action';
 
@@ -25,9 +27,20 @@ export {
   UpsertRespondentPersonAction,
   SendConfirmationEmailAction,
   CreateFollowupTaskAction,
+  AnalyzeWrittenResponsesAction,
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
 };
+export {
+  setResponseAnalyzerModel,
+} from './on-submit/analyze-written-responses.action';
+export {
+  AIPromptResponseAnalyzerModel,
+  RESPONSE_ANALYZER_PROMPT_NAME,
+  type ResponseAnalyzerModel,
+  type AnalyzerInputAnswer,
+  type AnalyzedAnswer,
+} from './on-submit/response-analyzer-model';
 export * from './shared/action-params';
 export * from './shared/form-response-context';
 export * from './authoring/form-blueprint';
@@ -63,6 +76,7 @@ const FORMS_ACTION_CLASSES = [
   UpsertRespondentPersonAction,
   SendConfirmationEmailAction,
   CreateFollowupTaskAction,
+  AnalyzeWrittenResponsesAction,
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
 ] as const;

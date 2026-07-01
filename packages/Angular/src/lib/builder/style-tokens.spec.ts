@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   BRAND_TOKENS,
+  RADIUS_TOKENS,
   serializeCssVariables,
   readBrandToken,
   withBrandToken,
+  readRadiusPx,
+  withRadiusPx,
 } from './style-tokens';
 
 const PRESET = JSON.stringify({
@@ -54,5 +57,32 @@ describe('withBrandToken', () => {
     const map = { '--mjf-accent': '#111' };
     const serialized = serializeCssVariables(map);
     expect(JSON.parse(serialized)).toEqual(map);
+  });
+
+  it('writes the expanded tokens (page/card bg, fonts) added for the theme editor', () => {
+    let css: string | null = null;
+    css = withBrandToken(css, BRAND_TOKENS.pageBg, '#faf8f4');
+    css = withBrandToken(css, BRAND_TOKENS.cardBg, '#ffffff');
+    css = withBrandToken(css, BRAND_TOKENS.fontBody, "'Inter', sans-serif");
+    const map = JSON.parse(css);
+    expect(map['--mjf-page-bg']).toBe('#faf8f4');
+    expect(map['--mjf-card-bg']).toBe('#ffffff');
+    expect(map['--mjf-font-body']).toBe("'Inter', sans-serif");
+  });
+});
+
+describe('radius tokens', () => {
+  it('sets all four radius tokens together to keep rounding coherent', () => {
+    const map = JSON.parse(withRadiusPx(PRESET, 16));
+    for (const token of RADIUS_TOKENS) {
+      expect(map[token]).toBe('16px');
+    }
+    expect(map['--mjf-accent']).toBe('#1f5d4c'); // other tokens preserved
+  });
+
+  it('reads the card radius back as a number, 0 when unset/invalid', () => {
+    expect(readRadiusPx(withRadiusPx(PRESET, 22))).toBe(22);
+    expect(readRadiusPx(PRESET)).toBe(0);
+    expect(readRadiusPx(null)).toBe(0);
   });
 });

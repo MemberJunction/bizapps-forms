@@ -252,5 +252,45 @@
       "lastModified": "2026-06-30T19:18:03.445Z",
       "checksum": "6878f895892ae17ebf11ddca8dbb9535090f966f7b4466d31d325dd8214af782"
     }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Analyze Written Responses",
+      "Description": "On-submit hook — runs a metadata-driven AI Prompt over a response's free-text (ShortText/LongText) answers in a single call and persists a per-answer Score + ScoreRationale onto each FormResponseAnswer.",
+      "DriverClass": "Forms: Analyze Written Responses",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-magnifying-glass-chart"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormResponseID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The FormResponse ID whose free-text answers should be analyzed."
+          },
+          "primaryKey": {
+            "ID": "7F0B0006-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T16:45:08.683Z",
+            "checksum": "dd25f47c3d616069689e3e1030bd6ca045c05de07b8d9bcb8d844df88e7317e6"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0006-A1B2-4C3D-8E4F-000000000006"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T16:45:08.654Z",
+      "checksum": "d5c7c78d1c9f165e890353bed24286a17c3fc0fe3ee265f694c98f0319ef9bd9"
+    }
   }
 ]

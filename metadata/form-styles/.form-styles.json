@@ -146,5 +146,380 @@
       "lastModified": "2026-06-30T17:14:17.545Z",
       "checksum": "5f3c0c828d05398867a11632b929a6365c06edf9ce8e1237c3a31a8a0d8c2f96"
     }
+  },
+  {
+    "fields": {
+      "Name": "Minimal",
+      "Description": "Clean, neutral light theme. White cards on a soft gray page, system font, subtle borders, and a calm slate-blue accent. The safe corporate default.",
+      "CSSVariables": {
+        "--mjf-font-body": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+        "--mjf-font-display": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+        "--mjf-display-weight": "700",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#111827",
+        "--mj-text-secondary": "#4b5563",
+        "--mj-text-muted": "#9ca3af",
+        "--mj-border-default": "#e5e7eb",
+        "--mj-border-strong": "#d1d5db",
+        "--mjf-page-bg": "#f7f8fa",
+        "--mjf-page-bg-image": "none",
+        "--mjf-accent": "#4f6ef2",
+        "--mjf-accent-strong": "#3b57d6",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#eaeffe",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#e5e7eb",
+        "--mjf-card-radius": "12px",
+        "--mjf-card-shadow": "0 1px 2px rgba(16,24,40,.06)",
+        "--mjf-input-radius": "8px",
+        "--mjf-choice-radius": "8px",
+        "--mjf-btn-radius": "8px",
+        "--mjf-pill-radius": "999px",
+        "--mjf-chrome-bg": "#f0f1f4",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#f7f8fa"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "D6801A11-12A2-43BA-BD3D-52118112B1C5"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.109Z",
+      "checksum": "35658d549fae18f830155c94af09b08807326a10a5e31d2eb6735e9af1fa59b4"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Contrast",
+      "Description": "High-contrast, accessible theme (WCAG-strong). Pure black text on white, heavy borders, sharp corners, black accent — maximum legibility for a11y-first forms.",
+      "CSSVariables": {
+        "--mjf-font-body": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+        "--mjf-font-display": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+        "--mjf-display-weight": "800",
+        "--mjf-display-tracking": "0",
+        "--mj-text-primary": "#000000",
+        "--mj-text-secondary": "#1a1a1a",
+        "--mj-text-muted": "#3d3d3d",
+        "--mj-border-default": "#000000",
+        "--mj-border-strong": "#000000",
+        "--mjf-page-bg": "#ffffff",
+        "--mjf-page-bg-image": "none",
+        "--mjf-accent": "#000000",
+        "--mjf-accent-strong": "#1a1a1a",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#e6e6e6",
+        "--mjf-focus-ring": "#0b5fff",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#000000",
+        "--mjf-card-radius": "0px",
+        "--mjf-card-shadow": "none",
+        "--mjf-input-radius": "0px",
+        "--mjf-choice-radius": "0px",
+        "--mjf-btn-radius": "0px",
+        "--mjf-pill-radius": "0px",
+        "--mjf-chrome-bg": "#ffffff",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#f0f0f0"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "8CF077AD-61EF-436B-89B0-704FE1A9138E"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.120Z",
+      "checksum": "1b07d6a57681c606700843b42d75a16fae05c76b2be4e31a893a59149dac8059"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Midnight",
+      "Description": "Dark, minimal theme. Near-black background, light text, flat cards with hairline borders, and a bright blue accent. Understated dark mode.",
+      "CSSVariables": {
+        "color-scheme": "dark",
+        "--mjf-font-body": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+        "--mjf-font-display": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+        "--mjf-display-weight": "700",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#e6e9ef",
+        "--mj-text-secondary": "#a8b0be",
+        "--mj-text-muted": "#6b7280",
+        "--mj-text-inverse": "#0d1117",
+        "--mj-border-default": "#242a33",
+        "--mj-border-strong": "#333b47",
+        "--mjf-page-bg": "#0d1117",
+        "--mjf-page-bg-image": "none",
+        "--mjf-accent": "#3b82f6",
+        "--mjf-accent-strong": "#2f6fe0",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "rgba(59,130,246,.16)",
+        "--mjf-card-bg": "#161b22",
+        "--mjf-card-border": "#242a33",
+        "--mjf-card-radius": "12px",
+        "--mjf-card-shadow": "none",
+        "--mjf-input-bg": "#0d1117",
+        "--mjf-input-border": "#333b47",
+        "--mjf-input-radius": "8px",
+        "--mjf-choice-bg": "#161b22",
+        "--mjf-choice-border": "#333b47",
+        "--mjf-choice-radius": "8px",
+        "--mjf-btn-radius": "8px",
+        "--mjf-progress-track": "rgba(255,255,255,.10)",
+        "--mjf-rating-inactive": "rgba(255,255,255,.20)",
+        "--mjf-chrome-bg": "#0d1117",
+        "--mjf-panel-bg": "#161b22",
+        "--mjf-sidebar-bg": "#0d1117"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "56D9A823-2099-4A90-AAE2-E17439B20269"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.131Z",
+      "checksum": "5cec1e033923cff214fe5d96c5e4bca47167b9189f98e6a89e4bbce48c9ae1c7"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Playful",
+      "Description": "Bright, friendly theme. Rounded cards, heavy Nunito headings, a pink-to-purple accent gradient, and a soft lavender page. Great for community and fun surveys.",
+      "CSSVariables": {
+        "--mjf-font-body": "'Nunito', system-ui, sans-serif",
+        "--mjf-font-display": "'Nunito', system-ui, sans-serif",
+        "--mjf-display-weight": "900",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#2a2140",
+        "--mj-text-secondary": "#5b5175",
+        "--mj-text-muted": "#8b82a3",
+        "--mj-border-default": "#ece7f6",
+        "--mj-border-strong": "#dcd3ef",
+        "--mjf-page-bg": "#f6f2ff",
+        "--mjf-page-bg-image": "radial-gradient(900px 500px at 100% -5%, rgba(236,72,153,.14), transparent 60%)",
+        "--mjf-accent": "#ec4899",
+        "--mjf-accent-strong": "#db2777",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#fce7f3",
+        "--mjf-accent-gradient": "linear-gradient(135deg, #ec4899, #8b5cf6)",
+        "--mjf-eyebrow": "#8b5cf6",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#ece7f6",
+        "--mjf-card-radius": "24px",
+        "--mjf-card-shadow": "0 12px 28px -14px rgba(139,92,246,.35)",
+        "--mjf-input-radius": "16px",
+        "--mjf-choice-radius": "18px",
+        "--mjf-btn-radius": "18px",
+        "--mjf-pill-radius": "999px",
+        "--mjf-chrome-bg": "#efe8ff",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#f6f2ff"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 70,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "85374DD1-C795-4A7F-8467-DA1787BF3B2E"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.140Z",
+      "checksum": "e3838b4a91dab2c1b7358a3bfb6756aadbac126a67bd96fc4eaf583bea666075"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Ocean",
+      "Description": "Cool, calm theme. Soft blue page, white cards, and a teal-to-cyan accent. Fresh and professional.",
+      "CSSVariables": {
+        "--mjf-font-body": "'Inter', system-ui, sans-serif",
+        "--mjf-font-display": "'Inter', system-ui, sans-serif",
+        "--mjf-display-weight": "700",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#0f2b38",
+        "--mj-text-secondary": "#37596a",
+        "--mj-text-muted": "#7796a3",
+        "--mj-border-default": "#d6e6ec",
+        "--mj-border-strong": "#bcd5de",
+        "--mjf-page-bg": "#eef6f9",
+        "--mjf-page-bg-image": "radial-gradient(1000px 560px at 8% -10%, rgba(6,182,212,.14), transparent 60%)",
+        "--mjf-accent": "#0891b2",
+        "--mjf-accent-strong": "#0e7490",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#d5f0f6",
+        "--mjf-accent-gradient": "linear-gradient(135deg, #0891b2, #22d3ee)",
+        "--mjf-eyebrow": "#0e7490",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#d6e6ec",
+        "--mjf-card-radius": "16px",
+        "--mjf-card-shadow": "0 8px 20px -14px rgba(8,145,178,.4)",
+        "--mjf-input-radius": "10px",
+        "--mjf-choice-radius": "12px",
+        "--mjf-btn-radius": "12px",
+        "--mjf-pill-radius": "999px",
+        "--mjf-chrome-bg": "#e3eff3",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#eef6f9"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 80,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "06C4A3D2-8E48-42E7-910E-9E251FE8CD7E"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.150Z",
+      "checksum": "535db8097e4d4c5e045757cb0f9c30ccb9772c2e0d0bcaab84c05a3de1dee13c"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Mono",
+      "Description": "Monochrome, technical theme. Grayscale palette, monospace body, sharp corners, and a graphite accent. For dev tools and technical intake.",
+      "CSSVariables": {
+        "--mjf-font-body": "'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace",
+        "--mjf-font-display": "ui-monospace, 'SF Mono', Menlo, monospace",
+        "--mjf-display-weight": "700",
+        "--mjf-display-tracking": "0",
+        "--mj-text-primary": "#18181b",
+        "--mj-text-secondary": "#3f3f46",
+        "--mj-text-muted": "#71717a",
+        "--mj-border-default": "#d4d4d8",
+        "--mj-border-strong": "#a1a1aa",
+        "--mjf-page-bg": "#fafafa",
+        "--mjf-page-bg-image": "none",
+        "--mjf-accent": "#27272a",
+        "--mjf-accent-strong": "#09090b",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#e4e4e7",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#d4d4d8",
+        "--mjf-card-radius": "4px",
+        "--mjf-card-shadow": "none",
+        "--mjf-input-radius": "4px",
+        "--mjf-choice-radius": "4px",
+        "--mjf-btn-radius": "4px",
+        "--mjf-pill-radius": "4px",
+        "--mjf-chrome-bg": "#f4f4f5",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#fafafa"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 90,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "25E7D1E5-159F-4A48-8FA1-4BD47ADAB89E"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.159Z",
+      "checksum": "5617c0fc0dd8022bbd6dc661f2556d6f85a53848e66797ea87c48e8f410df8a2"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Pastel",
+      "Description": "Soft, gentle theme. Muted mint page, cream cards, rounded corners, and a soft lilac accent. Calm and approachable.",
+      "CSSVariables": {
+        "--mjf-font-body": "'Nunito', system-ui, sans-serif",
+        "--mjf-font-display": "'Nunito', system-ui, sans-serif",
+        "--mjf-display-weight": "800",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#3b3a45",
+        "--mj-text-secondary": "#63616f",
+        "--mj-text-muted": "#9997a6",
+        "--mj-border-default": "#e6ece6",
+        "--mj-border-strong": "#d3ddd3",
+        "--mjf-page-bg": "#eef5ef",
+        "--mjf-page-bg-image": "radial-gradient(800px 480px at 100% 0%, rgba(167,139,250,.14), transparent 60%)",
+        "--mjf-accent": "#a78bfa",
+        "--mjf-accent-strong": "#8b5cf6",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#ede9fe",
+        "--mjf-eyebrow": "#6ee7b7",
+        "--mjf-card-bg": "#fffdf9",
+        "--mjf-card-border": "#e9e6de",
+        "--mjf-card-radius": "20px",
+        "--mjf-card-shadow": "0 10px 22px -16px rgba(120,110,140,.4)",
+        "--mjf-input-radius": "14px",
+        "--mjf-choice-radius": "16px",
+        "--mjf-btn-radius": "16px",
+        "--mjf-pill-radius": "999px",
+        "--mjf-chrome-bg": "#e6f0e8",
+        "--mjf-panel-bg": "#fffdf9",
+        "--mjf-sidebar-bg": "#eef5ef"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 100,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "3485F016-DEBA-4165-ACE6-8D662B48E326"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.168Z",
+      "checksum": "c74be67cea7b429675ed3716454e28ab83dd079308cac56f8f8d44985f137d0f"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forest",
+      "Description": "Earthy, grounded theme. Warm off-white page, deep forest-green accent, subtle olive tones. Natural and trustworthy.",
+      "CSSVariables": {
+        "--mjf-font-body": "'Inter', system-ui, sans-serif",
+        "--mjf-font-display": "'Fraunces', Georgia, serif",
+        "--mjf-display-weight": "600",
+        "--mjf-display-tracking": "-0.01em",
+        "--mj-text-primary": "#1c2a1e",
+        "--mj-text-secondary": "#3f5140",
+        "--mj-text-muted": "#748076",
+        "--mj-border-default": "#dde5da",
+        "--mj-border-strong": "#c6d3c2",
+        "--mjf-page-bg": "#f4f6f0",
+        "--mjf-page-bg-image": "none",
+        "--mjf-accent": "#2f6b3c",
+        "--mjf-accent-strong": "#245430",
+        "--mjf-on-accent": "#ffffff",
+        "--mjf-accent-soft": "#e0ecdf",
+        "--mjf-accent-gradient": "linear-gradient(135deg, #2f6b3c, #6b8f3d)",
+        "--mjf-eyebrow": "#6b8f3d",
+        "--mjf-card-bg": "#ffffff",
+        "--mjf-card-border": "#dde5da",
+        "--mjf-card-radius": "14px",
+        "--mjf-card-shadow": "0 6px 18px -14px rgba(47,107,60,.4)",
+        "--mjf-input-radius": "10px",
+        "--mjf-choice-radius": "12px",
+        "--mjf-btn-radius": "12px",
+        "--mjf-pill-radius": "999px",
+        "--mjf-chrome-bg": "#e8ede1",
+        "--mjf-panel-bg": "#ffffff",
+        "--mjf-sidebar-bg": "#f4f6f0"
+      },
+      "CustomCSS": null,
+      "LogoURL": null,
+      "DisplayRank": 110,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "AB9087DC-AD7B-4F6A-A705-FD5DDF3D1509"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T15:28:38.179Z",
+      "checksum": "2401c78ef6ba9063c579dd53c86b49e6e3349a7dcf1b1c71689147f3f1fa7bc8"
+    }
   }
 ]

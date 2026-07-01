@@ -20,6 +20,7 @@ export const ON_SUBMIT_ACTION_NAMES = [
   'Forms: Upsert Respondent Person',
   'Forms: Send Confirmation Email',
   'Forms: Create Followup Task',
+  'Forms: Analyze Written Responses',
 ] as const;
 
 export type OnSubmitActionName = (typeof ON_SUBMIT_ACTION_NAMES)[number];

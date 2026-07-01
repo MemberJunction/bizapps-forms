@@ -159,6 +159,19 @@ describe('buildPublishedDefinition', () => {
     expect(def.styleTokens.logoURL).toBe('https://logo');
   });
 
+  it('uses the styleTokensOverride verbatim when supplied (WYSIWYG preview of unsaved edits)', () => {
+    const style = {
+      CSSVariables: '{"--mjf-accent":"#000000"}',
+      CustomCSS: null,
+      LogoURL: null,
+    } as mjBizAppsFormsFormStyleEntity;
+    const override = { cssVariables: { '--mjf-accent': '#ff8800' }, logoURL: 'https://preview-logo' };
+    const def = buildPublishedDefinition({ form: form({}), pages: [] }, style, 'v', override);
+    // Override wins over the entity-derived tokens.
+    expect(def.styleTokens.cssVariables['--mjf-accent']).toBe('#ff8800');
+    expect(def.styleTokens.logoURL).toBe('https://preview-logo');
+  });
+
   it('produces JSON-serializable output (round-trips through JSON)', () => {
     const p = page('p', 0);
     p.questions = [question('q1', 0)];

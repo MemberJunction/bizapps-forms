@@ -88,7 +88,11 @@ export class DistributionService {
     dist.Status = 'Active';
     dist.ResponseCount = 0;
     dist.IsActive = true;
-    dist.CaptchaRequired = input.captchaRequired ?? true;
+    // Captcha is OPT-IN: default off so public forms work out of the box. Turnstile is
+    // fail-closed (a submit is rejected if captcha is on but no Turnstile secret is
+    // configured), so defaulting on would silently break every submission until an admin
+    // wires Cloudflare Turnstile. Matches the form-level `captchaRequired` default (false).
+    dist.CaptchaRequired = input.captchaRequired ?? false;
     dist.MaxResponses = input.maxResponses ?? null;
     dist.OpenAt = input.openAt ?? null;
     dist.CloseAt = input.closeAt ?? null;
