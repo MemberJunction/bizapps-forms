@@ -721,3 +721,40 @@ native entities. This is the reporting differentiator no incumbent has.
     7 commits once landed on the wrong branch). (c) **User runs MJAPI/Explorer themselves — never start/restart
     them.** (d) **`MJ_Forms` is the shared dev DB — never DROP it** (the `consolidate-migration` skill wants to;
     don't). (e) AI keys are in `.env` (present); redeem is POST. State tracked in the task list + this log.
+- **2026-06-30 (later 2) — last-mile clickable-form slices integrated (supervisor + 4 parallel agents).** HEAD
+  **`854d4b4`** on `feature/phase1-foundation`. Four slices built concurrently in isolated worktrees, each
+  verified, then merged `--no-ff` (zero conflicts — fully disjoint file sets); integrated tree builds green
+  (5 packages + MJAPI + widget bundle) with **221 Vitest passing** (Server 90 · Actions 40 · Angular 91):
+  1. **`<mj-form>` widget bundle** (DG-5, `01c0ae6`) — `packages/Angular/scripts/build-widget.mjs` runs esbuild
+     with an **Angular Linker AOT pass** (`@angular/compiler-cli/linker/babel`; published `@angular/*` ship
+     partially-compiled `ɵɵngDeclare*`, so plain esbuild threw "JIT unavailable" at load). `npm run build:widget`
+     → `packages/Angular/dist/widget/mj-form.js` (~900 kB IIFE, zoneless, calls `customElements.define('mj-form')`).
+     Served by `WidgetBundleMiddleware` (`@RegisterClass(BaseServerMiddleware,'mj:formsWidgetBundle')`) at
+     `GET /forms/widget/mj-form.js`; path resolves via `FORMS_WIDGET_BUNDLE_PATH` → `require.resolve('@mj-biz-apps/forms-ng/dist/widget/mj-form.js')` → monorepo fallback; missing bundle → 404, never crashes boot.
+  2. **`/f/:slug` server-side redeem** (`4f2396e`) — `redeem.service.ts` (pure/injectable): slug →
+     `FormDistribution.PublicLinkToken` (via `RunView`, `UserCache.Instance.GetSystemUser()` for the pre-auth
+     read) → `POST ${magicLinkRedeemUrl}?format=json` (Node `fetch`, default `http://localhost:4121/magic-link/redeem`)
+     → anon JWT injected into the host page via XSS-safe `data-token` attr + `Cache-Control: no-store`.
+     Friendly shell-free error pages: slug-not-found 404, closed/out-of-window 410, no-token 409, redeem-fail 502.
+  3. **Upsert Person fix** (`9a87365`) — ROOT CAUSE: seam-S3 param-name mismatch — `on-submit-hooks.service.ts`
+     fired `ResponseID` but the action read `FormResponseID`, so it bailed (`MISSING_PARAMETERS`) before
+     creating/linking the Person. Fixed the producer side; match-before-create by email was already correct.
+  4. **CI UI gate** (`3f643db`) — `scripts/check-ui-tokens.mjs` + `.github/workflows/ui-gate.yml` + root
+     `lint:ui`. Color gate enforces `--mj-*`/`--mjf-*` (var() fallbacks allowed); current tree passes clean
+     (0 violations). Button/`mj-btn` gate coded but **disabled** (repo has 0 `mj-btn` by convention → would be
+     44 false positives); one-line toggle when adopted.
+  - **Gotcha (b) recurred:** resumed agents 1 & 2 ran in the **main checkout** (not their sub-worktrees), flipping
+    its branch and stacking both commits on `worktree-agent-a5864f9c…`; reconciled by switching main back to
+    `feature/phase1-foundation` (user's 3 uncommitted files — `.vscode/settings.json`, `schema.graphql`,
+    `index.html` — preserved throughout, never committed) and merging. Foundation was never endangered (stayed
+    at `989d777` until the approved merges).
+  - **NEXT (resume here) — Phase 1 close-out, all need the live MJAPI the user runs:**
+    1. **Full anonymous-submit e2e in a browser:** `start:api`, mint/activate a distribution, hit `GET /f/:slug`
+       → confirm the bundle loads, `<mj-form>` renders, the server-side redeem injects a working JWT, and
+       `SubmitFormResponse` persists under the anonymous scope (this exercises the redeem wire-contract +
+       `UserCache` system user + actual `customElements` rendering that unit tests stub).
+    2. **Verify the `Forms: Upsert Respondent Person` hook end-to-end** now that the param bug is fixed — a real
+       submission should create/link `MJ_BizApps_Common: People` and set `FormResponse.RespondentPersonID`.
+    3. Real **Turnstile / email (CommunicationEngine) / file (MJ:Files)** provider wiring.
+    4. Confirm the **Gemini AIPrompt** actually executes in MJAPI (AI credential resolution).
+    5. Push once write access to the org remote exists.

@@ -10,6 +10,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
+import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import { BUILDER_CONTROL_STYLES } from './builder-styles';
 import {
   DistributionService,
@@ -162,10 +163,35 @@ export class DistributionManagerComponent implements OnInit {
     return `dm-status dm-status--${dist.Status.toLowerCase()}`;
   }
 
+  /**
+   * Base URL the public `/f/:slug` link is built against. This MUST be the **MJAPI
+   * origin** (where the anonymous respondent host page is served) — NOT the Explorer
+   * origin this builder runs under. Using `window.location.origin` here was the bug
+   * that produced `http://localhost:4321/f/:slug` (Explorer → login page) instead of
+   * `http://localhost:4121/f/:slug` (the shell-free respondent host).
+   *
+   * Resolution order: an explicit `publicBaseUrl` input → the configured GraphQL API
+   * origin (`GraphQLDataProvider.Instance.ConfigData.URL`) → `window.location.origin`
+   * as a last resort.
+   */
   private get effectiveBaseUrl(): string {
     if (this.publicBaseUrl.length > 0) {
       return this.publicBaseUrl;
     }
+    const apiOrigin = this.resolveApiOrigin();
+    if (apiOrigin) {
+      return apiOrigin;
+    }
     return typeof window !== 'undefined' ? window.location.origin : '';
+  }
+
+  /** Origin of the configured MJAPI GraphQL endpoint, or '' if unavailable. */
+  private resolveApiOrigin(): string {
+    try {
+      const url = GraphQLDataProvider.Instance?.ConfigData?.URL;
+      return url ? new URL(url).origin : '';
+    } catch {
+      return '';
+    }
   }
 }

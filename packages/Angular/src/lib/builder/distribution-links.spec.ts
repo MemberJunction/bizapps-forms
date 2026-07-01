@@ -32,29 +32,21 @@ describe('redeemUrl', () => {
 });
 
 describe('shareUrl', () => {
-  it('uses the redeem URL when a token exists', () => {
-    expect(shareUrl('mj_ml_tok', 'spring', 'https://x.com')).toBe(
-      'https://x.com/magic-link/redeem?token=mj_ml_tok',
-    );
+  it('always uses the /f/:slug host page (which redeems server-side), never the raw redeem URL', () => {
+    expect(shareUrl('spring', 'https://x.com')).toBe('https://x.com/f/spring');
   });
 
-  it('falls back to the slug URL when no token yet', () => {
-    expect(shareUrl(null, 'spring', 'https://x.com')).toBe('https://x.com/f/spring');
-    expect(shareUrl(undefined, 'spring', 'https://x.com')).toBe('https://x.com/f/spring');
+  it('url-encodes the slug', () => {
+    expect(shareUrl('a b', 'https://x.com')).toBe('https://x.com/f/a%20b');
   });
 });
 
 describe('embedSnippet', () => {
-  it('produces an iframe pointing at the redeem url when a token exists', () => {
-    const snippet = embedSnippet('mj_ml_tok', 's1', 'https://x.com');
+  it('produces an iframe pointing at the /f/:slug public URL', () => {
+    const snippet = embedSnippet('s1', 'https://x.com');
     expect(snippet).toContain('<iframe');
-    expect(snippet).toContain('src="https://x.com/magic-link/redeem?token=mj_ml_tok"');
-    expect(snippet).toContain('width:100%');
-  });
-
-  it('falls back to the slug url when no token', () => {
-    const snippet = embedSnippet(null, 's1', 'https://x.com');
     expect(snippet).toContain('src="https://x.com/f/s1"');
+    expect(snippet).toContain('width:100%');
   });
 });
 

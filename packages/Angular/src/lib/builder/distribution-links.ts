@@ -15,26 +15,29 @@ export function publicUrl(slug: string, baseUrl: string): string {
 }
 
 /**
- * The REDEEMABLE public URL: hitting it redeems the distribution's anonymous
- * magic-link token and establishes the scoped session before showing the form.
- * This is the link that actually works when shared — it carries the raw token.
+ * The low-level core redeem URL for a raw token. NOTE: a browser hitting this is
+ * 302-redirected by MJ core to the Explorer shell (`magicLink.explorerUrl`) with the
+ * JWT in the fragment — WRONG for an anonymous respondent. So this is NOT the shared
+ * link; the shareable link is {@link shareUrl} (`/f/:slug`), whose route performs the
+ * redeem server-side and renders the shell-free widget. Kept only as a primitive.
  */
 export function redeemUrl(token: string, baseUrl: string): string {
   return `${trimBase(baseUrl)}/magic-link/redeem?token=${encodeURIComponent(token)}`;
 }
 
 /**
- * The shareable public URL for a distribution: the redeemable token URL when the
- * link has been provisioned (a token exists), otherwise the slug URL as a
- * pre-provisioning placeholder. Token-driven, never a hardcoded host.
+ * The shareable public URL for a distribution: ALWAYS the `/f/:slug` host page. That
+ * route resolves the distribution's `PublicLinkToken` and redeems it server-side, then
+ * renders the anonymous `<mj-form>` widget — so the shared link must never be the raw
+ * `/magic-link/redeem?token=` URL (which bounces to the Explorer login shell).
  */
-export function shareUrl(token: string | null | undefined, slug: string, baseUrl: string): string {
-  return token ? redeemUrl(token, baseUrl) : publicUrl(slug, baseUrl);
+export function shareUrl(slug: string, baseUrl: string): string {
+  return publicUrl(slug, baseUrl);
 }
 
-/** An `<iframe>` embed snippet pointing at the shareable public URL. */
-export function embedSnippet(token: string | null | undefined, slug: string, baseUrl: string): string {
-  const url = shareUrl(token, slug, baseUrl);
+/** An `<iframe>` embed snippet pointing at the shareable `/f/:slug` public URL. */
+export function embedSnippet(slug: string, baseUrl: string): string {
+  const url = shareUrl(slug, baseUrl);
   return (
     `<iframe src="${url}" title="Form" loading="lazy" ` +
     `style="width:100%;border:0;min-height:600px" allow="clipboard-write"></iframe>`

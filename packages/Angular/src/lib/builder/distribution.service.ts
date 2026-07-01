@@ -80,7 +80,12 @@ export class DistributionService {
     dist.FormID = input.formId;
     dist.Name = input.name;
     dist.ChannelType = input.channelType;
-    dist.Status = 'Draft';
+    // Create live, not Draft. A distribution is created to be shared, and the anonymous
+    // magic-link token is only minted by the server-side lifecycle hook once the record
+    // is Active (see provisioning-decision.ts). Leaving it Draft produces a public link
+    // (`/f/:slug`) that 409s ("not ready yet") because no token was ever minted — a
+    // footgun. Staff can Close it anytime; this just makes the link work on creation.
+    dist.Status = 'Active';
     dist.ResponseCount = 0;
     dist.IsActive = true;
     dist.CaptchaRequired = input.captchaRequired ?? true;
@@ -148,18 +153,18 @@ export class DistributionService {
   }
 
   /**
-   * The shareable public URL for a distribution. Once its anonymous link has been
-   * provisioned (a `PublicLinkToken` exists), this is the redeemable magic-link URL
-   * (`/magic-link/redeem?token=...`) that establishes the scoped session; before
-   * provisioning it falls back to the slug URL.
+   * The shareable public URL for a distribution: the `/f/:slug` host page, which
+   * redeems the distribution's anonymous magic-link token server-side and renders the
+   * shell-free widget. (NOT the raw `/magic-link/redeem?token=` URL — that bounces a
+   * browser to the Explorer login shell.)
    */
   public publicUrl(dist: mjBizAppsFormsFormDistributionEntity, baseUrl: string): string {
-    return buildShareUrl(dist.PublicLinkToken, dist.Slug ?? '', baseUrl);
+    return buildShareUrl(dist.Slug ?? '', baseUrl);
   }
 
-  /** An `<iframe>` embed snippet pointing at the distribution's shareable public URL. */
+  /** An `<iframe>` embed snippet pointing at the distribution's `/f/:slug` public URL. */
   public embedSnippet(dist: mjBizAppsFormsFormDistributionEntity, baseUrl: string): string {
-    return buildEmbedSnippet(dist.PublicLinkToken, dist.Slug ?? '', baseUrl);
+    return buildEmbedSnippet(dist.Slug ?? '', baseUrl);
   }
 
   /** Slugify a name to a URL-friendly token. */

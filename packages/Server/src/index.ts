@@ -43,6 +43,15 @@ import { resolve } from 'node:path';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
+// Register the concrete magic-link minter into the entity-hook seam at MODULE LOAD —
+// exactly like the @RegisterClass side effects above. This must NOT live only inside
+// LoadBizAppsFormsServer(): MJAPI wires this package by importing `RESOLVER_PATHS`
+// (which triggers module evaluation) but does not necessarily call the startup export,
+// so a registration stranded in that function never runs and the FormDistribution hook
+// reports "no magic-link minter registered" (leaving PublicLinkToken null). Registering
+// at import time makes provisioning work regardless. Idempotent: a re-register replaces.
+MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
+
 /** Absolute paths to the generated resolver files, for use with createMJServer() */
 export const RESOLVER_PATHS = [resolve(__dirname, 'generated/generated.{js,ts}')];
 // WP-B (public submit endpoint): custom anonymous resolvers, discovered via the *Resolver glob.
