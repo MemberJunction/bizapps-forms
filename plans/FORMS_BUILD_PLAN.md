@@ -27,10 +27,42 @@ review/approve-before-publish routing (its v1.1.x `Task Decisions` model). The p
 `FormResponse` subject seam was **removed** in favour of hard FKs (we build directly on common/tasks
 as part of the stack).
 
-**Phase 1 — 🟡 IN PROGRESS.** Schema + Phase-1 tables migration **authored**:
-`migrations/B202606281200__v0.1.x_Schema_and_Tables.sql` (all 10 tables, value-list CHECKs,
-extended-property descriptions, the hard `FormResponse.RespondentPersonID` FK to
-`__mj_BizAppsCommon.Person`, cross-schema FKs to `__mj.[User]` / `__mj.[File]`).
+**Phase 1 — 🟢 BUILD COMPLETE; closing out (audited 2026-07-01).** Every §9 slice is built, wired to
+real MJ infrastructure, and green: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 ·
+Angular 162). A 4-agent, code-grounded audit (2026-07-01) confirmed each item is genuinely
+implemented — *not* stubbed — and corrected several the log had **understated**:
+- **Cloudflare Turnstile is a REAL `siteverify` fetch** (per-form toggle, fail-closed), not the "stub"
+  earlier log lines claimed; the confirmation-email sender is **CommunicationEngine-backed**; file
+  upload writes real **`MJ: Files`** via `@memberjunction/storage`.
+- **AI authoring is a metadata-driven `Forms: Form Designer` AIPrompt** (Gemini, model pinned in
+  metadata not code) with a zod-validated blueprint + 5 starter templates — the earlier "highest-power
+  Claude in code" description is obsolete.
+- There are **4** on-submit hooks, not 3: Upsert Respondent Person · Send Confirmation Email · Create
+  Followup Task · **Analyze Written Responses** (the last **confirmed running live** — writes
+  `Score`/`ScoreRationale` to real responses).
+
+Live DB `MJ_Forms` (localhost:1456): all 11 `__mj_BizAppsForms` tables present, both migrations applied,
+metadata seeded (Form Respondent role + response-only CanCreate perms, 7 FormStyle presets, FormCategory
+tree, Forms app + nav + 2 dashboards). Integration branch `feature/phase1-foundation` (local only).
+
+**What remains to call Phase 1 DONE — all deploy/verify, no net-new build:**
+1. **Full anonymous-submit e2e** against the live wire (mint link → `GET /f/:slug` redeem →
+   `PublishedForm` → `SubmitFormResponse` persists under anon scope). Redeem HTTP contract is
+   unit-tested with fakes but never run end-to-end.
+2. **Deploy-time provider config** (code-complete, unconfigured): `FORMS_TURNSTILE_SECRET`, an email
+   `CommunicationProvider` + `FORMS_EMAIL_FROM`, a storage account for uploads.
+3. **Re-verify `Upsert Respondent Person`** links a `People` row live (param bug fixed; unproven e2e).
+4. **mj-btn CI gate** still disabled (color-token gate enforced + passing at 0 violations).
+5. **Push to the org remote** (account has been read-only; nothing pushed yet).
+
+**Housekeeping the audit flagged:** delete the orphaned, superseded
+`migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql` (514 KB, non-Flyway, duplicates inline
+CodeGen); align `.actions.json` on-submit input-param name `ResponseID` → `FormResponseID` (3 hooks —
+harmless on the hook-fired path, a trap for UI/validated invocation); add a `Forms: Create Followup
+Task` unit test; widget §2 **flaky-network resilience is thin** (no offline detection / autosave-retry /
+submit auto-retry) — the one real UX-bar shortfall. Gemini output-token truncation on long forms is an
+**upstream limitation** (MJ runner/driver never sends `maxOutputTokens` to Gemini), mitigated by the
+analyzer's truncated-JSON salvage.
 
 ### 🎨 Design system & themeable prototypes (live on GitHub Pages)
 
@@ -75,23 +107,13 @@ same `--mj-*`/`--mjf-*` tokens, so these themes drop in as `FormStyle` rows with
 *(The original per-direction explorations remain under `docs/{aurora,editorial,warm}/` and are linked
 from the gallery as "v1".)*
 
-### ▶ NEXT — blocking gate (requires a SQL Server database)
+### ▶ NEXT — Phase 1 close-out
 
-1. **`npm run mj:migrate`** — apply the migration to a SQL Server instance (creates the
-   `__mj_BizAppsForms` schema + the 10 Phase-1 tables).
-2. **`npm run mj:codegen`** — generate the `MJ_BizApps_Forms: …` entity / action / GraphQL-resolver /
-   Angular-form subclasses into `packages/*/src/generated/`, plus the SQL views & SPs.
-3. **`npm run build`** — verify the generated entity types compile end-to-end.
-
-> **Do NOT write entity-dependent code before CodeGen runs.** With no generated types yet, it would
-> produce nothing but TypeScript errors and tempt `any`/`unknown` casting — an explicit MJ
-> antipattern (see CLAUDE.md rules 2 / 2b). Everything else in Phase 1 (the public submit endpoint
-> + anti-abuse hardening layer, the mobile-first `<mj-form>` widget, the builder/admin app, AI
-> authoring, reporting, on-submit hooks) depends on this gate.
-
-Once CodeGen has run and the build is green, resume Phase 1 in the **§9** dependency order — the
-first code task is the **public submit endpoint** (forms-server) with its anonymous-scope check +
-Turnstile / rate-limit / quota hardening (§4), followed by the **respondent widget** (forms-ng).
+The original blocking gate (migrate → CodeGen → build) is **long cleared**: the live `MJ_Forms` DB has
+all 11 tables and both migrations applied, generated entity/resolver/Angular subclasses are committed,
+and metadata is seeded. What's left to *close* Phase 1 is the **deploy/verify list in the Status
+Snapshot above** (live anonymous-submit e2e, provider config, remote push, mj-btn gate) plus the small
+housekeeping items — **no net-new feature build**. For Phase 2, resume in the §9 dependency order.
 
 ---
 
@@ -519,7 +541,7 @@ native entities. This is the reporting differentiator no incumbent has.
       ports 4121/4321, `mjVersionRange >=5.43.0 <6.0.0` (DG-1 — see Progress Log).
 - [x] Pull this plan into `plans/FORMS_BUILD_PLAN.md` (byte-for-byte from MJ PR #2971).
 
-### Phase 1 — MVP (the differentiating slice) — ✅ BUILD COMPLETE (2026-06-30)
+### Phase 1 — MVP (the differentiating slice) — ✅ BUILD COMPLETE (audited 2026-07-01)
 - [x] Migration: schema + Phase-1 tables (§5.1) applied to `MJ_Forms` (localhost:1456); all 10 tables live.
 - [x] `MJ_BizApps_Forms: …` entity subclasses generated (CodeGen) + verified (build green).
 - [x] mj-sync seed: FormCategory starter tree (9), FormStyle defaults (3 — Editorial/Aurora/Warm),
@@ -532,20 +554,35 @@ native entities. This is the reporting differentiator no incumbent has.
       FormStyle token theming, §6 conditional logic (shared evaluator), file upload, partial save. 18 tests.
 - [x] **Builder/admin app** (MJExplorer): visual builder (registers as Forms entity-form override),
       publish→FormVersion snapshot, FormDistribution management (public link/embed/QR). 40 tests.
-- [x] **AI authoring** action (`Forms: Generate Form From Brief`, highest-power Claude, zod-validated
-      blueprint) + 5 starter templates. 31 tests (with on-submit actions).
-- [x] **Reporting dashboard** (§8.1): summaries, per-question breakdowns, NPS, funnel, response view,
-      CSV/Excel export — RunView/RunQuery only, registered as `FormsReportingDashboard`. 12 tests.
-- [x] On-submit hooks (forms-actions, seam S3): `Forms: Upsert Respondent Person`,
-      `Forms: Send Confirmation Email` (pluggable sender), `Forms: Create Followup Task`.
+- [x] **AI authoring** action `Forms: Generate Form From Brief` → invokes the **metadata-driven
+      `Forms: Form Designer` AIPrompt** (Gemini via `SelectionStrategy=Specific` + AIPromptModel — model
+      in metadata, NOT code; see [[ai-model-selection-via-metadata]]), zod-validated `FormBlueprint`,
+      deterministic Designer→Builder split. Plus `Forms: Create Form From Template` + **5** starter
+      templates (contact · rsvp · nps · lead-capture · application).
+- [x] **Reporting dashboard** (§8.1): summaries, per-question breakdowns, NPS, funnel, response
+      list/detail, CSV/Excel export (MJ `ExportService`) — live RunView/RunQuery (`useMock=false`
+      default), stats scoped by **FormID** (not latest version), registered as `FormsReportingDashboard`
+      (plus a `FormsHomeDashboard` home tab).
+- [x] On-submit hooks (forms-actions, seam S3) — **4, all real**: `Forms: Upsert Respondent Person`
+      (matches/creates `MJ_BizApps_Common: People`, stamps `RespondentPersonID`), `Forms: Send
+      Confirmation Email` (CommunicationEngine-backed, metadata/config-driven sender),
+      `Forms: Create Followup Task` (bizapps-tasks Task + TaskLink), **`Forms: Analyze Written
+      Responses`** (metadata-driven AIPrompt scores free-text → `Score`/`ScoreRationale`; **running
+      live**; truncated-JSON salvage handles Gemini's uncontrollable output cap).
 - [x] **Distribution magic-link provisioning** (§4 item 4): server-side `FormDistribution`
       lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite and stores
       `MagicLinkInviteID` + `PublicLinkToken`. Configurable; gated on host `magicLink` config.
       _(Verified built + tested 2026-07-01 — the §9 checkbox had lagged the Progress Log.)_
-- [~] Tests: **158 Vitest passing** across all packages. CI gates (UI tokens, mj-btn) still TODO.
-- **Remaining for Phase 1 close:** full anonymous-submit headless e2e (mint magic link → PublishedForm
-      → SubmitFormResponse → verify saved + hooks); push not yet to org remote (read-only access);
-      real Turnstile/email/file-upload provider wiring; CI token/mj-btn gate.
+- [x] Tests: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 · Angular 162). Color-token
+      CI gate enforced (0 violations); mj-btn gate coded but disabled (0 `mj-btn` by convention).
+- **Remaining for Phase 1 close (deploy/verify, not build):** (1) full anonymous-submit e2e against the
+      live wire (mint link → `/f/:slug` redeem → PublishedForm → SubmitFormResponse persists + hooks
+      fire); (2) deploy-time provider config — `FORMS_TURNSTILE_SECRET`, email `CommunicationProvider` +
+      `FORMS_EMAIL_FROM`, storage account (all code-complete, unconfigured); (3) re-verify Upsert
+      Respondent Person links a Person live; (4) enable mj-btn CI gate if adopted; (5) push to org remote.
+- **Housekeeping (audit-found):** delete orphaned `migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql`
+      (superseded); fix `.actions.json` param `ResponseID`→`FormResponseID` (3 hooks); add a
+      `Forms: Create Followup Task` unit test; strengthen widget flaky-network resilience (§2).
 
 ### Phase 2 — Power
 - [ ] FormGroup + MaterializedEntityID; **view-projection** (default) and **RSU
@@ -814,3 +851,43 @@ native entities. This is the reporting differentiator no incumbent has.
   - **Still genuinely open for Phase 1 close:** real **Turnstile** provider call is still a stub (fail-closed
     scaffold only); browser e2e of the full anonymous submit; the mj-btn CI gate remains disabled (color gate
     enforced); push once org write access exists.
+    _(Superseded — see 2026-07-01 audit below: Turnstile is in fact a real `siteverify` call.)_
+- **2026-07-01 — the above close-out work committed + follow-on fixes landed** (on `feature/phase1-foundation`):
+  - `bb50b16` — builder drag-drop reorder + Design/branding panel **and** the 5 close-out gaps from the
+    adversarial audit (dedupe, real confirmation email, real file upload, partial-save, reporting live data).
+  - `63471fc` — **WYSIWYG theming** (design choices → `--mj-*` tokens, live preview), submit/reporting fixes,
+    and the **`Forms: Analyze Written Responses`** on-submit AI action (metadata-driven `Forms: Response
+    Analyzer` AIPrompt → per-answer `Score`/`ScoreRationale`). Earlier `5c59d6f` (anonymous public links
+    end-to-end) + `051cdb0` (reporting stats scoped by FormID, not latest version) also landed on 06-30.
+- **2026-07-01 — this session: concurrency + AI-analysis robustness (3 commits).**
+  1. `33c4016` — **PK-collision recovery on concurrent duplicate submits.** Two submits with the same
+     client `responseId` (double-click / autosave-vs-submit overlap / retry, common with a blank session)
+     both passed the pre-write dedupe/adopt SELECTs and raced to `spCreateFormResponse` → PK violation. A
+     SELECT can't close that TOCTOU window; only the DB PK can. `persistence.service.ts` now treats a
+     duplicate-key `Save()` failure as "a concurrent request won" and **reconciles** (promote/update if
+     Partial, leave untouched if already Complete — never downgrade), with count-once + no-double-hooks
+     guards. Verified live: a real collision recovered to `Complete`.
+  2. `becbc3c` — **analyzer truncated-JSON salvage + slimmed output + widget submit serialization.** Gemini
+     sometimes returns truncated JSON (its output length is **not** controllable through the MJ runner/
+     Gemini driver — confirmed by reading `AIPromptRunner`/`ai-gemini`; `maxOutputTokens` is never sent, so
+     neither `additionalParameters` nor the AIModelVendor row helps — an upstream gap to file). Mitigations
+     in our control: `coerceAnalyzedAnswers` now brace-scans and salvages the complete leading answers
+     instead of dropping all scores; the prompt/template dropped the unused `sentiment`/`theme` to shrink
+     output. Widget `onSubmit` now disables the button and `await`s `AutosaveController.settle()` (awaits any
+     in-flight autosave) before the final submit, so autosave + submit no longer race the same id.
+  3. `51e2efa` — `mj sync push` of the slimmed analyzer prompt/template to `MJ_Forms` + refreshed sync checksums.
+- **2026-07-01 — 4-agent code-grounded status audit (this entry drives the refreshed Status Snapshot + §9).**
+  Audited the actual code on `feature/phase1-foundation` across four areas (server/anonymous/hardening;
+  respondent widget; actions/AI; reporting+builder+data-model). **Verdict: Phase 1 is genuinely
+  build-complete** — this time the audit found the code *real*, not overstated. Corrections to earlier log
+  claims: (a) **Turnstile is a real Cloudflare `siteverify` fetch**, not a stub (prior lines were stale);
+  (b) confirmation-email sender is CommunicationEngine-backed and file upload writes real `MJ: Files`;
+  (c) AI authoring is the **metadata-driven `Forms: Form Designer` AIPrompt** (Gemini), not "Claude in code";
+  (d) there are **4** on-submit hooks (Analyze Written Responses added); (e) true test total is **396**
+  (Entities 24 · Actions 57 · Server 153 · Angular 162), long past the "158" the log last recorded. Real
+  remaining items are **deploy/verify, not build** (live anonymous-submit e2e, provider config/secrets,
+  remote push) plus small housekeeping (orphaned CodeGen SQL file; `.actions.json` `ResponseID`→
+  `FormResponseID` for 3 hooks; missing `Create Followup Task` test; thin widget flaky-network resilience —
+  the one real §2 UX-bar shortfall). Anti-abuse caveats to note before declaring "closed": the rate-limiter
+  is single-process (DB quota is the durable cap) and the session-hash is usually blank for the widget's
+  plain-fetch transport, so per-session rate-limiting leans on the client response id.
