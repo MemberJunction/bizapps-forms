@@ -123,7 +123,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
         this.rawAnswers = [];
       } else {
         this.report = await this.data.loadReport(form);
-        this.rawAnswers = await this.loadRawAnswers(form.formVersionId);
+        this.rawAnswers = await this.loadRawAnswers(form.formId);
       }
     } catch (err) {
       this.fail(err, 'Failed to load the report.');
@@ -176,9 +176,9 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   /** Loads the raw answers separately so export can pivot to a wide matrix. */
   private async loadRawAnswers(
-    formVersionId: string,
+    formId: string,
   ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
-    return this.data.loadAnswersForVersion(formVersionId);
+    return this.data.loadAnswersForForm(formId);
   }
 
   /** Builds a detail view from the mock report (no extra fetch). */

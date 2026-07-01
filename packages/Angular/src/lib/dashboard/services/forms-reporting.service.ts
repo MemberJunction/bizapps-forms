@@ -112,7 +112,14 @@ export class FormsReportingService {
   }
 
   /**
-   * Loads the full report bundle for one published form version.
+   * Loads the full report bundle for a form — across ALL its versions.
+   *
+   * Responses are scoped by `FormID`, NOT by a single `FormVersionID`. Every response
+   * pins the form version that was live at submission, so a form with multiple
+   * published versions has responses spread across them; filtering to only the latest
+   * version silently hides every response submitted against an earlier one (the "I
+   * submitted a response but the dashboard shows nothing" bug). Question labels/options
+   * come from the latest published definition; answers map back by `QuestionID`.
    */
   public async loadReport(form: ReportableForm): Promise<FormReportData> {
     const definition = await this.loadDefinition(form.formVersionId);
@@ -121,7 +128,7 @@ export class FormsReportingService {
     const [responsesRes, answersRes] = await this.rv.RunViews([
       {
         EntityName: ENTITY.responses,
-        ExtraFilter: `FormVersionID='${form.formVersionId}'`,
+        ExtraFilter: `FormID='${form.formId}'`,
         ResultType: 'simple',
         Fields: [
           'ID',
@@ -135,7 +142,7 @@ export class FormsReportingService {
       },
       {
         EntityName: ENTITY.answers,
-        ExtraFilter: `ResponseID IN (SELECT ID FROM ${this.responsesViewName()} WHERE FormVersionID='${form.formVersionId}')`,
+        ExtraFilter: `ResponseID IN (SELECT ID FROM ${this.responsesViewName()} WHERE FormID='${form.formId}')`,
         ResultType: 'simple',
         Fields: [
           'ID',
@@ -210,15 +217,16 @@ export class FormsReportingService {
   }
 
   /**
-   * Loads all answer rows for a form version (across its responses). Used by the
-   * export service to pivot responses into a wide matrix.
+   * Loads all answer rows for a form (across ALL its versions' responses). Used by the
+   * export service to pivot responses into a wide matrix. Scoped by `FormID` for the
+   * same reason as {@link loadReport} — responses span versions.
    */
-  public async loadAnswersForVersion(
-    formVersionId: string,
+  public async loadAnswersForForm(
+    formId: string,
   ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
     const res = (await this.rv.RunView({
       EntityName: ENTITY.answers,
-      ExtraFilter: `ResponseID IN (SELECT ID FROM ${this.responsesViewName()} WHERE FormVersionID='${formVersionId}')`,
+      ExtraFilter: `ResponseID IN (SELECT ID FROM ${this.responsesViewName()} WHERE FormID='${formId}')`,
       ResultType: 'simple',
       Fields: [
         'ID',
