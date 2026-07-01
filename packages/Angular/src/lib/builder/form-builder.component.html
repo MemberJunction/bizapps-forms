@@ -48,6 +48,14 @@
       type="button"
       class="fb-tab"
       role="tab"
+      [class.is-on]="activeTab === 'design'"
+      [attr.aria-selected]="activeTab === 'design'"
+      (click)="setTab('design')"
+    >Design</button>
+    <button
+      type="button"
+      class="fb-tab"
+      role="tab"
       [class.is-on]="activeTab === 'distribute'"
       [attr.aria-selected]="activeTab === 'distribute'"
       (click)="setTab('distribute')"
@@ -92,15 +100,35 @@
             @if (page.questions.length === 0) {
               <p class="fb-canvas-empty">Add a question from the palette to get started.</p>
             }
+            <div
+              class="fb-q-list"
+              cdkDropList
+              [cdkDropListData]="page.questions"
+              (cdkDropListDropped)="dropQuestion(page, $event)"
+            >
             @for (node of page.questions; track node.entity.ID) {
               <article
                 class="fb-q"
+                cdkDrag
+                [cdkDragData]="node"
                 [class.is-selected]="node.entity.ID === selectedQuestionId"
                 tabindex="0"
                 (click)="selectQuestion(node)"
                 (keydown.enter)="selectQuestion(node)"
                 [attr.aria-label]="'Edit question ' + node.entity.Prompt"
               >
+                <div class="fb-q-drag-preview" *cdkDragPreview>
+                  <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
+                  <span class="fb-q-label">{{ node.entity.Prompt }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="fb-q-handle"
+                  cdkDragHandle
+                  [disabled]="busy"
+                  [attr.aria-label]="'Drag to reorder question ' + node.entity.Prompt"
+                  (click)="$event.stopPropagation()"
+                ><i class="fa-solid fa-grip-vertical" aria-hidden="true"></i></button>
                 <div class="fb-q-main">
                   <div class="fb-q-top">
                     <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
@@ -139,6 +167,7 @@
                 </div>
               </article>
             }
+            </div>
           }
         </div>
       </section>
@@ -153,6 +182,10 @@
           (removeOptionRequested)="onRemoveOption($event)"
         ></mjf-question-editor>
       </aside>
+    </div>
+  } @else if (activeTab === 'design') {
+    <div class="fb-design">
+      <mjf-design-panel [form]="record" (styleApplied)="onStyleApplied()"></mjf-design-panel>
     </div>
   } @else {
     <div class="fb-distribute">

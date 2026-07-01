@@ -11,12 +11,18 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  inject,
   input,
   output,
+  signal,
 } from '@angular/core';
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
+import { FormUploadService } from '../../api/form-upload.service';
 import { autocompleteFor, inputModeFor, inputTypeFor } from './input-mode';
+
+/** UI state of a FileUpload control. */
+type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
 @Component({
   selector: 'mjf-form-question',
@@ -32,8 +38,26 @@ export class FormQuestionComponent {
   public readonly value = input<AnswerValue>(undefined);
   /** Validation message to show, or `null` when valid / untouched. */
   public readonly errorMessage = input<string | null>(null);
+  /** Distribution slug — needed to scope a FileUpload's upload to the current form. */
+  public readonly distributionSlug = input<string>('');
   /** Emits whenever the respondent changes the answer. */
   public readonly valueChange = output<AnswerValue>();
+
+  private readonly uploader = inject(FormUploadService);
+
+  /** FileUpload UI state (upload lifecycle for the current file). */
+  protected readonly uploadStatus = signal<UploadStatus>('idle');
+  /** Progress 0–1 while uploading, or `null` for an indeterminate phase. */
+  protected readonly uploadProgress = signal<number | null>(null);
+  /** Display name of the selected/uploaded file (the stored answer is the fileId). */
+  protected readonly uploadFileName = signal<string>('');
+  /** Inline, respondent-facing upload error, or `null`. */
+  protected readonly uploadError = signal<string | null>(null);
+  /** Whole-number progress percent for the aria-valuenow / label. */
+  protected readonly uploadPercent = computed(() => {
+    const p = this.uploadProgress();
+    return p === null ? null : Math.round(p * 100);
+  });
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
@@ -138,12 +162,63 @@ export class FormQuestionComponent {
     this.valueChange.emit(this.booleanValue() === value ? null : value);
   }
 
+  /** Last selected file, retained so the respondent can retry a failed upload. */
+  private lastFile: File | null = null;
+
   protected async onFile(input: HTMLInputElement): Promise<void> {
-    const file = input.files?.[0];
-    // FileUpload answers carry the `MJ: Files` id. Real upload is wired by the host
-    // app (it has the authenticated file-storage client); the widget emits the
-    // selected file's name as a placeholder id until that handshake lands. Emitting
-    // a non-empty string keeps required-validation honest in the demo path.
-    this.valueChange.emit(file ? file.name : null);
+    const file = input.files?.[0] ?? null;
+    if (!file) {
+      // Cleared the picker — drop the answer + any prior upload state.
+      this.lastFile = null;
+      this.resetUploadState();
+      this.valueChange.emit(null);
+      return;
+    }
+    this.lastFile = file;
+    await this.uploadFile(file);
+  }
+
+  /** Re-run the upload for the previously-selected file after a failure. */
+  protected async retryUpload(): Promise<void> {
+    if (this.lastFile) {
+      await this.uploadFile(this.lastFile);
+    }
+  }
+
+  /**
+   * Upload one file to the anonymous `/forms/upload` endpoint and store the returned
+   * `fileId` as the answer. The answer is cleared while the upload is in flight so a
+   * required FileUpload cannot be satisfied by a not-yet-stored file.
+   */
+  private async uploadFile(file: File): Promise<void> {
+    this.uploadFileName.set(file.name);
+    this.uploadError.set(null);
+    this.uploadStatus.set('uploading');
+    this.uploadProgress.set(0);
+    // Clear any prior fileId until the new upload confirms.
+    this.valueChange.emit(null);
+    try {
+      const result = await this.uploader.upload(
+        file,
+        this.distributionSlug(),
+        this.question().id,
+        (fraction) => this.uploadProgress.set(fraction),
+      );
+      this.uploadStatus.set('done');
+      this.uploadProgress.set(1);
+      this.valueChange.emit(result.fileId);
+    } catch (err) {
+      this.uploadStatus.set('error');
+      this.uploadProgress.set(null);
+      this.uploadError.set(err instanceof Error ? err.message : 'Upload failed. Please try again.');
+      this.valueChange.emit(null);
+    }
+  }
+
+  private resetUploadState(): void {
+    this.uploadStatus.set('idle');
+    this.uploadProgress.set(null);
+    this.uploadFileName.set('');
+    this.uploadError.set(null);
   }
 }

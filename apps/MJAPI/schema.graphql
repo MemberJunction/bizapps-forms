@@ -386,6 +386,12 @@ input ClassifyFeedbackInput {
   Title: String!
 }
 
+"""Lightweight client telemetry; IP-hash is derived server-side."""
+input ClientMetaInput {
+  referrer: String
+  userAgent: String
+}
+
 type ClientToolRequestNotification {
   AgentRunID: String!
   Description: String
@@ -5833,6 +5839,7 @@ input CreatemjBizAppsFormsFormDistributionInput {
   MaxResponses: Int
   Name: String
   OpenAt: Timestamp
+  PublicLinkToken: String
   ResponseCount: Int
   RestoreContext___: RestoreContextInput
   Slug: String
@@ -6439,6 +6446,12 @@ type FetchEntityVectorsResult {
   TotalCount: Float!
 }
 
+"""A single validation/processing error, optionally tied to a question."""
+type FieldErrorType {
+  message: String!
+  questionId: ID
+}
+
 input FieldMapInput {
   DestinationFieldName: String!
   IsKeyField: Boolean = false
@@ -6474,6 +6487,53 @@ type FileSearchResultPayload {
   path: String!
   relevance: Float
   size: Int!
+}
+
+"""One answer in a submission (exactly one typed value, or jsonValue)."""
+input FormAnswerInputType {
+  booleanValue: Boolean
+  dateValue: String
+  fileId: ID
+
+  """JSON string for multi/complex answers."""
+  jsonValue: String
+  numericValue: Float
+  questionId: ID!
+  textValue: String
+}
+
+"""Payload posted to SubmitFormResponse."""
+input FormSubmissionInputType {
+  answers: [FormAnswerInputType!]!
+  clientMeta: ClientMetaInput
+
+  """Resolves FormDistribution -> Form -> published FormVersion."""
+  distributionSlug: String!
+
+  """Echoed from PublishedForm; pins the response version."""
+  formVersionId: ID!
+
+  """true => Partial, false/absent => Complete."""
+  partial: Boolean
+
+  """
+  Transport-level autosave target: the FormResponse the widget is already editing this session. Honored ONLY if it belongs to the current anonymous session (server-validated); otherwise ignored and the session-key lookup is used. Not part of the frozen FormSubmissionInput contract — it is a widget-session concern.
+  """
+  responseId: ID
+  startedAt: String
+
+  """Turnstile token; required iff captcha is on."""
+  turnstileToken: String
+}
+
+"""Result of SubmitFormResponse."""
+type FormSubmissionResultType {
+  confirmationMessage: String
+  errors: [FieldErrorType!]
+  redirectUrl: String
+  responseId: ID
+  status: String
+  success: Boolean!
 }
 
 type GenerateSeedTaxonomyResult {
@@ -23868,6 +23928,7 @@ type Mutation {
   StopRemoteBrowserScreencast(agentSessionID: String!): Boolean!
   StreamScopedSearch(agentID: ID, maxResults: Float, minScore: Float, query: String!, scopeIDs: [ID!], searchContext: JSON): SearchStreamStartResult!
   SubmitFeedback(input: SubmitFeedbackInput!): FeedbackResponseType!
+  SubmitFormResponse(input: FormSubmissionInputType!): FormSubmissionResultType!
   SyncData(items: [ActionItemInputType!]!): SyncDataResultType!
   SyncMCPTools(input: SyncMCPToolsInput!): SyncMCPToolsResult!
   SyncRoles(roles: [RoleInputType!]!): SyncRolesAndUsersResultType!
@@ -24369,6 +24430,27 @@ type PromotedColumn {
   EntityName: String!
 }
 
+"""A published form resolved from a public distribution slug."""
+type PublishedFormType {
+  """
+  JSON-encoded full PublishedFormDefinition (pages -> questions -> options).
+  """
+  definitionJSON: String!
+  description: String
+  formId: ID!
+  formVersionId: ID!
+  name: String!
+
+  """Render mode: 'Scroll' | 'OneQuestion'."""
+  renderMode: String!
+
+  """JSON-encoded FormSettings (FormSettings contract)."""
+  settingsJSON: String!
+
+  """JSON-encoded FormStyleTokens (--mj-* / --mjf-* overrides)."""
+  styleTokensJSON: String!
+}
+
 type PushStatusNotification {
   date: Timestamp!
   message: String
@@ -24852,6 +24934,7 @@ type Query {
   Preview a list operation. Returns a signed DeltaToken that ApplyListDelta will accept (subject to TTL + drift checks).
   """
   PreviewListDelta(input: ComputeDeltaInput!): ListDeltaType!
+  PublishedForm(distributionSlug: String!): PublishedFormType
   RemoteBrowserSnapshot(agentSessionID: String!): RemoteBrowserSnapshot!
   ResolveComponentDependencies(componentId: String!, registryName: String!): ComponentDependencyTreeType
   ResolveCountry(input: String!): GeoResolveResult!
@@ -37234,6 +37317,7 @@ input UpdatemjBizAppsFormsFormDistributionInput {
   Name: String
   OldValues___: [KeyValuePairInput!]
   OpenAt: Timestamp
+  PublicLinkToken: String
   ResponseCount: Int
   RestoreContext___: RestoreContextInput
   Slug: String
@@ -38042,6 +38126,11 @@ type mjBizAppsFormsFormDistribution_ {
   """When this distribution opens for responses (null = immediately)"""
   OpenAt: Timestamp
 
+  """
+  Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.
+  """
+  PublicLinkToken: String
+
   """Running count of responses received through this distribution"""
   ResponseCount: Int!
 
@@ -38114,6 +38203,7 @@ type mjBizAppsFormsFormQuestion_ {
 
   """Whether an answer is required before the form can be submitted"""
   IsRequired: Boolean!
+  Page: String
   PageID: String
 
   """The question text shown to the respondent"""

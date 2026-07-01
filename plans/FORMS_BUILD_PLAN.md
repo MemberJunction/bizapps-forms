@@ -538,10 +538,10 @@ native entities. This is the reporting differentiator no incumbent has.
       CSV/Excel export — RunView/RunQuery only, registered as `FormsReportingDashboard`. 12 tests.
 - [x] On-submit hooks (forms-actions, seam S3): `Forms: Upsert Respondent Person`,
       `Forms: Send Confirmation Email` (pluggable sender), `Forms: Create Followup Task`.
-- [ ] **Distribution magic-link provisioning** (§4 item 4): server-side `FormDistribution`
-      lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite via MJ core
-      `MagicLinkService` and stores `MagicLinkInviteID`. Configurable; gated on host `magicLink` config.
-      Unblocks the full anonymous-submit e2e.
+- [x] **Distribution magic-link provisioning** (§4 item 4): server-side `FormDistribution`
+      lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite and stores
+      `MagicLinkInviteID` + `PublicLinkToken`. Configurable; gated on host `magicLink` config.
+      _(Verified built + tested 2026-07-01 — the §9 checkbox had lagged the Progress Log.)_
 - [~] Tests: **158 Vitest passing** across all packages. CI gates (UI tokens, mj-btn) still TODO.
 - **Remaining for Phase 1 close:** full anonymous-submit headless e2e (mint magic link → PublishedForm
       → SubmitFormResponse → verify saved + hooks); push not yet to org remote (read-only access);
@@ -758,3 +758,59 @@ native entities. This is the reporting differentiator no incumbent has.
     3. Real **Turnstile / email (CommunicationEngine) / file (MJ:Files)** provider wiring.
     4. Confirm the **Gemini AIPrompt** actually executes in MJAPI (AI credential resolution).
     5. Push once write access to the org remote exists.
+- **2026-07-01 — Phase-1 builder polish: drag-drop reorder + Design/branding panel.** Branch
+  `feature/builder-dnd-theming` off `feature/phase1-foundation`. Angular package builds green;
+  **102 Vitest passing** (was 90 — +12: `style-tokens.spec.ts` 7, `reorder.spec.ts` 5); `lint:ui` clean.
+  1. **Drag-and-drop question reorder** (Feature 1). Added `@angular/cdk@21.1.3` (peer + dev, matching
+     MJExplorer's pin) to `packages/Angular/package.json`; `CdkDropList`/`CdkDrag`/`CdkDragHandle`/`CdkDragPreview`
+     in `form-builder.component`. New `dropQuestion()` + shared `reorderQuestion()` funnel BOTH the arrows
+     (`moveQuestion`) and drag into the **existing** `BuilderStateService.persistQuestionOrder(page)` path — no
+     parallel save; DisplayOrder persists identically. Arrows kept as the keyboard-accessible WCAG fallback; a
+     `cdkDragHandle` grip button (aria-labelled) added. Guard extracted to pure `reorder.ts` (`isValidReorder`,
+     unit-tested). Drag CSS in `form-builder.styles.ts` uses `--mj-*`/`--mjf-*` tokens only.
+  2. **Design / Branding panel** (Feature 2). New builder "Design" tab → `design-panel.component` +
+     `design-state.service` + pure `style-tokens.ts` (reuses `json-fields` `parseStyleTokens`/`buildStyleTokens`,
+     no dup). Lists active `FormStyle` presets via RunView (`.Success`-checked), applies one to the form
+     (`Form.StyleID`), and edits branding basics (Name, primary=`--mjf-accent`, accent=`--mjf-accent-strong`,
+     LogoURL) written into the existing `CSSVariables` JSON via `md.GetEntityObject(...).Save()`. **Duplicate-&-edit**
+     flow copies a preset before editing so shared presets stay pristine. **Live preview** reuses
+     `applyStyleTokens` imported directly from `widget/core/theming` (no cross-package re-export). Existing columns
+     only.
+  - **Deferred (would need schema/CodeGen — NOT done):** per-form (vs per-FormStyle) style overrides would require
+     new columns on `Form`; a `FormStyle.OwnerFormID`/`IsPreset` distinction to hide user copies from the shared
+     preset gallery would also be a schema change. Both left as follow-ups.
+  - **Not committed** — awaiting explicit approval (CLAUDE.md rule 1).
+- **2026-07-01 (later) — Adversarial completeness audit + close-out of the five overstated/deferred gaps.**
+  A 5-agent adversarial audit against the actual code put Phase 1 at ~90% *built* (not "closed"), and
+  found five line-items thinner than their `[x]` implied. All five are now genuinely implemented on
+  `feature/phase1-foundation` (co-resident with the builder-dnd work); whole tree type-checks and tests
+  green. **Nothing committed** (rule 1). Note: unit tests transpile via esbuild and do NOT type-check —
+  every package `tsconfig` excludes specs — so a real `tsc` pass was needed to surface the errors vitest hid.
+  1. **Dedupe (was ABSENT despite being claimed §9).** `public-submit/response-lookup.service.ts` +
+     `submit-pipeline.ts`: a prior `Complete` `FormResponse` for the session/version short-circuits to the
+     existing id (idempotent, no second row); **fail-closed** on lookup-query error.
+  2. **Confirmation email (was a logging no-op).** `Actions/…/on-submit/confirmation-email-sender.ts` —
+     `CommunicationEngineConfirmationEmailSender` via `CommunicationEngine.SendSingleMessage`; provider/
+     message-type/From are **metadata/config-driven, not vendor-hardcoded** (env read in Server
+     `confirmation-email/install-sender.ts`, installed at module load). Fail-soft skip if unconfigured.
+     `LoggingConfirmationEmailSender` retained for tests.
+  3. **File upload (was a filename-only stub).** New `Server/src/upload/` — `POST /forms/upload`
+     `BaseServerMiddleware` (post-auth; reuses the anonymous scope guard, fail-closed; size cap + type
+     allowlist) stores bytes via `@memberjunction/storage` `FileStorageEngine.UploadFile` into `MJ: Files`
+     and returns `{fileId,…}`. Widget `form-upload.service.ts` + `FormQuestionComponent` upload with
+     progress/`aria-live`/retry and store the real `MJ: Files` id as the answer (→ `FormResponseAnswer.FileID`).
+  4. **Partial-save (was contract-only; widget hardcoded `partial:false`).** Server upsert keyed by
+     AnonymousSessionID → `Status='Partial'` (no hooks/quota/count), promoted to `Complete` on final submit;
+     widget `core/autosave-controller.ts` debounced autosave threads the returned `responseId`. **Cross-session
+     resume stays Phase 2 (§5.2).**
+  5. **Reporting live data (was `useMock=true`).** `forms-reporting-dashboard.component.ts` now defaults to the
+     real RunView/RunQuery path; mock is an explicit dev-only opt-in.
+  - **Seam closed:** the widget already sent `responseId` in the `SubmitFormResponse` mutation but the server
+    `@InputType FormSubmissionInputType` lacked the field (would fail GraphQL validation at runtime) — added the
+    nullable field + resolver wiring, guarded by `findOwnedResponseById` (matches ID **and** AnonymousSessionID
+    **and** FormVersionID) so one anonymous session can never adopt another's partial.
+  - **Verified:** `tsc` 0 errors (specs included) in Entities/Actions/Server/Angular; Vitest **Entities 24 ·
+    Actions 45 · Server 130 · Angular 117**; `lint:ui` 0 color violations.
+  - **Still genuinely open for Phase 1 close:** real **Turnstile** provider call is still a stub (fail-closed
+    scaffold only); browser e2e of the full anonymous submit; the mj-btn CI gate remains disabled (color gate
+    enforced); push once org write access exists.

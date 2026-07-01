@@ -18,6 +18,33 @@ export interface FormsApiConfig {
    * with no live submit; submission requires it.
    */
   token?: string;
+  /**
+   * Absolute URL of the multipart file-upload endpoint (`POST /forms/upload`). Optional:
+   * when omitted it is derived from {@link graphqlUrl} by {@link deriveUploadUrl}, so a
+   * host that only supplies `api-url` still gets working uploads. Sent the same anonymous
+   * bearer {@link token}.
+   */
+  uploadUrl?: string;
+}
+
+/**
+ * Derive the file-upload endpoint from the GraphQL endpoint. MJAPI serves the widget's
+ * anonymous upload route at `/forms/upload` on the same origin as `/graphql`, so we swap
+ * the trailing `/graphql` path segment for `/forms/upload`. Falls back to appending the
+ * path when the URL does not end in `/graphql`.
+ */
+export function deriveUploadUrl(graphqlUrl: string): string {
+  if (!graphqlUrl) {
+    return '';
+  }
+  try {
+    const url = new URL(graphqlUrl);
+    url.pathname = url.pathname.replace(/\/graphql\/?$/i, '') + '/forms/upload';
+    return url.toString();
+  } catch {
+    // Not an absolute URL — fall back to a plain string swap.
+    return graphqlUrl.replace(/\/graphql\/?$/i, '') + '/forms/upload';
+  }
 }
 
 /** DI token carrying the {@link FormsApiConfig} into the GraphQL transport. */

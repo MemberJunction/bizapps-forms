@@ -23,6 +23,7 @@ import { FORMS_API_SERVICE } from './api/forms-api.interface';
 import { FORMS_API_CONFIG, type FormsApiConfig } from './api/forms-api.config';
 import { FormsGraphQLApiService } from './api/forms-api.graphql.service';
 import { FormsMockApiService } from './api/forms-api.mock.service';
+import { FormUploadService } from './api/form-upload.service';
 import { MjFormComponent } from './mj-form.component';
 
 /** Element tag the widget registers under. */
@@ -72,6 +73,7 @@ class MjFormElement extends HTMLElement {
         apiServiceProvider,
         FormsGraphQLApiService,
         FormsMockApiService,
+        FormUploadService,
       ],
     });
     this.appRef = app;

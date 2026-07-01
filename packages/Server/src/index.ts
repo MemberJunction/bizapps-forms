@@ -21,6 +21,13 @@ import { MagicLinkInviteMinter } from './magic-link/MagicLinkInviteMinter.js';
 // Import generated GraphQL resolvers
 import './generated/generated.js';
 
+// TASK 2: install the real CommunicationEngine-backed confirmation-email sender as the default,
+// using the env-driven deployment config (which metadata CommunicationProvider + From address).
+// Done here in the server package because the config is env-driven; the sender + seam live in
+// forms-actions. Gracefully skips when unconfigured (never fails a submit).
+import { installConfirmationEmailSender } from './confirmation-email/install-sender.js';
+installConfirmationEmailSender();
+
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
 
@@ -31,6 +38,12 @@ import './respondent-host/RespondentHostMiddleware.js';
 // DG-5: import the widget-bundle middleware so its @RegisterClass fires and MJ server bootstrap
 // discovers the public /forms/widget/mj-form.js route that serves the built <mj-form> element.
 import './widget-bundle/WidgetBundleMiddleware.js';
+
+// TASK 3: import the public file-upload middleware so its @RegisterClass fires and MJ server
+// bootstrap discovers the POST /forms/upload route (anonymous magic-link scoped, stores bytes
+// via MJ's configured file-storage provider into MJ: Files). Registered as POST-AUTH middleware
+// so it reads the verified anonymous session; missing storage config yields a 5xx, never a crash.
+import './upload/UploadMiddleware.js';
 
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';

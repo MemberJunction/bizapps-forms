@@ -10,6 +10,15 @@
 export { FormBuilderComponent } from './form-builder.component';
 export { QuestionEditorComponent } from './question-editor.component';
 export { DistributionManagerComponent } from './distribution-manager.component';
+export { DesignPanelComponent } from './design-panel.component';
+export { DesignStateService, type BrandEdit } from './design-state.service';
+export {
+  BRAND_TOKENS,
+  serializeCssVariables,
+  toStyleTokens,
+  readBrandToken,
+  withBrandToken,
+} from './style-tokens';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';
@@ -24,6 +33,7 @@ export {
   type QuestionPaletteGroup,
 } from './question-type-catalog';
 export { generateQrMatrix, qrMatrixToSvg, textToQrSvg, type QrMatrix } from './qr-code';
+export { isValidReorder } from './reorder';
 export { buildPublishedDefinition } from './snapshot-builder';
 export { publicUrl, embedSnippet, slugify } from './distribution-links';
 export type { FormTree, PageNode, QuestionNode } from './builder-models';

@@ -75,6 +75,8 @@ export class PublicFormResolver extends ResolverBase {
       turnstileToken: input.turnstileToken,
       clientMeta: input.clientMeta ? { referrer: input.clientMeta.referrer, userAgent: input.clientMeta.userAgent } : undefined,
       answers: toAnswerInputs(input.answers),
+      // Transport-level autosave hint; the pipeline validates session-ownership before honoring it.
+      clientResponseId: input.responseId,
     };
 
     const result = await runSubmitPipeline(

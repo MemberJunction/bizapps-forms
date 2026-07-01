@@ -12,7 +12,7 @@
  * `.Success`; a missing/closed distribution yields a typed not-found result rather
  * than a throw.
  */
-import type { IRunViewProvider, UserInfo } from '@memberjunction/core';
+import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormDistributionEntityType,
   mjBizAppsFormsFormVersionEntityType,
@@ -20,6 +20,15 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from './entity-names';
 import { parsePublishedDefinition } from './snapshot-parser';
+
+/**
+ * The narrow slice of a data provider this flow uses — a single `RunView`. Typed minimally
+ * (not the full `IRunViewProvider`) so BOTH the per-request `DatabaseProviderBase` (submit
+ * pipeline) and a global `RunView` instance (upload endpoint) satisfy it without casts.
+ */
+export interface DefinitionRunViewProvider {
+  RunView<T = unknown>(params: RunViewParams, contextUser?: UserInfo): Promise<RunViewResult<T>>;
+}
 
 /** Why a slug could not be resolved to an open, published form. */
 export type DefinitionLoadFailure =
@@ -53,7 +62,7 @@ function sqlString(value: string): string {
 
 /** Load the active distribution row for a slug, or `undefined` if none/closed. */
 async function loadDistribution(
-  provider: IRunViewProvider,
+  provider: DefinitionRunViewProvider,
   slug: string,
   contextUser: UserInfo,
 ): Promise<mjBizAppsFormsFormDistributionEntityType | undefined> {
@@ -73,7 +82,7 @@ async function loadDistribution(
 
 /** Load the single Published version for a form, or `undefined`. */
 async function loadPublishedVersion(
-  provider: IRunViewProvider,
+  provider: DefinitionRunViewProvider,
   formId: string,
   contextUser: UserInfo,
 ): Promise<mjBizAppsFormsFormVersionEntityType | undefined> {
@@ -115,7 +124,7 @@ function distributionIsOpen(
  * is reported so a stale tab cannot submit against a re-published form.
  */
 export async function resolvePublishedDefinition(
-  provider: IRunViewProvider,
+  provider: DefinitionRunViewProvider,
   slug: string,
   contextUser: UserInfo,
   options: { expectedVersionId?: string; now?: Date } = {},

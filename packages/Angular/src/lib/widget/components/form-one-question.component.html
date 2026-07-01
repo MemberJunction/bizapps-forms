@@ -10,6 +10,7 @@
         [question]="q"
         [value]="runtime().valueFor(q.id)"
         [errorMessage]="runtime().visibleErrorFor(q)"
+        [distributionSlug]="distributionSlug()"
         (valueChange)="onValueChange(q, $event)"
       />
 

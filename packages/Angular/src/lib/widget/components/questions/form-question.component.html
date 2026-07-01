@@ -148,13 +148,55 @@
             type="file"
             #fileInput
             [accept]="fileAccept()"
+            [disabled]="uploadStatus() === 'uploading'"
             [attr.aria-required]="q.isRequired"
-            [attr.aria-invalid]="!!errorMessage()"
+            [attr.aria-invalid]="!!errorMessage() || uploadStatus() === 'error'"
             [attr.aria-describedby]="describedBy()"
             (change)="onFile(fileInput)"
           />
-          @if (textValue()) {
-            <p class="mjf-file__name">{{ textValue() }}</p>
+
+          @if (uploadStatus() === 'uploading') {
+            <div
+              class="mjf-file__progress"
+              role="progressbar"
+              aria-label="Uploading file"
+              [attr.aria-valuenow]="uploadPercent()"
+              [attr.aria-valuemin]="uploadPercent() === null ? null : 0"
+              [attr.aria-valuemax]="uploadPercent() === null ? null : 100"
+            >
+              <span
+                class="mjf-file__progress-bar"
+                [class.mjf-file__progress-bar--indeterminate]="uploadPercent() === null"
+                [style.width.%]="uploadPercent() ?? 100"
+              ></span>
+            </div>
+          }
+
+          <p class="mjf-file__status" aria-live="polite">
+            @switch (uploadStatus()) {
+              @case ('uploading') {
+                <span>
+                  <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                  Uploading {{ uploadFileName() }}@if (uploadPercent() !== null) { — {{ uploadPercent() }}% }…
+                </span>
+              }
+              @case ('done') {
+                <span class="mjf-file__ok">
+                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  {{ uploadFileName() }} uploaded
+                </span>
+              }
+            }
+          </p>
+
+          @if (uploadStatus() === 'error') {
+            <p class="mjf-file__error" role="alert">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              {{ uploadError() }}
+            </p>
+            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
+              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry upload
+            </button>
           }
         }
         @default {

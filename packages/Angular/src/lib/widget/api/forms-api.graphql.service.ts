@@ -64,6 +64,8 @@ interface FormSubmissionInputType {
   distributionSlug: string;
   formVersionId: string;
   partial?: boolean;
+  /** Prior partial's id, so the server UPSERTs the same response on autosave. */
+  responseId?: string;
   startedAt?: string;
   turnstileToken?: string;
   clientMeta?: { referrer?: string; userAgent?: string };
@@ -109,9 +111,12 @@ export class FormsGraphQLApiService implements IFormsApiService {
     return JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition;
   }
 
-  public async submitResponse(input: FormSubmissionInput): Promise<FormSubmissionResult> {
+  public async submitResponse(
+    input: FormSubmissionInput,
+    existingResponseId?: string,
+  ): Promise<FormSubmissionResult> {
     const data = await this.execute<SubmitFormResponseData>(SUBMIT_RESPONSE_MUTATION, {
-      input: this.toInputType(input),
+      input: this.toInputType(input, existingResponseId),
     });
     return data.SubmitFormResponse;
   }
@@ -119,13 +124,19 @@ export class FormsGraphQLApiService implements IFormsApiService {
   /**
    * Map the contract {@link FormSubmissionInput} onto WP-B's `FormSubmissionInputType`.
    * Only `jsonValue` differs: the contract carries a structured `JSONValue`, the SDL
-   * expects a JSON STRING, so each answer's `jsonValue` is stringified here.
+   * expects a JSON STRING, so each answer's `jsonValue` is stringified here. The
+   * transport-level `existingResponseId` (autosave upsert target) is folded in here so
+   * it need not pollute the frozen `FormSubmissionInput` contract.
    */
-  private toInputType(input: FormSubmissionInput): FormSubmissionInputType {
+  private toInputType(
+    input: FormSubmissionInput,
+    existingResponseId?: string,
+  ): FormSubmissionInputType {
     return {
       distributionSlug: input.distributionSlug,
       formVersionId: input.formVersionId,
       partial: input.partial,
+      responseId: existingResponseId,
       startedAt: input.startedAt,
       turnstileToken: input.turnstileToken,
       clientMeta: input.clientMeta,

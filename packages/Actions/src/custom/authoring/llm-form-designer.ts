@@ -69,6 +69,10 @@ export class AIPromptFormDesignerModel implements FormDesignerModel {
     params.prompt = prompt;
     params.contextUser = contextUser;
     params.data = { ...data };
+    // The prompt is authored with OutputType='object' + ResponseFormat='JSON', so the
+    // runner parses/validates the model's JSON for us; this lets it also repair
+    // slightly-malformed JSON (trailing commas, stray fences) before giving up.
+    params.attemptJSONRepair = true;
 
     const result = await new AIPromptRunner().ExecutePrompt<FormBlueprint>(params);
     if (!result.success) {

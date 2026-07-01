@@ -37,7 +37,9 @@
     "@memberjunction/ai": "^5.43.0",
     "@memberjunction/aiengine": "^5.43.0",
     "@memberjunction/ai-core-plus": "^5.43.0",
-    "@memberjunction/ai-prompts": "^5.43.0"
+    "@memberjunction/ai-prompts": "^5.43.0",
+    "@memberjunction/communication-engine": "^5.43.0",
+    "@memberjunction/communication-types": "^5.43.0"
   },
   "repository": {
     "type": "git",

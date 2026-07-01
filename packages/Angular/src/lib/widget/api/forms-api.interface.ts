@@ -33,8 +33,18 @@ export interface IFormsApiService {
    */
   loadPublishedForm(distributionSlug: string): Promise<PublishedFormDefinition | null>;
 
-  /** Submit (or partial-save) a response. The server re-validates before persisting. */
-  submitResponse(input: FormSubmissionInput): Promise<FormSubmissionResult>;
+  /**
+   * Submit (or partial-save) a response. The server re-validates before persisting.
+   *
+   * `existingResponseId` is the id returned by a prior partial save; passing it lets the
+   * server UPSERT the same in-progress response (autosave) rather than creating a new
+   * one. It is a transport-level parameter — NOT part of the frozen `FormSubmissionInput`
+   * contract — because it is a widget-session concern (cross-session resume is Phase 2).
+   */
+  submitResponse(
+    input: FormSubmissionInput,
+    existingResponseId?: string,
+  ): Promise<FormSubmissionResult>;
 }
 
 /**

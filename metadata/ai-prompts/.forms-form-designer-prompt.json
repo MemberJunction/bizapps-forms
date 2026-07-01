@@ -9,20 +9,23 @@
       "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
       "Status": "Active",
       "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-form-designer.output-example.json",
       "SelectionStrategy": "Specific",
       "PowerPreference": "Highest",
       "PromptRole": "System",
       "PromptPosition": "First",
       "ParallelizationMode": "None",
-      "MaxRetries": 0,
-      "EffortLevel": 1
+      "ValidationBehavior": "Strict",
+      "MaxRetries": 2,
+      "EffortLevel": null
     },
     "relatedEntities": {
       "MJ: AI Prompt Models": [
         {
           "fields": {
             "PromptID": "@parent:ID",
-            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 2.5 Pro",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.1 Pro",
             "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
             "Priority": 100,
             "Status": "Active"
@@ -31,8 +34,8 @@
             "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718293"
           },
           "sync": {
-            "lastModified": "2026-06-30T20:49:10.168Z",
-            "checksum": "75460e887a92dd89ac51685f3cee4b92a8d4111e82055828fb2ad2934d63cee4"
+            "lastModified": "2026-07-01T00:46:59.155Z",
+            "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
           }
         }
       ]
@@ -41,8 +44,8 @@
       "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829304"
     },
     "sync": {
-      "lastModified": "2026-06-30T20:49:10.128Z",
-      "checksum": "354711e9c22c105e13fafcbe5d20c8ccb3b56fbd15eec9c48530f5256e45cc49"
+      "lastModified": "2026-07-01T00:47:36.484Z",
+      "checksum": "114fb979ca8327f1ef0ccca875264ef6d72a0de655fa4f04b448065e8e79c6fe"
     }
   }
 ]

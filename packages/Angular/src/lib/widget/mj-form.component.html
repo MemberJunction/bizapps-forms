@@ -36,14 +36,31 @@
             <mjf-form-scroll
               [runtime]="rt"
               [submitting]="phase() === 'submitting'"
+              [distributionSlug]="distributionSlug()"
               (submit)="onSubmit()"
+              (progressChange)="onProgress()"
             />
           } @else {
             <mjf-form-one-question
               [runtime]="rt"
               [submitting]="phase() === 'submitting'"
+              [distributionSlug]="distributionSlug()"
               (submit)="onSubmit()"
+              (progressChange)="onProgress()"
             />
+          }
+
+          @switch (autosaveStatus()) {
+            @case ('saving') {
+              <p class="mjf-autosave" aria-live="polite">
+                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Saving…
+              </p>
+            }
+            @case ('saved') {
+              <p class="mjf-autosave" aria-live="polite">
+                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Progress saved
+              </p>
+            }
           }
         }
       }

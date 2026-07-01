@@ -86,6 +86,16 @@ export class FormSubmissionInputType {
   @Field(() => Boolean, { nullable: true, description: 'true => Partial, false/absent => Complete.' })
   partial?: boolean;
 
+  @Field(() => ID, {
+    nullable: true,
+    description:
+      'Transport-level autosave target: the FormResponse the widget is already editing this ' +
+      'session. Honored ONLY if it belongs to the current anonymous session (server-validated); ' +
+      'otherwise ignored and the session-key lookup is used. Not part of the frozen ' +
+      'FormSubmissionInput contract — it is a widget-session concern.',
+  })
+  responseId?: string;
+
   @Field({ nullable: true })
   startedAt?: string;
 

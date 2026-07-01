@@ -34,7 +34,11 @@ import { FormQuestionComponent } from './questions/form-question.component';
 export class FormOneQuestionComponent {
   public readonly runtime = input.required<FormRuntime>();
   public readonly submitting = input<boolean>(false);
+  /** Distribution slug, forwarded to FileUpload questions for scoped uploads. */
+  public readonly distributionSlug = input<string>('');
   public readonly submit = output<void>();
+  /** Fires when the respondent advances a step — a natural autosave checkpoint. */
+  public readonly progressChange = output<void>();
 
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
 
@@ -106,6 +110,8 @@ export class FormOneQuestionComponent {
       this.submit.emit();
     } else {
       this.setIndex(this.index() + 1);
+      // Advancing a step is a natural, non-chatty autosave checkpoint.
+      this.progressChange.emit();
     }
   }
 

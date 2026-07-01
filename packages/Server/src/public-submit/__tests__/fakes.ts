@@ -12,6 +12,7 @@ import type {
   RunViewResult,
   UserInfo,
 } from '@memberjunction/core';
+import { IsPlatformSQL } from '@memberjunction/core';
 import type {
   PublishedFormDefinition,
   mjBizAppsFormsFormDistributionEntityType,
@@ -27,6 +28,14 @@ export interface SavedRecord {
 /** Per-entity create-permission map for the scope check. */
 export type CreatePermissions = Record<string, boolean>;
 
+/** A stored FormResponse row the fake returns from session-response lookups. */
+export interface ExistingResponseRow {
+  ID: string;
+  Status: 'Complete' | 'Partial';
+  FormVersionID: string;
+  AnonymousSessionID: string;
+}
+
 /** Configuration for {@link makeFakeProvider}. */
 export interface FakeProviderConfig {
   distribution?: mjBizAppsFormsFormDistributionEntityType;
@@ -38,6 +47,12 @@ export interface FakeProviderConfig {
   failRunViewFor?: string;
   /** Force a Save() to return false for a given entity name. */
   failSaveFor?: string;
+  /**
+   * Existing FormResponse rows the session-response lookup should return. The fake filters
+   * these by the requested `Status` (parsed out of the ExtraFilter). Used to exercise dedupe
+   * (a Complete row) and partial upsert/promotion (a Partial row).
+   */
+  existingResponses?: ExistingResponseRow[];
 }
 
 /** The fake provider plus inspection handles for tests. */
@@ -60,7 +75,13 @@ function makeFakeEntity(entityName: string, saved: SavedRecord[], failSave: bool
       ID: `id-${entityName}-${saved.length + 1}`,
       LatestResult: { CompleteMessage: 'forced save failure' },
       NewRecord: () => true,
-      Load: async () => true,
+      Load: async (id?: string) => {
+        // Emulate loading an existing row: adopt its id so update/promote key on it correctly.
+        if (typeof id === 'string' && id.length > 0) {
+          record.ID = id;
+        }
+        return true;
+      },
       Save: async () => {
         if (failSave) {
           return false;
@@ -68,6 +89,7 @@ function makeFakeEntity(entityName: string, saved: SavedRecord[], failSave: bool
         saved.push({ entityName, values: { ...values } });
         return true;
       },
+      Delete: async () => true,
     },
     {
       set(target, prop: string, value) {
@@ -115,7 +137,14 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
       return runViewResult<T>(true, config.version ? [config.version as unknown as T] : []);
     }
     if (name === FORM_RESPONSE_ENTITY) {
-      return runViewResult<T>(true, [], config.formResponseCount ?? 0);
+      // Quota uses count_only; the dedupe/partial lookups use entity_object with a Status filter.
+      if (params.ResultType === 'count_only') {
+        return runViewResult<T>(true, [], config.formResponseCount ?? 0);
+      }
+      const rawFilter = params.ExtraFilter;
+      const filter = IsPlatformSQL(rawFilter) ? rawFilter.default : rawFilter ?? '';
+      const rows = (config.existingResponses ?? []).filter((r) => matchesResponseFilter(r, filter));
+      return runViewResult<T>(true, rows as unknown as T[]);
     }
     return runViewResult<T>(true, []);
   };
@@ -134,6 +163,26 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     saved,
     distribution: config.distribution,
   };
+}
+
+/**
+ * Emulate the FormResponse lookups' `ExtraFilter` semantics against a stored row: every
+ * `Column='value'` equality predicate present in the filter must hold. This makes the fake honor
+ * not just `Status` (dedupe / session-key partial lookup) but also `ID` and `AnonymousSessionID`
+ * (the client-supplied-id ownership guard) — so a foreign-session id correctly matches NOTHING.
+ */
+function matchesResponseFilter(row: ExistingResponseRow, filter: string): boolean {
+  const eq = (column: string, value: string | undefined): boolean => {
+    // Anchor the column name on a word boundary so `ID=` does not also match `FormVersionID=`.
+    const m = filter.match(new RegExp(`(?:^|\\W)${column}='([^']*)'`));
+    return m === null || m[1] === value;
+  };
+  return (
+    eq('Status', row.Status) &&
+    eq('ID', row.ID) &&
+    eq('AnonymousSessionID', row.AnonymousSessionID) &&
+    eq('FormVersionID', row.FormVersionID)
+  );
 }
 
 /** Shape a RunViewResult with sensible defaults. */

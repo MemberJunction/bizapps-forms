@@ -1,12 +1,20 @@
 /**
- * Persist a validated submission: one `FormResponse` row plus one
- * `FormResponseAnswer` per visible answer, then increment the distribution's
- * `ResponseCount`.
+ * Persist a validated submission as one `FormResponse` row plus one
+ * `FormResponseAnswer` per visible answer, then (for a completed submission)
+ * increment the distribution's `ResponseCount`.
+ *
+ * Three modes (all funnel through {@link persistSubmission}):
+ *   - CREATE   — first save for a session (Partial autosave or one-shot Complete).
+ *   - UPDATE   — a Partial autosave re-hits the SAME session row: update it in place and
+ *                REPLACE its answers (idempotent — no duplicate Partial rows). (Task 4)
+ *   - PROMOTE  — a final submit finds the session's existing Partial row: flip it to
+ *                Complete + set SubmittedAt, replace answers, and increment the count.
+ *                No second row is created. (Task 4)
  *
  * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)`
- * (never `new`), passing the anonymous `contextUser`. Every `Save()` boolean is
- * checked; on failure we read `LatestResult.CompleteMessage` (per CLAUDE.md). The
- * answer typed columns mirror the `FormAnswerInput` transport exactly.
+ * (never `new`), passing the anonymous `contextUser`. Every `Save()`/`Delete()` boolean is
+ * checked; on failure we read `LatestResult.CompleteMessage` (per CLAUDE.md). The answer
+ * typed columns mirror the `FormAnswerInput` transport exactly.
  */
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import type {
@@ -14,6 +22,7 @@ import type {
   JSONValue,
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormResponseAnswerEntity,
+  mjBizAppsFormsFormResponseAnswerEntityType,
   mjBizAppsFormsFormResponseEntity,
 } from '@mj-biz-apps/forms-entities';
 import {
@@ -33,6 +42,12 @@ export interface PersistenceInputs {
   sessionId: string;
   sourceMetadata: JSONValue;
   answers: ValidatedAnswer[];
+  /**
+   * When set, the persistence updates/promotes THIS existing row instead of creating a new
+   * one (Task 4). Its answers are replaced with `answers`. Used for Partial autosave re-hits
+   * and for promoting a Partial to Complete on final submit.
+   */
+  existingResponseId?: string;
 }
 
 /**
@@ -60,13 +75,29 @@ interface SaveAnswerResult {
   message?: string;
 }
 
-/** Read a failed Save's detail message in the MJ-prescribed way. */
+/** Read a failed Save/Delete's detail message in the MJ-prescribed way. */
 function saveError(entity: BaseEntity, fallback: string): string {
   return entity.LatestResult?.CompleteMessage ?? fallback;
 }
 
-/** Create + Save the parent FormResponse row; returns it or a failure. */
-async function saveResponse(
+/** Apply the (non-answer) column values common to create + update onto the response row. */
+function applyResponseFields(response: mjBizAppsFormsFormResponseEntity, inputs: PersistenceInputs): void {
+  response.FormID = inputs.formId;
+  response.FormVersionID = inputs.formVersionId;
+  response.Status = inputs.complete ? 'Complete' : 'Partial';
+  response.AnonymousSessionID = inputs.sessionId;
+  if (inputs.startedAt) {
+    response.StartedAt = new Date(inputs.startedAt);
+  }
+  // Set SubmittedAt only on completion; a re-saved Partial must never claim it was submitted.
+  if (inputs.complete) {
+    response.SubmittedAt = new Date();
+  }
+  response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
+}
+
+/** CREATE a new parent FormResponse row; returns it or a failure. */
+async function createResponse(
   provider: DatabaseProviderBase,
   inputs: PersistenceInputs,
   contextUser: UserInfo,
@@ -76,20 +107,31 @@ async function saveResponse(
     contextUser,
   );
   response.NewRecord();
-  response.FormID = inputs.formId;
-  response.FormVersionID = inputs.formVersionId;
-  response.Status = inputs.complete ? 'Complete' : 'Partial';
-  response.AnonymousSessionID = inputs.sessionId;
-  if (inputs.startedAt) {
-    response.StartedAt = new Date(inputs.startedAt);
-  }
-  if (inputs.complete) {
-    response.SubmittedAt = new Date();
-  }
-  response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
-
+  applyResponseFields(response, inputs);
   if (!(await response.Save())) {
     return { ok: false, message: saveError(response, 'Failed to save form response.') };
+  }
+  return { ok: true, entity: response };
+}
+
+/** UPDATE/PROMOTE an existing parent FormResponse row in place; returns it or a failure. */
+async function updateResponse(
+  provider: DatabaseProviderBase,
+  inputs: PersistenceInputs,
+  existingResponseId: string,
+  contextUser: UserInfo,
+): Promise<SaveResponseResult> {
+  const response = await provider.GetEntityObject<mjBizAppsFormsFormResponseEntity>(
+    FORM_RESPONSE_ENTITY,
+    contextUser,
+  );
+  if (!(await response.Load(existingResponseId))) {
+    // The row vanished between lookup and save — fall back to creating a fresh one.
+    return createResponse(provider, inputs, contextUser);
+  }
+  applyResponseFields(response, inputs);
+  if (!(await response.Save())) {
+    return { ok: false, message: saveError(response, 'Failed to update form response.') };
   }
   return { ok: true, entity: response };
 }
@@ -138,6 +180,52 @@ function applyAnswerValue(answer: mjBizAppsFormsFormResponseAnswerEntity, input:
   }
 }
 
+/**
+ * Delete every existing answer for a response (used before re-inserting on an UPDATE/PROMOTE
+ * so the row's answers exactly mirror the latest submission — idempotent). Loads the answers
+ * as entity objects so each `.Delete()` return is checked. On any failure returns a message.
+ */
+async function replaceAnswersClear(
+  provider: DatabaseProviderBase,
+  responseId: string,
+  contextUser: UserInfo,
+): Promise<SaveAnswerResult> {
+  const existing = await provider.RunView<mjBizAppsFormsFormResponseAnswerEntityType>(
+    {
+      EntityName: FORM_RESPONSE_ANSWER_ENTITY,
+      ExtraFilter: `ResponseID='${responseId.replace(/'/g, "''")}'`,
+      ResultType: 'entity_object',
+    },
+    contextUser,
+  );
+  if (!existing.Success) {
+    return { ok: false, message: 'Failed to load existing answers for replacement.' };
+  }
+  for (const row of existing.Results) {
+    const answer = row as unknown as mjBizAppsFormsFormResponseAnswerEntity;
+    if (!(await answer.Delete())) {
+      return { ok: false, message: saveError(answer, 'Failed to clear a prior answer.') };
+    }
+  }
+  return { ok: true };
+}
+
+/** Insert all validated answers for a response; aborts with a message on first failure. */
+async function insertAnswers(
+  provider: DatabaseProviderBase,
+  responseId: string,
+  answers: ValidatedAnswer[],
+  contextUser: UserInfo,
+): Promise<SaveAnswerResult> {
+  for (const validated of answers) {
+    const result = await saveAnswer(provider, responseId, validated, contextUser);
+    if (!result.ok) {
+      return result;
+    }
+  }
+  return { ok: true };
+}
+
 /** Increment the distribution's ResponseCount (best-effort; logs but never fails the submit). */
 async function incrementResponseCount(
   provider: DatabaseProviderBase,
@@ -162,26 +250,38 @@ async function incrementResponseCount(
 }
 
 /**
- * Save the response and all its answers. On any answer failure the response id is
- * still returned (the parent row exists); callers decide how strict to be. We keep
- * it simple here: a failed answer aborts with a message so the client can retry.
+ * Save the response and all its answers. CREATE (default), or UPDATE/PROMOTE when
+ * `existingResponseId` is set — in which case the existing row's answers are REPLACED so
+ * repeated Partial autosaves stay idempotent (Task 4). `ResponseCount` is incremented only
+ * when the resulting row is Complete AND this is not merely re-completing an already-counted
+ * row — promotion counts once because the Partial was never counted.
  */
 export async function persistSubmission(
   provider: DatabaseProviderBase,
   inputs: PersistenceInputs,
   contextUser: UserInfo,
 ): Promise<PersistenceResult> {
-  const saved = await saveResponse(provider, inputs, contextUser);
+  const isUpsert = Boolean(inputs.existingResponseId);
+  const saved = isUpsert
+    ? await updateResponse(provider, inputs, inputs.existingResponseId as string, contextUser)
+    : await createResponse(provider, inputs, contextUser);
   if (!saved.ok || !saved.entity) {
     return { ok: false, message: saved.message };
   }
   const responseId = saved.entity.ID;
 
-  for (const validated of inputs.answers) {
-    const result = await saveAnswer(provider, responseId, validated, contextUser);
-    if (!result.ok) {
-      return { ok: false, message: result.message };
+  // On an upsert the prior answers must be cleared first so the persisted set mirrors the
+  // latest submission (no stale/duplicate answers across autosaves or promotion).
+  if (isUpsert) {
+    const cleared = await replaceAnswersClear(provider, responseId, contextUser);
+    if (!cleared.ok) {
+      return { ok: false, message: cleared.message };
     }
+  }
+
+  const inserted = await insertAnswers(provider, responseId, inputs.answers, contextUser);
+  if (!inserted.ok) {
+    return { ok: false, message: inserted.message };
   }
 
   if (inputs.complete) {

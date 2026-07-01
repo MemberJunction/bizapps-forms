@@ -9,9 +9,16 @@ export { registerMjFormElement, MJ_FORM_TAG } from './register-element';
 
 // S1 API seam
 export { FORMS_API_SERVICE, type IFormsApiService } from './api/forms-api.interface';
-export { FORMS_API_CONFIG, type FormsApiConfig } from './api/forms-api.config';
+export { FORMS_API_CONFIG, type FormsApiConfig, deriveUploadUrl } from './api/forms-api.config';
 export { FormsGraphQLApiService } from './api/forms-api.graphql.service';
 export { FormsMockApiService } from './api/forms-api.mock.service';
+export {
+  FormUploadService,
+  buildUploadFormData,
+  parseUploadResponse,
+  type UploadedFile,
+  type UploadProgress,
+} from './api/form-upload.service';
 
 // Render-mode + question components (for direct embedding / testing)
 export { FormScrollComponent } from './components/form-scroll.component';
@@ -21,6 +28,12 @@ export { FormProgressComponent } from './components/form-progress.component';
 
 // Headless runtime + helpers
 export { FormRuntime } from './core/form-runtime';
+export {
+  AutosaveController,
+  type AutosaveFn,
+  type AutosaveStatus,
+  type TimerApi,
+} from './core/autosave-controller';
 export { clampCursor } from './core/one-question-stepper';
 export { applyStyleTokens } from './core/theming';
 export { validateQuestion, hasValue, type FieldValidationResult } from './core/validation';

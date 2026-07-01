@@ -45,6 +45,13 @@ export {
   type ConfirmationEmail,
   type ConfirmationEmailResult,
 } from './on-submit/send-confirmation-email.action';
+export {
+  CommunicationEngineConfirmationEmailSender,
+  installCommunicationEngineConfirmationSender,
+  DEFAULT_MESSAGE_TYPE,
+  type ConfirmationEmailConfig,
+  type ConfirmationEmailEngine,
+} from './on-submit/confirmation-email-sender';
 export * from './templates/starter-templates';
 
 /**

@@ -1,6 +1,14 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import {
+  CdkDropList,
+  CdkDrag,
+  CdkDragHandle,
+  CdkDragPreview,
+  moveItemInArray,
+  type CdkDragDrop,
+} from '@angular/cdk/drag-drop';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
@@ -13,6 +21,7 @@ import { BuilderStateService } from './builder-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { DistributionManagerComponent } from './distribution-manager.component';
+import { DesignPanelComponent } from './design-panel.component';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import {
   QUESTION_PALETTE_GROUPS,
@@ -23,9 +32,10 @@ import {
 } from './question-type-catalog';
 import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
+import { isValidReorder } from './reorder';
 
 /** Which workspace tab is showing. */
-type BuilderTab = 'build' | 'distribute';
+type BuilderTab = 'build' | 'design' | 'distribute';
 
 /**
  * The visual form builder — registered as the override for the
@@ -45,7 +55,17 @@ type BuilderTab = 'build' | 'distribute';
 @Component({
   selector: 'mjf-form-builder',
   standalone: true,
-  imports: [CommonModule, FormsModule, QuestionEditorComponent, DistributionManagerComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    CdkDropList,
+    CdkDrag,
+    CdkDragHandle,
+    CdkDragPreview,
+    QuestionEditorComponent,
+    DistributionManagerComponent,
+    DesignPanelComponent,
+  ],
   providers: [BuilderStateService, PublishService],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
@@ -214,14 +234,20 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected async moveQuestion(page: PageNode, node: QuestionNode, delta: number): Promise<void> {
     const index = page.questions.indexOf(node);
-    const target = index + delta;
-    if (target < 0 || target >= page.questions.length) {
+    await this.reorderQuestion(page, index, index + delta);
+  }
+
+  /** Pointer/touch drag-drop reorder within a page (mirrors {@link moveQuestion}). */
+  protected async dropQuestion(page: PageNode, event: CdkDragDrop<QuestionNode[]>): Promise<void> {
+    await this.reorderQuestion(page, event.previousIndex, event.currentIndex);
+  }
+
+  /** Shared reorder: move a question to a new index in its page, then persist. */
+  private async reorderQuestion(page: PageNode, from: number, to: number): Promise<void> {
+    if (this.busy || !isValidReorder(from, to, page.questions.length)) {
       return;
     }
-    const reordered = [...page.questions];
-    reordered.splice(index, 1);
-    reordered.splice(target, 0, node);
-    page.questions = reordered;
+    moveItemInArray(page.questions, from, to);
     await this.state.persistQuestionOrder(page);
     this.cdr.markForCheck();
   }
@@ -263,6 +289,11 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected setTab(tab: BuilderTab): void {
     this.activeTab = tab;
+    this.cdr.markForCheck();
+  }
+
+  /** The Design panel persisted `Form.StyleID`; refresh the shell. */
+  protected onStyleApplied(): void {
     this.cdr.markForCheck();
   }
 }

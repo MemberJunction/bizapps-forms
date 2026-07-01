@@ -1,0 +1,151 @@
+<div class="dp">
+  <!-- LEFT: style picker + branding editor -->
+  <div class="dp-controls">
+    <section aria-labelledby="dp-styles-title">
+      <h3 id="dp-styles-title" class="dp-title">Theme</h3>
+      <p class="dp-hint">Pick a preset. The preview updates instantly; “Apply” saves it to this form.</p>
+
+      @if (styles.length === 0) {
+        <p class="dp-empty">No styles available yet.</p>
+      }
+      <ul class="dp-style-list" role="list">
+        @for (style of styles; track style.ID) {
+          <li>
+            <button
+              type="button"
+              class="dp-style"
+              [class.is-selected]="isSelected(style)"
+              [attr.aria-pressed]="isSelected(style)"
+              [disabled]="busy"
+              (click)="select(style)"
+            >
+              <span class="dp-style-name">{{ style.Name }}</span>
+              @if (isApplied(style)) {
+                <span class="mjf-pill">Applied</span>
+              }
+              @if (style.Description) {
+                <span class="dp-style-desc">{{ style.Description }}</span>
+              }
+            </button>
+          </li>
+        }
+      </ul>
+
+      <div class="dp-actions">
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--primary"
+          [disabled]="busy || !selected || (selected && isApplied(selected))"
+          (click)="applyToForm()"
+        >Apply to form</button>
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--ghost"
+          [disabled]="busy || !selected"
+          (click)="duplicateSelected()"
+        >Duplicate &amp; edit</button>
+      </div>
+    </section>
+
+    @if (selected) {
+      <section class="qe-section" aria-labelledby="dp-brand-title">
+        <h3 id="dp-brand-title" class="dp-title">Branding</h3>
+        <p class="dp-hint">Editing changes the theme itself. Duplicate first to avoid changing a shared preset.</p>
+
+        <label class="mjf-field">
+          <span class="mjf-field-label">Theme name</span>
+          <input class="mjf-input" [(ngModel)]="brandName" (ngModelChange)="onBrandInput()" />
+        </label>
+
+        <div class="mjf-field">
+          <span class="mjf-field-label">Primary color</span>
+          <div class="dp-color-row">
+            <input
+              type="color"
+              class="dp-color"
+              [(ngModel)]="brandPrimary"
+              (ngModelChange)="onBrandInput()"
+              aria-label="Primary color"
+            />
+            <input
+              class="mjf-input"
+              [(ngModel)]="brandPrimary"
+              (ngModelChange)="onBrandInput()"
+              placeholder="Hex or CSS color"
+              aria-label="Primary color hex"
+            />
+          </div>
+        </div>
+
+        <div class="mjf-field">
+          <span class="mjf-field-label">Accent color (hover / strong)</span>
+          <div class="dp-color-row">
+            <input
+              type="color"
+              class="dp-color"
+              [(ngModel)]="brandAccent"
+              (ngModelChange)="onBrandInput()"
+              aria-label="Accent color"
+            />
+            <input
+              class="mjf-input"
+              [(ngModel)]="brandAccent"
+              (ngModelChange)="onBrandInput()"
+              placeholder="Hex or CSS color"
+              aria-label="Accent color hex"
+            />
+          </div>
+        </div>
+
+        <label class="mjf-field">
+          <span class="mjf-field-label">Logo URL</span>
+          <input
+            class="mjf-input"
+            [(ngModel)]="brandLogo"
+            (ngModelChange)="onBrandInput()"
+            placeholder="https://…/logo.svg"
+          />
+          <span class="mjf-field-hint">Shown at the top of the form.</span>
+        </label>
+
+        <div class="dp-actions">
+          <button type="button" class="mjf-btn mjf-btn--primary" [disabled]="busy" (click)="saveBranding()">
+            Save branding
+          </button>
+        </div>
+      </section>
+    }
+
+    @if (status) {
+      <p class="dp-status" role="status">{{ status }}</p>
+    }
+  </div>
+
+  <!-- RIGHT: live preview (tokens applied to this host by applyStyleTokens) -->
+  <div class="dp-preview" aria-label="Style preview">
+    <div class="dp-preview-frame" #previewHost>
+      @if (brandLogo) {
+        <img class="dp-prev-logo" [src]="brandLogo" alt="" />
+      }
+      <p class="dp-prev-eyebrow">Preview</p>
+      <h2 class="dp-prev-title">{{ form.Name }}</h2>
+      <p class="dp-prev-sub">This is how the selected theme looks to respondents.</p>
+
+      <div class="dp-prev-card">
+        <p class="dp-prev-q">1 · How likely are you to recommend us?</p>
+        <div class="dp-prev-choices">
+          <span class="dp-prev-choice is-on">Very likely</span>
+          <span class="dp-prev-choice">Somewhat</span>
+          <span class="dp-prev-choice">Not likely</span>
+        </div>
+      </div>
+
+      <div class="dp-prev-card">
+        <p class="dp-prev-q">2 · Any other feedback?</p>
+        <div class="dp-prev-input"></div>
+      </div>
+
+      <button type="button" class="dp-prev-btn">Submit</button>
+    </div>
+  </div>
+</div>

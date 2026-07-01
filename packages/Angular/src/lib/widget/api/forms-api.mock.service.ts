@@ -26,11 +26,15 @@ export class FormsMockApiService implements IFormsApiService {
     return buildMockForm(distributionSlug);
   }
 
-  public async submitResponse(input: FormSubmissionInput): Promise<FormSubmissionResult> {
+  public async submitResponse(
+    input: FormSubmissionInput,
+    existingResponseId?: string,
+  ): Promise<FormSubmissionResult> {
     await this.simulateLatency();
     return {
       success: true,
-      responseId: `mock-${Date.now().toString(36)}`,
+      // Echo an existing id back on autosave so the widget keeps upserting one record.
+      responseId: existingResponseId ?? `mock-${Date.now().toString(36)}`,
       status: input.partial ? 'Partial' : 'Complete',
       confirmationMessage: input.partial
         ? 'Your progress has been saved.'

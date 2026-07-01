@@ -58,8 +58,12 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   private readonly exporter = inject(FormsReportingExportService);
   private readonly cdr = inject(ChangeDetectorRef);
 
-  /** Flip to false once live responses exist; everything else is identical. */
-  public useMock = true;
+  /**
+   * Live RunView/RunQuery data path is the default. Set to `true` only as an explicit
+   * dev aid (e.g. to preview the dashboard UI before any real responses exist) — the
+   * seeded mock renders the identical UI with fabricated data. Never ship `true`.
+   */
+  public useMock = false;
 
   public loading = false;
   public errorMessage: string | null = null;

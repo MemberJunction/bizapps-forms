@@ -15,12 +15,22 @@
  * It uses the live, per-user aggregated permissions (`EntityInfo.GetUserPermisions`),
  * so a mis-scoped session is denied regardless of how the role was assembled.
  */
-import type { IMetadataProvider, UserInfo } from '@memberjunction/core';
+import type { EntityInfo, UserInfo } from '@memberjunction/core';
 import {
   FORM_RESPONSE_ENTITY,
   FORM_RESPONSE_ANSWER_ENTITY,
   FORM_DEFINITION_NO_CREATE_ENTITIES,
 } from './entity-names';
+
+/**
+ * The narrow capability the scope check needs — just entity-definition lookup. Both the
+ * per-request `DatabaseProviderBase` (submit pipeline) and a global `Metadata` (upload
+ * endpoint) satisfy this, so the same guard is reused across both entry points without
+ * requiring the full `IMetadataProvider` surface.
+ */
+export interface ScopeMetadataProvider {
+  EntityByName(entityName: string): EntityInfo | undefined;
+}
 
 /** Outcome of the scope check; `reason` is set only on denial. */
 export interface ScopeCheckResult {
@@ -29,7 +39,7 @@ export interface ScopeCheckResult {
 }
 
 /** True if the user holds CanCreate on the named entity, per aggregated permissions. */
-function userCanCreate(provider: IMetadataProvider, entityName: string, user: UserInfo): boolean {
+function userCanCreate(provider: ScopeMetadataProvider, entityName: string, user: UserInfo): boolean {
   const entity = provider.EntityByName(entityName);
   if (!entity) {
     return false;
@@ -41,7 +51,7 @@ function userCanCreate(provider: IMetadataProvider, entityName: string, user: Us
  * Verify the anonymous session may create responses and nothing more. Returns a
  * denial (never throws) so the resolver can map it to a clean `FormSubmissionResult`.
  */
-export function checkRespondentScope(provider: IMetadataProvider, user: UserInfo): ScopeCheckResult {
+export function checkRespondentScope(provider: ScopeMetadataProvider, user: UserInfo): ScopeCheckResult {
   if (!userCanCreate(provider, FORM_RESPONSE_ENTITY, user)) {
     return { allowed: false, reason: 'Session is not authorized to create form responses.' };
   }

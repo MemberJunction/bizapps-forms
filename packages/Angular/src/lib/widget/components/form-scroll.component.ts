@@ -21,7 +21,11 @@ import { FormQuestionComponent } from './questions/form-question.component';
 export class FormScrollComponent {
   public readonly runtime = input.required<FormRuntime>();
   public readonly submitting = input<boolean>(false);
+  /** Distribution slug, forwarded to FileUpload questions for scoped uploads. */
+  public readonly distributionSlug = input<string>('');
   public readonly submit = output<void>();
+  /** Fires when the respondent has made progress worth autosaving (debounced upstream). */
+  public readonly progressChange = output<void>();
 
   protected readonly pages = computed(() => this.runtime().visiblePages());
   protected readonly progress = computed(() => this.runtime().progress());
@@ -33,6 +37,7 @@ export class FormScrollComponent {
   protected onValueChange(question: PublishedFormQuestion, value: AnswerValue): void {
     this.runtime().setValue(question.id, value);
     this.runtime().markTouched(question.id);
+    this.progressChange.emit();
   }
 
   protected onSubmit(): void {
