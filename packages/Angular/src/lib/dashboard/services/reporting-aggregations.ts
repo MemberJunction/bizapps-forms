@@ -71,37 +71,49 @@ export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
   return 'freeText';
 }
 
-/** Builds top-line summary stats from response rows. */
+/**
+ * Builds top-line summary stats from response rows.
+ *
+ * The HEADLINE `totalResponses` counts COMPLETE responses only — a Partial row is an
+ * in-progress autosave, not a submitted response, and must never inflate the count a form
+ * owner sees. `partialResponses` still surfaces the in-progress count separately, and
+ * `completionRate` is complete / (complete + partial) so the drop-off signal is preserved.
+ */
 export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
-  const total = responses.length;
   let complete = 0;
+  let partial = 0;
   let durationSum = 0;
   let durationCount = 0;
   let lastSubmitted: Date | null = null;
 
   for (const r of responses) {
-    if (r.Status === 'Complete') {
-      complete++;
-      const submitted = toDate(r.SubmittedAt);
-      const started = toDate(r.StartedAt);
-      if (submitted && started) {
-        const secs = (submitted.getTime() - started.getTime()) / 1000;
-        if (secs >= 0) {
-          durationSum += secs;
-          durationCount++;
-        }
+    if (r.Status !== 'Complete') {
+      partial++;
+      continue;
+    }
+    complete++;
+    const submitted = toDate(r.SubmittedAt);
+    const started = toDate(r.StartedAt);
+    if (submitted && started) {
+      const secs = (submitted.getTime() - started.getTime()) / 1000;
+      if (secs >= 0) {
+        durationSum += secs;
+        durationCount++;
       }
-      if (submitted && (!lastSubmitted || submitted > lastSubmitted)) {
-        lastSubmitted = submitted;
-      }
+    }
+    if (submitted && (!lastSubmitted || submitted > lastSubmitted)) {
+      lastSubmitted = submitted;
     }
   }
 
+  const started = complete + partial;
   return {
-    totalResponses: total,
+    // Headline count is Complete-only (Partials are in-progress, not responses).
+    totalResponses: complete,
     completeResponses: complete,
-    partialResponses: total - complete,
-    completionRate: total > 0 ? complete / total : 0,
+    partialResponses: partial,
+    // Completion rate keeps the started (complete + partial) denominator as the drop-off signal.
+    completionRate: started > 0 ? complete / started : 0,
     averageCompletionSeconds: durationCount > 0 ? durationSum / durationCount : null,
     lastSubmittedAt: lastSubmitted,
   };
@@ -309,7 +321,11 @@ export function buildFunnel(
   return steps;
 }
 
-/** Builds the response-list rows. */
+/**
+ * Builds the response-list rows. Lists COMPLETE responses only — a Partial is an in-progress
+ * autosave, not a submitted response, so it must not appear in the headline response list
+ * (it is still reflected in the funnel/drop-off metric, which reads all answers).
+ */
 export function buildResponseRows(
   responses: ResponseRow[],
   answers: AnswerRow[],
@@ -318,14 +334,16 @@ export function buildResponseRows(
   for (const a of answers) {
     answerCountByResponse.set(a.ResponseID, (answerCountByResponse.get(a.ResponseID) ?? 0) + 1);
   }
-  return responses.map((r) => ({
-    responseId: r.ID,
-    status: r.Status,
-    startedAt: toDate(r.StartedAt),
-    submittedAt: toDate(r.SubmittedAt),
-    respondent: respondentLabel(r),
-    answeredCount: answerCountByResponse.get(r.ID) ?? 0,
-  }));
+  return responses
+    .filter((r) => r.Status === 'Complete')
+    .map((r) => ({
+      responseId: r.ID,
+      status: r.Status,
+      startedAt: toDate(r.StartedAt),
+      submittedAt: toDate(r.SubmittedAt),
+      respondent: respondentLabel(r),
+      answeredCount: answerCountByResponse.get(r.ID) ?? 0,
+    }));
 }
 
 /** Builds a single response detail with labelled answers. */

@@ -100,7 +100,7 @@ describe('flattenQuestions', () => {
 });
 
 describe('buildSummary', () => {
-  it('computes counts, completion rate and average duration', () => {
+  it('headline total counts COMPLETE only; partials feed partialResponses + completionRate', () => {
     const start = new Date('2026-01-01T00:00:00Z');
     const rows: ResponseRow[] = [
       response('r1', 'Complete', start, new Date(start.getTime() + 60_000)),
@@ -108,18 +108,28 @@ describe('buildSummary', () => {
       response('r3', 'Partial', start, null),
     ];
     const s = buildSummary(rows);
-    expect(s.totalResponses).toBe(3);
+    // Headline total EXCLUDES the in-progress partial (regression: partials must not inflate it).
+    expect(s.totalResponses).toBe(2);
     expect(s.completeResponses).toBe(2);
     expect(s.partialResponses).toBe(1);
+    // completionRate keeps the started (complete + partial) denominator as the drop-off signal.
     expect(s.completionRate).toBeCloseTo(2 / 3);
     expect(s.averageCompletionSeconds).toBe(90); // (60 + 120) / 2
   });
 
   it('handles zero responses', () => {
     const s = buildSummary([]);
+    expect(s.totalResponses).toBe(0);
     expect(s.completionRate).toBe(0);
     expect(s.averageCompletionSeconds).toBeNull();
     expect(s.lastSubmittedAt).toBeNull();
+  });
+
+  it('counts nothing as a response when only partials exist', () => {
+    const s = buildSummary([response('p1', 'Partial', new Date(), null)]);
+    expect(s.totalResponses).toBe(0);
+    expect(s.partialResponses).toBe(1);
+    expect(s.completionRate).toBe(0);
   });
 });
 
@@ -227,6 +237,17 @@ describe('buildResponseRows', () => {
     );
     expect(rows[0].answeredCount).toBe(2);
     expect(rows[0].respondent).toBe('Anonymous');
+  });
+
+  it('lists COMPLETE responses only — in-progress partials are excluded from the list', () => {
+    const rows = buildResponseRows(
+      [
+        response('r1', 'Complete', new Date(), new Date()),
+        response('r2', 'Partial', new Date(), null),
+      ],
+      [answer('r1', 'q1', { TextValue: 'x' })],
+    );
+    expect(rows.map((r) => r.responseId)).toEqual(['r1']);
   });
 });
 

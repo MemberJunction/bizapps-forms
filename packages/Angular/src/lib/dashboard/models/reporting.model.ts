@@ -16,7 +16,7 @@ export interface ReportableForm {
   formId: string;
   formVersionId: string;
   name: string;
-  /** Total responses (any status) — used to disable empty forms in the picker. */
+  /** Complete responses (Partials excluded) — used to disable empty forms in the picker. */
   responseCount: number;
 }
 

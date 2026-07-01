@@ -58,7 +58,8 @@ export class FormsReportingService {
 
   /**
    * Lists forms that have at least one published version, with their latest
-   * published version id and total response count, for the form picker.
+   * published version id and COMPLETE response count, for the form picker. Partial
+   * (in-progress) autosaves are excluded from the count.
    */
   public async loadReportableForms(): Promise<ReportableForm[]> {
     const [formsRes, versionsRes, responsesRes] = await this.rv.RunViews([
@@ -77,8 +78,12 @@ export class FormsReportingService {
       },
       {
         EntityName: ENTITY.responses,
+        // Headline response count is COMPLETE-only: in-progress Partial autosaves are not
+        // "responses". (Partials still feed the drop-off funnel in loadReport, which reads
+        // its own rows.)
+        ExtraFilter: `Status='Complete'`,
         ResultType: 'simple',
-        Fields: ['ID', 'FormID'],
+        Fields: ['ID', 'FormID', 'Status'],
       },
     ]) as [
       RunViewResult<mjBizAppsFormsFormEntityType>,
