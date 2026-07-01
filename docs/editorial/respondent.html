@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --paper: #faf8f4;
+    --paper-2: #f3f0e9;
+    --card: #ffffff;
+    --ink: #1a1815;
+    --ink-2: #4a463f;
+    --ink-3: #837d72;
+    --hair: #e2ddd2;
+    --hair-strong: #cfc8b9;
+    --accent: #1f5d4c;        /* deep emerald */
+    --accent-soft: #e8f0ec;
+    --accent-ink: #164437;
+    --focus: #1f5d4c;
+    --radius: 14px;
+    --serif: "Fraunces", Georgia, "Times New Roman", serif;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Gallery back link */
+  .gallery-bar {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(250,248,244,.86);
+    backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 1px solid var(--hair);
+  }
+  .gallery-bar a {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-size: .8rem; letter-spacing: .02em;
+    color: var(--ink-2); text-decoration: none;
+    padding: .6rem 1.1rem; font-weight: 500;
+  }
+  .gallery-bar a:hover { color: var(--accent); }
+
+  .shell { max-width: 660px; margin: 0 auto; padding: 0 1.1rem 4rem; }
+
+  /* Brand header */
+  .brand {
+    display: flex; align-items: center; gap: .55rem;
+    padding: 1.7rem 0 1.1rem;
+  }
+  .brand .mark {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: var(--accent); color: #fff;
+    display: grid; place-items: center; font-size: .8rem;
+  }
+  .brand .wordmark {
+    font-family: var(--serif); font-weight: 600; font-size: 1.02rem;
+    letter-spacing: .01em;
+  }
+  .brand .wordmark span { color: var(--accent); }
+
+  /* Mode toggle */
+  .modebar { display: flex; justify-content: flex-end; margin-bottom: 1.2rem; }
+  .seg {
+    display: inline-flex; background: var(--paper-2);
+    border: 1px solid var(--hair); border-radius: 999px; padding: 3px;
+  }
+  .seg button {
+    border: 0; background: transparent; cursor: pointer;
+    font-family: var(--sans); font-size: .78rem; font-weight: 500;
+    color: var(--ink-3); padding: .38rem .85rem; border-radius: 999px;
+    transition: all .18s ease;
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--card); color: var(--ink);
+    box-shadow: 0 1px 0 rgba(0,0,0,.04);
+  }
+
+  /* Title block */
+  .hero h1 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(2rem, 7vw, 2.9rem); line-height: 1.05;
+    margin: .2rem 0 .6rem; letter-spacing: -.01em;
+  }
+  .hero .intro { color: var(--ink-2); font-size: 1.02rem; max-width: 52ch; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: .16em;
+    font-size: .68rem; font-weight: 600; color: var(--accent);
+  }
+
+  /* Progress */
+  .progress-wrap { margin: 1.6rem 0 2.2rem; }
+  .progress-meta {
+    display: flex; justify-content: space-between;
+    font-size: .74rem; color: var(--ink-3); margin-bottom: .5rem;
+    letter-spacing: .02em;
+  }
+  .progress-track {
+    height: 4px; background: var(--hair); border-radius: 999px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; width: 40%; background: var(--accent);
+    border-radius: 999px; transition: width .4s ease;
+  }
+
+  /* Question blocks */
+  .q {
+    background: var(--card);
+    border: 1px solid var(--hair);
+    border-radius: var(--radius);
+    padding: 1.5rem 1.45rem;
+    margin-bottom: 1.05rem;
+  }
+  .q-num {
+    font-family: var(--serif); font-size: .8rem; color: var(--accent);
+    font-weight: 600;
+  }
+  .q-label {
+    display: block; font-size: 1.1rem; font-weight: 600;
+    margin: .15rem 0 .15rem; letter-spacing: -.005em;
+  }
+  .q-label .req { color: var(--accent); font-weight: 500; }
+  .q-help { color: var(--ink-3); font-size: .86rem; margin-bottom: 1rem; }
+
+  /* Text inputs */
+  .field {
+    width: 100%; font-family: var(--sans); font-size: 1rem;
+    color: var(--ink); background: var(--paper);
+    border: 1px solid var(--hair-strong); border-radius: 10px;
+    padding: .8rem .9rem; transition: border-color .15s, box-shadow .15s;
+  }
+  .field::placeholder { color: var(--ink-3); }
+  .field:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft); background: #fff;
+  }
+  textarea.field { resize: vertical; min-height: 110px; line-height: 1.5; }
+
+  /* Radio / checkbox option rows */
+  .opt {
+    display: flex; align-items: center; gap: .8rem;
+    border: 1px solid var(--hair); border-radius: 10px;
+    padding: .8rem .9rem; margin-bottom: .55rem; cursor: pointer;
+    transition: border-color .15s, background .15s;
+    background: var(--paper);
+  }
+  .opt:hover { border-color: var(--hair-strong); }
+  .opt input { position: absolute; opacity: 0; pointer-events: none; }
+  .opt .ind {
+    width: 20px; height: 20px; flex: 0 0 20px;
+    border: 1.5px solid var(--hair-strong); display: grid; place-items: center;
+    transition: all .15s;
+  }
+  .opt.radio .ind { border-radius: 50%; }
+  .opt.check .ind { border-radius: 6px; }
+  .opt .ind i { font-size: .62rem; color: #fff; opacity: 0; transform: scale(.4); transition: all .15s; }
+  .opt .txt { font-size: .96rem; }
+  .opt input:checked ~ .ind { background: var(--accent); border-color: var(--accent); }
+  .opt input:checked ~ .ind i { opacity: 1; transform: scale(1); }
+  .opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .opt:focus-within { box-shadow: 0 0 0 3px var(--accent-soft); border-color: var(--accent); }
+
+  /* NPS scale */
+  .nps {
+    display: grid; grid-template-columns: repeat(11, 1fr); gap: 6px;
+  }
+  .nps label {
+    aspect-ratio: 1 / 1; min-width: 0;
+    display: grid; place-items: center; cursor: pointer;
+    border: 1px solid var(--hair-strong); border-radius: 9px;
+    font-size: .9rem; font-weight: 500; color: var(--ink-2);
+    background: var(--paper); transition: all .14s;
+  }
+  .nps input { position: absolute; opacity: 0; pointer-events: none; }
+  .nps label:hover { border-color: var(--accent); color: var(--accent); }
+  .nps input:checked + label,
+  .nps label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .nps-cap { display: flex; justify-content: space-between; font-size: .72rem; color: var(--ink-3); margin-top: .55rem; }
+
+  /* Star rating */
+  .stars { display: flex; gap: .35rem; font-size: 1.7rem; color: var(--hair-strong); }
+  .stars i { cursor: pointer; transition: color .12s, transform .12s; }
+  .stars i:hover { transform: scale(1.08); }
+  .stars i.on { color: var(--accent); }
+
+  /* Footer / submit */
+  .submit-row {
+    display: flex; align-items: center; gap: 1rem;
+    margin-top: 1.8rem; flex-wrap: wrap;
+  }
+  .btn-submit {
+    font-family: var(--sans); font-weight: 600; font-size: 1rem;
+    background: var(--accent); color: #fff; border: 0;
+    border-radius: 11px; padding: .95rem 2.1rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: .6rem;
+    transition: background .18s, transform .05s;
+    letter-spacing: .01em;
+  }
+  .btn-submit:hover { background: var(--accent-ink); }
+  .btn-submit:active { transform: translateY(1px); }
+  .btn-submit:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+
+  .meta-foot {
+    margin-top: 2.6rem; padding-top: 1.4rem; border-top: 1px solid var(--hair);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .7rem;
+  }
+  .powered {
+    font-size: .78rem; color: var(--ink-3); display: inline-flex; align-items: center; gap: .4rem;
+  }
+  .powered b { color: var(--ink-2); font-weight: 600; }
+  .powered .dot { width: 16px; height: 16px; border-radius: 5px; background: var(--accent); color:#fff; display:grid; place-items:center; font-size:.55rem; }
+  .privacy { font-size: .74rem; color: var(--ink-3); display:inline-flex; align-items:center; gap:.4rem; }
+
+  :focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; border-radius: 6px; }
+
+  @media (max-width: 420px) {
+    .nps label { font-size: .78rem; border-radius: 7px; }
+    .nps { gap: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="gallery-bar" aria-label="Prototype navigation">
+  <a href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+</nav>
+
+<main class="shell">
+  <header class="brand">
+    <div class="mark" aria-hidden="true"><i class="fa-solid fa-feather"></i></div>
+    <div class="wordmark">Riverbend Arts <span>Alliance</span></div>
+  </header>
+
+  <div class="modebar">
+    <div class="seg" role="group" aria-label="Display mode">
+      <button type="button" aria-pressed="true">Classic</button>
+      <button type="button" aria-pressed="false">One question</button>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="eyebrow">Member Survey</div>
+    <h1>Spring 2026 <br>Member Survey</h1>
+    <p class="intro">A few minutes of your time helps us shape next season's programs, workshops, and community events. Thank you for being part of the Alliance.</p>
+  </div>
+
+  <div class="progress-wrap" aria-hidden="true">
+    <div class="progress-meta"><span>Your progress</span><span>40% complete</span></div>
+    <div class="progress-track"><div class="progress-fill"></div></div>
+  </div>
+
+  <form>
+    <!-- Q1 Short text -->
+    <section class="q">
+      <div class="q-num">Question 01</div>
+      <label class="q-label" for="fullname">Full name <span class="req" title="required">*</span></label>
+      <p class="q-help">So we can address you correctly in follow-ups.</p>
+      <input class="field" id="fullname" name="fullname" type="text" autocomplete="name" placeholder="Jordan Avery" />
+    </section>
+
+    <!-- Q2 Email -->
+    <section class="q">
+      <div class="q-num">Question 02</div>
+      <label class="q-label" for="email">Email address <span class="req" title="required">*</span></label>
+      <p class="q-help">We'll only use this to share survey results and event news.</p>
+      <input class="field" id="email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="jordan@example.org" />
+    </section>
+
+    <!-- Q3 Single choice -->
+    <fieldset class="q" style="border:1px solid var(--hair); margin:0 0 1.05rem; padding:1.5rem 1.45rem;">
+      <div class="q-num">Question 03</div>
+      <legend class="q-label" style="padding:0;">How did you hear about us?</legend>
+      <p class="q-help">Choose the one that fits best.</p>
+      <label class="opt radio">
+        <input type="radio" name="hear" value="friend" checked />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">A friend or family member</span>
+      </label>
+      <label class="opt radio">
+        <input type="radio" name="hear" value="social" />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Social media</span>
+      </label>
+      <label class="opt radio">
+        <input type="radio" name="hear" value="event" />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">At a community event</span>
+      </label>
+      <label class="opt radio">
+        <input type="radio" name="hear" value="other" />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Somewhere else</span>
+      </label>
+    </fieldset>
+
+    <!-- Q4 Multi choice -->
+    <fieldset class="q" style="border:1px solid var(--hair); margin:0 0 1.05rem; padding:1.5rem 1.45rem;">
+      <div class="q-num">Question 04</div>
+      <legend class="q-label" style="padding:0;">Which programs interest you?</legend>
+      <p class="q-help">Select all that apply.</p>
+      <label class="opt check">
+        <input type="checkbox" name="prog" value="studio" checked />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Studio workshops</span>
+      </label>
+      <label class="opt check">
+        <input type="checkbox" name="prog" value="gallery" checked />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Gallery exhibitions</span>
+      </label>
+      <label class="opt check">
+        <input type="checkbox" name="prog" value="youth" />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Youth & education</span>
+      </label>
+      <label class="opt check">
+        <input type="checkbox" name="prog" value="music" />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Live music & performance</span>
+      </label>
+      <label class="opt check">
+        <input type="checkbox" name="prog" value="volunteer" />
+        <span class="ind"><i class="fa-solid fa-check"></i></span>
+        <span class="txt">Volunteering opportunities</span>
+      </label>
+    </fieldset>
+
+    <!-- Q5 NPS -->
+    <fieldset class="q" style="border:1px solid var(--hair); margin:0 0 1.05rem; padding:1.5rem 1.45rem;">
+      <div class="q-num">Question 05</div>
+      <legend class="q-label" style="padding:0;">How likely are you to recommend us to a friend?</legend>
+      <p class="q-help">0 = not at all likely, 10 = extremely likely.</p>
+      <div class="nps" role="radiogroup" aria-label="Recommendation score from 0 to 10">
+        <label><input type="radio" name="nps" value="0" />0</label>
+        <label><input type="radio" name="nps" value="1" />1</label>
+        <label><input type="radio" name="nps" value="2" />2</label>
+        <label><input type="radio" name="nps" value="3" />3</label>
+        <label><input type="radio" name="nps" value="4" />4</label>
+        <label><input type="radio" name="nps" value="5" />5</label>
+        <label><input type="radio" name="nps" value="6" />6</label>
+        <label><input type="radio" name="nps" value="7" />7</label>
+        <label><input type="radio" name="nps" value="8" />8</label>
+        <label><input type="radio" name="nps" value="9" checked />9</label>
+        <label><input type="radio" name="nps" value="10" />10</label>
+      </div>
+      <div class="nps-cap"><span>Not likely</span><span>Extremely likely</span></div>
+    </fieldset>
+
+    <!-- Q5b Star rating -->
+    <section class="q">
+      <div class="q-num">Question 06</div>
+      <label class="q-label">Overall, how was your last visit?</label>
+      <p class="q-help">Tap to rate.</p>
+      <div class="stars" id="stars" role="radiogroup" aria-label="Star rating out of 5">
+        <i class="fa-solid fa-star on" data-v="1" role="radio" aria-checked="true" tabindex="0" aria-label="1 star"></i>
+        <i class="fa-solid fa-star on" data-v="2" role="radio" aria-checked="false" tabindex="0" aria-label="2 stars"></i>
+        <i class="fa-solid fa-star on" data-v="3" role="radio" aria-checked="false" tabindex="0" aria-label="3 stars"></i>
+        <i class="fa-solid fa-star on" data-v="4" role="radio" aria-checked="false" tabindex="0" aria-label="4 stars"></i>
+        <i class="fa-regular fa-star" data-v="5" role="radio" aria-checked="false" tabindex="0" aria-label="5 stars"></i>
+      </div>
+    </section>
+
+    <!-- Q6 Long text -->
+    <section class="q">
+      <div class="q-num">Question 07</div>
+      <label class="q-label" for="more">Anything else you'd like to share?</label>
+      <p class="q-help">Suggestions, ideas, or a note for the team — all welcome.</p>
+      <textarea class="field" id="more" name="more" placeholder="We'd love to hear your thoughts…"></textarea>
+    </section>
+
+    <div class="submit-row">
+      <button type="button" class="btn-submit">Submit response <i class="fa-solid fa-arrow-right"></i></button>
+      <span class="privacy"><i class="fa-solid fa-lock"></i> Your answers are private &amp; secure.</span>
+    </div>
+  </form>
+
+  <footer class="meta-foot">
+    <span class="powered"><span class="dot"><i class="fa-solid fa-feather"></i></span> Powered by <b>MJ Forms</b></span>
+    <span class="privacy">Free &amp; open source · built on MemberJunction</span>
+  </footer>
+</main>
+
+<script>
+  // Mode toggle
+  document.querySelectorAll('.seg button').forEach(b => {
+    b.addEventListener('click', () => {
+      b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+      b.setAttribute('aria-pressed', 'true');
+    });
+  });
+  // Star rating
+  const stars = document.querySelectorAll('#stars i');
+  function setStars(v) {
+    stars.forEach(s => {
+      const on = +s.dataset.v <= v;
+      s.classList.toggle('on', on);
+      s.classList.toggle('fa-solid', on);
+      s.classList.toggle('fa-regular', !on);
+      s.setAttribute('aria-checked', (+s.dataset.v === v) ? 'true' : 'false');
+    });
+  }
+  stars.forEach(s => {
+    s.addEventListener('click', () => setStars(+s.dataset.v));
+    s.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setStars(+s.dataset.v); } });
+  });
+</script>
+</body>
+</html>

@@ -60,6 +60,18 @@
 
 /** @type {import('@memberjunction/config').MJConfig} */
 module.exports = {
-  // Empty config - everything uses defaults from DEFAULT_SERVER_CONFIG!
-  // Add any custom overrides here if needed.
+  /**
+   * Anonymous magic-link support — install prerequisite for public/anonymous MJ Forms
+   * (see FORMS_BUILD_PLAN §4). The respondent widget submits under an anonymous magic-link
+   * session whose scope is enforced from JWT mj_scopes (never DB roles). This config lives in
+   * the MJAPI server config because cosmiconfig loads THIS file (not the repo-root mj.config.cjs)
+   * from the server's working directory. An install not using public forms can set
+   * FORMS_MAGICLINK_ENABLED=false. URLs are env-driven.
+   */
+  magicLink: {
+    enabled: process.env.FORMS_MAGICLINK_ENABLED !== 'false',
+    restrictedRoleName: 'Form Respondent',
+    grantableRoleNames: ['Form Respondent'],
+    explorerUrl: process.env.MJ_EXPLORER_BASE_URL || 'http://localhost:4321',
+  },
 };

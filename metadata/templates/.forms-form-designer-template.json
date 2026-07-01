@@ -1,0 +1,85 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Form Designer",
+    "Description": "System + user prompt for the Forms AI authoring Designer. Turns a natural-language brief (the {{ Brief }} parameter) into a structured FormBlueprint JSON object validated against the Phase-1 question taxonomy. Used by the 'Forms: Form Designer' AI Prompt.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-form-designer.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F60"
+        },
+        "sync": {
+          "lastModified": "2026-06-30T20:49:10.069Z",
+          "checksum": "b8069d3063a45f4e2b26912b3fe739d96c812fa762b8de5de36ad503b02fde1d"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Brief",
+          "Description": "The natural-language description of the form to design.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E5F"
+        },
+        "sync": {
+          "lastModified": "2026-07-01T16:45:06.861Z",
+          "checksum": "1c0505e4102baa0b028bfcef0c5551ed44cbed690fe601e5e2e3f99d13a37c5c"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PreviousAttempt",
+          "Description": "Optional: the model's prior invalid output, fed back on a retry attempt.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "2D3E4F5A-6B7C-4D8E-9F0A-1B2C3D4E5F60"
+        },
+        "sync": {
+          "lastModified": "2026-07-01T16:45:06.872Z",
+          "checksum": "2259a506b20e9b54c7288be1a7771384fa27dcb9656709e603013ef0cc90a774"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "ValidationError",
+          "Description": "Optional: the blueprint validation error from the prior attempt, fed back on a retry.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "3E4F5A6B-7C8D-4E9F-0A1B-2C3D4E5F6071"
+        },
+        "sync": {
+          "lastModified": "2026-07-01T16:45:06.884Z",
+          "checksum": "dce07b91cb03cfba69cd6d548280823d34ab44a88914d9437ae708023fe708af"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61"
+  },
+  "sync": {
+    "lastModified": "2026-06-30T20:49:09.878Z",
+    "checksum": "06cd006ad301f2b178f0af45c48b81280fe97e30ac05365f0ca235f96f1b5d49"
+  }
+}

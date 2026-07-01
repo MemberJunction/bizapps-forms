@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Analytics · Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --ink: #0b1020;
+    --indigo: #4f46e5;
+    --violet: #7c3aed;
+    --teal: #14b8a6;
+    --aurora: linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #14b8a6 100%);
+    --aurora-soft: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #2dd4bf 100%);
+    --text: #1e2438;
+    --text-soft: #5b6480;
+    --muted: #8a93ad;
+    --line: rgba(124, 58, 237, 0.12);
+    --panel: rgba(255, 255, 255, 0.78);
+    --radius: 18px;
+    --shadow: 0 24px 60px -30px rgba(43, 30, 120, 0.45);
+    --shadow-sm: 0 8px 24px -16px rgba(43, 30, 120, 0.42);
+    --focus: 0 0 0 4px rgba(124, 58, 237, 0.28);
+    --green: #10b981;
+    --rose: #f43f5e;
+    --amber: #f59e0b;
+    --font: "Sora", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    background:
+      radial-gradient(900px 600px at 0% 0%, rgba(124,58,237,0.42), transparent 55%),
+      radial-gradient(900px 700px at 100% 0%, rgba(20,184,166,0.34), transparent 55%),
+      radial-gradient(1000px 800px at 50% 130%, rgba(79,70,229,0.4), transparent 60%),
+      linear-gradient(160deg, #0c1124 0%, #141a36 55%, #0e1430 100%);
+    background-attachment: fixed;
+  }
+
+  .gallery-link {
+    position: fixed; top: 0; left: 0; right: 0;
+    z-index: 60;
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 18px;
+    font-size: 12.5px; font-weight: 600;
+    color: #e7e9ff; text-decoration: none;
+    background: rgba(11,16,32,0.55);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .gallery-link:hover { color: #fff; }
+  .gallery-link i { transition: transform .2s; }
+  .gallery-link:hover i { transform: translateX(-3px); }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    position: fixed; top: 36px; bottom: 0; left: 0;
+    width: 240px;
+    padding: 22px 16px;
+    display: flex; flex-direction: column; gap: 6px;
+    background: rgba(11,16,32,0.42);
+    backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    z-index: 40;
+  }
+  .sb-brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 20px; }
+  .sb-logo {
+    width: 38px; height: 38px; border-radius: 11px;
+    display: grid; place-items: center; font-size: 16px; color: #fff;
+    background: var(--aurora-soft);
+    box-shadow: 0 10px 22px -10px rgba(124,58,237,0.8), inset 0 1px 0 rgba(255,255,255,0.35);
+  }
+  .sb-brand .name { color: #fff; font-weight: 800; font-size: 16px; letter-spacing: -0.01em; }
+  .sb-brand .sub { color: rgba(231,233,255,0.5); font-size: 11px; font-weight: 500; }
+
+  .nav-label { color: rgba(231,233,255,0.4); font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 14px 10px 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 13px; border-radius: 12px;
+    color: rgba(231,233,255,0.78); text-decoration: none;
+    font-size: 13.5px; font-weight: 600;
+    transition: all .15s;
+  }
+  .nav-item i { width: 18px; text-align: center; font-size: 14px; }
+  .nav-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+  .nav-item.active {
+    color: #fff;
+    background: linear-gradient(135deg, rgba(124,58,237,0.55), rgba(20,184,166,0.4));
+    box-shadow: 0 10px 24px -12px rgba(124,58,237,0.8), inset 0 1px 0 rgba(255,255,255,0.15);
+  }
+  .nav-item .badge { margin-left: auto; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.18); }
+  .sb-user {
+    margin-top: auto; display: flex; align-items: center; gap: 10px;
+    padding: 11px; border-radius: 13px; background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .sb-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--aurora); display:grid; place-items:center; color:#fff; font-weight:700; font-size:13px; }
+  .sb-user .u-name { color: #fff; font-size: 13px; font-weight: 600; }
+  .sb-user .u-role { color: rgba(231,233,255,0.5); font-size: 11px; }
+
+  /* ---------- main ---------- */
+  .main {
+    margin-left: 240px; margin-top: 36px;
+    flex: 1; min-width: 0;
+    padding: 26px 30px 40px;
+  }
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+  }
+
+  .page-head {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .page-head h1 { color: #fff; font-size: clamp(22px,3.5vw,30px); font-weight: 800; margin: 0; letter-spacing: -0.02em; }
+  .page-head .crumb { color: rgba(231,233,255,0.55); font-size: 12.5px; font-weight: 600; margin-bottom: 7px; display:flex; align-items:center; gap:8px; }
+  .crumb .pill { background: rgba(16,185,129,0.18); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4); padding: 3px 10px; border-radius: 999px; font-size: 11px; }
+  .head-controls { display: flex; align-items: center; gap: 10px; }
+  .date-range {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-size: 13px; font-weight: 600; color: #e7e9ff;
+    padding: 9px 14px; border-radius: 11px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16);
+    cursor: pointer; transition: all .15s;
+  }
+  .date-range:hover { background: rgba(255,255,255,0.16); }
+  .btn-export {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font); font-size: 13px; font-weight: 700; color: #fff;
+    padding: 10px 17px; border: 0; border-radius: 11px; cursor: pointer;
+    background: var(--aurora); background-size: 160% 160%;
+    box-shadow: 0 12px 26px -12px rgba(124,58,237,0.8);
+    transition: all .18s;
+  }
+  .btn-export:hover { background-position: 100% 0; transform: translateY(-1px); }
+  .btn-export:focus-visible { outline: none; box-shadow: var(--focus); }
+
+  /* ---------- kpi cards ---------- */
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .kpi-grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255,255,255,0.82);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+  }
+  .kpi .kpi-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .kpi-ico { width: 40px; height: 40px; border-radius: 12px; display:grid; place-items:center; color:#fff; font-size:16px; }
+  .kpi-ico.i1 { background: linear-gradient(135deg,#6366f1,#8b5cf6); }
+  .kpi-ico.i2 { background: linear-gradient(135deg,#7c3aed,#a855f7); }
+  .kpi-ico.i3 { background: linear-gradient(135deg,#0ea5e9,#14b8a6); }
+  .kpi-ico.i4 { background: linear-gradient(135deg,#14b8a6,#10b981); }
+  .delta { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:700; padding:4px 9px; border-radius:999px; }
+  .delta.up { color:#047857; background: rgba(16,185,129,0.14); }
+  .delta.down { color:#be123c; background: rgba(244,63,94,0.14); }
+  .kpi-value { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; color: var(--ink); line-height: 1; }
+  .kpi-label { font-size: 13px; color: var(--text-soft); font-weight: 600; margin-top: 7px; }
+  .kpi-spark { margin-top: 12px; height: 30px; }
+
+  /* ---------- chart grid ---------- */
+  .grid-2 { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  @media (max-width: 1000px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .card-head h3 { margin: 0; font-size: 15px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
+  .card-head .sub { font-size: 12px; color: var(--muted); }
+  .legend { display: flex; gap: 14px; font-size: 11.5px; font-weight: 600; color: var(--text-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* svg helpers */
+  .chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .axis-label { font-size: 10px; fill: var(--muted); font-family: var(--font); font-weight: 500; }
+  .grid-line { stroke: rgba(124,58,237,0.1); stroke-width: 1; }
+
+  /* per-question bars */
+  .qbar-row { margin-bottom: 14px; }
+  .qbar-top { display:flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .qbar-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .qbar-val { font-size: 12.5px; font-weight: 700; color: var(--violet); }
+  .qbar-track { height: 11px; border-radius: 999px; background: rgba(124,58,237,0.08); overflow: hidden; }
+  .qbar-fill { height: 100%; border-radius: 999px; background: var(--aurora); box-shadow: 0 2px 8px rgba(124,58,237,0.3); transition: width .6s; }
+
+  /* nps donut */
+  .nps-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+  .nps-center { text-align: center; }
+  .nps-score { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
+  .nps-tag { font-size: 12px; font-weight: 700; color: var(--green); }
+  .nps-breakdown { flex: 1; min-width: 150px; display: grid; gap: 11px; }
+  .nps-line { display:flex; align-items:center; gap: 10px; font-size: 12.5px; }
+  .nps-line .dot { width: 10px; height: 10px; border-radius: 50%; flex:0 0 auto; }
+  .nps-line .nm { font-weight: 600; }
+  .nps-line .bar { flex:1; height: 8px; border-radius: 999px; background: rgba(124,58,237,0.08); overflow:hidden; }
+  .nps-line .bar i { display:block; height:100%; border-radius:999px; }
+  .nps-line .pc { font-weight: 700; color: var(--text-soft); width: 38px; text-align:right; }
+
+  /* funnel */
+  .funnel { display: grid; gap: 11px; }
+  .fn-step { }
+  .fn-top { display:flex; justify-content: space-between; align-items:baseline; margin-bottom:6px; }
+  .fn-name { font-size: 13px; font-weight: 600; color: var(--text); display:flex; align-items:center; gap:8px; }
+  .fn-name .n { width:22px;height:22px;border-radius:7px;background:rgba(124,58,237,0.1);color:var(--violet);font-size:11px;font-weight:700;display:grid;place-items:center; }
+  .fn-num { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .fn-num small { color: var(--muted); font-weight: 600; }
+  .fn-track { height: 26px; border-radius: 9px; background: rgba(124,58,237,0.06); overflow:hidden; }
+  .fn-fill { height:100%; border-radius:9px; display:flex; align-items:center; padding-left:12px; color:#fff; font-size:11.5px; font-weight:700; }
+  .fn-drop { font-size: 11px; color: var(--rose); font-weight: 600; margin-top: 4px; text-align:right; }
+
+  /* table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 0 14px 12px; border-bottom: 1px solid var(--line); }
+  td { padding: 13px 14px; border-bottom: 1px solid rgba(124,58,237,0.07); color: var(--text); }
+  tbody tr { transition: background .15s; }
+  tbody tr:hover { background: rgba(124,58,237,0.04); }
+  .resp-cell { display: flex; align-items: center; gap: 11px; }
+  .resp-avatar { width: 32px; height: 32px; border-radius: 50%; display:grid; place-items:center; color:#fff; font-size:12px; font-weight:700; flex:0 0 auto; }
+  .resp-name { font-weight: 600; }
+  .resp-email { font-size: 11.5px; color: var(--muted); }
+  .pill {
+    display: inline-flex; align-items:center; gap:6px;
+    font-size: 11.5px; font-weight: 700; padding: 4px 11px; border-radius: 999px;
+  }
+  .pill.complete { color:#047857; background: rgba(16,185,129,0.14); }
+  .pill.partial { color:#b45309; background: rgba(245,158,11,0.16); }
+  .pill .dot { width:6px;height:6px;border-radius:50%; }
+  .pill.complete .dot { background:#10b981; }
+  .pill.partial .dot { background:#f59e0b; }
+  .answer-chip { font-size: 12px; padding: 4px 10px; border-radius: 8px; background: rgba(124,58,237,0.07); color: var(--text-soft); font-weight:600; }
+  .stars-mini { color: #f59e0b; font-size: 12px; }
+  .stars-mini .off { color: rgba(124,58,237,0.18); }
+
+  .view-all { display:inline-flex; align-items:center; gap:7px; font-size: 13px; font-weight: 600; color: var(--violet); text-decoration:none; }
+  .view-all:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <a class="gallery-link" href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <div class="sb-logo"><i class="fa-solid fa-feather-pointed"></i></div>
+      <div>
+        <div class="name">MJ Forms</div>
+        <div class="sub">Riverbend Alliance</div>
+      </div>
+    </div>
+
+    <div class="nav-label">Workspace</div>
+    <a class="nav-item" href="#"><i class="fa-regular fa-rectangle-list"></i> Forms</a>
+    <a class="nav-item" href="#"><i class="fa-regular fa-comment-dots"></i> Responses <span class="badge">847</span></a>
+    <a class="nav-item active" href="#"><i class="fa-solid fa-chart-line"></i> Analytics</a>
+    <a class="nav-item" href="#"><i class="fa-solid fa-share-nodes"></i> Distributions</a>
+    <a class="nav-item" href="#"><i class="fa-solid fa-gear"></i> Settings</a>
+
+    <div class="nav-label">Account</div>
+    <a class="nav-item" href="#"><i class="fa-regular fa-circle-question"></i> Help &amp; docs</a>
+
+    <div class="sb-user">
+      <div class="sb-avatar">AC</div>
+      <div>
+        <div class="u-name">Amara Cole</div>
+        <div class="u-role">Program Director</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <div class="crumb">Spring 2026 Member Survey <span class="pill">Live</span></div>
+        <h1>Analytics overview</h1>
+      </div>
+      <div class="head-controls">
+        <button class="date-range"><i class="fa-regular fa-calendar"></i> Last 30 days <i class="fa-solid fa-chevron-down" style="font-size:10px"></i></button>
+        <button class="btn-export"><i class="fa-solid fa-file-export"></i> Export</button>
+      </div>
+    </div>
+
+    <!-- KPI -->
+    <div class="kpi-grid">
+      <div class="card kpi">
+        <div class="kpi-top">
+          <div class="kpi-ico i1"><i class="fa-solid fa-inbox"></i></div>
+          <span class="delta up"><i class="fa-solid fa-arrow-up"></i> 18%</span>
+        </div>
+        <div class="kpi-value">847</div>
+        <div class="kpi-label">Total responses</div>
+        <svg class="kpi-spark" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+          <polyline fill="none" stroke="#7c3aed" stroke-width="2.2" points="0,24 17,20 34,22 51,14 68,16 85,9 102,11 120,4"/>
+        </svg>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpi-top">
+          <div class="kpi-ico i2"><i class="fa-solid fa-circle-check"></i></div>
+          <span class="delta up"><i class="fa-solid fa-arrow-up"></i> 4.2%</span>
+        </div>
+        <div class="kpi-value">73.4%</div>
+        <div class="kpi-label">Completion rate</div>
+        <svg class="kpi-spark" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+          <polyline fill="none" stroke="#a855f7" stroke-width="2.2" points="0,18 17,16 34,17 51,12 68,13 85,10 102,8 120,7"/>
+        </svg>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpi-top">
+          <div class="kpi-ico i3"><i class="fa-regular fa-clock"></i></div>
+          <span class="delta down"><i class="fa-solid fa-arrow-down"></i> 11s</span>
+        </div>
+        <div class="kpi-value">4m 12s</div>
+        <div class="kpi-label">Avg. time to complete</div>
+        <svg class="kpi-spark" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+          <polyline fill="none" stroke="#0ea5e9" stroke-width="2.2" points="0,8 17,11 34,9 51,14 68,12 85,17 102,15 120,20"/>
+        </svg>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpi-top">
+          <div class="kpi-ico i4"><i class="fa-solid fa-gauge-high"></i></div>
+          <span class="delta up"><i class="fa-solid fa-arrow-up"></i> 6 pts</span>
+        </div>
+        <div class="kpi-value">+62</div>
+        <div class="kpi-label">NPS score</div>
+        <svg class="kpi-spark" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+          <polyline fill="none" stroke="#14b8a6" stroke-width="2.2" points="0,22 17,18 34,19 51,15 68,12 85,13 102,8 120,6"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- responses over time + NPS donut -->
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Responses over time</h3>
+            <div class="sub">Daily submissions · last 30 days</div>
+          </div>
+          <div class="legend">
+            <span><span class="swatch" style="background:#7c3aed"></span> Submitted</span>
+            <span><span class="swatch" style="background:#14b8a6"></span> Started</span>
+          </div>
+        </div>
+        <svg class="chart-svg" viewBox="0 0 600 220" preserveAspectRatio="none" role="img" aria-label="Responses over time area chart">
+          <defs>
+            <linearGradient id="areaV" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.45"/>
+              <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="areaT" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#14b8a6" stop-opacity="0.3"/>
+              <stop offset="100%" stop-color="#14b8a6" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <!-- grid -->
+          <line class="grid-line" x1="0" y1="40" x2="600" y2="40"/>
+          <line class="grid-line" x1="0" y1="90" x2="600" y2="90"/>
+          <line class="grid-line" x1="0" y1="140" x2="600" y2="140"/>
+          <line class="grid-line" x1="0" y1="190" x2="600" y2="190"/>
+          <!-- started area (back) -->
+          <path d="M0,150 L50,140 100,145 150,120 200,128 250,100 300,108 350,82 400,90 450,66 500,72 550,52 600,46 L600,190 L0,190 Z" fill="url(#areaT)"/>
+          <polyline fill="none" stroke="#14b8a6" stroke-width="2.5" stroke-linejoin="round" points="0,150 50,140 100,145 150,120 200,128 250,100 300,108 350,82 400,90 450,66 500,72 550,52 600,46"/>
+          <!-- submitted area (front) -->
+          <path d="M0,168 L50,160 100,164 150,142 200,150 250,124 300,132 350,108 400,116 450,92 500,100 550,80 600,72 L600,190 L0,190 Z" fill="url(#areaV)"/>
+          <polyline fill="none" stroke="#7c3aed" stroke-width="3" stroke-linejoin="round" points="0,168 50,160 100,164 150,142 200,150 250,124 300,132 350,108 400,116 450,92 500,100 550,80 600,72"/>
+          <circle cx="600" cy="72" r="5" fill="#7c3aed" stroke="#fff" stroke-width="2"/>
+          <!-- x labels -->
+          <text class="axis-label" x="0" y="210">Jun 1</text>
+          <text class="axis-label" x="270" y="210" text-anchor="middle">Jun 15</text>
+          <text class="axis-label" x="600" y="210" text-anchor="end">Jun 29</text>
+        </svg>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Net Promoter Score</h3>
+            <div class="sub">Based on 812 ratings</div>
+          </div>
+        </div>
+        <div class="nps-wrap">
+          <svg width="150" height="150" viewBox="0 0 150 150" role="img" aria-label="NPS donut, score plus 62">
+            <defs>
+              <linearGradient id="npsGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#7c3aed"/>
+                <stop offset="100%" stop-color="#14b8a6"/>
+              </linearGradient>
+            </defs>
+            <!-- track -->
+            <circle cx="75" cy="75" r="60" fill="none" stroke="rgba(124,58,237,0.1)" stroke-width="16"/>
+            <!-- promoters arc (~81% of circle) -->
+            <circle cx="75" cy="75" r="60" fill="none" stroke="url(#npsGrad)" stroke-width="16"
+              stroke-linecap="round" stroke-dasharray="305 377" stroke-dashoffset="0"
+              transform="rotate(-90 75 75)"/>
+            <text x="75" y="70" text-anchor="middle" class="nps-score" style="fill:var(--ink);font-size:34px;font-weight:800">+62</text>
+            <text x="75" y="92" text-anchor="middle" style="fill:#10b981;font-size:11px;font-weight:700;font-family:var(--font)">EXCELLENT</text>
+          </svg>
+          <div class="nps-breakdown">
+            <div class="nps-line">
+              <span class="dot" style="background:#10b981"></span>
+              <span class="nm">Promoters</span>
+              <span class="bar"><i style="width:71%;background:#10b981"></i></span>
+              <span class="pc">71%</span>
+            </div>
+            <div class="nps-line">
+              <span class="dot" style="background:#f59e0b"></span>
+              <span class="nm">Passives</span>
+              <span class="bar"><i style="width:20%;background:#f59e0b"></i></span>
+              <span class="pc">20%</span>
+            </div>
+            <div class="nps-line">
+              <span class="dot" style="background:#f43f5e"></span>
+              <span class="nm">Detractors</span>
+              <span class="bar"><i style="width:9%;background:#f43f5e"></i></span>
+              <span class="pc">9%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- per question + funnel -->
+    <div class="grid-3">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Program interest</h3>
+            <div class="sub">"Which programs interest you?" · multi-select</div>
+          </div>
+        </div>
+        <div class="qbar-row">
+          <div class="qbar-top"><span class="qbar-name">Youth mentorship</span><span class="qbar-val">534 · 63%</span></div>
+          <div class="qbar-track"><div class="qbar-fill" style="width:63%"></div></div>
+        </div>
+        <div class="qbar-row">
+          <div class="qbar-top"><span class="qbar-name">Arts &amp; culture workshops</span><span class="qbar-val">468 · 55%</span></div>
+          <div class="qbar-track"><div class="qbar-fill" style="width:55%"></div></div>
+        </div>
+        <div class="qbar-row">
+          <div class="qbar-top"><span class="qbar-name">Community gardens</span><span class="qbar-val">390 · 46%</span></div>
+          <div class="qbar-track"><div class="qbar-fill" style="width:46%"></div></div>
+        </div>
+        <div class="qbar-row">
+          <div class="qbar-top"><span class="qbar-name">Food &amp; nutrition support</span><span class="qbar-val">305 · 36%</span></div>
+          <div class="qbar-track"><div class="qbar-fill" style="width:36%"></div></div>
+        </div>
+        <div class="qbar-row">
+          <div class="qbar-top"><span class="qbar-name">Senior connection circles</span><span class="qbar-val">221 · 26%</span></div>
+          <div class="qbar-track"><div class="qbar-fill" style="width:26%"></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3>Completion funnel</h3>
+            <div class="sub">Where respondents drop off</div>
+          </div>
+        </div>
+        <div class="funnel">
+          <div class="fn-step">
+            <div class="fn-top">
+              <span class="fn-name"><span class="n">1</span> Started</span>
+              <span class="fn-num">1,154 <small>· 100%</small></span>
+            </div>
+            <div class="fn-track"><div class="fn-fill" style="width:100%;background:linear-gradient(90deg,#6366f1,#8b5cf6)">100%</div></div>
+          </div>
+          <div class="fn-step">
+            <div class="fn-top">
+              <span class="fn-name"><span class="n">2</span> Reached page 2</span>
+              <span class="fn-num">982 <small>· 85%</small></span>
+            </div>
+            <div class="fn-track"><div class="fn-fill" style="width:85%;background:linear-gradient(90deg,#8b5cf6,#a855f7)">85%</div></div>
+            <div class="fn-drop"><i class="fa-solid fa-arrow-trend-down"></i> 172 dropped (15%)</div>
+          </div>
+          <div class="fn-step">
+            <div class="fn-top">
+              <span class="fn-name"><span class="n">3</span> Submitted</span>
+              <span class="fn-num">847 <small>· 73%</small></span>
+            </div>
+            <div class="fn-track"><div class="fn-fill" style="width:73%;background:linear-gradient(90deg,#a855f7,#14b8a6)">73%</div></div>
+            <div class="fn-drop"><i class="fa-solid fa-arrow-trend-down"></i> 135 dropped (12%)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- recent responses table -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3>Recent responses</h3>
+          <div class="sub">Latest submissions across all distributions</div>
+        </div>
+        <a class="view-all" href="#">View all 847 <i class="fa-solid fa-arrow-right"></i></a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Respondent</th>
+              <th>Submitted</th>
+              <th>Status</th>
+              <th>Recommend (0–10)</th>
+              <th>Top program</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="resp-cell">
+                  <div class="resp-avatar" style="background:linear-gradient(135deg,#6366f1,#8b5cf6)">JR</div>
+                  <div><div class="resp-name">Jordan Rivera</div><div class="resp-email">jordan.r@example.org</div></div>
+                </div>
+              </td>
+              <td>2 min ago</td>
+              <td><span class="pill complete"><span class="dot"></span> Complete</span></td>
+              <td><span class="answer-chip">9</span></td>
+              <td><span class="answer-chip">Youth mentorship</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="resp-cell">
+                  <div class="resp-avatar" style="background:linear-gradient(135deg,#7c3aed,#a855f7)">MO</div>
+                  <div><div class="resp-name">Maya Osei</div><div class="resp-email">m.osei@example.org</div></div>
+                </div>
+              </td>
+              <td>14 min ago</td>
+              <td><span class="pill complete"><span class="dot"></span> Complete</span></td>
+              <td><span class="answer-chip">10</span></td>
+              <td><span class="answer-chip">Arts &amp; culture</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="resp-cell">
+                  <div class="resp-avatar" style="background:linear-gradient(135deg,#0ea5e9,#14b8a6)">DT</div>
+                  <div><div class="resp-name">Daniel Tran</div><div class="resp-email">dtran@example.org</div></div>
+                </div>
+              </td>
+              <td>38 min ago</td>
+              <td><span class="pill partial"><span class="dot"></span> Partial</span></td>
+              <td><span class="answer-chip">—</span></td>
+              <td><span class="answer-chip">Community gardens</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="resp-cell">
+                  <div class="resp-avatar" style="background:linear-gradient(135deg,#14b8a6,#10b981)">LB</div>
+                  <div><div class="resp-name">Lena Brooks</div><div class="resp-email">lena.b@example.org</div></div>
+                </div>
+              </td>
+              <td>1 hour ago</td>
+              <td><span class="pill complete"><span class="dot"></span> Complete</span></td>
+              <td><span class="answer-chip">8</span></td>
+              <td><span class="answer-chip">Food &amp; nutrition</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="resp-cell">
+                  <div class="resp-avatar" style="background:linear-gradient(135deg,#8b5cf6,#6366f1)">PK</div>
+                  <div><div class="resp-name">Priya Kapoor</div><div class="resp-email">priya.k@example.org</div></div>
+                </div>
+              </td>
+              <td>2 hours ago</td>
+              <td><span class="pill complete"><span class="dot"></span> Complete</span></td>
+              <td><span class="answer-chip">7</span></td>
+              <td><span class="answer-chip">Senior circles</span></td>
+            </tr>
+            <tr>
+              <td>
+                <div class="resp-cell">
+                  <div class="resp-avatar" style="background:linear-gradient(135deg,#a855f7,#14b8a6)">RM</div>
+                  <div><div class="resp-name">Robert Mensah</div><div class="resp-email">r.mensah@example.org</div></div>
+                </div>
+              </td>
+              <td>3 hours ago</td>
+              <td><span class="pill complete"><span class="dot"></span> Complete</span></td>
+              <td><span class="answer-chip">10</span></td>
+              <td><span class="answer-chip">Youth mentorship</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,296 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Generate Form From Brief",
+      "Description": "AI form authoring — turns a natural-language brief (for example 'a 5-question event RSVP with dietary restrictions and a +1 count') into a draft Form with pages, questions, and options, using the highest-power Claude model with a zod-validated blueprint.",
+      "DriverClass": "Forms: Generate Form From Brief",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-wand-magic-sparkles"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Brief",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "Natural-language description of the form to author."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T19:18:03.484Z",
+            "checksum": "415cb13c4f4a3dc2545c0416ca498c6f446b79fa1e5f43f59e8719323110e738"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "OwnerUserID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Optional owner User ID for the created form."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000002"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T19:18:03.506Z",
+            "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0001-A1B2-4C3D-8E4F-000000000001"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T19:18:03.391Z",
+      "checksum": "3bbc440d4269a866153444ac43d524cb2ee863d815575adccec6b1319960ea8b"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Create Form From Template",
+      "Description": "No-AI authoring — instantiates a starter-gallery template (Contact, RSVP, NPS/feedback, Lead capture, Application) into a draft Form.",
+      "DriverClass": "Forms: Create Form From Template",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-table-list"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "TemplateKey",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "One of the starter-gallery template keys."
+          },
+          "primaryKey": {
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T19:18:03.525Z",
+            "checksum": "e38cd06560cf3879bf54f84ff242b4ec23242271da9e946dc896b71727e7a58d"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "OwnerUserID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Optional owner User ID for the created form."
+          },
+          "primaryKey": {
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000002"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T19:18:03.543Z",
+            "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0002-A1B2-4C3D-8E4F-000000000002"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T19:18:03.404Z",
+      "checksum": "f449b22b5f56a63120842600dd96feddbc9ed046c4674904da962ec6364fa2e2"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Upsert Respondent Person",
+      "Description": "On-submit hook — creates or links a MJ_BizApps_Common Person from a form response's answers (matched by email) and stamps FormResponse.RespondentPersonID.",
+      "DriverClass": "Forms: Upsert Respondent Person",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-user-plus"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormResponseID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The FormResponse ID to process."
+          },
+          "primaryKey": {
+            "ID": "7F0B0003-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T19:25:18.284Z",
+            "checksum": "a9c7c720cb833a90bd064e0589a6c26ada6bbf8547ea00efb6f0127015136663"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0003-A1B2-4C3D-8E4F-000000000003"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T19:18:03.418Z",
+      "checksum": "d8a94edcc4b3c436425b3a25b5eafc180ef3cf7c06f3c5960ba2632be7f234bb"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Send Confirmation Email",
+      "Description": "On-submit hook — sends the form's confirmation message to the respondent via the configured communication provider (pluggable; logs a no-op until a provider is wired).",
+      "DriverClass": "Forms: Send Confirmation Email",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-envelope"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormResponseID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The FormResponse ID to process."
+          },
+          "primaryKey": {
+            "ID": "7F0B0004-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T19:25:18.303Z",
+            "checksum": "a9c7c720cb833a90bd064e0589a6c26ada6bbf8547ea00efb6f0127015136663"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0004-A1B2-4C3D-8E4F-000000000004"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T19:18:03.431Z",
+      "checksum": "1e33af4f39b679a6aab7df78e3193fd66e4a2fa595e3d8e5c122d67612ce8eea"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Create Followup Task",
+      "Description": "On-submit hook — creates a MJ_BizApps_Tasks Task linked to the form response for follow-up routing.",
+      "DriverClass": "Forms: Create Followup Task",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-list-check"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormResponseID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The FormResponse ID to process."
+          },
+          "primaryKey": {
+            "ID": "7F0B0005-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T19:25:18.320Z",
+            "checksum": "a9c7c720cb833a90bd064e0589a6c26ada6bbf8547ea00efb6f0127015136663"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "TaskTypeName",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Optional TaskType name; falls back to the first active type."
+          },
+          "primaryKey": {
+            "ID": "7F0B0005-A1B2-4C3D-8E4F-000000000002"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T19:18:03.614Z",
+            "checksum": "efdcbe77e55053f856ced446ab71627012628a58eb332d47451988a20c40b6ac"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0005-A1B2-4C3D-8E4F-000000000005"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T19:18:03.445Z",
+      "checksum": "6878f895892ae17ebf11ddca8dbb9535090f966f7b4466d31d325dd8214af782"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Analyze Written Responses",
+      "Description": "On-submit hook — runs a metadata-driven AI Prompt over a response's free-text (ShortText/LongText) answers in a single call and persists a per-answer Score + ScoreRationale onto each FormResponseAnswer.",
+      "DriverClass": "Forms: Analyze Written Responses",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-magnifying-glass-chart"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormResponseID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "The FormResponse ID whose free-text answers should be analyzed."
+          },
+          "primaryKey": {
+            "ID": "7F0B0006-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T16:45:08.683Z",
+            "checksum": "dd25f47c3d616069689e3e1030bd6ca045c05de07b8d9bcb8d844df88e7317e6"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0006-A1B2-4C3D-8E4F-000000000006"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T16:45:08.654Z",
+      "checksum": "d5c7c78d1c9f165e890353bed24286a17c3fc0fe3ee265f694c98f0319ef9bd9"
+    }
+  }
+]

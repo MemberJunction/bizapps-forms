@@ -1,0 +1,90 @@
+<div class="cre">
+  <label class="cre-toggle">
+    <input
+      #enabledToggle
+      type="checkbox"
+      [checked]="_enabled"
+      (change)="toggleEnabled(enabledToggle.checked)"
+      aria-label="Only show this when conditions are met"
+    />
+    <span>Only show when&hellip;</span>
+  </label>
+
+  @if (_enabled) {
+    @if (sources.length === 0) {
+      <p class="cre-empty">Add an earlier question first to base a rule on its answer.</p>
+    } @else {
+      <div class="cre-combinator" role="group" aria-label="Match mode">
+        <span>Match</span>
+        <button
+          type="button"
+          class="cre-seg"
+          [class.is-on]="_combinator === 'all'"
+          [attr.aria-pressed]="_combinator === 'all'"
+          (click)="setCombinator('all')"
+        >all</button>
+        <button
+          type="button"
+          class="cre-seg"
+          [class.is-on]="_combinator === 'any'"
+          [attr.aria-pressed]="_combinator === 'any'"
+          (click)="setCombinator('any')"
+        >any</button>
+        <span>of these:</span>
+      </div>
+
+      @for (cond of _conditions; track $index) {
+        <div class="cre-row">
+          <select
+            #questionSelect
+            class="cre-input"
+            [value]="cond.questionId"
+            (change)="setQuestion($index, questionSelect.value)"
+            aria-label="Question"
+          >
+            @for (src of sources; track src.id) {
+              <option [value]="src.id">{{ src.prompt }}</option>
+            }
+          </select>
+
+          <select
+            #operatorSelect
+            class="cre-input"
+            [value]="cond.op"
+            (change)="setOperator($index, operatorSelect.value)"
+            aria-label="Operator"
+          >
+            @for (op of operators; track op.op) {
+              <option [value]="op.op">{{ op.label }}</option>
+            }
+          </select>
+
+          @if (operatorNeedsValue(cond.op)) {
+            <input
+              #valueInput
+              type="text"
+              class="cre-input cre-value"
+              [value]="valueAsString(cond)"
+              (input)="setValue($index, valueInput.value)"
+              [attr.placeholder]="cond.op === 'in' || cond.op === 'notIn' ? 'a, b, c' : 'value'"
+              aria-label="Comparison value"
+            />
+          }
+
+          <button
+            type="button"
+            class="cre-remove"
+            (click)="removeCondition($index)"
+            aria-label="Remove condition"
+          >
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+      }
+
+      <button type="button" class="cre-add" (click)="addCondition()">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add condition
+      </button>
+    }
+  }
+</div>

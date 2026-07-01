@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Analytics · Spring 2026 Member Survey · MJ Forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --paper: #faf8f4;
+    --paper-2: #f3f0e9;
+    --card: #ffffff;
+    --ink: #1a1815;
+    --ink-2: #4a463f;
+    --ink-3: #837d72;
+    --hair: #e2ddd2;
+    --hair-strong: #cfc8b9;
+    --accent: #1f5d4c;
+    --accent-soft: #e8f0ec;
+    --accent-2: #b7895a;   /* muted brass for secondary data */
+    --accent-ink: #164437;
+    --pos: #2f7d54;
+    --neg: #a8553f;
+    --serif: "Fraunces", Georgia, "Times New Roman", serif;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--sans); color: var(--ink);
+    background: var(--paper); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .gallery-bar {
+    position: sticky; top: 0; z-index: 80;
+    background: rgba(250,248,244,.9); backdrop-filter: saturate(180%) blur(10px);
+    border-bottom: 1px solid var(--hair);
+  }
+  .gallery-bar a {
+    display: inline-flex; align-items: center; gap: .5rem;
+    font-size: .8rem; color: var(--ink-2); text-decoration: none;
+    padding: .55rem 1.1rem; font-weight: 500;
+  }
+  .gallery-bar a:hover { color: var(--accent); }
+
+  .layout { display: grid; grid-template-columns: 232px 1fr; min-height: calc(100vh - 38px); }
+
+  /* Sidebar */
+  .side {
+    border-right: 1px solid var(--hair); background: var(--card);
+    padding: 1.3rem 0; display: flex; flex-direction: column;
+  }
+  .side .brand { display:flex; align-items:center; gap:.55rem; padding: 0 1.3rem 1.4rem; }
+  .side .brand .mark { width:26px; height:26px; border-radius:7px; background:var(--accent); color:#fff; display:grid; place-items:center; font-size:.78rem; }
+  .side .brand .wm { font-family:var(--serif); font-weight:600; font-size:1rem; }
+  .side .brand .wm span { color: var(--accent); }
+  .nav-label { font-size:.64rem; text-transform:uppercase; letter-spacing:.14em; color:var(--ink-3); padding:.4rem 1.3rem; font-weight:600; }
+  .nav a {
+    display:flex; align-items:center; gap:.75rem; padding:.62rem 1.3rem;
+    color:var(--ink-2); text-decoration:none; font-size:.88rem; font-weight:500;
+    border-left: 2.5px solid transparent; transition: all .14s;
+  }
+  .nav a i { width:18px; text-align:center; color:var(--ink-3); }
+  .nav a:hover { background: var(--paper); color:var(--ink); }
+  .nav a.active { color:var(--accent); border-left-color: var(--accent); background: var(--accent-soft); }
+  .nav a.active i { color: var(--accent); }
+  .side-foot { margin-top:auto; padding: 1rem 1.3rem 0; border-top:1px solid var(--hair); }
+  .side-foot .who { display:flex; align-items:center; gap:.6rem; font-size:.8rem; color:var(--ink-2); }
+  .avatar { width:30px; height:30px; border-radius:50%; background:var(--accent-2); color:#fff; display:grid; place-items:center; font-size:.72rem; font-weight:600; }
+
+  /* Main */
+  .main { padding: 1.6rem 2rem 4rem; overflow-x: hidden; }
+  .page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap; margin-bottom:1.6rem; }
+  .page-head .eyebrow { text-transform:uppercase; letter-spacing:.14em; font-size:.66rem; font-weight:600; color:var(--accent); }
+  .page-head h1 { font-family:var(--serif); font-weight:600; font-size:1.85rem; margin:.15rem 0 0; letter-spacing:-.01em; }
+  .head-controls { display:flex; gap:.6rem; align-items:center; }
+  .dater {
+    display:inline-flex; align-items:center; gap:.5rem; font-size:.82rem; font-weight:500;
+    border:1px solid var(--hair-strong); border-radius:9px; padding:.5rem .85rem; background:var(--card); color:var(--ink-2); cursor:pointer;
+  }
+  .dater i { color:var(--ink-3); }
+  .btn {
+    font-family:var(--sans); font-weight:600; font-size:.82rem; border-radius:9px; padding:.55rem 1rem; cursor:pointer;
+    display:inline-flex; align-items:center; gap:.45rem; border:1px solid var(--accent); background:var(--accent); color:#fff; transition:all .16s;
+  }
+  .btn:hover { background:var(--accent-ink); }
+
+  /* KPI cards */
+  .kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap:1rem; margin-bottom:1.4rem; }
+  .kpi {
+    background:var(--card); border:1px solid var(--hair); border-radius:13px; padding:1.1rem 1.2rem;
+  }
+  .kpi .k-top { display:flex; align-items:center; justify-content:space-between; }
+  .kpi .k-label { font-size:.76rem; color:var(--ink-3); font-weight:500; }
+  .kpi .k-ico { width:30px; height:30px; border-radius:8px; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; font-size:.8rem; }
+  .kpi .k-val { font-family:var(--serif); font-weight:600; font-size:2rem; letter-spacing:-.01em; margin:.45rem 0 .1rem; }
+  .kpi .k-delta { font-size:.76rem; font-weight:600; display:inline-flex; align-items:center; gap:.3rem; }
+  .k-delta.up { color: var(--pos); }
+  .k-delta.down { color: var(--neg); }
+  .k-delta .since { color: var(--ink-3); font-weight:400; margin-left:.2rem; }
+
+  /* Card grid for charts */
+  .grid { display:grid; gap:1rem; }
+  .grid.two { grid-template-columns: 1.55fr 1fr; }
+  .grid.two-eq { grid-template-columns: 1fr 1fr; }
+  .panel {
+    background:var(--card); border:1px solid var(--hair); border-radius:13px; padding:1.2rem 1.3rem; min-width:0;
+  }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; gap:.6rem; flex-wrap:wrap; }
+  .panel-head h2 { font-family:var(--serif); font-weight:600; font-size:1.05rem; margin:0; letter-spacing:-.01em; }
+  .panel-head .h-sub { font-size:.74rem; color:var(--ink-3); }
+  .legend { display:flex; gap:1rem; font-size:.72rem; color:var(--ink-2); }
+  .legend i { font-size:.6rem; margin-right:.3rem; }
+  .legend .c1 { color: var(--accent); }
+  .legend .c2 { color: var(--accent-2); }
+
+  /* Line chart */
+  .line-wrap { position:relative; }
+  svg { display:block; width:100%; height:auto; }
+
+  /* Per-question bars */
+  .qbars { display:flex; flex-direction:column; gap:.95rem; }
+  .qbar .qb-top { display:flex; justify-content:space-between; font-size:.82rem; margin-bottom:.35rem; }
+  .qbar .qb-name { color:var(--ink-2); font-weight:500; }
+  .qbar .qb-pct { color:var(--ink-3); font-variant-numeric: tabular-nums; }
+  .qbar .track { height:9px; background:var(--paper-2); border-radius:999px; overflow:hidden; }
+  .qbar .fill { height:100%; background:var(--accent); border-radius:999px; }
+  .qbar .fill.alt { background: var(--accent-2); }
+
+  /* NPS donut */
+  .nps-row { display:flex; align-items:center; gap:1.4rem; flex-wrap:wrap; }
+  .donut-num { position:absolute; inset:0; display:grid; place-items:center; text-align:center; }
+  .donut-num .n { font-family:var(--serif); font-weight:600; font-size:1.9rem; line-height:1; }
+  .donut-num .l { font-size:.66rem; color:var(--ink-3); text-transform:uppercase; letter-spacing:.1em; margin-top:.2rem; }
+  .nps-legend { display:flex; flex-direction:column; gap:.55rem; font-size:.8rem; }
+  .nps-legend .li { display:flex; align-items:center; gap:.55rem; }
+  .nps-legend .sw { width:11px; height:11px; border-radius:3px; }
+  .nps-legend .v { margin-left:auto; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+
+  /* Funnel */
+  .funnel { display:flex; flex-direction:column; gap:.6rem; }
+  .step { }
+  .step .s-top { display:flex; justify-content:space-between; font-size:.82rem; margin-bottom:.32rem; }
+  .step .s-name { color:var(--ink-2); font-weight:500; }
+  .step .s-meta { color:var(--ink-3); font-variant-numeric:tabular-nums; }
+  .step .s-bar { height:30px; background:var(--accent); border-radius:8px; display:flex; align-items:center; padding:0 .7rem; color:#fff; font-size:.78rem; font-weight:600; }
+  .step .s-bar.fade { background: color-mix(in srgb, var(--accent) 78%, var(--paper)); }
+  .step .s-bar.fade2 { background: color-mix(in srgb, var(--accent) 56%, var(--paper)); }
+  .step .s-bar.fade3 { background: color-mix(in srgb, var(--accent) 38%, var(--paper)); }
+
+  /* Recent responses table */
+  .tbl-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  thead th {
+    text-align:left; font-size:.68rem; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--ink-3); font-weight:600; padding:.6rem .7rem; border-bottom:1px solid var(--hair);
+  }
+  tbody td { padding:.7rem .7rem; border-bottom:1px solid var(--hair); color:var(--ink-2); }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody tr:hover { background: var(--paper); }
+  .resp-name { display:flex; align-items:center; gap:.6rem; color:var(--ink); font-weight:500; }
+  .resp-name .av { width:26px; height:26px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; font-size:.66rem; font-weight:600; }
+  .tag { font-size:.68rem; font-weight:600; padding:.18rem .5rem; border-radius:999px; display:inline-flex; align-items:center; gap:.3rem; }
+  .tag.done { background:#e9f3ec; color:var(--pos); }
+  .tag.partial { background:#faf3df; color:#8a6d1f; }
+  .score-pill { font-variant-numeric:tabular-nums; font-weight:600; }
+  td.num { font-variant-numeric:tabular-nums; color:var(--ink-3); }
+
+  .stack { display:flex; flex-direction:column; gap:1rem; }
+
+  :focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; border-radius:6px; }
+
+  @media (max-width: 1100px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .grid.two, .grid.two-eq { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; }
+    .side { flex-direction:row; align-items:center; overflow-x:auto; padding:.6rem 1rem; gap:.5rem; }
+    .side .brand, .nav-label, .side-foot { display:none; }
+    .nav { display:flex; gap:.3rem; }
+    .nav a { border-left:0; border-radius:8px; padding:.5rem .8rem; white-space:nowrap; }
+    .main { padding:1.2rem; }
+  }
+  @media (max-width: 520px) {
+    .kpis { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="gallery-bar" aria-label="Prototype navigation">
+  <a href="../index.html"><i class="fa-solid fa-arrow-left"></i> MJ Forms gallery</a>
+</nav>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="side" aria-label="App navigation">
+    <div class="brand">
+      <span class="mark"><i class="fa-solid fa-feather"></i></span>
+      <span class="wm">MJ <span>Forms</span></span>
+    </div>
+    <div class="nav-label">Workspace</div>
+    <nav class="nav">
+      <a href="#"><i class="fa-regular fa-rectangle-list"></i> Forms</a>
+      <a href="#"><i class="fa-regular fa-comment-dots"></i> Responses</a>
+      <a href="#" class="active" aria-current="page"><i class="fa-solid fa-chart-line"></i> Analytics</a>
+      <a href="#"><i class="fa-solid fa-share-nodes"></i> Distributions</a>
+      <a href="#"><i class="fa-solid fa-sliders"></i> Settings</a>
+    </nav>
+    <div class="side-foot">
+      <div class="who"><span class="avatar">RA</span><div>Riverbend Arts<br><span style="color:var(--ink-3);font-size:.72rem">Admin workspace</span></div></div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Analytics</div>
+        <h1>Spring 2026 Member Survey</h1>
+      </div>
+      <div class="head-controls">
+        <button class="dater"><i class="fa-regular fa-calendar"></i> Mar 1 – Jun 29, 2026 <i class="fa-solid fa-chevron-down" style="font-size:.6rem"></i></button>
+        <button class="btn"><i class="fa-solid fa-arrow-up-from-bracket"></i> Export</button>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <section class="kpis" aria-label="Key metrics">
+      <div class="kpi">
+        <div class="k-top"><span class="k-label">Total responses</span><span class="k-ico"><i class="fa-solid fa-inbox"></i></span></div>
+        <div class="k-val">1,284</div>
+        <div class="k-delta up"><i class="fa-solid fa-arrow-up"></i> 18.4%<span class="since">vs. last period</span></div>
+      </div>
+      <div class="kpi">
+        <div class="k-top"><span class="k-label">Completion rate</span><span class="k-ico"><i class="fa-solid fa-circle-check"></i></span></div>
+        <div class="k-val">82%</div>
+        <div class="k-delta up"><i class="fa-solid fa-arrow-up"></i> 4.1%<span class="since">vs. last period</span></div>
+      </div>
+      <div class="kpi">
+        <div class="k-top"><span class="k-label">Avg. time</span><span class="k-ico"><i class="fa-regular fa-clock"></i></span></div>
+        <div class="k-val">2:48</div>
+        <div class="k-delta down"><i class="fa-solid fa-arrow-down"></i> 0:22<span class="since">faster than before</span></div>
+      </div>
+      <div class="kpi">
+        <div class="k-top"><span class="k-label">NPS score</span><span class="k-ico"><i class="fa-solid fa-gauge-high"></i></span></div>
+        <div class="k-val">+61</div>
+        <div class="k-delta up"><i class="fa-solid fa-arrow-up"></i> 7 pts<span class="since">vs. last period</span></div>
+      </div>
+    </section>
+
+    <!-- Row: line chart + NPS donut -->
+    <section class="grid two" style="margin-bottom:1rem;">
+      <!-- Line chart -->
+      <div class="panel">
+        <div class="panel-head">
+          <div><h2>Responses over time</h2><div class="h-sub">Daily submissions, last 16 weeks</div></div>
+          <div class="legend">
+            <span class="c1"><i class="fa-solid fa-circle"></i>Completed</span>
+            <span class="c2"><i class="fa-solid fa-circle"></i>Started</span>
+          </div>
+        </div>
+        <div class="line-wrap">
+          <svg viewBox="0 0 720 240" role="img" aria-label="Line chart of responses over time">
+            <!-- gridlines -->
+            <g stroke="#e2ddd2" stroke-width="1">
+              <line x1="40" y1="20" x2="700" y2="20" />
+              <line x1="40" y1="70" x2="700" y2="70" />
+              <line x1="40" y1="120" x2="700" y2="120" />
+              <line x1="40" y1="170" x2="700" y2="170" />
+              <line x1="40" y1="210" x2="700" y2="210" />
+            </g>
+            <!-- y labels -->
+            <g fill="#837d72" font-size="10" font-family="Inter, sans-serif">
+              <text x="30" y="24" text-anchor="end">160</text>
+              <text x="30" y="74" text-anchor="end">120</text>
+              <text x="30" y="124" text-anchor="end">80</text>
+              <text x="30" y="174" text-anchor="end">40</text>
+              <text x="30" y="214" text-anchor="end">0</text>
+            </g>
+            <!-- x labels -->
+            <g fill="#837d72" font-size="10" font-family="Inter, sans-serif" text-anchor="middle">
+              <text x="80" y="230">Mar</text>
+              <text x="220" y="230">Apr</text>
+              <text x="380" y="230">May</text>
+              <text x="540" y="230">Jun</text>
+              <text x="680" y="230">Now</text>
+            </g>
+            <!-- Started area (brass, lighter) -->
+            <path d="M40,165 L120,150 L200,158 L280,120 L360,128 L440,90 L520,98 L600,60 L680,68 L700,64 L700,210 L40,210 Z"
+                  fill="#b7895a" opacity="0.10" />
+            <polyline points="40,165 120,150 200,158 280,120 360,128 440,90 520,98 600,60 680,68 700,64"
+                      fill="none" stroke="#b7895a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+            <!-- Completed area (emerald) -->
+            <path d="M40,185 L120,172 L200,176 L280,148 L360,150 L440,118 L520,124 L600,92 L680,96 L700,90 L700,210 L40,210 Z"
+                  fill="#1f5d4c" opacity="0.10" />
+            <polyline points="40,185 120,172 200,176 280,148 360,150 440,118 520,124 600,92 680,96 700,90"
+                      fill="none" stroke="#1f5d4c" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+            <!-- emphasis dots on completed -->
+            <g fill="#1f5d4c">
+              <circle cx="440" cy="118" r="3.5" />
+              <circle cx="600" cy="92" r="3.5" />
+              <circle cx="700" cy="90" r="4" stroke="#fff" stroke-width="2" />
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <!-- NPS donut -->
+      <div class="panel">
+        <div class="panel-head"><div><h2>NPS breakdown</h2><div class="h-sub">Promoters − Detractors</div></div></div>
+        <div class="nps-row">
+          <div style="position:relative; width:170px; height:170px;">
+            <svg viewBox="0 0 42 42" role="img" aria-label="NPS donut: 72% promoters, 17% passives, 11% detractors">
+              <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#f3f0e9" stroke-width="5"></circle>
+              <!-- detractors 11% (brass) -->
+              <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#a8553f" stroke-width="5"
+                      stroke-dasharray="11 89" stroke-dashoffset="25"></circle>
+              <!-- passives 17% (neutral hair-strong) -->
+              <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#cfc8b9" stroke-width="5"
+                      stroke-dasharray="17 83" stroke-dashoffset="14"></circle>
+              <!-- promoters 72% (emerald) -->
+              <circle cx="21" cy="21" r="15.9155" fill="none" stroke="#1f5d4c" stroke-width="5"
+                      stroke-dasharray="72 28" stroke-dashoffset="97"></circle>
+            </svg>
+            <div class="donut-num"><div><div class="n">+61</div><div class="l">NPS</div></div></div>
+          </div>
+          <div class="nps-legend">
+            <div class="li"><span class="sw" style="background:#1f5d4c"></span> Promoters <span class="v">72%</span></div>
+            <div class="li"><span class="sw" style="background:#cfc8b9"></span> Passives <span class="v">17%</span></div>
+            <div class="li"><span class="sw" style="background:#a8553f"></span> Detractors <span class="v">11%</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Row: per-question bars + funnel -->
+    <section class="grid two-eq" style="margin-bottom:1rem;">
+      <div class="panel">
+        <div class="panel-head"><div><h2>Program interest</h2><div class="h-sub">"Which programs interest you?" — % of respondents</div></div></div>
+        <div class="qbars">
+          <div class="qbar"><div class="qb-top"><span class="qb-name">Studio workshops</span><span class="qb-pct">68%</span></div><div class="track"><div class="fill" style="width:68%"></div></div></div>
+          <div class="qbar"><div class="qb-top"><span class="qb-name">Gallery exhibitions</span><span class="qb-pct">54%</span></div><div class="track"><div class="fill" style="width:54%"></div></div></div>
+          <div class="qbar"><div class="qb-top"><span class="qb-name">Live music &amp; performance</span><span class="qb-pct">47%</span></div><div class="track"><div class="fill alt" style="width:47%"></div></div></div>
+          <div class="qbar"><div class="qb-top"><span class="qb-name">Youth &amp; education</span><span class="qb-pct">39%</span></div><div class="track"><div class="fill" style="width:39%"></div></div></div>
+          <div class="qbar"><div class="qb-top"><span class="qb-name">Volunteering</span><span class="qb-pct">31%</span></div><div class="track"><div class="fill alt" style="width:31%"></div></div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><div><h2>Completion funnel</h2><div class="h-sub">Where respondents drop off</div></div></div>
+        <div class="funnel">
+          <div class="step"><div class="s-top"><span class="s-name">Opened form</span><span class="s-meta">1,566 · 100%</span></div><div class="s-bar" style="width:100%">100%</div></div>
+          <div class="step"><div class="s-top"><span class="s-name">Started answering</span><span class="s-meta">1,489 · 95%</span></div><div class="s-bar fade" style="width:95%">95%</div></div>
+          <div class="step"><div class="s-top"><span class="s-name">Reached question 5</span><span class="s-meta">1,372 · 88%</span></div><div class="s-bar fade2" style="width:88%">88%</div></div>
+          <div class="step"><div class="s-top"><span class="s-name">Submitted</span><span class="s-meta">1,284 · 82%</span></div><div class="s-bar fade3" style="width:82%">82%</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recent responses -->
+    <section class="panel">
+      <div class="panel-head"><div><h2>Recent responses</h2><div class="h-sub">Latest submissions across all channels</div></div>
+        <span class="h-sub"><i class="fa-solid fa-circle" style="color:var(--pos);font-size:.5rem"></i> Live</span>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Respondent</th>
+              <th>Heard via</th>
+              <th>NPS</th>
+              <th>Status</th>
+              <th>Source</th>
+              <th class="num">Submitted</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="resp-name"><span class="av">MA</span> Mara Aldridge</span></td>
+              <td>A friend</td>
+              <td><span class="score-pill" style="color:var(--pos)">10</span></td>
+              <td><span class="tag done"><i class="fa-solid fa-check"></i> Complete</span></td>
+              <td>Email link</td>
+              <td class="num">2 min ago</td>
+            </tr>
+            <tr>
+              <td><span class="resp-name"><span class="av">DK</span> Devon Kane</span></td>
+              <td>Social media</td>
+              <td><span class="score-pill" style="color:var(--pos)">9</span></td>
+              <td><span class="tag done"><i class="fa-solid fa-check"></i> Complete</span></td>
+              <td>Public link</td>
+              <td class="num">11 min ago</td>
+            </tr>
+            <tr>
+              <td><span class="resp-name"><span class="av">PR</span> Priya Raman</span></td>
+              <td>Community event</td>
+              <td><span class="score-pill" style="color:var(--ink-3)">7</span></td>
+              <td><span class="tag partial"><i class="fa-solid fa-hourglass-half"></i> Partial</span></td>
+              <td>QR code</td>
+              <td class="num">26 min ago</td>
+            </tr>
+            <tr>
+              <td><span class="resp-name"><span class="av">JL</span> James Liang</span></td>
+              <td>A friend</td>
+              <td><span class="score-pill" style="color:var(--pos)">10</span></td>
+              <td><span class="tag done"><i class="fa-solid fa-check"></i> Complete</span></td>
+              <td>Embed widget</td>
+              <td class="num">38 min ago</td>
+            </tr>
+            <tr>
+              <td><span class="resp-name"><span class="av">SO</span> Sofia Okonkwo</span></td>
+              <td>Somewhere else</td>
+              <td><span class="score-pill" style="color:var(--neg)">4</span></td>
+              <td><span class="tag done"><i class="fa-solid fa-check"></i> Complete</span></td>
+              <td>Public link</td>
+              <td class="num">52 min ago</td>
+            </tr>
+            <tr>
+              <td><span class="resp-name"><span class="av">TM</span> Theo Marsh</span></td>
+              <td>Social media</td>
+              <td><span class="score-pill" style="color:var(--pos)">8</span></td>
+              <td><span class="tag done"><i class="fa-solid fa-check"></i> Complete</span></td>
+              <td>Email link</td>
+              <td class="num">1 hr ago</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>

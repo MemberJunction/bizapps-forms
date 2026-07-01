@@ -1,0 +1,32 @@
+name: UI Token Gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [next, main]
+    paths:
+      - 'packages/Angular/**'
+      - 'scripts/check-ui-tokens.mjs'
+      - '.github/workflows/ui-gate.yml'
+
+concurrency:
+  group: ui-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-token-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # No dependencies needed — the checker is plain Node stdlib.
+      - name: Self-test the checker
+        run: node scripts/check-ui-tokens.mjs --self-test
+
+      - name: Run UI token gate (hardcoded colors + raw buttons)
+        run: npm run lint:ui

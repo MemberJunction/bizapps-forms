@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MJ Forms — Design System</title>
+<meta name="description" content="MJ Forms — one MemberJunction-token-driven design system, three switchable themes (Editorial, Aurora, Warm) across the respondent form, the visual builder, and the analytics dashboard." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  :root {
+    --bg: #0b0f1a; --bg-soft: #121829; --card: #161d31; --line: #28324f;
+    --ink: #eef2ff; --ink-soft: #aeb8d4; --ink-mute: #7a85a6;
+    --accent: #7c5cff; --accent-2: #29d0c4;
+    --radius: 18px; --shadow: 0 24px 60px -20px rgba(0,0,0,.6);
+    font-family: 'Sora', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; line-height: 1.5;
+    background-image: radial-gradient(1100px 600px at 12% -10%, rgba(124,92,255,.22), transparent 60%),
+                      radial-gradient(900px 520px at 100% 0%, rgba(41,208,196,.16), transparent 55%);
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+  .repo-cta { position: fixed; top: 16px; right: 16px; z-index: 20; display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; color: var(--ink); background: var(--card); border: 1px solid var(--line);
+    padding: 9px 15px; border-radius: 999px; box-shadow: var(--shadow); transition: border-color .18s, transform .18s; }
+  .repo-cta:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .repo-cta i { font-size: 15px; }
+
+  header.hero { padding: 84px 0 30px; }
+  .eyebrow { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft);
+    border: 1px solid var(--line); padding: 7px 14px; border-radius: 999px; background: rgba(255,255,255,.02); }
+  .eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 12px var(--accent-2); }
+  h1 { font-size: clamp(38px, 6vw, 70px); line-height: 1.02; margin: 22px 0 0; font-weight: 800; letter-spacing: -.02em;
+    background: linear-gradient(120deg, #fff 20%, #b9a8ff 55%, #6ee7df 95%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { max-width: 720px; color: var(--ink-soft); font-size: 18px; margin: 20px 0 0; }
+  .lede code { color: #cbbcff; background: rgba(124,92,255,.12); padding: 1px 6px; border-radius: 6px; font-size: .9em; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+  .pill { font-size: 13px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 999px; padding: 7px 13px; background: rgba(255,255,255,.02); }
+  .pill i { color: var(--accent-2); margin-right: 6px; }
+
+  .section { padding: 36px 0; border-top: 1px solid var(--line); margin-top: 40px; }
+  .section h2 { font-size: 24px; margin: 0 0 6px; }
+  .section .sub { color: var(--ink-mute); margin: 0 0 26px; max-width: 640px; }
+
+  /* surface cards */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    display: flex; flex-direction: column; transition: transform .18s, border-color .18s, box-shadow .18s; }
+  .card:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: var(--shadow); }
+  .thumb { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: #faf8f4; border-bottom: 1px solid var(--line); }
+  .thumb iframe { width: 1440px; height: 900px; border: 0; transform: scale(.32); transform-origin: top left; pointer-events: none; }
+  .card .meta { padding: 15px 16px; }
+  .card .meta .s-name { font-weight: 600; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+  .card .meta .s-name i { color: var(--accent); width: 18px; text-align: center; }
+  .card .meta .desc { color: var(--ink-mute); font-size: 13px; margin: 4px 0 12px; }
+  .chips { display: flex; gap: 7px; flex-wrap: wrap; }
+  .chips a { font-size: 12px; font-weight: 600; color: var(--ink-soft); border: 1px solid var(--line);
+    padding: 6px 11px; border-radius: 999px; transition: border-color .18s, color .18s; }
+  .chips a:hover { border-color: var(--accent); color: #fff; }
+  .chips a .sw { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align: middle; }
+
+  /* theme legend */
+  .themes { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+  @media (max-width: 900px) { .themes { grid-template-columns: 1fr; } }
+  .theme { border: 1px solid var(--line); border-radius: 14px; padding: 18px; background: rgba(255,255,255,.02); }
+  .theme .sw { display:inline-flex; gap:5px; margin-bottom: 10px; }
+  .theme .sw span { width: 20px; height: 20px; border-radius: 6px; border: 1px solid rgba(255,255,255,.2); }
+  .theme b { font-size: 15px; }
+  .theme p { color: var(--ink-mute); font-size: 13px; margin: 5px 0 0; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 52px; padding: 30px 0 70px; color: var(--ink-mute); font-size: 14px; }
+  footer a { color: var(--ink-soft); border-bottom: 1px solid var(--line); }
+  footer a:hover { color: var(--ink); }
+  .foot-row { display:flex; flex-wrap:wrap; gap: 22px; justify-content: space-between; align-items:center; }
+  .repo-cta { position: fixed; top: 16px; right: 16px; z-index: 20; display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; text-decoration: none; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line); padding: 9px 15px; border-radius: 999px; box-shadow: var(--shadow);
+    transition: border-color .18s ease, transform .18s ease; }
+  .repo-cta:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .repo-cta i { font-size: 15px; }
+</style>
+</head>
+<body>
+  <a class="repo-cta" href="https://github.com/MemberJunction/bizapps-forms" target="_blank" rel="noopener"><i class="fa-brands fa-github"></i> View on GitHub</a>
+  <div class="wrap">
+    <header class="hero">
+      <span class="eyebrow"><span class="dot"></span> MemberJunction Open App · Design System</span>
+      <h1>MJ Forms</h1>
+      <p class="lede">One themeable design system, three looks. Every theme is just a set of overrides on MemberJunction's <code>--mj-*</code> design tokens (plus <code>--mjf-*</code> form tokens) — exactly the mechanism MJ dark mode uses, and exactly what a <code>FormStyle</code> stores. <strong>Editorial</strong> is the default; flip <strong>Aurora</strong> or <strong>Warm</strong> live on any page. Same HTML — only tokens change.</p>
+      <div class="meta-row">
+        <span class="pill"><i class="fa-solid fa-palette"></i> Token-driven themes</span>
+        <span class="pill"><i class="fa-solid fa-mobile-screen"></i> Mobile-first</span>
+        <span class="pill"><i class="fa-solid fa-wand-magic-sparkles"></i> Live theme switch</span>
+        <span class="pill"><i class="fa-solid fa-shield-halved"></i> Anonymous-friendly</span>
+      </div>
+    </header>
+
+    <!-- Surfaces -->
+    <section class="section" style="border-top:0; margin-top: 8px;">
+      <h2>The three surfaces</h2>
+      <p class="sub">Each opens in the default <strong>Editorial</strong> theme with a live switcher in the corner — or jump straight to a theme with the chips.</p>
+      <div class="grid">
+        <a class="card" href="app/respondent.html" aria-label="Respondent form">
+          <div class="thumb"><iframe src="app/respondent.html" scrolling="no" tabindex="-1" title="Respondent form"></iframe></div>
+          <div class="meta">
+            <div class="s-name"><i class="fa-solid fa-mobile-screen-button"></i> Respondent form</div>
+            <div class="desc">The public, mobile-first survey — all 7 question types.</div>
+            <div class="chips">
+              <a href="app/respondent.html?theme=editorial"><span class="sw" style="background:#1f5d4c"></span>Editorial</a>
+              <a href="app/respondent.html?theme=aurora"><span class="sw" style="background:#6d5efc"></span>Aurora</a>
+              <a href="app/respondent.html?theme=warm"><span class="sw" style="background:#d8744a"></span>Warm</a>
+            </div>
+          </div>
+        </a>
+        <a class="card" href="app/builder.html" aria-label="Form builder">
+          <div class="thumb"><iframe src="app/builder.html" scrolling="no" tabindex="-1" title="Form builder"></iframe></div>
+          <div class="meta">
+            <div class="s-name"><i class="fa-solid fa-pen-ruler"></i> Form builder</div>
+            <div class="desc">The internal 3-pane visual builder.</div>
+            <div class="chips">
+              <a href="app/builder.html?theme=editorial"><span class="sw" style="background:#1f5d4c"></span>Editorial</a>
+              <a href="app/builder.html?theme=aurora"><span class="sw" style="background:#6d5efc"></span>Aurora</a>
+              <a href="app/builder.html?theme=warm"><span class="sw" style="background:#d8744a"></span>Warm</a>
+            </div>
+          </div>
+        </a>
+        <a class="card" href="app/dashboard.html" aria-label="Analytics dashboard">
+          <div class="thumb"><iframe src="app/dashboard.html" scrolling="no" tabindex="-1" title="Analytics dashboard"></iframe></div>
+          <div class="meta">
+            <div class="s-name"><i class="fa-solid fa-chart-pie"></i> Analytics dashboard</div>
+            <div class="desc">Native reporting — charts re-skin per theme too.</div>
+            <div class="chips">
+              <a href="app/dashboard.html?theme=editorial"><span class="sw" style="background:#1f5d4c"></span>Editorial</a>
+              <a href="app/dashboard.html?theme=aurora"><span class="sw" style="background:#6d5efc"></span>Aurora</a>
+              <a href="app/dashboard.html?theme=warm"><span class="sw" style="background:#d8744a"></span>Warm</a>
+            </div>
+          </div>
+        </a>
+      </div>
+    </section>
+
+    <!-- Themes -->
+    <section class="section">
+      <h2>The three themes</h2>
+      <p class="sub">A theme is ~25 token overrides — no component CSS changes. Brand themes ship the same way (a <code>FormStyle</code> row).</p>
+      <div class="themes">
+        <div class="theme">
+          <div class="sw"><span style="background:#faf8f4"></span><span style="background:#1f5d4c"></span><span style="background:#1a1815"></span></div>
+          <b>Editorial</b> <span style="color:var(--ink-mute);font-size:12px">· default</span>
+          <p>Refined &amp; minimal — paper white, a serif display face, emerald accent, hairline structure.</p>
+        </div>
+        <div class="theme">
+          <div class="sw"><span style="background:#6d5efc"></span><span style="background:#22d3ee"></span><span style="background:#0b1020"></span></div>
+          <b>Aurora</b>
+          <p>Vibrant SaaS — dark canvas, gradient glassmorphism, soft glow, Sora type.</p>
+        </div>
+        <div class="theme">
+          <div class="sw"><span style="background:#f6ede0"></span><span style="background:#d8744a"></span><span style="background:#7c8c5a"></span></div>
+          <b>Warm / Humanist</b>
+          <p>Friendly &amp; nonprofit-forward — cream &amp; terracotta, soft rounded shapes, Nunito type.</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="foot-row">
+        <div>MJ Forms — design prototypes (no backend). Built on <a href="https://github.com/MemberJunction/MJ">MemberJunction</a> · themed with <code style="font-size:12px">--mj-*</code> design tokens.</div>
+        <div>
+          <a href="https://github.com/MemberJunction/bizapps-forms">Repo</a> &nbsp;·&nbsp;
+          <a href="https://github.com/MemberJunction/bizapps-forms/blob/main/plans/FORMS_BUILD_PLAN.md">Build plan</a> &nbsp;·&nbsp;
+          <a href="aurora/respondent.html">v1 explorations</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

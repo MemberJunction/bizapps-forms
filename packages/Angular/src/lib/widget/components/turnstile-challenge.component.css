@@ -1,0 +1,13 @@
+/* The Turnstile challenge slot. Cloudflare renders its own iframe inside .mjf-turnstile;
+   we only reserve space and center it so it sits comfortably above the submit action on
+   mobile and desktop alike. No hardcoded colors — the iframe styles itself. */
+:host {
+  display: block;
+}
+
+.mjf-turnstile {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  min-height: 65px; /* Turnstile's default widget height; avoids layout shift on load. */
+}

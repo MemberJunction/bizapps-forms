@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Response Analyzer",
+      "Description": "On-submit analyzer for the MJ Forms Open App. Given a form response's free-text (ShortText/LongText) answers as an Answers array, scores each answer 0-100 for quality and returns a parallel answers array (same order) with score and rationale. One call per response. The model/vendor is metadata-driven: SelectionStrategy=Specific pins the related AI Prompt Model below, so installers swap the model here (in metadata) rather than in code.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Response Analyzer",
+      "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
+      "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
+      "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
+      "Status": "Active",
+      "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-response-analyzer.output-example.json",
+      "SelectionStrategy": "Specific",
+      "PowerPreference": "Highest",
+      "PromptRole": "System",
+      "PromptPosition": "First",
+      "ParallelizationMode": "None",
+      "ValidationBehavior": "Strict",
+      "MaxRetries": 2,
+      "EffortLevel": null
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": [
+        {
+          "fields": {
+            "PromptID": "@parent:ID",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.1 Pro",
+            "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T16:45:08.391Z",
+            "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T19:12:32.326Z",
+      "checksum": "0fc86019c50ab36735aef406768505e91ebfab976ebe3761b5ad0717fdcffe15"
+    }
+  }
+]

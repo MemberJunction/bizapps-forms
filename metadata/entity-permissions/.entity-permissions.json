@@ -1,0 +1,155 @@
+[
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Responses",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": false,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "60470C16-21AB-48DF-BD12-EB3482F365F7"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.840Z",
+      "checksum": "b270c3ebf247b03a778627d3ccd6c37c4ebdf18f38f4d91b018998b1de8a7e93"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Response Answers",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": false,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "4A3B0FDC-91E1-4A09-A354-8F9E1F710D03"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.856Z",
+      "checksum": "b50083202c2d1056c0c66261b7bf1bfe68616d68bd994950df1a6ca15ebe1b1c"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "D21031C5-3141-4E24-A21E-95728ABF3584"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.869Z",
+      "checksum": "48385ed1202e7e701bfb9875e7b75c6e24c9808cc7af19315f96218b7e7151cd"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Versions",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "822CC66A-AAA0-4CBE-9498-471BF2E0ED36"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.881Z",
+      "checksum": "ebcc38b3feba00869ae17852ed4319e73f8d245e6f5ed6353caab1a0a34e2de6"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "7E255850-054D-4F7C-B905-574B61A3A2D6"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.938Z",
+      "checksum": "9afa8b06339ce8fb712b500ab605fe1fe23b65b7a6707332ad80f74244bbf5c9"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "2B47C8EF-13AE-4CC4-AE99-3E516642507B"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.952Z",
+      "checksum": "8da19c8098a71c03fc188e990807fff91731514729c48ecbffbf769edc1fa490"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Question Options",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "26E9996E-1523-4541-B772-DE12CA853874"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.965Z",
+      "checksum": "780ed097a38aecbd7f4175a997335250bc35585a3c9cb98df44ba3b73ea28bf9"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Distributions",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "1A4395E6-794E-46F3-A8E8-A8AFE44FC5CC"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.904Z",
+      "checksum": "0d2db0e6ffce1697310ceae5409f20bde7a6092cfc7b8cb24626d46db1d13eac"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Styles",
+      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "4469927D-21EB-46FA-B12B-C30E1C5FAD11"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.916Z",
+      "checksum": "ea32969efd7b15362a2a4464cf8433bf8c311249c592150a0c8ae9ee5d666afa"
+    }
+  }
+]

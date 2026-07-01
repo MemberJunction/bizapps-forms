@@ -5,7 +5,115 @@
 > A fresh session should pull this file byte-for-byte into that repo (e.g. as
 > `plans/FORMS_BUILD_PLAN.md`) and treat it as the durable task state — read the Status
 > Snapshot + Progress Log at the start of every session, pick up the first unfinished task
-> in dependency order, and update task state here as you work (the Caliber plan convention).
+> in dependency order, and update task state here as you work.
+
+---
+
+## Status Snapshot
+
+**Phase 0 — ✅ COMPLETE.** Repo scaffolded from the bizapps-common Open App skeleton
+(5 packages: `forms-{entities,actions,core-entities-server,server,ng}`; 2 apps: MJAPI/MJExplorer),
+pinned to MJ **`5.43.0`** (`mjVersionRange >=5.43.0 <6.0.0`), schema `__mj_BizAppsForms`, entity
+prefix `MJ_BizApps_Forms: ` (matches the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` siblings), ports
+**4121 / 4321**. `npm install --ignore-scripts && npm run build` is green for all 5 packages **and**
+MJAPI; the only failure is the MJExplorer *production* `ng build` font-inline step, which needs
+internet (`fonts.googleapis.com`) and is an environment-only issue. Scaffold is on **`main`**.
+
+**Hard Open-App dependencies.** MJ Forms **requires** and auto-installs two sibling apps (declared in
+`mj-app.json` `dependencies`; `mj app install` resolves leaf-first **common → tasks → forms**):
+**`bizapps-common`** (`>=5.31.0 <6.0.0`) for identity — `FormResponse.RespondentPersonID` is a hard
+cross-schema FK to `MJ_BizApps_Common: People`; and **`bizapps-tasks`** (`>=1.1.0 <2.0.0`) for the
+review/approve-before-publish routing (its v1.1.x `Task Decisions` model). The polymorphic
+`FormResponse` subject seam was **removed** in favour of hard FKs (we build directly on common/tasks
+as part of the stack).
+
+**Phase 1 — 🟢 BUILD COMPLETE; closing out (audited 2026-07-01).** Every §9 slice is built, wired to
+real MJ infrastructure, and green: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 ·
+Angular 162). A 4-agent, code-grounded audit (2026-07-01) confirmed each item is genuinely
+implemented — *not* stubbed — and corrected several the log had **understated**:
+- **Cloudflare Turnstile is a REAL `siteverify` fetch** (per-form toggle, fail-closed), not the "stub"
+  earlier log lines claimed; the confirmation-email sender is **CommunicationEngine-backed**; file
+  upload writes real **`MJ: Files`** via `@memberjunction/storage`.
+- **AI authoring is a metadata-driven `Forms: Form Designer` AIPrompt** (Gemini, model pinned in
+  metadata not code) with a zod-validated blueprint + 5 starter templates — the earlier "highest-power
+  Claude in code" description is obsolete.
+- There are **4** on-submit hooks, not 3: Upsert Respondent Person · Send Confirmation Email · Create
+  Followup Task · **Analyze Written Responses** (the last **confirmed running live** — writes
+  `Score`/`ScoreRationale` to real responses).
+
+Live DB `MJ_Forms` (localhost:1456): all 11 `__mj_BizAppsForms` tables present, both migrations applied,
+metadata seeded (Form Respondent role + response-only CanCreate perms, 7 FormStyle presets, FormCategory
+tree, Forms app + nav + 2 dashboards). Integration branch `feature/phase1-foundation` (local only).
+
+**What remains to call Phase 1 DONE — all deploy/verify, no net-new build:**
+1. **Full anonymous-submit e2e** against the live wire (mint link → `GET /f/:slug` redeem →
+   `PublishedForm` → `SubmitFormResponse` persists under anon scope). Redeem HTTP contract is
+   unit-tested with fakes but never run end-to-end.
+2. **Deploy-time provider config** (code-complete, unconfigured): `FORMS_TURNSTILE_SECRET`, an email
+   `CommunicationProvider` + `FORMS_EMAIL_FROM`, a storage account for uploads.
+3. **Re-verify `Upsert Respondent Person`** links a `People` row live (param bug fixed; unproven e2e).
+4. **mj-btn CI gate** still disabled (color-token gate enforced + passing at 0 violations).
+5. **Push to the org remote** (account has been read-only; nothing pushed yet).
+
+**Housekeeping the audit flagged:** delete the orphaned, superseded
+`migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql` (514 KB, non-Flyway, duplicates inline
+CodeGen); align `.actions.json` on-submit input-param name `ResponseID` → `FormResponseID` (3 hooks —
+harmless on the hook-fired path, a trap for UI/validated invocation); add a `Forms: Create Followup
+Task` unit test; widget §2 **flaky-network resilience is thin** (no offline detection / autosave-retry /
+submit auto-retry) — the one real UX-bar shortfall. Gemini output-token truncation on long forms is an
+**upstream limitation** (MJ runner/driver never sends `maxOutputTokens` to Gemini), mitigated by the
+analyzer's truncated-JSON salvage.
+
+### 🎨 Design system & themeable prototypes (live on GitHub Pages)
+
+All three looks are now **one MemberJunction-token-driven design system**
+([`docs/app/design-system.css`](../docs/app/design-system.css)): the base layer mirrors MJ's real
+`--mj-*` semantic tokens, a new `--mjf-*` layer adds form-specific concepts (question card, choice
+option, progress, rating, app chrome), and **each theme is just a `[data-theme]` block overriding
+~25 tokens** — the same mechanism as MJ dark mode, and exactly what a `FormStyle.CSSVariables` row will
+store. **Editorial is the default**; Aurora and Warm flip live via an in-page switcher (or a `?theme=`
+deep-link). The HTML is identical across all three — only tokens change, and the prototypes carry
+**zero hardcoded colors** below the token layer. Three surfaces (respondent form, builder, dashboard)
+live under [`docs/app/`](../docs/app/); visual only (no backend), no CodeGen dependency.
+
+➡️ **Live gallery: https://memberjunction.github.io/bizapps-forms/**
+
+> One HTML, three themes — proof the token system re-skins every surface (chrome, cards, even chart
+> fills). Click any image to open the live, switchable page.
+
+#### 📱 Respondent form — Editorial · Aurora · Warm
+<table><tr>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/respondent.html?theme=editorial"><img src="../docs/screenshots/app-respondent-editorial.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/respondent.html?theme=aurora"><img src="../docs/screenshots/app-respondent-aurora.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/respondent.html?theme=warm"><img src="../docs/screenshots/app-respondent-warm.png" width="100%"></a></td>
+</tr></table>
+
+#### 🛠️ Form builder — Editorial · Aurora · Warm
+<table><tr>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/builder.html?theme=editorial"><img src="../docs/screenshots/app-builder-editorial.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/builder.html?theme=aurora"><img src="../docs/screenshots/app-builder-aurora.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/builder.html?theme=warm"><img src="../docs/screenshots/app-builder-warm.png" width="100%"></a></td>
+</tr></table>
+
+#### 📊 Analytics dashboard — Editorial · Aurora · Warm
+<table><tr>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/dashboard.html?theme=editorial"><img src="../docs/screenshots/app-dashboard-editorial.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/dashboard.html?theme=aurora"><img src="../docs/screenshots/app-dashboard-aurora.png" width="100%"></a></td>
+<td width="33%"><a href="https://memberjunction.github.io/bizapps-forms/app/dashboard.html?theme=warm"><img src="../docs/screenshots/app-dashboard-warm.png" width="100%"></a></td>
+</tr></table>
+
+When Phase 1 builds the real Angular respondent widget + Explorer builder/dashboards, they consume the
+same `--mj-*`/`--mjf-*` tokens, so these themes drop in as `FormStyle` rows with no component changes.
+*(The original per-direction explorations remain under `docs/{aurora,editorial,warm}/` and are linked
+from the gallery as "v1".)*
+
+### ▶ NEXT — Phase 1 close-out
+
+The original blocking gate (migrate → CodeGen → build) is **long cleared**: the live `MJ_Forms` DB has
+all 11 tables and both migrations applied, generated entity/resolver/Angular subclasses are committed,
+and metadata is seeded. What's left to *close* Phase 1 is the **deploy/verify list in the Status
+Snapshot above** (live anonymous-submit e2e, provider config, remote push, mj-btn gate) plus the small
+housekeeping items — **no net-new feature build**. For Phase 2, resume in the §9 dependency order.
 
 ---
 
@@ -62,9 +170,6 @@ A standalone survey tool traps responses in a silo. MJ Forms inverts that:
    (e.g. "Annual Meeting Survey") can be projected into a real, evolving table that the whole
    MJ toolchain — viewing system, query builder, dashboards, **Skip** — treats natively. No
    form tool on the market does this.
-4. **Optional conversational/voice upgrade via Caliber.** When text + uploads aren't enough,
-   a question can hand off to a voice agent that transcribes, records, and rubric-scores —
-   see §9.
 
 ### 1.3 Competitive landscape (summary — VERIFY PRICING before any customer-facing use)
 
@@ -97,7 +202,7 @@ integration*, not on out-feature-ing the long tail.
 - No statistical analysis suite (significance testing, weighting). Reporting is solid, not
   SPSS.
 - No multi-tenant SaaS billing. This is an installable open app; any hosted offering is a
-  separate concern (and may live with Caliber commercially — out of scope here).
+  separate concern (out of scope here).
 
 ---
 
@@ -154,7 +259,7 @@ flowchart TB
 
 ```
 bizapps-forms/
-  mj-app.json            # OpenApp manifest (see §12)
+  mj-app.json            # OpenApp manifest (see §11)
   mj.config.cjs          # schema + entity prefix + CodeGen output paths
   package.json           # npm workspace (apps/* + packages/*), turbo
   turbo.json
@@ -196,7 +301,6 @@ and no FK indexes — CodeGen adds those).
 | Promote responses → first-class entity | **Runtime Schema Update (RSU)** pipeline: `SchemaEngine.generateDDL()` → migration → CodeGen → restart; `SchemaEvolution` adds columns over time | `packages/SchemaEngine/src/RuntimeSchemaManager.ts`, `SchemaEvolution.ts`, `MJServer/src/resolvers/RSUResolver.ts` |
 | On-submit automation | **Actions / Agents / AI Prompts** | core framework |
 | Reporting | RunView/RunViews, RunQuery, BaseDashboard + AG Grid | core framework |
-| Conversational/voice upgrade | **bizapps-caliber** + MJ 5.44 realtime, bound via polymorphic subject + `IntakeSubmission` | Caliber `plans/CALIBER_BUILD_PLAN.md` §2.1, §5 |
 
 > **NOTE — do NOT reuse MJ Interactive Forms as the survey schema.** Interactive Forms
 > (`Type='Form'` Components + `Entity Form Overrides`) are **entity-bound** — they override
@@ -234,6 +338,16 @@ form = effectively a **public form URL**.
 3. **A `FormDistribution` object (entity, §5).** "Publish public URL" is a first-class
    record wrapping an anonymous, multi-use, scoped link — with its own quota, expiry,
    open/close window, and per-link analytics.
+4. **Provisioning the distribution's magic-link invite (new server code).** When a
+   `FormDistribution` is created/activated, mint the anonymous, multi-use, scoped magic-link
+   invite — carrying `mj_scopes` that grant the **Form Respondent** role, scoped to the
+   distribution, with configurable `maxUses`/expiry — via MJ core's `MagicLinkService`, and
+   store its `MagicLinkInviteID` on the record. Implemented as a server-side `FormDistribution`
+   entity lifecycle hook so it fires however the distribution is created (builder, AI, import).
+   **Install prerequisite:** the host MJ instance must enable core `magicLink` and allow the
+   Form Respondent role to be granted (`restrictedRoleName`/`grantableRoleNames`); MJ
+   auto-generates its signing keys. _(Added 2026-06-30 — the original plan named
+   `MagicLinkInviteID` but never assigned who mints it; this closes that gap.)_
 
 **Submission path:** anonymous multi-use magic link scoped to a `FormDistribution`
 → widget loads published `FormVersion` (read) → respondent answers → public submit endpoint
@@ -307,7 +421,7 @@ erDiagram
 - **FormVersion** — immutable published snapshots. `FormID, VersionNumber, Status
   (Draft|Published|Retired), PublishedAt, DefinitionSnapshot (JSON — the full
   pages/questions/options/logic as-published)`. Responses pin a `FormVersionID` so a form can
-  evolve without corrupting historical data (Caliber's immutable-`ResolvedConfig` pattern).
+  evolve without corrupting historical data.
 - **FormPage** — `FormID, Title, Description, DisplayOrder, ConditionalRule (JSON,
   show-if logic — §6)`.
 - **FormQuestion** — `FormID, PageID, QuestionType (value-list — §5.3), Prompt, HelpText,
@@ -316,8 +430,8 @@ erDiagram
   Settings (JSON, per-type)`.
 - **FormQuestionOption** — `QuestionID, Label, Value, DisplayOrder, IsDefault`.
 - **FormResponse** — `FormID, FormVersionID, Status (Partial|Complete), AnonymousSessionID
-  (mj_sid), SubjectEntityName (nullable), SubjectID (nullable — polymorphic link to
-  Person/anything, Caliber pattern), SubmittedAt, StartedAt, SourceMetadata (JSON: ip-hash,
+  (mj_sid), RespondentPersonID (nullable FK → `MJ_BizApps_Common` Person, for identified
+  respondents), StartedAt, SubmittedAt, SourceMetadata (JSON: ip-hash,
   ua, distribution id, referrer)`.
 - **FormResponseAnswer** — `ResponseID, QuestionID, TextValue, NumericValue, DateValue,
   BooleanValue, JSONValue (for multi/complex), FileID (→ MJ: Files), Score (nullable),
@@ -343,7 +457,7 @@ erDiagram
 (radio), MultiChoice (checkbox), Dropdown, Rating (stars/scale), NPS, YesNo, Date, Time,
 FileUpload, Statement (display-only/section header).
 **Advanced (Phase 2):** Matrix/Grid, Ranking, Address (→ bizapps-common), Signature,
-Payment, Calculated, Conversational (→ Caliber hand-off, §9).
+Payment, Calculated.
 
 ### 5.4 Dual persistence (the design you locked)
 
@@ -416,71 +530,71 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ---
 
-## 9. Caliber Integration Seam (Forms ← consumed by Caliber)
-
-MJ Forms is the **text/structured/upload** input layer; **Caliber** is the
-**conversational/voice** layer with rubric scoring. They **compose** (siblings), they are not
-parent/child. The seam is **data-level, in-process, zero schema coupling**:
-
-- A `FormResponse` is a **subject**: Caliber binds an `Engagement`/`AssessmentSession` via
-  `SubjectEntityName='Forms: Responses' + SubjectID`.
-- Form answers flow into Caliber as an **`IntakeSubmission`** (`MappedData` JSON), read by a
-  `ContextProvider` to brief the voice agent.
-- A `Conversational` question type (§5.3, P2) hands a respondent off to a Caliber voice agent
-  via an **anonymous magic link** scoped to that agent; the transcript/recording/score
-  return and attach to the originating `FormResponse`.
-- Caliber's `Criterion.AppliesTo=Both` already allows one rubric to score **written +
-  spoken** answers together.
-
-> A companion PR is being opened in the **Caliber repo** proposing that MJ Forms become
-> Caliber's **native intake mechanism** (text + uploads) rather than the current
-> external-form (TypeForm) bolt-on — and that Caliber's intake design (Protocol
-> `IntakeMode`, the `ExternalFormType` lookup) be updated to treat MJ Forms as a
-> first-class, in-process intake source. It points at this plan.
-
----
-
-## 10. Phases & Tasks
+## 9. Phases & Tasks
 
 ### Phase 0 — Repo bootstrap ✅ COMPLETE
 - [x] Create `bizapps-forms` repo from the bizapps-common skeleton (mj-app.json, mj.config.cjs,
       package.json workspace, turbo.json, packages/{Entities,Actions,**CoreEntitiesServer**,Server,Angular},
-      apps/{MJAPI,MJExplorer}). _Built from the bizapps-caliber fresh-scaffold variant of the common
+      apps/{MJAPI,MJExplorer}). _Built from a fresh-scaffold variant of the bizapps-common Open App
       skeleton, then `CoreEntitiesServer` added to fully mirror bizapps-common's package set._
-- [x] Set schema `__mj_BizAppsForms`, scope `@mj-biz-apps/forms-*`, prefix `MJ Forms:` (DG-2),
+- [x] Set schema `__mj_BizAppsForms`, scope `@mj-biz-apps/forms-*`, prefix `MJ_BizApps_Forms:` (DG-2),
       ports 4121/4321, `mjVersionRange >=5.43.0 <6.0.0` (DG-1 — see Progress Log).
 - [x] Pull this plan into `plans/FORMS_BUILD_PLAN.md` (byte-for-byte from MJ PR #2971).
 
-### Phase 1 — MVP (the differentiating slice)
-- [~] Migration: schema + Phase-1 tables (§5.1) **authored** as
-      `migrations/B202606281200__v0.1.x_Schema_and_Tables.sql` (all 10 tables + extended props +
-      value-list CHECKs + cross-schema FKs to `__mj.[User]` / `__mj.[File]`). **Run migrate + CodeGen
-      pending a DB connection** (do on local pull).
-- [ ] `Forms: …` entity subclasses generated; verify types.
-- [ ] mj-sync seed: FormCategory starter tree, FormStyle defaults, **Form Respondent role +
-      entity permissions** (CanCreate on responses only), Application + nav metadata.
-- [ ] **Public submit endpoint** (forms-server): anonymous magic-link scope check +
-      Turnstile + rate-limit + quota → Save response/answers → fire on-submit Actions.
-- [ ] **Respondent widget** (forms-ng → Angular element): both render modes, mobile-first,
-      themed via FormStyle, basic conditional logic (§6), file upload to MJ: Files, a11y.
-- [ ] **Builder/admin app** (MJExplorer): visual form builder (pages/questions/options/logic),
-      publish→FormVersion, FormDistribution management (public link/embed/QR).
-- [ ] **AI authoring** action/agent (§7) + starter template gallery.
-- [ ] **Reporting dashboard** (§8.1): summaries, breakdowns, funnel, response view, export.
-- [ ] On-submit hooks: create/link bizapps-common Person; email confirmation; create Task.
-- [ ] Tests (Vitest) for engine/server logic; CI gates (UI tokens, mj-btn).
+### Phase 1 — MVP (the differentiating slice) — ✅ BUILD COMPLETE (audited 2026-07-01)
+- [x] Migration: schema + Phase-1 tables (§5.1) applied to `MJ_Forms` (localhost:1456); all 10 tables live.
+- [x] `MJ_BizApps_Forms: …` entity subclasses generated (CodeGen) + verified (build green).
+- [x] mj-sync seed: FormCategory starter tree (9), FormStyle defaults (3 — Editorial/Aurora/Warm),
+      **Form Respondent role + 9 entity permissions** (CanCreate on Form Responses/Answers only),
+      Application + nav + reporting Dashboard record. **Pushed to DB: 33 records, 0 errors.**
+- [x] **Public submit endpoint** (forms-server): `PublishedForm` + `SubmitFormResponse` custom
+      resolvers — anon mj_scopes/CanCreate check + Turnstile (fail-closed) + rate-limit + dual quota
+      + dedupe + IP-hash(session) → Save response/answers → fire on-submit Actions by name. In schema. 33 tests.
+- [x] **Respondent widget** (forms-ng → Angular element): both render modes, mobile-first/WCAG-AA,
+      FormStyle token theming, §6 conditional logic (shared evaluator), file upload, partial save. 18 tests.
+- [x] **Builder/admin app** (MJExplorer): visual builder (registers as Forms entity-form override),
+      publish→FormVersion snapshot, FormDistribution management (public link/embed/QR). 40 tests.
+- [x] **AI authoring** action `Forms: Generate Form From Brief` → invokes the **metadata-driven
+      `Forms: Form Designer` AIPrompt** (Gemini via `SelectionStrategy=Specific` + AIPromptModel — model
+      in metadata, NOT code; see [[ai-model-selection-via-metadata]]), zod-validated `FormBlueprint`,
+      deterministic Designer→Builder split. Plus `Forms: Create Form From Template` + **5** starter
+      templates (contact · rsvp · nps · lead-capture · application).
+- [x] **Reporting dashboard** (§8.1): summaries, per-question breakdowns, NPS, funnel, response
+      list/detail, CSV/Excel export (MJ `ExportService`) — live RunView/RunQuery (`useMock=false`
+      default), stats scoped by **FormID** (not latest version), registered as `FormsReportingDashboard`
+      (plus a `FormsHomeDashboard` home tab).
+- [x] On-submit hooks (forms-actions, seam S3) — **4, all real**: `Forms: Upsert Respondent Person`
+      (matches/creates `MJ_BizApps_Common: People`, stamps `RespondentPersonID`), `Forms: Send
+      Confirmation Email` (CommunicationEngine-backed, metadata/config-driven sender),
+      `Forms: Create Followup Task` (bizapps-tasks Task + TaskLink), **`Forms: Analyze Written
+      Responses`** (metadata-driven AIPrompt scores free-text → `Score`/`ScoreRationale`; **running
+      live**; truncated-JSON salvage handles Gemini's uncontrollable output cap).
+- [x] **Distribution magic-link provisioning** (§4 item 4): server-side `FormDistribution`
+      lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite and stores
+      `MagicLinkInviteID` + `PublicLinkToken`. Configurable; gated on host `magicLink` config.
+      _(Verified built + tested 2026-07-01 — the §9 checkbox had lagged the Progress Log.)_
+- [x] Tests: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 · Angular 162). Color-token
+      CI gate enforced (0 violations); mj-btn gate coded but disabled (0 `mj-btn` by convention).
+- **Remaining for Phase 1 close (deploy/verify, not build):** (1) full anonymous-submit e2e against the
+      live wire (mint link → `/f/:slug` redeem → PublishedForm → SubmitFormResponse persists + hooks
+      fire); (2) deploy-time provider config — `FORMS_TURNSTILE_SECRET`, email `CommunicationProvider` +
+      `FORMS_EMAIL_FROM`, storage account (all code-complete, unconfigured); (3) re-verify Upsert
+      Respondent Person links a Person live; (4) enable mj-btn CI gate if adopted; (5) push to org remote.
+- **Housekeeping (audit-found):** delete orphaned `migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql`
+      (superseded); fix `.actions.json` param `ResponseID`→`FormResponseID` (3 hooks); add a
+      `Forms: Create Followup Task` unit test; strengthen widget flaky-network resilience (§2).
 
 ### Phase 2 — Power
 - [ ] FormGroup + MaterializedEntityID; **view-projection** (default) and **RSU
       materialization** (opt-in, admin-triggered, batched) — §5.4 / §8.2.
 - [ ] Advanced question types (Matrix, Ranking, Address→bizapps-common, Signature, Payment).
 - [ ] LLM-judge scoring pipeline on free-text answers (ScoringConfig).
-- [ ] Caliber `Conversational` question type hand-off (§9).
+- [ ] Review/approve-before-publish routing via **bizapps-tasks** (FormVersion status state machine + a "Form Approval" TaskType whose OnComplete/OnReject hooks call Forms actions).
 - [ ] Partial-response resume, advanced quotas, richer conditional logic.
 
 ---
 
-## 11. Decision Gates / Open Questions
+## 10. Decision Gates / Open Questions
 
 - **DG-1 — Min MJ version.** Confirm earliest version with anonymous magic-link `mj_scopes`
   enforcement **and** RSU; pin `mjVersionRange`. (Default `>=5.44.0 <6.0.0`.)
@@ -497,7 +611,7 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
 
 ---
 
-## 12. Repo Bootstrap Specifics (defaults for the build session)
+## 11. Repo Bootstrap Specifics (defaults for the build session)
 
 `mj-app.json` (mirroring `bizapps-common/mj-app.json`):
 
@@ -533,39 +647,38 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
 
 - `mj.config.cjs`: `entityPackageName: '@mj-biz-apps/forms-entities'`, the same `output[]`
   block as bizapps-common (SQL / Angular / GraphQLServer / ActionSubclasses /
-  EntitySubclasses / DBSchemaJSON), entity name prefix `Forms:`, post-codegen build commands.
+  EntitySubclasses / DBSchemaJSON), entity name prefix `MJ_BizApps_Forms:`, post-codegen build commands.
 - `package.json`: workspaces `apps/*` + `packages/*`; `mj:migrate --schema __mj_BizAppsForms
   --dir ./migrations`; `mj:codegen`; turbo build/start filters for `mj_api` / `mj_explorer`.
-- Ports: MJAPI **4121**, MJExplorer **4321** (common=4101/4301, caliber=4111/4311).
+- Ports: MJAPI **4121**, MJExplorer **4321** (common=4101/4301).
 - Branching: `next` (integration) → `main` (release), feature branches track same-named
   remote (bizapps convention).
 
 ---
 
-## 13. Progress Log
+## 12. Progress Log
 
 - *(pre-build)* Plan authored in MJ repo as portable seed. Competitive pricing (§1.3) flagged
   for live re-verification. Next: pull into `bizapps-forms`, execute Phase 0.
 - **2026-06-28 — Phase 0 complete; Phase 1 started.** Scaffolded `bizapps-forms` from the
-  bizapps-common Open App skeleton (used the bizapps-caliber fresh-scaffold variant as the concrete
+  bizapps-common Open App skeleton (used a fresh-scaffold variant of the bizapps-common skeleton as the concrete
   base, then added `packages/CoreEntitiesServer` = `@mj-biz-apps/forms-core-entities-server`, wired
-  into the Server bootstrap, to fully mirror common's 5-package set). All Caliber identifiers,
-  semantics, branding, ports, and version pins rewritten to Forms. Authored `mj-app.json`, a
+  into the Server bootstrap, to fully mirror common's 5-package set). All scaffold identifiers,
+  semantics, branding, ports, and version pins set to Forms. Authored `mj-app.json`, a
   world-class root `README.md`, and a Forms-specific `CLAUDE.md`.
     - **DG-1 (min MJ version) resolved → pin `5.43.0`.** Verified directly: `@memberjunction/*@5.44.0`
       is NOT published to npm (404); latest published is `5.43.0`. The two capabilities Forms depends
       on — anonymous magic-link `mj_scopes` enforcement (`@memberjunction/server`) and the RSU pipeline
       (`@memberjunction/schema-engine`: `RuntimeSchemaManager`, `SchemaEvolution`, `RSUResolver`) — are
-      both present in published `5.43.0`. The 5.44 realtime/media work (MJ PR #2941) is Caliber's
-      dependency, not Forms'. So `mjVersionRange = >=5.43.0 <6.0.0`, npm deps pinned to `5.43.0`.
+      both present in published `5.43.0`. The 5.44 realtime/media work (MJ PR #2941) is not a Forms
+      dependency. So `mjVersionRange = >=5.43.0 <6.0.0`, npm deps pinned to `5.43.0`.
     - **DG-2 (naming) resolved →** schema `__mj_BizAppsForms` (PascalCase `__mj_BizApps*` convention,
-      confirmed against common + tasks), entity prefix **`MJ Forms: `**, root table **`Form`**
-      (plan default; entity reads "MJ Forms: Forms"). *Open: the `MJ Forms: Forms` mild stutter, and
-      whether to match tasks' longer `MJ_BizApps_Tasks:`-style prefix — owner chose `MJ Forms:`.*
+      confirmed against common + tasks), entity prefix `MJ_BizApps_Forms:` (aligned to the
+      MJ_BizApps_Common: / MJ_BizApps_Tasks: sibling convention), root table `Form`.
     - **Build status:** `npm install` (with `--ignore-scripts` to skip `sharp`'s blocked libvips
       binary download in this sandbox) + `npm run build` → all 5 packages **and** MJAPI build green
       after one fix (gave `forms-server` `"types": ["node"]` for its `node:url`/`node:path` imports —
-      a latent bug inherited from the never-built caliber scaffold). The only remaining failure is the
+      a latent bug inherited from the fresh scaffold (never built before this)). The only remaining failure is the
       MJExplorer **production** `ng build` trying to inline an external Google Font over the internet
       (no `fonts.googleapis.com` access in this sandbox) — an environment/network limitation, not a
       code defect; it will build locally with internet, and `ng serve` is unaffected.
@@ -574,3 +687,207 @@ parent/child. The seam is **data-level, in-process, zero schema coupling**:
       migrate + CodeGen, public submit endpoint, `<mj-form>` widget, builder/admin, AI authoring,
       reporting) needs a live DB and is the next session's work after a local pull.
     - **Not committed** — awaiting explicit approval (per CLAUDE.md rule 1).
+- **2026-06-29 — Design system tokenized + hard Open-App dependencies adopted.** (a) The three
+  design directions (Editorial default · Aurora · Warm) were rebuilt as one MJ-token-driven design
+  system (`docs/app/design-system.css`) where each theme is a `[data-theme]` token-override block =
+  a `FormStyle.CSSVariables` row; live at the GitHub Pages gallery. (b) Owner decided MJ Forms
+  **hard-depends** on `bizapps-common` + `bizapps-tasks` (free OSS, auto-installed). Research
+  confirmed app-to-app deps are first-class (`mj-app.json` `dependencies`, transitive topological
+  install, proven by `bizapps-tasks → bizapps-common`) and that `bizapps-tasks` v1.1.x already ships
+  an approval/decision model (Task Decisions/Outcomes, polymorphic Task Links + Assignments, TaskType
+  `OnComplete`/`OnReject` action hooks) — so approve-before-publish is wiring, not building. Changes
+  landed: entity prefix `MJ Forms:` → **`MJ_BizApps_Forms:`** (sibling convention; set before first
+  CodeGen); `mj-app.json` `dependencies` on common (`>=5.31.0`) + tasks (`>=1.1.0`); the polymorphic
+  `FormResponse` subject seam **removed** and replaced by a hard `RespondentPersonID` FK →
+  `__mj_BizAppsCommon.Person`. Consequence: the forms migration now requires `bizapps-common`'s schema
+  present first (install order / local-dev ordering). The bizapps-tasks approval routing is **Phase 2**
+  (FormVersion status state machine + 3 Forms actions + a "Form Approval" TaskType).
+- **2026-06-30 — Phase 1 built end-to-end via parallel multi-agent orchestration.** Ran migrate +
+  CodeGen against the live `MJ_Forms` DB (localhost:1456) and committed the generated gate
+  (`feature/phase1-foundation`). A supervisor decomposed Phase 1 into a shared **contract** (Wave 0)
+  + **6 work packages** built concurrently in isolated git worktrees:
+  - **Contract** (forms-entities): `PublishedFormDefinition` snapshot model, `ConditionalRule`/`ValidationRule`
+    + pure `evaluateConditionalRule`, submit transport types, zod parse helpers — the seam all packages import.
+  - **WP-A** metadata, **WP-B** submit endpoint + anti-abuse, **WP-C** `<mj-form>` widget, **WP-D** builder,
+    **WP-E** AI authoring + on-submit actions, **WP-F** reporting dashboard. Three seams (S1 submit/read API,
+    S2 conditional JSON, S3 action names) kept them coherent. All 6 merged into the foundation; two seam
+    reconciliations applied (C's GraphQL field names → B's real SDL; A's nav → builder-as-entity-form-override
+    + `FormsReportingDashboard`). **Full build green; 158 Vitest tests pass.**
+  - **e2e validation:** MJAPI boots clean against the live DB; emitted `schema.graphql` confirms
+    `PublishedForm`/`SubmitFormResponse` + types + all 10 Forms entities. **mj sync push → 33 records created**
+    (Form Respondent role + 9 permissions, 9 categories, 3 styles, Forms app + nav, dashboard), 0 errors.
+  - **Branch reality:** `next`/`main` realigned locally; all work local (account has read-only on the org remote —
+    nothing pushed). Worktree agents based off the contract-equipped foundation (verified codegen+contract present).
+  - **Anonymous e2e PROVEN (live):** added the distribution magic-link provisioning hook (server-side, via
+    a dependency-inversion seam — on 5.43.0 core `MagicLinkService.CreateInvite` can't set anonymous/
+    resource-share fields, so the minter writes the `MJ: Magic Link Invites` row directly), enabled
+    `magicLink` in `apps/MJAPI/mj.config.cjs` (the file cosmiconfig loads — NOT repo-root), and fixed
+    `MJAPI_PUBLIC_URL` to the real port so the magic-link JWKS self-fetch resolves. Full chain green:
+    anonymous redeem → scoped JWT (`mj_anon`, role `Form Respondent`, `resourceId`=distribution) →
+    `PublishedForm` (200) → `SubmitFormResponse` (200, `Complete`) → `FormResponse` + 2 answers persisted
+    with session-hash source metadata, scope-enforced.
+  - **Still open:** (a) the public-link raw token isn't yet surfaced/stored on the distribution — agent
+    building the `FormDistribution.PublicLinkToken` column + migration died on the org spend limit, so the
+    auto-mint produces an invite whose redeemable URL isn't yet persisted (the e2e used a controlled token);
+    (b) the `Forms: Upsert Respondent Person` on-submit hook didn't create/link a Person — investigate;
+    (c) real Turnstile/email/MJ:Files provider wiring; (d) CI token/mj-btn gate; (e) push to remote.
+  - See `plans/PHASE1_DECOMPOSITION.md` for the work-package boundaries, seams, and per-branch commits.
+- **2026-06-30 (later) — UI-test-driven fixes + handoff.** Integration branch is
+  **`feature/phase1-foundation`** (local only; account is read-only on the org remote — nothing pushed).
+  HEAD `69239ad`. Landed since the parallel build: builder fix (codegen resync regenerated
+  `spCreateFormQuestion` + added `PublicLinkToken` to entity/resolver/Angular form), `PublicLinkToken`
+  minter→hook→builder wiring, **codegen appended into `V202606301305`** migration (checksum repaired on the
+  shared DB), **AI authoring reworked to a metadata-driven MJ AIPrompt** (`Forms: Form Designer` + Template +
+  `AIPromptModel` → Gemini 2.5 Pro; model lives in metadata, NOT code — see [[ai-model-selection-via-metadata]]),
+  **Forms home dashboard** tab (BaseDashboard, the §3.2 surface), Actions catalog seeded, and the
+  **OneQuestion render-mode bug** fixed. Metadata pushed to `MJ_Forms` (localhost:1456).
+  - **NEXT (resume here) — last mile for clickable public anonymous forms:**
+    1. **Build the `<mj-form>` widget element bundle** (DG-5) — `register-element.ts` compiles via `ngc` but is
+       never bundled; need an esbuild/`@angular/elements` `build:widget` → served at `/forms/widget/mj-form.js`.
+    2. **`/f/:slug` internal redeem (#2a)** in `packages/Server/src/respondent-host/` — resolve slug →
+       `FormDistribution.PublicLinkToken` → **POST** `http://localhost:<GRAPHQL_PORT>/magic-link/redeem?format=json`
+       (⚠️ GET is side-effect-free / returns 405 — redemption is POST only) → inject the anon JWT (XSS-safe,
+       data-attrs) → render. Then `GET /f/:slug` renders a live anonymous form end-to-end.
+  - **Then to close Phase 1:** real Turnstile/email(CommunicationEngine)/file(MJ:Files) provider wiring;
+    confirm Gemini AIPrompt actually runs in MJAPI (AI credential resolution); `Forms: Upsert Respondent Person`
+    hook not linking a Person; CI token/mj-btn gate; push once write access exists.
+  - **🚨 SUPERVISOR GOTCHAS (cost real time this session):** (a) Agent-tool **worktrees mis-fork off `main`** —
+    EVERY spawned agent must `git checkout -b <b> feature/phase1-foundation` AND verify (`git log` shows
+    foundation HEAD + `grep -c PublicLinkToken …/entity_subclasses.ts` >0) or STOP. (b) The **main checkout's
+    branch silently flips** on worktree creation — `git branch --show-current` before every commit (this is how
+    7 commits once landed on the wrong branch). (c) **User runs MJAPI/Explorer themselves — never start/restart
+    them.** (d) **`MJ_Forms` is the shared dev DB — never DROP it** (the `consolidate-migration` skill wants to;
+    don't). (e) AI keys are in `.env` (present); redeem is POST. State tracked in the task list + this log.
+- **2026-06-30 (later 2) — last-mile clickable-form slices integrated (supervisor + 4 parallel agents).** HEAD
+  **`854d4b4`** on `feature/phase1-foundation`. Four slices built concurrently in isolated worktrees, each
+  verified, then merged `--no-ff` (zero conflicts — fully disjoint file sets); integrated tree builds green
+  (5 packages + MJAPI + widget bundle) with **221 Vitest passing** (Server 90 · Actions 40 · Angular 91):
+  1. **`<mj-form>` widget bundle** (DG-5, `01c0ae6`) — `packages/Angular/scripts/build-widget.mjs` runs esbuild
+     with an **Angular Linker AOT pass** (`@angular/compiler-cli/linker/babel`; published `@angular/*` ship
+     partially-compiled `ɵɵngDeclare*`, so plain esbuild threw "JIT unavailable" at load). `npm run build:widget`
+     → `packages/Angular/dist/widget/mj-form.js` (~900 kB IIFE, zoneless, calls `customElements.define('mj-form')`).
+     Served by `WidgetBundleMiddleware` (`@RegisterClass(BaseServerMiddleware,'mj:formsWidgetBundle')`) at
+     `GET /forms/widget/mj-form.js`; path resolves via `FORMS_WIDGET_BUNDLE_PATH` → `require.resolve('@mj-biz-apps/forms-ng/dist/widget/mj-form.js')` → monorepo fallback; missing bundle → 404, never crashes boot.
+  2. **`/f/:slug` server-side redeem** (`4f2396e`) — `redeem.service.ts` (pure/injectable): slug →
+     `FormDistribution.PublicLinkToken` (via `RunView`, `UserCache.Instance.GetSystemUser()` for the pre-auth
+     read) → `POST ${magicLinkRedeemUrl}?format=json` (Node `fetch`, default `http://localhost:4121/magic-link/redeem`)
+     → anon JWT injected into the host page via XSS-safe `data-token` attr + `Cache-Control: no-store`.
+     Friendly shell-free error pages: slug-not-found 404, closed/out-of-window 410, no-token 409, redeem-fail 502.
+  3. **Upsert Person fix** (`9a87365`) — ROOT CAUSE: seam-S3 param-name mismatch — `on-submit-hooks.service.ts`
+     fired `ResponseID` but the action read `FormResponseID`, so it bailed (`MISSING_PARAMETERS`) before
+     creating/linking the Person. Fixed the producer side; match-before-create by email was already correct.
+  4. **CI UI gate** (`3f643db`) — `scripts/check-ui-tokens.mjs` + `.github/workflows/ui-gate.yml` + root
+     `lint:ui`. Color gate enforces `--mj-*`/`--mjf-*` (var() fallbacks allowed); current tree passes clean
+     (0 violations). Button/`mj-btn` gate coded but **disabled** (repo has 0 `mj-btn` by convention → would be
+     44 false positives); one-line toggle when adopted.
+  - **Gotcha (b) recurred:** resumed agents 1 & 2 ran in the **main checkout** (not their sub-worktrees), flipping
+    its branch and stacking both commits on `worktree-agent-a5864f9c…`; reconciled by switching main back to
+    `feature/phase1-foundation` (user's 3 uncommitted files — `.vscode/settings.json`, `schema.graphql`,
+    `index.html` — preserved throughout, never committed) and merging. Foundation was never endangered (stayed
+    at `989d777` until the approved merges).
+  - **NEXT (resume here) — Phase 1 close-out, all need the live MJAPI the user runs:**
+    1. **Full anonymous-submit e2e in a browser:** `start:api`, mint/activate a distribution, hit `GET /f/:slug`
+       → confirm the bundle loads, `<mj-form>` renders, the server-side redeem injects a working JWT, and
+       `SubmitFormResponse` persists under the anonymous scope (this exercises the redeem wire-contract +
+       `UserCache` system user + actual `customElements` rendering that unit tests stub).
+    2. **Verify the `Forms: Upsert Respondent Person` hook end-to-end** now that the param bug is fixed — a real
+       submission should create/link `MJ_BizApps_Common: People` and set `FormResponse.RespondentPersonID`.
+    3. Real **Turnstile / email (CommunicationEngine) / file (MJ:Files)** provider wiring.
+    4. Confirm the **Gemini AIPrompt** actually executes in MJAPI (AI credential resolution).
+    5. Push once write access to the org remote exists.
+- **2026-07-01 — Phase-1 builder polish: drag-drop reorder + Design/branding panel.** Branch
+  `feature/builder-dnd-theming` off `feature/phase1-foundation`. Angular package builds green;
+  **102 Vitest passing** (was 90 — +12: `style-tokens.spec.ts` 7, `reorder.spec.ts` 5); `lint:ui` clean.
+  1. **Drag-and-drop question reorder** (Feature 1). Added `@angular/cdk@21.1.3` (peer + dev, matching
+     MJExplorer's pin) to `packages/Angular/package.json`; `CdkDropList`/`CdkDrag`/`CdkDragHandle`/`CdkDragPreview`
+     in `form-builder.component`. New `dropQuestion()` + shared `reorderQuestion()` funnel BOTH the arrows
+     (`moveQuestion`) and drag into the **existing** `BuilderStateService.persistQuestionOrder(page)` path — no
+     parallel save; DisplayOrder persists identically. Arrows kept as the keyboard-accessible WCAG fallback; a
+     `cdkDragHandle` grip button (aria-labelled) added. Guard extracted to pure `reorder.ts` (`isValidReorder`,
+     unit-tested). Drag CSS in `form-builder.styles.ts` uses `--mj-*`/`--mjf-*` tokens only.
+  2. **Design / Branding panel** (Feature 2). New builder "Design" tab → `design-panel.component` +
+     `design-state.service` + pure `style-tokens.ts` (reuses `json-fields` `parseStyleTokens`/`buildStyleTokens`,
+     no dup). Lists active `FormStyle` presets via RunView (`.Success`-checked), applies one to the form
+     (`Form.StyleID`), and edits branding basics (Name, primary=`--mjf-accent`, accent=`--mjf-accent-strong`,
+     LogoURL) written into the existing `CSSVariables` JSON via `md.GetEntityObject(...).Save()`. **Duplicate-&-edit**
+     flow copies a preset before editing so shared presets stay pristine. **Live preview** reuses
+     `applyStyleTokens` imported directly from `widget/core/theming` (no cross-package re-export). Existing columns
+     only.
+  - **Deferred (would need schema/CodeGen — NOT done):** per-form (vs per-FormStyle) style overrides would require
+     new columns on `Form`; a `FormStyle.OwnerFormID`/`IsPreset` distinction to hide user copies from the shared
+     preset gallery would also be a schema change. Both left as follow-ups.
+  - **Not committed** — awaiting explicit approval (CLAUDE.md rule 1).
+- **2026-07-01 (later) — Adversarial completeness audit + close-out of the five overstated/deferred gaps.**
+  A 5-agent adversarial audit against the actual code put Phase 1 at ~90% *built* (not "closed"), and
+  found five line-items thinner than their `[x]` implied. All five are now genuinely implemented on
+  `feature/phase1-foundation` (co-resident with the builder-dnd work); whole tree type-checks and tests
+  green. **Nothing committed** (rule 1). Note: unit tests transpile via esbuild and do NOT type-check —
+  every package `tsconfig` excludes specs — so a real `tsc` pass was needed to surface the errors vitest hid.
+  1. **Dedupe (was ABSENT despite being claimed §9).** `public-submit/response-lookup.service.ts` +
+     `submit-pipeline.ts`: a prior `Complete` `FormResponse` for the session/version short-circuits to the
+     existing id (idempotent, no second row); **fail-closed** on lookup-query error.
+  2. **Confirmation email (was a logging no-op).** `Actions/…/on-submit/confirmation-email-sender.ts` —
+     `CommunicationEngineConfirmationEmailSender` via `CommunicationEngine.SendSingleMessage`; provider/
+     message-type/From are **metadata/config-driven, not vendor-hardcoded** (env read in Server
+     `confirmation-email/install-sender.ts`, installed at module load). Fail-soft skip if unconfigured.
+     `LoggingConfirmationEmailSender` retained for tests.
+  3. **File upload (was a filename-only stub).** New `Server/src/upload/` — `POST /forms/upload`
+     `BaseServerMiddleware` (post-auth; reuses the anonymous scope guard, fail-closed; size cap + type
+     allowlist) stores bytes via `@memberjunction/storage` `FileStorageEngine.UploadFile` into `MJ: Files`
+     and returns `{fileId,…}`. Widget `form-upload.service.ts` + `FormQuestionComponent` upload with
+     progress/`aria-live`/retry and store the real `MJ: Files` id as the answer (→ `FormResponseAnswer.FileID`).
+  4. **Partial-save (was contract-only; widget hardcoded `partial:false`).** Server upsert keyed by
+     AnonymousSessionID → `Status='Partial'` (no hooks/quota/count), promoted to `Complete` on final submit;
+     widget `core/autosave-controller.ts` debounced autosave threads the returned `responseId`. **Cross-session
+     resume stays Phase 2 (§5.2).**
+  5. **Reporting live data (was `useMock=true`).** `forms-reporting-dashboard.component.ts` now defaults to the
+     real RunView/RunQuery path; mock is an explicit dev-only opt-in.
+  - **Seam closed:** the widget already sent `responseId` in the `SubmitFormResponse` mutation but the server
+    `@InputType FormSubmissionInputType` lacked the field (would fail GraphQL validation at runtime) — added the
+    nullable field + resolver wiring, guarded by `findOwnedResponseById` (matches ID **and** AnonymousSessionID
+    **and** FormVersionID) so one anonymous session can never adopt another's partial.
+  - **Verified:** `tsc` 0 errors (specs included) in Entities/Actions/Server/Angular; Vitest **Entities 24 ·
+    Actions 45 · Server 130 · Angular 117**; `lint:ui` 0 color violations.
+  - **Still genuinely open for Phase 1 close:** real **Turnstile** provider call is still a stub (fail-closed
+    scaffold only); browser e2e of the full anonymous submit; the mj-btn CI gate remains disabled (color gate
+    enforced); push once org write access exists.
+    _(Superseded — see 2026-07-01 audit below: Turnstile is in fact a real `siteverify` call.)_
+- **2026-07-01 — the above close-out work committed + follow-on fixes landed** (on `feature/phase1-foundation`):
+  - `bb50b16` — builder drag-drop reorder + Design/branding panel **and** the 5 close-out gaps from the
+    adversarial audit (dedupe, real confirmation email, real file upload, partial-save, reporting live data).
+  - `63471fc` — **WYSIWYG theming** (design choices → `--mj-*` tokens, live preview), submit/reporting fixes,
+    and the **`Forms: Analyze Written Responses`** on-submit AI action (metadata-driven `Forms: Response
+    Analyzer` AIPrompt → per-answer `Score`/`ScoreRationale`). Earlier `5c59d6f` (anonymous public links
+    end-to-end) + `051cdb0` (reporting stats scoped by FormID, not latest version) also landed on 06-30.
+- **2026-07-01 — this session: concurrency + AI-analysis robustness (3 commits).**
+  1. `33c4016` — **PK-collision recovery on concurrent duplicate submits.** Two submits with the same
+     client `responseId` (double-click / autosave-vs-submit overlap / retry, common with a blank session)
+     both passed the pre-write dedupe/adopt SELECTs and raced to `spCreateFormResponse` → PK violation. A
+     SELECT can't close that TOCTOU window; only the DB PK can. `persistence.service.ts` now treats a
+     duplicate-key `Save()` failure as "a concurrent request won" and **reconciles** (promote/update if
+     Partial, leave untouched if already Complete — never downgrade), with count-once + no-double-hooks
+     guards. Verified live: a real collision recovered to `Complete`.
+  2. `becbc3c` — **analyzer truncated-JSON salvage + slimmed output + widget submit serialization.** Gemini
+     sometimes returns truncated JSON (its output length is **not** controllable through the MJ runner/
+     Gemini driver — confirmed by reading `AIPromptRunner`/`ai-gemini`; `maxOutputTokens` is never sent, so
+     neither `additionalParameters` nor the AIModelVendor row helps — an upstream gap to file). Mitigations
+     in our control: `coerceAnalyzedAnswers` now brace-scans and salvages the complete leading answers
+     instead of dropping all scores; the prompt/template dropped the unused `sentiment`/`theme` to shrink
+     output. Widget `onSubmit` now disables the button and `await`s `AutosaveController.settle()` (awaits any
+     in-flight autosave) before the final submit, so autosave + submit no longer race the same id.
+  3. `51e2efa` — `mj sync push` of the slimmed analyzer prompt/template to `MJ_Forms` + refreshed sync checksums.
+- **2026-07-01 — 4-agent code-grounded status audit (this entry drives the refreshed Status Snapshot + §9).**
+  Audited the actual code on `feature/phase1-foundation` across four areas (server/anonymous/hardening;
+  respondent widget; actions/AI; reporting+builder+data-model). **Verdict: Phase 1 is genuinely
+  build-complete** — this time the audit found the code *real*, not overstated. Corrections to earlier log
+  claims: (a) **Turnstile is a real Cloudflare `siteverify` fetch**, not a stub (prior lines were stale);
+  (b) confirmation-email sender is CommunicationEngine-backed and file upload writes real `MJ: Files`;
+  (c) AI authoring is the **metadata-driven `Forms: Form Designer` AIPrompt** (Gemini), not "Claude in code";
+  (d) there are **4** on-submit hooks (Analyze Written Responses added); (e) true test total is **396**
+  (Entities 24 · Actions 57 · Server 153 · Angular 162), long past the "158" the log last recorded. Real
+  remaining items are **deploy/verify, not build** (live anonymous-submit e2e, provider config/secrets,
+  remote push) plus small housekeeping (orphaned CodeGen SQL file; `.actions.json` `ResponseID`→
+  `FormResponseID` for 3 hooks; missing `Create Followup Task` test; thin widget flaky-network resilience —
+  the one real §2 UX-bar shortfall). Anti-abuse caveats to note before declaring "closed": the rate-limiter
+  is single-process (DB quota is the durable cap) and the session-hash is usually blank for the widget's
+  plain-fetch transport, so per-session rate-limiting leans on the client response id.

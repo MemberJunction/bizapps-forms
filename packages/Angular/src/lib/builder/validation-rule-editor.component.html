@@ -1,0 +1,84 @@
+<div class="vre">
+  @if (!hasAnyControl) {
+    <p class="vre-empty">No validation options for this question type.</p>
+  }
+
+  @if (showLength) {
+    <div>
+      <label class="vre-label" for="vre-minlen">Min length</label>
+      <input
+        #minLenInput
+        id="vre-minlen"
+        type="number"
+        min="0"
+        class="mjf-input"
+        [value]="_rule.minLength ?? ''"
+        (change)="setNumber('minLength', minLenInput.value)"
+      />
+    </div>
+    <div>
+      <label class="vre-label" for="vre-maxlen">Max length</label>
+      <input
+        #maxLenInput
+        id="vre-maxlen"
+        type="number"
+        min="0"
+        class="mjf-input"
+        [value]="_rule.maxLength ?? ''"
+        (change)="setNumber('maxLength', maxLenInput.value)"
+      />
+    </div>
+  }
+
+  @if (showRange) {
+    <div>
+      <label class="vre-label" for="vre-min">Minimum value</label>
+      <input
+        #minInput
+        id="vre-min"
+        type="number"
+        class="mjf-input"
+        [value]="_rule.min ?? ''"
+        (change)="setNumber('min', minInput.value)"
+      />
+    </div>
+    <div>
+      <label class="vre-label" for="vre-max">Maximum value</label>
+      <input
+        #maxInput
+        id="vre-max"
+        type="number"
+        class="mjf-input"
+        [value]="_rule.max ?? ''"
+        (change)="setNumber('max', maxInput.value)"
+      />
+    </div>
+  }
+
+  @if (showPattern) {
+    <div class="vre-full">
+      <label class="vre-label" for="vre-pattern">Pattern (regular expression)</label>
+      <input
+        #patternInput
+        id="vre-pattern"
+        type="text"
+        class="mjf-input"
+        placeholder="^[A-Z]{2}\d+$"
+        [value]="_rule.pattern ?? ''"
+        (change)="setPattern(patternInput.value)"
+      />
+    </div>
+    <div class="vre-full">
+      <label class="vre-label" for="vre-patternmsg">Message shown when the pattern fails</label>
+      <input
+        #patternMsgInput
+        id="vre-patternmsg"
+        type="text"
+        class="mjf-input"
+        placeholder="Please enter a valid value"
+        [value]="_rule.patternMessage ?? ''"
+        (change)="setPatternMessage(patternMsgInput.value)"
+      />
+    </div>
+  }
+</div>

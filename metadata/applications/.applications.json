@@ -1,0 +1,154 @@
+[
+  {
+    "_comments": [
+      "MJ Forms admin/builder Explorer application. The builder is NOT a custom nav",
+      "resource: WP-D registered it as an entity form override",
+      "(@RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Forms', 10)), so opening a",
+      "Form record renders the visual builder. The 'Forms' nav item is a 'User Views'",
+      "resource pointing at the 'All Forms' saved view (a records grid) — pick/create a",
+      "form, open it, build it. ('Records' resource type = a SINGLE record, not a list.)",
+      "The 'Responses & Analytics' item points at the FormsReportingDashboard Dashboard",
+      "record (DriverClass 'FormsReportingDashboard', registered by WP-F via",
+      "@RegisterClass(BaseDashboard, 'FormsReportingDashboard')) by RecordID.",
+      "The embedded Application Entities make the Forms admin entities browsable here."
+    ],
+    "fields": {
+      "Name": "Forms",
+      "Description": "Build, distribute, and analyze forms, surveys, and intake. Author forms with the visual builder or AI, publish public/embed/QR distributions, and review responses as first-class MemberJunction records.",
+      "Icon": "fa-solid fa-clipboard-list",
+      "DefaultForNewUser": false,
+      "DefaultNavItems": [
+        {
+          "Label": "Forms",
+          "Icon": "fa-solid fa-clipboard-list",
+          "ResourceType": "Dashboards",
+          "RecordID": "3F8A6B12-9C4D-4E7A-B1F2-5A6D7E8C9012",
+          "isDefault": true
+        },
+        {
+          "Label": "Responses & Analytics",
+          "Icon": "fa-solid fa-chart-column",
+          "ResourceType": "Dashboards",
+          "RecordID": "EB23CCFD-AAF5-48BE-8B81-33A3944AD898",
+          "isDefault": true
+        }
+      ]
+    },
+    "relatedEntities": {
+      "MJ: Application Entities": [
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms",
+            "Sequence": 10,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "245E7F5E-1EB5-4B15-BDC2-5ABF2816BBE7"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.595Z",
+            "checksum": "f4c1993af6787895551b68c9aaf1dc7bfa887712a8600200e8ea918ef401b81d"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Categories",
+            "Sequence": 20,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "C7C9BF71-6955-47F2-8B0B-1033B2414DC2"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.606Z",
+            "checksum": "fc19d2f581463c778e64eeb0a0b4c130cee8b329b56d09a6d5a2f9e15780a584"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Styles",
+            "Sequence": 30,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "0B8026EE-E84C-4533-B922-3605B949FB35"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.619Z",
+            "checksum": "a666deb8cc66a6d83335cb528180387eac372f128a7ec00d6b487555442f271a"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Versions",
+            "Sequence": 40,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "9B35C777-ED4D-46EF-A8BB-3E80C26C1D92"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.630Z",
+            "checksum": "95711affc09d0c88b049383291e9e24c7ad043dde810f594b8564e0cd6a1a43d"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Distributions",
+            "Sequence": 50,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "C840628B-FFBA-446E-861F-7D8CACDDDB0C"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.640Z",
+            "checksum": "63e324ef29fadc6838ba772e2134b6be0471b2e2f1df16f18ea0084e62e0a0d1"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Responses",
+            "Sequence": 60,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "6D9B03F2-B276-496D-8752-604CD025FED9"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.651Z",
+            "checksum": "6463deac3b60e872d4ff457bdc7c1761abd7a3e2956fb6c25be6d6c4aba36e0c"
+          }
+        },
+        {
+          "fields": {
+            "ApplicationID": "@parent:ID",
+            "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Response Answers",
+            "Sequence": 70,
+            "DefaultForNewUser": true
+          },
+          "primaryKey": {
+            "ID": "926C118D-4A68-4771-98CF-899B66AD4B41"
+          },
+          "sync": {
+            "lastModified": "2026-06-30T17:14:17.661Z",
+            "checksum": "9ac5ed351fe471a8d18414b2237a7edfc35c407fc643397344ddcdbfb9a80312"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "BFB97C57-4552-4643-8933-A0B2D76544D8"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T20:02:04.524Z",
+      "checksum": "3d8eef15f73d497bd25e1d07e07e3e49741b9cbf37d88406328d68efa54aeedc"
+    }
+  }
+]

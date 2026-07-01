@@ -1,0 +1,171 @@
+/* Host is the themable surface: style tokens are set on the element by applyStyleTokens.
+   Fallbacks keep the widget legible before any FormStyle is applied. */
+:host {
+  display: block;
+  /* --mjf-* fallbacks (mirror docs/app/design-system.css :root) so the widget renders
+     standalone; a published FormStyle overrides these via host inline custom props. */
+  --mj-font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --mj-bg-page: #ffffff;
+  --mj-bg-surface: #ffffff;
+  --mj-bg-surface-sunken: #f1f3f5;
+  --mj-text-primary: #1a1d21;
+  --mj-text-muted: #5c6670;
+  --mj-border-default: #d7dce1;
+  --mj-border-strong: #b7bfc7;
+  --mj-radius-sm: 6px;
+  --mj-radius-md: 10px;
+  --mj-radius-lg: 14px;
+  --mj-shadow-sm: 0 1px 3px rgba(20, 24, 31, 0.08);
+  --mj-status-error: #c1392b;
+  --mj-brand-primary: #2f5bea;
+  --mj-brand-primary-hover: #2348c4;
+  --mj-brand-on-primary: #ffffff;
+
+  --mjf-font-body: var(--mj-font-family);
+  --mjf-font-display: var(--mj-font-family);
+  --mjf-page-bg: var(--mj-bg-page);
+  --mjf-page-ink: var(--mj-text-primary);
+  --mjf-accent: var(--mj-brand-primary);
+  --mjf-accent-strong: var(--mj-brand-primary-hover);
+  --mjf-on-accent: var(--mj-brand-on-primary);
+  --mjf-accent-soft: color-mix(in srgb, var(--mjf-accent) 12%, var(--mj-bg-surface));
+  --mjf-card-bg: var(--mj-bg-surface);
+  --mjf-card-border: var(--mj-border-default);
+  --mjf-card-radius: var(--mj-radius-lg);
+  --mjf-card-shadow: var(--mj-shadow-sm);
+  --mjf-input-bg: var(--mj-bg-surface);
+  --mjf-input-border: var(--mj-border-strong);
+  --mjf-input-radius: var(--mj-radius-md);
+  --mjf-choice-bg: var(--mj-bg-surface);
+  --mjf-choice-border: var(--mj-border-default);
+  --mjf-choice-radius: var(--mj-radius-md);
+  --mjf-choice-selected-bg: var(--mjf-accent-soft);
+  --mjf-choice-selected-border: var(--mjf-accent);
+  --mjf-choice-selected-text: var(--mj-text-primary);
+  --mjf-progress-track: var(--mj-bg-surface-sunken);
+  --mjf-progress-fill: var(--mjf-accent);
+  --mjf-rating-active: var(--mjf-accent);
+  --mjf-rating-inactive: var(--mj-border-strong);
+  --mjf-btn-radius: var(--mj-radius-md);
+  --mjf-pill-radius: 999px;
+  --mjf-focus-ring: 0 0 0 3px color-mix(in srgb, var(--mjf-accent) 35%, transparent);
+
+  font-family: var(--mjf-font-body);
+  color: var(--mjf-page-ink);
+  background: var(--mjf-page-bg);
+}
+
+.mjf-shell {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 1.25rem;
+  box-sizing: border-box;
+}
+
+.mjf-header {
+  margin-bottom: 1.5rem;
+}
+
+.mjf-header__title {
+  margin: 0 0 0.25rem;
+  font-family: var(--mjf-font-display);
+  font-size: 1.75rem;
+  line-height: 1.2;
+  color: var(--mjf-page-ink);
+}
+
+.mjf-header__desc {
+  margin: 0;
+  color: var(--mj-text-muted);
+}
+
+.mjf-banner-error {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  color: var(--mj-status-error);
+  background: color-mix(in srgb, var(--mj-status-error) 10%, transparent);
+  border-radius: var(--mjf-input-radius);
+}
+
+.mjf-captcha-gap {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  color: var(--mj-status-error);
+  background: color-mix(in srgb, var(--mj-status-error) 10%, transparent);
+  border-radius: var(--mjf-input-radius);
+  font-size: 0.9375rem;
+}
+
+.mjf-autosave {
+  margin: 0.75rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--mj-text-muted);
+}
+
+.mjf-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--mjf-page-ink);
+}
+
+.mjf-state--error .mjf-state__msg {
+  color: var(--mj-status-error);
+}
+
+.mjf-spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid var(--mjf-progress-track);
+  border-top-color: var(--mjf-accent);
+  border-radius: var(--mjf-pill-radius);
+  animation: mjf-spin 0.8s linear infinite;
+}
+
+@keyframes mjf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mjf-done__icon {
+  font-size: 2.5rem;
+  color: var(--mjf-accent);
+}
+
+.mjf-done__msg {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.mjf-retry {
+  min-height: 2.75rem;
+  padding: 0.625rem 1.5rem;
+  color: var(--mjf-on-accent);
+  background: var(--mjf-accent);
+  border: none;
+  border-radius: var(--mjf-btn-radius);
+  cursor: pointer;
+  font-family: var(--mjf-font-body);
+  font-size: 1rem;
+}
+
+.mjf-retry:focus-visible {
+  outline: none;
+  box-shadow: var(--mjf-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mjf-spinner {
+    animation-duration: 2s;
+  }
+}

@@ -4,7 +4,20 @@
     "autoCreateMissingRecords": true
   },
   "directoryOrder": [
-    "schema-info"
+    "schema-info",
+    "roles",
+    "action-categories",
+    "ai-prompt-categories",
+    "templates",
+    "ai-prompts",
+    "form-categories",
+    "form-styles",
+    "user-views",
+    "applications",
+    "dashboards",
+    "application-roles",
+    "entity-permissions",
+    "actions"
   ],
   "emitSyncNotes": false
 }

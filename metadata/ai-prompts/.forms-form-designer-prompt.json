@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Form Designer",
+      "Description": "AI form-authoring Designer for the MJ Forms Open App. Turns a natural-language brief into a structured FormBlueprint JSON object (validated downstream against the Phase-1 §5.3 question taxonomy). The model/vendor is metadata-driven: SelectionStrategy=Specific pins the related AI Prompt Model below, so installers swap the model here (in metadata) rather than in code.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Form Designer",
+      "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
+      "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
+      "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
+      "Status": "Active",
+      "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-form-designer.output-example.json",
+      "SelectionStrategy": "Specific",
+      "PowerPreference": "Highest",
+      "PromptRole": "System",
+      "PromptPosition": "First",
+      "ParallelizationMode": "None",
+      "ValidationBehavior": "Strict",
+      "MaxRetries": 2,
+      "EffortLevel": null
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": [
+        {
+          "fields": {
+            "PromptID": "@parent:ID",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.1 Pro",
+            "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718293"
+          },
+          "sync": {
+            "lastModified": "2026-07-01T00:46:59.155Z",
+            "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829304"
+    },
+    "sync": {
+      "lastModified": "2026-07-01T00:47:36.484Z",
+      "checksum": "114fb979ca8327f1ef0ccca875264ef6d72a0de655fa4f04b448065e8e79c6fe"
+    }
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "_comments": [
+      "Internal access to the Forms admin/builder Explorer application. Developer gets",
+      "admin; UI (the standard authenticated-user role) gets access. The 'Form Respondent'",
+      "role is deliberately NOT granted application access — respondents use the headless",
+      "mj-form widget, never the Explorer shell."
+    ],
+    "fields": {
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "RoleID": "@lookup:MJ: Roles.Name=Developer",
+      "CanAccess": true,
+      "CanAdmin": true
+    },
+    "primaryKey": {
+      "ID": "ECA4686E-EBEA-45AE-AC33-1EABDD2A3399"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.723Z",
+      "checksum": "e369d9be7eb1b8c7762f1a2213359d5ea677ebc80df73fc463dc682a45912c91"
+    }
+  },
+  {
+    "fields": {
+      "ApplicationID": "@lookup:MJ: Applications.Name=Forms",
+      "RoleID": "@lookup:MJ: Roles.Name=UI",
+      "CanAccess": true,
+      "CanAdmin": false
+    },
+    "primaryKey": {
+      "ID": "814E01B6-2B2D-4787-9826-3F16DE8F51C1"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.734Z",
+      "checksum": "de9d9f28880e2b2b3ffc20c2fcad460d41ce85545feb6dff059a0bc13a8d2b1f"
+    }
+  }
+]
