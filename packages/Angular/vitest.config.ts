@@ -1,16 +1,16 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Vitest config for the forms-ng package. Targets the pure-logic builder modules
- * (snapshot builder, JSON field codecs, question-type catalog, distribution-link
- * helpers, QR encoder) — none of which need Angular TestBed or a DOM. Component
- * classes are intentionally NOT unit-tested here; their behaviour is covered by the
- * pure services they delegate to.
+ * Vitest config for the forms-ng package. Covers all pure (Angular-free) logic
+ * across widget, dashboard, and builder (runtime/validation/theming, reporting
+ * aggregations, snapshot builder, JSON field codecs, question-type catalog,
+ * distribution-link helpers, QR encoder). Angular component classes are not
+ * unit-tested here; they're exercised by the Explorer ngc build (strictTemplates).
  */
 export default defineConfig({
   test: {
+    include: ['src/**/*.spec.ts'],
     environment: 'node',
-    include: ['src/lib/builder/**/*.spec.ts'],
-    globals: false,
+    globals: true,
   },
 });

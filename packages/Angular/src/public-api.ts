@@ -33,6 +33,8 @@ export function LoadBizAppsFormsClient(): void {
     // Static imports ensure all classes are registered.
 }
 
+// WP-C — respondent widget (<mj-form> custom element + S1 API seam + runtime)
+export * from './lib/widget/index';
 // WP-D builder — registers the Forms form-component override (visual builder) + re-exports.
 export * from './lib/builder';
 // Forms home/studio dashboard — the first-class "Forms" Explorer surface (plan §3.2).
