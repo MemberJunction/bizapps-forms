@@ -1,0 +1,24 @@
+{
+  "entity": "MJ: AI Prompts",
+  "filePattern": "**/.*.json",
+  "ignoreDirectories": [
+    "templates"
+  ],
+  "pull": {
+    "lookupFields": {
+      "CategoryID": { "entity": "MJ: AI Prompt Categories", "field": "Name" },
+      "TypeID": { "entity": "MJ: AI Prompt Types", "field": "Name" },
+      "TemplateID": { "entity": "MJ: Templates", "field": "Name" }
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": {
+        "entity": "MJ: AI Prompt Models",
+        "foreignKey": "PromptID",
+        "lookupFields": {
+          "ModelID": { "entity": "MJ: AI Models", "field": "Name" },
+          "VendorID": { "entity": "MJ: AI Vendors", "field": "Name" }
+        }
+      }
+    }
+  }
+}

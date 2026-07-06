@@ -1,0 +1,225 @@
+@let q = question();
+
+<div class="mjf-question" [class.mjf-question--error]="!!errorMessage()">
+  @if (q.type === 'Statement') {
+    <div class="mjf-statement" role="note">
+      <h3 class="mjf-statement__title">{{ q.prompt }}</h3>
+      @if (q.helpText) {
+        <p class="mjf-statement__help">{{ q.helpText }}</p>
+      }
+    </div>
+  } @else {
+    <label class="mjf-question__label" [attr.for]="inputId()">
+      <span class="mjf-question__prompt">{{ q.prompt }}</span>
+      @if (q.isRequired) {
+        <span class="mjf-question__required" aria-hidden="true">*</span>
+        <span class="mjf-visually-hidden">(required)</span>
+      }
+    </label>
+    @if (q.helpText) {
+      <p class="mjf-question__help" [id]="helpId()">{{ q.helpText }}</p>
+    }
+
+    <div class="mjf-question__control">
+      @switch (q.type) {
+        @case ('LongText') {
+          <textarea
+            class="mjf-input mjf-textarea"
+            [id]="inputId()"
+            [rows]="textRows()"
+            [placeholder]="placeholder()"
+            [value]="textValue()"
+            [attr.aria-required]="q.isRequired"
+            [attr.aria-invalid]="!!errorMessage()"
+            [attr.aria-describedby]="describedBy()"
+            (input)="onText($any($event.target).value)"
+          ></textarea>
+        }
+        @case ('Number') {
+          <input
+            class="mjf-input"
+            [id]="inputId()"
+            type="number"
+            inputmode="decimal"
+            [placeholder]="placeholder()"
+            [value]="textValue()"
+            [attr.aria-required]="q.isRequired"
+            [attr.aria-invalid]="!!errorMessage()"
+            [attr.aria-describedby]="describedBy()"
+            (input)="onNumber($any($event.target).value)"
+          />
+        }
+        @case ('SingleChoice') {
+          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            @for (opt of q.options; track opt.id) {
+              <button
+                type="button"
+                role="radio"
+                class="mjf-choice"
+                [class.mjf-choice--selected]="textValue() === opt.value"
+                [attr.aria-checked]="textValue() === opt.value"
+                (click)="onSingleChoice(opt.value)"
+              >
+                <span class="mjf-choice__mark" aria-hidden="true"></span>
+                <span class="mjf-choice__label">{{ opt.label }}</span>
+              </button>
+            }
+          </div>
+        }
+        @case ('MultiChoice') {
+          <div class="mjf-choices" role="group" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            @for (opt of q.options; track opt.id) {
+              <button
+                type="button"
+                role="checkbox"
+                class="mjf-choice"
+                [class.mjf-choice--selected]="isSelected(opt.value)"
+                [attr.aria-checked]="isSelected(opt.value)"
+                (click)="onMultiToggle(opt.value)"
+              >
+                <span class="mjf-choice__mark mjf-choice__mark--box" aria-hidden="true"></span>
+                <span class="mjf-choice__label">{{ opt.label }}</span>
+              </button>
+            }
+          </div>
+        }
+        @case ('Dropdown') {
+          <select
+            class="mjf-input mjf-select"
+            [id]="inputId()"
+            [value]="textValue()"
+            [attr.aria-required]="q.isRequired"
+            [attr.aria-invalid]="!!errorMessage()"
+            [attr.aria-describedby]="describedBy()"
+            (change)="onSingleChoice($any($event.target).value)"
+          >
+            <option value="" disabled [selected]="textValue() === ''">Select…</option>
+            @for (opt of q.options; track opt.id) {
+              <option [value]="opt.value" [selected]="textValue() === opt.value">{{ opt.label }}</option>
+            }
+          </select>
+        }
+        @case ('Rating') {
+          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            @for (star of ratingScale(); track star) {
+              <button
+                type="button"
+                role="radio"
+                class="mjf-rating__star"
+                [class.mjf-rating__star--on]="numericValue() !== null && star <= numericValue()!"
+                [attr.aria-checked]="numericValue() === star"
+                [attr.aria-label]="star + ' of ' + ratingMax()"
+                (click)="onRating(star)"
+              >
+                <i class="fa-solid fa-star" aria-hidden="true"></i>
+              </button>
+            }
+          </div>
+        }
+        @case ('NPS') {
+          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            @for (n of npsScale; track n) {
+              <button
+                type="button"
+                role="radio"
+                class="mjf-nps__btn"
+                [class.mjf-nps__btn--selected]="numericValue() === n"
+                [attr.aria-checked]="numericValue() === n"
+                [attr.aria-label]="n + ' out of 10'"
+                (click)="onRating(n)"
+              >{{ n }}</button>
+            }
+          </div>
+        }
+        @case ('YesNo') {
+          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
+              [class.mjf-choice--selected]="booleanValue() === true"
+              [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">Yes</button>
+            <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
+              [class.mjf-choice--selected]="booleanValue() === false"
+              [attr.aria-checked]="booleanValue() === false" (click)="onYesNo(false)">No</button>
+          </div>
+        }
+        @case ('FileUpload') {
+          <input
+            class="mjf-input mjf-file"
+            [id]="inputId()"
+            type="file"
+            #fileInput
+            [accept]="fileAccept()"
+            [disabled]="uploadStatus() === 'uploading'"
+            [attr.aria-required]="q.isRequired"
+            [attr.aria-invalid]="!!errorMessage() || uploadStatus() === 'error'"
+            [attr.aria-describedby]="describedBy()"
+            (change)="onFile(fileInput)"
+          />
+
+          @if (uploadStatus() === 'uploading') {
+            <div
+              class="mjf-file__progress"
+              role="progressbar"
+              aria-label="Uploading file"
+              [attr.aria-valuenow]="uploadPercent()"
+              [attr.aria-valuemin]="uploadPercent() === null ? null : 0"
+              [attr.aria-valuemax]="uploadPercent() === null ? null : 100"
+            >
+              <span
+                class="mjf-file__progress-bar"
+                [class.mjf-file__progress-bar--indeterminate]="uploadPercent() === null"
+                [style.width.%]="uploadPercent() ?? 100"
+              ></span>
+            </div>
+          }
+
+          <p class="mjf-file__status" aria-live="polite">
+            @switch (uploadStatus()) {
+              @case ('uploading') {
+                <span>
+                  <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                  Uploading {{ uploadFileName() }}@if (uploadPercent() !== null) { — {{ uploadPercent() }}% }…
+                </span>
+              }
+              @case ('done') {
+                <span class="mjf-file__ok">
+                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  {{ uploadFileName() }} uploaded
+                </span>
+              }
+            }
+          </p>
+
+          @if (uploadStatus() === 'error') {
+            <p class="mjf-file__error" role="alert">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              {{ uploadError() }}
+            </p>
+            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
+              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry upload
+            </button>
+          }
+        }
+        @default {
+          <!-- ShortText · Email · Phone · Date · Time -->
+          <input
+            class="mjf-input"
+            [id]="inputId()"
+            [type]="inputType()"
+            [attr.inputmode]="inputMode()"
+            [attr.autocomplete]="autocomplete()"
+            [placeholder]="placeholder()"
+            [value]="textValue()"
+            [attr.aria-required]="q.isRequired"
+            [attr.aria-invalid]="!!errorMessage()"
+            [attr.aria-describedby]="describedBy()"
+            (input)="onText($any($event.target).value)"
+          />
+        }
+      }
+    </div>
+
+    @if (errorMessage()) {
+      <p class="mjf-question__error" [id]="errorId()" role="alert">{{ errorMessage() }}</p>
+    }
+  }
+</div>

@@ -1,0 +1,155 @@
+[
+  {
+    "fields": {
+      "Name": "Contact",
+      "Description": "Contact and get-in-touch forms: contact us, support requests, general inquiries.",
+      "ParentID": null,
+      "IconClass": "fa-solid fa-envelope",
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "C7B1DE46-8C04-4DF9-8920-07DBBE30EA1C"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.424Z",
+      "checksum": "005a70f5e7d061ffde9f53a0b2b871045eb697f8868e6882a055178a7f8d7a37"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Feedback & NPS",
+      "Description": "Customer and member feedback: satisfaction surveys, Net Promoter Score, post-interaction ratings.",
+      "ParentID": null,
+      "IconClass": "fa-solid fa-comment-dots",
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "FAC231B6-34D7-4BF3-BCBE-AEF5BFAA46D3"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.436Z",
+      "checksum": "9e60df17272a07c95cde2ff0ff7d8b7dbb2ff50952b57c2343065b146cff7015"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Registration & RSVP",
+      "Description": "Event and program sign-ups: event registration, RSVP, webinar enrollment, class booking.",
+      "ParentID": null,
+      "IconClass": "fa-solid fa-calendar-check",
+      "DisplayRank": 30,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "1D2CAFC8-EBE0-4CCA-B78B-E0961C6E4B01"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.447Z",
+      "checksum": "13bb6334ce63a73599f61ae0ba59edec5ec115d2772216311bd40355c2a72591"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Application",
+      "Description": "Structured applications and intake: membership applications, grant applications, job applications, program intake.",
+      "ParentID": null,
+      "IconClass": "fa-solid fa-file-signature",
+      "DisplayRank": 40,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "602A3342-2A77-47FF-B492-7855D40602F6"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.459Z",
+      "checksum": "1d3bc24dc10c131a57f7243765da936ae3aafc92f2fd104e54e1ac707669a421"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Lead Capture",
+      "Description": "Marketing and sales lead generation: demo requests, gated-content downloads, newsletter sign-ups, quote requests.",
+      "ParentID": null,
+      "IconClass": "fa-solid fa-bullseye",
+      "DisplayRank": 50,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "B006E8AF-0C83-40BE-9A7F-7B4F8E783041"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.469Z",
+      "checksum": "7fd853985134aaffcad89d8f04a1eca2564232028d5772a8e9a65313d919800a"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Survey",
+      "Description": "General-purpose surveys and questionnaires: research surveys, polls, assessments, quizzes.",
+      "ParentID": null,
+      "IconClass": "fa-solid fa-square-poll-vertical",
+      "DisplayRank": 60,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "AAC98AA1-5BE9-4B1D-9FB8-D3289C3C38FA"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.479Z",
+      "checksum": "10711884ab95ac881c0143f869d184438c4354ccec38a63f98a59da27b8a7884"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Customer Satisfaction (CSAT)",
+      "Description": "Short post-interaction satisfaction surveys.",
+      "ParentID": "FAC231B6-34D7-4BF3-BCBE-AEF5BFAA46D3",
+      "IconClass": "fa-solid fa-face-smile",
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "6DF5E865-0D3A-42F4-A224-5BF964BB1291"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.492Z",
+      "checksum": "5d0b1b3c771855dfd0ec65116b7a59f19c896a95f664076adfb09816b0b2faf9"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Event Feedback",
+      "Description": "Post-event evaluations and session ratings.",
+      "ParentID": "FAC231B6-34D7-4BF3-BCBE-AEF5BFAA46D3",
+      "IconClass": "fa-solid fa-star-half-stroke",
+      "DisplayRank": 20,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "EBB64EB0-CF84-420D-9FE6-CB6DAEAE3A40"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.502Z",
+      "checksum": "de5e97e5a9f8aae38be89838546f59cca6486312e2ba2a7daabc2b68546e89f4"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Membership Application",
+      "Description": "New-member and renewal applications.",
+      "ParentID": "602A3342-2A77-47FF-B492-7855D40602F6",
+      "IconClass": "fa-solid fa-id-card",
+      "DisplayRank": 10,
+      "IsActive": true
+    },
+    "primaryKey": {
+      "ID": "15D05E08-0F3B-4AE0-96B3-55667856C446"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T17:14:17.513Z",
+      "checksum": "28deeb9f4d888f7dd1fcc6381ec4747622a7c86485292ef836988de31e272898"
+    }
+  }
+]

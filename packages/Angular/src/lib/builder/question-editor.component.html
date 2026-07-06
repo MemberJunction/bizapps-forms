@@ -1,0 +1,96 @@
+@if (!node) {
+  <div class="qe-empty">Select a question to edit its settings.</div>
+} @else {
+  <div class="qe">
+    <div class="qe-head">
+      <span class="mjf-pill"><i [class]="typeIcon" aria-hidden="true"></i> {{ typeLabel }}</span>
+    </div>
+
+    <div class="mjf-field">
+      <label class="mjf-field-label" for="qe-prompt">Question</label>
+      <textarea
+        #promptInput
+        id="qe-prompt"
+        class="mjf-input"
+        rows="2"
+        [value]="node.entity.Prompt"
+        (change)="setPrompt(promptInput.value)"
+      ></textarea>
+    </div>
+
+    <div class="mjf-field">
+      <label class="mjf-field-label" for="qe-help">Help text</label>
+      <input
+        #helpInput
+        id="qe-help"
+        type="text"
+        class="mjf-input"
+        [value]="node.entity.HelpText ?? ''"
+        (change)="setHelpText(helpInput.value)"
+        placeholder="Optional guidance shown under the question"
+      />
+    </div>
+
+    <div class="qe-required">
+      <span>Required</span>
+      <button
+        type="button"
+        class="mjf-switch"
+        [class.is-on]="node.entity.IsRequired"
+        role="switch"
+        [attr.aria-checked]="node.entity.IsRequired"
+        aria-label="Required"
+        (click)="toggleRequired()"
+      ></button>
+    </div>
+
+    @if (hasOptions) {
+      <div class="qe-section">
+        <p class="qe-section-title">Options</p>
+        <div class="qe-options">
+          @for (opt of node.options; track opt.ID) {
+            <div class="qe-option">
+              <input
+                #optInput
+                type="text"
+                class="mjf-input"
+                [value]="opt.Label"
+                (change)="setOptionLabel($index, optInput.value)"
+                [attr.aria-label]="'Option ' + ($index + 1)"
+              />
+              <button
+                type="button"
+                class="qe-opt-remove"
+                (click)="removeOption($index)"
+                aria-label="Remove option"
+              >
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          }
+        </div>
+        <button type="button" class="mjf-btn mjf-btn--ghost" style="margin-top:8px" (click)="addOption()">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add option
+        </button>
+      </div>
+    }
+
+    <div class="qe-section">
+      <p class="qe-section-title">Validation</p>
+      <mjf-validation-rule-editor
+        [questionType]="node.entity.QuestionType"
+        [rule]="validationRule"
+        (ruleChange)="onValidationChange($event)"
+      ></mjf-validation-rule-editor>
+    </div>
+
+    <div class="qe-section">
+      <p class="qe-section-title">Conditional logic</p>
+      <mjf-conditional-rule-editor
+        [sources]="conditionalSources"
+        [rule]="conditionalRule"
+        (ruleChange)="onConditionalChange($event)"
+      ></mjf-conditional-rule-editor>
+    </div>
+  </div>
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "_comments": [
+      "App-level 'All Forms' view powering the Forms app's primary nav tab (ResourceType",
+      "'User Views' -> ViewResource = a records grid). Opening a row renders the visual",
+      "builder (the Form entity-form override). IsShared so all app users can load it.",
+      "UserID is the install Owner; adjust per deployment if that user is absent."
+    ],
+    "fields": {
+      "Name": "All Forms",
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms",
+      "UserID": "ECAFCCEC-6A37-EF11-86D4-000D3A4E707E",
+      "IsShared": true
+    },
+    "primaryKey": {
+      "ID": "7F0D0001-A1B2-4C3D-8E4F-000000000001"
+    },
+    "sync": {
+      "lastModified": "2026-06-30T20:49:10.207Z",
+      "checksum": "2e445a7c0b61297a9f87ac72775d731a165e62b02bedc21798bd696aff55a012"
+    }
+  }
+]

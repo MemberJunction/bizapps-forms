@@ -1,4 +1,5 @@
 export * from './generated/entity_subclasses'
+export * from './contracts'
 
 /**
  * Forces the generated entity subclasses to be loaded so their @RegisterClass

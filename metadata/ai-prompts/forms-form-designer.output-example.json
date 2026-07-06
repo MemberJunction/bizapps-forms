@@ -1,0 +1,39 @@
+{
+  "name": "Event RSVP",
+  "description": "Let us know if you can make it.",
+  "renderMode": "Scroll",
+  "confirmationMessage": "Thanks — your RSVP has been recorded.",
+  "pages": [
+    {
+      "title": "Your details",
+      "description": "A few quick questions.",
+      "questions": [
+        {
+          "type": "ShortText",
+          "prompt": "Your name",
+          "helpText": "First and last name.",
+          "isRequired": true
+        },
+        {
+          "type": "Email",
+          "prompt": "Email address",
+          "isRequired": true
+        },
+        {
+          "type": "SingleChoice",
+          "prompt": "Will you attend?",
+          "isRequired": true,
+          "options": [
+            { "label": "Yes", "value": "yes", "isDefault": true },
+            { "label": "No", "value": "no" }
+          ]
+        },
+        {
+          "type": "Number",
+          "prompt": "How many guests are you bringing?",
+          "settings": { "min": 0, "max": 5 }
+        }
+      ]
+    }
+  ]
+}

@@ -49,3 +49,5 @@ report.json
 
 
 metadata/sql_logging
+# Claude Code agent worktrees
+.claude/worktrees/

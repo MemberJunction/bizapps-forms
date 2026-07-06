@@ -1,0 +1,9 @@
+{
+  "entity": "MJ: AI Prompt Categories",
+  "filePattern": "**/.*.json",
+  "pull": {
+    "lookupFields": {
+      "ParentID": { "entity": "MJ: AI Prompt Categories", "field": "Name" }
+    }
+  }
+}
