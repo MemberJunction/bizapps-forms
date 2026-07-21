@@ -21,8 +21,10 @@
     "@mj-biz-apps/forms-core-entities-server": "0.2.0",
     "@mj-biz-apps/forms-entities": "0.2.0",
     "@mj-biz-apps/forms-actions": "0.2.0",
-    "@mj-biz-apps/forms-ng": "0.2.0",
     "class-validator": "^0.14.3"
+  },
+  "optionalDependencies": {
+    "@mj-biz-apps/forms-ng": "0.2.0"
   },
   "peerDependencies": {
     "@memberjunction/actions": "^5.43.0",
