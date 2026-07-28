@@ -666,8 +666,8 @@ native entities. This is the reporting differentiator no incumbent has.
   alongside Forms, the duplicate type names made **MJAPI fail to start outright** in every real
   deployment. Fixed by adding both sibling schemas to `excludeSchemas` and removing the
   foreign-schema artifacts from `packages/{Entities,Server,Angular}/…/generated`.
-    - **Verification:** `forms-server` now contributes **50** generated classes (was 196), with
-      **zero** name overlap against `tasks-server` (was 95, complete) or `common-server` (was 51,
+    - **Verification:** `forms-server` now contributes **50** generated classes (was 195), with
+      **zero** name overlap against `tasks-server` (was 95, complete) or `common-server` (was 50,
       complete) — measured by extracting class names from all three packages' built
       `dist/generated/generated.js`. Full build 7/7 green; 426 tests pass across 52 files.
     - **Consequence for the two on-submit actions:** `Forms: Create Followup Task` and

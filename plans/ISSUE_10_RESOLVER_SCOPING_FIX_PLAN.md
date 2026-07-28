@@ -190,8 +190,12 @@ the matchers fire on known-bad input and stay silent on the legitimate FK refere
 - `npm run build` — 7/7 tasks green (all packages + MJAPI + MJExplorer).
 - Tests — 426 passed across 52 files (Actions 61, Entities 24, Server 153, Angular 162,
   CoreEntitiesServer 26). No test was modified.
-- `npm run lint:generated` — RED before the fix (261 violations across 90 paths),
-  GREEN after. `npm run lint:ui` — still green.
+- `npm run lint:generated` — RED before the fix, GREEN after. Run the *shipped* gate against
+  the pre-fix tree (`git worktree add --detach <dir> 1ae4180`, copy the script in, run it) and
+  it reports **348 violations across 90 paths**. An earlier draft of this record said "261",
+  which was the number the gate emitted *before* its own matcher was widened — not
+  reproducible with the script as shipped, so it has been replaced with the reproducible
+  figure. `npm run lint:ui` — still green.
 - **Type-overlap proof** — generated class names extracted from the built
   `dist/generated/generated.js` of all three packages (siblings pulled from npm):
 
@@ -254,7 +258,9 @@ This is contained but not resolved:
   so the dry-run could not have proven anything about a strict resolver.
 
 **Follow-up (outside this fix's blast radius, logged not done):** CLAUDE.md justifies the
-5.43.0 pin with "5.44.0 … is NOT published to npm (404)". That is now **stale** —
+5.43.0 pin by noting the forms-critical features ship in 5.43.0, "which — unlike 5.44.0 — is
+actually published to npm" (`CLAUDE.md:17`); `plans/FORMS_BUILD_PLAN.md:695` records the
+underlying DG-1 check as "is NOT published to npm (404)". That rationale is now **stale** —
 `@memberjunction/core@5.44.0` is published and latest is `5.49.0`; the reporter of #10 is
 running 5.48.0. Revving the pin would clear this tension outright, but it touches every
 package and deserves its own commit, its own testing, and its own decision.
