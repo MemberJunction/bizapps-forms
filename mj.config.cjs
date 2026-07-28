@@ -56,8 +56,29 @@ module.exports = {
     ],
   },
 
-  /** Core schemas should never be touched by this distribution's CodeGen */
-  excludeSchemas: ['sys', 'staging', 'dbo', '__mj'],
+  /**
+   * Schemas this distribution's CodeGen must never touch.
+   *
+   * Beyond the core/system schemas, this MUST exclude the sibling Open Apps'
+   * schemas. CodeGen runs against a database that also hosts bizapps-common and
+   * bizapps-tasks (both are hard `mj-app.json` dependencies, so they are always
+   * installed alongside Forms). Without these exclusions CodeGen emits entity
+   * subclasses, GraphQL resolvers, and Angular form components for THEIR schemas
+   * into the Forms packages — and because forms-server exports RESOLVER_PATHS
+   * that MJ's server-bootstrap merges into a single type-graphql schema,
+   * the duplicate type names make MJAPI fail to start outright:
+   *
+   *   Error: Schema must contain uniquely named types but contains multiple
+   *   types named "mjBizAppsTasksTaskActivity_".
+   *
+   * Forms still has legitimate cross-schema FKs (e.g. FormResponse.RespondentPersonID
+   * -> MJ_BizApps_Common: People); excluding a schema only stops us GENERATING its
+   * artifacts, it does not sever the relationship. Consume those entity types from
+   * @mj-biz-apps/common-entities / @mj-biz-apps/tasks-entities instead.
+   *
+   * Guarded by `npm run lint:generated`. See issue #10.
+   */
+  excludeSchemas: ['sys', 'staging', 'dbo', '__mj', '__mj_BizAppsCommon', '__mj_BizAppsTasks'],
 
   /** SQL migration output for CodeGen-produced objects */
   SQLOutput: {
