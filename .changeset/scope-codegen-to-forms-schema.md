@@ -32,7 +32,10 @@ matching the ranges `mj-app.json` already requires — installing `forms-actions
 pulls in no new runtime dependency.
 
 A `npm run lint:generated` gate plus a CI workflow now fail the build if an
-unscoped CodeGen run ever reintroduces foreign-schema artifacts.
+unscoped CodeGen run ever reintroduces foreign-schema artifacts, or if
+`excludeSchemas` itself stops covering a sibling schema — the latter matters
+because a committed tree stays clean until someone regenerates, so an
+artifact-only check would report PASS right up until the bug returned.
 
 Note: `@mj-biz-apps/forms-entities` no longer re-exports `mjBizAppsCommon*` /
 `mjBizAppsTasks*` entity classes. Those exports were an artifact of this bug and
