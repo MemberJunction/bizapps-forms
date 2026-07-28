@@ -19,6 +19,8 @@
   "author": "MemberJunction.com",
   "license": "ISC",
   "devDependencies": {
+    "@mj-biz-apps/common-entities": "^5.32.0",
+    "@mj-biz-apps/tasks-entities": "^1.2.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
@@ -28,6 +30,8 @@
     "zod": "^3.25.76"
   },
   "peerDependencies": {
+    "@mj-biz-apps/common-entities": ">=5.31.0 <6.0.0",
+    "@mj-biz-apps/tasks-entities": ">=1.1.0 <2.0.0",
     "@memberjunction/actions-base": "^5.43.0",
     "@memberjunction/actions": "^5.43.0",
     "@memberjunction/global": "^5.43.0",
