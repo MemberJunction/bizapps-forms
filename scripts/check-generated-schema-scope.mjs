@@ -72,12 +72,21 @@ const CODE_EXTS = ['.ts', '.js', '.mjs', '.html'];
 // ---------------------------------------------------------------------------
 
 /**
- * An exported declaration whose symbol name starts with a foreign class prefix.
- * Captures the declaration keyword so the report can say what was declared.
- * Matches e.g. `export class mjBizAppsTasksTaskActivity_ {`.
+ * An exported declaration whose symbol name CONTAINS a foreign class prefix.
+ *
+ * Deliberately not anchored to the start of the identifier: CodeGen emits five
+ * classes per entity and only two of them lead with the schema prefix
+ * (`mjBizAppsTasksTask_`, `mjBizAppsTasksTaskResolver`). The other three wrap it —
+ * `CreatemjBizAppsTasksTaskInput`, `UpdatemjBizAppsTasksTaskInput`,
+ * `RunmjBizAppsTasksTaskViewResult` — so a start-anchored matcher would miss 60%
+ * of a real regression, in a file whose own name carries no prefix for the name
+ * gate to catch either.
+ *
+ * The prefix is distinctive enough (`mjBizAppsTasks`) that a substring match
+ * cannot collide with a Forms-owned name.
  */
 function declarationRe(classPrefix) {
-  return new RegExp(`^\\s*export\\s+(?:declare\\s+)?(?:abstract\\s+)?(class|interface|type|const|enum|function)\\s+(${classPrefix}\\w*)`);
+  return new RegExp(`^\\s*export\\s+(?:declare\\s+)?(?:abstract\\s+)?(class|interface|type|const|enum|function)\\s+(\\w*${classPrefix}\\w*)`);
 }
 
 /** An import/export whose module specifier reaches into a foreign-named path. */
@@ -206,6 +215,12 @@ function selfTest() {
   const checks = [
     ['flags a foreign resolver class', declGate.test('export class mjBizAppsTasksTaskActivity_ {')],
     ['flags a foreign entity subclass', declGate.test('export class mjBizAppsTasksTaskEntity extends BaseEntity {')],
+    // CodeGen emits 5 classes per entity and only 2 of them lead with the schema
+    // prefix. The other 3 wrap it in Create/Update/Run, so a matcher anchored to
+    // the start of the identifier would miss 60% of a real regression.
+    ['flags a foreign Create input type', declGate.test('export class CreatemjBizAppsTasksTaskActivityInput {')],
+    ['flags a foreign Update input type', declGate.test('export class UpdatemjBizAppsTasksTaskActivityInput {')],
+    ['flags a foreign Run view result', declGate.test('export class RunmjBizAppsTasksTaskActivityViewResult {')],
     ['flags a foreign component import', impGate.test("import { X } from './Entities/mjBizAppsCommonPerson/x.component';")],
     ['allows a Forms-owned class', !declGate.test('export class mjBizAppsFormsFormResponse_ {')],
     // The legitimate cross-schema FK: correctly scoped output still names the target.

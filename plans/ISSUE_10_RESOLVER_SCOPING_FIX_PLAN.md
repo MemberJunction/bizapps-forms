@@ -25,7 +25,7 @@ MJAPI does not start at all. The reporter's workaround (disabling `forms-server`
 | Claim in issue | Verified against repo | Result |
 |---|---|---|
 | `excludeSchemas` missing sibling schemas | `mj.config.cjs:60` → `['sys', 'staging', 'dbo', '__mj']` | ✅ Confirmed — root cause |
-| forms-server bundles ~196 classes incl. all of tasks + common | `packages/Server/src/generated/generated.ts` has **195** exported classes, incl. full `mjBizAppsCommon*` and `mjBizAppsTasks*` resolver/type sets | ✅ Confirmed (196 in dist vs 195 in src is immaterial) |
+| forms-server bundles ~196 classes incl. all of tasks + common | `packages/Server/src/generated/generated.ts` has **195** exported classes, incl. full `mjBizAppsCommon*` and `mjBizAppsTasks*` resolver/type sets | ✅ Confirmed — and the reporter has since corrected the issue's table to **195 / 95 / 50** (the original 196 / 95 / 51 double-counted a JSDoc string containing the word `class`). 195 = 5 generated classes × 39 entities. |
 | Collision unavoidable at runtime | `packages/Server/src/index.ts:69` exports `RESOLVER_PATHS` pointing at `generated/generated.{js,ts}` — bootstrap merges all dynamic packages' resolvers into one schema | ✅ Confirmed |
 
 Contamination spread (wider than the issue states — it affects three packages, not just Server):
@@ -198,11 +198,39 @@ the matchers fire on known-bad input and stay silent on the legitimate FK refere
   | Overlap | Before (issue #10) | After |
   |---|---|---|
   | forms ∩ tasks | 95 (complete) | **0** |
-  | forms ∩ common | 51 (complete) | **0** |
+  | forms ∩ common | 50 (complete) | **0** |
   | tasks ∩ common | 0 | 0 |
 
-  `forms-server` now contributes 50 generated classes, down from 196 — the same shape as
+  `forms-server` now contributes 50 generated classes, down from 195 — the same shape as
   its correctly-scoped siblings. The duplicate-type schema build can no longer occur.
+  (Before-figures are the reporter's **corrected** counts, 195 / 95 / 50; the issue body's
+  original 196 / 95 / 51 over-counted by one on two of the three packages.)
+
+### Post-review fix: the gate's declaration matcher was missing 60% of a regression
+
+A multi-agent review of this branch found a real hole in the gate as first written.
+`declarationRe` was anchored to the **start** of the exported identifier
+(`^…export\s+class\s+(mjBizAppsTasks\w*)`), but CodeGen emits five classes per entity and
+only two of them lead with the schema prefix:
+
+| CodeGen class | Leads with prefix? |
+|---|---|
+| `mjBizAppsTasksTask_` (ObjectType) | yes |
+| `mjBizAppsTasksTaskResolver` | yes |
+| `CreatemjBizAppsTasksTaskInput` | **no** |
+| `UpdatemjBizAppsTasksTaskInput` | **no** |
+| `RunmjBizAppsTasksTaskViewResult` | **no** |
+
+Measured against the real pre-fix contaminated `generated.ts`, the start-anchored matcher
+caught **58** foreign declarations; the corrected substring matcher catches **145** — it was
+blind to **87**. The gate would still have failed overall on a full regression (the two
+prefix-leading classes trip it), but a partial leak of only wrapper types would have passed,
+and `generated.ts` carries no foreign prefix in its own filename for the name gate to catch.
+
+Fixed test-first: three failing self-test cases were added (`Create`/`Update`/`Run` foreign
+wrappers), confirmed red (`SELF-TEST FAILED — 3 matcher check(s) wrong`, exit 2), then the
+matcher was widened to `\w*${classPrefix}\w*`. Self-test is now 9/9 green and the real tree
+still passes, so no false positive was introduced.
 
 ### Known tension: sibling peer-dependency vs the MJ 5.43.0 pin
 

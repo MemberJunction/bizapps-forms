@@ -19,7 +19,7 @@ single type-graphql schema, installing forms alongside `tasks-server` and
 `mj.config.cjs` now excludes the sibling schemas from CodeGen, and the
 foreign-schema entity subclasses, resolvers, and Angular form components have
 been removed from the generated output. `forms-server` now contributes 50
-generated classes instead of 196, with zero overlap against either sibling
+generated classes instead of 195, with zero overlap against either sibling
 package.
 
 The two on-submit actions that legitimately use sibling entity types
