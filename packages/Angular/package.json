@@ -1,7 +1,7 @@
 {
   "name": "@mj-biz-apps/forms-ng",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Forms Angular bootstrap - form components and module for the Forms Open App",
   "main": "dist/public-api.js",
   "types": "dist/public-api.d.ts",
@@ -19,7 +19,7 @@
   "author": "MemberJunction.com",
   "license": "ISC",
   "dependencies": {
-    "@mj-biz-apps/forms-entities": "0.2.0"
+    "@mj-biz-apps/forms-entities": "0.2.1"
   },
   "peerDependencies": {
     "@angular/animations": ">=21.0.0 <22.0.0",

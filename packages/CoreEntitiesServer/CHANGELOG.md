@@ -1,5 +1,12 @@
 # @mj-biz-apps/forms-core-entities-server
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [234286f]
+  - @mj-biz-apps/forms-entities@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes
