@@ -20,11 +20,13 @@ import type { ActionResultSimple, RunActionParams } from '@memberjunction/action
 import { RegisterClass } from '@memberjunction/global';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
-import {
+// Task types come from the package that owns __mj_BizAppsTasks — Forms deliberately
+// does not generate them (rationale: `excludeSchemas` in mj.config.cjs).
+import type {
   mjBizAppsTasksTaskEntity,
   mjBizAppsTasksTaskLinkEntity,
   mjBizAppsTasksTaskTypeEntity,
-} from '@mj-biz-apps/forms-entities';
+} from '@mj-biz-apps/tasks-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { loadFormResponseContext, type FormResponseContext } from '../shared/form-response-context';
 

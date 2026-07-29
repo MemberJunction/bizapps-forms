@@ -658,6 +658,31 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-07-27 — Issue #10 fixed: CodeGen scoped to `__mj_BizAppsForms`.** `forms-server@0.2.0`
+  shipped generated GraphQL resolvers for the *sibling* schemas (`__mj_BizAppsCommon`,
+  `__mj_BizAppsTasks`) as well as its own, because `mj.config.cjs` `excludeSchemas` listed only the
+  core schemas. Since MJ's server-bootstrap merges every installed package's `RESOLVER_PATHS` into
+  one type-graphql schema, and both siblings are *hard* dependencies that are always installed
+  alongside Forms, the duplicate type names made **MJAPI fail to start outright** in every real
+  deployment. Fixed by adding both sibling schemas to `excludeSchemas` and removing the
+  foreign-schema artifacts from `packages/{Entities,Server,Angular}/…/generated`.
+    - **Verification:** `forms-server` now contributes **50** generated classes (was 195), with
+      **zero** name overlap against `tasks-server` (was 95, complete) or `common-server` (was 50,
+      complete) — measured by extracting class names from all three packages' built
+      `dist/generated/generated.js`. Full build 7/7 green; 426 tests pass across 52 files.
+    - **Consequence for the two on-submit actions:** `Forms: Create Followup Task` and
+      `Forms: Upsert Respondent Person` had been importing sibling entity classes *from*
+      `@mj-biz-apps/forms-entities` — which only compiled because of this bug, and violated
+      CLAUDE.md rule 5 (no re-exports between packages). They now take those types (type-only,
+      fully erased at build time) from `@mj-biz-apps/tasks-entities` / `@mj-biz-apps/common-entities`.
+    - **New guard:** `npm run lint:generated` (`scripts/check-generated-schema-scope.mjs`) plus a CI
+      workflow fail the build if an unscoped CodeGen run ever reintroduces foreign-schema artifacts.
+    - **Caveat — CodeGen was never re-run:** no database is reachable from the dev environment, so
+      the output was pruned deterministically instead. `excludeSchemas` is the durable fix but is
+      *unexercised*; the first real regen is its true test. The MJAPI boot repro is likewise still
+      outstanding. Full detail, including a stale-pin follow-up (MJ 5.44.0 **is** published now —
+      latest 5.49.0 — so the CLAUDE.md rationale for pinning 5.43.0 no longer holds), is in
+      [`plans/ISSUE_10_RESOLVER_SCOPING_FIX_PLAN.md`](ISSUE_10_RESOLVER_SCOPING_FIX_PLAN.md) §6.
 - *(pre-build)* Plan authored in MJ repo as portable seed. Competitive pricing (§1.3) flagged
   for live re-verification. Next: pull into `bizapps-forms`, execute Phase 0.
 - **2026-06-28 — Phase 0 complete; Phase 1 started.** Scaffolded `bizapps-forms` from the

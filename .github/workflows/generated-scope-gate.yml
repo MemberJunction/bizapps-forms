@@ -1,0 +1,49 @@
+name: Generated Schema Scope Gate
+
+# Catches an unscoped CodeGen run leaking sibling-schema artifacts (bizapps-common /
+# bizapps-tasks) into the Forms packages. That leak makes MJAPI fail to start with a
+# duplicate GraphQL type error whenever forms-server is installed next to its own
+# dependencies — i.e. in every real deployment. See issue #10.
+
+on:
+  workflow_dispatch:
+  # `push` as well as `pull_request`: the PR trigger alone would let a direct commit
+  # to next/main land unscoped generated output without the gate ever running.
+  push:
+    branches: [next, main]
+    paths:
+      - 'packages/*/src/generated/**'
+      - 'packages/Angular/src/lib/generated/**'
+      - 'mj.config.cjs'
+      - 'scripts/check-generated-schema-scope.mjs'
+      - '.github/workflows/generated-scope-gate.yml'
+  pull_request:
+    branches: [next, main]
+    paths:
+      - 'packages/*/src/generated/**'
+      - 'packages/Angular/src/lib/generated/**'
+      - 'mj.config.cjs'
+      - 'scripts/check-generated-schema-scope.mjs'
+      - '.github/workflows/generated-scope-gate.yml'
+
+concurrency:
+  group: generated-scope-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generated-scope-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # No dependencies needed — the checker is plain Node stdlib.
+      - name: Self-test the checker
+        run: node scripts/check-generated-schema-scope.mjs --self-test
+
+      - name: Run generated-output schema-scope gate
+        run: npm run lint:generated
