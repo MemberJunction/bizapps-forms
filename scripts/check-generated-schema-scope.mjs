@@ -83,8 +83,27 @@ const GENERATED_ROOTS = [
   'packages/Angular/src/lib/generated',
 ];
 
+/**
+ * Generated artifacts that do NOT live under a `generated/` directory.
+ *
+ * `apps/MJAPI/schema.graphql` is the emitted GraphQL SDL for whatever resolvers the
+ * host loaded. It is as much CodeGen output as `generated.ts`, but it sits in the app
+ * rather than a package, so scanning GENERATED_ROOTS alone never touched it — and it
+ * shipped with 392 foreign-schema references through the entire #10 fix, which pruned
+ * the three package directories and missed this one. The gate reported PASS the whole
+ * time.
+ *
+ * Like GENERATED_ROOTS, a missing entry is a hard error rather than a skip.
+ */
+const GENERATED_FILES = [
+  'apps/MJAPI/schema.graphql',
+];
+
 /** Extensions inspected for declarations and imports. */
 const CODE_EXTS = ['.ts', '.js', '.mjs', '.html'];
+
+/** Extensions inspected with the GraphQL SDL matcher instead of the TypeScript one. */
+const GRAPHQL_EXTS = ['.graphql', '.gql'];
 
 // ---------------------------------------------------------------------------
 // MATCHERS
@@ -106,6 +125,23 @@ const CODE_EXTS = ['.ts', '.js', '.mjs', '.html'];
  */
 function declarationRe(classPrefix) {
   return new RegExp(`^\\s*export\\s+(?:declare\\s+)?(?:abstract\\s+)?(class|interface|type|const|enum|function)\\s+(\\w*${classPrefix}\\w*)`);
+}
+
+/**
+ * A GraphQL SDL type definition whose name CONTAINS a foreign class prefix.
+ *
+ * The TypeScript matcher cannot be reused: SDL has no `export`, and CodeGen emits
+ * `type mjBizAppsTasksTask_`, `input CreatemjBizAppsTasksTaskInput`, and
+ * `type RunmjBizAppsTasksTaskViewResult` — so the same wrap-the-prefix problem applies
+ * and the match must be a substring within the identifier, not start-anchored.
+ *
+ * Anchored to column 0 on purpose. Correctly scoped output still REFERENCES foreign
+ * entities at field level (`RespondentPersonID: String`) and in description strings
+ * ("links to a bizapps-common Person"), all of which are indented or quoted. Only a
+ * top-level definition means this repo GENERATED the foreign type.
+ */
+function graphqlDeclarationRe(classPrefix) {
+  return new RegExp(`^(type|input|enum|interface|union|scalar)\\s+(\\w*${classPrefix}\\w*)`);
 }
 
 /** An import/export whose module specifier reaches into a foreign-named path. */
@@ -190,6 +226,10 @@ function hasCodeExt(abs) {
   return CODE_EXTS.some((ext) => abs.endsWith(ext));
 }
 
+function hasGraphQLExt(abs) {
+  return GRAPHQL_EXTS.some((ext) => abs.endsWith(ext));
+}
+
 /**
  * The fix itself going missing. Reported in the same shape as an artifact violation
  * so there is one reporting path and one failure path, not a parallel set for config.
@@ -229,11 +269,14 @@ function runDeclarationGate(entries) {
   const matchers = FOREIGN_SCHEMAS.map((f) => ({
     ...f,
     decl: declarationRe(f.classPrefix),
+    gql: graphqlDeclarationRe(f.classPrefix),
     imp: importPathRe(f.classPrefix),
   }));
 
   for (const { abs, isDir } of entries) {
-    if (isDir || !hasCodeExt(abs)) continue;
+    if (isDir) continue;
+    const isGraphQL = hasGraphQLExt(abs);
+    if (!isGraphQL && !hasCodeExt(abs)) continue;
     // A foreign-named file is already reported by the name gate; re-reporting
     // every one of its lines would bury the signal.
     if (FOREIGN_SCHEMAS.some((f) => nameCarriesForeignPrefix(basename(abs), f.classPrefix))) continue;
@@ -241,7 +284,12 @@ function runDeclarationGate(entries) {
     const lines = readFileSync(abs, 'utf8').split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      for (const { decl, imp, owner } of matchers) {
+      for (const m of matchers) {
+        const { owner } = m;
+        // SDL has no import statements, so the import matcher is meaningless there
+        // and would only produce noise on description strings.
+        const decl = isGraphQL ? m.gql : m.decl;
+        const imp = isGraphQL ? null : m.imp;
         const d = line.match(decl);
         if (d) {
           violations.push({
@@ -252,7 +300,7 @@ function runDeclarationGate(entries) {
           });
           break;
         }
-        if (imp.test(line)) {
+        if (imp && imp.test(line)) {
           violations.push({
             file: relative(REPO_ROOT, abs),
             line: i + 1,
@@ -279,6 +327,8 @@ function runDeclarationGate(entries) {
 function selfTest() {
   const declGate = declarationRe('mjBizAppsTasks');
   const impGate = importPathRe('mjBizAppsCommon');
+  const gqlTasks = graphqlDeclarationRe('mjBizAppsTasks');
+  const gqlCommon = graphqlDeclarationRe('mjBizAppsCommon');
 
   const checks = [
     ['flags a foreign resolver class', declGate.test('export class mjBizAppsTasksTaskActivity_ {')],
@@ -309,6 +359,37 @@ function selfTest() {
       !nameCarriesForeignPrefix('mjbizappsformsformresponse.form.component.ts', 'mjBizAppsTasks')],
     ['allows a neutrally-named generated file',
       !nameCarriesForeignPrefix('generated-forms.module.ts', 'mjBizAppsCommon')],
+
+    // GraphQL SDL. `apps/MJAPI/schema.graphql` carried 392 foreign references through
+    // the whole #10 fix because nothing scanned it. SDL has no `export`, so the
+    // TypeScript matcher above is blind to every line here.
+    ['flags a foreign GraphQL type', gqlTasks.test('type mjBizAppsTasksTaskActivity_ {')],
+    ['flags a foreign GraphQL input', gqlCommon.test('input CreatemjBizAppsCommonPersonInput {')],
+    ['flags a foreign GraphQL update input', gqlCommon.test('input UpdatemjBizAppsCommonPersonInput {')],
+    ['flags a foreign GraphQL view result', gqlTasks.test('type RunmjBizAppsTasksTaskActivityViewResult {')],
+    ['flags a foreign GraphQL enum', gqlTasks.test('enum mjBizAppsTasksTaskStatus {')],
+    // The TS matcher must NOT be what catches these — if it were, the dispatch in
+    // runDeclarationGate would be pointless and a regression there would go unnoticed.
+    ['TS matcher is blind to SDL (proves the GraphQL matcher is load-bearing)',
+      !declGate.test('type mjBizAppsTasksTaskActivity_ {')],
+
+    ['allows a Forms-owned GraphQL type', !gqlTasks.test('type mjBizAppsFormsFormResponse_ {')],
+    // Correctly scoped SDL still REFERENCES foreign entities — at field level and in
+    // description strings. Column-0 anchoring is the only thing separating those from
+    // a real generated definition, so both must stay silent.
+    ['allows an indented FK field naming a foreign entity',
+      !gqlCommon.test('  RespondentPersonID: String')],
+    ['allows a description string mentioning a foreign app',
+      !gqlCommon.test('One submission of a form. Identified respondents link to a bizapps-common Person via RespondentPersonID.')],
+    ['allows a mutation field referencing a foreign type mid-line',
+      !gqlCommon.test('  CreatemjBizAppsCommonAddress(input: CreatemjBizAppsCommonAddressInput!): mjBizAppsCommonAddress_!')],
+    // This one is what makes the column-0 anchor load-bearing, and it is the only
+    // check that does. An SDL description block is free text, so a sentence naming a
+    // foreign type after the word "input" or "type" is a legitimate line that the
+    // unanchored matcher reads as a definition. Verified by mutation: drop the `^`
+    // and this check — and only this check — goes red.
+    ['allows a description sentence that names a foreign input type',
+      !gqlCommon.test('  Use input CreatemjBizAppsCommonPersonInput to create a Person.')],
 
     ['allows a Forms-owned class', !declGate.test('export class mjBizAppsFormsFormResponse_ {')],
     // The legitimate cross-schema FK: correctly scoped output still names the target.
@@ -354,6 +435,21 @@ function main() {
     }
   }
 
+  // Standalone generated artifacts. A missing one is a hard error for the same reason
+  // an empty root is: silently skipping it is how this file went unscanned through an
+  // entire release while the gate reported PASS.
+  for (const rel of GENERATED_FILES) {
+    const abs = join(REPO_ROOT, rel);
+    let st;
+    try {
+      st = statSync(abs);
+    } catch (err) {
+      throw new Error(`Generated file '${rel}' is missing — the gate would not scan it. Update GENERATED_FILES.`, { cause: err });
+    }
+    if (!st.isFile()) throw new Error(`Generated file '${rel}' is not a file.`);
+    entries.push({ abs, isDir: false });
+  }
+
   const unexcluded = missingExclusions(loadExcludeSchemas());
   const violations = [...runConfigGate(unexcluded), ...runNameGate(entries), ...runDeclarationGate(entries)];
 
@@ -361,7 +457,7 @@ function main() {
   console.log('----------------------------------');
   console.log(`Owned schema : ${OWNED_SCHEMA}`);
   console.log(`Foreign      : ${FOREIGN_SCHEMAS.map((f) => f.schema).join(', ')}`);
-  console.log(`Scanned      : ${entries.length} path(s) under ${GENERATED_ROOTS.length} generated root(s)`);
+  console.log(`Scanned      : ${entries.length} path(s) under ${GENERATED_ROOTS.length} generated root(s) + ${GENERATED_FILES.length} standalone file(s)`);
   console.log(`Config       : mj.config.cjs excludes ${FOREIGN_SCHEMAS.length - unexcluded.length}/${FOREIGN_SCHEMAS.length} foreign schema(s)`);
   console.log('');
 
