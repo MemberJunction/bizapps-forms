@@ -40,6 +40,24 @@ Read the first line of its output. A real core run prints `Detected installed mi
 - **Hard dependencies (auto-installed Open Apps):** MJ Forms **requires** `bizapps-common` (identity — `MJ_BizApps_Common: People`, hard FK from `FormResponse.RespondentPersonID`) and `bizapps-tasks` (review/approve-before-publish routing). Both are declared in `mj-app.json` `dependencies` and installed automatically by `mj app install` (leaf-first: common → tasks → forms). They're free OSS and part of our stack — build on them directly with hard FKs; do **not** use soft polymorphic links to avoid the dependency.
 - **Approval routing (Phase 2):** publish gating uses `bizapps-tasks` — a `FormVersion` going to review creates a Task + TaskLink(→FormVersion) + TaskAssignment(→approver People); the Task's `TaskType` `OnComplete`/`OnReject` action hooks call back into Forms actions to publish or return-to-draft. Forms owns the `FormVersion` status state machine; tasks owns assignment/decisions/UI/audit/notifications.
 
+## Rules and skills (`.claude/`)
+
+Ported from MemberJunction and bizapps-caliber on 2026-07-30 and **corrected against this repo** —
+several details in the originals are wrong here, and each file says where and why.
+
+| File | Scope | Covers |
+|---|---|---|
+| `.claude/rules/data-access.md` | `**/*.ts` | Entity metadata, `BaseEntity`, `RunView`/`RunViews`, caching, the `MJ: ` prefix rule |
+| `.claude/rules/typescript-style.md` | `**/*.ts` | No `any`, no weak typing, no cross-package re-exports, `BaseSingleton`, decomposition |
+| `.claude/rules/testing.md` | tests | Vitest conventions **here** (`.spec.ts`, no `test-utils`), and what unit tests structurally cannot catch |
+| `.claude/rules/design-tokens.md` | `**/*.css` | No hardcoded colours; `--mj-*` / `--mjf-*` tokens; the shadow-root constraint |
+| `.claude/skills/mj-upgrade/` | on request | Full MJ version-upgrade runbook, including the core `__mj` migration that the pin bump alone does **not** do |
+
+Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
+`.test.ts`; `@memberjunction/test-utils`, `scripts/scaffold-tests.mjs` and `guides/` do not exist
+here; there is no Sass; and Caliber's `bump-pins.sh` omits `packages/CoreEntitiesServer`, which this
+repo has.
+
 ## Structure
 ```
 mj-app.json   package.json   mj.config.cjs   turbo.json
