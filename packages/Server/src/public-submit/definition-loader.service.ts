@@ -123,6 +123,22 @@ function distributionIsOpen(
  * (submit path), pins the response to the version the widget rendered; a mismatch
  * is reported so a stale tab cannot submit against a re-published form.
  */
+/**
+ * Compare two `uniqueidentifier` values for identity.
+ *
+ * A GUID is case-insensitive, but the two sides of this comparison reliably disagree
+ * on case: MJ mints the PK client-side at `NewRecord()` and the publish snapshot
+ * embeds THAT spelling (lowercase) as `formVersionId`, while SQL Server returns the
+ * stored column uppercased. The respondent widget echoes the snapshot's spelling back
+ * on submit, so a case-sensitive `!==` rejected every single anonymous submission with
+ * `version-mismatch` — the one path the whole product exists to serve.
+ *
+ * Trimmed because the value arrives from a JSON payload over the wire.
+ */
+function sameGuid(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
 export async function resolvePublishedDefinition(
   provider: DefinitionRunViewProvider,
   slug: string,
@@ -142,7 +158,7 @@ export async function resolvePublishedDefinition(
   if (!version) {
     return { ok: false, failure: 'no-published-version' };
   }
-  if (options.expectedVersionId && options.expectedVersionId !== version.ID) {
+  if (options.expectedVersionId && !sameGuid(options.expectedVersionId, version.ID)) {
     return { ok: false, failure: 'version-mismatch' };
   }
 

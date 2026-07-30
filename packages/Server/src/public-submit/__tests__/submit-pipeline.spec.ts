@@ -202,6 +202,21 @@ describe('runSubmitPipeline', () => {
     expect(result.errors?.[0].message).toMatch(/version-mismatch/);
   });
 
+  // Regression: every anonymous submission failed with version-mismatch because this
+  // comparison was case-sensitive. The widget echoes back the `formVersionId` embedded
+  // in the published snapshot, which carries the client-minted (lowercase) GUID, while
+  // SQL Server returns the column uppercased. Two spellings of the same uniqueidentifier
+  // are the same version — a GUID is case-insensitive by definition.
+  it('accepts a formVersionId that differs from the published version only by case', async () => {
+    const { ctx, saved } = makeContext(respondentPermissions());
+
+    const result = await runSubmitPipeline(ctx, validSubmission({ formVersionId: 'VER-1' }));
+
+    expect(result.errors ?? []).toEqual([]);
+    expect(result.success).toBe(true);
+    expect(saved().length).toBeGreaterThan(0);
+  });
+
   it('rate-limits repeated submissions from the same session+distribution', async () => {
     process.env.FORMS_RATELIMIT_MAX = '2';
     resetPublicSubmitConfigForTests();
