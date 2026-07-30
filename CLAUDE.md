@@ -20,6 +20,18 @@ These capabilities are all present in published **MJ 5.50.0**. We pin `@memberju
 
 Upgrading required adding `@workos-inc/authkit-js` to MJExplorer: 5.50's `@memberjunction/ng-auth-services` added a WorkOS provider and declares it as a **required** peer (empty `peerDependenciesMeta`), so the Angular build cannot resolve it otherwise. This matches how the repo already carries Okta and Amplify without using them.
 
+**Pinning model** (verified 2026-07-30, matches the sibling repos'): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
+
+**Upgrading MJ is a database operation, not just a pin bump.** Bumping npm versions leaves the `__mj` core schema behind, and a partially-migrated core still installs, builds, tests and boots cleanly — the damage surfaces later and nowhere near its cause (`AIEngine.Config()` hits a core entity the metadata lacks, throws `Entity <name> not found in metadata`, and aborts loading its entire agent set). The core migration is run **version-tagged**:
+
+```bash
+npx mj migrate -t v<version>      # NOT `npm run mj:migrate`, which only targets __mj_BizAppsForms
+```
+
+Read the first line of its output. A real core run prints `Detected installed migration version: <N> — fetching only migrations newer than it.` — that `<N>` must equal the frontier you recorded beforehand (`SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1`). A higher `<N>` means a poisoned watermark that will silently hide every migration below it. No watermark line at all means you are not migrating core. Judge success by the **frontier advancing**, never by the `N applied` count — `R__RefreshMetadata.sql` is repeatable, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Finish by restarting MJAPI and grepping its startup log for `not found in metadata`; it must be clean, because MJAPI starts fine either way.
+
+`bizapps-caliber` carries a full `mj-upgrade` skill covering this end to end (watermark repair, `TURBO_FORCE` builds, post-migration verification). Port it here rather than re-deriving it.
+
 ## Repository facts
 - **npm scope:** `@mj-biz-apps/forms-*` (packages: `forms-entities`, `forms-actions`, `forms-server`, `forms-ng`)
 - **Database schema:** `__mj_BizAppsForms` (follows the bizapps-common / bizapps-tasks `__mj_BizApps*` convention; never put Forms tables in `__mj`)
