@@ -210,6 +210,53 @@ npm run start:explorer      # MJExplorer    → http://localhost:4321
 
 A published form is then reachable anonymously at `http://localhost:4121/f/<distribution-slug>`.
 
+**Verify it actually works** — this exercises the public path end to end (host page, session token,
+widget bundle, published definition, anonymous submit) and is the check that would have caught the
+respondent-path defects in 0.2.1:
+
+```bash
+npm run smoke:respondent -- <distribution-slug>
+```
+
+---
+
+## 🔌 Installing MJ Forms into a host app
+
+MJ Forms is an Open App: it does not run standalone in production, it installs **into** another
+MemberJunction application (the way [bizapps-caliber](https://github.com/MemberJunction/bizapps-caliber)
+hosts it). `mj app install` handles the schema, metadata and package wiring from `mj-app.json`.
+
+One requirement it **cannot** wire for you, because it lives in the host's own server config:
+
+```js
+// <host>/apps/MJAPI/mj.config.cjs
+module.exports = {
+  magicLink: {
+    enabled: true,
+    restrictedRoleName: 'Form Respondent',   // the role Forms seeds via its metadata
+    grantableRoleNames: ['Form Respondent'],
+    explorerUrl: process.env.MJ_EXPLORER_BASE_URL,
+  },
+};
+```
+
+Without it, forms still publish — but every public link answers **409**, because no anonymous
+session can be minted and `FormDistribution.PublicLinkToken` stays null. Forms checks this at
+startup and logs `[Forms] Anonymous respondent path is NOT ready: …` naming the exact setting, so
+watch the host's boot log after installing.
+
+| Host requirement | Why |
+|---|---|
+| **MJ `>=5.50.0`** | Set by our dependencies, not preference — `bizapps-common` and `bizapps-tasks` both require `>=5.44.0`, and 5.50.0 is where CodeGen's `includeSchemas` lands |
+| **`bizapps-common` + `bizapps-tasks` installed** | Hard `mj-app.json` dependencies. The on-submit hooks write a `Person` and a `Task` across schema boundaries |
+| **Their entity subclasses registered** | The hooks call `GetEntityObject` for both siblings' entities; unregistered, MJ returns a bare `BaseEntity` and every field assignment is silently lost |
+| **`magicLink` configured** | As above — the anonymous respondent path depends on it entirely |
+| **Forms metadata pushed** | Creates the `Form Respondent` role and its CanCreate-only permissions |
+
+The host should also add Forms to its own CodeGen `excludeSchemas` (or use an `includeSchemas`
+allow-list), so *its* CodeGen never generates `__mj_BizAppsForms` artifacts into *its* packages —
+the mirror image of what this repo does.
+
 | | |
 |---|---|
 | **Database schema** | `__mj_BizAppsForms` |
