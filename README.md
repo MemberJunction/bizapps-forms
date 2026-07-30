@@ -14,7 +14,7 @@ And every response is a **first-class record in your MemberJunction database** �
 
 [![Live design gallery](https://img.shields.io/badge/%F0%9F%8E%A8_live_design_gallery-view_now-7c5cff?style=for-the-badge)](https://memberjunction.github.io/bizapps-forms/)
 [![Built on MemberJunction](https://img.shields.io/badge/built%20on-MemberJunction-264FAF?style=for-the-badge)](https://github.com/MemberJunction/MJ)
-[![MemberJunction 5.43.0](https://img.shields.io/badge/MJ-5.43.0-264FAF?style=for-the-badge)](https://www.npmjs.com/package/@memberjunction/core)
+[![MemberJunction 5.50.0](https://img.shields.io/badge/MJ-5.50.0-264FAF?style=for-the-badge)](https://www.npmjs.com/package/@memberjunction/core)
 [![License: ISC](https://img.shields.io/badge/license-ISC-2c7be5?style=for-the-badge)](#-license)
 [![Status: scaffold](https://img.shields.io/badge/status-Phase%201-e8a33d?style=for-the-badge)](plans/FORMS_BUILD_PLAN.md)
 
@@ -154,7 +154,7 @@ respondents link to a `bizapps-common` Person via `RespondentPersonID`) · `Form
 
 Anonymous magic-link `mj_scopes` · API-key scopes · Actions / Agents / AI Prompts · RunView / RunQuery /
 dashboards · RSU (`RuntimeSchemaManager` + `SchemaEvolution`) · bizapps-common identity. **All present in
-published MJ 5.43.0** — see the [reuse map](plans/FORMS_BUILD_PLAN.md#33-reuse-map--what-mj-already-gives-us-the-heart-of-this-plan).
+published MJ 5.50.0** — see the [reuse map](plans/FORMS_BUILD_PLAN.md#33-reuse-map--what-mj-already-gives-us-the-heart-of-this-plan).
 
 ---
 
@@ -215,7 +215,7 @@ A published form is then reachable anonymously at `http://localhost:4121/f/<dist
 | **Database schema** | `__mj_BizAppsForms` |
 | **Entity prefix** | `MJ_BizApps_Forms: ` |
 | **npm scope** | `@mj-biz-apps/forms-*` |
-| **MJ version** | pinned to exactly **`5.43.0`** — the earliest published version carrying anonymous magic-link `mj_scopes` enforcement **and** the RSU pipeline MJ Forms depends on |
+| **MJ version** | pinned to exactly **`5.50.0`**. The floor is set by our own dependencies, not by us: `bizapps-common` and `bizapps-tasks` both require `>=5.44.0`, and 5.50.0 is the first release with CodeGen's `includeSchemas` allow-list |
 | **Ports** | MJAPI `4121` · MJExplorer `4321` |
 
 ---

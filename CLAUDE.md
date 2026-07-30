@@ -14,7 +14,11 @@ MJ Forms reuses ~70% of what it needs from MJ core (the heart of the plan — se
 - **RSU** (`RuntimeSchemaManager` + `SchemaEvolution`) for promoting responses to first-class entities.
 - **bizapps-common** Person / Organization for known-respondent identity (optional, loose coupling).
 
-These capabilities are all present in published **MJ 5.43.0**. We pin `@memberjunction/*` to **exactly `5.43.0`** and rev that pin upward over time (do not loosen to a caret range without a reason). Note: the plan's §12 default assumed `>=5.44.0`; verification during Phase 0 (DG-1) confirmed the forms-critical features ship in 5.43.0, which — unlike 5.44.0 — is actually published to npm.
+These capabilities are all present in published **MJ 5.50.0**. We pin `@memberjunction/*` to **exactly `5.50.0`** and rev that pin upward over time (do not loosen to a caret range without a reason — the caret ranges in `peerDependencies` are correct and deliberate; the `dependencies` pins are the ones that must stay exact).
+
+**Why 5.50.0, and why the old 5.43.0 pin was wrong.** The floor is set by our own dependencies, not by preference: `bizapps-common` and `bizapps-tasks` both declare `>=5.44.0` and are hard `mj-app.json` dependencies, so a 5.43.0 pin promised a configuration that could not exist. The reason originally given for choosing 5.43.0 over 5.44.0 — that 5.44.0 was not published to npm — was simply false. 5.50.0 specifically is the first release carrying CodeGen's `includeSchemas` allow-list, which is what lets us scope CodeGen positively instead of maintaining a deny-list that can never name an Open App we have not heard of.
+
+Upgrading required adding `@workos-inc/authkit-js` to MJExplorer: 5.50's `@memberjunction/ng-auth-services` added a WorkOS provider and declares it as a **required** peer (empty `peerDependenciesMeta`), so the Angular build cannot resolve it otherwise. This matches how the repo already carries Okta and Amplify without using them.
 
 ## Repository facts
 - **npm scope:** `@mj-biz-apps/forms-*` (packages: `forms-entities`, `forms-actions`, `forms-server`, `forms-ng`)
