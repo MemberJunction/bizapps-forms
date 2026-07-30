@@ -28,6 +28,7 @@ import type {
   mjBizAppsTasksTaskTypeEntity,
 } from '@mj-biz-apps/tasks-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
+import { saveOrExplain } from '../shared/save-entity';
 import { loadFormResponseContext, type FormResponseContext } from '../shared/form-response-context';
 
 const ENTITY = {
@@ -71,15 +72,20 @@ export class CreateFollowupTaskAction extends BaseAction {
     params: RunActionParams,
   ): Promise<ActionResultSimple> {
     const contextUser = params.ContextUser;
-    const task = await createTask(ctx, typeId, params, contextUser);
-    if (!task) {
-      return fail('Failed to create followup Task.', 'TASK_SAVE_FAILED');
+    const taskOutcome = await createTask(ctx, typeId, params, contextUser);
+    if ('error' in taskOutcome) {
+      return fail(`Failed to create followup Task: ${taskOutcome.error}`, 'TASK_SAVE_FAILED');
     }
+    const task = taskOutcome.task;
 
-    const link = await createTaskLink(task.ID, ctx.response.ID, contextUser);
-    if (!link) {
-      return fail('Task created but failed to link it to the response.', 'TASK_LINK_FAILED');
+    const linkOutcome = await createTaskLink(task.ID, ctx.response.ID, contextUser);
+    if ('error' in linkOutcome) {
+      return fail(
+        `Task ${task.ID} created but failed to link it to the response: ${linkOutcome.error}`,
+        'TASK_LINK_FAILED',
+      );
     }
+    const link = linkOutcome.link;
 
     setOutputParam(params, 'TaskID', task.ID);
     setOutputParam(params, 'TaskLinkID', link.ID);
@@ -96,7 +102,7 @@ async function createTask(
   typeId: string,
   params: RunActionParams,
   contextUser: UserInfo,
-): Promise<mjBizAppsTasksTaskEntity | null> {
+): Promise<{ task: mjBizAppsTasksTaskEntity } | { error: string }> {
   const md = new Metadata();
   const task = await md.GetEntityObject<mjBizAppsTasksTaskEntity>(ENTITY.Task, contextUser);
   task.NewRecord();
@@ -105,19 +111,22 @@ async function createTask(
   task.TypeID = typeId;
   task.Status = 'Open';
   task.Priority = resolvePriority(getStringParam(params, 'Priority'));
-  const ok = await task.Save();
-  return ok ? task : null;
+  const outcome = await saveOrExplain(task);
+  return outcome.ok ? { task: outcome.entity } : { error: outcome.error };
 }
 
 async function createTaskLink(
   taskId: string,
   responseId: string,
   contextUser: UserInfo,
-): Promise<mjBizAppsTasksTaskLinkEntity | null> {
+): Promise<{ link: mjBizAppsTasksTaskLinkEntity } | { error: string }> {
   const md = new Metadata();
   const responseEntityId = md.EntityByName(ENTITY.FormResponse)?.ID;
   if (!responseEntityId) {
-    return null;
+    // A distinct failure from a rejected save: the metadata this host loaded has no
+    // such entity, which usually means Forms' metadata was never pushed to this
+    // database. Reporting it as a save failure sends the reader hunting the wrong bug.
+    return { error: `entity '${ENTITY.FormResponse}' is not present in this host's metadata` };
   }
   const link = await md.GetEntityObject<mjBizAppsTasksTaskLinkEntity>(ENTITY.TaskLink, contextUser);
   link.NewRecord();
@@ -125,8 +134,8 @@ async function createTaskLink(
   link.EntityID = responseEntityId;
   link.RecordID = responseId;
   link.Description = 'Form response that triggered this followup task.';
-  const ok = await link.Save();
-  return ok ? link : null;
+  const outcome = await saveOrExplain(link);
+  return outcome.ok ? { link: outcome.entity } : { error: outcome.error };
 }
 
 /** Resolve the required Task.TypeID — by name when supplied, else the first active type. */

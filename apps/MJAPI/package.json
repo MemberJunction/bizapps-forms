@@ -30,9 +30,11 @@
     "@memberjunction/server-bootstrap": "5.43.0",
     "@memberjunction/sqlserver-dataprovider": "5.43.0",
     "@memberjunction/templates": "5.43.0",
+    "@mj-biz-apps/common-entities": "5.32.0",
+    "@mj-biz-apps/forms-server": "0.2.1",
+    "@mj-biz-apps/tasks-entities": "1.2.0",
     "axios": "^1.13.4",
-    "class-validator": "^0.14.3",
-    "@mj-biz-apps/forms-server": "0.2.1"
+    "class-validator": "^0.14.3"
   },
   "repository": {
     "type": "git",
