@@ -173,21 +173,62 @@ function missingExclusions(excludeSchemas) {
   return FOREIGN_SCHEMAS.filter((f) => !excluded.has(f.schema.toLowerCase()));
 }
 
-/** Reads `excludeSchemas` from mj.config.cjs. Throws rather than defaulting to []. */
-function loadExcludeSchemas() {
+/**
+ * Whether this repo's CodeGen config can emit artifacts for a schema it does not own.
+ *
+ * Two mechanisms, checked according to which one the config actually uses:
+ *
+ * - **Allow-list** (`includeSchemas` non-empty). CodeGen resolves it into
+ *   `excludeSchemas` before anything downstream runs, treating every schema NOT named
+ *   as excluded — including schemas this repo has never heard of. Demanding that
+ *   `excludeSchemas` also name each sibling would then be a rule about the wrong
+ *   mechanism.
+ * - **Deny-list** (no `includeSchemas`). Every known foreign schema must be named.
+ */
+function configScopeViolations({ includeSchemas, excludeSchemas }) {
+  const include = (includeSchemas ?? []).map((s) => String(s).trim()).filter((s) => s.length > 0);
+  if (include.length === 0) {
+    return missingExclusions(excludeSchemas).map((f) => ({
+      schema: f.schema,
+      detail: `excludeSchemas is missing '${f.schema}'`,
+      message: `'${f.schema}' (owned by ${f.owner}) is missing from excludeSchemas — the next CodeGen run will emit its artifacts here`,
+    }));
+  }
+  const owned = OWNED_SCHEMA.trim().toLowerCase();
+  return include
+    .filter((s) => s.toLowerCase() !== owned)
+    .map((s) => ({
+      schema: s,
+      detail: `includeSchemas names '${s}'`,
+      message: `includeSchemas names '${s}', which this repo does not own — CodeGen will emit its artifacts here`,
+    }));
+}
+
+/**
+ * Reads the CodeGen scope config from mj.config.cjs. Throws rather than defaulting.
+ *
+ * `excludeSchemas` is required even under an allow-list: CodeGen's own zod schema
+ * defaults it, and `includeSchemas` is resolved INTO it, so a config missing it
+ * entirely is malformed rather than merely permissive. `includeSchemas` is optional —
+ * absent means classic deny-list behaviour.
+ */
+function loadScopeConfig() {
   const configPath = join(REPO_ROOT, 'mj.config.cjs');
   let config;
   try {
     config = require(configPath);
   } catch (err) {
-    throw new Error(`Cannot load mj.config.cjs to verify excludeSchemas: ${err.message}`, { cause: err });
+    throw new Error(`Cannot load mj.config.cjs to verify CodeGen scope: ${err.message}`, { cause: err });
   }
   if (!Array.isArray(config.excludeSchemas)) {
     // Defaulting to [] here would turn a malformed config into a silent full-scan
     // pass; the whole point of this check is that the config is load-bearing.
     throw new Error(`mj.config.cjs has no 'excludeSchemas' array — cannot verify CodeGen scope.`);
   }
-  return config.excludeSchemas;
+  if (config.includeSchemas !== undefined && !Array.isArray(config.includeSchemas)) {
+    throw new Error(`mj.config.cjs has a non-array 'includeSchemas' — cannot verify CodeGen scope.`);
+  }
+  return { includeSchemas: config.includeSchemas, excludeSchemas: config.excludeSchemas };
 }
 
 // ---------------------------------------------------------------------------
@@ -234,12 +275,12 @@ function hasGraphQLExt(abs) {
  * The fix itself going missing. Reported in the same shape as an artifact violation
  * so there is one reporting path and one failure path, not a parallel set for config.
  */
-function runConfigGate(unexcluded) {
-  return unexcluded.map((f) => ({
+function runConfigGate(scopeViolations) {
+  return scopeViolations.map((v) => ({
     file: 'mj.config.cjs',
     line: 0,
-    text: `excludeSchemas is missing '${f.schema}'`,
-    message: `'${f.schema}' (owned by ${f.owner}) is missing from excludeSchemas — the next CodeGen run will emit its artifacts here`,
+    text: v.detail,
+    message: v.message,
   }));
 }
 
@@ -405,6 +446,28 @@ function selfTest() {
       missingExclusions(['sys', '__mj']).length === FOREIGN_SCHEMAS.length],
     ['allows a config that excludes every foreign schema',
       missingExclusions(['__mj', '__mj_BizAppsCommon', '__mj_BizAppsTasks']).length === 0],
+
+    // An `includeSchemas` allow-list scopes CodeGen positively: anything not named is
+    // out of scope, including schemas this repo has never heard of. Once it is set,
+    // demanding that excludeSchemas ALSO name each sibling is a rule about the wrong
+    // mechanism — the siblings are already unreachable.
+    ['allows an includeSchemas allow-list that names only the owned schema',
+      configScopeViolations({ includeSchemas: [OWNED_SCHEMA], excludeSchemas: ['sys', '__mj'] }).length === 0],
+    ['flags an includeSchemas allow-list that pulls a sibling schema back into scope',
+      configScopeViolations({ includeSchemas: [OWNED_SCHEMA, '__mj_BizAppsTasks'], excludeSchemas: ['sys'] }).length === 1],
+    // The reason the allow-list exists. A deny-list can only name apps we already know;
+    // __mj_BizAppsCaliber is a real Open App sharing a database with Forms today and
+    // appears nowhere in FOREIGN_SCHEMAS. Under the old rule this config was clean.
+    ['flags an unknown app schema the deny-list could never have named',
+      configScopeViolations({ includeSchemas: [OWNED_SCHEMA, '__mj_BizAppsCaliber'], excludeSchemas: [] }).length === 1
+      && missingExclusions(['__mj_BizAppsCommon', '__mj_BizAppsTasks']).length === 0],
+    // Regression guards: both passed the moment the allow-list branch was written, so
+    // they document the contract rather than having driven it.
+    ['falls back to the deny-list rule when includeSchemas is absent or blank',
+      configScopeViolations({ excludeSchemas: ['sys'] }).length === FOREIGN_SCHEMAS.length
+      && configScopeViolations({ includeSchemas: ['  '], excludeSchemas: ['sys'] }).length === FOREIGN_SCHEMAS.length],
+    ['matches CodeGen’s case/whitespace handling for includeSchemas',
+      configScopeViolations({ includeSchemas: ['  __MJ_BIZAPPSFORMS '], excludeSchemas: [] }).length === 0],
     // CodeGen trims and lowercases schema names before comparing, so the gate must too
     // — otherwise a cosmetically-reformatted config would read as a missing exclusion.
     ['matches CodeGen’s case/whitespace-insensitive comparison',
@@ -450,15 +513,19 @@ function main() {
     entries.push({ abs, isDir: false });
   }
 
-  const unexcluded = missingExclusions(loadExcludeSchemas());
-  const violations = [...runConfigGate(unexcluded), ...runNameGate(entries), ...runDeclarationGate(entries)];
+  const scopeConfig = loadScopeConfig();
+  const scopeViolations = configScopeViolations(scopeConfig);
+  const violations = [...runConfigGate(scopeViolations), ...runNameGate(entries), ...runDeclarationGate(entries)];
+  const usingAllowList = (scopeConfig.includeSchemas ?? []).some((s) => String(s).trim().length > 0);
 
   console.log('Generated-output schema-scope gate');
   console.log('----------------------------------');
   console.log(`Owned schema : ${OWNED_SCHEMA}`);
   console.log(`Foreign      : ${FOREIGN_SCHEMAS.map((f) => f.schema).join(', ')}`);
   console.log(`Scanned      : ${entries.length} path(s) under ${GENERATED_ROOTS.length} generated root(s) + ${GENERATED_FILES.length} standalone file(s)`);
-  console.log(`Config       : mj.config.cjs excludes ${FOREIGN_SCHEMAS.length - unexcluded.length}/${FOREIGN_SCHEMAS.length} foreign schema(s)`);
+  console.log(usingAllowList
+    ? `Config       : includeSchemas allow-list -> [${scopeConfig.includeSchemas.join(', ')}]`
+    : `Config       : excludeSchemas deny-list -> ${FOREIGN_SCHEMAS.length - scopeViolations.length}/${FOREIGN_SCHEMAS.length} foreign schema(s) named`);
   console.log('');
 
   if (violations.length === 0) {
@@ -486,7 +553,8 @@ function main() {
 
   console.log('');
   console.log(`FAIL — ${violations.length} scope violation(s) across ${byFile.size} path(s).`);
-  console.log('Fix: ensure `excludeSchemas` in mj.config.cjs lists every foreign schema, then re-run CodeGen.');
+  console.log('Fix: scope CodeGen in mj.config.cjs — either an `includeSchemas` allow-list naming only');
+  console.log(`     '${OWNED_SCHEMA}', or an \`excludeSchemas\` deny-list naming every foreign schema — then re-run CodeGen.`);
   process.exit(1);
 }
 
