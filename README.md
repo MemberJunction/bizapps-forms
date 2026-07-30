@@ -160,14 +160,55 @@ published MJ 5.43.0** — see the [reuse map](plans/FORMS_BUILD_PLAN.md#33-reuse
 
 ## 🚀 Quick start
 
+MJ Forms is an Open App: it installs **into** an existing MemberJunction database alongside its two
+required siblings. A working local stack therefore needs an MJ core schema and both siblings present
+before Forms' own steps do anything useful.
+
+**1. Configure.** There is no default connection — nothing works until this exists.
+
 ```bash
-npm install                 # repo root only — never inside a package dir
+npm install                        # repo root only — never inside a package dir
+cp .env.example .env               # then fill in the placeholders (see the file's comments)
+ln -sf ../../.env apps/MJAPI/.env  # MJAPI runs with cwd apps/MJAPI and reads .env from there
+```
+
+**2. Lay down MJ core.** Forms' migrations assume the `__mj` schema already exists; they do not
+create it. Point MJ's own migrations at your database (from a MemberJunction checkout):
+
+```bash
+DB_HOST=localhost DB_PORT=<port> DB_DATABASE=<db> DB_USERNAME=sa DB_PASSWORD=<pw> \
+  npm run mj:migrate --prefix /path/to/MJ
+```
+
+**3. Install the sibling Open Apps, leaf-first.** `bizapps-common` and `bizapps-tasks` are hard
+`mj-app.json` dependencies — the on-submit hooks write into both schemas.
+
+```bash
+npx mj migrate --schema __mj_BizAppsCommon --dir /path/to/bizapps-common/migrations
+npx mj migrate --schema __mj_BizAppsTasks  --dir /path/to/bizapps-tasks/migrations
+```
+
+**4. Install Forms.**
+
+```bash
 npm run mj:migrate          # apply migrations to the __mj_BizAppsForms schema
+npx mj sync push --dir metadata   # roles, entity permissions, actions, AI prompts, styles
 npm run mj:codegen          # generate entity / action / resolver / Angular subclasses
+```
+
+> The metadata push is **not** optional. It creates the `Form Respondent` role and its
+> CanCreate-only entity permissions — without them the anonymous submit path cannot work at all.
+
+**5. Build and run.**
+
+```bash
 npm run build               # build all packages + apps (turbo)
+npm run build:widget        # bundle the <mj-form> custom element the respondent page serves
 npm run start:api           # MJAPI         → http://localhost:4121
 npm run start:explorer      # MJExplorer    → http://localhost:4321
 ```
+
+A published form is then reachable anonymously at `http://localhost:4121/f/<distribution-slug>`.
 
 | | |
 |---|---|

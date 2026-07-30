@@ -28,8 +28,8 @@ review/approve-before-publish routing (its v1.1.x `Task Decisions` model). The p
 as part of the stack).
 
 **Phase 1 — 🟢 BUILD COMPLETE; closing out (audited 2026-07-01).** Every §9 slice is built, wired to
-real MJ infrastructure, and green: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 ·
-Angular 162). A 4-agent, code-grounded audit (2026-07-01) confirmed each item is genuinely
+real MJ infrastructure, and green: **427 Vitest passing** (Entities 24 · Actions 61 · Server 154 ·
+Angular 162 · CoreEntitiesServer 26). A 4-agent, code-grounded audit (2026-07-01) confirmed each item is genuinely
 implemented — *not* stubbed — and corrected several the log had **understated**:
 - **Cloudflare Turnstile is a REAL `siteverify` fetch** (per-form toggle, fail-closed), not the "stub"
   earlier log lines claimed; the confirmation-email sender is **CommunicationEngine-backed**; file
@@ -57,8 +57,10 @@ tree, Forms app + nav + 2 dashboards). Integration branch `feature/phase1-founda
 
 **Housekeeping the audit flagged:** delete the orphaned, superseded
 `migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql` (514 KB, non-Flyway, duplicates inline
-CodeGen); align `.actions.json` on-submit input-param name `ResponseID` → `FormResponseID` (3 hooks —
-harmless on the hook-fired path, a trap for UI/validated invocation); add a `Forms: Create Followup
+CodeGen); ~~align `.actions.json` on-submit input-param name `ResponseID` → `FormResponseID`~~
+**(already done — `.actions.json` declares `FormResponseID` in all four places, all four actions read
+`FormResponseID`, zero bare `ResponseID` params remain, and the hooks were verified firing end-to-end
+on 2026-07-30)**; add a `Forms: Create Followup
 Task` unit test; widget §2 **flaky-network resilience is thin** (no offline detection / autosave-retry /
 submit auto-retry) — the one real UX-bar shortfall. Gemini output-token truncation on long forms is an
 **upstream limitation** (MJ runner/driver never sends `maxOutputTokens` to Gemini), mitigated by the
@@ -573,7 +575,8 @@ native entities. This is the reporting differentiator no incumbent has.
       lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite and stores
       `MagicLinkInviteID` + `PublicLinkToken`. Configurable; gated on host `magicLink` config.
       _(Verified built + tested 2026-07-01 — the §9 checkbox had lagged the Progress Log.)_
-- [x] Tests: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 · Angular 162). Color-token
+- [x] Tests: **427 Vitest passing** (Entities 24 · Actions 61 · Server 154 · Angular 162 ·
+      CoreEntitiesServer 26 — the earlier "396" omitted CoreEntitiesServer entirely). Color-token
       CI gate enforced (0 violations); mj-btn gate coded but disabled (0 `mj-btn` by convention).
 - **Remaining for Phase 1 close (deploy/verify, not build):** (1) full anonymous-submit e2e against the
       live wire (mint link → `/f/:slug` redeem → PublishedForm → SubmitFormResponse persists + hooks
@@ -581,7 +584,8 @@ native entities. This is the reporting differentiator no incumbent has.
       `FORMS_EMAIL_FROM`, storage account (all code-complete, unconfigured); (3) re-verify Upsert
       Respondent Person links a Person live; (4) enable mj-btn CI gate if adopted; (5) push to org remote.
 - **Housekeeping (audit-found):** delete orphaned `migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql`
-      (superseded); fix `.actions.json` param `ResponseID`→`FormResponseID` (3 hooks); add a
+      (superseded); ~~fix `.actions.json` param `ResponseID`→`FormResponseID`~~ **(already done — see
+      the Housekeeping note above)**; add a
       `Forms: Create Followup Task` unit test; strengthen widget flaky-network resilience (§2).
 
 ### Phase 2 — Power
