@@ -15,6 +15,7 @@
     "build:packages": "turbo --log-order=stream build --filter=\"@mj-biz-apps/forms-*\"",
     "build:api": "turbo --log-order=stream build --filter=\"mj_api\"",
     "build:explorer": "turbo --log-order=stream build --filter=\"mj_explorer\"",
+    "build:widget": "npm run build:widget --workspace=@mj-biz-apps/forms-ng",
     "start": "turbo start --filter=mj_explorer --filter=mj_api",
     "start:api": "turbo start --filter=mj_api",
     "start:explorer": "turbo start --filter=mj_explorer",
