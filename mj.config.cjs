@@ -57,26 +57,46 @@ module.exports = {
   },
 
   /**
-   * Schemas this distribution's CodeGen must never touch.
+   * The ONE schema this distribution's CodeGen may generate from.
    *
-   * Beyond the core/system schemas, this MUST exclude the sibling Open Apps'
-   * schemas. CodeGen runs against a database that also hosts bizapps-common and
-   * bizapps-tasks (both are hard `mj-app.json` dependencies, so they are always
-   * installed alongside Forms). Without these exclusions CodeGen emits entity
-   * subclasses, GraphQL resolvers, and Angular form components for THEIR schemas
-   * into the Forms packages — and because forms-server exports RESOLVER_PATHS
-   * that MJ's server-bootstrap merges into a single type-graphql schema,
-   * the duplicate type names make MJAPI fail to start outright:
+   * `includeSchemas` is an opt-in positive scope: CodeGen resolves it into
+   * `excludeSchemas` before metadata management and again before file generation, so
+   * every schema in the database that is NOT named here is treated as excluded —
+   * including schemas this repo has never heard of.
+   *
+   * That last part is why this is an allow-list rather than a deny-list. CodeGen runs
+   * against a database that also hosts the sibling Open Apps (bizapps-common and
+   * bizapps-tasks are hard `mj-app.json` dependencies, so they are always installed
+   * alongside Forms) — but a real deployment holds more than that. bizapps-caliber, for
+   * one, already shares a database with all three and owns `__mj_BizAppsCaliber`, which
+   * no deny-list maintained here could ever have named in advance. An allow-list needs
+   * no advance knowledge: anything unnamed is out of scope by construction.
+   *
+   * Without correct scoping, CodeGen emits entity subclasses, GraphQL resolvers, and
+   * Angular form components for OTHER schemas into the Forms packages — and because
+   * forms-server exports RESOLVER_PATHS that MJ's server-bootstrap merges into a single
+   * type-graphql schema, the duplicate type names make MJAPI fail to start outright:
    *
    *   Error: Schema must contain uniquely named types but contains multiple
    *   types named "mjBizAppsTasksTaskActivity_".
    *
    * Forms still has legitimate cross-schema FKs (e.g. FormResponse.RespondentPersonID
-   * -> MJ_BizApps_Common: People); excluding a schema only stops us GENERATING its
-   * artifacts, it does not sever the relationship. Consume those entity types from
-   * @mj-biz-apps/common-entities / @mj-biz-apps/tasks-entities instead.
+   * -> MJ_BizApps_Common: People); leaving a schema out of scope only stops us
+   * GENERATING its artifacts, it does not sever the relationship. Consume those entity
+   * types from @mj-biz-apps/common-entities / @mj-biz-apps/tasks-entities instead.
    *
-   * Guarded by `npm run lint:generated`. See issue #10.
+   * Requires MJ >= 5.50.0 (`includeSchemas` ships there). Guarded by
+   * `npm run lint:generated`. See issue #10.
+   */
+  includeSchemas: ['__mj_BizAppsForms'],
+
+  /**
+   * System schemas, kept explicit.
+   *
+   * Redundant while `includeSchemas` is set — the allow-list already puts everything
+   * unnamed out of scope — but retained deliberately for two reasons: CodeGen's config
+   * schema expects the key, and if `includeSchemas` were ever removed this is the
+   * behaviour the repo falls back to rather than generating from the whole database.
    */
   excludeSchemas: ['sys', 'staging', 'dbo', '__mj', '__mj_BizAppsCommon', '__mj_BizAppsTasks'],
 

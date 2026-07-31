@@ -743,6 +743,8 @@ export const mjBizAppsFormsFormSchema = z.object({
 });
 
 export type mjBizAppsFormsFormEntityType = z.infer<typeof mjBizAppsFormsFormSchema>;
+ 
+ 
 
 /**
  * MJ_BizApps_Forms: Form Categories - strongly typed entity sub-class
@@ -2587,4 +2589,3 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
         return this.Get('OwnerUser');
     }
 }
-

@@ -13,7 +13,8 @@
 
 **Phase 0 — ✅ COMPLETE.** Repo scaffolded from the bizapps-common Open App skeleton
 (5 packages: `forms-{entities,actions,core-entities-server,server,ng}`; 2 apps: MJAPI/MJExplorer),
-pinned to MJ **`5.43.0`** (`mjVersionRange >=5.43.0 <6.0.0`), schema `__mj_BizAppsForms`, entity
+pinned to MJ **`5.50.0`** (`mjVersionRange >=5.50.0 <6.0.0` — raised from `5.43.0` on 2026-07-30,
+because a floor below `5.44.0` was never satisfiable; see the Progress Log), schema `__mj_BizAppsForms`, entity
 prefix `MJ_BizApps_Forms: ` (matches the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` siblings), ports
 **4121 / 4321**. `npm install --ignore-scripts && npm run build` is green for all 5 packages **and**
 MJAPI; the only failure is the MJExplorer *production* `ng build` font-inline step, which needs
@@ -27,9 +28,10 @@ review/approve-before-publish routing (its v1.1.x `Task Decisions` model). The p
 `FormResponse` subject seam was **removed** in favour of hard FKs (we build directly on common/tasks
 as part of the stack).
 
-**Phase 1 — 🟢 BUILD COMPLETE; closing out (audited 2026-07-01).** Every §9 slice is built, wired to
-real MJ infrastructure, and green: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 ·
-Angular 162). A 4-agent, code-grounded audit (2026-07-01) confirmed each item is genuinely
+**Phase 1 — ✅ CLOSED (verified end to end on 2026-07-30/31; ships as 0.3.0).** Every §9 slice is built, wired to
+real MJ infrastructure, and green: **434 Vitest passing** (Entities 24 · Actions 61 · Server 159 ·
+Angular 162 · CoreEntitiesServer 26 · MJAPI 2 — run them with `npm test`, which is the only command
+that covers all six; a per-package loop reports 432 and looks complete). A 4-agent, code-grounded audit (2026-07-01) confirmed each item is genuinely
 implemented — *not* stubbed — and corrected several the log had **understated**:
 - **Cloudflare Turnstile is a REAL `siteverify` fetch** (per-form toggle, fail-closed), not the "stub"
   earlier log lines claimed; the confirmation-email sender is **CommunicationEngine-backed**; file
@@ -41,28 +43,45 @@ implemented — *not* stubbed — and corrected several the log had **understate
   Followup Task · **Analyze Written Responses** (the last **confirmed running live** — writes
   `Score`/`ScoreRationale` to real responses).
 
-Live DB `MJ_Forms` (localhost:1456): all 11 `__mj_BizAppsForms` tables present, both migrations applied,
+Live DB **`MJ_Forms_Dev`** (localhost:1456 — the earlier `MJ_Forms` server is gone; older Progress Log
+entries name it and were accurate when written): all 10 `__mj_BizAppsForms` tables present plus
+`flyway_schema_history`, both migrations applied,
 metadata seeded (Form Respondent role + response-only CanCreate perms, 7 FormStyle presets, FormCategory
-tree, Forms app + nav + 2 dashboards). Integration branch `feature/phase1-foundation` (local only).
+tree, Forms app + nav + 2 dashboards). All work is on the org remote; the branching model is
+`feature → next → main`.
 
-**What remains to call Phase 1 DONE — all deploy/verify, no net-new build:**
-1. **Full anonymous-submit e2e** against the live wire (mint link → `GET /f/:slug` redeem →
-   `PublishedForm` → `SubmitFormResponse` persists under anon scope). Redeem HTTP contract is
-   unit-tested with fakes but never run end-to-end.
-2. **Deploy-time provider config** (code-complete, unconfigured): `FORMS_TURNSTILE_SECRET`, an email
-   `CommunicationProvider` + `FORMS_EMAIL_FROM`, a storage account for uploads.
-3. **Re-verify `Upsert Respondent Person`** links a `People` row live (param bug fixed; unproven e2e).
-4. **mj-btn CI gate** still disabled (color-token gate enforced + passing at 0 violations).
-5. **Push to the org remote** (account has been read-only; nothing pushed yet).
+**⚠️ The anonymous submit path did not work in any published 0.2.x.** Standing the product up for the
+first time (2026-07-30) found two independent defects, either alone fatal — a case-sensitive GUID
+comparison and a `<form>` running the browser's native submit. Both are fixed and now covered by
+`npm run smoke:respondent`, which drives the real public surface and is the only check that would have
+caught either. **A green `npm test` is necessary and not sufficient for anything touching the public
+path** — the full suite was green the entire time the product could not accept a single response.
 
-**Housekeeping the audit flagged:** delete the orphaned, superseded
-`migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql` (514 KB, non-Flyway, duplicates inline
-CodeGen); align `.actions.json` on-submit input-param name `ResponseID` → `FormResponseID` (3 hooks —
-harmless on the hook-fired path, a trap for UI/validated invocation); add a `Forms: Create Followup
-Task` unit test; widget §2 **flaky-network resilience is thin** (no offline detection / autosave-retry /
-submit auto-retry) — the one real UX-bar shortfall. Gemini output-token truncation on long forms is an
-**upstream limitation** (MJ runner/driver never sends `maxOutputTokens` to Gemini), mitigated by the
-analyzer's truncated-JSON salvage.
+**Closed on 2026-07-30/31 — what the Phase 1 close-out list asked for:**
+1. ~~Full anonymous-submit e2e against the live wire~~ **done** — mint link → `GET /f/:slug` redeem →
+   `PublishedForm` → `SubmitFormResponse` persists under anon scope, in a real browser; response +
+   answers written and all 4 on-submit hooks fired.
+2. ~~Re-verify `Upsert Respondent Person` links a `People` row live~~ **done** — writes to
+   `__mj_BizAppsCommon`, with `Create Followup Task` writing Task + TaskLink to `__mj_BizAppsTasks`.
+3. ~~Push to the org remote~~ **done.**
+4. ~~Orphaned `migrations/codegen/` CodeGen SQL~~ **done** — the directory is `.gitignore`d, so no
+   generated SQL is tracked.
+5. ~~`Forms: Create Followup Task` unit test~~ **done** —
+   `packages/Actions/src/custom/on-submit/create-followup-task.action.spec.ts`.
+
+**Still open — deploy/verify and one real gap:**
+1. **Deploy-time provider config** (code-complete, unconfigured): `FORMS_TURNSTILE_SECRET`, an email
+   `CommunicationProvider` + `FORMS_EMAIL_FROM`, a storage account for uploads. `.env.example`
+   documents every knob.
+2. **The Explorer surfaces (studio / builder / dashboard) have not been exercised by a human.** They
+   need an interactive host login, which the e2e above deliberately does not. The anonymous respondent
+   path is the part that is verified.
+3. **mj-btn CI gate** still disabled (color-token gate enforced + passing at 0 violations).
+4. Widget §2 **flaky-network resilience is thin** (no offline detection / autosave-retry / submit
+   auto-retry) — the one real UX-bar shortfall left.
+
+Gemini output-token truncation on long forms is an **upstream limitation** (MJ runner/driver never
+sends `maxOutputTokens` to Gemini), mitigated by the analyzer's truncated-JSON salvage.
 
 ### 🎨 Design system & themeable prototypes (live on GitHub Pages)
 
@@ -107,13 +126,19 @@ same `--mj-*`/`--mjf-*` tokens, so these themes drop in as `FormStyle` rows with
 *(The original per-direction explorations remain under `docs/{aurora,editorial,warm}/` and are linked
 from the gallery as "v1".)*
 
-### ▶ NEXT — Phase 1 close-out
+### ▶ NEXT — publish 0.3.0, then Phase 2
 
-The original blocking gate (migrate → CodeGen → build) is **long cleared**: the live `MJ_Forms` DB has
-all 11 tables and both migrations applied, generated entity/resolver/Angular subclasses are committed,
-and metadata is seeded. What's left to *close* Phase 1 is the **deploy/verify list in the Status
-Snapshot above** (live anonymous-submit e2e, provider config, remote push, mj-btn gate) plus the small
-housekeeping items — **no net-new feature build**. For Phase 2, resume in the §9 dependency order.
+Phase 1 is closed: the anonymous submit path is verified end to end against a live wire, and the two
+defects that made every published 0.2.x unable to accept a response are fixed. **The immediate task is
+releasing it** — promote `next` → `main`, which publishes **0.3.0** from the pending changeset. Nothing
+downstream can move until that lands: `bizapps-caliber` cannot re-enable Forms
+([bizapps-caliber#76](https://github.com/MemberJunction/bizapps-caliber/issues/76)) until 0.3.0 exists
+*and* Caliber is on MJ 5.50 ([bizapps-caliber#81](https://github.com/MemberJunction/bizapps-caliber/issues/81)),
+because re-enabling against 0.2.1 would trade a boot crash for a form that silently discards responses.
+
+After that, the remaining Status-Snapshot items are deploy/verify (provider config, Explorer surfaces
+exercised by a human, widget flaky-network resilience) — **no net-new feature build**. For Phase 2,
+resume in the §9 dependency order.
 
 ---
 
@@ -377,9 +402,11 @@ sequenceDiagram
   S-->>W: confirmation / redirect
 ```
 
-**Open follow-up:** confirm the **minimum MJ version** that includes (a) anonymous
+~~**Open follow-up:** confirm the **minimum MJ version** that includes (a) anonymous
 magic-link `mj_scopes` enforcement and (b) RSU — pin `mjVersionRange` accordingly (default
-assumption: `>=5.44.0`).
+assumption: `>=5.44.0`).~~ **Resolved 2026-07-30 → `>=5.50.0 <6.0.0`.** Both capabilities ship well
+below that; the floor is set instead by the hard sibling dependencies (`>=5.44.0`) and by CodeGen's
+`includeSchemas` allow-list, which first lands in 5.50.0. See DG-1 in §10.
 
 ---
 
@@ -573,16 +600,22 @@ native entities. This is the reporting differentiator no incumbent has.
       lifecycle hook that mints the anonymous, scoped, multi-use magic-link invite and stores
       `MagicLinkInviteID` + `PublicLinkToken`. Configurable; gated on host `magicLink` config.
       _(Verified built + tested 2026-07-01 — the §9 checkbox had lagged the Progress Log.)_
-- [x] Tests: **396 Vitest passing** (Entities 24 · Actions 57 · Server 153 · Angular 162). Color-token
+- [x] Tests: **434 Vitest passing** (Entities 24 · Actions 61 · Server 159 · Angular 162 ·
+      CoreEntitiesServer 26 · MJAPI 2 — the earlier "396" omitted CoreEntitiesServer entirely, and
+      "427" predated both the `npm test` root task and this branch's new specs). Color-token
       CI gate enforced (0 violations); mj-btn gate coded but disabled (0 `mj-btn` by convention).
-- **Remaining for Phase 1 close (deploy/verify, not build):** (1) full anonymous-submit e2e against the
-      live wire (mint link → `/f/:slug` redeem → PublishedForm → SubmitFormResponse persists + hooks
-      fire); (2) deploy-time provider config — `FORMS_TURNSTILE_SECRET`, email `CommunicationProvider` +
-      `FORMS_EMAIL_FROM`, storage account (all code-complete, unconfigured); (3) re-verify Upsert
-      Respondent Person links a Person live; (4) enable mj-btn CI gate if adopted; (5) push to org remote.
-- **Housekeeping (audit-found):** delete orphaned `migrations/codegen/CodeGen_Run_2026-06-30_15-11-16.sql`
-      (superseded); fix `.actions.json` param `ResponseID`→`FormResponseID` (3 hooks); add a
-      `Forms: Create Followup Task` unit test; strengthen widget flaky-network resilience (§2).
+- [x] **Live anonymous-submit e2e** (2026-07-30): mint link → `/f/:slug` redeem → PublishedForm →
+      SubmitFormResponse persists + all 4 hooks fire, driven from a real browser. Codified as
+      `npm run smoke:respondent`, which reproduces the 0.2.x failure when the fix is reverted.
+- **Remaining for Phase 1 close (deploy/verify, not build):** (1) deploy-time provider config —
+      `FORMS_TURNSTILE_SECRET`, email `CommunicationProvider` + `FORMS_EMAIL_FROM`, storage account
+      (all code-complete, unconfigured — see `.env.example`); (2) Explorer studio/builder/dashboard
+      exercised by a human against a real host login; (3) enable mj-btn CI gate if adopted;
+      (4) strengthen widget flaky-network resilience (§2).
+- **Housekeeping (audit-found) — all closed:** ~~orphaned `migrations/codegen/` CodeGen SQL~~ (the
+      directory is `.gitignore`d, nothing generated is tracked); ~~fix `.actions.json` param
+      `ResponseID`→`FormResponseID`~~ (already done — see the Housekeeping note above);
+      ~~add a `Forms: Create Followup Task` unit test~~ (`create-followup-task.action.spec.ts`).
 
 ### Phase 2 — Power
 - [ ] FormGroup + MaterializedEntityID; **view-projection** (default) and **RSU
@@ -596,8 +629,11 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 10. Decision Gates / Open Questions
 
-- **DG-1 — Min MJ version.** Confirm earliest version with anonymous magic-link `mj_scopes`
-  enforcement **and** RSU; pin `mjVersionRange`. (Default `>=5.44.0 <6.0.0`.)
+- **DG-1 — Min MJ version. ✅ RESOLVED (2026-07-30) → `>=5.50.0 <6.0.0`.** Not set by the two
+  capabilities in the original question — both ship well below 5.50 — but by the hard sibling
+  dependencies (`bizapps-common` / `bizapps-tasks`, each `>=5.44.0`) and by CodeGen's `includeSchemas`
+  allow-list, which first lands in 5.50.0. The earlier `5.43.0` answer was unsatisfiable; see the
+  superseded DG-1 entry in the Progress Log.
 - **DG-2 — Entity prefix/naming.** `Forms:` prefix (accept `Forms: Forms` stutter) vs. rename
   root table `FormDefinition`. (Default: `Forms:` prefix.)
 - **DG-3 — Repo/scope name.** Repo `bizapps-forms`; product/display name **MJ Forms**; npm
@@ -612,6 +648,11 @@ native entities. This is the reporting differentiator no incumbent has.
 ---
 
 ## 11. Repo Bootstrap Specifics (defaults for the build session)
+
+> **Historical.** This section is the pre-build seed, kept as the record of what Phase 0 was told to
+> create. The repo now has real files and **they are authoritative** — in particular `mjVersionRange`
+> is `>=5.50.0 <6.0.0` and the version is whatever the last release published, not the `>=5.44.0` /
+> `0.1.0` written below. Do not copy from here.
 
 `mj-app.json` (mirroring `bizapps-common/mj-app.json`):
 
@@ -658,6 +699,62 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-07-31 — release prep for 0.3.0: the publish workflow could not have shipped a minor.**
+  `.github/workflows/publish.yml` predicted the next version from *"were any migrations added since the
+  last tag"* and then failed the job if `changeset version` disagreed. This release is a deliberate
+  minor with no schema change, so the workflow expected `0.2.2`, changesets produced `0.3.0`, and the
+  guard would have killed the run before anything published. The prediction now reads the highest bump
+  the changesets actually declare, with a new migration flooring it at minor — the heuristic kept as a
+  backstop rather than the source of truth. Two branches were latently broken and are now covered by a
+  local table-test: a `major` changeset written with **single** quotes (which is what `npx changeset`
+  emits here) never matched the old `^"@mj-biz-apps/…"` pattern, so a major would have released as a
+  patch. Status Snapshot, §9 and DG-1 refreshed in the same pass — the snapshot still claimed the
+  `5.43.0` pin and a `427` test count, and DG-1 still asserted the unreproducible "5.44.0 is not
+  published" finding.
+- **2026-07-28/30 — the product was stood up for the first time, and had never worked.** What began as
+  a check on whether the #10 fix held (it did — a CodeGen re-run against a database carrying all three
+  app schemas produced output byte-identical to what shipped in `0.2.1`) required standing MJ Forms up
+  end to end, which nothing had done before. **The anonymous submit path could not succeed in any
+  published version.** Landed on `chore/forms-hardening-followups`, merged to `next` as PR #13, and
+  released as **0.3.0**.
+    - **Two independent respondent-path defects, either alone fatal.** (1) The published-version check
+      compared GUIDs **case-sensitively**: MJ mints the id client-side at `NewRecord()` and the publish
+      snapshot embeds that lowercase spelling, SQL Server returns it uppercased, and the widget echoes
+      the snapshot's spelling back — so every submission was rejected with `version-mismatch`. Fixed at
+      the comparison, not at publish time, so already-published forms are repaired too. (2)
+      `form-scroll.component` is standalone and never imported `FormsModule`, so `NgForm` never applied,
+      `(ngSubmit)` bound to nothing, and the browser ran its **native** submit — the page navigated away
+      and aborted the in-flight mutation. That also *masked* defect 1, so the form appeared to silently
+      reset and discard everything typed. Both trace to commits first tagged `v0.2.0`.
+    - **`npm run smoke:respondent`** now drives the real public surface (host page → session token →
+      widget bundle → published definition → submit), deliberately submitting the `formVersionId` read
+      from the snapshot rather than from the database — the two spellings differ in case. Reverting the
+      one-line GUID fix turns it red with the original `version-mismatch`, which is how it was verified.
+    - **MJ pin `5.43.0` → `5.50.0`**, including the core `__mj` migration the pin bump alone does not
+      do (`npx mj migrate -t v5.50.0`; watermark matched the recorded frontier). One genuine upstream
+      break: 5.50's `@memberjunction/ng-auth-services` declares `@workos-inc/authkit-js` as a
+      **required** peer, so MJExplorer would not compile without it.
+    - **CodeGen moved to an `includeSchemas` allow-list.** A deny-list can only name schemas known in
+      advance, and a real deployment carries Open Apps this repo has never heard of —
+      `__mj_BizAppsCaliber` shares a database with Forms today and appeared nowhere in the deny-list, so
+      a CodeGen run there would have regenerated #10 exactly. Output is byte-identical, so the change is
+      behaviour-preserving.
+    - **Contamination the #10 fix missed:** `apps/MJAPI/schema.graphql` still carried **392**
+      foreign-schema references, and the scope gate never scanned `.graphql` at all — restoring the
+      contaminated file and running the gate reported PASS. The gate now covers it (self-test 19 → 35
+      checks) and the workflow's path filter actually triggers on it.
+    - **Two of four on-submit hooks could never work:** the MJAPI harness never registered the siblings'
+      entity subclasses, so `GetEntityObject` returned a bare `BaseEntity` and every field assignment
+      was lost. Three helpers also collapsed MJ's per-field validation detail into a bare `null`, so a
+      real defect surfaced as `"Failed to create Person record."` and nothing else.
+    - **No CI workflow ran any tests** — all 434 could have been red and a PR would still have gone
+      green — and the suite could not be run from the root at all, because `turbo.json` declared no
+      `test` task. Both fixed; path filters widened past `packages/**`.
+    - **The repo could not be stood up**: no `.env.example`, no DB config anywhere, and MJAPI's own boot
+      message told operators to run `npm run build:widget`, which did not exist. Also ported MJ's rules
+      (`data-access`, `typescript-style`, `testing`, `design-tokens`) and Caliber's `mj-upgrade` skill,
+      corrected against this repo — this one uses `.spec.ts`, has no `@memberjunction/test-utils`, no
+      Sass, and has a `packages/CoreEntitiesServer` that Caliber's `bump-pins.sh` omits.
 - **2026-07-27 — Issue #10 fixed: CodeGen scoped to `__mj_BizAppsForms`.** `forms-server@0.2.0`
   shipped generated GraphQL resolvers for the *sibling* schemas (`__mj_BizAppsCommon`,
   `__mj_BizAppsTasks`) as well as its own, because `mj.config.cjs` `excludeSchemas` listed only the
@@ -691,7 +788,13 @@ native entities. This is the reporting differentiator no incumbent has.
   into the Server bootstrap, to fully mirror common's 5-package set). All scaffold identifiers,
   semantics, branding, ports, and version pins set to Forms. Authored `mj-app.json`, a
   world-class root `README.md`, and a Forms-specific `CLAUDE.md`.
-    - **DG-1 (min MJ version) resolved → pin `5.43.0`.** Verified directly: `@memberjunction/*@5.44.0`
+    - **DG-1 (min MJ version) resolved → pin `5.43.0`.** ⚠️ **SUPERSEDED 2026-07-30 → `5.50.0`, and the
+      reasoning below was wrong.** `@memberjunction/*@5.44.0` *is* published; the 404 recorded here was
+      never reproducible. More importantly the floor was unsatisfiable regardless of what npm carried:
+      `bizapps-common` and `bizapps-tasks` both require `>=5.44.0` and are hard `mj-app.json`
+      dependencies, so a `5.43.0` pin promised a configuration that could not exist. Left in place as
+      the record of what was decided and why it failed. Original text follows: Verified directly:
+      `@memberjunction/*@5.44.0`
       is NOT published to npm (404); latest published is `5.43.0`. The two capabilities Forms depends
       on — anonymous magic-link `mj_scopes` enforcement (`@memberjunction/server`) and the RSU pipeline
       (`@memberjunction/schema-engine`: `RuntimeSchemaManager`, `SchemaEvolution`, `RSUResolver`) — are

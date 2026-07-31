@@ -42,7 +42,15 @@ export class FormScrollComponent {
     this.progressChange.emit();
   }
 
-  protected onSubmit(): void {
+  /**
+   * Handles the form's native `submit` event.
+   *
+   * `preventDefault` is load-bearing, not decorative: without it the browser performs a
+   * GET navigation that unmounts the widget mid-request, so the submission never lands.
+   * See the comment on the <form> element.
+   */
+  protected onSubmit(event?: Event): void {
+    event?.preventDefault();
     const all = this.runtime().visibleAnswerableQuestions();
     this.runtime().touchAll(all);
     if (this.runtime().areValid(all)) {

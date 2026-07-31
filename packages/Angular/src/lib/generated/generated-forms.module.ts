@@ -25,7 +25,7 @@ import { mjBizAppsFormsFormResponseFormComponent } from "./Entities/mjBizAppsFor
 import { mjBizAppsFormsFormStyleFormComponent } from "./Entities/mjBizAppsFormsFormStyle/mjbizappsformsformstyle.form.component";
 import { mjBizAppsFormsFormVersionFormComponent } from "./Entities/mjBizAppsFormsFormVersion/mjbizappsformsformversion.form.component";
 import { mjBizAppsFormsFormFormComponent } from "./Entities/mjBizAppsFormsForm/mjbizappsformsform.form.component";
-
+   
 
 @NgModule({
 declarations: [
@@ -50,7 +50,7 @@ exports: [
 ]
 })
 export class GeneratedForms_SubModule_0 { }
-
+    
 
 
 @NgModule({
@@ -61,7 +61,8 @@ imports: [
 ]
 })
 export class GeneratedFormsModule { }
-
+    
 // Note: LoadXXXGeneratedForms() functions have been removed. Tree-shaking prevention
 // is now handled by the pre-built class registration manifest system.
 // See packages/CodeGenLib/CLASS_MANIFEST_GUIDE.md for details.
+    

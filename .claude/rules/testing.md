@@ -1,0 +1,94 @@
+---
+paths:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/__tests__/**"
+---
+
+# Unit Testing in bizapps-forms
+
+**Vitest**, everywhere. Adapted from MemberJunction's rule and corrected against this repo on
+2026-07-30 — several details differ, and following MJ's version verbatim would be wrong here.
+
+## Running tests
+
+```bash
+npm test                    # every workspace, via turbo — 434 tests
+npm run test:packages       # the five @mj-biz-apps/forms-* packages only
+cd packages/Server && npx vitest run     # one package
+cd packages/Server && npx vitest         # watch mode
+```
+
+> `npm test` did not exist until 2026-07-30. Every package had a `test` script but `turbo.json`
+> declared no `test` task, so there was no way to run the suite from the root — which made it easy to
+> believe a partial per-package loop was the whole thing. If `npm test` ever fails with *"Could not
+> find task `test` in project"*, the `test` task has been dropped from `turbo.json`.
+
+**`npm test` covers a workspace the per-package loop misses.** `apps/MJAPI` has its own tests. Looping
+the five packages reports 432 and looks complete; the real total is **434**.
+
+There is no `test:coverage` or `test:watch` script — use `npx vitest --coverage` / `npx vitest`
+directly. MJ's rule lists both; they do not exist here.
+
+## Conventions here (these differ from MJ core)
+
+- Test files are **`.spec.ts`** in all five `packages/*`. The one exception is
+  `apps/MJAPI/src/__tests__/index.test.ts`, which follows MJ's `.test.ts` convention because it came
+  from the MJ app scaffold — leave it alone; new package tests use `.spec.ts`.
+- Two placements, both in use:
+  - **colocated** beside the source — `create-followup-task.action.spec.ts`
+  - **`__tests__/`** subdirectory — `packages/Server/src/public-submit/__tests__/`
+
+  Follow whichever the neighbouring code already uses.
+- **`@memberjunction/test-utils` is not installed here.** MJ's rule tells you to use it; don't, unless
+  you add it deliberately. Hand-rolled fakes are the established pattern —
+  `packages/Server/src/public-submit/__tests__/fakes.ts` is worth copying.
+- No database connections in unit tests. Stack-level checks live elsewhere (below).
+- There is no `scripts/scaffold-tests.mjs` and no `guides/` directory — both are MJ-only.
+
+## What unit tests here cannot catch
+
+Version 0.2.1 shipped with the anonymous respondent path **completely broken** and the entire unit
+suite green. Both defects were structurally invisible to unit tests: one was a case mismatch between a
+GUID minted client-side and the same GUID read back from SQL Server; the other was a browser
+performing its default form submit. Neither exists until a real server serves a real published form.
+
+So a green `npm test` is necessary and **not sufficient** for anything touching the public path:
+
+```bash
+npm run smoke:respondent -- <distribution-slug>   # drives the real public surface end to end
+npm run lint:generated                            # CodeGen scope gate
+npm run lint:ui                                   # design-token gate
+```
+
+The smoke test is the one that would have caught 0.2.1. It deliberately submits using the
+`formVersionId` read from the published snapshot — exactly what the widget sends — rather than one
+queried from the database, because those two spellings of the same GUID differ in case.
+
+## Writing tests
+
+- Descriptive names that read as specifications, not as method names.
+- Test **behaviour through public interfaces**, not internals. A test that breaks when you rename a
+  private function was testing the wrong thing.
+- Import from `vitest`: `import { describe, it, expect, vi, beforeEach } from 'vitest'`.
+- When a test documents a contract rather than having driven the implementation, say so in a comment.
+  Both are legitimate; conflating them makes a suite look more load-bearing than it is.
+- **Assert the thing that was actually wrong.** The pre-existing version-mismatch test used
+  `formVersionId: 'stale-version'` — a genuinely different string — so it passed regardless of case
+  handling and never exercised the bug that shipped. A test can be present, passing, and worthless.
+
+## Keeping tests green is your job
+
+When you change a package's source, run its tests and fix what your change broke. If a test fails
+because the new behaviour is correct, update the test. Never leave a broken test behind.
+
+## CI
+
+`.github/workflows/build.yml` (*Build and Test*) runs `npm test` on every push and PR to `next`.
+
+> Until 2026-07-30 **no workflow ran any tests** — all 434 could have been red and a PR would still
+> have gone green. If you are adding a workflow, check it actually runs something.
+
+Its path filter now includes `apps/**`, `scripts/**`, `smoke/**`, `turbo.json` and `package.json`;
+previously only `packages/**` and `package-lock.json` triggered it, so a change breaking MJAPI or a
+gate script never ran CI at all.
