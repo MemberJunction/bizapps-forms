@@ -85,7 +85,8 @@ jobs:
           # migrations" only agreed with changesets by coincidence: a deliberate minor with no
           # schema change — which is what a raised install requirement looks like — was expected
           # to be a patch, and the guard below then failed the release on its own prediction.
-          # Package names are quoted with ' or " depending on who wrote the changeset, so match both.
+          # `@changesets/write` always double-quotes the package name; single quotes are matched too
+          # because changesets accepts them, so a hand-authored file is not silently passed over.
           DECLARED_BUMP=patch
           for f in .changeset/*.md; do
             [ "$f" = ".changeset/README.md" ] && continue
@@ -100,17 +101,25 @@ jobs:
           done
           echo "Highest bump declared across changesets: $DECLARED_BUMP"
 
-          # A migration is a schema change, so it floors the release at a minor even if every
-          # changeset only asked for a patch. (changes.yml enforces the same rule on PRs into
-          # `next`; this is the backstop for anything that reached main another way.)
+          # A migration is a schema change, so it must not ship as a patch. This is a POLICY GATE,
+          # kept deliberately separate from the prediction above, because the rule CANNOT be
+          # enforced by adjusting DECLARED_BUMP: `changeset version` reads only `.changeset/*.md`
+          # and knows nothing about `migrations/`. Raising the prediction here would move the
+          # expectation away from what will actually happen, and the guard below would abort the
+          # release reporting a predictor mismatch instead of the missing changeset — the exact
+          # failure mode this step was rewritten to remove. So stop, and name what is missing.
+          # (changes.yml enforces the same rule on PRs into `next`; this is the backstop for
+          # anything that reached main another way. When no `v${CURRENT_VERSION}` tag exists there
+          # is nothing to diff against and the gate cannot run — that is a first release, which has
+          # no previously-shipped schema to have changed.)
           if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
             NEW_MIGRATION_FILES=$(git --no-pager diff --name-only "v${CURRENT_VERSION}" "${{ github.sha }}" -- migrations/ || true)
           else
             NEW_MIGRATION_FILES=""
           fi
           if [ -n "$NEW_MIGRATION_FILES" ] && [ "$DECLARED_BUMP" = "patch" ]; then
-            echo "New migrations found but no minor changeset — flooring the release at minor"
-            DECLARED_BUMP=minor
+            echo "::error::migrations/ changed since v${CURRENT_VERSION} but every pending changeset declares only 'patch'. A schema change must ship as at least a minor. Add a changeset with a 'minor' bump for an @mj-biz-apps/* package, then re-run."
+            exit 1
           fi
 
           case "$DECLARED_BUMP" in
