@@ -80,36 +80,46 @@ jobs:
           NEXT_MINOR_VERSION="${VERSION_PARTS[0]}.$(( ${VERSION_PARTS[1]} + 1 )).0"
           NEXT_PATCH_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$(( ${VERSION_PARTS[2]} + 1 ))"
 
-          # Check if any changeset requests a major bump
-          HAS_MAJOR=false
+          # The expectation has to come from what the changesets declare, because that is what
+          # `changeset version` will actually do. Deriving a minor from "are there new
+          # migrations" only agreed with changesets by coincidence: a deliberate minor with no
+          # schema change — which is what a raised install requirement looks like — was expected
+          # to be a patch, and the guard below then failed the release on its own prediction.
+          # Package names are quoted with ' or " depending on who wrote the changeset, so match both.
+          DECLARED_BUMP=patch
           for f in .changeset/*.md; do
             [ "$f" = ".changeset/README.md" ] && continue
             [ ! -f "$f" ] && continue
-            if grep -qE '^"@mj-biz-apps/.*":\s*major' "$f"; then
-              HAS_MAJOR=true
+            if grep -qE "^['\"]@mj-biz-apps/[^'\"]+['\"]:[[:space:]]*major" "$f"; then
+              DECLARED_BUMP=major
               break
             fi
+            if grep -qE "^['\"]@mj-biz-apps/[^'\"]+['\"]:[[:space:]]*minor" "$f"; then
+              DECLARED_BUMP=minor
+            fi
           done
+          echo "Highest bump declared across changesets: $DECLARED_BUMP"
 
-          if [ "$HAS_MAJOR" = true ]; then
-            echo "Major changeset found — bumping major version"
-            echo "EXPECTED_NEXT_VERSION=$NEXT_MAJOR_VERSION" >> "$GITHUB_OUTPUT"
+          # A migration is a schema change, so it floors the release at a minor even if every
+          # changeset only asked for a patch. (changes.yml enforces the same rule on PRs into
+          # `next`; this is the backstop for anything that reached main another way.)
+          if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
+            NEW_MIGRATION_FILES=$(git --no-pager diff --name-only "v${CURRENT_VERSION}" "${{ github.sha }}" -- migrations/ || true)
           else
-            # Check for new migration files since last tag
-            if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
-              NEW_MIGRATION_FILES=$(git --no-pager diff --name-only "v${CURRENT_VERSION}" "${{ github.sha }}" -- migrations/ || true)
-            else
-              NEW_MIGRATION_FILES=""
-            fi
-
-            if [ -n "$NEW_MIGRATION_FILES" ]; then
-              echo "New migrations found — bumping minor version"
-              echo "EXPECTED_NEXT_VERSION=$NEXT_MINOR_VERSION" >> "$GITHUB_OUTPUT"
-            else
-              echo "No new migrations — bumping patch version"
-              echo "EXPECTED_NEXT_VERSION=$NEXT_PATCH_VERSION" >> "$GITHUB_OUTPUT"
-            fi
+            NEW_MIGRATION_FILES=""
           fi
+          if [ -n "$NEW_MIGRATION_FILES" ] && [ "$DECLARED_BUMP" = "patch" ]; then
+            echo "New migrations found but no minor changeset — flooring the release at minor"
+            DECLARED_BUMP=minor
+          fi
+
+          case "$DECLARED_BUMP" in
+            major) EXPECTED_NEXT_VERSION="$NEXT_MAJOR_VERSION" ;;
+            minor) EXPECTED_NEXT_VERSION="$NEXT_MINOR_VERSION" ;;
+            *)     EXPECTED_NEXT_VERSION="$NEXT_PATCH_VERSION" ;;
+          esac
+          echo "Expected next version: $EXPECTED_NEXT_VERSION"
+          echo "EXPECTED_NEXT_VERSION=$EXPECTED_NEXT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Update version
         if: steps.changeset_check.outputs.pending != '0'
