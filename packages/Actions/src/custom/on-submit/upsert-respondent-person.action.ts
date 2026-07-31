@@ -21,6 +21,7 @@ import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 // does not generate it (rationale: `excludeSchemas` in mj.config.cjs).
 import type { mjBizAppsCommonPersonEntity } from '@mj-biz-apps/common-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
+import { saveOrExplain } from '../shared/save-entity';
 import { loadFormResponseContext, type AnswerWithType, type FormResponseContext } from '../shared/form-response-context';
 
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
@@ -69,9 +70,13 @@ export class UpsertRespondentPersonAction extends BaseAction {
     const contextUser = params.ContextUser;
     const existing = await findPersonByEmail(email, contextUser);
     const created = !existing;
-    const person = existing ?? (await createPerson(identity, email, contextUser));
+    let person = existing;
     if (!person) {
-      return fail('Failed to create Person record.', 'PERSON_SAVE_FAILED');
+      const outcome = await createPerson(identity, email, contextUser);
+      if ('error' in outcome) {
+        return fail(`Failed to create Person record: ${outcome.error}`, 'PERSON_SAVE_FAILED');
+      }
+      person = outcome.person;
     }
 
     ctx.response.RespondentPersonID = person.ID;
@@ -160,7 +165,7 @@ async function createPerson(
   identity: RespondentIdentity,
   email: string,
   contextUser: UserInfo,
-): Promise<mjBizAppsCommonPersonEntity | null> {
+): Promise<{ person: mjBizAppsCommonPersonEntity } | { error: string }> {
   const md = new Metadata();
   const person = await md.GetEntityObject<mjBizAppsCommonPersonEntity>(PERSON_ENTITY, contextUser);
   person.NewRecord();
@@ -173,8 +178,8 @@ async function createPerson(
     person.Phone = identity.phone;
   }
   person.Status = 'Active';
-  const ok = await person.Save();
-  return ok ? person : null;
+  const outcome = await saveOrExplain(person);
+  return outcome.ok ? { person: outcome.entity } : { error: outcome.error };
 }
 
 function fail(message: string, resultCode: string): ActionResultSimple {

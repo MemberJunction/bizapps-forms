@@ -43,13 +43,14 @@
  */
 import type { Application, Request, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
-import { BaseServerMiddleware } from '@memberjunction/server';
+import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/sqlserver-dataprovider';
 
 import { getRespondentHostConfig } from './config.js';
 import { renderRespondentHostPage, renderRespondentHostErrorPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
+import { checkRespondentReadiness } from './host-readiness.js';
 import { redeemFailureToView, type RedeemErrorView } from './error-view.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
@@ -83,6 +84,14 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       `[Forms] Respondent host page served at ${RESPONDENT_HOST_ROUTE} ` +
         `(graphql: ${cfg.graphqlUrl}, widget: ${cfg.widgetBundleUrl}, redeem: ${cfg.magicLinkRedeemUrl})`,
     );
+
+    // Surfaced at boot, not at first publish. The magic-link minter's gate is
+    // deliberately graceful, so a misconfigured host stays silent until a respondent
+    // hits a 409 — by which time nobody connects it to an install-time setting.
+    const readiness = checkRespondentReadiness(configInfo.magicLink);
+    if (readiness.ready === false) {
+      LogError(`[Forms] Anonymous respondent path is NOT ready: ${readiness.reason}`);
+    }
   }
 
   /** Resolve the slug, do the server-side redeem, and render the host page or a friendly error. */

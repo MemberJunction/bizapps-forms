@@ -83,8 +83,27 @@ const GENERATED_ROOTS = [
   'packages/Angular/src/lib/generated',
 ];
 
+/**
+ * Generated artifacts that do NOT live under a `generated/` directory.
+ *
+ * `apps/MJAPI/schema.graphql` is the emitted GraphQL SDL for whatever resolvers the
+ * host loaded. It is as much CodeGen output as `generated.ts`, but it sits in the app
+ * rather than a package, so scanning GENERATED_ROOTS alone never touched it — and it
+ * shipped with 392 foreign-schema references through the entire #10 fix, which pruned
+ * the three package directories and missed this one. The gate reported PASS the whole
+ * time.
+ *
+ * Like GENERATED_ROOTS, a missing entry is a hard error rather than a skip.
+ */
+const GENERATED_FILES = [
+  'apps/MJAPI/schema.graphql',
+];
+
 /** Extensions inspected for declarations and imports. */
 const CODE_EXTS = ['.ts', '.js', '.mjs', '.html'];
+
+/** Extensions inspected with the GraphQL SDL matcher instead of the TypeScript one. */
+const GRAPHQL_EXTS = ['.graphql', '.gql'];
 
 // ---------------------------------------------------------------------------
 // MATCHERS
@@ -106,6 +125,23 @@ const CODE_EXTS = ['.ts', '.js', '.mjs', '.html'];
  */
 function declarationRe(classPrefix) {
   return new RegExp(`^\\s*export\\s+(?:declare\\s+)?(?:abstract\\s+)?(class|interface|type|const|enum|function)\\s+(\\w*${classPrefix}\\w*)`);
+}
+
+/**
+ * A GraphQL SDL type definition whose name CONTAINS a foreign class prefix.
+ *
+ * The TypeScript matcher cannot be reused: SDL has no `export`, and CodeGen emits
+ * `type mjBizAppsTasksTask_`, `input CreatemjBizAppsTasksTaskInput`, and
+ * `type RunmjBizAppsTasksTaskViewResult` — so the same wrap-the-prefix problem applies
+ * and the match must be a substring within the identifier, not start-anchored.
+ *
+ * Anchored to column 0 on purpose. Correctly scoped output still REFERENCES foreign
+ * entities at field level (`RespondentPersonID: String`) and in description strings
+ * ("links to a bizapps-common Person"), all of which are indented or quoted. Only a
+ * top-level definition means this repo GENERATED the foreign type.
+ */
+function graphqlDeclarationRe(classPrefix) {
+  return new RegExp(`^(type|input|enum|interface|union|scalar)\\s+(\\w*${classPrefix}\\w*)`);
 }
 
 /** An import/export whose module specifier reaches into a foreign-named path. */
@@ -137,21 +173,62 @@ function missingExclusions(excludeSchemas) {
   return FOREIGN_SCHEMAS.filter((f) => !excluded.has(f.schema.toLowerCase()));
 }
 
-/** Reads `excludeSchemas` from mj.config.cjs. Throws rather than defaulting to []. */
-function loadExcludeSchemas() {
+/**
+ * Whether this repo's CodeGen config can emit artifacts for a schema it does not own.
+ *
+ * Two mechanisms, checked according to which one the config actually uses:
+ *
+ * - **Allow-list** (`includeSchemas` non-empty). CodeGen resolves it into
+ *   `excludeSchemas` before anything downstream runs, treating every schema NOT named
+ *   as excluded — including schemas this repo has never heard of. Demanding that
+ *   `excludeSchemas` also name each sibling would then be a rule about the wrong
+ *   mechanism.
+ * - **Deny-list** (no `includeSchemas`). Every known foreign schema must be named.
+ */
+function configScopeViolations({ includeSchemas, excludeSchemas }) {
+  const include = (includeSchemas ?? []).map((s) => String(s).trim()).filter((s) => s.length > 0);
+  if (include.length === 0) {
+    return missingExclusions(excludeSchemas).map((f) => ({
+      schema: f.schema,
+      detail: `excludeSchemas is missing '${f.schema}'`,
+      message: `'${f.schema}' (owned by ${f.owner}) is missing from excludeSchemas — the next CodeGen run will emit its artifacts here`,
+    }));
+  }
+  const owned = OWNED_SCHEMA.trim().toLowerCase();
+  return include
+    .filter((s) => s.toLowerCase() !== owned)
+    .map((s) => ({
+      schema: s,
+      detail: `includeSchemas names '${s}'`,
+      message: `includeSchemas names '${s}', which this repo does not own — CodeGen will emit its artifacts here`,
+    }));
+}
+
+/**
+ * Reads the CodeGen scope config from mj.config.cjs. Throws rather than defaulting.
+ *
+ * `excludeSchemas` is required even under an allow-list: CodeGen's own zod schema
+ * defaults it, and `includeSchemas` is resolved INTO it, so a config missing it
+ * entirely is malformed rather than merely permissive. `includeSchemas` is optional —
+ * absent means classic deny-list behaviour.
+ */
+function loadScopeConfig() {
   const configPath = join(REPO_ROOT, 'mj.config.cjs');
   let config;
   try {
     config = require(configPath);
   } catch (err) {
-    throw new Error(`Cannot load mj.config.cjs to verify excludeSchemas: ${err.message}`, { cause: err });
+    throw new Error(`Cannot load mj.config.cjs to verify CodeGen scope: ${err.message}`, { cause: err });
   }
   if (!Array.isArray(config.excludeSchemas)) {
     // Defaulting to [] here would turn a malformed config into a silent full-scan
     // pass; the whole point of this check is that the config is load-bearing.
     throw new Error(`mj.config.cjs has no 'excludeSchemas' array — cannot verify CodeGen scope.`);
   }
-  return config.excludeSchemas;
+  if (config.includeSchemas !== undefined && !Array.isArray(config.includeSchemas)) {
+    throw new Error(`mj.config.cjs has a non-array 'includeSchemas' — cannot verify CodeGen scope.`);
+  }
+  return { includeSchemas: config.includeSchemas, excludeSchemas: config.excludeSchemas };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,16 +267,20 @@ function hasCodeExt(abs) {
   return CODE_EXTS.some((ext) => abs.endsWith(ext));
 }
 
+function hasGraphQLExt(abs) {
+  return GRAPHQL_EXTS.some((ext) => abs.endsWith(ext));
+}
+
 /**
  * The fix itself going missing. Reported in the same shape as an artifact violation
  * so there is one reporting path and one failure path, not a parallel set for config.
  */
-function runConfigGate(unexcluded) {
-  return unexcluded.map((f) => ({
+function runConfigGate(scopeViolations) {
+  return scopeViolations.map((v) => ({
     file: 'mj.config.cjs',
     line: 0,
-    text: `excludeSchemas is missing '${f.schema}'`,
-    message: `'${f.schema}' (owned by ${f.owner}) is missing from excludeSchemas — the next CodeGen run will emit its artifacts here`,
+    text: v.detail,
+    message: v.message,
   }));
 }
 
@@ -229,11 +310,14 @@ function runDeclarationGate(entries) {
   const matchers = FOREIGN_SCHEMAS.map((f) => ({
     ...f,
     decl: declarationRe(f.classPrefix),
+    gql: graphqlDeclarationRe(f.classPrefix),
     imp: importPathRe(f.classPrefix),
   }));
 
   for (const { abs, isDir } of entries) {
-    if (isDir || !hasCodeExt(abs)) continue;
+    if (isDir) continue;
+    const isGraphQL = hasGraphQLExt(abs);
+    if (!isGraphQL && !hasCodeExt(abs)) continue;
     // A foreign-named file is already reported by the name gate; re-reporting
     // every one of its lines would bury the signal.
     if (FOREIGN_SCHEMAS.some((f) => nameCarriesForeignPrefix(basename(abs), f.classPrefix))) continue;
@@ -241,7 +325,12 @@ function runDeclarationGate(entries) {
     const lines = readFileSync(abs, 'utf8').split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      for (const { decl, imp, owner } of matchers) {
+      for (const m of matchers) {
+        const { owner } = m;
+        // SDL has no import statements, so the import matcher is meaningless there
+        // and would only produce noise on description strings.
+        const decl = isGraphQL ? m.gql : m.decl;
+        const imp = isGraphQL ? null : m.imp;
         const d = line.match(decl);
         if (d) {
           violations.push({
@@ -252,7 +341,7 @@ function runDeclarationGate(entries) {
           });
           break;
         }
-        if (imp.test(line)) {
+        if (imp && imp.test(line)) {
           violations.push({
             file: relative(REPO_ROOT, abs),
             line: i + 1,
@@ -279,6 +368,8 @@ function runDeclarationGate(entries) {
 function selfTest() {
   const declGate = declarationRe('mjBizAppsTasks');
   const impGate = importPathRe('mjBizAppsCommon');
+  const gqlTasks = graphqlDeclarationRe('mjBizAppsTasks');
+  const gqlCommon = graphqlDeclarationRe('mjBizAppsCommon');
 
   const checks = [
     ['flags a foreign resolver class', declGate.test('export class mjBizAppsTasksTaskActivity_ {')],
@@ -310,6 +401,37 @@ function selfTest() {
     ['allows a neutrally-named generated file',
       !nameCarriesForeignPrefix('generated-forms.module.ts', 'mjBizAppsCommon')],
 
+    // GraphQL SDL. `apps/MJAPI/schema.graphql` carried 392 foreign references through
+    // the whole #10 fix because nothing scanned it. SDL has no `export`, so the
+    // TypeScript matcher above is blind to every line here.
+    ['flags a foreign GraphQL type', gqlTasks.test('type mjBizAppsTasksTaskActivity_ {')],
+    ['flags a foreign GraphQL input', gqlCommon.test('input CreatemjBizAppsCommonPersonInput {')],
+    ['flags a foreign GraphQL update input', gqlCommon.test('input UpdatemjBizAppsCommonPersonInput {')],
+    ['flags a foreign GraphQL view result', gqlTasks.test('type RunmjBizAppsTasksTaskActivityViewResult {')],
+    ['flags a foreign GraphQL enum', gqlTasks.test('enum mjBizAppsTasksTaskStatus {')],
+    // The TS matcher must NOT be what catches these — if it were, the dispatch in
+    // runDeclarationGate would be pointless and a regression there would go unnoticed.
+    ['TS matcher is blind to SDL (proves the GraphQL matcher is load-bearing)',
+      !declGate.test('type mjBizAppsTasksTaskActivity_ {')],
+
+    ['allows a Forms-owned GraphQL type', !gqlTasks.test('type mjBizAppsFormsFormResponse_ {')],
+    // Correctly scoped SDL still REFERENCES foreign entities — at field level and in
+    // description strings. Column-0 anchoring is the only thing separating those from
+    // a real generated definition, so both must stay silent.
+    ['allows an indented FK field naming a foreign entity',
+      !gqlCommon.test('  RespondentPersonID: String')],
+    ['allows a description string mentioning a foreign app',
+      !gqlCommon.test('One submission of a form. Identified respondents link to a bizapps-common Person via RespondentPersonID.')],
+    ['allows a mutation field referencing a foreign type mid-line',
+      !gqlCommon.test('  CreatemjBizAppsCommonAddress(input: CreatemjBizAppsCommonAddressInput!): mjBizAppsCommonAddress_!')],
+    // This one is what makes the column-0 anchor load-bearing, and it is the only
+    // check that does. An SDL description block is free text, so a sentence naming a
+    // foreign type after the word "input" or "type" is a legitimate line that the
+    // unanchored matcher reads as a definition. Verified by mutation: drop the `^`
+    // and this check — and only this check — goes red.
+    ['allows a description sentence that names a foreign input type',
+      !gqlCommon.test('  Use input CreatemjBizAppsCommonPersonInput to create a Person.')],
+
     ['allows a Forms-owned class', !declGate.test('export class mjBizAppsFormsFormResponse_ {')],
     // The legitimate cross-schema FK: correctly scoped output still names the target.
     ['allows an FK comment naming a foreign entity', !declGate.test(' * RespondentPersonID -> MJ_BizApps_Common: People')],
@@ -324,6 +446,28 @@ function selfTest() {
       missingExclusions(['sys', '__mj']).length === FOREIGN_SCHEMAS.length],
     ['allows a config that excludes every foreign schema',
       missingExclusions(['__mj', '__mj_BizAppsCommon', '__mj_BizAppsTasks']).length === 0],
+
+    // An `includeSchemas` allow-list scopes CodeGen positively: anything not named is
+    // out of scope, including schemas this repo has never heard of. Once it is set,
+    // demanding that excludeSchemas ALSO name each sibling is a rule about the wrong
+    // mechanism — the siblings are already unreachable.
+    ['allows an includeSchemas allow-list that names only the owned schema',
+      configScopeViolations({ includeSchemas: [OWNED_SCHEMA], excludeSchemas: ['sys', '__mj'] }).length === 0],
+    ['flags an includeSchemas allow-list that pulls a sibling schema back into scope',
+      configScopeViolations({ includeSchemas: [OWNED_SCHEMA, '__mj_BizAppsTasks'], excludeSchemas: ['sys'] }).length === 1],
+    // The reason the allow-list exists. A deny-list can only name apps we already know;
+    // __mj_BizAppsCaliber is a real Open App sharing a database with Forms today and
+    // appears nowhere in FOREIGN_SCHEMAS. Under the old rule this config was clean.
+    ['flags an unknown app schema the deny-list could never have named',
+      configScopeViolations({ includeSchemas: [OWNED_SCHEMA, '__mj_BizAppsCaliber'], excludeSchemas: [] }).length === 1
+      && missingExclusions(['__mj_BizAppsCommon', '__mj_BizAppsTasks']).length === 0],
+    // Regression guards: both passed the moment the allow-list branch was written, so
+    // they document the contract rather than having driven it.
+    ['falls back to the deny-list rule when includeSchemas is absent or blank',
+      configScopeViolations({ excludeSchemas: ['sys'] }).length === FOREIGN_SCHEMAS.length
+      && configScopeViolations({ includeSchemas: ['  '], excludeSchemas: ['sys'] }).length === FOREIGN_SCHEMAS.length],
+    ['matches CodeGen’s case/whitespace handling for includeSchemas',
+      configScopeViolations({ includeSchemas: ['  __MJ_BIZAPPSFORMS '], excludeSchemas: [] }).length === 0],
     // CodeGen trims and lowercases schema names before comparing, so the gate must too
     // — otherwise a cosmetically-reformatted config would read as a missing exclusion.
     ['matches CodeGen’s case/whitespace-insensitive comparison',
@@ -354,15 +498,34 @@ function main() {
     }
   }
 
-  const unexcluded = missingExclusions(loadExcludeSchemas());
-  const violations = [...runConfigGate(unexcluded), ...runNameGate(entries), ...runDeclarationGate(entries)];
+  // Standalone generated artifacts. A missing one is a hard error for the same reason
+  // an empty root is: silently skipping it is how this file went unscanned through an
+  // entire release while the gate reported PASS.
+  for (const rel of GENERATED_FILES) {
+    const abs = join(REPO_ROOT, rel);
+    let st;
+    try {
+      st = statSync(abs);
+    } catch (err) {
+      throw new Error(`Generated file '${rel}' is missing — the gate would not scan it. Update GENERATED_FILES.`, { cause: err });
+    }
+    if (!st.isFile()) throw new Error(`Generated file '${rel}' is not a file.`);
+    entries.push({ abs, isDir: false });
+  }
+
+  const scopeConfig = loadScopeConfig();
+  const scopeViolations = configScopeViolations(scopeConfig);
+  const violations = [...runConfigGate(scopeViolations), ...runNameGate(entries), ...runDeclarationGate(entries)];
+  const usingAllowList = (scopeConfig.includeSchemas ?? []).some((s) => String(s).trim().length > 0);
 
   console.log('Generated-output schema-scope gate');
   console.log('----------------------------------');
   console.log(`Owned schema : ${OWNED_SCHEMA}`);
   console.log(`Foreign      : ${FOREIGN_SCHEMAS.map((f) => f.schema).join(', ')}`);
-  console.log(`Scanned      : ${entries.length} path(s) under ${GENERATED_ROOTS.length} generated root(s)`);
-  console.log(`Config       : mj.config.cjs excludes ${FOREIGN_SCHEMAS.length - unexcluded.length}/${FOREIGN_SCHEMAS.length} foreign schema(s)`);
+  console.log(`Scanned      : ${entries.length} path(s) under ${GENERATED_ROOTS.length} generated root(s) + ${GENERATED_FILES.length} standalone file(s)`);
+  console.log(usingAllowList
+    ? `Config       : includeSchemas allow-list -> [${scopeConfig.includeSchemas.join(', ')}]`
+    : `Config       : excludeSchemas deny-list -> ${FOREIGN_SCHEMAS.length - scopeViolations.length}/${FOREIGN_SCHEMAS.length} foreign schema(s) named`);
   console.log('');
 
   if (violations.length === 0) {
@@ -390,7 +553,8 @@ function main() {
 
   console.log('');
   console.log(`FAIL — ${violations.length} scope violation(s) across ${byFile.size} path(s).`);
-  console.log('Fix: ensure `excludeSchemas` in mj.config.cjs lists every foreign schema, then re-run CodeGen.');
+  console.log('Fix: scope CodeGen in mj.config.cjs — either an `includeSchemas` allow-list naming only');
+  console.log(`     '${OWNED_SCHEMA}', or an \`excludeSchemas\` deny-list naming every foreign schema — then re-run CodeGen.`);
   process.exit(1);
 }
 

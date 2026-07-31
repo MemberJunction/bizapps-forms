@@ -3,7 +3,16 @@
     <mjf-form-progress [value]="progress()" />
   </div>
 
-  <form class="mjf-scroll__body" (ngSubmit)="onSubmit()" novalidate>
+  <!--
+    Native `submit`, not `(ngSubmit)`. This component is standalone and does NOT import
+    FormsModule (the widget has its own FormRuntime and uses no ngModel), so Angular's
+    NgForm directive never applies to this element and `(ngSubmit)` binds to nothing.
+    The browser therefore ran its default GET submit: the page navigated to `?`, tearing
+    down the component and aborting the in-flight submit mutation — every respondent lost
+    their answers. The <form> element itself is kept for semantics (screen readers, and
+    the mobile keyboard's "Go" affordance); `preventDefault` is now explicit.
+  -->
+  <form class="mjf-scroll__body" (submit)="onSubmit($event)" novalidate>
     @for (page of pages(); track page.id) {
       <section class="mjf-page" [attr.aria-label]="page.title || 'Section'">
         @if (page.title) {

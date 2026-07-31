@@ -14,6 +14,7 @@ on:
     paths:
       - 'packages/*/src/generated/**'
       - 'packages/Angular/src/lib/generated/**'
+      - 'apps/MJAPI/schema.graphql'
       - 'mj.config.cjs'
       - 'scripts/check-generated-schema-scope.mjs'
       - '.github/workflows/generated-scope-gate.yml'
@@ -22,6 +23,7 @@ on:
     paths:
       - 'packages/*/src/generated/**'
       - 'packages/Angular/src/lib/generated/**'
+      - 'apps/MJAPI/schema.graphql'
       - 'mj.config.cjs'
       - 'scripts/check-generated-schema-scope.mjs'
       - '.github/workflows/generated-scope-gate.yml'

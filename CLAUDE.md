@@ -14,7 +14,23 @@ MJ Forms reuses ~70% of what it needs from MJ core (the heart of the plan — se
 - **RSU** (`RuntimeSchemaManager` + `SchemaEvolution`) for promoting responses to first-class entities.
 - **bizapps-common** Person / Organization for known-respondent identity (optional, loose coupling).
 
-These capabilities are all present in published **MJ 5.43.0**. We pin `@memberjunction/*` to **exactly `5.43.0`** and rev that pin upward over time (do not loosen to a caret range without a reason). Note: the plan's §12 default assumed `>=5.44.0`; verification during Phase 0 (DG-1) confirmed the forms-critical features ship in 5.43.0, which — unlike 5.44.0 — is actually published to npm.
+These capabilities are all present in published **MJ 5.50.0**. We pin `@memberjunction/*` to **exactly `5.50.0`** and rev that pin upward over time (do not loosen to a caret range without a reason — the caret ranges in `peerDependencies` are correct and deliberate; the `dependencies` pins are the ones that must stay exact).
+
+**Why 5.50.0, and why the old 5.43.0 pin was wrong.** The floor is set by our own dependencies, not by preference: `bizapps-common` and `bizapps-tasks` both declare `>=5.44.0` and are hard `mj-app.json` dependencies, so a 5.43.0 pin promised a configuration that could not exist. The reason originally given for choosing 5.43.0 over 5.44.0 — that 5.44.0 was not published to npm — was simply false. 5.50.0 specifically is the first release carrying CodeGen's `includeSchemas` allow-list, which is what lets us scope CodeGen positively instead of maintaining a deny-list that can never name an Open App we have not heard of.
+
+Upgrading required adding `@workos-inc/authkit-js` to MJExplorer: 5.50's `@memberjunction/ng-auth-services` added a WorkOS provider and declares it as a **required** peer (empty `peerDependenciesMeta`), so the Angular build cannot resolve it otherwise. This matches how the repo already carries Okta and Amplify without using them.
+
+**Pinning model** (verified 2026-07-30, matches the sibling repos'): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
+
+**Upgrading MJ is a database operation, not just a pin bump.** Bumping npm versions leaves the `__mj` core schema behind, and a partially-migrated core still installs, builds, tests and boots cleanly — the damage surfaces later and nowhere near its cause (`AIEngine.Config()` hits a core entity the metadata lacks, throws `Entity <name> not found in metadata`, and aborts loading its entire agent set). The core migration is run **version-tagged**:
+
+```bash
+npx mj migrate -t v<version>      # NOT `npm run mj:migrate`, which only targets __mj_BizAppsForms
+```
+
+Read the first line of its output. A real core run prints `Detected installed migration version: <N> — fetching only migrations newer than it.` — that `<N>` must equal the frontier you recorded beforehand (`SELECT MAX(version) FROM __mj.flyway_schema_history WHERE version IS NOT NULL AND success = 1`). A higher `<N>` means a poisoned watermark that will silently hide every migration below it. No watermark line at all means you are not migrating core. Judge success by the **frontier advancing**, never by the `N applied` count — `R__RefreshMetadata.sql` is repeatable, so an already-current run and a fully-skipped run both report `1 applied` and exit 0. Finish by restarting MJAPI and grepping its startup log for `not found in metadata`; it must be clean, because MJAPI starts fine either way.
+
+`bizapps-caliber` carries a full `mj-upgrade` skill covering this end to end (watermark repair, `TURBO_FORCE` builds, post-migration verification). Port it here rather than re-deriving it.
 
 ## Repository facts
 - **npm scope:** `@mj-biz-apps/forms-*` (packages: `forms-entities`, `forms-actions`, `forms-server`, `forms-ng`)
@@ -23,6 +39,24 @@ These capabilities are all present in published **MJ 5.43.0**. We pin `@memberju
 - **Entity-name prefix:** Forms entities get the `MJ_BizApps_Forms: ` prefix (set in `mj.config.cjs`), matching the `MJ_BizApps_Common:` / `MJ_BizApps_Tasks:` sibling convention.
 - **Hard dependencies (auto-installed Open Apps):** MJ Forms **requires** `bizapps-common` (identity — `MJ_BizApps_Common: People`, hard FK from `FormResponse.RespondentPersonID`) and `bizapps-tasks` (review/approve-before-publish routing). Both are declared in `mj-app.json` `dependencies` and installed automatically by `mj app install` (leaf-first: common → tasks → forms). They're free OSS and part of our stack — build on them directly with hard FKs; do **not** use soft polymorphic links to avoid the dependency.
 - **Approval routing (Phase 2):** publish gating uses `bizapps-tasks` — a `FormVersion` going to review creates a Task + TaskLink(→FormVersion) + TaskAssignment(→approver People); the Task's `TaskType` `OnComplete`/`OnReject` action hooks call back into Forms actions to publish or return-to-draft. Forms owns the `FormVersion` status state machine; tasks owns assignment/decisions/UI/audit/notifications.
+
+## Rules and skills (`.claude/`)
+
+Ported from MemberJunction and bizapps-caliber on 2026-07-30 and **corrected against this repo** —
+several details in the originals are wrong here, and each file says where and why.
+
+| File | Scope | Covers |
+|---|---|---|
+| `.claude/rules/data-access.md` | `**/*.ts` | Entity metadata, `BaseEntity`, `RunView`/`RunViews`, caching, the `MJ: ` prefix rule |
+| `.claude/rules/typescript-style.md` | `**/*.ts` | No `any`, no weak typing, no cross-package re-exports, `BaseSingleton`, decomposition |
+| `.claude/rules/testing.md` | tests | Vitest conventions **here** (`.spec.ts`, no `test-utils`), and what unit tests structurally cannot catch |
+| `.claude/rules/design-tokens.md` | `**/*.css` | No hardcoded colours; `--mj-*` / `--mjf-*` tokens; the shadow-root constraint |
+| `.claude/skills/mj-upgrade/` | on request | Full MJ version-upgrade runbook, including the core `__mj` migration that the pin bump alone does **not** do |
+
+Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
+`.test.ts`; `@memberjunction/test-utils`, `scripts/scaffold-tests.mjs` and `guides/` do not exist
+here; there is no Sass; and Caliber's `bump-pins.sh` omits `packages/CoreEntitiesServer`, which this
+repo has.
 
 ## Structure
 ```
