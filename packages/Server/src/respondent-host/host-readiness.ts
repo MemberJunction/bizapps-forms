@@ -73,13 +73,21 @@ export function checkRespondentReadiness(
   // role 'form respondent' was told it could not grant a role core would grant it. Getting this
   // wrong only ever produces a wrong BOOT WARNING, never a wrong authorization decision — core
   // re-checks grantability itself at mint time.
+  //
+  // Two details are load-bearing beyond the comparison itself. The `typeof` filter is not
+  // belt-and-braces: `magicLink` is host config parsed from JSON, where an operator blanking a
+  // value writes `null` — a value the TypeScript shape does not admit but the runtime hands us
+  // anyway — and this runs inside boot middleware, where throwing is strictly worse than any
+  // wrong verdict. The empty-target guard mirrors core's own `if (!target) return false`, which
+  // it checks BEFORE consulting the allow-list, so a blank name is never grantable.
   const normalize = (name: string): string => name.trim().toLowerCase();
+  const target = normalize(roleName ?? '');
   const allowed = new Set(
     [magicLink.restrictedRoleName, ...(magicLink.grantableRoleNames ?? [])]
-      .filter((n): n is string => n !== undefined)
+      .filter((n): n is string => typeof n === 'string')
       .map(normalize),
   );
-  if (!allowed.has(normalize(roleName))) {
+  if (!target || !allowed.has(target)) {
     return {
       ready: false,
       reason:

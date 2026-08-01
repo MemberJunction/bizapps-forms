@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { checkRespondentReadiness, RESPONDENT_ROLE } from '../../respondent-host/host-readiness';
+import type { HostMagicLinkConfig } from '../../respondent-host/host-readiness';
 
 /**
  * These describe what an OPERATOR needs to be told, not how the check is written.
@@ -91,5 +92,23 @@ describe('checkRespondentReadiness', () => {
       .toEqual({ ready: true });
     expect(checkRespondentReadiness({ enabled: true, restrictedRoleName: 'form respondent', grantableRoleNames: [] }))
       .toEqual({ ready: true });
+  });
+  // `magicLink` is host config read from JSON, so a null is reachable in a way the TypeScript
+  // shape does not admit — an operator who blanks a value writes `null`, not `undefined`. This
+  // runs inside boot middleware, so throwing here is strictly worse than any wrong verdict.
+  it('ignores null entries in host config instead of throwing on them', () => {
+    const fromJson: HostMagicLinkConfig = JSON.parse(
+      '{"enabled":true,"restrictedRoleName":null,"grantableRoleNames":["Form Respondent",null]}',
+    );
+    expect(() => checkRespondentReadiness(fromJson)).not.toThrow();
+    expect(checkRespondentReadiness(fromJson)).toEqual({ ready: true });
+  });
+
+  // Core's `isRoleGrantable` bails on an empty target (`if (!target) return false`) before it
+  // consults the allow-list. Without the same guard, a config carrying a blank string would make
+  // a blank role name "grantable" — agreeing with core means agreeing about this too.
+  it('never treats a blank role name as grantable, as core does not', () => {
+    const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [''] }, '   ');
+    expect(result.ready).toBe(false);
   });
 });
