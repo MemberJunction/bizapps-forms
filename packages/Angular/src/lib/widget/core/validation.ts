@@ -3,6 +3,7 @@
  * re-validates the same rules on submit; this layer gives instant, accessible
  * feedback and blocks navigation/submit on a visible, required question.
  */
+import { validateAnswerFormat } from '@mj-biz-apps/forms-entities';
 import type {
   AnswerValue,
   PublishedFormQuestion,
@@ -56,25 +57,19 @@ export function validateQuestion(
   return validateRule(question.validationRule, value);
 }
 
-/** Built-in format checks for typed questions (Email, Phone, Number). */
+/**
+ * Built-in format checks for typed questions, delegated to the shared contract.
+ *
+ * This used to be its own copy of the rules, and the server had no copy at all — so the widget
+ * rejected a malformed email that the mutation behind it happily stored. Both sides now call
+ * {@link validateAnswerFormat}, which is the only way the two stay in agreement.
+ */
 function validateByType(
   question: PublishedFormQuestion,
   value: AnswerValue,
 ): FieldValidationResult {
-  switch (question.type) {
-    case 'Email':
-      return isEmail(String(value))
-        ? VALID
-        : { valid: false, message: 'Enter a valid email address.' };
-    case 'Number':
-    case 'Rating':
-    case 'NPS':
-      return Number.isFinite(toNumber(value))
-        ? VALID
-        : { valid: false, message: 'Enter a number.' };
-    default:
-      return VALID;
-  }
+  const message = validateAnswerFormat(question.type, value);
+  return message ? { valid: false, message } : VALID;
 }
 
 /** Apply the declarative {@link ValidationRule} (length / range / pattern). */
@@ -116,11 +111,6 @@ function matchesPattern(text: string, pattern: string): boolean {
   } catch {
     return true;
   }
-}
-
-/** Pragmatic email check — intentionally lenient; the server is authoritative. */
-function isEmail(text: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim());
 }
 
 /** Coerce to a finite number or `undefined`. */

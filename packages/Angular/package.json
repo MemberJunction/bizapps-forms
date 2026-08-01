@@ -12,7 +12,7 @@
     "/dist"
   ],
   "scripts": {
-    "build": "ngc",
+    "build": "ngc && node scripts/build-widget.mjs",
     "build:widget": "node scripts/build-widget.mjs",
     "test": "vitest run"
   },

@@ -28,16 +28,32 @@ export type RespondentReadiness =
   | { ready: true }
   | { ready: false; reason: string };
 
-/** The role Forms' anonymous sessions are granted. Seeded by this app's metadata. */
+/** The role Forms' anonymous sessions are granted by default. Seeded by this app's metadata. */
 export const RESPONDENT_ROLE = 'Form Respondent';
 
 /**
  * Whether this host can mint the anonymous links public forms depend on.
  *
- * Three ways it can be unready, each with a distinct fix, so they get distinct messages
- * rather than one vague "check your config".
+ * Two ways it can be unready, each with a distinct fix, so they get distinct messages rather
+ * than one vague "check your config".
+ *
+ * @param magicLink the host's core `magicLink` config
+ * @param roleName  the role THIS app's minter grants — pass the value the minter uses
+ *                  (`FORMS_MAGICLINK_ROLE`) so the check cannot drift from what is actually
+ *                  minted. Defaults to {@link RESPONDENT_ROLE}.
+ *
+ * Deliberately does NOT inspect `magicLink.restrictedRoleName`. That deployment-global is only
+ * core's default for invites that name no role (`isRoleGrantable` treats it as one more allowed
+ * name, and `isProtectedAccount` already includes the invited role in its allowed set). Forms'
+ * minter always names its role, so the global is irrelevant to us — and requiring it to equal
+ * ours made every stock host unready, since core defaults it to 'Magic Link Baseline'. Worse, it
+ * is one value per deployment, so demanding it meant no second Open App could ever be ready on
+ * the same MJAPI instance. The real requirement is grantability, checked below.
  */
-export function checkRespondentReadiness(magicLink: HostMagicLinkConfig | undefined): RespondentReadiness {
+export function checkRespondentReadiness(
+  magicLink: HostMagicLinkConfig | undefined,
+  roleName: string = RESPONDENT_ROLE,
+): RespondentReadiness {
   if (!magicLink || magicLink.enabled !== true) {
     return {
       ready: false,
@@ -48,22 +64,20 @@ export function checkRespondentReadiness(magicLink: HostMagicLinkConfig | undefi
     };
   }
   const grantable = magicLink.grantableRoleNames ?? [];
-  if (!grantable.includes(RESPONDENT_ROLE)) {
+  // Deliberately mirrors core's `isRoleGrantable` (auth/magicLink/magicLinkCore): a role is
+  // grantable if it is the restricted role OR appears in grantableRoleNames. Duplicated rather
+  // than imported because core does not export it from its public surface, and reaching into
+  // `@memberjunction/server/dist/auth/...` would couple us to its internal file layout. If core
+  // ever exports it, delete this and call it — the point is to agree with core, not to have an
+  // opinion. Getting it wrong here only ever produces a wrong BOOT WARNING, never a wrong
+  // authorization decision: core re-checks grantability itself at mint time.
+  if (!grantable.includes(roleName) && magicLink.restrictedRoleName !== roleName) {
     return {
       ready: false,
       reason:
-        `core 'magicLink' is enabled but '${RESPONDENT_ROLE}' is not in ` +
+        `core 'magicLink' is enabled but '${roleName}' is not in ` +
         `magicLink.grantableRoleNames, so invites cannot grant it. Add it, or anonymous ` +
         `respondents will have no permission to create responses.`,
-    };
-  }
-  if (magicLink.restrictedRoleName !== RESPONDENT_ROLE) {
-    return {
-      ready: false,
-      reason:
-        `core 'magicLink' has restrictedRoleName='${magicLink.restrictedRoleName ?? '(unset)'}' ` +
-        `rather than '${RESPONDENT_ROLE}'. Anonymous sessions would be restricted to the wrong ` +
-        `role and could carry permissions Forms never intended to grant.`,
     };
   }
   return { ready: true };

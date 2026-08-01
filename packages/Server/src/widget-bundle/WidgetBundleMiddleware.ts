@@ -11,7 +11,7 @@
  * after the page's 10s safety timeout. This route closes that gap.
  *
  * The route runs BEFORE auth (it is just a static JS asset) so an anonymous respondent loads it
- * without a login. If the bundle file cannot be located (e.g. `build:widget` was never run), the
+ * without a login. If the bundle file cannot be located (e.g. the package was never built), the
  * route returns 404 with a clear log line — it never crashes boot.
  */
 import type { Application, Request, Response } from 'express';
@@ -39,7 +39,7 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
       if (!bundlePath) {
         LogError(
           `[Forms] Widget bundle not found for ${WIDGET_BUNDLE_ROUTE}. Run ` +
-            `"npm run build:widget" in @mj-biz-apps/forms-ng, or set FORMS_WIDGET_BUNDLE_PATH.`,
+            `"npm run build" in @mj-biz-apps/forms-ng, or set FORMS_WIDGET_BUNDLE_PATH.`,
         );
         res.status(404).type('text/plain').send('Form widget bundle not found.');
         return;
@@ -66,7 +66,7 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
     } else {
       LogStatus(
         `[Forms] Widget bundle route ${WIDGET_BUNDLE_ROUTE} registered, but no bundle found yet ` +
-          `(will 404 until "npm run build:widget" runs or FORMS_WIDGET_BUNDLE_PATH is set).`,
+          `(will 404 until "npm run build" runs or FORMS_WIDGET_BUNDLE_PATH is set).`,
       );
     }
   }

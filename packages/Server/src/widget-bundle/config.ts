@@ -3,7 +3,7 @@
  *
  * The respondent host page loads the element via `<script src="/forms/widget/mj-form.js">`.
  * {@link WidgetBundleMiddleware} serves that route from the file produced by
- * `@mj-biz-apps/forms-ng`'s `build:widget` step (`dist/widget/mj-form.js`).
+ * `@mj-biz-apps/forms-ng`'s `build` (`dist/widget/mj-form.js`).
  *
  * Path resolution is layered so it works in a monorepo (hoisted) AND an installed Open App:
  *  1. `FORMS_WIDGET_BUNDLE_PATH` — explicit absolute override (CDN-staged copy, custom build).
@@ -25,7 +25,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 /** Route the widget bundle is served from (matches `host-page.ts`'s default bundle URL). */
 export const WIDGET_BUNDLE_ROUTE = '/forms/widget/mj-form.js';
 
-/** The bundle file `@mj-biz-apps/forms-ng`'s `build:widget` emits, relative to that package. */
+/** The bundle file `@mj-biz-apps/forms-ng`'s `build` emits, relative to that package. */
 const PACKAGE_BUNDLE_SUBPATH = '@mj-biz-apps/forms-ng/dist/widget/mj-form.js';
 
 /** Frozen configuration for the widget-bundle route. */

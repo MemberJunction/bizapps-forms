@@ -45,6 +45,81 @@ describe('validateSubmission — required MultiChoice via jsonValue', () => {
   });
 });
 
+/**
+ * A form whose format-bearing questions carry NO explicit `validationRule` — the shape the
+ * seeded `contact-us-e2e` form actually has, and the one that was silently accepting anything.
+ */
+function typedQuestionsWithoutRulesDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'Contact',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-email', type: 'Email', prompt: 'Email address', isRequired: true, displayOrder: 1, options: [] },
+          { id: 'q-num', type: 'Number', prompt: 'How many?', isRequired: false, displayOrder: 2, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('validateSubmission — type-derived format (the client/server asymmetry)', () => {
+  // The widget has always enforced these type checks; the server consulted only the declarative
+  // rule, so a direct POST at the GraphQL mutation persisted `not-an-email` into an Email
+  // question as a Complete response. The docstring claimed format could not be bypassed.
+  it('rejects a malformed email for an Email question carrying no validationRule', () => {
+    const outcome = validateSubmission(
+      typedQuestionsWithoutRulesDefinition(),
+      [{ questionId: 'q-email', textValue: 'not-an-email' }],
+      false,
+    );
+    expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-email']);
+    expect(outcome.errors[0].message).toBe('Enter a valid email address.');
+  });
+
+  it('still accepts a well-formed email, and does not invent errors for unanswered optionals', () => {
+    const outcome = validateSubmission(
+      typedQuestionsWithoutRulesDefinition(),
+      [{ questionId: 'q-email', textValue: 'someone@example.com' }],
+      false,
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-email']);
+  });
+
+  it('rejects a non-numeric answer to a Number question carrying no validationRule', () => {
+    const outcome = validateSubmission(
+      typedQuestionsWithoutRulesDefinition(),
+      [
+        { questionId: 'q-email', textValue: 'someone@example.com' },
+        { questionId: 'q-num', textValue: 'lots' },
+      ],
+      false,
+    );
+    expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-num']);
+  });
+
+  it('does not apply a format check to a question left unanswered', () => {
+    // An empty optional is the isRequired check's business; a format check must not fire on it.
+    const outcome = validateSubmission(
+      typedQuestionsWithoutRulesDefinition(),
+      [
+        { questionId: 'q-email', textValue: 'someone@example.com' },
+        { questionId: 'q-num', textValue: '' },
+      ],
+      false,
+    );
+    expect(outcome.errors).toEqual([]);
+  });
+});
+
 /** A definition where q-other is shown only when q-choice equals 'Other'. */
 function conditionalDefinition(): PublishedFormDefinition {
   return {

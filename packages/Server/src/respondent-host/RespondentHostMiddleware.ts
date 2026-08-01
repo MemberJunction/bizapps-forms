@@ -46,6 +46,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/sqlserver-dataprovider';
+import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
 
 import { getRespondentHostConfig } from './config.js';
 import { renderRespondentHostPage, renderRespondentHostErrorPage } from './host-page.js';
@@ -88,7 +89,12 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // Surfaced at boot, not at first publish. The magic-link minter's gate is
     // deliberately graceful, so a misconfigured host stays silent until a respondent
     // hits a 409 — by which time nobody connects it to an install-time setting.
-    const readiness = checkRespondentReadiness(configInfo.magicLink);
+    // Pass the role the MINTER grants, not a constant: both read FORMS_MAGICLINK_ROLE, so a host
+    // that renames the role gets a readiness verdict about the role it will actually mint.
+    const readiness = checkRespondentReadiness(
+      configInfo.magicLink,
+      getMagicLinkProvisioningConfig().roleName,
+    );
     if (readiness.ready === false) {
       LogError(`[Forms] Anonymous respondent path is NOT ready: ${readiness.reason}`);
     }

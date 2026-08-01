@@ -49,6 +49,11 @@ jobs:
       - name: Build all packages
         run: npm run build:packages
 
+      # Same gate publish.yml runs, pulled forward so a PR that breaks the widget bundle fails
+      # here rather than silently shipping a form that never renders.
+      - name: Validate the forms-ng widget bundle will ship
+        run: ./.github/scripts/validate-widget-bundle.sh
+
       # 434 tests existed in this repo with no workflow running them, so a PR could go
       # green with the whole suite red. Runs after the build because turbo's `test` task
       # dependsOn ^build.

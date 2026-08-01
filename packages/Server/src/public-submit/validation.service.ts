@@ -9,13 +9,21 @@
  *  2. Evaluate page + question `ConditionalRule` with the shared
  *     {@link evaluateConditionalRule}; questions that resolve hidden are DROPPED
  *     (their answers are discarded, and they cannot trip "required").
- *  3. For each visible question: enforce `isRequired`, then `ValidationRule`
- *     (length / numeric bounds / regex pattern).
+ *  3. For each visible question: enforce `isRequired`, then the format implied by the
+ *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
+ *     `ValidationRule` (length / numeric bounds / regex pattern).
+ *
+ * Step 3's type check was missing until 2026-08-01, and this comment claimed it was there. The
+ * widget enforced it, the server did not, so an `Email` question authored without a `pattern`
+ * accepted anything posted straight at the mutation — `not-an-email` persisted as a `Complete`
+ * response. The check now comes from the shared contract both sides import, which is what makes
+ * "the server re-runs the same rules" a fact rather than an intention.
  *
  * Returns the set of visible answers to persist plus any field errors. Pure — no I/O.
  */
 import {
   evaluateConditionalRule,
+  validateAnswerFormat,
   type AnswerValue,
   type FieldError,
   type FormAnswerInput,
@@ -157,8 +165,21 @@ function collectVisibleQuestion(
   }
 }
 
-/** Apply the declarative {@link ValidationRule} (if any) to an answered value. */
+/**
+ * Validate an answered value: first the format its TYPE implies, then the declarative
+ * {@link ValidationRule} the author supplied (if any).
+ *
+ * The type check runs unconditionally and is NOT a fallback for a missing rule. An `Email`
+ * question with a `pattern` is still an email question, so the type floor holds and the
+ * author's pattern narrows it further — a rule can constrain a type, never loosen it.
+ * {@link validateAnswerFormat} is the same check the widget runs, imported rather than
+ * reimplemented so the two cannot drift again.
+ */
 function validateValue(question: PublishedFormQuestion, value: AnswerValue): string | undefined {
+  const formatError = validateAnswerFormat(question.type, value);
+  if (formatError) {
+    return formatError;
+  }
   const rule = question.validationRule;
   if (!rule) {
     return undefined;

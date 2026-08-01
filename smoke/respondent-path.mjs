@@ -60,7 +60,7 @@ async function main() {
   // 3. The widget bundle must actually be served, not 404. Without it the page renders
   //    an empty shell — which looks like a styling problem, not a missing build step.
   const widget = await fetch(`${BASE}/forms/widget/mj-form.js`);
-  check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:widget"`);
+  check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:packages"`);
 
   // 4. The published definition must load for that anonymous session.
   const published = await gql(token,
@@ -76,10 +76,29 @@ async function main() {
   const versionIdFromSnapshot = definition.formVersionId;
   check(Boolean(versionIdFromSnapshot), 'snapshot carries a formVersionId');
 
-  const answers = questions.map((q) => ({
-    questionId: q.id,
-    textValue: q.type === 'Email' ? 'smoke@example.com' : `smoke check ${new Date(0).toISOString()}`,
-  }));
+  // Answers must FIT THEIR QUESTION'S TYPE. Until 2026-08-01 the server ignored question
+  // type and applied only the author's ValidationRule, so this test could post
+  // "smoke check <date>" into a Number question and still get a Complete response — the
+  // same hole that let `not-an-email` persist into an Email question. Now that the server
+  // enforces the type-derived format the widget always enforced, a smoke run has to send
+  // what a real respondent would, which is what it should have been sending all along.
+  const answerFor = (type) => {
+    switch (type) {
+      case 'Email':
+        return { textValue: 'smoke@example.com' };
+      case 'Number':
+      case 'Rating':
+      case 'NPS':
+        return { numericValue: 7 };
+      case 'Phone':
+        return { textValue: '+1 555 010 1234' };
+      case 'Date':
+        return { textValue: new Date(0).toISOString() };
+      default:
+        return { textValue: `smoke check ${new Date(0).toISOString()}` };
+    }
+  };
+  const answers = questions.map((q) => ({ questionId: q.id, ...answerFor(q.type) }));
 
   const submission = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {

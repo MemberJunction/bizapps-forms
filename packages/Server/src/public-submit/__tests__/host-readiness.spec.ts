@@ -32,15 +32,50 @@ describe('checkRespondentReadiness', () => {
   // Enabled-but-misconfigured is the nastier case: the minter runs and the link is
   // created, so nothing looks broken until a respondent is denied at submit time.
   it('fails when the respondent role is not grantable, naming the role', () => {
-    const result = checkRespondentReadiness({ ...ready, grantableRoleNames: ['Some Other Role'] });
+    // Both routes to grantability must be closed for this to be genuinely unready: core treats
+    // the restricted role as always grantable, so leaving it set to ours would make this host
+    // fine. That is why restrictedRoleName is another app's here, not ours.
+    const result = checkRespondentReadiness({
+      enabled: true,
+      restrictedRoleName: 'Magic Link Baseline',
+      grantableRoleNames: ['Some Other Role'],
+    });
     expect(result.ready).toBe(false);
     expect(result.ready === false && result.reason).toContain(RESPONDENT_ROLE);
   });
 
-  it('fails when the session would be restricted to a different role', () => {
-    const result = checkRespondentReadiness({ ...ready, restrictedRoleName: 'Viewer' });
+  it('is ready when the host happens to have set restrictedRoleName to our role and listed nothing', () => {
+    // Core always allows the restricted role, so this host can grant it even with an empty list.
+    expect(checkRespondentReadiness({ enabled: true, restrictedRoleName: RESPONDENT_ROLE, grantableRoleNames: [] }))
+      .toEqual({ ready: true });
+  });
+
+  // `restrictedRoleName` is core's default for invites that do NOT name a role. Forms' minter
+  // always names one, and core's `isRoleGrantable` allows any role listed in grantableRoleNames,
+  // so this deployment-global has no bearing on whether Forms works. Requiring it to equal our
+  // role made every stock host unready (core's own default is 'Magic Link Baseline') and meant
+  // two Open Apps could never both be ready on one MJAPI instance.
+  it('is ready on a host whose restrictedRoleName belongs to another app, so apps can coexist', () => {
+    expect(checkRespondentReadiness({ ...ready, restrictedRoleName: 'Some Other App Respondent' }))
+      .toEqual({ ready: true });
+  });
+
+  it('is ready on a stock host, which defaults restrictedRoleName to "Magic Link Baseline"', () => {
+    expect(checkRespondentReadiness({ ...ready, restrictedRoleName: 'Magic Link Baseline' }))
+      .toEqual({ ready: true });
+  });
+
+  // The role Forms grants is per-app config (FORMS_MAGICLINK_ROLE, read by the minter). If
+  // readiness checked a hardcoded name instead, a host that renamed the role would pass the
+  // check and still mint invites for a role that is not grantable — the same silent drift the
+  // client/server validation split caused.
+  it('checks the role this app actually grants, not a hardcoded one', () => {
+    const custom = 'Survey Respondent';
+    const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [RESPONDENT_ROLE] }, custom);
     expect(result.ready).toBe(false);
-    // Naming what it actually found is what makes the message actionable.
-    expect(result.ready === false && result.reason).toContain('Viewer');
+    expect(result.ready === false && result.reason).toContain(custom);
+
+    expect(checkRespondentReadiness({ enabled: true, grantableRoleNames: [custom] }, custom))
+      .toEqual({ ready: true });
   });
 });
