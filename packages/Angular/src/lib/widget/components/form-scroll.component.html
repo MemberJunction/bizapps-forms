@@ -29,7 +29,7 @@
               [errorMessage]="runtime().visibleErrorFor(q)"
               [distributionSlug]="distributionSlug()"
               (valueChange)="onValueChange(q, $event)"
-              (focusout)="onBlur(q)"
+              (focusout)="onBlur(q, $event)"
             />
           }
         </div>

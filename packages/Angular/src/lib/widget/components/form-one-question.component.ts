@@ -106,7 +106,18 @@ export class FormOneQuestionComponent {
    * Touched means "left the field", not "typed in it" — see the note on the scroll renderer.
    * `onNext` below still marks touched explicitly, because trying to advance IS a commit.
    */
-  protected onBlur(question: PublishedFormQuestion): void {
+  protected onBlur(question: PublishedFormQuestion, event: FocusEvent): void {
+    // `focusout` bubbles, which is why one binding covers every control a question renders — but
+    // it also fires when focus moves BETWEEN two controls of the same question. A MultiChoice
+    // renders one `role="checkbox"` per option and SingleChoice/Rating a `role="radiogroup"`, so
+    // without this guard tabbing from the first option to the second marks the question touched
+    // and renders "This question is required." while the respondent is still reading the options.
+    // Focus has only really left when it landed somewhere outside this question (or nowhere).
+    const container = event.currentTarget as HTMLElement | null;
+    const movedTo = event.relatedTarget as Node | null;
+    if (container && movedTo && container.contains(movedTo)) {
+      return;
+    }
     this.runtime().markTouched(question.id);
   }
 

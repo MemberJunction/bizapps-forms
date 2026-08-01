@@ -47,10 +47,20 @@ export class FormScrollComponent {
    * Marking touched on every keystroke means the error message is live while someone is still
    * typing: a `Phone` question wants 7+ digits, so the first six keystrokes each render
    * "Enter a valid phone number." — and because that message carries `role="alert"`, a screen
-   * reader re-announces it on every one. `focusout` is used rather than a per-control `blur`
-   * because it bubbles, so one binding covers every control the question renders.
+   * reader re-announces it on every one.
    */
-  protected onBlur(question: PublishedFormQuestion): void {
+  protected onBlur(question: PublishedFormQuestion, event: FocusEvent): void {
+    // `focusout` bubbles, which is why one binding covers every control a question renders — but
+    // it also fires when focus moves BETWEEN two controls of the same question. A MultiChoice
+    // renders one `role="checkbox"` per option and SingleChoice/Rating a `role="radiogroup"`, so
+    // without this guard tabbing from the first option to the second marks the question touched
+    // and renders "This question is required." while the respondent is still reading the options.
+    // Focus has only really left when it landed somewhere outside this question (or nowhere).
+    const container = event.currentTarget as HTMLElement | null;
+    const movedTo = event.relatedTarget as Node | null;
+    if (container && movedTo && container.contains(movedTo)) {
+      return;
+    }
     this.runtime().markTouched(question.id);
   }
 
