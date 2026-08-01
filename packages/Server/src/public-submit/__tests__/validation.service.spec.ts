@@ -303,9 +303,9 @@ describe('validateSubmission', () => {
 
   // `min`/`max` were reachable only when the answer arrived as `numericValue`, because the rule
   // path branched on `typeof value` and sent every string to the length/pattern checks. A text
-  // input produces a STRING, the widget coerces it and enforces the range, and this module's own
-  // docstring blesses `textValue` as a legitimate numeric spelling — so the two sides disagreed
-  // about the same answer depending only on which typed column carried it.
+  // input produces a STRING, the widget coerces it and enforces the range, and the shared
+  // `coerceAnswerToNumber` documents `textValue` as a legitimate numeric spelling — so the two
+  // sides disagreed about the same answer depending only on which typed column carried it.
   it('enforces a numeric range whichever typed column carried the answer', () => {
     const def: PublishedFormDefinition = {
       formId: 'f',

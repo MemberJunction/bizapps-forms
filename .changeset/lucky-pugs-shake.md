@@ -49,8 +49,10 @@ text typed, which nothing downstream reads back as a number.
 A numeric `min`/`max` is now enforced on any answer that IS a number, not only on one that
 arrived in the `numericValue` column. The rule path branched on `typeof value`, so
 `{ numericValue: 9999 }` was rejected against `max: 100` and `{ textValue: "9999" }` was
-accepted — while the widget coerced the string and rejected both. A text input produces a
-string, so this was reachable from the ordinary UI, not just a crafted request.
+accepted — while the widget coerced the string and rejected both. The builder only offers
+`min`/`max` on numeric question types, and the widget sends those as `numericValue`, so reaching
+this needed a direct call at the mutation rather than the ordinary UI — which is exactly the
+traffic a public anonymous endpoint has to assume.
 
 **An unsubmittable form.** `matchesValidationPattern` is now shared too. The widget treated an
 author `pattern` that would not compile as valid (never block the respondent) and the server

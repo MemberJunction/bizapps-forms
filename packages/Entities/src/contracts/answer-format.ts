@@ -140,8 +140,9 @@ const DECIMAL_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
  *
  * Numeric questions reach the server as either `numericValue` (a real number) or `textValue`
  * (the string an `<input>` produced), so both spellings have to be accepted. `Number.isFinite`
- * rather than a bare `Number()` check, because `Number('')`, `NaN` and `Infinity` are all
- * things a caller can hand us and none of them is an answer.
+ * rather than a bare `Number()` check, because a caller can hand us `NaN` or `Infinity` in the
+ * `numericValue` column and neither is an answer. (Blank strings are excluded earlier, by the
+ * regex below — not by `isFinite`, which would happily accept `Number('')` as the finite `0`.)
  *
  * The string branch additionally requires a DECIMAL spelling, which `Number()` alone does not:
  * `Number('0x10')` is `16`, `Number('0b101')` is `5`, `Number('0o17')` is `15`. Those passed the

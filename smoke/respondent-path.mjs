@@ -83,11 +83,20 @@ async function main() {
   // enforces a type-derived format — the one the widget already applied to Email/Number/
   // Rating/NPS, plus Phone and Date, which neither side used to check — a smoke run has to
   // send what a real respondent would, which is what it should have been sending all along.
-  // Mirrors the widget's `toAnswerInput` (packages/Angular/src/lib/widget/core/answer-value.ts):
-  // same TYPE must reach the same typed COLUMN. This used to send `textValue` for every type, so
-  // a Date answer arrived in the column `answerValueOf` reads first and the run never touched
-  // `dateValue` at all — the one column this branch hardened, since `isDate` now rejects
-  // non-strings. Sending what the widget sends is the whole point of a smoke test.
+  //
+  // "What the widget sends" is TWO hops, and mirroring only the first is wrong:
+  // `toAnswerInput` (core/answer-value.ts) picks the typed COLUMN, then `submission-mapping.ts`
+  // serializes it. `jsonValue` is a JSON STRING in the SDL, so passing the contract's array
+  // straight through is rejected before any resolver runs ("String cannot represent a non string
+  // value") and the smoke aborts on any form carrying a MultiChoice question.
+  //
+  // This used to send `textValue` for every type, so a Date answer landed in the column
+  // `answerValueOf` reads first and the run never touched `dateValue` — the one column this
+  // branch hardened, since `isDate` now rejects non-strings.
+  //
+  // `FileUpload` is deliberately NOT mirrored: the widget sends `fileId`, but `answerValueOf`
+  // does not read that column at all, so a required upload question reads as unanswered on the
+  // server regardless. That gap pre-dates this branch and is not the smoke test's to surface.
   const answerFor = (type) => {
     switch (type) {
       case 'Number':
@@ -100,7 +109,7 @@ async function main() {
       case 'Time':
         return { dateValue: new Date(0).toISOString() };
       case 'MultiChoice':
-        return { jsonValue: ['smoke'] };
+        return { jsonValue: JSON.stringify(['smoke']) };
       case 'Email':
         return { textValue: 'smoke@example.com' };
       case 'Phone':
