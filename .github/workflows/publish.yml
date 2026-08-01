@@ -67,25 +67,19 @@ jobs:
             echo "Found $PENDING pending changeset(s)"
           fi
 
-      - name: Determine next expected version
-        if: steps.changeset_check.outputs.pending != '0' && github.ref == 'refs/heads/main' && !github.event.inputs.targetVersion
-        id: version_check
+      - name: Determine declared version bump
+        if: steps.changeset_check.outputs.pending != '0'
+        id: declared_bump
         run: |
-          # Get current version from entities package (any of the 4 BAC packages works since they're fixed-versioned)
+          # Current version from the entities package — any of them works, since `fixed` in
+          # .changeset/config.json moves every @mj-biz-apps package together.
           CURRENT_VERSION=$(jq -r .version packages/Entities/package.json)
-          echo "Current version: $CURRENT_VERSION"
 
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          NEXT_MAJOR_VERSION="$(( ${VERSION_PARTS[0]} + 1 )).0.0"
-          NEXT_MINOR_VERSION="${VERSION_PARTS[0]}.$(( ${VERSION_PARTS[1]} + 1 )).0"
-          NEXT_PATCH_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$(( ${VERSION_PARTS[2]} + 1 ))"
-
-          # The expectation has to come from what the changesets declare, because that is what
-          # `changeset version` will actually do. Deriving a minor from "are there new
-          # migrations" only agreed with changesets by coincidence: a deliberate minor with no
-          # schema change — which is what a raised install requirement looks like — was expected
-          # to be a patch, and the guard below then failed the release on its own prediction.
-          # Package names are quoted with ' or " depending on who wrote the changeset, so match both.
+          # What the release will be is whatever the changesets declare, because that is what
+          # `changeset version` will actually do. Nothing else may move this number — see the
+          # policy gate below for why the schema-change rule cannot be enforced by nudging it.
+          # `@changesets/write` always double-quotes the package name; single quotes are matched too
+          # because changesets accepts them, so a hand-authored file is not silently passed over.
           DECLARED_BUMP=patch
           for f in .changeset/*.md; do
             [ "$f" = ".changeset/README.md" ] && continue
@@ -98,20 +92,75 @@ jobs:
               DECLARED_BUMP=minor
             fi
           done
-          echo "Highest bump declared across changesets: $DECLARED_BUMP"
 
-          # A migration is a schema change, so it floors the release at a minor even if every
-          # changeset only asked for a patch. (changes.yml enforces the same rule on PRs into
-          # `next`; this is the backstop for anything that reached main another way.)
-          if git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
-            NEW_MIGRATION_FILES=$(git --no-pager diff --name-only "v${CURRENT_VERSION}" "${{ github.sha }}" -- migrations/ || true)
-          else
-            NEW_MIGRATION_FILES=""
+          echo "Current version: $CURRENT_VERSION"
+          echo "Highest bump declared across changesets: $DECLARED_BUMP"
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "DECLARED_BUMP=$DECLARED_BUMP" >> "$GITHUB_OUTPUT"
+
+      # Deliberately carries NO ref or targetVersion condition: this must hold on every path
+      # that can cut a release. See the comment inside for what happens when it does not.
+      - name: Enforce schema-change version policy
+        if: steps.changeset_check.outputs.pending != '0'
+        env:
+          CURRENT_VERSION: ${{ steps.declared_bump.outputs.CURRENT_VERSION }}
+          DECLARED_BUMP: ${{ steps.declared_bump.outputs.DECLARED_BUMP }}
+        run: |
+          # A migration is a schema change, so it must not ship as a patch. This is a POLICY GATE,
+          # kept as its own step rather than folded into the prediction below, for two reasons.
+          #
+          # 1. The rule CANNOT be enforced by adjusting the predicted bump. `changeset version`
+          #    reads only `.changeset/*.md` and knows nothing about `migrations/`, so raising the
+          #    prediction moves the expectation away from what will actually happen, and the
+          #    mismatch guard then aborts the release reporting a predictor error instead of the
+          #    missing changeset — the exact failure this step exists to remove.
+          # 2. It has to hold on every path that releases. The prediction below only runs for an
+          #    auto-detected release from `main`; a `workflow_dispatch` skips it and publishes
+          #    anyway. A dry run of this workflow dispatched from `next` shipped 0.3.1 — a patch —
+          #    carrying a new migration, and tagged it, because the gate lived inside a step that
+          #    path never reaches.
+          #
+          # (changes.yml enforces the same rule on PRs into `next`; this is the backstop for
+          # anything that reached a release another way.)
+          if [ -z "$DECLARED_BUMP" ] || [ -z "$CURRENT_VERSION" ]; then
+            echo "::error::Determine declared version bump produced no result — refusing to release blind."
+            exit 1
           fi
-          if [ -n "$NEW_MIGRATION_FILES" ] && [ "$DECLARED_BUMP" = "patch" ]; then
-            echo "New migrations found but no minor changeset — flooring the release at minor"
-            DECLARED_BUMP=minor
+
+          if [ "$DECLARED_BUMP" != "patch" ]; then
+            echo "Declared bump is '$DECLARED_BUMP' — a schema change is allowed to ship in it"
+            exit 0
           fi
+
+          # No tag to diff against means a first release, which has no previously-shipped schema
+          # for a migration to have changed.
+          if ! git rev-parse "v${CURRENT_VERSION}" >/dev/null 2>&1; then
+            echo "No v${CURRENT_VERSION} tag to diff against — first release, nothing to enforce"
+            exit 0
+          fi
+
+          NEW_MIGRATION_FILES=$(git --no-pager diff --name-only "v${CURRENT_VERSION}" "$GITHUB_SHA" -- migrations/ || true)
+          if [ -n "$NEW_MIGRATION_FILES" ]; then
+            echo "$NEW_MIGRATION_FILES"
+            echo "::error::migrations/ changed since v${CURRENT_VERSION} but every pending changeset declares only 'patch'. A schema change must ship as at least a minor. Add a changeset with a 'minor' bump for an @mj-biz-apps/* package, then re-run."
+            exit 1
+          fi
+          echo "No migrations changed since v${CURRENT_VERSION} — a patch release is in policy"
+
+      - name: Determine next expected version
+        if: steps.changeset_check.outputs.pending != '0' && github.ref == 'refs/heads/main' && !github.event.inputs.targetVersion
+        id: version_check
+        env:
+          CURRENT_VERSION: ${{ steps.declared_bump.outputs.CURRENT_VERSION }}
+          DECLARED_BUMP: ${{ steps.declared_bump.outputs.DECLARED_BUMP }}
+        run: |
+          # Purely a prediction of what `changeset version` is about to do, so that the guard in
+          # the next step can catch the two disagreeing. It is a function of DECLARED_BUMP and
+          # nothing else — any other input here would be predicting a different program.
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          NEXT_MAJOR_VERSION="$(( ${VERSION_PARTS[0]} + 1 )).0.0"
+          NEXT_MINOR_VERSION="${VERSION_PARTS[0]}.$(( ${VERSION_PARTS[1]} + 1 )).0"
+          NEXT_PATCH_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$(( ${VERSION_PARTS[2]} + 1 ))"
 
           case "$DECLARED_BUMP" in
             major) EXPECTED_NEXT_VERSION="$NEXT_MAJOR_VERSION" ;;
