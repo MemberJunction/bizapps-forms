@@ -126,6 +126,12 @@ describe('FormRuntime — a value being typed is not yet a wrong answer', () => 
   // autosave bug on the server: holding an in-progress value to a finished value's standard.
   const q = () => phoneDefinition().pages[0].questions[0];
 
+  // NOTE ON WHAT THIS CAN AND CANNOT CATCH. The bug lived in the COMPONENTS — they called
+  // `markTouched` on every keystroke — and the runtime was correct throughout, so the first test
+  // below passes on `origin/next` too. It is a contract test, not a regression test: it pins the
+  // half of the rule the runtime owns. The other half is template wiring, and this repo has no
+  // TestBed, so nothing here can catch a component that marks touched at the wrong moment. That
+  // was verified in a real browser instead, and would need a component/e2e harness to automate.
   it('shows no error while a phone number is being typed', () => {
     const runtime = new FormRuntime(phoneDefinition());
     for (const partial of ['5', '55', '555', '55501']) {

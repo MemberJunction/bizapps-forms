@@ -5,8 +5,8 @@
  * server bootstrap discovers it through ClassFactory — no core fork, no Explorer shell.
  *
  * SEAM NOTE: `BaseServerMiddleware`'s own docs steer route-adding toward `BaseServerExtension`
- * / `ServerExtensionsCore` (PR #2037). That seam is NOT present in the pinned MJ 5.43.0
- * (`@memberjunction/server@5.43.0` ships only `BaseServerMiddleware`), so the documented
+ * / `ServerExtensionsCore` (PR #2037). That seam is NOT present in the pinned MJ release
+ * (`@memberjunction/server` at the pinned release ships only `BaseServerMiddleware`), so the documented
  * escape hatch `ConfigureExpressApp(app)` is the available hook. When MJ is bumped to a
  * version shipping `BaseServerExtension`, move this route there.
  *

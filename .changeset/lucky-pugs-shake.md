@@ -69,6 +69,16 @@ meant an author's `maxLength` bought nothing on the autosave path — which matt
 `validationRule` at all is still bounded only by MJAPI's 50mb body limit, on both paths; a global
 answer-size cap would be a product decision, not a bug fix.
 
+**When the widget shows an error.** A question is now marked "touched" when focus leaves it,
+not when the respondent types in it. This is a consequence of the validation work above: with
+`Phone` newly validated and `isPhone` wanting seven digits, marking touched on every keystroke
+rendered "Enter a valid phone number." on keystrokes one through six of every phone number — and
+that message carries `role="alert"`, so a screen reader re-announced it each time. Errors still
+appear on blur, on trying to advance in one-question mode, and on submit (which marks every
+visible question touched). Moving focus BETWEEN two controls of the same question — option to
+option in a `MultiChoice`, `SingleChoice`, `Rating`, `NPS` or `YesNo` — does not count as leaving
+it, so choice questions no longer flash "required" while the respondent is reading the options.
+
 **Widget sourcemap.** The bundle is built with `minify: true, sourcemap: true` and ends with
 `//# sourceMappingURL=mj-form.js.map`, but nothing served that path, so it fell through to
 MJAPI's authenticated routes and answered 401 on every devtools session. `/forms/widget/

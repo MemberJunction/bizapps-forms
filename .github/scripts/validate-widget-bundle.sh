@@ -71,7 +71,16 @@ fi
 
 # (4) It self-registers the element the host page waits on. Loading a bundle that never
 # calls customElements.define leaves customElements.whenDefined('mj-form') pending forever.
-if ! grep -q 'customElements' "$DISK_PATH" || ! grep -q 'mj-form' "$DISK_PATH"; then
+#
+# Both halves are deliberately specific. A bare `grep mj-form` is satisfied by the trailing
+# `//# sourceMappingURL=mj-form.js.map` comment alone, so this asserted almost nothing: a bundle
+# registering some OTHER element would have passed. The tag reaches `define` through a minified
+# constant (`var qP="mj-form" ... customElements.define(qP,NI)`), so the registration call and the
+# QUOTED tag literal are checked separately — the quotes are what the sourcemap comment lacks.
+REGISTERS_TAG=0
+grep -q '"mj-form"' "$DISK_PATH" && REGISTERS_TAG=1
+grep -q "'mj-form'" "$DISK_PATH" && REGISTERS_TAG=1
+if ! grep -q 'customElements\.define(' "$DISK_PATH" || [ "$REGISTERS_TAG" != "1" ]; then
   fail "${BUNDLE_PATH} does not appear to register the <mj-form> custom element — customElements.whenDefined('mj-form') would never resolve on the respondent page."
 else
   echo "  registers the <mj-form> custom element"
