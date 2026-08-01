@@ -21,17 +21,26 @@ for pkg_json in $(find packages -name "package.json" -maxdepth 2 -not -path "*/n
   # Check if package exists on npm with retry logic
   EXISTS=false
   for attempt in $(seq 1 $MAX_RETRIES); do
-    if timeout 10 npm view "$name" version > /dev/null 2>&1; then
+    if output=$(timeout 10 npm view "$name" version 2>&1); then
       EXISTS=true
       break
     fi
-    exit_code=$?
-    if [ $exit_code -eq 1 ]; then
-      # Package not found (E404) — no point retrying
+
+    # A 404 is a definitive answer — the package really is absent, so stop retrying. Anything
+    # else (timeout, DNS, registry 5xx) is transient and worth another attempt. `npm view` exits
+    # 1 for both, so the exit code cannot tell them apart and the message has to.
+    #
+    # This used to read the exit code from `$?` *after* the `if`, where bash reports the status
+    # of the `if` compound command itself — defined as 0 when the condition was false and there
+    # is no else branch. It was therefore never 1, the fast path never fired, and a genuinely
+    # missing package burned every retry and both sleeps before being reported.
+    if echo "$output" | grep -q 'E404'; then
       break
     fi
-    # Network error or timeout — retry
-    sleep $RETRY_DELAY
+
+    if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+      sleep $RETRY_DELAY
+    fi
   done
 
   if [ "$EXISTS" = false ]; then
