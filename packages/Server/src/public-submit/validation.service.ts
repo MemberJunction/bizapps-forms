@@ -13,6 +13,10 @@
  *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
  *     `ValidationRule` (length / numeric bounds / regex pattern).
  *
+ * A `partial` (autosave) submission skips ALL of step 3's value checks, not just `isRequired`:
+ * it is a draft, and the widget autosaves on a debounce with no validity gate, so half-typed
+ * values are the normal case rather than an error. Only the real submit is held to the rules.
+ *
  * Step 3's type check was missing until 2026-08-01, and this comment claimed it was there. The
  * widget enforced it, the server did not, so an `Email` question authored without a `pattern`
  * accepted anything posted straight at the mutation — `not-an-email` persisted as a `Complete`
@@ -155,10 +159,18 @@ function collectVisibleQuestion(
     return; // nothing to persist / validate for an unanswered, optional question
   }
 
-  const formatError = validateValue(question, value);
-  if (formatError) {
-    errors.push({ questionId: question.id, message: formatError });
-    return;
+  // A partial save is a snapshot of work in progress, not a claim that the work is done — the
+  // same reason `isRequired` is skipped above. The widget autosaves on a 1500ms debounce with
+  // no validity gate, so a respondent who pauses while typing an address autosaves something
+  // like "someone@examp"; holding that to the finished value's standard throws away their
+  // progress for the most ordinary thing they can do, which is type slowly. The real submit
+  // (`partial === false`) enforces format and rule, and a partial can never reach `Complete`.
+  if (!partial) {
+    const invalid = validateValue(question, value);
+    if (invalid) {
+      errors.push({ questionId: question.id, message: invalid });
+      return;
+    }
   }
   if (input) {
     visible.push({ question, input });

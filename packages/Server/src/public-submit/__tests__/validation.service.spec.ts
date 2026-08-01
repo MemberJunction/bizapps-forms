@@ -120,6 +120,77 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
   });
 });
 
+/** An Email question plus a ShortText carrying a minLength rule, for the partial-save cases. */
+function partialSaveDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'Draft',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-email', type: 'Email', prompt: 'Email address', isRequired: true, displayOrder: 1, options: [] },
+          {
+            id: 'q-code',
+            type: 'ShortText',
+            prompt: 'Reference code',
+            isRequired: false,
+            displayOrder: 2,
+            validationRule: { minLength: 10 },
+            options: [],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe('validateSubmission — partial (autosave) saves', () => {
+  // The widget autosaves on a 1500ms debounce with no validity gate, so a respondent who
+  // pauses while typing an address autosaves something like "someone@examp". A partial is a
+  // snapshot of work in progress, not an assertion that the work is done — the same reason
+  // `isRequired` is already skipped when partial. Blocking it loses the respondent's progress
+  // for the most ordinary thing they can do: type slowly.
+  it('accepts a half-typed email, so autosave does not fail mid-word', () => {
+    const outcome = validateSubmission(
+      partialSaveDefinition(),
+      [{ questionId: 'q-email', textValue: 'someone@examp' }],
+      true,
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-email']);
+  });
+
+  // Pre-dates the type-format check: a minLength rule has always been evaluated on partials,
+  // so any question with one failed every autosave until the respondent had typed enough.
+  it('accepts a value still shorter than its minLength rule', () => {
+    const outcome = validateSubmission(
+      partialSaveDefinition(),
+      [{ questionId: 'q-code', textValue: 'AB' }],
+      true,
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-code']);
+  });
+
+  it('still enforces both format and rule on the real submit', () => {
+    const outcome = validateSubmission(
+      partialSaveDefinition(),
+      [
+        { questionId: 'q-email', textValue: 'someone@examp' },
+        { questionId: 'q-code', textValue: 'AB' },
+      ],
+      false,
+    );
+    expect(outcome.errors.map((e) => e.questionId).sort()).toEqual(['q-code', 'q-email']);
+  });
+});
+
 /** A definition where q-other is shown only when q-choice equals 'Other'. */
 function conditionalDefinition(): PublishedFormDefinition {
   return {
