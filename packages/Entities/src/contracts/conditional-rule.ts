@@ -143,10 +143,11 @@ export function evaluateCondition(
  * three tested `value.trim().length > 0`. (A fifth briefly existed: `validateAnswerFormat` added
  * its own before all of them were folded in here.)
  *
- * A respondent typing a single space into an optional question therefore satisfied an
- * `isAnswered` conditional — revealing whatever branch depended on it — while that same question
- * simultaneously failed its own required check. Whitespace is not an answer; every caller now
- * agrees on that by construction rather than by coincidence.
+ * A respondent typing a single space therefore satisfied an `isAnswered` conditional — revealing
+ * whatever branch depended on it — while every validator read the same keystroke as blank, so the
+ * answer was neither persisted nor able to satisfy `isRequired`. One keystroke made a question
+ * answered and unanswered at once. Whitespace is not an answer; every caller now agrees on that
+ * by construction rather than by coincidence.
  *
  * Note `0` and `false` ARE answers — only nullish, blank-string and empty-array are not.
  */

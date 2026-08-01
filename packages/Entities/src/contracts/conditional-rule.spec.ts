@@ -132,10 +132,9 @@ describe('evaluateConditionalRule', () => {
 
     // A whitespace-only string is not an answer. This evaluator used to be the one place that
     // said otherwise: it tested `answer.length > 0` while every validator tested
-    // `value.trim().length > 0`, so a respondent who typed a single space into an optional
-    // question revealed the branch that depended on it AND was told the question was still
-    // required. Both statements came from the same keystroke, which is not a state a form
-    // should be able to reach.
+    // `value.trim().length > 0`. So a single space revealed the branch that depended on the
+    // question while every validator still read it as blank — the same keystroke made the
+    // question answered and unanswered at once, which is not a state a form should reach.
     it('is false for a whitespace-only answer, agreeing with the validators', () => {
       expect(evaluateConditionalRule(rule, answers({ q1: '   ' }))).toBe(false);
       expect(evaluateConditionalRule(rule, answers({ q1: '\t\n' }))).toBe(false);

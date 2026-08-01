@@ -83,18 +83,28 @@ async function main() {
   // enforces a type-derived format — the one the widget already applied to Email/Number/
   // Rating/NPS, plus Phone and Date, which neither side used to check — a smoke run has to
   // send what a real respondent would, which is what it should have been sending all along.
+  // Mirrors the widget's `toAnswerInput` (packages/Angular/src/lib/widget/core/answer-value.ts):
+  // same TYPE must reach the same typed COLUMN. This used to send `textValue` for every type, so
+  // a Date answer arrived in the column `answerValueOf` reads first and the run never touched
+  // `dateValue` at all — the one column this branch hardened, since `isDate` now rejects
+  // non-strings. Sending what the widget sends is the whole point of a smoke test.
   const answerFor = (type) => {
     switch (type) {
-      case 'Email':
-        return { textValue: 'smoke@example.com' };
       case 'Number':
       case 'Rating':
       case 'NPS':
         return { numericValue: 7 };
+      case 'YesNo':
+        return { booleanValue: true };
+      case 'Date':
+      case 'Time':
+        return { dateValue: new Date(0).toISOString() };
+      case 'MultiChoice':
+        return { jsonValue: ['smoke'] };
+      case 'Email':
+        return { textValue: 'smoke@example.com' };
       case 'Phone':
         return { textValue: '+1 555 010 1234' };
-      case 'Date':
-        return { textValue: new Date(0).toISOString() };
       default:
         return { textValue: `smoke check ${new Date(0).toISOString()}` };
     }

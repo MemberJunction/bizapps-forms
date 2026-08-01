@@ -250,9 +250,10 @@ function validateString(value: string, rule: ValidationRule): string | undefined
  *
  * This used to branch on `typeof value === 'number'`, so a range was enforced on
  * `{ numericValue: 9999 }` and silently skipped on `{ textValue: "9999" }`. A text input
- * produces a string, the widget coerces it and enforces the range, and this module's own
- * docstring calls `textValue` a legitimate numeric spelling — so the two sides reached
- * opposite verdicts on the same answer based only on which column carried it.
+ * produces a string, the widget coerces it and enforces the range, and the shared
+ * `coerceAnswerToNumber` (forms-entities) documents `textValue` as a legitimate numeric
+ * spelling — so the two sides reached opposite verdicts on the same answer based only on which
+ * column carried it.
  */
 function validateNumericRange(value: AnswerValue, rule: ValidationRule): string | undefined {
   const num = coerceAnswerToNumber(value);
