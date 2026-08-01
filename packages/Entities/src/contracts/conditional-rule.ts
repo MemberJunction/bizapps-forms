@@ -138,7 +138,7 @@ export function evaluateCondition(
  * "Answered" = not null/undefined, and not a blank string or empty array.
  *
  * THE one definition of "answered" in the system. It is exported because it was previously
- * reimplemented in four places — here, {@link validateAnswerFormat}, the server's
+ * reimplemented in four places — here, `validateAnswerFormat`, the server's
  * `validateSubmission`, and the widget's `hasValue` — and the copies had already drifted: this
  * one tested `answer.length > 0` while the other three tested `value.trim().length > 0`. A
  * respondent typing a single space into an optional question therefore satisfied an

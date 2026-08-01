@@ -1,14 +1,19 @@
 /**
  * Type-derived format validation for an answered question — the check that follows from a
- * question's TYPE rather than from an author-supplied {@link ValidationRule}.
+ * question's TYPE rather than from an author-supplied `ValidationRule`.
  *
  * WHY THIS IS SHARED. The widget and the server must reach the same verdict on the same
- * answer, and they did not: the widget carried its own type-format check while the server's
- * `validateValue` consulted only the declarative rule. An `Email` question authored without
- * a `pattern` therefore looked validated in the browser (the `<input type="email">` and the
- * widget both rejected it) yet accepted anything posted straight at the GraphQL mutation,
- * persisting `not-an-email` as a `Complete` response. That is precisely the fork this
- * package's contract exists to prevent, so the check lives here and both sides call it.
+ * answer, and they did not: the widget carried its own type-format check (`Email`, `Number`,
+ * `Rating`, `NPS`) while the server's `validateValue` consulted only the declarative rule. An
+ * `Email` question authored without a `pattern` therefore looked validated in the browser (the
+ * `<input type="email">` and the widget both rejected it) yet accepted anything posted straight
+ * at the GraphQL mutation, persisting `not-an-email` as a `Complete` response. That is precisely
+ * the fork this package's contract exists to prevent, so the check lives here and both sides
+ * call it.
+ *
+ * `Phone` and `Date` are validated by neither side before this module existed — the widget's
+ * switch fell through to `default: return VALID` for both — so they are new enforcement here,
+ * not a one-sided gap being closed.
  *
  * Runs BEFORE the declarative rule and does not replace it: an explicit `ValidationRule`
  * still applies on top, so an author who supplies their own `pattern` keeps full control
