@@ -18,8 +18,13 @@
  * value is the normal case rather than an error — but "not finished" and "already too big" are
  * different claims. A value under `minLength`, an incomplete email or a value that does not yet
  * match a `pattern` are all states a respondent passes THROUGH; a value past `maxLength` is not
- * on its way anywhere. Exempting the ceilings too left autosave as an unbounded write on the
- * anonymous public path.
+ * on its way anywhere. Exempting the ceilings too meant an author's `maxLength` bought nothing
+ * on the autosave path.
+ *
+ * Note what this does NOT do: a question with no `validationRule` at all — the common case — is
+ * still capped only by MJAPI's 50mb GraphQL body limit, on the draft path and the complete path
+ * alike. Enforcing an author's ceiling is not the same as having a global one, and a global
+ * answer-size cap is a product decision rather than something to smuggle in here.
  *
  * Step 3's type check was missing until 2026-08-01, and this comment claimed it was there. The
  * widget enforced it, the server did not, so an `Email` question authored without a `pattern`

@@ -12,6 +12,12 @@ on:
       - 'smoke/**'
       - 'turbo.json'
       - 'package.json'
+      # The gates themselves live here. Without this, a PR that edits ONLY
+      # .github/scripts/validate-widget-bundle.sh does not run this workflow, so a broken gate
+      # reports green — which is the same class of failure (a check that silently does not run)
+      # that let four releases ship without the widget bundle.
+      - '.github/workflows/build.yml'
+      - '.github/scripts/**'
   pull_request:
     branches: [next]
     paths:
@@ -22,6 +28,12 @@ on:
       - 'smoke/**'
       - 'turbo.json'
       - 'package.json'
+      # The gates themselves live here. Without this, a PR that edits ONLY
+      # .github/scripts/validate-widget-bundle.sh does not run this workflow, so a broken gate
+      # reports green — which is the same class of failure (a check that silently does not run)
+      # that let four releases ship without the widget bundle.
+      - '.github/workflows/build.yml'
+      - '.github/scripts/**'
 
 concurrency:
   group: build-${{ github.ref }}

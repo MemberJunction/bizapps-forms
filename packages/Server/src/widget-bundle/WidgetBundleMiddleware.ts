@@ -34,53 +34,33 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
   public override ConfigureExpressApp(app: Application): void {
     const cfg = getWidgetBundleConfig();
 
-    app.get(WIDGET_BUNDLE_ROUTE, (_req: Request, res: Response) => {
-      const bundlePath = getWidgetBundleConfig().bundlePath;
-      if (!bundlePath) {
-        LogError(
-          `[Forms] Widget bundle not found for ${WIDGET_BUNDLE_ROUTE}. Run ` +
-            `"npm run build" in @mj-biz-apps/forms-ng, or set FORMS_WIDGET_BUNDLE_PATH.`,
-        );
-        res.status(404).type('text/plain').send('Form widget bundle not found.');
-        return;
-      }
-      res
-        .status(200)
-        .type('text/javascript')
-        // The bundle URL is UNVERSIONED (/forms/widget/mj-form.js), so it must never be blindly
-        // cached — a stale copy silently pins respondents (and devs) to an old widget across
-        // rebuilds. `no-cache` = the browser may store it but MUST revalidate every load; Express's
-        // ETag/Last-Modified then yields a cheap 304 when unchanged and the fresh bundle when it
-        // changes. (Switch to a content-hashed URL + immutable if long-term CDN caching is wanted.)
-        .set('Cache-Control', 'no-cache')
-        .sendFile(bundlePath, (err) => {
-          if (err && !res.headersSent) {
-            LogError(`[Forms] Failed to send widget bundle ${bundlePath}: ${String(err)}`);
-            res.status(500).type('text/plain').send('Failed to load form widget.');
-          }
-        });
+    // Both routes are registered unconditionally and resolve their file per REQUEST, not at boot.
+    // The config is memoized, but the FILE is not: in local dev MJAPI is routinely running before
+    // forms-ng has been built, and a route that was never registered cannot start working when the
+    // build lands. Registering always and 404ing until the artifact exists is what makes
+    // "rebuild, then reload the page" behave the way anyone would expect.
+    this.serveStaticAsset(app, {
+      route: WIDGET_BUNDLE_ROUTE,
+      contentType: 'text/javascript',
+      resolvePath: () => getWidgetBundleConfig().bundlePath,
+      label: 'widget bundle',
+      missingMessage: 'Form widget bundle not found.',
+      // Only the bundle is worth a log line: a missing bundle means every public form is broken,
+      // whereas a missing sourcemap means devtools is slightly less useful.
+      logWhenMissing:
+        `[Forms] Widget bundle not found for ${WIDGET_BUNDLE_ROUTE}. Run ` +
+        `"npm run build" in @mj-biz-apps/forms-ng, or set FORMS_WIDGET_BUNDLE_PATH.`,
     });
 
     // The bundle is minified and carries `//# sourceMappingURL=mj-form.js.map`, so the browser
     // asks for this on every devtools session. Unserved, it fell through to the authenticated
-    // routes and answered 401 — a reference the build emits and the server refuses. Registered
-    // only when a map was actually emitted, so a sourcemap-free build simply has no route.
-    app.get(WIDGET_SOURCEMAP_ROUTE, (_req: Request, res: Response) => {
-      const sourcemapPath = getWidgetBundleConfig().sourcemapPath;
-      if (!sourcemapPath) {
-        res.status(404).type('text/plain').send('Form widget sourcemap not found.');
-        return;
-      }
-      res
-        .status(200)
-        .type('application/json')
-        .set('Cache-Control', 'no-cache')
-        .sendFile(sourcemapPath, (err) => {
-          if (err && !res.headersSent) {
-            LogError(`[Forms] Failed to send widget sourcemap ${sourcemapPath}: ${String(err)}`);
-            res.status(500).type('text/plain').send('Failed to load form widget sourcemap.');
-          }
-        });
+    // routes and answered 401 — a reference the build emits and the server refuses.
+    this.serveStaticAsset(app, {
+      route: WIDGET_SOURCEMAP_ROUTE,
+      contentType: 'application/json',
+      resolvePath: () => getWidgetBundleConfig().sourcemapPath,
+      label: 'widget sourcemap',
+      missingMessage: 'Form widget sourcemap not found.',
     });
 
     if (cfg.bundlePath) {
@@ -92,4 +72,52 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
       );
     }
   }
+
+  /**
+   * Register one unauthenticated static-file route.
+   *
+   * The bundle and its sourcemap differ only in which config property they read, their content
+   * type, and whether a missing file deserves a log — so they share this rather than carrying two
+   * copies of the same send-with-fallbacks dance.
+   */
+  private serveStaticAsset(app: Application, asset: StaticAsset): void {
+    app.get(asset.route, (_req: Request, res: Response) => {
+      const filePath = asset.resolvePath();
+      if (!filePath) {
+        if (asset.logWhenMissing) {
+          LogError(asset.logWhenMissing);
+        }
+        res.status(404).type('text/plain').send(asset.missingMessage);
+        return;
+      }
+      res
+        .status(200)
+        .type(asset.contentType)
+        // These URLs are UNVERSIONED, so they must never be blindly cached — a stale copy silently
+        // pins respondents (and devs) to an old widget across rebuilds. `no-cache` = the browser
+        // may store it but MUST revalidate every load; Express's ETag/Last-Modified then yields a
+        // cheap 304 when unchanged and the fresh file when it changes. (Switch to a content-hashed
+        // URL + immutable if long-term CDN caching is ever wanted.)
+        .set('Cache-Control', 'no-cache')
+        .sendFile(filePath, (err) => {
+          if (err && !res.headersSent) {
+            LogError(`[Forms] Failed to send ${asset.label} ${filePath}: ${String(err)}`);
+            res.status(500).type('text/plain').send(`Failed to load form ${asset.label}.`);
+          }
+        });
+    });
+  }
+}
+
+/** One unauthenticated static file this middleware serves. */
+interface StaticAsset {
+  route: string;
+  contentType: string;
+  /** Resolved per request, so a file built after boot starts serving without a restart. */
+  resolvePath: () => string | undefined;
+  /** Human-readable name used in error copy and logs. */
+  label: string;
+  missingMessage: string;
+  /** Logged when the file is absent — omitted for assets whose absence is not an incident. */
+  logWhenMissing?: string;
 }

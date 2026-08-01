@@ -20,8 +20,11 @@
  *                                 Default `Forms` (the app WP-A seeds).
  *  - `FORMS_MAGICLINK_ROLE`       Restricted role the invite grants. Default
  *                                 `Form Respondent` (the role WP-A seeds). Must be
- *                                 magic-link grantable on the host — i.e. listed in core's
- *                                 `magicLink.grantableRoleNames`. It does NOT have to equal
+ *                                 magic-link grantable on the host — i.e. accepted by core's
+ *                                 `isRoleGrantable`, which allows a role listed in
+ *                                 `magicLink.grantableRoleNames` OR one equal to
+ *                                 `magicLink.restrictedRoleName`, matched case- and
+ *                                 whitespace-insensitively. It does NOT have to equal
  *                                 core's `magicLink.restrictedRoleName`: that global is only
  *                                 the default for invites naming no role, and every invite
  *                                 this minter issues names one. `checkRespondentReadiness`

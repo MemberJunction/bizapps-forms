@@ -62,13 +62,16 @@ the type floor still applies underneath, and the respondent is not the one who m
 half-typed email or a value still under `minLength` no longer fails the debounced autosave and
 discards the respondent's progress. Upper bounds (`maxLength`, `max`) ARE still enforced on a
 draft: "not finished yet" and "already too big" are different claims, and exempting the ceilings
-left autosave as an unbounded write on the anonymous public path, where `TextValue` is
-`NVARCHAR(MAX)` and the widget sets no `maxlength` attribute.
+meant an author's `maxLength` bought nothing on the autosave path — which matters here because
+`TextValue` is `NVARCHAR(MAX)` and the widget sets no `maxlength` attribute. A question with no
+`validationRule` at all is still bounded only by MJAPI's 50mb body limit, on both paths; a global
+answer-size cap would be a product decision, not a bug fix.
 
 **Widget sourcemap.** The bundle is built with `minify: true, sourcemap: true` and ends with
 `//# sourceMappingURL=mj-form.js.map`, but nothing served that path, so it fell through to
 MJAPI's authenticated routes and answered 401 on every devtools session. `/forms/widget/
-mj-form.js.map` is now served beside the bundle, and only when a map was actually emitted.
+mj-form.js.map` is now served beside the bundle, resolved per request so it starts working
+when a build lands, and answering 404 when the build emitted no map.
 
 This rejects submissions that previously succeeded — any answer that does not fit its question's
 type. Already-published forms are covered without re-publishing, because the check derives from

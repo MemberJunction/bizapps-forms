@@ -16,8 +16,10 @@
  * not a one-sided gap being closed.
  *
  * Runs BEFORE the declarative rule and does not replace it: an explicit `ValidationRule`
- * still applies on top, so an author who supplies their own `pattern` keeps full control
- * and can constrain a type further (never loosen it — the type floor always holds).
+ * still applies on top, so an author who supplies their own `pattern` keeps full control and can
+ * constrain a type further, never loosen it. The one case where this check does not run at all
+ * is an autosave draft — see `validateValue` in forms-server, which holds a `partial` save to
+ * upper bounds only. A draft can never reach `Complete` without passing through the full check.
  */
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
@@ -88,8 +90,12 @@ function isEmail(text: string): boolean {
 }
 
 /**
- * Deliberately permissive phone check: count digits, ignore everything people use to make a
- * number readable (spaces, dashes, parentheses, dots, a leading `+`).
+ * Deliberately permissive phone check: count the digits and ignore EVERY non-digit character —
+ * not only the separators people use to make a number readable (spaces, dashes, parentheses,
+ * dots, a leading `+`) but letters too. So `123456 ext 999` counts nine digits and passes the
+ * seven-digit floor below on a six-digit number. That is the accepted cost of the leniency: an
+ * extension is a real thing respondents type, and the alternative — deciding which letters are
+ * an extension marker in which locale — rejects more real numbers than it catches bad ones.
  *
  * The bounds are the ITU E.164 range — a national number is at least 7 digits and a fully
  * qualified international one is at most 15. Anything stricter starts rejecting real numbers,

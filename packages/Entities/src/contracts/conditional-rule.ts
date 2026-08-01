@@ -137,11 +137,12 @@ export function evaluateCondition(
 /**
  * "Answered" = not null/undefined, and not a blank string or empty array.
  *
- * THE one definition of "answered" in the system. It is exported because it was previously
- * reimplemented in five places — here, `validateAnswerFormat`, the server's `validateSubmission`,
- * the widget's `hasValue` and the widget's progress-bar `hasAnswer` — and the copies had
- * already drifted: this
- * one tested `answer.length > 0` while the other three tested `value.trim().length > 0`. A
+ * THE one definition of "answered" in the system. FOUR hand-written copies predated this
+ * branch — here, the server's `validateSubmission`, the widget's `hasValue`, and the widget's
+ * progress-bar `hasAnswer` — and they had already drifted: this
+ * one tested `answer.length > 0` while the other three tested `value.trim().length > 0`. (A
+ * fifth briefly existed: `validateAnswerFormat` added its own before all of them were folded in
+ * here.) A
  * respondent typing a single space into an optional question therefore satisfied an
  * `isAnswered` conditional (revealing whatever branch depended on it) while simultaneously
  * failing that same question's required check. Whitespace is not an answer; every caller now

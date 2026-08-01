@@ -45,8 +45,11 @@ export interface WidgetBundleConfig {
   bundlePath: string | undefined;
   /**
    * Absolute path to the bundle's sourcemap, or `undefined` when the build emitted none.
-   * Always resolved as the sibling the `sourceMappingURL` comment actually points at, rather
-   * than searched for separately — a map that does not sit beside its bundle is not its map.
+   *
+   * Resolved BY CONVENTION as `<bundle>.map` — the bundle is not opened and its
+   * `sourceMappingURL` comment is not parsed. That matches what esbuild emits for the config in
+   * `build-widget.mjs`, and is why a build that renamed or relocated its map would serve a 404
+   * here rather than the wrong file.
    */
   sourcemapPath: string | undefined;
 }
