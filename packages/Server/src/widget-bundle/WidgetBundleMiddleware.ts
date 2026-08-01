@@ -4,7 +4,7 @@
  * Registered via `@RegisterClass(BaseServerMiddleware, 'mj:formsWidgetBundle')` so MJ server
  * bootstrap discovers it through ClassFactory — no core fork, no Explorer shell. Mirrors
  * {@link RespondentHostMiddleware}: it adds a route through {@link ConfigureExpressApp} (the
- * available hook on the pinned MJ 5.43.0, which ships only `BaseServerMiddleware`).
+ * available hook on the pinned MJ release, which ships only `BaseServerMiddleware`).
  *
  * The respondent host page references this bundle via `<script src="/forms/widget/mj-form.js">`.
  * Without it, `customElements.whenDefined('mj-form')` never resolves and every public form fails
@@ -19,7 +19,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
 import { LogStatus, LogError } from '@memberjunction/core';
 
-import { getWidgetBundleConfig, WIDGET_BUNDLE_ROUTE } from './config.js';
+import { getWidgetBundleConfig, WIDGET_BUNDLE_ROUTE, WIDGET_SOURCEMAP_ROUTE } from './config.js';
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsWidgetBundle')
 export class WidgetBundleMiddleware extends BaseServerMiddleware {
@@ -57,6 +57,28 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
           if (err && !res.headersSent) {
             LogError(`[Forms] Failed to send widget bundle ${bundlePath}: ${String(err)}`);
             res.status(500).type('text/plain').send('Failed to load form widget.');
+          }
+        });
+    });
+
+    // The bundle is minified and carries `//# sourceMappingURL=mj-form.js.map`, so the browser
+    // asks for this on every devtools session. Unserved, it fell through to the authenticated
+    // routes and answered 401 — a reference the build emits and the server refuses. Registered
+    // only when a map was actually emitted, so a sourcemap-free build simply has no route.
+    app.get(WIDGET_SOURCEMAP_ROUTE, (_req: Request, res: Response) => {
+      const sourcemapPath = getWidgetBundleConfig().sourcemapPath;
+      if (!sourcemapPath) {
+        res.status(404).type('text/plain').send('Form widget sourcemap not found.');
+        return;
+      }
+      res
+        .status(200)
+        .type('application/json')
+        .set('Cache-Control', 'no-cache')
+        .sendFile(sourcemapPath, (err) => {
+          if (err && !res.headersSent) {
+            LogError(`[Forms] Failed to send widget sourcemap ${sourcemapPath}: ${String(err)}`);
+            res.status(500).type('text/plain').send('Failed to load form widget sourcemap.');
           }
         });
     });

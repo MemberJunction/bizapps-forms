@@ -150,6 +150,35 @@ function partialSaveDefinition(): PublishedFormDefinition {
   };
 }
 
+/** A ShortText question with an upper bound, plus a Number question with a numeric ceiling. */
+function cappedDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'Capped',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          {
+            id: 'q-capped',
+            type: 'ShortText',
+            prompt: 'Short answer',
+            isRequired: false,
+            displayOrder: 1,
+            validationRule: { maxLength: 50 },
+            options: [],
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe('validateSubmission — partial (autosave) saves', () => {
   // The widget autosaves on a 1500ms debounce with no validity gate, so a respondent who
   // pauses while typing an address autosaves something like "someone@examp". A partial is a
@@ -176,6 +205,32 @@ describe('validateSubmission — partial (autosave) saves', () => {
     );
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-code']);
+  });
+
+  // An upper bound is not a "not finished yet" condition. A value under minLength, a half-typed
+  // email or a value that does not match a pattern are all states a respondent passes THROUGH on
+  // the way to a good answer, which is why a draft is excused from them. A value already past
+  // maxLength is not on the way to anything — it is wrong now and gets worse with every
+  // keystroke. This is the anonymous public write path, `TextValue` is NVARCHAR(MAX), the
+  // GraphQL body limit is 50mb and the widget sets no `maxlength` attribute, so autosave was
+  // the one door left open to storing unbounded values.
+  it('still enforces maxLength on a partial, because exceeding a cap is never work in progress', () => {
+    const outcome = validateSubmission(
+      cappedDefinition(),
+      [{ questionId: 'q-capped', textValue: 'x'.repeat(500) }],
+      true,
+    );
+    expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at most 50 characters.']);
+  });
+
+  it('still lets a partial stay under the cap', () => {
+    const outcome = validateSubmission(
+      cappedDefinition(),
+      [{ questionId: 'q-capped', textValue: 'still typing' }],
+      true,
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-capped']);
   });
 
   it('still enforces both format and rule on the real submit', () => {
@@ -244,6 +299,50 @@ describe('validateSubmission', () => {
     );
     expect(outcome.errors).toHaveLength(0);
     expect(outcome.answers).toHaveLength(2);
+  });
+
+  // `min`/`max` were reachable only when the answer arrived as `numericValue`, because the rule
+  // path branched on `typeof value` and sent every string to the length/pattern checks. A text
+  // input produces a STRING, the widget coerces it and enforces the range, and this module's own
+  // docstring blesses `textValue` as a legitimate numeric spelling — so the two sides disagreed
+  // about the same answer depending only on which typed column carried it.
+  it('enforces a numeric range whichever typed column carried the answer', () => {
+    const def: PublishedFormDefinition = {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Range',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 1,
+          questions: [
+            {
+              id: 'q-num',
+              type: 'Number',
+              prompt: 'How many?',
+              isRequired: true,
+              displayOrder: 1,
+              validationRule: { min: 1, max: 100 },
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+    for (const over of [{ numericValue: 9999 }, { textValue: '9999' }]) {
+      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...over }], false);
+      expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at most 100.']);
+    }
+    for (const under of [{ numericValue: 0 }, { textValue: '0' }]) {
+      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...under }], false);
+      expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at least 1.']);
+    }
+    for (const good of [{ numericValue: 42 }, { textValue: '42' }]) {
+      expect(validateSubmission(def, [{ questionId: 'q-num', ...good }], false).errors).toEqual([]);
+    }
   });
 
   it('enforces a ValidationRule pattern', () => {

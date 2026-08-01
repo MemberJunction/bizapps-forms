@@ -13,9 +13,13 @@
  *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
  *     `ValidationRule` (length / numeric bounds / regex pattern).
  *
- * A `partial` (autosave) submission skips ALL of step 3's value checks, not just `isRequired`:
- * it is a draft, and the widget autosaves on a debounce with no validity gate, so half-typed
- * values are the normal case rather than an error. Only the real submit is held to the rules.
+ * A `partial` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`).
+ * It is a draft, and the widget autosaves on a debounce with no validity gate, so a half-typed
+ * value is the normal case rather than an error — but "not finished" and "already too big" are
+ * different claims. A value under `minLength`, an incomplete email or a value that does not yet
+ * match a `pattern` are all states a respondent passes THROUGH; a value past `maxLength` is not
+ * on its way anywhere. Exempting the ceilings too left autosave as an unbounded write on the
+ * anonymous public path.
  *
  * Step 3's type check was missing until 2026-08-01, and this comment claimed it was there. The
  * widget enforced it, the server did not, so an `Email` question authored without a `pattern`
@@ -28,6 +32,7 @@
 import {
   evaluateConditionalRule,
   isAnswerSupplied,
+  coerceAnswerToNumber,
   matchesValidationPattern,
   validateAnswerFormat,
   type AnswerValue,
@@ -147,18 +152,10 @@ function collectVisibleQuestion(
     return; // nothing to persist / validate for an unanswered, optional question
   }
 
-  // A partial save is a snapshot of work in progress, not a claim that the work is done — the
-  // same reason `isRequired` is skipped above. The widget autosaves on a 1500ms debounce with
-  // no validity gate, so a respondent who pauses while typing an address autosaves something
-  // like "someone@examp"; holding that to the finished value's standard throws away their
-  // progress for the most ordinary thing they can do, which is type slowly. The real submit
-  // (`partial === false`) enforces format and rule, and a partial can never reach `Complete`.
-  if (!partial) {
-    const invalid = validateValue(question, value);
-    if (invalid) {
-      errors.push({ questionId: question.id, message: invalid });
-      return;
-    }
+  const invalid = validateValue(question, value, partial);
+  if (invalid) {
+    errors.push({ questionId: question.id, message: invalid });
+    return;
   }
   if (input) {
     visible.push({ question, input });
@@ -166,7 +163,7 @@ function collectVisibleQuestion(
 }
 
 /**
- * Validate an answered value: first the format its TYPE implies, then the declarative
+ * Validate an answered value: the format its TYPE implies, then the declarative
  * {@link ValidationRule} the author supplied (if any).
  *
  * The type check runs unconditionally and is NOT a fallback for a missing rule. An `Email`
@@ -174,21 +171,56 @@ function collectVisibleQuestion(
  * author's pattern narrows it further — a rule can constrain a type, never loosen it.
  * {@link validateAnswerFormat} is the same check the widget runs, imported rather than
  * reimplemented so the two cannot drift again.
+ *
+ * A `partial` (autosave) save is held ONLY to the upper bounds. Everything else — the type
+ * format, `minLength`, `min`, `pattern` — describes a finished value, and a respondent passes
+ * through all of those states on the way to a good answer: the widget autosaves on a 1500ms
+ * debounce with no validity gate, so "someone@examp" is what typing an address looks like.
+ * An upper bound is different in kind. A value already past `maxLength` is not on its way to
+ * being valid; it is wrong now and every further keystroke makes it worse. See
+ * {@link validateUpperBounds} for why that distinction is load-bearing here specifically.
  */
-function validateValue(question: PublishedFormQuestion, value: AnswerValue): string | undefined {
+function validateValue(
+  question: PublishedFormQuestion,
+  value: AnswerValue,
+  partial: boolean,
+): string | undefined {
+  const rule = question.validationRule;
+  if (partial) {
+    return rule ? validateUpperBounds(value, rule) : undefined;
+  }
   const formatError = validateAnswerFormat(question.type, value);
   if (formatError) {
     return formatError;
   }
-  const rule = question.validationRule;
   if (!rule) {
     return undefined;
   }
   if (typeof value === 'string') {
-    return validateString(value, rule);
+    const stringError = validateString(value, rule);
+    if (stringError) {
+      return stringError;
+    }
   }
-  if (typeof value === 'number') {
-    return validateNumber(value, rule);
+  return validateNumericRange(value, rule);
+}
+
+/**
+ * The subset of the rule a DRAFT is still answerable for: the ceilings.
+ *
+ * This is the anonymous public write path. `FormResponseAnswer.TextValue` is `NVARCHAR(MAX)`,
+ * MJAPI's GraphQL body limit is 50mb, and the widget sets no `maxlength` attribute on its
+ * inputs — so with autosave exempt from `maxLength`, an ordinary respondent pasting a very
+ * large value had it persisted, no crafted request required. Ceilings are also the only rules
+ * that can be judged on an unfinished value without being unfair about it.
+ */
+function validateUpperBounds(value: AnswerValue, rule: ValidationRule): string | undefined {
+  if (typeof value === 'string' && rule.maxLength !== undefined && value.length > rule.maxLength) {
+    return `Must be at most ${rule.maxLength} characters.`;
+  }
+  const num = coerceAnswerToNumber(value);
+  if (num !== undefined && rule.max !== undefined && num > rule.max) {
+    return `Must be at most ${rule.max}.`;
   }
   return undefined;
 }
@@ -207,12 +239,25 @@ function validateString(value: string, rule: ValidationRule): string | undefined
   return undefined;
 }
 
-/** Numeric-answer rules: min, max. */
-function validateNumber(value: number, rule: ValidationRule): string | undefined {
-  if (rule.min !== undefined && value < rule.min) {
+/**
+ * Numeric-answer rules: min, max — applied to any answer that IS a number, not only to one
+ * that happened to arrive in the `numericValue` column.
+ *
+ * This used to branch on `typeof value === 'number'`, so a range was enforced on
+ * `{ numericValue: 9999 }` and silently skipped on `{ textValue: "9999" }`. A text input
+ * produces a string, the widget coerces it and enforces the range, and this module's own
+ * docstring calls `textValue` a legitimate numeric spelling — so the two sides reached
+ * opposite verdicts on the same answer based only on which column carried it.
+ */
+function validateNumericRange(value: AnswerValue, rule: ValidationRule): string | undefined {
+  const num = coerceAnswerToNumber(value);
+  if (num === undefined) {
+    return undefined;
+  }
+  if (rule.min !== undefined && num < rule.min) {
     return `Must be at least ${rule.min}.`;
   }
-  if (rule.max !== undefined && value > rule.max) {
+  if (rule.max !== undefined && num > rule.max) {
     return `Must be at most ${rule.max}.`;
   }
   return undefined;

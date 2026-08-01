@@ -4,6 +4,7 @@
  * feedback and blocks navigation/submit on a visible, required question.
  */
 import {
+  coerceAnswerToNumber,
   isAnswerSupplied,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -94,7 +95,7 @@ function validateRule(
       return { valid: false, message: rule.patternMessage ?? 'Value is not in the expected format.' };
     }
   }
-  const num = toNumber(value);
+  const num = coerceAnswerToNumber(value);
   if (num !== undefined) {
     if (rule.min !== undefined && num < rule.min) {
       return { valid: false, message: `Must be at least ${rule.min}.` };
@@ -106,14 +107,3 @@ function validateRule(
   return VALID;
 }
 
-/** Coerce to a finite number or `undefined`. */
-function toNumber(value: AnswerValue): number | undefined {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : undefined;
-  }
-  if (typeof value === 'string' && value.trim() !== '') {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : undefined;
-  }
-  return undefined;
-}

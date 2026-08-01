@@ -47,7 +47,7 @@ export function validateAnswerFormat(
     case 'Number':
     case 'Rating':
     case 'NPS':
-      return toFiniteNumber(value) === undefined ? 'Enter a number.' : undefined;
+      return coerceAnswerToNumber(value) === undefined ? 'Enter a number.' : undefined;
     case 'Phone':
       return isPhone(String(value)) ? undefined : 'Enter a valid phone number.';
     case 'Date':
@@ -125,7 +125,7 @@ function isDate(value: AnswerValue): boolean {
  * fractional part (or a bare `.5`), and optional scientific-notation exponent.
  *
  * Exists because `Number()` also understands spellings no respondent means and no consumer
- * reads back — see {@link toFiniteNumber}.
+ * reads back — see {@link coerceAnswerToNumber}.
  */
 const DECIMAL_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
@@ -142,7 +142,7 @@ const DECIMAL_NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
  * old finite check and were then persisted as the literal text the respondent typed, so the
  * answer was accepted as a number and stored as something nothing downstream reads as one.
  */
-function toFiniteNumber(value: AnswerValue): number | undefined {
+export function coerceAnswerToNumber(value: AnswerValue): number | undefined {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : undefined;
   }

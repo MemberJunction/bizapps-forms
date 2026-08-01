@@ -46,11 +46,29 @@ upstream had vetted it either. And `Number` accepted anything `Number()` could c
 includes `0x10`, `0b101` and `0o17`; those passed as valid and were then persisted as the literal
 text typed, which nothing downstream reads back as a number.
 
+A numeric `min`/`max` is now enforced on any answer that IS a number, not only on one that
+arrived in the `numericValue` column. The rule path branched on `typeof value`, so
+`{ numericValue: 9999 }` was rejected against `max: 100` and `{ textValue: "9999" }` was
+accepted — while the widget coerced the string and rejected both. A text input produces a
+string, so this was reachable from the ordinary UI, not just a crafted request.
+
 **An unsubmittable form.** `matchesValidationPattern` is now shared too. The widget treated an
 author `pattern` that would not compile as valid (never block the respondent) and the server
 treated it as invalid, so a form carrying a malformed regex showed no error while being filled in
 and then refused every submit with a field error no input could clear. Both sides now fail open;
 the type floor still applies underneath, and the respondent is not the one who made the mistake.
+
+**Autosave drafts.** A `partial` (autosave) save is no longer held to finished-value rules — a
+half-typed email or a value still under `minLength` no longer fails the debounced autosave and
+discards the respondent's progress. Upper bounds (`maxLength`, `max`) ARE still enforced on a
+draft: "not finished yet" and "already too big" are different claims, and exempting the ceilings
+left autosave as an unbounded write on the anonymous public path, where `TextValue` is
+`NVARCHAR(MAX)` and the widget sets no `maxlength` attribute.
+
+**Widget sourcemap.** The bundle is built with `minify: true, sourcemap: true` and ends with
+`//# sourceMappingURL=mj-form.js.map`, but nothing served that path, so it fell through to
+MJAPI's authenticated routes and answered 401 on every devtools session. `/forms/widget/
+mj-form.js.map` is now served beside the bundle, and only when a map was actually emitted.
 
 This rejects submissions that previously succeeded — any answer that does not fit its question's
 type. Already-published forms are covered without re-publishing, because the check derives from

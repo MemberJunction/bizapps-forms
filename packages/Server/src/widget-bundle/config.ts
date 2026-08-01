@@ -25,6 +25,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 /** Route the widget bundle is served from (matches `host-page.ts`'s default bundle URL). */
 export const WIDGET_BUNDLE_ROUTE = '/forms/widget/mj-form.js';
 
+/**
+ * Route the bundle's sourcemap is served from.
+ *
+ * Not a nicety: esbuild builds the widget with `minify: true, sourcemap: true`, so the shipped
+ * bundle ends with `//# sourceMappingURL=mj-form.js.map`. With nothing serving that path it fell
+ * through to MJAPI's authenticated routes and answered 401 on every devtools session, and the
+ * minified bundle is unreadable without it.
+ */
+export const WIDGET_SOURCEMAP_ROUTE = `${WIDGET_BUNDLE_ROUTE}.map`;
+
 /** The bundle file `@mj-biz-apps/forms-ng`'s `build` emits, relative to that package. */
 const PACKAGE_BUNDLE_SUBPATH = '@mj-biz-apps/forms-ng/dist/widget/mj-form.js';
 
@@ -33,6 +43,12 @@ export interface WidgetBundleConfig {
   enabled: boolean;
   /** Absolute path to the built bundle, or `undefined` if it could not be located. */
   bundlePath: string | undefined;
+  /**
+   * Absolute path to the bundle's sourcemap, or `undefined` when the build emitted none.
+   * Always resolved as the sibling the `sourceMappingURL` comment actually points at, rather
+   * than searched for separately — a map that does not sit beside its bundle is not its map.
+   */
+  sourcemapPath: string | undefined;
 }
 
 let cached: WidgetBundleConfig | undefined;
@@ -42,11 +58,22 @@ export function getWidgetBundleConfig(): WidgetBundleConfig {
   if (cached) {
     return cached;
   }
+  const bundlePath = resolveBundlePath();
   cached = Object.freeze({
     enabled: process.env.FORMS_WIDGET_BUNDLE_ENABLED?.trim() !== 'false',
-    bundlePath: resolveBundlePath(),
+    bundlePath,
+    sourcemapPath: resolveSourcemapPath(bundlePath),
   });
   return cached;
+}
+
+/** The map esbuild writes beside the bundle; `undefined` when built without sourcemaps. */
+function resolveSourcemapPath(bundlePath: string | undefined): string | undefined {
+  if (!bundlePath) {
+    return undefined;
+  }
+  const candidate = `${bundlePath}.map`;
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 /** Resolve the bundle's on-disk path via the layered strategy; `undefined` if none exist. */

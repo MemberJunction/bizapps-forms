@@ -80,8 +80,9 @@ async function main() {
   // type and applied only the author's ValidationRule, so this test could post
   // "smoke check <date>" into a Number question and still get a Complete response — the
   // same hole that let `not-an-email` persist into an Email question. Now that the server
-  // enforces the type-derived format the widget always enforced, a smoke run has to send
-  // what a real respondent would, which is what it should have been sending all along.
+  // enforces a type-derived format — the one the widget already applied to Email/Number/
+  // Rating/NPS, plus Phone and Date, which neither side used to check — a smoke run has to
+  // send what a real respondent would, which is what it should have been sending all along.
   const answerFor = (type) => {
     switch (type) {
       case 'Email':

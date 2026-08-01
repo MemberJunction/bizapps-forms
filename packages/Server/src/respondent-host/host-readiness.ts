@@ -34,15 +34,17 @@ export const RESPONDENT_ROLE = 'Form Respondent';
 /**
  * Whether this host can mint the anonymous links public forms depend on.
  *
- * Two ways it can be unready, each with a distinct fix, so they get distinct messages rather
- * than one vague "check your config".
+ * Three ways it can be unready — magicLink off, this app configured to grant a blank role, or
+ * the role not grantable by this host — each with a different fix, so each gets its own message
+ * rather than one vague "check your config".
  *
  * @param magicLink the host's core `magicLink` config
  * @param roleName  the role THIS app's minter grants — pass the value the minter uses
  *                  (`FORMS_MAGICLINK_ROLE`) so the check cannot drift from what is actually
  *                  minted. Defaults to {@link RESPONDENT_ROLE}.
  *
- * Deliberately does NOT inspect `magicLink.restrictedRoleName`. That deployment-global is only
+ * Deliberately does NOT REQUIRE `magicLink.restrictedRoleName` to equal our role — it is still
+ * consulted, as one more allowed name, exactly as core does. That deployment-global is only
  * core's default for invites that name no role (`isRoleGrantable` treats it as one more allowed
  * name, and `isProtectedAccount` already includes the invited role in its allowed set). Forms'
  * minter always names its role, so the global is irrelevant to us — and requiring it to equal
@@ -87,13 +89,23 @@ export function checkRespondentReadiness(
       .filter((n): n is string => typeof n === 'string')
       .map(normalize),
   );
-  if (!target || !allowed.has(target)) {
+  if (!target) {
     return {
       ready: false,
       reason:
-        `core 'magicLink' is enabled but '${roleName}' is not in ` +
-        `magicLink.grantableRoleNames, so invites cannot grant it. Add it, or anonymous ` +
-        `respondents will have no permission to create responses.`,
+        `this app is configured to grant a blank magic-link role, so no anonymous session can ` +
+        `carry any permission. Set FORMS_MAGICLINK_ROLE to the role name Forms should grant ` +
+        `(default '${RESPONDENT_ROLE}').`,
+    };
+  }
+  if (!allowed.has(target)) {
+    return {
+      ready: false,
+      reason:
+        `core 'magicLink' is enabled but '${roleName}' is neither ` +
+        `magicLink.restrictedRoleName nor listed in magicLink.grantableRoleNames, so invites ` +
+        `cannot grant it. Add it to grantableRoleNames, or anonymous respondents will have no ` +
+        `permission to create responses.`,
     };
   }
   return { ready: true };
