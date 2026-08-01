@@ -94,3 +94,53 @@ describe('FormRuntime', () => {
     expect(inputs).toEqual([{ questionId: 'q-color', textValue: 'blue' }]);
   });
 });
+
+/** A single Phone question — the type this branch newly taught the widget to validate. */
+function phoneDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'Phone',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-phone', type: 'Phone', prompt: 'Phone', isRequired: false, displayOrder: 1, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('FormRuntime — a value being typed is not yet a wrong answer', () => {
+  // The CONTRACT the components must honour: `setValue` is the keystroke, `markTouched` is the
+  // commit. Keeping them separate is what stops a format error appearing while the respondent is
+  // still typing. Before this branch `Phone` fell through to `default: return VALID`, so it never
+  // errored at all; now `isPhone` wants 7+ digits, and a component that marks touched on every
+  // keystroke shows "Enter a valid phone number." from the first digit to the sixth — re-announced
+  // each time, since the message carries `role="alert"`. That is the client-side twin of the
+  // autosave bug on the server: holding an in-progress value to a finished value's standard.
+  const q = () => phoneDefinition().pages[0].questions[0];
+
+  it('shows no error while a phone number is being typed', () => {
+    const runtime = new FormRuntime(phoneDefinition());
+    for (const partial of ['5', '55', '555', '55501']) {
+      runtime.setValue('q-phone', partial);
+      expect(runtime.visibleErrorFor(q())).toBeNull();
+    }
+  });
+
+  it('shows the error once the field is committed, and clears it when the value becomes valid', () => {
+    const runtime = new FormRuntime(phoneDefinition());
+    runtime.setValue('q-phone', '55501');
+    runtime.markTouched('q-phone');
+    expect(runtime.visibleErrorFor(q())).toBe('Enter a valid phone number.');
+
+    runtime.setValue('q-phone', '555 010 1234');
+    expect(runtime.visibleErrorFor(q())).toBeNull();
+  });
+});

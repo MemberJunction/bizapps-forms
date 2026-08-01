@@ -38,8 +38,20 @@ export class FormScrollComponent {
 
   protected onValueChange(question: PublishedFormQuestion, value: AnswerValue): void {
     this.runtime().setValue(question.id, value);
-    this.runtime().markTouched(question.id);
     this.progressChange.emit();
+  }
+
+  /**
+   * A field becomes "touched" when the respondent LEAVES it, not when they type in it.
+   *
+   * Marking touched on every keystroke means the error message is live while someone is still
+   * typing: a `Phone` question wants 7+ digits, so the first six keystrokes each render
+   * "Enter a valid phone number." — and because that message carries `role="alert"`, a screen
+   * reader re-announces it on every one. `focusout` is used rather than a per-control `blur`
+   * because it bubbles, so one binding covers every control the question renders.
+   */
+  protected onBlur(question: PublishedFormQuestion): void {
+    this.runtime().markTouched(question.id);
   }
 
   /**

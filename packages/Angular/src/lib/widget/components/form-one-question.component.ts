@@ -100,6 +100,13 @@ export class FormOneQuestionComponent {
 
   protected onValueChange(question: PublishedFormQuestion, value: AnswerValue): void {
     this.runtime().setValue(question.id, value);
+  }
+
+  /**
+   * Touched means "left the field", not "typed in it" — see the note on the scroll renderer.
+   * `onNext` below still marks touched explicitly, because trying to advance IS a commit.
+   */
+  protected onBlur(question: PublishedFormQuestion): void {
     this.runtime().markTouched(question.id);
   }
 

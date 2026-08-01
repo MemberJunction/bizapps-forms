@@ -12,6 +12,7 @@
         [errorMessage]="runtime().visibleErrorFor(q)"
         [distributionSlug]="distributionSlug()"
         (valueChange)="onValueChange(q, $event)"
+        (focusout)="onBlur(q)"
       />
 
       <div class="mjf-oneq__nav">
