@@ -70,8 +70,8 @@ answer-size cap would be a product decision, not a bug fix.
 **Widget sourcemap.** The bundle is built with `minify: true, sourcemap: true` and ends with
 `//# sourceMappingURL=mj-form.js.map`, but nothing served that path, so it fell through to
 MJAPI's authenticated routes and answered 401 on every devtools session. `/forms/widget/
-mj-form.js.map` is now served beside the bundle, resolved per request so it starts working
-when a build lands, and answering 404 when the build emitted no map.
+mj-form.js.map` is now served beside the bundle, and answers 404 rather than 401 when the build
+emitted no map.
 
 This rejects submissions that previously succeeded — any answer that does not fit its question's
 type. Already-published forms are covered without re-publishing, because the check derives from

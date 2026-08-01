@@ -34,11 +34,15 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
   public override ConfigureExpressApp(app: Application): void {
     const cfg = getWidgetBundleConfig();
 
-    // Both routes are registered unconditionally and resolve their file per REQUEST, not at boot.
-    // The config is memoized, but the FILE is not: in local dev MJAPI is routinely running before
-    // forms-ng has been built, and a route that was never registered cannot start working when the
-    // build lands. Registering always and 404ing until the artifact exists is what makes
-    // "rebuild, then reload the page" behave the way anyone would expect.
+    // Both routes are registered unconditionally, so the route table does not depend on whether
+    // the artifact existed at boot, and a missing file answers 404 rather than falling through to
+    // MJAPI's authenticated routes and answering 401 (which is what the sourcemap used to do).
+    //
+    // Path resolution is MEMOIZED, not per-request: `getWidgetBundleConfig()` freezes its result
+    // on first call and this method calls it eagerly above, so the lookup happens once at boot.
+    // A bundle built after MJAPI starts therefore needs a server restart, not just a page reload
+    // — the `resolvePath` indirection below exists to share one handler between two assets, not
+    // to re-probe the filesystem.
     this.serveStaticAsset(app, {
       route: WIDGET_BUNDLE_ROUTE,
       contentType: 'text/javascript',
@@ -113,7 +117,11 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
 interface StaticAsset {
   route: string;
   contentType: string;
-  /** Resolved per request, so a file built after boot starts serving without a restart. */
+  /**
+   * Reads the asset's path off the config. Called per request, but the config memoizes on first
+   * use, so this returns the same boot-time answer every time — it selects WHICH path, it does
+   * not re-probe the filesystem.
+   */
   resolvePath: () => string | undefined;
   /** Human-readable name used in error copy and logs. */
   label: string;
