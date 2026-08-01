@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { validateAnswerFormat } from './answer-format';
+import { matchesValidationPattern, validateAnswerFormat } from './answer-format';
+
+describe('matchesValidationPattern', () => {
+  it('anchors the author pattern to the whole value', () => {
+    expect(matchesValidationPattern('12345', '\\d{5}')).toBe(true);
+    expect(matchesValidationPattern('123456', '\\d{5}')).toBe(false);
+    expect(matchesValidationPattern('abc', '\\d{5}')).toBe(false);
+  });
+
+  // An author's pattern that will not compile is an AUTHORING defect, and the respondent is
+  // the wrong person to punish for it. The widget already failed open here; the server failed
+  // CLOSED, so a form carrying a malformed pattern showed the respondent no error, accepted
+  // their input client-side, then rejected the submit with a field error nothing they could
+  // type would clear — an unsubmittable form. Both sides now fail open, and the type floor
+  // (validateAnswerFormat) still applies, so failing open does not mean "unvalidated".
+  it('does not block the respondent when the author pattern cannot compile', () => {
+    for (const broken of ['[', '(', '*', '\\']) {
+      expect(matchesValidationPattern('anything', broken)).toBe(true);
+    }
+  });
+});
 
 describe('validateAnswerFormat — Email', () => {
   it('rejects a value that is not an email address for an Email question', () => {
@@ -35,6 +55,22 @@ describe('validateAnswerFormat — numeric types', () => {
     expect(validateAnswerFormat('Number', Number.NaN)).toBe('Enter a number.');
     expect(validateAnswerFormat('Number', Number.POSITIVE_INFINITY)).toBe('Enter a number.');
   });
+
+  // `Number('0x10')` is 16, so a bare `Number.isFinite` check called these valid. The value is
+  // then persisted verbatim as the text the respondent typed, and nothing downstream — a report,
+  // a SQL numeric cast, `parseFloat` — reads "0x10" as 16. Accepting a number we do not go on to
+  // store as that number is worse than rejecting it.
+  it('rejects non-decimal numeric literals that Number() would silently convert', () => {
+    for (const literal of ['0x10', '0b101', '0o17']) {
+      expect(validateAnswerFormat('Number', literal)).toBe('Enter a number.');
+    }
+  });
+
+  it('still accepts every decimal spelling a respondent might reasonably type', () => {
+    for (const ok of ['1e5', '1E-5', '+7', '.5', '12.', '  42  ', '-3.5', '0']) {
+      expect(validateAnswerFormat('Number', ok)).toBeUndefined();
+    }
+  });
 });
 
 describe('validateAnswerFormat — Phone', () => {
@@ -58,6 +94,17 @@ describe('validateAnswerFormat — Date', () => {
 
   it('rejects a string that is not a date at all', () => {
     expect(validateAnswerFormat('Date', 'sometime next week')).toBe('Enter a valid date.');
+  });
+
+  // `dateValue` is a plain nullable GraphQL String (`FormAnswerInputType`), so nothing upstream
+  // coerces or rejects it — there is no date scalar in the schema. A `Date` question answered
+  // through a different typed column therefore arrives here as a number/boolean/array, and
+  // waving those through is the same "posted straight at the mutation" bypass this module was
+  // written to close for Email.
+  it('rejects a non-string smuggled in through another typed column', () => {
+    expect(validateAnswerFormat('Date', 1754006400000)).toBe('Enter a valid date.');
+    expect(validateAnswerFormat('Date', true)).toBe('Enter a valid date.');
+    expect(validateAnswerFormat('Date', ['2026-08-01'])).toBe('Enter a valid date.');
   });
 });
 

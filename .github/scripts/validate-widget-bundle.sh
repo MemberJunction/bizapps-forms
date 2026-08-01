@@ -1,12 +1,13 @@
 #!/bin/bash
 # Validates that @mj-biz-apps/forms-ng actually SHIPS the <mj-form> browser bundle.
 #
-# WHY THIS EXISTS. Versions 0.1.0 through 0.4.0 all published without
-# dist/widget/mj-form.js. The bundler was never broken — it simply lived in a separate
+# WHY THIS EXISTS. Every published version that carried the widget at all — 0.2.0, 0.2.1,
+# 0.3.0 and 0.4.0 — shipped without dist/widget/mj-form.js. (0.0.0 predates the widget; there
+# is no 0.1.0.) The bundler was never broken — it simply lived in a separate
 # `build:widget` script that no CI path invoked, so `/forms/widget/mj-form.js` 404'd,
 # <mj-form> never upgraded, and every public form rendered an empty shell.
 #
-# It survived five releases because turbo declares `outputs: ["dist/**"]`. Anyone who ran
+# It survived all four because turbo declares `outputs: ["dist/**"]`. Anyone who ran
 # `build:widget` by hand once had the artifact captured into the build cache as though
 # `build` had produced it, and restored on every later cache hit. Local builds looked
 # correct forever after; CI, cold-cached, never produced it. A comment could not have

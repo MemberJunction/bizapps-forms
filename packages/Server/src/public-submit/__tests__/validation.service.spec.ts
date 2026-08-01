@@ -283,4 +283,102 @@ describe('validateSubmission', () => {
     const outcome = validateSubmission(conditionalDefinition(), [], true);
     expect(outcome.errors).toHaveLength(0);
   });
+
+  // The widget treated an uncompilable author pattern as "valid" and the server treated it as
+  // "invalid", so a form carrying a malformed regex looked fine while the respondent filled it
+  // in and then refused every submit with an error no input could clear. Both sides now fail
+  // open on a pattern that cannot compile; the respondent is not the one who made the mistake.
+  it('does not reject a respondent because the author pattern will not compile', () => {
+    const def: PublishedFormDefinition = {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Broken pattern',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 1,
+          questions: [
+            {
+              id: 'q-code',
+              type: 'ShortText',
+              prompt: 'Code',
+              isRequired: true,
+              displayOrder: 1,
+              validationRule: { pattern: '[' },
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+    const outcome = validateSubmission(def, [{ questionId: 'q-code', textValue: 'ABC' }], false);
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-code']);
+  });
+
+  // Contract test (the fix was driven by the unit-level test in forms-entities): a whitespace-only
+  // answer used to satisfy an `isAnswered` conditional, because the evaluator tested
+  // `answer.length > 0` while every validator tested `value.trim().length > 0`. One space
+  // revealed the dependent branch AND left the trigger question reported as unanswered.
+  it('does not reveal an isAnswered branch for a whitespace-only answer', () => {
+    const def: PublishedFormDefinition = {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Whitespace trigger',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-trigger', type: 'ShortText', prompt: 'Anything?', isRequired: false, displayOrder: 1, options: [] },
+            {
+              id: 'q-dependent',
+              type: 'ShortText',
+              prompt: 'Tell us more',
+              isRequired: true,
+              displayOrder: 2,
+              conditionalRule: { show: { all: [{ questionId: 'q-trigger', op: 'isAnswered' }] } },
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+    const outcome = validateSubmission(def, [{ questionId: 'q-trigger', textValue: '   ' }], false);
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers).toEqual([]);
+  });
+
+  // The end-to-end shape of the Date bypass: `FormAnswerInputType` exposes the typed columns
+  // independently and never cross-checks them against the question's declared type, so an
+  // anonymous caller can answer a Date question with `numericValue` and skip the string branch
+  // entirely. It persisted as a Complete response with NumericValue set on a Date question.
+  it('rejects a Date question answered through numericValue', () => {
+    const def: PublishedFormDefinition = {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Date',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-date', type: 'Date', prompt: 'When?', isRequired: true, displayOrder: 1, options: [] },
+          ],
+        },
+      ],
+    };
+    const outcome = validateSubmission(def, [{ questionId: 'q-date', numericValue: 999999 }], false);
+    expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-date']);
+    expect(outcome.answers).toEqual([]);
+  });
 });

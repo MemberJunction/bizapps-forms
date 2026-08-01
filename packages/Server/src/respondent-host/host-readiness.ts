@@ -63,15 +63,23 @@ export function checkRespondentReadiness(
         `= true in the host's MJAPI config.`,
     };
   }
-  const grantable = magicLink.grantableRoleNames ?? [];
   // Deliberately mirrors core's `isRoleGrantable` (auth/magicLink/magicLinkCore): a role is
-  // grantable if it is the restricted role OR appears in grantableRoleNames. Duplicated rather
-  // than imported because core does not export it from its public surface, and reaching into
+  // grantable if it is the restricted role OR appears in grantableRoleNames, compared through
+  // core's own `normalizeName` (`n.trim().toLowerCase()`). Duplicated rather than imported
+  // because core does not export it from its public surface, and reaching into
   // `@memberjunction/server/dist/auth/...` would couple us to its internal file layout. If core
   // ever exports it, delete this and call it — the point is to agree with core, not to have an
-  // opinion. Getting it wrong here only ever produces a wrong BOOT WARNING, never a wrong
-  // authorization decision: core re-checks grantability itself at mint time.
-  if (!grantable.includes(roleName) && magicLink.restrictedRoleName !== roleName) {
+  // opinion. The normalization is part of that agreement: without it a host that spelled the
+  // role 'form respondent' was told it could not grant a role core would grant it. Getting this
+  // wrong only ever produces a wrong BOOT WARNING, never a wrong authorization decision — core
+  // re-checks grantability itself at mint time.
+  const normalize = (name: string): string => name.trim().toLowerCase();
+  const allowed = new Set(
+    [magicLink.restrictedRoleName, ...(magicLink.grantableRoleNames ?? [])]
+      .filter((n): n is string => n !== undefined)
+      .map(normalize),
+  );
+  if (!allowed.has(normalize(roleName))) {
     return {
       ready: false,
       reason:

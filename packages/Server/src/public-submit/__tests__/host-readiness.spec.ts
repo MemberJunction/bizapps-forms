@@ -78,4 +78,18 @@ describe('checkRespondentReadiness', () => {
     expect(checkRespondentReadiness({ enabled: true, grantableRoleNames: [custom] }, custom))
       .toEqual({ ready: true });
   });
+  // Core compares role names case- and whitespace-insensitively: magicLinkCore's
+  // `isRoleGrantable` runs every name through `normalizeName = (n) => n.trim().toLowerCase()`
+  // before the set lookup. This check duplicates that function (core does not export it), and
+  // duplicating it without the normalization made the copy disagree with the thing it claims to
+  // mirror — a host that spelled the role 'form respondent' could mint invites perfectly well
+  // and still be told at boot that it could not.
+  it('matches role names the way core does: case- and whitespace-insensitively', () => {
+    expect(checkRespondentReadiness({ enabled: true, grantableRoleNames: ['form respondent'] }))
+      .toEqual({ ready: true });
+    expect(checkRespondentReadiness({ enabled: true, grantableRoleNames: ['  FORM RESPONDENT  '] }))
+      .toEqual({ ready: true });
+    expect(checkRespondentReadiness({ enabled: true, restrictedRoleName: 'form respondent', grantableRoleNames: [] }))
+      .toEqual({ ready: true });
+  });
 });

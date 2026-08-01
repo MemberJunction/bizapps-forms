@@ -3,7 +3,11 @@
  * re-validates the same rules on submit; this layer gives instant, accessible
  * feedback and blocks navigation/submit on a visible, required question.
  */
-import { validateAnswerFormat } from '@mj-biz-apps/forms-entities';
+import {
+  isAnswerSupplied,
+  matchesValidationPattern,
+  validateAnswerFormat,
+} from '@mj-biz-apps/forms-entities';
 import type {
   AnswerValue,
   PublishedFormQuestion,
@@ -18,18 +22,16 @@ export interface FieldValidationResult {
 
 const VALID: FieldValidationResult = { valid: true, message: null };
 
-/** True when a value counts as "supplied" (non-empty string / non-empty array / present). */
+/**
+ * True when a value counts as "supplied" (non-blank string / non-empty array / present).
+ *
+ * Kept as the widget's own exported name (callers import it from the widget's public surface)
+ * but implemented on the shared predicate, because this used to be one of FOUR hand-written
+ * copies of "is it answered" and they had drifted: the conditional evaluator did not trim while
+ * every validator did.
+ */
 export function hasValue(value: AnswerValue): boolean {
-  if (value === null || value === undefined) {
-    return false;
-  }
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-  return true;
+  return isAnswerSupplied(value);
 }
 
 /**
@@ -88,7 +90,7 @@ function validateRule(
     if (rule.maxLength !== undefined && text.length > rule.maxLength) {
       return { valid: false, message: `Use at most ${rule.maxLength} characters.` };
     }
-    if (rule.pattern !== undefined && !matchesPattern(text, rule.pattern)) {
+    if (rule.pattern !== undefined && !matchesValidationPattern(text, rule.pattern)) {
       return { valid: false, message: rule.patternMessage ?? 'Value is not in the expected format.' };
     }
   }
@@ -102,15 +104,6 @@ function validateRule(
     }
   }
   return VALID;
-}
-
-/** Anchored full-string regex test; an invalid pattern source never blocks the user. */
-function matchesPattern(text: string, pattern: string): boolean {
-  try {
-    return new RegExp(`^(?:${pattern})$`).test(text);
-  } catch {
-    return true;
-  }
 }
 
 /** Coerce to a finite number or `undefined`. */

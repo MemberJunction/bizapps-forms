@@ -27,6 +27,8 @@
  */
 import {
   evaluateConditionalRule,
+  isAnswerSupplied,
+  matchesValidationPattern,
   validateAnswerFormat,
   type AnswerValue,
   type FieldError,
@@ -93,20 +95,6 @@ export function buildAnswerMap(answers: FormAnswerInput[]): Map<string, AnswerVa
   return map;
 }
 
-/** "Answered" = a non-empty value present (matches the conditional evaluator's notion). */
-function isAnswered(value: AnswerValue): boolean {
-  if (value === null || value === undefined) {
-    return false;
-  }
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-  return true;
-}
-
 /**
  * Run full server-side validation. `partial` submissions skip the `isRequired`
  * check (the respondent has not finished) but still validate any supplied answers.
@@ -150,7 +138,7 @@ function collectVisibleQuestion(
 
   const input = inputByQuestion.get(question.id);
   const value = input ? answerValueOf(input) : undefined;
-  const answered = isAnswered(value);
+  const answered = isAnswerSupplied(value);
 
   if (!answered) {
     if (question.isRequired && !partial) {
@@ -213,7 +201,7 @@ function validateString(value: string, rule: ValidationRule): string | undefined
   if (rule.maxLength !== undefined && value.length > rule.maxLength) {
     return `Must be at most ${rule.maxLength} characters.`;
   }
-  if (rule.pattern !== undefined && !matchesPattern(value, rule.pattern)) {
+  if (rule.pattern !== undefined && !matchesValidationPattern(value, rule.pattern)) {
     return rule.patternMessage ?? 'Value is not in the expected format.';
   }
   return undefined;
@@ -228,13 +216,4 @@ function validateNumber(value: number, rule: ValidationRule): string | undefined
     return `Must be at most ${rule.max}.`;
   }
   return undefined;
-}
-
-/** Full-match regex test; an invalid pattern source is treated as "no match". */
-function matchesPattern(value: string, pattern: string): boolean {
-  try {
-    return new RegExp(`^(?:${pattern})$`).test(value);
-  } catch {
-    return false;
-  }
 }

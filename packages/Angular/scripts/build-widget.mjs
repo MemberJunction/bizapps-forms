@@ -19,7 +19,7 @@
  * optional extra. It consumes ngc output and does not compile TypeScript itself, so running it
  * standalone requires a prior `ngc`. It must stay wired into `build`: the package publishes
  * `files: ["/dist"]`, so anything `build` does not produce simply never reaches a host — which
- * is exactly how 0.1.0 through 0.4.0 shipped with no `<mj-form>` bundle at all.
+ * is exactly how 0.2.0 through 0.4.0 shipped with no `<mj-form>` bundle at all.
  * `.github/scripts/validate-widget-bundle.sh` is the gate that now holds that line.
  */
 import { build } from 'esbuild';

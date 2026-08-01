@@ -7,7 +7,7 @@
  * in — into a single self-contained, browser-loadable file at `dist/widget/mj-form.js`.
  *
  * Both halves belong to `build` because `files: ["/dist"]` publishes whatever `build` leaves
- * behind: when the bundling half was a separate opt-in script, five releases shipped without it.
+ * behind: when the bundling half was a separate opt-in script, four releases shipped without it.
  *
  * The respondent host page (`@mj-biz-apps/forms-server` → `host-page.ts`) loads that bundle
  * via `<script src="/forms/widget/mj-form.js">`. Importing this module immediately registers
