@@ -5,10 +5,13 @@
  * server bootstrap discovers it through ClassFactory — no core fork, no Explorer shell.
  *
  * SEAM NOTE: `BaseServerMiddleware`'s own docs steer route-adding toward `BaseServerExtension`
- * / `ServerExtensionsCore` (PR #2037). That seam is NOT present in the pinned MJ release
- * (`@memberjunction/server` at the pinned release ships only `BaseServerMiddleware`), so the documented
- * escape hatch `ConfigureExpressApp(app)` is the available hook. When MJ is bumped to a
- * version shipping `BaseServerExtension`, move this route there.
+ * / `ServerExtensionsCore` (PR #2037). That seam was absent when this was written against MJ
+ * 5.43.0, so `ConfigureExpressApp(app)` was the only hook available. It is NO LONGER absent:
+ * 5.51.0 re-exports `ServerExtensionLoader` and `BaseServerExtension` from
+ * `@memberjunction/server-extensions-core`, and `serve()` instantiates the loader. Migrating
+ * these two routes is now possible and is deliberately NOT part of this change —
+ * `ConfigureExpressApp` remains a supported hook in 5.51.0 and both routes work through it, so
+ * the move is a behaviour-preserving refactor that belongs in its own commit.
  *
  * It adds a GET route (`/f/:slug`) through {@link ConfigureExpressApp}; the route runs
  * BEFORE auth (it is just static HTML), so an anonymous respondent reaches it without a

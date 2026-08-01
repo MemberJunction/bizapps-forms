@@ -3,8 +3,9 @@
  *
  * Registered via `@RegisterClass(BaseServerMiddleware, 'mj:formsWidgetBundle')` so MJ server
  * bootstrap discovers it through ClassFactory — no core fork, no Explorer shell. Mirrors
- * {@link RespondentHostMiddleware}: it adds a route through {@link ConfigureExpressApp} (the
- * available hook on the pinned MJ release, which ships only `BaseServerMiddleware`).
+ * {@link RespondentHostMiddleware}: it adds a route through {@link ConfigureExpressApp}, and
+ * carries the same SEAM NOTE — `BaseServerExtension` DOES exist as of MJ 5.51.0, and moving
+ * both routes onto it is a separate, behaviour-preserving change.
  *
  * The respondent host page references this bundle via `<script src="/forms/widget/mj-form.js">`.
  * Without it, `customElements.whenDefined('mj-form')` never resolves and every public form fails
