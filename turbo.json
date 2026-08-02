@@ -15,7 +15,23 @@
     },
     "start": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      // Turbo runs tasks in a FILTERED environment. Without this, every variable set in the shell
+      // is dropped before the task sees it — only turbo's small built-in list (PATH, NODE_OPTIONS,
+      // …) survives — so `FORMS_WIDGET_BUNDLE_PATH=… npm run start:api` booted MJAPI with the
+      // variable absent, no warning and no error. That made the middleware's own remediation
+      // advice ("or set FORMS_WIDGET_BUNDLE_PATH") impossible to follow through this repo's own
+      // start script.
+      //
+      // `*` rather than an allow-list such as ["FORMS_*"]: an allow-list is incomplete by
+      // construction. It fixes today's variables and silently drops the next one added, which is
+      // the same defect again. Verified: with ["FORMS_*"] a probe variable outside the prefix
+      // still arrived ABSENT; with ["*"] it arrived.
+      //
+      // Safe here ONLY because `start` is `cache: false`. passThroughEnv is deliberately excluded
+      // from the cache hash, so putting `*` on a CACHED task would let an environment change
+      // silently reuse a stale result. Do not copy this onto `build` or `test`.
+      "passThroughEnv": ["*"]
     }
   }
 }

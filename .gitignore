@@ -51,3 +51,6 @@ report.json
 metadata/sql_logging
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Playwright MCP session scratch (traces, downloads, storage state) — tooling output, never source
+.playwright-mcp/
