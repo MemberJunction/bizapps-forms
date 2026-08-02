@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/forms-server": patch
+"@mj-biz-apps/forms-server": minor
 ---
 
 Serve the widget bundle from install paths containing a dot segment (#24)
@@ -42,6 +42,12 @@ to `send`:
 `resolveFromEnv()` now requires an absolute path, normalises it, and **logs** a rejected
 override rather than silently falling through to the next resolver — an operator who set the
 variable deliberately should not have to infer from a blank form that it was ignored.
+
+This is the reason for a **minor** rather than a patch: a `FORMS_WIDGET_BUNDLE_PATH` value that
+was previously accepted by `existsSync` and passed through can now be rejected. No path that
+actually *worked* stops working — the rejected shapes are exactly the ones that produced a 500
+or an HTML error page — but the configuration contract is narrower than it was, so it does not
+belong in a patch.
 
 Also adds route-level tests that stand the middleware up on a real express server and assert
 over real HTTP. The existing unit tests could not reach this bug class at all: path
