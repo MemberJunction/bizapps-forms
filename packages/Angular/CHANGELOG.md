@@ -1,5 +1,11 @@
 # @mj-biz-apps/forms-ng
 
+## 0.6.0
+
+### Patch Changes
+
+- @mj-biz-apps/forms-entities@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
