@@ -104,7 +104,18 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
         // cheap 304 when unchanged and the fresh file when it changes. (Switch to a content-hashed
         // URL + immutable if long-term CDN caching is ever wanted.)
         .set('Cache-Control', 'no-cache')
-        .sendFile(filePath, (err) => {
+        // `dotfiles: 'allow'` is REQUIRED, not a preference. `send` defaults it to 'ignore' and
+        // applies it to EVERY segment of the absolute path (`containsDotFile` walks the whole
+        // split path when no `root` is given) — so any install under a dot directory
+        // (`.worktrees/`, `.claude/`, `/opt/.releases/`, `~/.local/share/`) 404s inside `send`
+        // and surfaces here as a 500, for a file that is plainly there. Boot still logs
+        // "Widget bundle served at ...", so the only symptom is a blank form.
+        //
+        // It carries no traversal risk on this route: `filePath` comes from
+        // `getWidgetBundleConfig()` — an operator-set env var, `require.resolve`, or a monorepo
+        // constant — and never from the request. The route serves exactly two fixed files, so
+        // the default is guarding against an input that does not exist here.
+        .sendFile(filePath, { dotfiles: 'allow' }, (err) => {
           if (err && !res.headersSent) {
             LogError(`[Forms] Failed to send ${asset.label} ${filePath}: ${String(err)}`);
             res.status(500).type('text/plain').send(`Failed to load form ${asset.label}.`);
