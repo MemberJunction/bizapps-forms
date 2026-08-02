@@ -104,7 +104,29 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
         // cheap 304 when unchanged and the fresh file when it changes. (Switch to a content-hashed
         // URL + immutable if long-term CDN caching is ever wanted.)
         .set('Cache-Control', 'no-cache')
-        .sendFile(filePath, (err) => {
+        // `send` defaults `dotfiles` to 'ignore' and applies it to EVERY segment of the absolute
+        // path (`containsDotFile` walks the whole split path when no `root` is given) — so any
+        // install under a dot directory (`.worktrees/`, `.claude/`, `/opt/.releases/`,
+        // `~/.local/share/`) 404s inside `send` and surfaces here as a 500, for a file that is
+        // plainly there. Boot still logs "Widget bundle served at ...", so the only symptom is a
+        // blank form.
+        //
+        // This is a CHOICE, not the only repair: passing `{ root: dirname(filePath) }` and the
+        // basename also fixes it, because `send` only dot-checks the request-relative part once a
+        // `root` is set. They differ in posture rather than in safety — `root` would additionally
+        // refuse an operator who deliberately points FORMS_WIDGET_BUNDLE_PATH at a dotfile, but
+        // would also accept a RELATIVE override and silently resolve it against the server's
+        // working directory. We take `'allow'` because it keeps the resolved path the single
+        // source of truth, and reject bad overrides in `resolveFromEnv()` instead, where the
+        // reason can actually be logged.
+        //
+        // No traversal risk either way: `filePath` comes from `getWidgetBundleConfig()` — an
+        // operator-set env var, `require.resolve`, or a monorepo constant — and never from the
+        // request. The route serves exactly two fixed files, so the default is guarding against
+        // an input that does not exist here. (`'allow'` does let an operator serve a dotfile they
+        // explicitly named, but anyone who can set that variable already owns the process, and a
+        // non-dotted path like /etc/hosts was equally serveable before this change.)
+        .sendFile(filePath, { dotfiles: 'allow' }, (err) => {
           if (err && !res.headersSent) {
             LogError(`[Forms] Failed to send ${asset.label} ${filePath}: ${String(err)}`);
             res.status(500).type('text/plain').send(`Failed to load form ${asset.label}.`);
