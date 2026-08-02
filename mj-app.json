@@ -4,7 +4,7 @@
   "name": "mj-bizapps-forms",
   "displayName": "MJ Forms",
   "description": "Forms, surveys & intake for MemberJunction — anonymous-friendly, mobile-first, responses as first-class records.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "ISC",
   "icon": "fa-solid fa-list-check",
   "publisher": {
