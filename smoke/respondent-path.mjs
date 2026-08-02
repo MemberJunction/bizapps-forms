@@ -60,7 +60,7 @@ async function main() {
   // 3. The widget bundle must actually be served, not 404. Without it the page renders
   //    an empty shell — which looks like a styling problem, not a missing build step.
   const widget = await fetch(`${BASE}/forms/widget/mj-form.js`);
-  check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:widget"`);
+  check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:packages"`);
 
   // 4. The published definition must load for that anonymous session.
   const published = await gql(token,
@@ -76,10 +76,49 @@ async function main() {
   const versionIdFromSnapshot = definition.formVersionId;
   check(Boolean(versionIdFromSnapshot), 'snapshot carries a formVersionId');
 
-  const answers = questions.map((q) => ({
-    questionId: q.id,
-    textValue: q.type === 'Email' ? 'smoke@example.com' : `smoke check ${new Date(0).toISOString()}`,
-  }));
+  // Answers must FIT THEIR QUESTION'S TYPE. Until 2026-08-01 the server ignored question
+  // type and applied only the author's ValidationRule, so this test could post
+  // "smoke check <date>" into a Number question and still get a Complete response — the
+  // same hole that let `not-an-email` persist into an Email question. Now that the server
+  // enforces a type-derived format — the one the widget already applied to Email/Number/
+  // Rating/NPS, plus Phone and Date, which neither side used to check — a smoke run has to
+  // send what a real respondent would, which is what it should have been sending all along.
+  //
+  // "What the widget sends" is TWO hops, and mirroring only the first is wrong:
+  // `toAnswerInput` (core/answer-value.ts) picks the typed COLUMN, then `submission-mapping.ts`
+  // serializes it. `jsonValue` is a JSON STRING in the SDL, so passing the contract's array
+  // straight through is rejected before any resolver runs ("String cannot represent a non string
+  // value") and the smoke aborts on any form carrying a MultiChoice question.
+  //
+  // This used to send `textValue` for every type, so a Date answer landed in the column
+  // `answerValueOf` reads first and the run never touched `dateValue` — the one column this
+  // branch hardened, since `isDate` now rejects non-strings.
+  //
+  // `FileUpload` is deliberately NOT mirrored: the widget sends `fileId`, but `answerValueOf`
+  // does not read that column at all, so a required upload question reads as unanswered on the
+  // server regardless. That gap pre-dates this branch and is not the smoke test's to surface.
+  const answerFor = (type) => {
+    switch (type) {
+      case 'Number':
+      case 'Rating':
+      case 'NPS':
+        return { numericValue: 7 };
+      case 'YesNo':
+        return { booleanValue: true };
+      case 'Date':
+      case 'Time':
+        return { dateValue: new Date(0).toISOString() };
+      case 'MultiChoice':
+        return { jsonValue: JSON.stringify(['smoke']) };
+      case 'Email':
+        return { textValue: 'smoke@example.com' };
+      case 'Phone':
+        return { textValue: '+1 555 010 1234' };
+      default:
+        return { textValue: `smoke check ${new Date(0).toISOString()}` };
+    }
+  };
+  const answers = questions.map((q) => ({ questionId: q.id, ...answerFor(q.type) }));
 
   const submission = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {

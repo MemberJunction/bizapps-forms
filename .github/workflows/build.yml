@@ -12,6 +12,12 @@ on:
       - 'smoke/**'
       - 'turbo.json'
       - 'package.json'
+      # The gates themselves live here. Without this, a PR that edits ONLY
+      # .github/scripts/validate-widget-bundle.sh does not run this workflow, so a broken gate
+      # reports green — which is the same class of failure (a check that silently does not run)
+      # that let four releases ship without the widget bundle.
+      - '.github/workflows/build.yml'
+      - '.github/scripts/**'
   pull_request:
     branches: [next]
     paths:
@@ -22,6 +28,12 @@ on:
       - 'smoke/**'
       - 'turbo.json'
       - 'package.json'
+      # The gates themselves live here. Without this, a PR that edits ONLY
+      # .github/scripts/validate-widget-bundle.sh does not run this workflow, so a broken gate
+      # reports green — which is the same class of failure (a check that silently does not run)
+      # that let four releases ship without the widget bundle.
+      - '.github/workflows/build.yml'
+      - '.github/scripts/**'
 
 concurrency:
   group: build-${{ github.ref }}
@@ -48,6 +60,11 @@ jobs:
 
       - name: Build all packages
         run: npm run build:packages
+
+      # Same gate publish.yml runs, pulled forward so a PR that breaks the widget bundle fails
+      # here rather than silently shipping a form that never renders.
+      - name: Validate the forms-ng widget bundle will ship
+        run: ./.github/scripts/validate-widget-bundle.sh
 
       # 434 tests existed in this repo with no workflow running them, so a PR could go
       # green with the whole suite red. Runs after the build because turbo's `test` task

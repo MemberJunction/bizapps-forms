@@ -7,6 +7,7 @@
 import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
+  isAnswerSupplied,
   type AnswerValue,
   type FormAnswerInput,
   type PublishedFormDefinition,
@@ -126,7 +127,7 @@ export class FormRuntime {
     if (qs.length === 0) {
       return 1;
     }
-    const answered = qs.filter((q) => hasAnswer(this.valueFor(q.id))).length;
+    const answered = qs.filter((q) => isAnswerSupplied(this.valueFor(q.id))).length;
     return answered / qs.length;
   });
 
@@ -142,15 +143,3 @@ export class FormRuntime {
   }
 }
 
-function hasAnswer(value: AnswerValue): boolean {
-  if (value === null || value === undefined) {
-    return false;
-  }
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-  return true;
-}
