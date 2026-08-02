@@ -2,7 +2,7 @@
  * Bundles the `<mj-form>` custom element into a single, self-contained, browser-loadable
  * file (DG-5).
  *
- * Pipeline: `npm run build` (ngc) AOT-compiles the widget to `dist/widget-entry.js` (templates
+ * Pipeline: ngc AOT-compiles the widget to `dist/widget-entry.js` (templates
  * + styles inlined, no JIT needed). This script then bundles that compiled entry — together
  * with the Angular runtime it imports (`@angular/core`, `@angular/platform-browser`, …) — into
  * one IIFE at `dist/widget/mj-form.js`. Loading that file in a browser self-registers
@@ -15,7 +15,12 @@
  * plugin) over every module as an esbuild `onLoad` step, converting partial declarations to
  * full AOT so no JIT compiler is needed at runtime.
  *
- * Run AFTER `npm run build` — it consumes ngc output, it does not compile TypeScript itself.
+ * This is the SECOND HALF of `npm run build` (`ngc && node scripts/build-widget.mjs`), not an
+ * optional extra. It consumes ngc output and does not compile TypeScript itself, so running it
+ * standalone requires a prior `ngc`. It must stay wired into `build`: the package publishes
+ * `files: ["/dist"]`, so anything `build` does not produce simply never reaches a host — which
+ * is exactly how 0.2.0 through 0.4.0 shipped with no `<mj-form>` bundle at all.
+ * `.github/scripts/validate-widget-bundle.sh` is the gate that now holds that line.
  */
 import { build } from 'esbuild';
 import { transformAsync } from '@babel/core';

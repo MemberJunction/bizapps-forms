@@ -110,7 +110,7 @@ export function evaluateCondition(
   const answer = answers.get(condition.questionId);
   switch (condition.op) {
     case 'isAnswered':
-      return isAnswered(answer);
+      return isAnswerSupplied(answer);
     case 'equals':
       return scalarsEqual(answer, condition.value);
     case 'notEquals':
@@ -118,7 +118,7 @@ export function evaluateCondition(
     case 'in':
       return isMember(answer, condition.value);
     case 'notIn':
-      return isAnswered(answer) && !isMember(answer, condition.value);
+      return isAnswerSupplied(answer) && !isMember(answer, condition.value);
     case 'greaterThan':
       return compareNumeric(answer, condition.value) === 'greater';
     case 'lessThan':
@@ -134,13 +134,29 @@ export function evaluateCondition(
 // Operator helpers (each small + pure).
 // ---------------------------------------------------------------------------
 
-/** "Answered" = not null/undefined, and not an empty string or empty array. */
-function isAnswered(answer: AnswerValue): boolean {
+/**
+ * "Answered" = not null/undefined, and not a blank string or empty array.
+ *
+ * THE one definition of "answered" in the system. Four hand-written copies predated this branch —
+ * here, the server's `validateSubmission`, the widget's `hasValue`, and the widget's progress-bar
+ * `hasAnswer` — and they had already drifted: this one tested `answer.length > 0` while the other
+ * three tested `value.trim().length > 0`. (A fifth briefly existed: `validateAnswerFormat` added
+ * its own before all of them were folded in here.)
+ *
+ * A respondent typing a single space therefore satisfied an `isAnswered` conditional — revealing
+ * whatever branch depended on it — while every validator read the same keystroke as blank, so the
+ * answer was neither persisted nor able to satisfy `isRequired`. One keystroke made a question
+ * answered and unanswered at once. Whitespace is not an answer; every caller now agrees on that
+ * by construction rather than by coincidence.
+ *
+ * Note `0` and `false` ARE answers — only nullish, blank-string and empty-array are not.
+ */
+export function isAnswerSupplied(answer: AnswerValue): boolean {
   if (answer === null || answer === undefined) {
     return false;
   }
   if (typeof answer === 'string') {
-    return answer.length > 0;
+    return answer.trim().length > 0;
   }
   if (Array.isArray(answer)) {
     return answer.length > 0;

@@ -28,16 +28,34 @@ export type RespondentReadiness =
   | { ready: true }
   | { ready: false; reason: string };
 
-/** The role Forms' anonymous sessions are granted. Seeded by this app's metadata. */
+/** The role Forms' anonymous sessions are granted by default. Seeded by this app's metadata. */
 export const RESPONDENT_ROLE = 'Form Respondent';
 
 /**
  * Whether this host can mint the anonymous links public forms depend on.
  *
- * Three ways it can be unready, each with a distinct fix, so they get distinct messages
+ * Three ways it can be unready — magicLink off, this app configured to grant a blank role, or
+ * the role not grantable by this host — each with a different fix, so each gets its own message
  * rather than one vague "check your config".
+ *
+ * @param magicLink the host's core `magicLink` config
+ * @param roleName  the role THIS app's minter grants — pass the value the minter uses
+ *                  (`FORMS_MAGICLINK_ROLE`) so the check cannot drift from what is actually
+ *                  minted. Defaults to {@link RESPONDENT_ROLE}.
+ *
+ * Deliberately does NOT REQUIRE `magicLink.restrictedRoleName` to equal our role — it is still
+ * consulted, as one more allowed name, exactly as core does. That deployment-global is only
+ * core's default for invites that name no role (`isRoleGrantable` treats it as one more allowed
+ * name, and `isProtectedAccount` already includes the invited role in its allowed set). Forms'
+ * minter always names its role, so the global is irrelevant to us — and requiring it to equal
+ * ours made every stock host unready, since core defaults it to 'Magic Link Baseline'. Worse, it
+ * is one value per deployment, so demanding it meant no second Open App could ever be ready on
+ * the same MJAPI instance. The real requirement is grantability, checked below.
  */
-export function checkRespondentReadiness(magicLink: HostMagicLinkConfig | undefined): RespondentReadiness {
+export function checkRespondentReadiness(
+  magicLink: HostMagicLinkConfig | undefined,
+  roleName: string = RESPONDENT_ROLE,
+): RespondentReadiness {
   if (!magicLink || magicLink.enabled !== true) {
     return {
       ready: false,
@@ -47,23 +65,47 @@ export function checkRespondentReadiness(magicLink: HostMagicLinkConfig | undefi
         `= true in the host's MJAPI config.`,
     };
   }
-  const grantable = magicLink.grantableRoleNames ?? [];
-  if (!grantable.includes(RESPONDENT_ROLE)) {
+  // Deliberately mirrors core's `isRoleGrantable` (auth/magicLink/magicLinkCore): a role is
+  // grantable if it is the restricted role OR appears in grantableRoleNames, compared through
+  // core's own `normalizeName` (`n.trim().toLowerCase()`). Duplicated rather than imported
+  // because core does not export it from its public surface, and reaching into
+  // `@memberjunction/server/dist/auth/...` would couple us to its internal file layout. If core
+  // ever exports it, delete this and call it — the point is to agree with core, not to have an
+  // opinion. The normalization is part of that agreement: without it a host that spelled the
+  // role 'form respondent' was told it could not grant a role core would grant it. Getting this
+  // wrong only ever produces a wrong BOOT WARNING, never a wrong authorization decision — core
+  // re-checks grantability itself at mint time.
+  //
+  // Two details are load-bearing beyond the comparison itself. The `typeof` filter is not
+  // belt-and-braces: `magicLink` is host config parsed from JSON, where an operator blanking a
+  // value writes `null` — a value the TypeScript shape does not admit but the runtime hands us
+  // anyway — and this runs inside boot middleware, where throwing is strictly worse than any
+  // wrong verdict. The empty-target guard mirrors core's own `if (!target) return false`, which
+  // it checks BEFORE consulting the allow-list, so a blank name is never grantable.
+  const normalize = (name: string): string => name.trim().toLowerCase();
+  const target = normalize(roleName ?? '');
+  const allowed = new Set(
+    [magicLink.restrictedRoleName, ...(magicLink.grantableRoleNames ?? [])]
+      .filter((n): n is string => typeof n === 'string')
+      .map(normalize),
+  );
+  if (!target) {
     return {
       ready: false,
       reason:
-        `core 'magicLink' is enabled but '${RESPONDENT_ROLE}' is not in ` +
-        `magicLink.grantableRoleNames, so invites cannot grant it. Add it, or anonymous ` +
-        `respondents will have no permission to create responses.`,
+        `this app is configured to grant a blank magic-link role, so no anonymous session can ` +
+        `carry any permission. Set FORMS_MAGICLINK_ROLE to the role name Forms should grant ` +
+        `(default '${RESPONDENT_ROLE}').`,
     };
   }
-  if (magicLink.restrictedRoleName !== RESPONDENT_ROLE) {
+  if (!allowed.has(target)) {
     return {
       ready: false,
       reason:
-        `core 'magicLink' has restrictedRoleName='${magicLink.restrictedRoleName ?? '(unset)'}' ` +
-        `rather than '${RESPONDENT_ROLE}'. Anonymous sessions would be restricted to the wrong ` +
-        `role and could carry permissions Forms never intended to grant.`,
+        `core 'magicLink' is enabled but '${roleName}' is neither ` +
+        `magicLink.restrictedRoleName nor listed in magicLink.grantableRoleNames, so invites ` +
+        `cannot grant it. Add it to grantableRoleNames, or anonymous respondents will have no ` +
+        `permission to create responses.`,
     };
   }
   return { ready: true };

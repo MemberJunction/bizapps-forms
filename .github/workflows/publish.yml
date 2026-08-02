@@ -211,6 +211,13 @@ jobs:
       - name: Build all packages
         run: npm run build:packages
 
+      # Four consecutive releases (0.2.0, 0.2.1, 0.3.0, 0.4.0) shipped forms-ng without its <mj-form>
+      # browser bundle, so every public form rendered an empty shell. Nothing failed at build, test or
+      # boot time — the artifact was simply absent from the tarball. This is the last point at
+      # which that is still catchable.
+      - name: Validate the forms-ng widget bundle will ship
+        run: ./.github/scripts/validate-widget-bundle.sh
+
       - name: Publish to npm
         if: steps.changeset_check.outputs.pending != '0'
         run: npx changeset publish

@@ -202,11 +202,14 @@ npm run mj:codegen          # generate entity / action / resolver / Angular subc
 **5. Build and run.**
 
 ```bash
-npm run build               # build all packages + apps (turbo)
-npm run build:widget        # bundle the <mj-form> custom element the respondent page serves
+npm run build               # build all packages + apps (turbo), including the <mj-form> bundle
 npm run start:api           # MJAPI         → http://localhost:4121
 npm run start:explorer      # MJExplorer    → http://localhost:4321
 ```
+
+> `npm run build` now also emits `dist/widget/mj-form.js`, the `<mj-form>` custom-element bundle
+> the respondent page loads — it is part of `forms-ng`'s `build`, not a separate step you have to
+> remember. (`npm run build:widget` still exists to rebuild just that bundle during widget work.)
 
 A published form is then reachable anonymously at `http://localhost:4121/f/<distribution-slug>`.
 
