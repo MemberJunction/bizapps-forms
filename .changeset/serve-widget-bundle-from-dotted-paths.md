@@ -27,6 +27,22 @@ exactly the asset that makes a minified production fault readable. One fix cover
 an operator-set env var, `require.resolve`, or a monorepo constant — and never from the
 request, and the route serves exactly two fixed files.
 
+**`FORMS_WIDGET_BUNDLE_PATH` is now validated instead of trusted.** Adversarial review found
+two more shapes of the same "file is plainly there, route still fails" defect, reached through
+the one resolver whose value a human types. Both passed `existsSync` and were handed straight
+to `send`:
+
+- A **relative** path made `res.sendFile` throw a `TypeError` *synchronously*, before the error
+  callback it was given exists — so nothing was logged under `[Forms]` and the respondent got
+  express's default HTML error page, carrying a stack trace under a non-production `NODE_ENV`.
+- An **unnormalised** path (`$APP_ROOT/../shared/widget/mj-form.js`, which is how deploy
+  scripts compose paths) kept its `..`, which `send` rejects with 403 and this route turns into
+  a 500.
+
+`resolveFromEnv()` now requires an absolute path, normalises it, and **logs** a rejected
+override rather than silently falling through to the next resolver — an operator who set the
+variable deliberately should not have to infer from a blank form that it was ignored.
+
 Also adds route-level tests that stand the middleware up on a real express server and assert
 over real HTTP. The existing unit tests could not reach this bug class at all: path
 *resolution* was always correct, it was path *serving* that failed.

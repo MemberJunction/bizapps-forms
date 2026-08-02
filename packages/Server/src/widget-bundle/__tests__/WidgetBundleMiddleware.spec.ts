@@ -19,7 +19,7 @@ import express from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { WidgetBundleMiddleware } from '../WidgetBundleMiddleware';
@@ -103,9 +103,14 @@ describe('widget bundle route', () => {
   });
 
   // The control: without this, a harness that never served anything would pass the tests above
-  // for the wrong reason.
+  // for the wrong reason. Its value depends entirely on the path being dot-free, and the staging
+  // root comes from `tmpdir()` — so on a host whose TMPDIR itself contains a dot segment this
+  // would quietly become a fourth dotted case and stop controlling for anything. Asserted rather
+  // than assumed.
   it('serves the bundle from an ordinary install path', async () => {
-    stageBundle(join('opt', 'app', 'dist', 'widget'));
+    const staged = stageBundle(join('opt', 'app', 'dist', 'widget'));
+    expect(staged.split(sep).some((segment) => segment.length > 1 && segment.startsWith('.'))).toBe(false);
+
     await withServer(async (get) => {
       const res = await get(WIDGET_BUNDLE_ROUTE);
       expect(res.status).toBe(200);
@@ -113,10 +118,38 @@ describe('widget bundle route', () => {
     });
   });
 
-  it('sets no-cache on the bundle so a rebuild is never masked by a stale copy', async () => {
+  // The status assertion is not decoration. `Cache-Control` is set BEFORE `sendFile` and the error
+  // branch overrides only status and content type, so the header survives a failed send — an
+  // earlier version of this test asserted the header alone, staged a dotted path, and stayed green
+  // with the fix reverted and the route answering 500. It looked like a third dotted-path
+  // assertion while proving nothing about the route working at all.
+  it('serves the bundle with no-cache, so a rebuild is never masked by a stale copy', async () => {
     stageBundle(join('.worktrees', 'app'));
     await withServer(async (get) => {
-      expect((await get(WIDGET_BUNDLE_ROUTE)).headers.get('cache-control')).toBe('no-cache');
+      const res = await get(WIDGET_BUNDLE_ROUTE);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-cache');
+    });
+  });
+
+  // `FORMS_WIDGET_BUNDLE_PATH` is set by hand or by a deploy script, and scripts compose paths:
+  // `$APP_ROOT/../shared/widget/mj-form.js` is an ordinary thing to write. The file exists and
+  // `existsSync` agrees, but `send` rejects any unnormalised `..` with 403, which this route's
+  // callback turns into a 500 — the exact #24 symptom (file present, boot logs success, blank
+  // form) reached by a different route. Built by string concatenation because `join`/`resolve`
+  // would collapse the `..` and quietly destroy the case under test.
+  it('serves the bundle when the operator-set path contains a ".." segment', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mjf-widget-dotdot-'));
+    mkdirSync(join(root, 'shared', 'widget'), { recursive: true });
+    mkdirSync(join(root, 'app'), { recursive: true });
+    writeFileSync(join(root, 'shared', 'widget', 'mj-form.js'), BUNDLE_BYTES);
+    process.env.FORMS_WIDGET_BUNDLE_PATH = `${root}/app/../shared/widget/mj-form.js`;
+    resetWidgetBundleConfigForTests();
+
+    await withServer(async (get) => {
+      const res = await get(WIDGET_BUNDLE_ROUTE);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(BUNDLE_BYTES);
     });
   });
 

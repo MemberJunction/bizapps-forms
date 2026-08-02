@@ -16,8 +16,9 @@
  */
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { LogError } from '@memberjunction/core';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -84,10 +85,46 @@ function resolveBundlePath(): string | undefined {
   return resolveFromEnv() ?? resolveFromPackage() ?? resolveFromMonorepo();
 }
 
-/** (1) Explicit absolute override. */
+/**
+ * (1) Explicit absolute override.
+ *
+ * Validated rather than trusted, because this is the one layer whose value a human types. The
+ * other two resolvers produce normalised absolute paths by construction (`require.resolve`,
+ * `resolve()`); this one used to hand `send` whatever the environment said, gated only on
+ * `existsSync`. Two shapes that `existsSync` happily accepts both broke the route on a file that
+ * was plainly there:
+ *
+ *  - RELATIVE (`package.json`) — `res.sendFile` throws a TypeError *synchronously*, before the
+ *    error callback it was handed exists. Nothing was logged under `[Forms]` and the respondent
+ *    got express's default HTML error page, with a stack trace under a non-production NODE_ENV.
+ *  - UNNORMALISED (`$APP_ROOT/../shared/widget/mj-form.js`, which deploy scripts write) — `send`
+ *    rejects any surviving `..` with 403, which the route turns into a 500.
+ *
+ * Both reproduce #24's signature exactly: the file exists, boot logs success, the respondent sees
+ * a blank form. A rejected override is LOGGED, never swallowed — an operator who set this
+ * variable deliberately must not have to infer from a blank form that it was ignored.
+ */
 function resolveFromEnv(): string | undefined {
   const explicit = process.env.FORMS_WIDGET_BUNDLE_PATH?.trim();
-  return explicit && existsSync(explicit) ? explicit : undefined;
+  if (!explicit) {
+    return undefined;
+  }
+  if (!isAbsolute(explicit)) {
+    LogError(
+      `[Forms] FORMS_WIDGET_BUNDLE_PATH must be an absolute path; ignoring "${explicit}". ` +
+        `Relative paths resolve against the server's working directory, not the app root.`,
+    );
+    return undefined;
+  }
+  // Collapses `..`/`.` segments that `send` would otherwise reject with 403. Safe to apply after
+  // the absolute check: `resolve()` on an absolute path only normalises it, and never reintroduces
+  // the working directory the way it would for a relative one.
+  const normalized = resolve(explicit);
+  if (!existsSync(normalized)) {
+    LogError(`[Forms] FORMS_WIDGET_BUNDLE_PATH does not exist; ignoring "${normalized}".`);
+    return undefined;
+  }
+  return normalized;
 }
 
 /** (2) The installed `@mj-biz-apps/forms-ng` package's emitted bundle. */

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeFileSync, mkdtempSync } from 'node:fs';
-import { join } from 'node:path';
+import { writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   getWidgetBundleConfig,
@@ -35,12 +35,44 @@ describe('getWidgetBundleConfig', () => {
     expect(getWidgetBundleConfig().bundlePath).toBe(file);
   });
 
-  it('leaves bundlePath undefined when the override path does not exist (404 path)', () => {
-    process.env.FORMS_WIDGET_BUNDLE_PATH = join(tmpdir(), 'definitely-missing-mj-form.js');
-    // No env override match and (in the test runner) no resolvable package bundle → undefined,
-    // which drives the middleware's 404-without-crash branch.
+  it('ignores an override path that does not exist, rather than serving it', () => {
+    const missing = join(tmpdir(), 'definitely-missing-mj-form.js');
+    process.env.FORMS_WIDGET_BUNDLE_PATH = missing;
+    // The previous assertion here was `resolved === undefined || typeof resolved === 'string'`,
+    // which is every possible value of `string | undefined` — it could not fail. What actually
+    // matters is narrower: whatever we resolve, it is never the missing path itself.
+    expect(getWidgetBundleConfig().bundlePath).not.toBe(missing);
+  });
+
+  // `sendFile` throws a TypeError SYNCHRONOUSLY for a non-absolute path, before the error callback
+  // it was given exists. In the route that meant the callback never ran, nothing was logged under
+  // `[Forms]`, and express's default HTML error page went to the respondent — carrying a stack
+  // trace under a non-production NODE_ENV. The config layer is the right place to stop it: the
+  // docstring already calls this an "explicit absolute override", so honouring that is a guard,
+  // not a new rule. `package.json` is deliberate — it EXISTS relative to the package cwd, so
+  // `existsSync` alone waves it through.
+  it('rejects a relative override path instead of passing it to sendFile', () => {
+    process.env.FORMS_WIDGET_BUNDLE_PATH = 'package.json';
+    expect(getWidgetBundleConfig().bundlePath).not.toBe('package.json');
+  });
+
+  it('never resolves a bundlePath that is not absolute', () => {
+    process.env.FORMS_WIDGET_BUNDLE_PATH = 'package.json';
     const resolved = getWidgetBundleConfig().bundlePath;
-    expect(resolved === undefined || typeof resolved === 'string').toBe(true);
+    expect(resolved === undefined || isAbsolute(resolved)).toBe(true);
+  });
+
+  // A deploy script composing `$APP_ROOT/../shared/...` produces a real, existing path that
+  // `send` rejects with 403 unless it is normalised first — surfacing as a 500 on a file that is
+  // plainly there. Built by concatenation because `join`/`resolve` would collapse the `..`.
+  it('normalises a ".." segment out of the override path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mjf-widget-dotdot-cfg-'));
+    mkdirSync(join(root, 'shared'), { recursive: true });
+    mkdirSync(join(root, 'app'), { recursive: true });
+    const real = join(root, 'shared', 'mj-form.js');
+    writeFileSync(real, '// bundle');
+    process.env.FORMS_WIDGET_BUNDLE_PATH = `${root}/app/../shared/mj-form.js`;
+    expect(getWidgetBundleConfig().bundlePath).toBe(real);
   });
 
   it('memoizes config until reset', () => {
