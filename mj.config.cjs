@@ -53,6 +53,9 @@ module.exports = {
     NameRulesBySchema: [
       { SchemaName: '${mj_core_schema}', EntityNamePrefix: 'MJ: ' },
       { SchemaName: '__mj_BizAppsForms', EntityNamePrefix: 'MJ_BizApps_Forms: ', EntityNameSuffix: '' },
+      // PostgreSQL folds the unquoted schema name to lower case, and these rules match
+      // case-sensitively — without the twin, entities discovered on PG get no prefix.
+      { SchemaName: '__mj_bizappsforms', EntityNamePrefix: 'MJ_BizApps_Forms: ', EntityNameSuffix: '' },
     ],
   },
 
@@ -88,7 +91,10 @@ module.exports = {
    * Requires MJ >= 5.50.0 (`includeSchemas` ships there). Guarded by
    * `npm run lint:generated`. See issue #10.
    */
-  includeSchemas: ['__mj_BizAppsForms'],
+  // Both cases are listed for the same reason as the rules above: on PostgreSQL the
+  // physical schema is '__mj_bizappsforms', and an allow-list that names only the
+  // mixed-case spelling excludes Forms' own schema from its own CodeGen run.
+  includeSchemas: ['__mj_BizAppsForms', '__mj_bizappsforms'],
 
   /**
    * System schemas, kept explicit.
@@ -98,7 +104,11 @@ module.exports = {
    * schema expects the key, and if `includeSchemas` were ever removed this is the
    * behaviour the repo falls back to rather than generating from the whole database.
    */
-  excludeSchemas: ['sys', 'staging', 'dbo', '__mj', '__mj_BizAppsCommon', '__mj_BizAppsTasks'],
+  excludeSchemas: [
+    'sys', 'staging', 'dbo', '__mj',
+    '__mj_BizAppsCommon', '__mj_BizAppsTasks',
+    '__mj_bizappscommon', '__mj_bizappstasks',
+  ],
 
   /** SQL migration output for CodeGen-produced objects */
   SQLOutput: {
@@ -111,6 +121,20 @@ module.exports = {
       // Order matters: the more-specific app schema must come first so the
       // greedy '__mj' rule doesn't partially match '__mj_BizAppsForms'.
       { schema: '__mj_BizAppsForms', placeholder: '${flyway:defaultSchema}' },
+      // PostgreSQL folds unquoted identifiers to lower case, so CodeGen reads the physical
+      // schema names back from the database in lower case and these rules — which match
+      // case-SENSITIVELY — miss. The generic '__mj' rule below then matches the '__mj'
+      // PREFIX of '__mj_bizappsforms' and emits '${mjSchema}_bizappsforms', which resolves
+      // to a schema that does not exist. These lower-case twins must sit above the generic
+      // rule for the same greedy-match reason as the mixed-case ones.
+      { schema: '__mj_bizappsforms', placeholder: '${flyway:defaultSchema}' },
+      // bizapps-common had no rule at all, so the generic '__mj' rule mangled
+      // '__mj_BizAppsCommon' into '${mjSchema}_BizAppsCommon' — visible in the shipped
+      // T-SQL. That happens to resolve correctly on SQL Server (mjSchema is '__mj'), which
+      // is why it went unnoticed; it is still a reference this repo does not control being
+      // rewritten by accident. Name it explicitly, in both cases.
+      { schema: '__mj_BizAppsCommon', placeholder: '${commonSchema}' },
+      { schema: '__mj_bizappscommon', placeholder: '${commonSchema}' },
       { schema: '__mj', placeholder: '${mjSchema}' },
     ],
   },
