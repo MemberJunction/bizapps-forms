@@ -45,6 +45,7 @@
     "@memberjunction/cli": "5.51.0",
     "beasties": "0.3.5",
     "mrmime": "2.0.1",
+    "pg": "^8.22.0",
     "rolldown": "1.0.0-beta.58",
     "rollup": "^4.43.0",
     "simple-git": "^3.31.1",
