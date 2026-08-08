@@ -52,6 +52,12 @@ export function buildPublishedDefinition(
     pages: [...tree.pages]
       .sort((a, b) => a.entity.DisplayOrder - b.entity.DisplayOrder)
       .map((p, index) => buildPage(p, index)),
+    // Empty because there is no authoring store to read yet: the `FormAutomation` table (and the
+    // builder tab that edits it) land with the automation layer. Emitted explicitly rather than
+    // left off so the snapshot a publish produces always matches the contract a parse expects —
+    // the two sides are whitelists that strip anything the other adds unilaterally, so a field
+    // present on one and absent on the other is silently lost rather than loudly broken.
+    automations: [],
   };
 }
 
