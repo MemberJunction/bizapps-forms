@@ -33,6 +33,57 @@ describe('answerValueOf (null typed-column precedence)', () => {
     expect(answerValueOf({ questionId: 'n', numericValue: 0 } as unknown as FormAnswerInput)).toBe(0);
     expect(answerValueOf({ questionId: 'b', booleanValue: false } as unknown as FormAnswerInput)).toBe(false);
   });
+
+  it('reads a FileUpload answer from fileId (the only column a file answer populates)', () => {
+    const input = { questionId: 'q-resume', fileId: 'file-guid-1' } as unknown as FormAnswerInput;
+    expect(answerValueOf(input)).toBe('file-guid-1');
+  });
+});
+
+describe('validateSubmission — FileUpload answered via fileId', () => {
+  /** A required-FileUpload form: the "attach your resume" shape. */
+  function fileUploadRequiredDefinition(): PublishedFormDefinition {
+    return {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Application',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-resume', type: 'FileUpload', prompt: 'Resume', isRequired: true, displayOrder: 1, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  it('accepts a required FileUpload answered through fileId, and keeps the answer for persistence', () => {
+    const answers: FormAnswerInput[] = [{ questionId: 'q-resume', fileId: 'file-guid-1' } as unknown as FormAnswerInput];
+
+    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, false);
+
+    // Before this was fixed, the file answer read as unanswered: the submit was rejected with
+    // `"Resume" is required.` even though the upload had already succeeded, and — on an OPTIONAL
+    // file question — the answer was silently dropped instead, so FormResponseAnswer.FileID was
+    // never written by the public submit path at all.
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers).toHaveLength(1);
+    expect(outcome.answers[0].input.fileId).toBe('file-guid-1');
+  });
+
+  it('still reports a required FileUpload that carries no file', () => {
+    const answers: FormAnswerInput[] = [{ questionId: 'q-resume' } as unknown as FormAnswerInput];
+
+    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, false);
+
+    expect(outcome.errors).toEqual([{ questionId: 'q-resume', message: '"Resume" is required.' }]);
+    expect(outcome.answers).toEqual([]);
+  });
 });
 
 describe('validateSubmission — required MultiChoice via jsonValue', () => {
