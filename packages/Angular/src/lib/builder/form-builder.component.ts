@@ -367,7 +367,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     const style = this.record.StyleID
       ? (await this.design.loadStyleById(this.record.StyleID)) ?? undefined
       : undefined;
-    this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview');
+    // No automations: Preview renders the form, it never runs a submission's side effects.
+    this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
     this.cdr.markForCheck();
   }
 
@@ -376,7 +377,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree) {
       return;
     }
-    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', tokens);
+    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', [], tokens);
     this.cdr.markForCheck();
   }
 

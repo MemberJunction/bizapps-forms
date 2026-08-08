@@ -1,6 +1,8 @@
 import type {
+  mjBizAppsFormsFormAutomationEntity,
   mjBizAppsFormsFormStyleEntity,
   FormStyleTokens,
+  PublishedFormAutomation,
   PublishedFormDefinition,
   PublishedFormPage,
   PublishedFormQuestion,
@@ -17,6 +19,35 @@ import {
 } from './json-fields';
 
 /**
+ * The authored automation columns publish reads, as a `simple` RunView row.
+ *
+ * Every field type is derived from the generated entity rather than restated, so the value-list
+ * unions (`TargetType`, `Trigger`, `ExecutionMode`) keep tracking their CHECK constraints. A
+ * hand-copied union here would silently stop matching the day a migration adds a value, and the
+ * symptom would be a published snapshot the parser rejects.
+ */
+export interface AuthoredAutomationRow {
+  ID: mjBizAppsFormsFormAutomationEntity['ID'];
+  Name: mjBizAppsFormsFormAutomationEntity['Name'];
+  TargetType: mjBizAppsFormsFormAutomationEntity['TargetType'];
+  ActionID: mjBizAppsFormsFormAutomationEntity['ActionID'];
+  AgentID: mjBizAppsFormsFormAutomationEntity['AgentID'];
+  BindingID: mjBizAppsFormsFormAutomationEntity['BindingID'];
+  Trigger: mjBizAppsFormsFormAutomationEntity['Trigger'];
+  ExecutionMode: mjBizAppsFormsFormAutomationEntity['ExecutionMode'];
+  DisplayOrder: mjBizAppsFormsFormAutomationEntity['DisplayOrder'];
+  ConditionalRule: mjBizAppsFormsFormAutomationEntity['ConditionalRule'];
+  ContinueOnError: mjBizAppsFormsFormAutomationEntity['ContinueOnError'];
+  IsActive: mjBizAppsFormsFormAutomationEntity['IsActive'];
+}
+
+/** The columns `buildPublishedAutomations` needs — the `Fields` list publish must ask for. */
+export const AUTHORED_AUTOMATION_FIELDS: readonly (keyof AuthoredAutomationRow)[] = [
+  'ID', 'Name', 'TargetType', 'ActionID', 'AgentID', 'BindingID',
+  'Trigger', 'ExecutionMode', 'DisplayOrder', 'ConditionalRule', 'ContinueOnError', 'IsActive',
+];
+
+/**
  * Pure transform from the live builder tree to the immutable
  * {@link PublishedFormDefinition} stored in `FormVersion.DefinitionSnapshot` (the S1
  * contract). No I/O, no MJ services — so it is the unit-testable core of publish.
@@ -27,11 +58,18 @@ import {
  *
  * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
  * supplied it is used verbatim instead of deriving tokens from `style`.
+ *
+ * `automations` is REQUIRED rather than defaulted, because defaulting it is exactly how this
+ * silently broke once: publish emitted a hardcoded empty array, every configured binding
+ * therefore never fired, and nothing failed — the submit path simply fell back to the legacy
+ * hook list. A caller that genuinely has none (the live Preview, which renders a form and runs
+ * nothing) must now say so explicitly.
  */
 export function buildPublishedDefinition(
   tree: FormTree,
   style: mjBizAppsFormsFormStyleEntity | undefined,
   formVersionId: string,
+  automations: readonly PublishedFormAutomation[],
   styleTokensOverride?: FormStyleTokens,
 ): PublishedFormDefinition {
   const form = tree.form;
@@ -52,13 +90,59 @@ export function buildPublishedDefinition(
     pages: [...tree.pages]
       .sort((a, b) => a.entity.DisplayOrder - b.entity.DisplayOrder)
       .map((p, index) => buildPage(p, index)),
-    // Empty because there is no authoring store to read yet: the `FormAutomation` table (and the
-    // builder tab that edits it) land with the automation layer. Emitted explicitly rather than
-    // left off so the snapshot a publish produces always matches the contract a parse expects —
-    // the two sides are whitelists that strip anything the other adds unilaterally, so a field
-    // present on one and absent on the other is silently lost rather than loudly broken.
-    automations: [],
+    // Emitted always, even when empty, so the snapshot a publish produces always matches the
+    // contract a parse expects — the two sides are whitelists that strip anything the other adds
+    // unilaterally, so a field present on one and absent on the other is silently lost rather
+    // than loudly broken. An empty array is also what keeps an already-published form on the
+    // legacy hook list, so it is a meaningful value rather than a placeholder.
+    automations: [...automations],
   };
+}
+
+/**
+ * Map authored `FormAutomation` rows to their published form.
+ *
+ * Sorted by DisplayOrder here so the snapshot's order is canonical, matching how pages and
+ * questions are treated above — the runner sorts again by its own rules (Sync before Async), but
+ * a snapshot whose order depends on however the rows came back from a query is not a snapshot.
+ *
+ * Inactive rows are carried, not dropped: `isActive` is a state the runner honours, and dropping
+ * it here would make "disabled" indistinguishable from "never configured" to anyone reading the
+ * snapshot, including the author who later re-enables it.
+ */
+export function buildPublishedAutomations(
+  rows: readonly AuthoredAutomationRow[],
+): PublishedFormAutomation[] {
+  return [...rows]
+    .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
+    .map((row) => {
+      const automation: PublishedFormAutomation = {
+        id: row.ID,
+        name: row.Name,
+        targetType: row.TargetType,
+        trigger: row.Trigger,
+        executionMode: row.ExecutionMode,
+        displayOrder: row.DisplayOrder,
+        continueOnError: row.ContinueOnError,
+        isActive: row.IsActive,
+      };
+      // Only the id matching the target type is emitted. The parser reads all three as optional,
+      // so writing a null one through would serialize a field the contract says is absent.
+      if (row.ActionID) {
+        automation.actionId = row.ActionID;
+      }
+      if (row.AgentID) {
+        automation.agentId = row.AgentID;
+      }
+      if (row.BindingID) {
+        automation.bindingId = row.BindingID;
+      }
+      const conditional = parseConditionalRule(row.ConditionalRule);
+      if (conditional) {
+        automation.conditionalRule = conditional;
+      }
+      return automation;
+    });
 }
 
 function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {

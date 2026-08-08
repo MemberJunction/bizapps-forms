@@ -23,6 +23,7 @@ import {
 import { loadFormResponseContext } from '../shared/form-response-context';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { bindingFailed, executeBinding, parseBindingConfig } from './binding-executor';
+import { readPriorBindingOutcome, recordBindingLedgerRow } from './binding-ledger';
 import { MJBindingGateway } from './mj-binding-gateway';
 
 const BINDING_ENTITY = 'MJ_BizApps_Forms: Form Entity Bindings';
@@ -63,7 +64,13 @@ export class BindResponseToEntityAction extends BaseAction {
       const result = await executeBinding({
         config,
         answers: context.canonicalAnswers,
-        gateway: new MJBindingGateway(contextUser),
+        // The same identity ledger the submit path uses. This entry point is the re-drivable one
+        // — an approval hook, an admin re-run — so without it a second invocation would create a
+        // second record under an AlwaysCreate rule and leave no trace that either had happened.
+        gateway: Object.assign(new MJBindingGateway(contextUser), {
+          findPriorOutcome: (id: string) => readPriorBindingOutcome(bindingId, id, contextUser),
+        }),
+        responseId,
         // The caller decides the ceiling. Invoked from the submit path the deployment allow-list
         // applies; invoked deliberately by a privileged caller — an approval hook that has already
         // decided this response should be written — the caller's own grants are the constraint.
@@ -77,6 +84,8 @@ export class BindResponseToEntityAction extends BaseAction {
           Message: result.failure.message,
         };
       }
+
+      await recordBindingLedgerRow(bindingId, binding.TargetEntityID, responseId, result.outcome, contextUser);
 
       setOutputParam(params, 'TargetRecordID', result.outcome.targetRecordId);
       setOutputParam(params, 'Outcome', result.outcome.kind);

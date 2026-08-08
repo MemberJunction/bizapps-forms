@@ -297,6 +297,13 @@ become writable onto a business record just because a binding was added later. F
 older widgets do not yet send the response id. It is not an off switch — a foreign, revoked or
 unknown file is refused in either mode. Default is strict.
 
+**The bind-time check is strict regardless of that setting.** Lenient exists so a rollout does not
+reject a respondent mid-submission; it is not a reason to copy an unattributable file onto a
+business record later, when nobody is waiting and refusing costs nothing. Both check-points call
+the same `evaluateProvenance`, via `everyFileIsAttributable` — an earlier bind-time version
+compared only the distribution, which on a public form anyone can open means "was this uploaded by
+anybody at all".
+
 ---
 
 ## 10. Not built yet
@@ -310,3 +317,8 @@ unknown file is refused in either mode. Default is strict.
 - **Editing a saved binding's mapping.** The tab can disable, reorder and remove automations, and
   preview a mapping before saving it, but changing the field mapping of a binding that already
   exists means editing the row. Re-adding is the current path.
+- **PostgreSQL identity lookups.** `sqlLiteral` takes a dialect and defaults to SQL Server, and no
+  caller passes anything else — there is no runtime dialect detection. The `N'…'` prefix it emits
+  is rejected by PostgreSQL, so every `MatchThenCreate` / `MatchOrSkip` lookup would fail on a
+  PostgreSQL-backed deployment. `AlwaysCreate` bindings, which never run a lookup, are unaffected.
+  Wiring dialect detection through the gateway is the prerequisite.

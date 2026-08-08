@@ -16,4 +16,5 @@ export const FORMS_ENTITY = {
   FormResponse: 'MJ_BizApps_Forms: Form Responses',
   FormResponseAnswer: 'MJ_BizApps_Forms: Form Response Answers',
   FormDistribution: 'MJ_BizApps_Forms: Form Distributions',
+  FormAutomation: 'MJ_BizApps_Forms: Form Automations',
 } as const;

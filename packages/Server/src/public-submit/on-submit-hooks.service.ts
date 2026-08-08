@@ -14,7 +14,7 @@
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import type { UserInfo } from '@memberjunction/core';
-import { LEGACY_ON_SUBMIT_ACTION_NAMES } from '@mj-biz-apps/forms-entities';
+import { LEGACY_ON_SUBMIT_ACTION_NAMES, type LegacyOnSubmitActionName } from '@mj-biz-apps/forms-entities';
 import { UserCache } from '@memberjunction/sqlserver-dataprovider';
 
 /**
@@ -27,7 +27,14 @@ import { UserCache } from '@memberjunction/sqlserver-dataprovider';
  */
 export const ON_SUBMIT_ACTION_NAMES = LEGACY_ON_SUBMIT_ACTION_NAMES;
 
-export type OnSubmitActionName = string;
+/**
+ * The union of the four names, not `string`.
+ *
+ * This was briefly widened to `string` when the list moved to the shared contract, which removed
+ * the compile-time check that made the list "frozen" in the first place — a mistyped action name
+ * would then have failed only at runtime, as a hook that silently never fired.
+ */
+export type OnSubmitActionName = LegacyOnSubmitActionName;
 
 /** Per-hook outcome for observability/tests. */
 export interface HookFireResult {

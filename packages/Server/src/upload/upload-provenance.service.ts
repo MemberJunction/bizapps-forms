@@ -85,6 +85,29 @@ export function evaluateProvenance(
 }
 
 /**
+ * Do ALL of these files belong to this respondent's own submission?
+ *
+ * The bind-time re-check needs a whole-response yes/no rather than the per-answer verdict the
+ * submit path reports to a user. It exists as its own function so both check-points evaluate the
+ * SAME rule: the first version of the bind-time check compared only the distribution, which on a
+ * public form anyone can open means "was this uploaded by anybody at all" — it would have accepted
+ * a stranger's file and copied its id onto a business record other users can read.
+ *
+ * Fails closed on the first file it cannot vouch for; there is no partial success worth having
+ * when the question is whether to disclose a file.
+ */
+export function everyFileIsAttributable(
+  fileIds: readonly string[],
+  ledger: ReadonlyMap<string, UploadLedgerRow>,
+  scope: Omit<ProvenanceInputs, 'fileId'>,
+  strict: boolean,
+): boolean {
+  return fileIds.every((fileId) =>
+    evaluateProvenance(ledger.get(fileId.trim().toLowerCase()), { ...scope, fileId }, strict).ok,
+  );
+}
+
+/**
  * GUIDs are compared case-folded because they cross the same boundary every other identifier in
  * this codebase does: minted lowercase on the client, returned uppercase by SQL Server.
  */

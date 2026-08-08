@@ -9,13 +9,13 @@
  * Every dispatch runs under the automation service principal. The anonymous respondent never
  * reaches here.
  */
-import { LogError, Metadata, RunView } from '@memberjunction/core';
+import { LogError, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam } from '@memberjunction/actions-base';
 import { AgentRunner } from '@memberjunction/ai-agents';
 import type { MJAIAgentEntityExtended } from '@memberjunction/ai-core-plus';
-import { loadUploadLedger } from '../upload/upload-provenance.service';
+import { everyFileIsAttributable, loadUploadLedger } from '../upload/upload-provenance.service';
 import {
   isFileAnswer,
   parseFieldMappings,
@@ -27,22 +27,19 @@ import {
 import type {
   mjBizAppsFormsFormAutomationRunEntity,
   mjBizAppsFormsFormEntityBindingEntity,
-  mjBizAppsFormsFormEntityBindingRecordEntity,
 } from '@mj-biz-apps/forms-entities';
 import {
   bindingFailed,
   executeBinding,
   parseBindingConfig,
-  sqlLiteral,
+  readPriorBindingOutcome,
+  recordBindingLedgerRow,
   MJBindingGateway,
-  type BindingOutcome,
-  type BindingOutcomeKind,
 } from '@mj-biz-apps/forms-actions';
 
 const ENTITY = {
   AutomationRun: 'MJ_BizApps_Forms: Form Automation Runs',
   Binding: 'MJ_BizApps_Forms: Form Entity Bindings',
-  BindingRecord: 'MJ_BizApps_Forms: Form Entity Binding Records',
 } as const;
 
 export interface DispatchContext {
@@ -195,7 +192,8 @@ async function runBindingTarget(
     config,
     answers: ctx.answers,
     gateway: Object.assign(new MJBindingGateway(ctx.principal), {
-      findPriorOutcome: () => readPriorOutcome(automation.bindingId as string, ctx),
+      findPriorOutcome: (responseId: string) =>
+        readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal),
     }),
     responseId: ctx.responseId,
     allowedEntities: ctx.allowedEntities,
@@ -209,50 +207,14 @@ async function runBindingTarget(
     throw new Error(`${result.failure.scope}: ${result.failure.message}`);
   }
 
-  await recordLedgerRow(automation.bindingId, binding, result.outcome, ctx);
-  return `${result.outcome.kind}${result.outcome.targetRecordId ? ` ${result.outcome.targetRecordId}` : ''}`;
-}
-
-/** What this binding already did for this response, read from the identity ledger. */
-async function readPriorOutcome(
-  bindingId: string,
-  ctx: DispatchContext,
-): Promise<{ kind: BindingOutcomeKind; targetRecordId: string | null; writtenFields: string[] } | null> {
-  const result = await new RunView().RunView<{ Outcome: string; TargetRecordID: string | null; WrittenFields: string | null }>(
-    {
-      EntityName: ENTITY.BindingRecord,
-      ExtraFilter: `BindingID=${sqlLiteral(bindingId)} AND FormResponseID=${sqlLiteral(ctx.responseId)}`,
-      Fields: ['Outcome', 'TargetRecordID', 'WrittenFields'],
-      ResultType: 'simple',
-      MaxRows: 1,
-    },
+  await recordBindingLedgerRow(
+    automation.bindingId,
+    binding.TargetEntityID,
+    ctx.responseId,
+    result.outcome,
     ctx.principal,
   );
-  if (!result.Success) {
-    throw new Error(result.ErrorMessage ?? 'ledger read failed');
-  }
-  const [row] = result.Results;
-  if (!row) {
-    return null;
-  }
-  return {
-    kind: row.Outcome as BindingOutcomeKind,
-    targetRecordId: row.TargetRecordID,
-    writtenFields: parseWrittenFields(row.WrittenFields),
-  };
-}
-
-/** WrittenFields is authored JSON; a malformed value is reported as "nothing known", not a crash. */
-function parseWrittenFields(raw: string | null): string[] {
-  if (!raw) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-  } catch {
-    return [];
-  }
+  return `${result.outcome.kind}${result.outcome.targetRecordId ? ` ${result.outcome.targetRecordId}` : ''}`;
 }
 
 /**
@@ -263,6 +225,14 @@ function parseWrittenFields(raw: string | null): string[] {
  * or before the check existed at all, must not become writable onto a business record simply
  * because a binding was added later. Returns false on any doubt — including a failed lookup —
  * because the cost of being wrong here is disclosing someone else's file.
+ *
+ * Attribution is checked, not just scope. The response id IS the draft id the upload endpoint
+ * recorded (the widget mints it before uploading and submits under the same id), so a bind-time
+ * check can hold files to the same standard the submit-time one did.
+ *
+ * Deliberately STRICT regardless of `FORMS_UPLOAD_PROVENANCE`. Lenient exists so a rollout does
+ * not reject in-flight respondents mid-submission; it is not a reason to copy an unattributable
+ * file onto a business record later, when nobody is waiting and the refusal costs nothing.
  */
 async function filesAreVerified(ctx: DispatchContext): Promise<boolean> {
   const fileIds = [...ctx.answers.Entries()]
@@ -273,74 +243,18 @@ async function filesAreVerified(ctx: DispatchContext): Promise<boolean> {
   }
   try {
     const ledger = await loadUploadLedger(fileIds, ctx.principal);
-    return fileIds.every((id) => {
-      const row = ledger.get(id.trim().toLowerCase());
-      return Boolean(row) && row?.Status !== 'Revoked' && equalsFolded(row?.DistributionID, ctx.distributionId);
-    });
-  } catch {
+    return everyFileIsAttributable(
+      fileIds,
+      ledger,
+      { distributionId: ctx.distributionId, clientResponseId: ctx.responseId },
+      true,
+    );
+  } catch (error) {
+    LogError(
+      `Forms binding: upload provenance lookup failed for response ${ctx.responseId}; ` +
+        `refusing file answers: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return false;
-  }
-}
-
-function equalsFolded(left: string | null | undefined, right: string | null | undefined): boolean {
-  return Boolean(left) && Boolean(right) && left!.trim().toLowerCase() === right!.trim().toLowerCase();
-}
-
-/**
- * Upsert the (binding, response) ledger row.
- *
- * Written on every outcome including a skip, so "this submission was considered and produced
- * nothing" is a recorded fact rather than an absence indistinguishable from "never ran". The
- * unique index on (BindingID, FormResponseID) is the real guard against a double execution; this
- * read-then-write is the cooperative half, and a failure here must not undo a record that was
- * already written — the target row exists either way, so the ledger is repaired by re-running.
- */
-async function recordLedgerRow(
-  bindingId: string,
-  binding: mjBizAppsFormsFormEntityBindingEntity,
-  outcome: BindingOutcome,
-  ctx: DispatchContext,
-): Promise<void> {
-  const md = new Metadata();
-  const existing = await new RunView().RunView<{ ID: string }>(
-    {
-      EntityName: ENTITY.BindingRecord,
-      // Both are GUIDs minted by this system — the binding id from the published snapshot, the
-      // response id validated as a UUID before it became a primary key — but escaped anyway, so
-      // the safety of this query does not rest on a fact established three modules away.
-      ExtraFilter: `BindingID=${sqlLiteral(bindingId)} AND FormResponseID=${sqlLiteral(ctx.responseId)}`,
-      Fields: ['ID'],
-      ResultType: 'simple',
-      MaxRows: 1,
-    },
-    ctx.principal,
-  );
-
-  const row = await md.GetEntityObject<mjBizAppsFormsFormEntityBindingRecordEntity>(
-    ENTITY.BindingRecord,
-    ctx.principal,
-  );
-  if (!row) {
-    LogError('Forms binding: could not create a ledger row object; the bound record was still written.');
-    return;
-  }
-  if (existing.Success && existing.Results.length > 0) {
-    if (!(await row.Load(existing.Results[0].ID))) {
-      return;
-    }
-  } else {
-    row.NewRecord();
-    row.BindingID = bindingId;
-    row.FormResponseID = ctx.responseId;
-  }
-  row.TargetEntityID = binding.TargetEntityID;
-  row.TargetRecordID = outcome.targetRecordId;
-  row.Outcome = outcome.kind;
-  row.WrittenFields = JSON.stringify(outcome.writtenFields);
-  if (!(await row.Save())) {
-    // Logged, not thrown: the business record is already written, and failing the automation here
-    // would report a write that actually succeeded as a failure and invite a retry that duplicates.
-    LogError(`Forms binding: ledger row save failed: ${row.LatestResult?.CompleteMessage ?? 'unknown'}`);
   }
 }
 

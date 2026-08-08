@@ -4,10 +4,16 @@ import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormStyleEntity,
   mjBizAppsFormsFormVersionEntity,
+  PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from './entity-names';
 import type { FormTree } from './builder-models';
-import { buildPublishedDefinition } from './snapshot-builder';
+import {
+  AUTHORED_AUTOMATION_FIELDS,
+  buildPublishedAutomations,
+  buildPublishedDefinition,
+  type AuthoredAutomationRow,
+} from './snapshot-builder';
 
 /** Outcome of a publish attempt. */
 export interface PublishResult {
@@ -40,6 +46,15 @@ export class PublishService {
   /** Publish the tree as a new immutable version. */
   public async publish(tree: FormTree): Promise<PublishResult> {
     const style = await this.loadStyle(tree.form.StyleID);
+    const automations = await this.loadAutomations(tree.form.ID);
+    if (!automations) {
+      // Publishing a snapshot with no automations when the form HAS automations would disable
+      // every one of them silently, and the author's only signal would be side effects that stop
+      // happening. Refusing the publish keeps the previous version — and its automations — live.
+      const error = 'Could not read the form\'s automations; nothing was published.';
+      LogError(`Forms publish: ${error}`);
+      return { success: false, error };
+    }
     const nextVersion = (await this.maxVersionNumber(tree.form.ID)) + 1;
 
     const version = await this.md.GetEntityObject<mjBizAppsFormsFormVersionEntity>(
@@ -57,7 +72,7 @@ export class PublishService {
     // half-published row if a second save were to fail). If the PK is not yet
     // populated, fall back to the form id reference so formVersionId is never blank.
     const versionId = version.ID && version.ID.length > 0 ? version.ID : '';
-    const definition = buildPublishedDefinition(tree, style, versionId);
+    const definition = buildPublishedDefinition(tree, style, versionId, automations);
     version.DefinitionSnapshot = JSON.stringify(definition);
     if (!(await version.Save())) {
       const error = version.LatestResult?.CompleteMessage ?? 'unknown error';
@@ -105,6 +120,33 @@ export class PublishService {
       return undefined;
     }
     return style;
+  }
+
+  /**
+   * Read the form's authored automations, or null when the read itself failed.
+   *
+   * Null and empty are deliberately different. Empty means "this form configures no automations",
+   * which is a normal, publishable state that keeps the form on the legacy hook list. Null means
+   * we do not know — and publishing an empty array on a failed read would silently disable
+   * automations the form actually has, for every response until someone republished.
+   */
+  private async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
+    const rv = new RunView();
+    const result = await rv.RunView<AuthoredAutomationRow>(
+      {
+        EntityName: FORMS_ENTITY.FormAutomation,
+        ExtraFilter: `FormID='${formId}'`,
+        OrderBy: 'DisplayOrder ASC',
+        Fields: [...AUTHORED_AUTOMATION_FIELDS],
+        ResultType: 'simple',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(`Forms publish: could not load automations for form ${formId}: ${result.ErrorMessage}`);
+      return null;
+    }
+    return buildPublishedAutomations(result.Results ?? []);
   }
 
   private async maxVersionNumber(formId: string): Promise<number> {

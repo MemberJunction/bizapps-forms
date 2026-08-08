@@ -215,9 +215,40 @@ export function parseIdentityRule(raw: JSONValue | null | undefined): IdentityRu
     mode: identityMode,
     match,
     scope: parseScopeFields(obj.scope),
-    onMultipleMatch: obj.onMultipleMatch === 'Fail' ? 'Fail' : 'Oldest',
-    onMissingIdentityValue: obj.onMissingIdentityValue === 'Fail' ? 'Fail' : 'Skip',
+    onMultipleMatch: parseChoice(obj.onMultipleMatch, ['Oldest', 'Fail'] as const, 'Oldest', 'onMultipleMatch'),
+    onMissingIdentityValue: parseChoice(
+      obj.onMissingIdentityValue,
+      ['Skip', 'Fail'] as const,
+      'Skip',
+      'onMissingIdentityValue',
+    ),
   };
+}
+
+/**
+ * Read one optional enumerated rule: absent means the default, anything unrecognised is refused.
+ *
+ * The distinction matters. Absent is a real authoring state — most bindings never mention these —
+ * and defaulting it is correct. A value that is PRESENT and unrecognised is the opposite: the
+ * author believed they configured something. Quietly substituting the default there produces a
+ * binding that behaves the exact opposite of what its own JSON says, with nothing to notice.
+ */
+function parseChoice<T extends string>(
+  raw: JSONValue | undefined,
+  allowed: readonly T[],
+  fallback: T,
+  fieldName: string,
+): T {
+  if (raw === undefined || raw === null) {
+    return fallback;
+  }
+  const match = allowed.find((value) => value === raw);
+  if (!match) {
+    throw new BindingConfigError(
+      `IdentityRule.${fieldName} must be one of ${allowed.join(', ')} — got ${JSON.stringify(raw)}.`,
+    );
+  }
+  return match;
 }
 
 function parseMatchFields(raw: JSONValue | undefined): IdentityMatchField[] {

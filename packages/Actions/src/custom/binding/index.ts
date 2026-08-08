@@ -5,5 +5,6 @@
  * import from.
  */
 export * from './binding-executor';
+export * from './binding-ledger';
 export * from './bind-response-to-entity.action';
 export * from './mj-binding-gateway';

@@ -11,10 +11,13 @@ identities are `UserInfo` records fetched from `UserCache` and used as a `contex
 server-side work. MJ's own `System` user works exactly this way. The `.invalid` email domain is
 reserved by RFC 2606 precisely so an address can be unroutable on purpose.
 
-**What it can do is deliberately almost nothing.** Its role, `Forms Automation Runner`, grants
-read on the response entities and write on the Forms-owned bookkeeping tables (automation runs and
-the binding ledger). It has **no grant on any binding target entity**, so out of the box a binding
-that tries to write a business record fails with a permission error naming that entity.
+**What it can do is deliberately almost nothing.** Its role, `Forms Automation Runner`, grants read
+on the response entities and write on the Forms-owned bookkeeping tables (automation runs and the
+binding ledger). The one exception worth naming: it also has **update** on `Form Responses`, not
+merely read, because `Forms: Upsert Respondent Person` stamps `FormResponse.RespondentPersonID`
+back onto the response it just matched. It has **no grant on any binding target entity**, so out of
+the box a binding that tries to write a business record fails with a permission error naming that
+entity.
 
 **Granting it on a target entity is the security decision, and it is yours.** That grant set is
 the real ceiling on what a form author can reach through a binding — the deployment allow-list

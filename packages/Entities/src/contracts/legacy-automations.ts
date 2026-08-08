@@ -15,30 +15,42 @@
  * Submit tab as ordinary rows the author can reorder or disable.
  */
 
-/** One legacy hook, as an automation would express it. */
-export interface LegacyAutomationDefinition {
-  /** The MJ Action name. Resolved to an ActionID when the automation row is written. */
-  actionName: string;
-  /** Run order, matching the order the legacy list fired them in. */
-  displayOrder: number;
-}
-
 /**
- * The list, in the order the legacy runner fired it.
+ * The names, in the order the legacy runner fired them — the single source of truth.
+ *
+ * `as const` is load-bearing, not decoration: it is what makes {@link LegacyOnSubmitActionName} a
+ * union of these four literals rather than `string`, so a typo in any consumer is a compile error.
+ * Widening this to `readonly string[]` costs nothing visible and silently turns every downstream
+ * name check back into a runtime surprise.
  *
  * Order is preserved deliberately even though these four do not depend on each other today:
  * `Upsert Respondent Person` stamps `FormResponse.RespondentPersonID`, and anything later that
  * reads it — a follow-up task assigned to the respondent, say — would see a different value if the
  * order changed. Reproducing the old order is the cheapest way to be sure nothing quietly differs.
  */
-export const LEGACY_ON_SUBMIT_AUTOMATIONS: readonly LegacyAutomationDefinition[] = [
-  { actionName: 'Forms: Upsert Respondent Person', displayOrder: 1 },
-  { actionName: 'Forms: Send Confirmation Email', displayOrder: 2 },
-  { actionName: 'Forms: Create Followup Task', displayOrder: 3 },
-  { actionName: 'Forms: Analyze Written Responses', displayOrder: 4 },
+export const LEGACY_ON_SUBMIT_ACTION_NAMES = [
+  'Forms: Upsert Respondent Person',
+  'Forms: Send Confirmation Email',
+  'Forms: Create Followup Task',
+  'Forms: Analyze Written Responses',
 ] as const;
 
-/** Just the names, in order — what the legacy runner iterates. */
-export const LEGACY_ON_SUBMIT_ACTION_NAMES: readonly string[] = LEGACY_ON_SUBMIT_AUTOMATIONS.map(
-  (a) => a.actionName,
-);
+/** The four legacy hook names, as a type. */
+export type LegacyOnSubmitActionName = (typeof LEGACY_ON_SUBMIT_ACTION_NAMES)[number];
+
+/** One legacy hook, as an automation would express it. */
+export interface LegacyAutomationDefinition {
+  /** The MJ Action name. Resolved to an ActionID when the automation row is written. */
+  actionName: LegacyOnSubmitActionName;
+  /** Run order, matching the order the legacy list fired them in. */
+  displayOrder: number;
+}
+
+/**
+ * The same list as automation definitions.
+ *
+ * Derived from the names by position rather than restated, so the run order cannot drift from the
+ * firing order — there is no second place to edit and therefore no second place to get wrong.
+ */
+export const LEGACY_ON_SUBMIT_AUTOMATIONS: readonly LegacyAutomationDefinition[] =
+  LEGACY_ON_SUBMIT_ACTION_NAMES.map((actionName, index) => ({ actionName, displayOrder: index + 1 }));
