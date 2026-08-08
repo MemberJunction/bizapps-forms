@@ -9,7 +9,7 @@ Upgrade MemberJunction in this repo. Three phases: a safe **dry run**, a hard ap
 
 Ported from `bizapps-caliber` on 2026-07-30 and corrected against this repo. Two differences that matter: this repo has a **fifth package** (`packages/CoreEntitiesServer`, which holds the magic-link entity subclass) that Caliber's file list omits, and its own schema/container/ports.
 
-Pinning model (verified against this tree, do not violate): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; root `@memberjunction/cli` exact; `mj-app.json` `mjVersionRange` = `>=X.Y.Z <(major+1).0.0`. The bundled `scripts/bump-pins.sh` enforces all of this — always use it, never hand-edit pins.
+Pinning model (verified against this tree, do not violate): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; root `@memberjunction/cli` exact; `mj-app.json` `mjVersionRange` = `>=X.Y.Z <(major+1).0.0`. The bundled `scripts/bump-pins.sh` enforces all of this — always use it, never hand-edit pins. Angular is pinned separately from MJ: `@angular/*` peers in `packages/*` stay caret at the platform pin (`^21.1.3`) with exact `21.1.3` anchors in consuming packages' `devDependencies` — MJ pin bumps never touch Angular declarations.
 
 Keep install/build/test output in background log files under the scratchpad and grep them — never stream full logs into context.
 

@@ -24,6 +24,8 @@ The 5.50.0 upgrade required adding `@workos-inc/authkit-js` to MJExplorer: 5.50'
 
 **Pinning model** (verified 2026-07-30, re-verified on the 5.51.0 bump 2026-08-01; matches the sibling repos'): `apps/*` use **exact** `X.Y.Z` in `dependencies`; `packages/*` declare MJ only as **caret** `^X.Y.Z` `peerDependencies` and carry no MJ `dependencies` at all; `mj-app.json` `mjVersionRange` is `>=X.Y.Z <(major+1).0.0`.
 
+**Angular pinning model** (family-wide, 2026-08-07, with MemberJunction/MJ#3580): `@angular/*` peers in `packages/*` are **caret ranges at the platform pin** (`^21.1.3`) — compatibility claims, never exact. Each package that consumes Angular **anchors** the concrete version with exact `21.1.3` entries in its own `devDependencies`; the anchor is what actually installs. In the shared pnpm dev workspace `auto-install-peers=true` turns unanchored peer ranges into install instructions, which is how two copies of `@angular/core` ended up installed family-wide. Rev anchors with the era platform pin, never with MJ pins.
+
 **Upgrading MJ is a database operation, not just a pin bump.** Bumping npm versions leaves the `__mj` core schema behind, and a partially-migrated core still installs, builds, tests and boots cleanly — the damage surfaces later and nowhere near its cause (`AIEngine.Config()` hits a core entity the metadata lacks, throws `Entity <name> not found in metadata`, and aborts loading its entire agent set). The core migration is run **version-tagged**:
 
 ```bash
