@@ -301,12 +301,12 @@ unknown file is refused in either mode. Default is strict.
 
 ## 10. Not built yet
 
-- **Deleting the legacy hook list.** The four hard-coded on-submit actions still run for any form
-  that configures no automations, and dispatch is all-or-nothing — so the builder now seeds
-  equivalents for all four the first time a form configures anything, making the cutover per-form
-  and visible rather than a silent regression. `legacy-automation-parity.spec.ts` holds the
-  assertions that must pass before `ON_SUBMIT_ACTION_NAMES` can be removed; what remains is a
-  migration seeding those rows for forms that already exist.
-- **Builder editing.** The On Submit tab creates bindings and lists what is configured; it does not
-  yet edit or delete an existing one, reorder automations, or run the dry-run preview the spec
-  describes. Changing a binding today means editing the row.
+- **Deleting `ON_SUBMIT_ACTION_NAMES`.** The constant is still the fallback for a form that has no
+  automations at all, which is correct — those forms behave exactly as they always did. Everything
+  needed to remove it is in place: the builder seeds equivalents the moment a form configures
+  anything, `V202608081400__Backfill_Legacy_Automations.sql` seeds them for forms that already
+  existed, and `legacy-automation-parity.spec.ts` holds the assertions that make the removal safe.
+  What remains is the decision to cut over, which is deliberately a human one.
+- **Editing a saved binding's mapping.** The tab can disable, reorder and remove automations, and
+  preview a mapping before saving it, but changing the field mapping of a binding that already
+  exists means editing the row. Re-adding is the current path.

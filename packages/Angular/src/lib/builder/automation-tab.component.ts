@@ -3,7 +3,14 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { EntityFieldInfo, EntityInfo } from '@memberjunction/core';
-import { LEGACY_ON_SUBMIT_AUTOMATIONS } from '@mj-biz-apps/forms-entities';
+import {
+  CanonicalAnswers,
+  LEGACY_ON_SUBMIT_AUTOMATIONS,
+  resolveMappedValues,
+  type FieldMappings,
+  type MergeRule,
+  type StoredAnswerRow,
+} from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormAutomationEntity,
   mjBizAppsFormsFormEntityBindingEntity,
@@ -22,6 +29,7 @@ interface MappingRow {
   targetField: string;
   questionId: string;
   required: boolean;
+  rule: MergeRule;
 }
 
 /**
@@ -67,6 +75,12 @@ interface MappingRow {
                 <span class="fb-list-name">{{ a.Name }}</span>
                 <span class="fb-hint">{{ a.Trigger }} · {{ a.ExecutionMode }} · order {{ a.DisplayOrder }}</span>
                 <span class="fb-hint" [class.is-off]="!a.IsActive">{{ a.IsActive ? 'Active' : 'Disabled' }}</span>
+                <button type="button" class="fb-link" (click)="toggleActive(a)">
+                  {{ a.IsActive ? 'Disable' : 'Enable' }}
+                </button>
+                <button type="button" class="fb-link" (click)="move(a, -1)" [disabled]="$first">Up</button>
+                <button type="button" class="fb-link" (click)="move(a, 1)" [disabled]="$last">Down</button>
+                <button type="button" class="fb-link is-danger" (click)="remove(a)">Remove</button>
               </li>
             }
           </ul>
@@ -98,10 +112,13 @@ interface MappingRow {
         </label>
 
         @if (targetFields().length > 0) {
-          <p class="fb-hint">Map each answer to a field. Unmapped fields are left alone.</p>
+          <p class="fb-hint">
+            Map each answer to a field. Unmapped fields are left alone.
+            <button type="button" class="fb-link" (click)="autoMap()">Match by name</button>
+          </p>
           <table class="fb-map">
             <thead>
-              <tr><th>Field</th><th>Answer</th><th>Required</th></tr>
+              <tr><th>Field</th><th>Answer</th><th>Required</th><th>When it already has a value</th></tr>
             </thead>
             <tbody>
               @for (f of targetFields(); track f.Name) {
@@ -122,6 +139,13 @@ interface MappingRow {
                   <td>
                     <input type="checkbox" [ngModel]="isRequired(f.Name)" (ngModelChange)="setRequired(f.Name, $event)" />
                   </td>
+                  <td>
+                    <select [ngModel]="ruleFor(f.Name)" (ngModelChange)="setRule(f.Name, $event)" [disabled]="!mappingFor(f.Name)">
+                      <option value="neverBlank">Keep the existing value if blank</option>
+                      <option value="latestWins">Always use the new answer</option>
+                      <option value="writeOnce">Only fill it if empty</option>
+                    </select>
+                  </td>
                 </tr>
               }
             </tbody>
@@ -141,10 +165,23 @@ interface MappingRow {
             field you have mapped can be matched on — the value has to come from somewhere.
           </p>
 
+          @if (preview().length > 0) {
+            <h4>Preview against the most recent response</h4>
+            <ul class="fb-list">
+              @for (p of preview(); track p.field) {
+                <li class="fb-list-row">
+                  <span class="fb-list-name">{{ p.field }}</span>
+                  <span class="fb-hint">{{ p.value }}</span>
+                </li>
+              }
+            </ul>
+          }
+          @if (previewNote()) { <p class="fb-hint">{{ previewNote() }}</p> }
           @if (error()) { <p class="fb-error">{{ error() }}</p> }
 
           <div class="fb-actions">
             <button type="button" class="fb-btn" [disabled]="!canSave()" (click)="save()">Add binding</button>
+            <button type="button" class="fb-link" [disabled]="!canSave()" (click)="dryRun()">Preview</button>
           </div>
         }
       }
@@ -164,7 +201,10 @@ interface MappingRow {
     .fb-field { display: flex; flex-direction: column; gap: .25rem; margin: var(--mj-space-3, .75rem) 0; max-width: 28rem; }
     .fb-req { color: var(--mj-danger, #b00020); }
     .is-off { opacity: .6; }
-    .fb-actions { margin-top: var(--mj-space-4, 1rem); }
+    .fb-actions { margin-top: var(--mj-space-4, 1rem); display: flex; gap: var(--mj-space-3, .75rem); align-items: center; }
+    .fb-link { background: none; border: 0; color: var(--mj-primary, #0b57d0); cursor: pointer; padding: 0 .25rem; font: inherit; }
+    .fb-link:disabled { color: var(--mj-text-muted, #999); cursor: default; }
+    .fb-link.is-danger { color: var(--mj-danger, #b00020); }
   `],
 })
 export class AutomationTabComponent implements OnInit {
@@ -180,6 +220,8 @@ export class AutomationTabComponent implements OnInit {
   protected readonly writableEntities = signal<EntityInfo[]>([]);
   protected readonly targetFields = signal<EntityFieldInfo[]>([]);
   protected readonly error = signal<string>('');
+  protected readonly preview = signal<{ field: string; value: string }[]>([]);
+  protected readonly previewNote = signal<string>('');
 
   protected selectedEntityName = '';
   protected identityField = '';
@@ -252,10 +294,136 @@ export class AutomationTabComponent implements OnInit {
     return this.mappings.find((m) => m.targetField === fieldName)?.required ?? false;
   }
 
+  protected ruleFor(fieldName: string): MergeRule {
+    return this.mappings.find((m) => m.targetField === fieldName)?.rule ?? 'neverBlank';
+  }
+
+  protected setRule(fieldName: string, rule: MergeRule): void {
+    const row = this.mappings.find((m) => m.targetField === fieldName);
+    if (row) {
+      row.rule = rule;
+    }
+  }
+
+  /**
+   * Match answers to fields by name, the way an author would by eye.
+   *
+   * Compared with punctuation and case removed, because `First Name`, `firstName` and `first_name`
+   * are the same intent spelled three ways. Only fills fields that are still unmapped, so pressing
+   * it never undoes a deliberate choice.
+   */
+  protected autoMap(): void {
+    const normalize = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (const field of this.targetFields()) {
+      if (this.mappingFor(field.Name)) {
+        continue;
+      }
+      const target = normalize(field.Name);
+      const display = normalize(field.DisplayNameOrName);
+      const match = this.Questions.find((q) => {
+        const prompt = normalize(q.prompt);
+        return prompt === target || prompt === display;
+      });
+      if (match) {
+        this.setMapping(field.Name, match.id);
+      }
+    }
+  }
+
+  /**
+   * Show what this binding would write, using the form's most recent response.
+   *
+   * The interesting outcomes of a binding are invisible until data is already wrong, so being able
+   * to look before saving is worth more than it sounds. Read-only — it resolves the mapping and
+   * reports it; it never touches the target entity.
+   */
+  protected async dryRun(): Promise<void> {
+    this.preview.set([]);
+    this.previewNote.set('');
+    const latest = await new RunView().RunView<{ ID: string }>({
+      EntityName: 'MJ_BizApps_Forms: Form Responses',
+      ExtraFilter: `FormID='${this.FormID}' AND Status='Complete'`,
+      OrderBy: '__mj_CreatedAt DESC',
+      MaxRows: 1,
+      Fields: ['ID'],
+      ResultType: 'simple',
+    });
+    if (!latest.Success || latest.Results.length === 0) {
+      this.previewNote.set('No completed response yet to preview against.');
+      return;
+    }
+
+    const answers = await new RunView().RunView<StoredAnswerRow>({
+      EntityName: 'MJ_BizApps_Forms: Form Response Answers',
+      ExtraFilter: `ResponseID='${latest.Results[0].ID}'`,
+      ResultType: 'simple',
+    });
+    if (!answers.Success) {
+      this.previewNote.set('That response could not be read.');
+      return;
+    }
+
+    const canonical = new CanonicalAnswers(answers.Results);
+    const resolved = resolveMappedValues(this.buildFieldMappings(), canonical);
+    if (resolved.values.size === 0) {
+      this.previewNote.set('That response supplied nothing this binding maps.');
+      return;
+    }
+    this.preview.set(
+      [...resolved.values].map(([field, value]) => ({
+        field,
+        value: typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value),
+      })),
+    );
+  }
+
+  /** Toggle an automation on or off without deleting what the author configured. */
+  protected async toggleActive(automation: mjBizAppsFormsFormAutomationEntity): Promise<void> {
+    automation.IsActive = !automation.IsActive;
+    if (!(await automation.Save())) {
+      this.error.set(automation.LatestResult?.CompleteMessage ?? 'Could not update that automation.');
+      return;
+    }
+    await this.loadConfigured();
+  }
+
+  /** Move an automation one position in the run order. */
+  protected async move(automation: mjBizAppsFormsFormAutomationEntity, delta: number): Promise<void> {
+    const ordered = this.automations();
+    const index = ordered.findIndex((a) => a.ID === automation.ID);
+    const swapWith = ordered[index + delta];
+    if (!swapWith) {
+      return;
+    }
+    const mine = automation.DisplayOrder;
+    automation.DisplayOrder = swapWith.DisplayOrder;
+    swapWith.DisplayOrder = mine;
+    if (!(await automation.Save()) || !(await swapWith.Save())) {
+      this.error.set('Could not reorder those automations.');
+    }
+    await this.loadConfigured();
+  }
+
+  /**
+   * Remove an automation.
+   *
+   * Deletes only the automation, never the binding it points at: the binding may be referenced by
+   * a ledger row recording what a past submission produced, and deleting it would leave that
+   * lineage pointing at nothing. An orphaned binding is inert and re-attachable; a broken ledger
+   * is not repairable.
+   */
+  protected async remove(automation: mjBizAppsFormsFormAutomationEntity): Promise<void> {
+    if (!(await automation.Delete())) {
+      this.error.set(automation.LatestResult?.CompleteMessage ?? 'Could not remove that automation.');
+      return;
+    }
+    await this.loadConfigured();
+  }
+
   protected setMapping(fieldName: string, questionId: string): void {
     this.mappings = this.mappings.filter((m) => m.targetField !== fieldName);
     if (questionId) {
-      this.mappings.push({ targetField: fieldName, questionId, required: false });
+      this.mappings.push({ targetField: fieldName, questionId, required: false, rule: 'neverBlank' });
     }
     if (this.identityField && !this.mappedFieldNames().includes(this.identityField)) {
       // Un-mapping the identity field has to clear the choice: the executor refuses a binding whose
@@ -274,6 +442,18 @@ export class AutomationTabComponent implements OnInit {
 
   protected mappedFieldNames(): string[] {
     return this.mappings.map((m) => m.targetField);
+  }
+
+  /** The mapping as the contract expects it — one shape, used for both preview and save. */
+  private buildFieldMappings(): FieldMappings {
+    return {
+      version: 1,
+      fields: this.mappings.map((m) => ({
+        targetField: m.targetField,
+        source: { kind: 'question' as const, questionId: m.questionId },
+        ...(m.required ? { required: true } : {}),
+      })),
+    };
   }
 
   protected canSave(): boolean {
@@ -355,20 +535,18 @@ export class AutomationTabComponent implements OnInit {
     binding.Name = `Send responses to ${entity.DisplayNameOrName}`;
     binding.TargetEntityID = entity.ID;
     binding.TargetEntityName = entity.Name;
-    binding.FieldMappings = JSON.stringify({
-      version: 1,
-      fields: this.mappings.map((m) => ({
-        targetField: m.targetField,
-        source: { kind: 'question', questionId: m.questionId },
-        ...(m.required ? { required: true } : {}),
-      })),
-    });
+    binding.FieldMappings = JSON.stringify(this.buildFieldMappings());
     binding.IdentityRule = JSON.stringify(
       this.identityField
         ? { mode: 'MatchThenCreate', match: [{ targetField: this.identityField, normalize: 'LowerCaseTrim' }] }
         : { mode: 'AlwaysCreate' },
     );
-    binding.MergePolicy = JSON.stringify({ default: 'neverBlank' });
+    binding.MergePolicy = JSON.stringify({
+      default: 'neverBlank',
+      fields: Object.fromEntries(
+        this.mappings.filter((m) => m.rule !== 'neverBlank').map((m) => [m.targetField, m.rule]),
+      ),
+    });
     binding.Status = 'Active';
     if (!(await binding.Save())) {
       this.error.set(binding.LatestResult?.CompleteMessage ?? 'Saving the binding failed.');

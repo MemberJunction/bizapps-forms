@@ -36,6 +36,7 @@ import {
   sqlLiteral,
   MJBindingGateway,
   type BindingOutcome,
+  type BindingOutcomeKind,
 } from '@mj-biz-apps/forms-actions';
 
 const ENTITY = {
@@ -193,7 +194,10 @@ async function runBindingTarget(
   const result = await executeBinding({
     config,
     answers: ctx.answers,
-    gateway: new MJBindingGateway(ctx.principal),
+    gateway: Object.assign(new MJBindingGateway(ctx.principal), {
+      findPriorOutcome: () => readPriorOutcome(automation.bindingId as string, ctx),
+    }),
+    responseId: ctx.responseId,
     allowedEntities: ctx.allowedEntities,
     // File answers reach a target field only because the submit path refused to persist any file
     // id it could not attribute to this respondent's own upload. Defence in depth rather than
@@ -207,6 +211,48 @@ async function runBindingTarget(
 
   await recordLedgerRow(automation.bindingId, binding, result.outcome, ctx);
   return `${result.outcome.kind}${result.outcome.targetRecordId ? ` ${result.outcome.targetRecordId}` : ''}`;
+}
+
+/** What this binding already did for this response, read from the identity ledger. */
+async function readPriorOutcome(
+  bindingId: string,
+  ctx: DispatchContext,
+): Promise<{ kind: BindingOutcomeKind; targetRecordId: string | null; writtenFields: string[] } | null> {
+  const result = await new RunView().RunView<{ Outcome: string; TargetRecordID: string | null; WrittenFields: string | null }>(
+    {
+      EntityName: ENTITY.BindingRecord,
+      ExtraFilter: `BindingID=${sqlLiteral(bindingId)} AND FormResponseID=${sqlLiteral(ctx.responseId)}`,
+      Fields: ['Outcome', 'TargetRecordID', 'WrittenFields'],
+      ResultType: 'simple',
+      MaxRows: 1,
+    },
+    ctx.principal,
+  );
+  if (!result.Success) {
+    throw new Error(result.ErrorMessage ?? 'ledger read failed');
+  }
+  const [row] = result.Results;
+  if (!row) {
+    return null;
+  }
+  return {
+    kind: row.Outcome as BindingOutcomeKind,
+    targetRecordId: row.TargetRecordID,
+    writtenFields: parseWrittenFields(row.WrittenFields),
+  };
+}
+
+/** WrittenFields is authored JSON; a malformed value is reported as "nothing known", not a crash. */
+function parseWrittenFields(raw: string | null): string[] {
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /**

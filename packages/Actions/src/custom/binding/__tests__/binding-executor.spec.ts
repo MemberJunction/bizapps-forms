@@ -422,3 +422,63 @@ describe('executeBinding — regressions found in adversarial review', () => {
     expect(updateOnly.capabilityAsked).toEqual({ create: false, update: true });
   });
 });
+
+describe('executeBinding — idempotent short-circuit', () => {
+  it('returns the prior outcome without touching the target again', async () => {
+    const gateway = Object.assign(new FakeGateway(), {
+      findPriorOutcome: async () => ({ kind: 'Created' as const, targetRecordId: 'p-1', writtenFields: ['Email'] }),
+    });
+
+    const result = await executeBinding({
+      config: configOf(),
+      answers: goodAnswers,
+      gateway,
+      allowedEntities: null,
+      responseId: 'resp-1',
+    });
+
+    // Re-running is already safe — the unique index and identity matching see to that. This keeps
+    // it CHEAP, and keeps the reported outcome stable: re-deriving would report `Unchanged` where
+    // the ledger says `Created`, which reads like the record was lost.
+    expect(result.ok && result.outcome.kind).toBe('Created');
+    expect(result.ok && result.outcome.targetRecordId).toBe('p-1');
+    expect(gateway.queries).toEqual([]);
+    expect(gateway.writes).toEqual([]);
+  });
+
+  it('executes anyway when a re-drive is explicitly forced', async () => {
+    const gateway = Object.assign(new FakeGateway(), {
+      findPriorOutcome: async () => ({ kind: 'Created' as const, targetRecordId: 'p-1', writtenFields: [] }),
+    });
+
+    await executeBinding({
+      config: configOf(),
+      answers: goodAnswers,
+      gateway,
+      allowedEntities: null,
+      responseId: 'resp-1',
+      force: true,
+    });
+
+    expect(gateway.writes).toHaveLength(1);
+  });
+
+  it('executes when the ledger read fails, rather than blocking on it', async () => {
+    const gateway = Object.assign(new FakeGateway(), {
+      findPriorOutcome: async () => {
+        throw new Error('ledger unavailable');
+      },
+    });
+
+    const result = await executeBinding({
+      config: configOf(),
+      answers: goodAnswers,
+      gateway,
+      allowedEntities: null,
+      responseId: 'resp-1',
+    });
+
+    // The write path is idempotent without the ledger, so a failed read must not stop the binding.
+    expect(result.ok && result.outcome.kind).toBe('Created');
+  });
+});

@@ -18,6 +18,7 @@
  *   nothing, so a failed match surfaces as a retryable error rather than falling through to
  *   "create" — otherwise a transient database blip silently duplicates every record it touches.
  */
+import { LogError } from '@memberjunction/core';
 import {
   BindingConfigError,
   isFileAnswer,
@@ -100,8 +101,23 @@ export interface EntityCapability {
   update: boolean;
 }
 
+/** A prior execution of this binding for this response, if there was one. */
+export interface PriorBindingOutcome {
+  kind: BindingOutcomeKind;
+  targetRecordId: string | null;
+  writtenFields: string[];
+}
+
 /** Everything the executor needs from MemberJunction, and nothing it does not. */
 export interface BindingTargetGateway {
+  /**
+   * What this binding already did for this response, or null if it has not run.
+   *
+   * Optional so a caller that has no ledger — a dry-run preview, a test — needs no stub. When
+   * present it turns a re-drive into a no-op read instead of a full identity lookup and merge
+   * against a live record.
+   */
+  findPriorOutcome?(responseId: string): Promise<PriorBindingOutcome | null>;
   /** Field names that exist on the entity and can be written, or null when it does not resolve. */
   describeEntity(entityName: string, needs: EntityCapability): Promise<ReadonlySet<string> | null>;
   /** Oldest matching record, or null when none matched. Rejects when the lookup itself fails. */
@@ -124,6 +140,10 @@ export interface BindingConfig {
 export interface ExecuteBindingInput {
   config: BindingConfig;
   answers: CanonicalAnswers;
+  /** The response being bound. Enables the idempotent short-circuit when the gateway supports it. */
+  responseId?: string;
+  /** Ignore a prior outcome and execute anyway — a deliberate re-drive, not a retry. */
+  force?: boolean;
   gateway: BindingTargetGateway;
   /**
    * Entities this deployment permits bindings to write. Null disables the check.
@@ -167,6 +187,23 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
       false,
       `Entity "${config.targetEntityName}" is not on this deployment's binding allow-list.`,
     );
+  }
+
+  // Already done. The unique index on (BindingID, FormResponseID) means a second execution cannot
+  // produce a second record, and identity matching means it would converge on the same row anyway
+  // — so this is not what makes re-running safe. It makes re-running CHEAP, and it makes the
+  // reported outcome stable: without it the recovery sweep re-drives a succeeded binding and
+  // reports `Unchanged` where the ledger says `Created`, which reads like the record was lost.
+  if (input.responseId && !input.force && gateway.findPriorOutcome) {
+    try {
+      const prior = await gateway.findPriorOutcome(input.responseId);
+      if (prior) {
+        return { ok: true, outcome: { ...prior } };
+      }
+    } catch (error) {
+      // A ledger read failure must not block the binding: the write path is idempotent without it.
+      LogError(`Forms binding: prior-outcome lookup failed, executing anyway: ${messageOf(error)}`);
+    }
   }
 
   const needs = capabilityFor(config.identityRule.mode);
