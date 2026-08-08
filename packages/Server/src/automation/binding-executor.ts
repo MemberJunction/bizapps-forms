@@ -28,6 +28,7 @@ import {
   type FieldMappings,
   type IdentityNormalization,
   type IdentityRule,
+  type JSONValue,
   type MergePolicy,
 } from '@mj-biz-apps/forms-entities';
 
@@ -60,6 +61,18 @@ export interface BindingFailure {
 }
 
 export type BindingResult = { ok: true; outcome: BindingOutcome } | { ok: false; failure: BindingFailure };
+
+/**
+ * Narrow a result to its failure branch.
+ *
+ * A type guard rather than a bare `if (!result.ok)` because this package compiles without
+ * `strict`, and outside strict mode TypeScript does not narrow a discriminated union through a
+ * negated boolean discriminant — so the obvious spelling reads as an error at the call site. The
+ * guard states the relationship explicitly and works either way.
+ */
+export function bindingFailed(result: BindingResult): result is { ok: false; failure: BindingFailure } {
+  return !result.ok;
+}
 
 /** One identity criterion, already resolved to the value being matched on. */
 export interface MatchCriterion {
@@ -352,35 +365,34 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Parse the three authored config blobs, reporting a config-scoped failure on anything malformed. */
+/**
+ * Parse the three authored config blobs.
+ *
+ * Throws {@link BindingConfigError} on anything malformed — the caller records it as a
+ * config-scoped, non-retryable failure. Throwing rather than returning a result union because
+ * every one of these is the same kind of problem (an author wrote something this code cannot
+ * understand) and there is nothing partial to hand back.
+ */
 export function parseBindingConfig(
   targetEntityName: string,
   raw: { fieldMappings: string | null; identityRule: string | null; mergePolicy: string | null },
   parsers: {
-    fieldMappings: (v: unknown) => FieldMappings;
-    identityRule: (v: unknown) => IdentityRule;
-    mergePolicy: (v: unknown) => MergePolicy;
+    fieldMappings: (v: JSONValue | null) => FieldMappings;
+    identityRule: (v: JSONValue | null) => IdentityRule;
+    mergePolicy: (v: JSONValue | null) => MergePolicy;
   },
-): { ok: true; config: BindingConfig } | { ok: false; failure: BindingFailure } {
-  try {
-    return {
-      ok: true,
-      config: {
-        targetEntityName,
-        fieldMappings: parsers.fieldMappings(jsonOrNull(raw.fieldMappings)),
-        identityRule: parsers.identityRule(jsonOrNull(raw.identityRule)),
-        mergePolicy: parsers.mergePolicy(jsonOrNull(raw.mergePolicy)),
-      },
-    };
-  } catch (error) {
-    const message = error instanceof BindingConfigError ? error.message : messageOf(error);
-    return { ok: false, failure: { scope: 'config', retryable: false, message } };
-  }
+): BindingConfig {
+  return {
+    targetEntityName,
+    fieldMappings: parsers.fieldMappings(jsonOrNull(raw.fieldMappings)),
+    identityRule: parsers.identityRule(jsonOrNull(raw.identityRule)),
+    mergePolicy: parsers.mergePolicy(jsonOrNull(raw.mergePolicy)),
+  };
 }
 
-function jsonOrNull(raw: string | null): unknown {
+function jsonOrNull(raw: string | null): JSONValue | null {
   if (raw === null || raw.trim() === '') {
     return null;
   }
-  return JSON.parse(raw) as unknown;
+  return JSON.parse(raw) as JSONValue;
 }

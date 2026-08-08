@@ -94,9 +94,13 @@ async function main() {
   // `answerValueOf` reads first and the run never touched `dateValue` — the one column this
   // branch hardened, since `isDate` now rejects non-strings.
   //
-  // `FileUpload` is deliberately NOT mirrored: the widget sends `fileId`, but `answerValueOf`
-  // does not read that column at all, so a required upload question reads as unanswered on the
-  // server regardless. That gap pre-dates this branch and is not the smoke test's to surface.
+  // `FileUpload` is still not mirrored here, but the reason has changed. It used to be pointless:
+  // `answerValueOf` did not read the `fileId` column at all, so a required upload question read as
+  // unanswered whatever the widget sent, and an optional one was silently dropped before
+  // persistence. That is fixed — a file answer is now a supplied answer. What stops this script
+  // sending one is that `FormResponseAnswer.FileID` is a real foreign key to `__mj.File`, and a
+  // smoke run has no uploaded file to point at. Covering it properly means POSTing to
+  // /forms/upload first, which is its own test.
   const answerFor = (type) => {
     switch (type) {
       case 'Number':

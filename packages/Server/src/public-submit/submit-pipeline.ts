@@ -29,6 +29,13 @@ import { checkRespondentScope } from './scope-check.service';
 import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
 import { validateSubmission } from './validation.service';
+import { loadFormResponseContext } from '@mj-biz-apps/forms-actions';
+import { planAutomations } from './automation-plan';
+import { runAutomations } from '../automation/automation-runner';
+import { dispatchAutomation } from '../automation/dispatch-automation';
+import { buildConditionAnswers } from '../automation/condition-answers';
+import { allowedBindingEntities } from '../automation/allowed-entities';
+import { resolveAutomationPrincipal } from '../automation/service-principal';
 
 /** Normalized submission input the pipeline consumes (resolver maps GraphQL -> this). */
 export interface PipelineSubmission {
@@ -384,14 +391,17 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
 
 /** Invoke the (injectable) hook firer; swallow any error so the submit still succeeds. */
 async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinition, responseId: string): Promise<void> {
-  // NOTE: this still fires the legacy hard-coded hook list for every form. The switch to
-  // `resolved.definition.automations` is deliberately NOT made here yet: dispatching a configured
-  // automation needs a target dispatcher (Action / Agent / EntityBinding) and an answers map built
-  // under the service principal, and half of that landing early would mean a form that configures
-  // automations gets silent failures instead of hooks. When it does land, the safe shape is
-  // "automations when the snapshot has any, legacy list otherwise" — every existing snapshot
-  // carries an empty array, so every existing form keeps its current behaviour untouched.
-  //
+  // A form that configures its own automations runs those; one that does not keeps the legacy
+  // hard-coded hook list. That fallback is what makes this switch safe to land before any form has
+  // been re-published: every existing snapshot carries an empty `automations` array, so every
+  // existing form takes the legacy path and behaves exactly as it did. The constant list can only
+  // be deleted once a back-fill has given every form equivalent automations AND a parity test has
+  // shown the two produce the same effects.
+  if (resolved.definition.automations.length > 0 && !ctx.fireHooks) {
+    await runConfiguredAutomations(resolved, responseId);
+    return;
+  }
+
   // Default firer runs under the system user internally; the anonymous ctx.contextUser is
   // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
   const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
@@ -405,5 +415,48 @@ async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinitio
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] on-submit hooks failed for response ${responseId}: ${message}`);
+  }
+}
+
+/**
+ * Run the automations a form actually configured.
+ *
+ * Refuses to run anything when the service principal cannot be resolved, rather than falling back
+ * to a broader identity. A deployment that has not provisioned the principal gets no automations
+ * and a clear log line; quietly running privileged work as the system user instead would restore
+ * exactly the broad grants the dedicated principal exists to avoid, at the moment nobody is
+ * looking. Wrapped whole, because a submission that is already saved must never fail here.
+ */
+async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId: string): Promise<void> {
+  try {
+    const principal = resolveAutomationPrincipal();
+    if (!principal) {
+      return;
+    }
+    const context = await loadFormResponseContext(responseId, principal);
+    if (!context) {
+      console.warn(`[forms] automations skipped: response ${responseId} could not be read back.`);
+      return;
+    }
+
+    const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
+    const plan = planAutomations(resolved.definition.automations, { complete: true, answers });
+
+    await runAutomations({
+      plan,
+      dispatch: (automation) =>
+        dispatchAutomation(automation, {
+          responseId,
+          formId: resolved.definition.formId,
+          formVersionId: resolved.version.ID,
+          distributionId: resolved.distribution.ID,
+          answers: context.canonicalAnswers,
+          principal,
+          allowedEntities: allowedBindingEntities(),
+        }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
   }
 }
