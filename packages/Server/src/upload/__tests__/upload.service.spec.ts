@@ -75,19 +75,43 @@ function pngFile(size = 16): ParsedFile {
 }
 
 function request(overrides?: Partial<UploadRequest>): UploadRequest {
-  return { file: pngFile(), distributionSlug: 'public-1', distributionId: undefined, questionId: 'q-file', ...overrides };
+  return { file: pngFile(), distributionSlug: 'public-1', distributionId: undefined, questionId: 'q-file', responseId: undefined, ...overrides };
 }
 
-function context(opts: { perms?: Record<string, boolean>; open?: boolean; storage?: UploadStorageEngine }): UploadContext {
+/** Provenance rows recorded by the stub, so tests can assert what the endpoint wrote. */
+const recordedProvenance: { fileId: string; responseId?: string; distributionId: string }[] = [];
+
+function context(opts: {
+  perms?: Record<string, boolean>;
+  open?: boolean;
+  storage?: UploadStorageEngine;
+  provenanceFails?: boolean;
+}): UploadContext {
   return {
     contextUser: USER,
     metadataProvider: metadataProvider(opts.perms ?? respondentPerms()),
     runViewProvider: runViewProvider({ openDistribution: opts.open }),
     storage: opts.storage ?? storageEngine().engine,
+    // Stubbed rather than hitting the database. The endpoint fails closed when provenance cannot
+    // be recorded, so without a substitute every upload test would fail for the wrong reason.
+    recordProvenance: async (input) => {
+      if (opts.provenanceFails) {
+        return false;
+      }
+      recordedProvenance.push({
+        fileId: input.fileId,
+        responseId: input.responseId,
+        distributionId: input.distributionId,
+      });
+      return true;
+    },
   };
 }
 
-beforeEach(() => resetUploadConfigForTests());
+beforeEach(() => {
+  recordedProvenance.length = 0;
+  resetUploadConfigForTests();
+});
 afterEach(() => {
   resetUploadConfigForTests();
   delete process.env.FORMS_UPLOAD_MAX_BYTES;
@@ -166,5 +190,25 @@ describe('runUpload', () => {
     expect(result.ok).toBe(false);
     expect(result.failure?.status).toBe(500);
     expect(result.failure?.error).toMatch(/storage/i);
+  });
+});
+
+describe('runUpload — provenance', () => {
+  it('records the upload so the file can later be proved to be this respondent’s', async () => {
+    const result = await runUpload(context({}), request({ responseId: 'resp-42' }));
+
+    expect(result.ok).toBe(true);
+    expect(recordedProvenance).toHaveLength(1);
+    expect(recordedProvenance[0]).toMatchObject({ responseId: 'resp-42' });
+  });
+
+  it('fails the upload when provenance cannot be recorded', async () => {
+    const result = await runUpload(context({ provenanceFails: true }), request());
+
+    // Fail closed. A file with no provenance row is unusable — submit will reject it — so
+    // returning its id would hand the respondent a successful-looking upload that then silently
+    // breaks their submission.
+    expect(result.ok).toBe(false);
+    expect(result.failure?.status).toBe(500);
   });
 });

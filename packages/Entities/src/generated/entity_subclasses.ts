@@ -978,6 +978,115 @@ export const mjBizAppsFormsFormStyleSchema = z.object({
 export type mjBizAppsFormsFormStyleEntityType = z.infer<typeof mjBizAppsFormsFormStyleSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Uploads
+ */
+export const mjBizAppsFormsFormUploadSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FileID: z.string().describe(`
+        * * Field Name: FileID
+        * * Display Name: File
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Files (vwFiles.ID)
+        * * Description: The uploaded file`),
+    DistributionID: z.string().describe(`
+        * * Field Name: DistributionID
+        * * Display Name: Distribution
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Distributions (vwFormDistributions.ID)
+        * * Description: The distribution the upload was made through. The hard scope every provenance check enforces`),
+    FormID: z.string().describe(`
+        * * Field Name: FormID
+        * * Display Name: Form
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+        * * Description: The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed`),
+    QuestionID: z.string().nullable().describe(`
+        * * Field Name: QuestionID
+        * * Display Name: Question
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Questions (vwFormQuestions.ID)
+        * * Description: The question the file answers`),
+    ResponseDraftID: z.string().nullable().describe(`
+        * * Field Name: ResponseDraftID
+        * * Display Name: Response Draft
+        * * SQL Data Type: uniqueidentifier
+        * * Description: The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows`),
+    AnonymousSessionID: z.string().nullable().describe(`
+        * * Field Name: AnonymousSessionID
+        * * Display Name: Anonymous Session
+        * * SQL Data Type: nvarchar(255)
+        * * Description: The anonymous session id at upload time. A fallback correlation key; blank is tolerated`),
+    UploadedByUserID: z.string().nullable().describe(`
+        * * Field Name: UploadedByUserID
+        * * Display Name: Uploaded By User
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+        * * Description: The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record`),
+    ProviderKey: z.string().nullable().describe(`
+        * * Field Name: ProviderKey
+        * * Display Name: Provider Key
+        * * SQL Data Type: nvarchar(1000)
+        * * Description: Storage key of the file, so the Forms path prefix can be checked without loading the file row`),
+    FileName: z.string().nullable().describe(`
+        * * Field Name: FileName
+        * * Display Name: File Name
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Original sanitized filename`),
+    ContentType: z.string().nullable().describe(`
+        * * Field Name: ContentType
+        * * Display Name: Content Type
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Stored content type`),
+    SizeBytes: z.number().nullable().describe(`
+        * * Field Name: SizeBytes
+        * * Display Name: Size (Bytes)
+        * * SQL Data Type: bigint
+        * * Description: Size in bytes`),
+    Status: z.union([z.literal('Active'), z.literal('Revoked')]).describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(20)
+        * * Default Value: Active
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Active
+    *   * Revoked
+        * * Description: Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    File: z.string().describe(`
+        * * Field Name: File
+        * * Display Name: File Reference
+        * * SQL Data Type: nvarchar(500)`),
+    Distribution: z.string().describe(`
+        * * Field Name: Distribution
+        * * Display Name: Distribution Reference
+        * * SQL Data Type: nvarchar(255)`),
+    Form: z.string().describe(`
+        * * Field Name: Form
+        * * Display Name: Form Reference
+        * * SQL Data Type: nvarchar(255)`),
+    UploadedByUser: z.string().nullable().describe(`
+        * * Field Name: UploadedByUser
+        * * Display Name: Uploaded By User Reference
+        * * SQL Data Type: nvarchar(100)`),
+});
+
+export type mjBizAppsFormsFormUploadEntityType = z.infer<typeof mjBizAppsFormsFormUploadSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Forms: Form Versions
  */
 export const mjBizAppsFormsFormVersionSchema = z.object({
@@ -3589,6 +3698,273 @@ export class mjBizAppsFormsFormStyleEntity extends BaseEntity<mjBizAppsFormsForm
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Forms: Form Uploads - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormUpload
+ * * Base View: vwFormUploads
+ * * @description Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Uploads')
+export class mjBizAppsFormsFormUploadEntity extends BaseEntity<mjBizAppsFormsFormUploadEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Uploads record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Uploads record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormUploadEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FileID
+    * * Display Name: File
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Files (vwFiles.ID)
+    * * Description: The uploaded file
+    */
+    get FileID(): string {
+        return this.Get('FileID');
+    }
+    set FileID(value: string) {
+        this.Set('FileID', value);
+    }
+
+    /**
+    * * Field Name: DistributionID
+    * * Display Name: Distribution
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Distributions (vwFormDistributions.ID)
+    * * Description: The distribution the upload was made through. The hard scope every provenance check enforces
+    */
+    get DistributionID(): string {
+        return this.Get('DistributionID');
+    }
+    set DistributionID(value: string) {
+        this.Set('DistributionID', value);
+    }
+
+    /**
+    * * Field Name: FormID
+    * * Display Name: Form
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    * * Description: The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed
+    */
+    get FormID(): string {
+        return this.Get('FormID');
+    }
+    set FormID(value: string) {
+        this.Set('FormID', value);
+    }
+
+    /**
+    * * Field Name: QuestionID
+    * * Display Name: Question
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Questions (vwFormQuestions.ID)
+    * * Description: The question the file answers
+    */
+    get QuestionID(): string | null {
+        return this.Get('QuestionID');
+    }
+    set QuestionID(value: string | null) {
+        this.Set('QuestionID', value);
+    }
+
+    /**
+    * * Field Name: ResponseDraftID
+    * * Display Name: Response Draft
+    * * SQL Data Type: uniqueidentifier
+    * * Description: The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows
+    */
+    get ResponseDraftID(): string | null {
+        return this.Get('ResponseDraftID');
+    }
+    set ResponseDraftID(value: string | null) {
+        this.Set('ResponseDraftID', value);
+    }
+
+    /**
+    * * Field Name: AnonymousSessionID
+    * * Display Name: Anonymous Session
+    * * SQL Data Type: nvarchar(255)
+    * * Description: The anonymous session id at upload time. A fallback correlation key; blank is tolerated
+    */
+    get AnonymousSessionID(): string | null {
+        return this.Get('AnonymousSessionID');
+    }
+    set AnonymousSessionID(value: string | null) {
+        this.Set('AnonymousSessionID', value);
+    }
+
+    /**
+    * * Field Name: UploadedByUserID
+    * * Display Name: Uploaded By User
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+    * * Description: The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record
+    */
+    get UploadedByUserID(): string | null {
+        return this.Get('UploadedByUserID');
+    }
+    set UploadedByUserID(value: string | null) {
+        this.Set('UploadedByUserID', value);
+    }
+
+    /**
+    * * Field Name: ProviderKey
+    * * Display Name: Provider Key
+    * * SQL Data Type: nvarchar(1000)
+    * * Description: Storage key of the file, so the Forms path prefix can be checked without loading the file row
+    */
+    get ProviderKey(): string | null {
+        return this.Get('ProviderKey');
+    }
+    set ProviderKey(value: string | null) {
+        this.Set('ProviderKey', value);
+    }
+
+    /**
+    * * Field Name: FileName
+    * * Display Name: File Name
+    * * SQL Data Type: nvarchar(500)
+    * * Description: Original sanitized filename
+    */
+    get FileName(): string | null {
+        return this.Get('FileName');
+    }
+    set FileName(value: string | null) {
+        this.Set('FileName', value);
+    }
+
+    /**
+    * * Field Name: ContentType
+    * * Display Name: Content Type
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Stored content type
+    */
+    get ContentType(): string | null {
+        return this.Get('ContentType');
+    }
+    set ContentType(value: string | null) {
+        this.Set('ContentType', value);
+    }
+
+    /**
+    * * Field Name: SizeBytes
+    * * Display Name: Size (Bytes)
+    * * SQL Data Type: bigint
+    * * Description: Size in bytes
+    */
+    get SizeBytes(): number | null {
+        return this.Get('SizeBytes');
+    }
+    set SizeBytes(value: number | null) {
+        this.Set('SizeBytes', value);
+    }
+
+    /**
+    * * Field Name: Status
+    * * Display Name: Status
+    * * SQL Data Type: nvarchar(20)
+    * * Default Value: Active
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Active
+    *   * Revoked
+    * * Description: Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance
+    */
+    get Status(): 'Active' | 'Revoked' {
+        return this.Get('Status');
+    }
+    set Status(value: 'Active' | 'Revoked') {
+        this.Set('Status', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: File
+    * * Display Name: File Reference
+    * * SQL Data Type: nvarchar(500)
+    */
+    get File(): string {
+        return this.Get('File');
+    }
+
+    /**
+    * * Field Name: Distribution
+    * * Display Name: Distribution Reference
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Distribution(): string {
+        return this.Get('Distribution');
+    }
+
+    /**
+    * * Field Name: Form
+    * * Display Name: Form Reference
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Form(): string {
+        return this.Get('Form');
+    }
+
+    /**
+    * * Field Name: UploadedByUser
+    * * Display Name: Uploaded By User Reference
+    * * SQL Data Type: nvarchar(100)
+    */
+    get UploadedByUser(): string | null {
+        return this.Get('UploadedByUser');
     }
 }
 

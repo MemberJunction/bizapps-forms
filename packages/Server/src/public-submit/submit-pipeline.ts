@@ -29,6 +29,12 @@ import { checkRespondentScope } from './scope-check.service';
 import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
 import { validateSubmission } from './validation.service';
+import {
+  evaluateProvenance,
+  loadUploadLedger,
+  provenanceIsStrict,
+  type UploadLedgerRow,
+} from '../upload/upload-provenance.service';
 import { loadFormResponseContext } from '@mj-biz-apps/forms-actions';
 import { planAutomations } from './automation-plan';
 import { runAutomations } from '../automation/automation-runner';
@@ -201,6 +207,16 @@ export async function runSubmitPipeline(
   const validation = validateSubmission(resolved.definition, submission.answers, !complete);
   if (validation.errors.length > 0) {
     return { success: false, errors: validation.errors };
+  }
+
+  // 7b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
+  //     column, so the foreign key proves only that the file exists — without this a submission
+  //     can name any file in the instance and it becomes their answer. Checked before persistence,
+  //     so a foreign id never reaches the database, and on partial saves too, so it is caught at
+  //     first sight rather than at promotion.
+  const provenance = await checkFileProvenance(ctx, resolved, submission);
+  if (provenance.errors.length > 0) {
+    return { success: false, errors: provenance.errors };
   }
 
   // 8. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
@@ -416,6 +432,64 @@ async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinitio
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] on-submit hooks failed for response ${responseId}: ${message}`);
   }
+}
+
+/**
+ * Reject (strict) or strip (lenient) any file answer whose upload cannot be vouched for.
+ *
+ * Runs under the elevated principal because the ledger is deliberately unreadable by the anonymous
+ * respondent — a session that could read it could enumerate other people's uploads, and one that
+ * could write it could forge the very evidence being checked.
+ *
+ * A failed LOOKUP fails the submission rather than waving the file through. That is the
+ * uncomfortable direction on purpose: the alternative is that a database blip turns into silently
+ * accepting unverified files, which is precisely the state this check exists to end.
+ */
+async function checkFileProvenance(
+  ctx: PipelineContext,
+  resolved: ResolvedDefinition,
+  submission: PipelineSubmission,
+): Promise<{ errors: FieldError[] }> {
+  const fileAnswers = submission.answers.filter((a) => Boolean(a.fileId));
+  if (fileAnswers.length === 0) {
+    return { errors: [] };
+  }
+
+  const strict = provenanceIsStrict();
+  let ledger: Map<string, UploadLedgerRow>;
+  try {
+    ledger = await loadUploadLedger(
+      fileAnswers.map((a) => a.fileId as string),
+      ctx.elevatedUser,
+    );
+  } catch (error) {
+    console.warn(`[forms] upload provenance lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      errors: [{ message: 'Your uploaded file could not be verified. Please try again.' }],
+    };
+  }
+
+  const errors: FieldError[] = [];
+  for (const answer of fileAnswers) {
+    const verdict = evaluateProvenance(ledger.get((answer.fileId as string).trim().toLowerCase()), {
+      fileId: answer.fileId as string,
+      distributionId: resolved.distribution.ID,
+      clientResponseId: submission.clientResponseId,
+      sessionId: ctx.sessionId,
+    }, strict);
+    if (verdict.ok) {
+      continue;
+    }
+    if (strict) {
+      errors.push({ questionId: answer.questionId, message: 'That file could not be verified as your upload.' });
+    } else {
+      // Lenient: drop the file rather than persist an unverified one. The rest of the answer still
+      // saves, and a required file question then fails validation on its own terms.
+      delete (answer as { fileId?: string }).fileId;
+      console.warn(`[forms] stripped unverified file answer (${verdict.failure}) on question ${answer.questionId}`);
+    }
+  }
+  return { errors };
 }
 
 /**

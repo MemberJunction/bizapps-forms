@@ -225,6 +225,7 @@ npm test                                   # 595 unit tests, no database
 npm run smoke:binding:seed                 # seed a live binding (dev DB only)
 npm run smoke:binding                      # 5 real submissions, then verify the database
 npm run smoke:respondent -- <slug>         # the public path, unchanged
+npm run smoke:provenance                   # a second session cannot claim your upload
 ```
 
 Both smoke scripts need `set -a && . ./.env && set +a` first, MJAPI running, and the raised rate
@@ -253,6 +254,7 @@ public path completely broken and every unit test passing.
 | The MJ I/O behind that policy | `packages/Actions/src/custom/binding/mj-binding-gateway.ts` |
 | `Forms: Bind Response To Entity` action | `packages/Actions/src/custom/binding/bind-response-to-entity.action.ts` |
 | Recovery sweep | `packages/Server/src/automation/recovery-sweep.ts` |
+| Upload provenance | `packages/Server/src/upload/upload-provenance.service.ts` |
 | Builder "On Submit" tab | `packages/Angular/src/lib/builder/automation-tab.component.ts` |
 | Service principal, allow-list, sweep | `packages/Server/src/automation/{service-principal,allowed-entities,recovery-sweep}.ts` |
 
@@ -262,18 +264,43 @@ quietly corrupt data are the ones that need exhaustive tests and are impractical
 
 ---
 
-## 9. Not built yet
+## 9. File answers and upload provenance
 
-- **File answers into File-FK columns — REFUSED, not merely undone.** `__mj.File` rows carry no
-  owner, so a submitted fileId proves the file exists, not that this respondent uploaded it, and
-  copying one onto a record other users can read is cross-tenant disclosure. The executor now
-  refuses any mapping whose value came from a file answer, as a config-scoped failure. The switch
-  to flip when upload provenance becomes verifiable is `ExecuteBindingInput.allowFileAnswers` —
-  deliberately a parameter rather than a constant, so the guard has one greppable place to be
-  turned on instead of being deleted from the middle of the executor. Needs the provenance ledger
-  (F-SEC-1 / decision DG-12a, `plans/UPLOAD_PROVENANCE_LEDGER_SPEC.md`); the recommendation on the
-  table is that the upload endpoint elevates and the anonymous role holds no grants at all, because
-  a ledger the anonymous role can write is not a ledger.
+A file answer can be mapped onto a `File`-FK column, and it is safe because the file id is proved
+to be the respondent's own before it is written anywhere.
+
+`__mj.File` has no owner column and no row-level security, so the foreign key on a submitted
+`fileId` establishes only that the file exists. Without a second source of truth, one respondent
+could name another's upload — or any file in the instance — and a binding would copy it onto a
+record other people can read. `FormUpload` is that source of truth: the upload endpoint writes one
+row per upload recording the distribution, the form, the question, and the client-minted response
+id the upload was made for.
+
+**Who writes it (decision DG-12a): the upload endpoint, elevated.** Not the anonymous respondent.
+Granting the anonymous role `CanCreate` on the ledger would let a session mint its own provenance
+row through the generated GraphQL `CreateRecord` mutation and have the check confirm the forgery —
+a ledger the caller can write proves nothing. Elevating is also *less* privilege than before: the
+anonymous role holds no `MJ: Files` grant, so the upload was failing default-deny on a clean
+install (F-SEC-2), and moving the File write to the endpoint's principal fixes that without giving
+the anonymous internet the ability to create File rows.
+
+The correlation key is the **client-minted response id**, not the session id, because the anonymous
+session id is legitimately blank in ordinary public-link flows — keying on it alone would leave a
+real share of honest uploads unattributable. The widget sends it with every upload.
+
+Verification happens twice. At **submit**, before answers persist, so a foreign id never reaches the
+database. At **bind**, again, because a response persisted while the check was lenient must not
+become writable onto a business record just because a binding was added later. Failure modes:
+`unknown-file` (never came through the endpoint), `revoked`, `wrong-distribution`, `unattributable`.
+
+`FORMS_UPLOAD_PROVENANCE=lenient` admits only the *unattributable* case, for a rollout window where
+older widgets do not yet send the response id. It is not an off switch — a foreign, revoked or
+unknown file is refused in either mode. Default is strict.
+
+---
+
+## 10. Not built yet
+
 - **Deleting the legacy hook list.** The four hard-coded on-submit actions still run for any form
   that configures no automations, and dispatch is all-or-nothing — so the builder now seeds
   equivalents for all four the first time a form configures anything, making the cutover per-form

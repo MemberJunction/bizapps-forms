@@ -15,7 +15,9 @@ import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam } from '@memberjunction/actions-base';
 import { AgentRunner } from '@memberjunction/ai-agents';
 import type { MJAIAgentEntityExtended } from '@memberjunction/ai-core-plus';
+import { loadUploadLedger } from '../upload/upload-provenance.service';
 import {
+  isFileAnswer,
   parseFieldMappings,
   parseIdentityRule,
   parseMergePolicy,
@@ -193,6 +195,11 @@ async function runBindingTarget(
     answers: ctx.answers,
     gateway: new MJBindingGateway(ctx.principal),
     allowedEntities: ctx.allowedEntities,
+    // File answers reach a target field only because the submit path refused to persist any file
+    // id it could not attribute to this respondent's own upload. Defence in depth rather than
+    // trust: a response persisted under an older, more lenient configuration must not become
+    // writable to a business record just because the setting changed afterwards.
+    allowFileAnswers: await filesAreVerified(ctx),
   });
   if (bindingFailed(result)) {
     throw new Error(`${result.failure.scope}: ${result.failure.message}`);
@@ -200,6 +207,37 @@ async function runBindingTarget(
 
   await recordLedgerRow(automation.bindingId, binding, result.outcome, ctx);
   return `${result.outcome.kind}${result.outcome.targetRecordId ? ` ${result.outcome.targetRecordId}` : ''}`;
+}
+
+/**
+ * Re-check that every file answer on this response has provenance, at bind time.
+ *
+ * The submit path already refused unverifiable files, so in the normal case this confirms what is
+ * already true. It exists for the abnormal case: a response persisted while the check was lenient,
+ * or before the check existed at all, must not become writable onto a business record simply
+ * because a binding was added later. Returns false on any doubt — including a failed lookup —
+ * because the cost of being wrong here is disclosing someone else's file.
+ */
+async function filesAreVerified(ctx: DispatchContext): Promise<boolean> {
+  const fileIds = [...ctx.answers.Entries()]
+    .map(([, value]) => (isFileAnswer(value) ? value.fileId : undefined))
+    .filter((id): id is string => Boolean(id));
+  if (fileIds.length === 0) {
+    return true;
+  }
+  try {
+    const ledger = await loadUploadLedger(fileIds, ctx.principal);
+    return fileIds.every((id) => {
+      const row = ledger.get(id.trim().toLowerCase());
+      return Boolean(row) && row?.Status !== 'Revoked' && equalsFolded(row?.DistributionID, ctx.distributionId);
+    });
+  } catch {
+    return false;
+  }
+}
+
+function equalsFolded(left: string | null | undefined, right: string | null | undefined): boolean {
+  return Boolean(left) && Boolean(right) && left!.trim().toLowerCase() === right!.trim().toLowerCase();
 }
 
 /**

@@ -40,6 +40,13 @@ export class FormQuestionComponent {
   public readonly errorMessage = input<string | null>(null);
   /** Distribution slug — needed to scope a FileUpload's upload to the current form. */
   public readonly distributionSlug = input<string>('');
+  /**
+   * The response id this form is filling in, passed through to uploads.
+   *
+   * It is what ties an uploaded file to this respondent's submission; the anonymous session id is
+   * blank in ordinary public-link flows and cannot do that job.
+   */
+  public readonly responseId = input<string>('');
   /** Emits whenever the respondent changes the answer. */
   public readonly valueChange = output<AnswerValue>();
 
@@ -203,6 +210,7 @@ export class FormQuestionComponent {
         this.distributionSlug(),
         this.question().id,
         (fraction) => this.uploadProgress.set(fraction),
+        this.responseId() || undefined,
       );
       this.uploadStatus.set('done');
       this.uploadProgress.set(1);

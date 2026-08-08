@@ -17,7 +17,9 @@
  * The returned `fileId` is the `MJ: Files` record ID the widget submits as the answer's
  * `FileID` (that column already exists on FormResponseAnswer).
  */
+import { LogError, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
 import { contentTypeAllowed, getUploadConfig } from './config';
@@ -29,6 +31,15 @@ export interface UploadRequest {
   distributionSlug: string | undefined;
   distributionId: string | undefined;
   questionId: string | undefined;
+  /**
+   * The widget's client-minted response id.
+   *
+   * The primary correlation key for provenance, because the anonymous session id is documented to
+   * be blank in otherwise valid flows — so keying on the session alone would leave a real
+   * proportion of legitimate uploads unattributable. Optional: an older widget does not send it,
+   * and lenient mode exists for exactly that rollout window.
+   */
+  responseId: string | undefined;
 }
 
 /** The authenticated context (from the verified magic-link session). */
@@ -41,6 +52,40 @@ export interface UploadContext {
   runViewProvider: DefinitionRunViewProvider;
   /** Injectable storage engine (defaults to FileStorageEngine.Instance in the middleware). */
   storage: UploadStorageEngine;
+  /**
+   * The principal the File row and the provenance row are written as.
+   *
+   * Separate from `contextUser` on purpose: eligibility is checked against the anonymous caller,
+   * and only the WRITE runs elevated. Falls back to the caller when absent, which keeps existing
+   * tests honest — but the middleware always supplies it.
+   */
+  elevatedUser?: UserInfo;
+  /** The anonymous session id, a fallback correlation key for provenance. */
+  sessionId?: string;
+  /**
+   * Injectable provenance writer, matching how storage and metadata are injected here.
+   *
+   * Defaults to the real entity write. A seam rather than a direct `new Metadata()` because the
+   * upload now FAILS CLOSED when provenance cannot be recorded — correct behaviour, but it makes
+   * the whole endpoint untestable without a database unless the write can be substituted.
+   */
+  recordProvenance?: (input: ProvenanceRecordInput) => Promise<boolean>;
+}
+
+/** What the provenance writer needs to record one upload. */
+export interface ProvenanceRecordInput {
+  writer: UserInfo;
+  fileId: string;
+  providerKey?: string;
+  distributionId: string;
+  formId: string;
+  questionId?: string;
+  responseId?: string;
+  sessionId?: string;
+  uploadedByUserId?: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
 }
 
 /** The slice of `FileStorageEngine` this service depends on (lets tests inject a stub). */
@@ -53,7 +98,7 @@ export interface UploadStorageEngine {
     contextUser: UserInfo;
     storageAccountId?: string;
     pathPrefix?: string;
-  }): Promise<{ FileID: string }>;
+  }): Promise<{ FileID: string; StoragePath?: string }>;
 }
 
 /** The endpoint's JSON success body (the frozen widget contract). */
@@ -109,7 +154,7 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   }
 
   // 4. Store bytes + create the MJ: Files record via the canonical MJ storage path.
-  return storeFile(ctx, file);
+  return storeFile(ctx, file, req, distCheck.resolved);
 }
 
 /** Enforce presence, size cap, and content-type allowlist. */
@@ -130,8 +175,59 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
   return { ok: true };
 }
 
-/** Resolve the distribution slug to an open published form (rejects closed/unknown). */
-async function resolveOpenDistribution(ctx: UploadContext, req: UploadRequest): Promise<UploadResult> {
+/**
+ * The default provenance writer: one row in the Forms upload ledger.
+ *
+ * Returns false rather than throwing so the caller can fail the upload cleanly; a thrown error
+ * here would be reported to the respondent as a storage problem, which is not what happened.
+ */
+export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
+  try {
+    const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormUploadEntity>(
+      'MJ_BizApps_Forms: Form Uploads',
+      input.writer,
+    );
+    if (!row) {
+      return false;
+    }
+    row.NewRecord();
+    row.FileID = input.fileId;
+    row.DistributionID = input.distributionId;
+    row.FormID = input.formId;
+    row.QuestionID = input.questionId ?? null;
+    row.ResponseDraftID = input.responseId ?? null;
+    row.AnonymousSessionID = input.sessionId ?? null;
+    // Audit only. Every anonymous session shares one user record, so this can never be a
+    // correlation key — that is what ResponseDraftID is for.
+    row.UploadedByUserID = input.uploadedByUserId ?? null;
+    row.ProviderKey = input.providerKey ?? null;
+    row.FileName = input.fileName;
+    row.ContentType = input.contentType;
+    row.SizeBytes = input.sizeBytes;
+    row.Status = 'Active';
+    if (await row.Save()) {
+      return true;
+    }
+    LogError(`Forms upload: provenance row save failed: ${row.LatestResult?.CompleteMessage ?? 'unknown'}`);
+    return false;
+  } catch (error) {
+    LogError(
+      `Forms upload: provenance row could not be written: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Resolve the distribution slug to an open published form (rejects closed/unknown).
+ *
+ * Returns the resolved ids as well as the verdict, because the provenance row needs them and
+ * resolving twice would leave two answers free to disagree about which form an upload belonged to.
+ */
+async function resolveOpenDistribution(
+  ctx: UploadContext,
+  req: UploadRequest,
+): Promise<UploadResult & { resolved?: { distributionId: string; formId: string } }> {
   const slug = req.distributionSlug ?? req.distributionId;
   if (!slug) {
     return fail(400, 'Missing required field "distributionSlug" (or "distributionId").');
@@ -140,22 +236,62 @@ async function resolveOpenDistribution(ctx: UploadContext, req: UploadRequest): 
   if (!loaded.ok || !loaded.value) {
     return fail(404, `Form unavailable (${loaded.failure ?? 'not-found'}).`);
   }
-  return { ok: true };
+  return {
+    ok: true,
+    resolved: { distributionId: loaded.value.distribution.ID, formId: loaded.value.definition.formId },
+  };
 }
 
 /** Store the file via FileStorageEngine.UploadFile and shape the success body. */
-async function storeFile(ctx: UploadContext, file: ParsedFile): Promise<UploadResult> {
+async function storeFile(
+  ctx: UploadContext,
+  file: ParsedFile,
+  req: UploadRequest,
+  resolved: { distributionId: string; formId: string } | undefined,
+): Promise<UploadResult> {
   const cfg = getUploadConfig();
+  // The File row and the provenance row are both written under an ELEVATED principal, not the
+  // anonymous session. Two reasons, and the second is the load-bearing one: the anonymous role
+  // holds no `MJ: Files` grant, so writing as the caller fails default-deny on a clean install
+  // (F-SEC-2); and a provenance row the caller could write would prove nothing, since every
+  // IncludeInAPI entity has a generated CreateRecord mutation gated on the caller's own roles.
+  // Eligibility was already checked against the caller above — only the WORK runs elevated.
+  const writer = ctx.elevatedUser ?? ctx.contextUser;
   try {
-    await ctx.storage.Config(false, ctx.contextUser);
+    await ctx.storage.Config(false, writer);
     const result = await ctx.storage.UploadFile({
       content: file.data,
       fileName: safeFileName(file.filename),
       mimeType: bareContentType(file.contentType),
-      contextUser: ctx.contextUser,
+      contextUser: writer,
       storageAccountId: cfg.storageAccountId,
       pathPrefix: cfg.pathPrefix ?? defaultPathPrefix(),
     });
+
+    if (resolved) {
+      const record = ctx.recordProvenance ?? writeProvenanceRow;
+      const recorded = await record({
+        writer,
+        fileId: result.FileID,
+        providerKey: result.StoragePath,
+        distributionId: resolved.distributionId,
+        formId: resolved.formId,
+        questionId: req.questionId,
+        responseId: req.responseId,
+        sessionId: ctx.sessionId,
+        uploadedByUserId: ctx.contextUser?.ID,
+        fileName: safeFileName(file.filename),
+        contentType: bareContentType(file.contentType),
+        sizeBytes: file.data.length,
+      });
+      if (!recorded) {
+        // Fail closed. A file with no provenance row is unusable downstream — submit will reject
+        // it — so returning its id would hand the respondent something that looks like a
+        // successful upload and then silently fails their submission.
+        return fail(500, 'Upload could not be recorded; please try again.');
+      }
+    }
+
     return {
       ok: true,
       success: {
