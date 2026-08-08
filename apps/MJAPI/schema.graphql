@@ -6174,6 +6174,41 @@ input CreateVersionLabelInput {
   Scope: String
 }
 
+input CreatemjBizAppsFormsFormAutomationInput {
+  ActionID: String
+  AgentID: String
+  BindingID: String
+  ConditionalRule: String
+  ContinueOnError: Boolean
+  Description: String
+  DisplayOrder: Int
+  ExecutionMode: String
+  FormID: String
+  ID: String
+  IsActive: Boolean
+  Name: String
+  ParameterMapping: String
+  RestoreContext___: RestoreContextInput
+  TargetType: String
+  TimeoutMS: Int
+  Trigger: String
+}
+
+input CreatemjBizAppsFormsFormAutomationRunInput {
+  AIAgentRunID: String
+  ActionExecutionLogID: String
+  AttemptCount: Int
+  CompletedAt: Timestamp
+  ErrorMessage: String
+  FormAutomationID: String
+  FormResponseID: String
+  ID: String
+  OutputSummary: String
+  RestoreContext___: RestoreContextInput
+  StartedAt: Timestamp
+  Status: String
+}
+
 input CreatemjBizAppsFormsFormCategoryInput {
   Description: String
   DisplayRank: Int
@@ -6201,6 +6236,31 @@ input CreatemjBizAppsFormsFormDistributionInput {
   RestoreContext___: RestoreContextInput
   Slug: String
   Status: String
+}
+
+input CreatemjBizAppsFormsFormEntityBindingInput {
+  Description: String
+  FieldMappings: String
+  FormID: String
+  ID: String
+  IdentityRule: String
+  MergePolicy: String
+  Name: String
+  RestoreContext___: RestoreContextInput
+  Status: String
+  TargetEntityID: String
+  TargetEntityName: String
+}
+
+input CreatemjBizAppsFormsFormEntityBindingRecordInput {
+  BindingID: String
+  FormResponseID: String
+  ID: String
+  Outcome: String
+  RestoreContext___: RestoreContextInput
+  TargetEntityID: String
+  TargetRecordID: String
+  WrittenFields: String
 }
 
 input CreatemjBizAppsFormsFormInput {
@@ -25346,8 +25406,12 @@ type Mutation {
   CreateReportFromConversationDetailID(ConversationDetailID: String!): CreateReportResultType!
   CreateVersionLabel(input: CreateVersionLabelInput!, sessionId: String): CreateLabelResultOutput!
   CreatemjBizAppsFormsForm(input: CreatemjBizAppsFormsFormInput!): mjBizAppsFormsForm_!
+  CreatemjBizAppsFormsFormAutomation(input: CreatemjBizAppsFormsFormAutomationInput!): mjBizAppsFormsFormAutomation_!
+  CreatemjBizAppsFormsFormAutomationRun(input: CreatemjBizAppsFormsFormAutomationRunInput!): mjBizAppsFormsFormAutomationRun_!
   CreatemjBizAppsFormsFormCategory(input: CreatemjBizAppsFormsFormCategoryInput!): mjBizAppsFormsFormCategory_!
   CreatemjBizAppsFormsFormDistribution(input: CreatemjBizAppsFormsFormDistributionInput!): mjBizAppsFormsFormDistribution_!
+  CreatemjBizAppsFormsFormEntityBinding(input: CreatemjBizAppsFormsFormEntityBindingInput!): mjBizAppsFormsFormEntityBinding_!
+  CreatemjBizAppsFormsFormEntityBindingRecord(input: CreatemjBizAppsFormsFormEntityBindingRecordInput!): mjBizAppsFormsFormEntityBindingRecord_!
   CreatemjBizAppsFormsFormPage(input: CreatemjBizAppsFormsFormPageInput!): mjBizAppsFormsFormPage_!
   CreatemjBizAppsFormsFormQuestion(input: CreatemjBizAppsFormsFormQuestionInput!): mjBizAppsFormsFormQuestion_!
   CreatemjBizAppsFormsFormQuestionOption(input: CreatemjBizAppsFormsFormQuestionOptionInput!): mjBizAppsFormsFormQuestionOption_!
@@ -25743,8 +25807,12 @@ type Mutation {
   DeleteQueryExtended(ID: String!, options: DeleteOptionsInput): DeleteQueryResultType!
   DeleteStorageObject(input: DeleteStorageObjectInput!): Boolean!
   DeletemjBizAppsFormsForm(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsForm_!
+  DeletemjBizAppsFormsFormAutomation(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormAutomation_!
+  DeletemjBizAppsFormsFormAutomationRun(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormAutomationRun_!
   DeletemjBizAppsFormsFormCategory(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormCategory_!
   DeletemjBizAppsFormsFormDistribution(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormDistribution_!
+  DeletemjBizAppsFormsFormEntityBinding(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormEntityBinding_!
+  DeletemjBizAppsFormsFormEntityBindingRecord(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormEntityBindingRecord_!
   DeletemjBizAppsFormsFormPage(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormPage_!
   DeletemjBizAppsFormsFormQuestion(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormQuestion_!
   DeletemjBizAppsFormsFormQuestionOption(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormQuestionOption_!
@@ -26345,8 +26413,12 @@ type Mutation {
   UpdateMJWorkspaceItem(input: UpdateMJWorkspaceItemInput!): MJWorkspaceItem_!
   UpdateQueryExtended(input: UpdateQuerySystemUserInput!): QueryMutationResultType!
   UpdatemjBizAppsFormsForm(input: UpdatemjBizAppsFormsFormInput!): mjBizAppsFormsForm_!
+  UpdatemjBizAppsFormsFormAutomation(input: UpdatemjBizAppsFormsFormAutomationInput!): mjBizAppsFormsFormAutomation_!
+  UpdatemjBizAppsFormsFormAutomationRun(input: UpdatemjBizAppsFormsFormAutomationRunInput!): mjBizAppsFormsFormAutomationRun_!
   UpdatemjBizAppsFormsFormCategory(input: UpdatemjBizAppsFormsFormCategoryInput!): mjBizAppsFormsFormCategory_!
   UpdatemjBizAppsFormsFormDistribution(input: UpdatemjBizAppsFormsFormDistributionInput!): mjBizAppsFormsFormDistribution_!
+  UpdatemjBizAppsFormsFormEntityBinding(input: UpdatemjBizAppsFormsFormEntityBindingInput!): mjBizAppsFormsFormEntityBinding_!
+  UpdatemjBizAppsFormsFormEntityBindingRecord(input: UpdatemjBizAppsFormsFormEntityBindingRecordInput!): mjBizAppsFormsFormEntityBindingRecord_!
   UpdatemjBizAppsFormsFormPage(input: UpdatemjBizAppsFormsFormPageInput!): mjBizAppsFormsFormPage_!
   UpdatemjBizAppsFormsFormQuestion(input: UpdatemjBizAppsFormsFormQuestionInput!): mjBizAppsFormsFormQuestion_!
   UpdatemjBizAppsFormsFormQuestionOption(input: UpdatemjBizAppsFormsFormQuestionOptionInput!): mjBizAppsFormsFormQuestionOption_!
@@ -28175,6 +28247,12 @@ type Query {
   RunViews(input: [RunViewGenericInput!]!): [RunViewGenericResult!]!
   RunViewsSystemUser(input: [RunViewGenericInput!]!): [RunViewGenericResult!]!
   RunViewsWithCacheCheck(input: [RunViewWithCacheCheckInput!]!): RunViewsWithCacheCheckOutput!
+  RunmjBizAppsFormsFormAutomationDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormAutomationViewResult!
+  RunmjBizAppsFormsFormAutomationRunDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormAutomationRunViewResult!
+  RunmjBizAppsFormsFormAutomationRunViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormAutomationRunViewResult!
+  RunmjBizAppsFormsFormAutomationRunViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormAutomationRunViewResult!
+  RunmjBizAppsFormsFormAutomationViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormAutomationViewResult!
+  RunmjBizAppsFormsFormAutomationViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormAutomationViewResult!
   RunmjBizAppsFormsFormCategoryDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormCategoryViewResult!
   RunmjBizAppsFormsFormCategoryViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormCategoryViewResult!
   RunmjBizAppsFormsFormCategoryViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormCategoryViewResult!
@@ -28182,6 +28260,12 @@ type Query {
   RunmjBizAppsFormsFormDistributionViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormDistributionViewResult!
   RunmjBizAppsFormsFormDistributionViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormDistributionViewResult!
   RunmjBizAppsFormsFormDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormViewResult!
+  RunmjBizAppsFormsFormEntityBindingDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormEntityBindingViewResult!
+  RunmjBizAppsFormsFormEntityBindingRecordDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormEntityBindingRecordViewResult!
+  RunmjBizAppsFormsFormEntityBindingRecordViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormEntityBindingRecordViewResult!
+  RunmjBizAppsFormsFormEntityBindingRecordViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormEntityBindingRecordViewResult!
+  RunmjBizAppsFormsFormEntityBindingViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormEntityBindingViewResult!
+  RunmjBizAppsFormsFormEntityBindingViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormEntityBindingViewResult!
   RunmjBizAppsFormsFormPageDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormPageViewResult!
   RunmjBizAppsFormsFormPageViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormPageViewResult!
   RunmjBizAppsFormsFormPageViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormPageViewResult!
@@ -28234,8 +28318,12 @@ type Query {
   colors: [Color!]!
   debugCurrentUserEmail: String!
   mjBizAppsFormsForm(ID: String!): mjBizAppsFormsForm_
+  mjBizAppsFormsFormAutomation(ID: String!): mjBizAppsFormsFormAutomation_
+  mjBizAppsFormsFormAutomationRun(ID: String!): mjBizAppsFormsFormAutomationRun_
   mjBizAppsFormsFormCategory(ID: String!): mjBizAppsFormsFormCategory_
   mjBizAppsFormsFormDistribution(ID: String!): mjBizAppsFormsFormDistribution_
+  mjBizAppsFormsFormEntityBinding(ID: String!): mjBizAppsFormsFormEntityBinding_
+  mjBizAppsFormsFormEntityBindingRecord(ID: String!): mjBizAppsFormsFormEntityBindingRecord_
   mjBizAppsFormsFormPage(ID: String!): mjBizAppsFormsFormPage_
   mjBizAppsFormsFormQuestion(ID: String!): mjBizAppsFormsFormQuestion_
   mjBizAppsFormsFormQuestionOption(ID: String!): mjBizAppsFormsFormQuestionOption_
@@ -33012,6 +33100,26 @@ type RunViewsWithCacheCheckOutput {
   success: Boolean!
 }
 
+type RunmjBizAppsFormsFormAutomationRunViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormAutomationRun_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormAutomationViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormAutomation_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
 type RunmjBizAppsFormsFormCategoryViewResult {
   ErrorMessage: String
   ExecutionTime: Int
@@ -33026,6 +33134,26 @@ type RunmjBizAppsFormsFormDistributionViewResult {
   ErrorMessage: String
   ExecutionTime: Int
   Results: [mjBizAppsFormsFormDistribution_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormEntityBindingRecordViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormEntityBindingRecord_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormEntityBindingViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormEntityBinding_!]!
   RowCount: Int
   Success: Boolean!
   TotalRowCount: Int
@@ -39704,6 +39832,43 @@ input UpdateQuerySystemUserInput {
   UsesTemplate: Boolean
 }
 
+input UpdatemjBizAppsFormsFormAutomationInput {
+  ActionID: String
+  AgentID: String
+  BindingID: String
+  ConditionalRule: String
+  ContinueOnError: Boolean
+  Description: String
+  DisplayOrder: Int
+  ExecutionMode: String
+  FormID: String
+  ID: String!
+  IsActive: Boolean
+  Name: String
+  OldValues___: [KeyValuePairInput!]
+  ParameterMapping: String
+  RestoreContext___: RestoreContextInput
+  TargetType: String
+  TimeoutMS: Int
+  Trigger: String
+}
+
+input UpdatemjBizAppsFormsFormAutomationRunInput {
+  AIAgentRunID: String
+  ActionExecutionLogID: String
+  AttemptCount: Int
+  CompletedAt: Timestamp
+  ErrorMessage: String
+  FormAutomationID: String
+  FormResponseID: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  OutputSummary: String
+  RestoreContext___: RestoreContextInput
+  StartedAt: Timestamp
+  Status: String
+}
+
 input UpdatemjBizAppsFormsFormCategoryInput {
   Description: String
   DisplayRank: Int
@@ -39733,6 +39898,33 @@ input UpdatemjBizAppsFormsFormDistributionInput {
   RestoreContext___: RestoreContextInput
   Slug: String
   Status: String
+}
+
+input UpdatemjBizAppsFormsFormEntityBindingInput {
+  Description: String
+  FieldMappings: String
+  FormID: String
+  ID: String!
+  IdentityRule: String
+  MergePolicy: String
+  Name: String
+  OldValues___: [KeyValuePairInput!]
+  RestoreContext___: RestoreContextInput
+  Status: String
+  TargetEntityID: String
+  TargetEntityName: String
+}
+
+input UpdatemjBizAppsFormsFormEntityBindingRecordInput {
+  BindingID: String
+  FormResponseID: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  Outcome: String
+  RestoreContext___: RestoreContextInput
+  TargetEntityID: String
+  TargetRecordID: String
+  WrittenFields: String
 }
 
 input UpdatemjBizAppsFormsFormInput {
@@ -39900,6 +40092,121 @@ type WriteRecordOutput {
   Success: Boolean!
 }
 
+"""
+One execution attempt of an automation against one response, linking out to the MJ action or agent log that holds the detail
+"""
+type mjBizAppsFormsFormAutomationRun_ {
+  AIAgentRun: String
+
+  """The MJ agent run for this attempt, when an Agent ran"""
+  AIAgentRunID: String
+  ActionExecutionLog: String
+
+  """The MJ action execution log for this attempt, when an Action ran"""
+  ActionExecutionLogID: String
+
+  """
+  How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap
+  """
+  AttemptCount: Int!
+
+  """When this attempt finished, successfully or not"""
+  CompletedAt: Timestamp
+
+  """Why this attempt failed"""
+  ErrorMessage: String
+  FormAutomation: String!
+  FormAutomationID: String!
+  FormResponseID: String!
+  ID: String!
+
+  """JSON digest of the result, small enough to show in an activity view"""
+  OutputSummary: String
+
+  """When this attempt began"""
+  StartedAt: Timestamp
+
+  """
+  Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record
+  """
+  Status: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
+One configured on-submit automation for a form: an Action, an Agent or an entity binding, with its trigger, ordering, condition and execution mode
+"""
+type mjBizAppsFormsFormAutomation_ {
+  Action: String
+
+  """The MJ Action to run; set only when TargetType is Action"""
+  ActionID: String
+  Agent: String
+
+  """The MJ AI Agent to run; set only when TargetType is Agent"""
+  AgentID: String
+  Binding: String
+
+  """
+  The entity binding to execute; set only when TargetType is EntityBinding
+  """
+  BindingID: String
+
+  """
+  JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run
+  """
+  ConditionalRule: String
+
+  """
+  When false, a failure halts the remaining Sync automations for that response
+  """
+  ContinueOnError: Boolean!
+
+  """What this automation is for"""
+  Description: String
+
+  """
+  Run order within an execution mode; Sync automations always run before Async ones regardless
+  """
+  DisplayOrder: Int!
+
+  """
+  Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting
+  """
+  ExecutionMode: String!
+  Form: String!
+  FormID: String!
+  ID: String!
+
+  """Whether this automation is eligible to run"""
+  IsActive: Boolean!
+
+  """
+  Author-facing label, e.g. "Email confirmation"
+  """
+  Name: String!
+
+  """
+  JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids
+  """
+  ParameterMapping: String
+
+  """Which kind of target runs: Action, Agent or EntityBinding"""
+  TargetType: String!
+
+  """Optional per-automation execution cap in milliseconds"""
+  TimeoutMS: Int
+
+  """
+  Which save fires this automation: a completed submission, a partial autosave, or both
+  """
+  Trigger: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormAutomationIDArray: [mjBizAppsFormsFormAutomationRun_!]!
+}
+
 """Hierarchical categories that organize forms into a browsable tree"""
 type mjBizAppsFormsFormCategory_ {
   """Detailed description of this category"""
@@ -39980,6 +40287,81 @@ type mjBizAppsFormsFormDistribution_ {
   Status: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
+}
+
+"""
+Durable record of which target record a submission produced, making re-execution idempotent and the lineage queryable
+"""
+type mjBizAppsFormsFormEntityBindingRecord_ {
+  Binding: String!
+  BindingID: String!
+  FormResponseID: String!
+  ID: String!
+
+  """
+  What the binding did: created a record, merged into an existing one, changed nothing, or skipped
+  """
+  Outcome: String!
+
+  """Entity the record belongs to, captured at execution time"""
+  TargetEntityID: String!
+
+  """
+  Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped
+  """
+  TargetRecordID: String
+
+  """JSON list of the field names actually written by this execution"""
+  WrittenFields: String
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
+Declares that submissions to a form create or update a record of a target entity, via a field mapping, an identity rule and a merge policy
+"""
+type mjBizAppsFormsFormEntityBinding_ {
+  """What this binding is for"""
+  Description: String
+
+  """
+  JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions
+  """
+  FieldMappings: String!
+  Form: String!
+  FormID: String!
+  ID: String!
+
+  """
+  JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several
+  """
+  IdentityRule: String!
+
+  """
+  JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout
+  """
+  MergePolicy: String
+
+  """
+  Author-facing label for this binding, e.g. "Create CRM Lead"
+  """
+  Name: String!
+
+  """Whether this binding is eligible to run"""
+  Status: String!
+  TargetEntity: String!
+
+  """Entity whose records this binding writes"""
+  TargetEntityID: String!
+
+  """
+  Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle
+  """
+  TargetEntityName: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_BindingIDArray: [mjBizAppsFormsFormAutomation_!]!
+  mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_BindingIDArray: [mjBizAppsFormsFormEntityBindingRecord_!]!
 }
 
 """An ordered page/section of a form"""
@@ -40138,6 +40520,8 @@ type mjBizAppsFormsFormResponse_ {
   SubmittedAt: Timestamp
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormResponseIDArray: [mjBizAppsFormsFormAutomationRun_!]!
+  mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_FormResponseIDArray: [mjBizAppsFormsFormEntityBindingRecord_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_ResponseIDArray: [mjBizAppsFormsFormResponseAnswer_!]!
 }
 
@@ -40232,7 +40616,9 @@ type mjBizAppsFormsForm_ {
   StyleID: String
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_FormIDArray: [mjBizAppsFormsFormAutomation_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormDistributions_FormIDArray: [mjBizAppsFormsFormDistribution_!]!
+  mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings_FormIDArray: [mjBizAppsFormsFormEntityBinding_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormPages_FormIDArray: [mjBizAppsFormsFormPage_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_FormIDArray: [mjBizAppsFormsFormQuestion_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormIDArray: [mjBizAppsFormsFormResponse_!]!

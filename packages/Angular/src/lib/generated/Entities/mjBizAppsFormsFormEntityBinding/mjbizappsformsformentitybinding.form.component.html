@@ -10,11 +10,11 @@
     <!-- ========================================
          FIELD PANELS
          ======================================== -->
-    <!-- Form & Status Section -->
+    <!-- Binding Configuration Section -->
     <mj-collapsible-panel
-        SectionKey="formStatus"
-        SectionName="Form & Status"
-        Icon="fa fa-file-alt"
+        SectionKey="bindingConfiguration"
+        SectionName="Binding Configuration"
+        Icon="fa fa-sliders-h"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
@@ -29,11 +29,18 @@
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="FormVersionID"
+            FieldName="Name"
             Type="textbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
-            LinkType="Record"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="Description"
+            Type="textarea"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
@@ -46,60 +53,60 @@
 
     </mj-collapsible-panel>
 
-    <!-- Respondent Details Section -->
+    <!-- Target Entity Details Section -->
     <mj-collapsible-panel
-        SectionKey="respondentDetails"
-        SectionName="Respondent Details"
-        Icon="fa fa-user-circle"
+        SectionKey="targetEntityDetails"
+        SectionName="Target Entity Details"
+        Icon="fa fa-database"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="AnonymousSessionID"
-            Type="textbox"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="RespondentPersonID"
+            FieldName="TargetEntityID"
             Type="textbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
             LinkType="Record"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="TargetEntityName"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
-    <!-- Submission Metadata Section -->
+    <!-- Logic and Rules Section -->
     <mj-collapsible-panel
-        SectionKey="submissionMetadata"
-        SectionName="Submission Metadata"
-        Icon="fa fa-clock"
+        SectionKey="logicAndRules"
+        SectionName="Logic and Rules"
+        Icon="fa fa-code"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="StartedAt"
-            Type="datepicker"
+            FieldName="FieldMappings"
+            Type="code"
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="SubmittedAt"
-            Type="datepicker"
+            FieldName="IdentityRule"
+            Type="code"
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
         <mj-form-field 
             [Record]="record"
             [ShowLabel]="true"
-            FieldName="SourceMetadata"
+            FieldName="MergePolicy"
             Type="code"
             [EditMode]="EditMode"
             [FormContext]="formContext"
@@ -139,25 +146,25 @@
          RELATED ENTITY PANELS
          ======================================== -->
 
-    <!-- Form Response Answers Section -->
+    <!-- Form Automations Section -->
     <mj-collapsible-panel
-        SectionKey="mJBizAppsFormsFormResponseAnswers"
-        SectionName="Form Response Answers"
-        Icon="fa fa-list-alt"
+        SectionKey="mJBizAppsFormsFormAutomations"
+        SectionName="Form Automations"
+        Icon="fa fa-bolt"
         Variant="related-entity"
         [Form]="this"
         [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormResponseAnswers')"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormAutomations')"
         [DefaultExpanded]="false">
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Response Answers','ResponseID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Response Answers')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormResponseAnswers')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Automations','BindingID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automations')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormAutomations')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormResponseAnswers', $event.totalRowCount)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormAutomations', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>
@@ -177,37 +184,12 @@
         @if (record.IsSaved) {
         <div>
             <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Entity Binding Records','FormResponseID')"
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Entity Binding Records','BindingID')"
                 [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Binding Records')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormEntityBindingRecords')"
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormEntityBindingRecords', $event.totalRowCount)"
-                >
-            </mj-explorer-entity-data-grid>
-        </div>
-        }
-    </mj-collapsible-panel>
-
-    <!-- Form Automation Runs Section -->
-    <mj-collapsible-panel
-        SectionKey="mJBizAppsFormsFormAutomationRuns"
-        SectionName="Form Automation Runs"
-        Icon="fa fa-tasks"
-        Variant="related-entity"
-        [Form]="this"
-        [FormContext]="formContext"
-        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormAutomationRuns')"
-        [DefaultExpanded]="false">
-        @if (record.IsSaved) {
-        <div>
-            <mj-explorer-entity-data-grid
-                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Automation Runs','FormResponseID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automation Runs')"
-                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormAutomationRuns')"
-                [ShowToolbar]="false"
-                (Navigate)="OnFormNavigate($event)"
-                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormAutomationRuns', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

@@ -15,8 +15,12 @@ import { EntityViewerModule } from '@memberjunction/ng-entity-viewer';
 import { LinkDirectivesModule } from '@memberjunction/ng-link-directives';
 
 // Import Generated Components
+import { mjBizAppsFormsFormAutomationRunFormComponent } from "./Entities/mjBizAppsFormsFormAutomationRun/mjbizappsformsformautomationrun.form.component";
+import { mjBizAppsFormsFormAutomationFormComponent } from "./Entities/mjBizAppsFormsFormAutomation/mjbizappsformsformautomation.form.component";
 import { mjBizAppsFormsFormCategoryFormComponent } from "./Entities/mjBizAppsFormsFormCategory/mjbizappsformsformcategory.form.component";
 import { mjBizAppsFormsFormDistributionFormComponent } from "./Entities/mjBizAppsFormsFormDistribution/mjbizappsformsformdistribution.form.component";
+import { mjBizAppsFormsFormEntityBindingRecordFormComponent } from "./Entities/mjBizAppsFormsFormEntityBindingRecord/mjbizappsformsformentitybindingrecord.form.component";
+import { mjBizAppsFormsFormEntityBindingFormComponent } from "./Entities/mjBizAppsFormsFormEntityBinding/mjbizappsformsformentitybinding.form.component";
 import { mjBizAppsFormsFormPageFormComponent } from "./Entities/mjBizAppsFormsFormPage/mjbizappsformsformpage.form.component";
 import { mjBizAppsFormsFormQuestionOptionFormComponent } from "./Entities/mjBizAppsFormsFormQuestionOption/mjbizappsformsformquestionoption.form.component";
 import { mjBizAppsFormsFormQuestionFormComponent } from "./Entities/mjBizAppsFormsFormQuestion/mjbizappsformsformquestion.form.component";
@@ -29,8 +33,12 @@ import { mjBizAppsFormsFormFormComponent } from "./Entities/mjBizAppsFormsForm/m
 
 @NgModule({
 declarations: [
+    mjBizAppsFormsFormAutomationRunFormComponent,
+    mjBizAppsFormsFormAutomationFormComponent,
     mjBizAppsFormsFormCategoryFormComponent,
     mjBizAppsFormsFormDistributionFormComponent,
+    mjBizAppsFormsFormEntityBindingRecordFormComponent,
+    mjBizAppsFormsFormEntityBindingFormComponent,
     mjBizAppsFormsFormPageFormComponent,
     mjBizAppsFormsFormQuestionOptionFormComponent,
     mjBizAppsFormsFormQuestionFormComponent,
