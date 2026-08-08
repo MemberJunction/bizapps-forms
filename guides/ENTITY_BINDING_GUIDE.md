@@ -264,16 +264,22 @@ quietly corrupt data are the ones that need exhaustive tests and are impractical
 
 ## 9. Not built yet
 
-- **File answers into File-FK columns.** A file answer narrows to its bare GUID correctly, but the
-  upload-provenance check (F-SEC-1) must land before a binding writes one to a business record —
-  `__mj.File` rows carry no owner, so a respondent can submit any file's GUID, and copying it onto
-  a record other users can read turns that into cross-tenant disclosure. The builder will not offer
-  a file answer for anything but a uniqueidentifier column, which narrows the exposure but does not
-  close it. See the note at `narrowObjectValues` in `binding-executor.ts`. **Blocked on decision
-  DG-12a** (who writes the upload-provenance row) — see `plans/UPLOAD_PROVENANCE_LEDGER_SPEC.md`.
-- **Back-fill of the legacy hooks.** The four hard-coded on-submit actions still run for every form
-  that configures no automations. Deleting that list requires seeding equivalent automations and a
-  parity test proving identical effects — guarantee G1.
+- **File answers into File-FK columns — REFUSED, not merely undone.** `__mj.File` rows carry no
+  owner, so a submitted fileId proves the file exists, not that this respondent uploaded it, and
+  copying one onto a record other users can read is cross-tenant disclosure. The executor now
+  refuses any mapping whose value came from a file answer, as a config-scoped failure. The switch
+  to flip when upload provenance becomes verifiable is `ExecuteBindingInput.allowFileAnswers` —
+  deliberately a parameter rather than a constant, so the guard has one greppable place to be
+  turned on instead of being deleted from the middle of the executor. Needs the provenance ledger
+  (F-SEC-1 / decision DG-12a, `plans/UPLOAD_PROVENANCE_LEDGER_SPEC.md`); the recommendation on the
+  table is that the upload endpoint elevates and the anonymous role holds no grants at all, because
+  a ledger the anonymous role can write is not a ledger.
+- **Deleting the legacy hook list.** The four hard-coded on-submit actions still run for any form
+  that configures no automations, and dispatch is all-or-nothing — so the builder now seeds
+  equivalents for all four the first time a form configures anything, making the cutover per-form
+  and visible rather than a silent regression. `legacy-automation-parity.spec.ts` holds the
+  assertions that must pass before `ON_SUBMIT_ACTION_NAMES` can be removed; what remains is a
+  migration seeding those rows for forms that already exist.
 - **Builder editing.** The On Submit tab creates bindings and lists what is configured; it does not
   yet edit or delete an existing one, reorder automations, or run the dry-run preview the spec
   describes. Changing a binding today means editing the row.

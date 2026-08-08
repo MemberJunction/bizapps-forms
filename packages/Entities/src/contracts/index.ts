@@ -12,5 +12,6 @@ export * from './answer-format';
 export * from './answer-canonical';
 export * from './entity-binding';
 export * from './entity-binding-merge';
+export * from './legacy-automations';
 export * from './submission';
 export * from './schemas';

@@ -358,6 +358,32 @@ describe('executeBinding — regressions found in adversarial review', () => {
     expect(gateway.writes[0]?.values.CompanyID).toBeUndefined();
   });
 
+  it('refuses to map a file answer onto a field until provenance can be verified', async () => {
+    const gateway = new FakeGateway();
+    const config = configOf({
+      fieldMappings: parseFieldMappings({
+        version: 1,
+        fields: [
+          { targetField: 'Email', source: { kind: 'question', questionId: 'q-email' } },
+          { targetField: 'Notes', source: { kind: 'question', questionId: 'q-file' } },
+        ],
+      }),
+      identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }),
+    });
+    const answers = answersOf([
+      { QuestionID: 'q-email', TextValue: 'a@b.com' },
+      { QuestionID: 'q-file', FileID: 'file-guid-1' },
+    ]);
+
+    const result = await run(gateway, config, answers);
+
+    // __mj.File has no owner, so a submitted fileId proves existence, not authorship. Writing one
+    // onto a record other users can read is cross-tenant disclosure.
+    expect(!result.ok && result.failure.scope).toBe('config');
+    expect(!result.ok && result.failure.message).toContain('Notes');
+    expect(gateway.writes).toEqual([]);
+  });
+
   it('writes a file answer as its bare GUID, not the wrapper object', async () => {
     const gateway = new FakeGateway();
     const config = configOf({
@@ -375,7 +401,7 @@ describe('executeBinding — regressions found in adversarial review', () => {
       { QuestionID: 'q-file', FileID: 'file-guid-1' },
     ]);
 
-    await run(gateway, config, answers);
+    await executeBinding({ config, answers, gateway, allowedEntities: null, allowFileAnswers: true });
 
     // Passed through, the wrapper reaches Set() as an object and stringifies to "[object Object]" —
     // a write that succeeds, corrupts the column and reports success.

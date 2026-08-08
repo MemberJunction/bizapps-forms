@@ -133,6 +133,20 @@ export interface ExecuteBindingInput {
    * honest inside it.
    */
   allowedEntities: ReadonlySet<string> | null;
+  /**
+   * Permit mapping a FileUpload answer onto a target field.
+   *
+   * Off by default and intended to stay off until upload provenance is verifiable. It exists as a
+   * parameter rather than a constant so the check has a single, greppable switch to flip when the
+   * provenance ledger lands, instead of the guard being deleted from the middle of the executor and
+   * nobody noticing what it protected.
+   */
+  allowFileAnswers?: boolean;
+}
+
+/** Target fields whose value came from a file answer. */
+function fileAnswerTargets(values: ReadonlyMap<string, CanonicalAnswerValue>): string[] {
+  return [...values].filter(([, value]) => isFileAnswer(value)).map(([field]) => field);
 }
 
 function fail(scope: BindingFailureScope, retryable: boolean, message: string): BindingResult {
@@ -197,6 +211,22 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<Bindin
     return fail('candidate', false, `Submission is missing required value(s): ${resolved.missingRequired.join(', ')}.`);
   }
 
+  const fileTargets = fileAnswerTargets(resolved.values);
+  if (fileTargets.length > 0 && !input.allowFileAnswers) {
+    // ENFORCED, not documented. `__mj.File` rows carry no owner column and no row-level security,
+    // so the foreign key on a submitted fileId proves the file EXISTS, not that this respondent
+    // uploaded it. Copying one onto a business record that other users can read turns "a
+    // respondent can name any file" into cross-tenant disclosure. Until upload provenance can be
+    // verified (F-SEC-1), the mapping is refused rather than trusted — a comment would not have
+    // stopped a hand-written mapping, and the builder's picker only narrows the accident, not the
+    // attack.
+    return fail(
+      'config',
+      false,
+      `Mapping a file answer to ${fileTargets.join(', ')} is not permitted yet: an uploaded file's ` +
+        `provenance cannot be verified, so it must not be written onto a record other users can read.`,
+    );
+  }
   narrowObjectValues(resolved.values);
 
   for (const scope of config.identityRule.scope ?? []) {

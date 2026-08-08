@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { EntityFieldInfo, EntityInfo } from '@memberjunction/core';
+import { LEGACY_ON_SUBMIT_AUTOMATIONS } from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormAutomationEntity,
   mjBizAppsFormsFormEntityBindingEntity,
@@ -279,6 +280,60 @@ export class AutomationTabComponent implements OnInit {
     return Boolean(this.selectedEntityName) && this.mappings.length > 0;
   }
 
+  /**
+   * Write the legacy on-submit defaults as automations, if this form has none yet.
+   *
+   * Returns how many were seeded so the caller can order itself after them. A default whose Action
+   * is not registered in this deployment is skipped rather than failing the save — it was not
+   * running before either, since the legacy runner also resolves by name and skips what it cannot
+   * find, so skipping preserves the behaviour instead of inventing a new failure.
+   */
+  private async seedLegacyDefaultsIfFirst(): Promise<number> {
+    if (this.automations().length > 0) {
+      return 0;
+    }
+    const actions = await new RunView().RunView<{ ID: string; Name: string }>({
+      EntityName: 'MJ: Actions',
+      ExtraFilter: LEGACY_ON_SUBMIT_AUTOMATIONS.map((d) => `Name='${d.actionName.replace(/'/g, "''")}'`).join(' OR '),
+      Fields: ['ID', 'Name'],
+      ResultType: 'simple',
+    });
+    if (!actions.Success) {
+      return 0;
+    }
+    const idByName = new Map(actions.Results.map((a) => [a.Name, a.ID]));
+
+    let seeded = 0;
+    for (const legacy of LEGACY_ON_SUBMIT_AUTOMATIONS) {
+      const actionId = idByName.get(legacy.actionName);
+      if (!actionId) {
+        continue;
+      }
+      const row = await this.md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
+        'MJ_BizApps_Forms: Form Automations',
+      );
+      if (!row) {
+        continue;
+      }
+      row.NewRecord();
+      row.FormID = this.FormID;
+      row.Name = legacy.actionName;
+      row.TargetType = 'Action';
+      row.ActionID = actionId;
+      row.Trigger = 'OnComplete';
+      // Sync and best-effort, matching how the legacy runner fired them: sequentially, with a
+      // failure logged and the rest continuing.
+      row.ExecutionMode = 'Sync';
+      row.DisplayOrder = legacy.displayOrder;
+      row.ContinueOnError = true;
+      row.IsActive = true;
+      if (await row.Save()) {
+        seeded += 1;
+      }
+    }
+    return seeded;
+  }
+
   /** Create the binding and the automation that runs it. */
   protected async save(): Promise<void> {
     this.error.set('');
@@ -320,6 +375,12 @@ export class AutomationTabComponent implements OnInit {
       return;
     }
 
+    // Adding the first automation switches this form off the legacy hard-coded hook list — dispatch
+    // is all-or-nothing — so the four defaults are written first. Without this, adding a binding
+    // would silently stop the confirmation email and the follow-up task. Seeded as ordinary rows,
+    // so the author can see them and turn any of them off deliberately.
+    const seeded = await this.seedLegacyDefaultsIfFirst();
+
     const automation = await this.md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
       'MJ_BizApps_Forms: Form Automations',
     );
@@ -336,7 +397,7 @@ export class AutomationTabComponent implements OnInit {
     // Sync so anything configured after it can rely on the record existing — the confirmation email
     // that reports it, or a follow-up task that links to it.
     automation.ExecutionMode = 'Sync';
-    automation.DisplayOrder = this.automations().length + 1;
+    automation.DisplayOrder = this.automations().length + seeded + 1;
     automation.ContinueOnError = true;
     automation.IsActive = true;
     if (!(await automation.Save())) {
