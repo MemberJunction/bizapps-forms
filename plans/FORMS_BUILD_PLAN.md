@@ -44,11 +44,22 @@ implemented — *not* stubbed — and corrected several the log had **understate
   `Score`/`ScoreRationale` to real responses).
 
 Live DB **`MJ_Forms_Dev`** (localhost:1456 — the earlier `MJ_Forms` server is gone; older Progress Log
-entries name it and were accurate when written): all 10 `__mj_BizAppsForms` tables present plus
-`flyway_schema_history`, both migrations applied,
-metadata seeded (Form Respondent role + response-only CanCreate perms, 7 FormStyle presets, FormCategory
-tree, Forms app + nav + 2 dashboards). All work is on the org remote; the branching model is
-`feature → next → main`.
+entries name it and were accurate when written): all `__mj_BizAppsForms` tables present plus
+`flyway_schema_history`, all migrations applied, metadata seeded. All work is on the org remote; the
+branching model is `feature → next → main`.
+
+**⚠️ That "metadata seeded" line was true of ONE DATABASE and nowhere else, until 2026-08-08.**
+`mj-app.json` names a `metadata/` directory, but MJ's manifest schema is explicit that
+`metadata.directory` is a dev-time pointer the install engine **never reads** — seeding happens
+exclusively through `migrations/`. MJ Forms shipped no seed migration for any release, so every
+`mj sync push` wrote to this one database and left no artifact. A clean `mj app install` produced a
+Forms deployment with no Form Respondent role, no `CanCreate` grant on the response entities, no
+styles, categories, application, nav, dashboards or AI authoring — the anonymous submit path could
+not run, and every step reported success. Fixed by
+`migrations/V202608081700__v0.8.x__Metadata_Sync.sql` (84 records) plus a teardown, a
+`SchemaInfo.EntityNamePrefix` migration and a CI gate. Full account:
+[`DISTRIBUTION_SEED_PLAN.md`](DISTRIBUTION_SEED_PLAN.md). **The rule this leaves behind: a
+`mj sync push` whose result exists only in your dev DB is an unshipped change.**
 
 **⚠️ The anonymous submit path did not work in any published 0.2.x.** Standing the product up for the
 first time (2026-07-30) found two independent defects, either alone fatal — a case-sensitive GUID
@@ -698,6 +709,47 @@ native entities. This is the reporting differentiator no incumbent has.
 ---
 
 ## 12. Progress Log
+
+- **2026-08-08 — MJ Forms had never been installable by anyone but its author.** Asked whether an MJ
+  upgrade needs an `mj sync` migration (it does not — MJ ships its own core Metadata_Sync per release
+  band, applied by `npx mj migrate -t`), which surfaced that **this repo had never shipped a metadata
+  seed migration at all**. `metadata.directory` in `mj-app.json` is documentation; MJ's install engine
+  never reads it. So ~56 records — the Form Respondent role, its response-only `CanCreate` grants,
+  styles, categories, actions, prompts, the application, nav and dashboards — existed only in
+  `MJ_Forms_Dev`. The mechanical cause was a missing `sqlLogging.formatAsMigration` block in
+  `metadata/.mj-sync.json`; both sibling Open Apps ship one and Forms did not.
+
+  Now shipped as `V202608081700__v0.8.x__Metadata_Sync.sql` (84 records), generated against an emptied
+  database so every statement is a CREATE, and verified by emptying that database again and replaying
+  **the migration** rather than the push. **The generator's output cannot ship verbatim**: MetadataSync
+  writes core SP calls with `${flyway:defaultSchema}` because in MJ's own repo the default schema *is*
+  the core schema — here that would have called `__mj_BizAppsForms.spCreateRole`, an object that does
+  not exist, on every install.
+
+  **Four defects, none reachable by unit tests, each found only by running something end to end:**
+  1. `${commonSchema}` resolved locally (from *our* `mj.config.cjs`) but not at install (built from the
+     *host's*), and Skyway leaves unknown placeholders untouched rather than failing — so it shipped as
+     a literal string and silently stopped excluding `__mj_BizAppsCommon` from five CodeGen sweeps.
+  2. The teardown could not remove a *used* installation: remove runs it before dropping the app schema,
+     so `FormAutomation` still references the Actions being retired — leaving them blocks the delete,
+     NULLing them violates `CK_FormAutomation_SingleTarget`. A pristine canary passes either way.
+  3. `smoke/seed-binding-smoke.mjs` minted its own principal under a different GUID; once the seed
+     shipped one, `Role.Name` being UNIQUE meant any database that had run the fixture could no longer
+     apply the migration.
+  4. The `Forms Automation Runner` role held no read on `MJ_BizApps_Forms: Forms` or `Form Questions`,
+     which its own runtime reads — so automations-on-by-default would have failed on every fresh
+     install, response saved and every side effect silently skipped.
+
+  Also: automations now ship **on** (the principal *and* its `user-roles` grant — the two are useless
+  apart), `SchemaInfo.EntityNamePrefix` is declared in the database so a host's CodeGen cannot misname
+  Forms entities (caliber's #119, inoculated), `mj app remove` retires our `__mj` rows, and
+  `npm run lint:distribution` + `distribution-gate.yml` guard both defect classes with self-tests that
+  prove the gate fires. Verified: full migration set applied **from zero** (7 applied, 0 failed) against
+  a database with Forms fully removed, then all four smoke suites green against a real database —
+  binding 13/13, automation semantics, upload provenance, and the anonymous respondent path.
+  `MJ_Forms_Dev` was reconciled to the shipped GUIDs; it had also been missing 6 entity permissions
+  outright. Still unproven, and unprovable before the v0.8.0 tag exists: the actual `mj app install`,
+  which fetches manifest and migrations from GitHub at a version tag.
 
 - **2026-07-31 — release prep for 0.3.0: the publish workflow could not have shipped a minor.**
   `.github/workflows/publish.yml` predicted the next version from *"were any migrations added since the

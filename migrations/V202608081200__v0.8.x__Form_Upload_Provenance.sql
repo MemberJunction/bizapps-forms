@@ -165,7 +165,7 @@ INSERT INTO [${mjSchema}].[EntityPermission]
                                                    ('890ae739-1a57-4070-9358-d1788cc2c4c0', 'DFAFCCEC-6A37-EF11-86D4-000D3A4E707E', 1, 1, 1, 1, GETUTCDATE(), GETUTCDATE());
 
 /* SQL text to update existing entities from schema */
-EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks';
+EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks';
 
 /* SQL text to add special date field __mj_CreatedAt to entity ${flyway:defaultSchema}.FormUpload */
 ALTER TABLE [${flyway:defaultSchema}].[FormUpload] ADD [__mj_CreatedAt] DATETIMEOFFSET NULL;
@@ -1147,10 +1147,10 @@ GO
       END;
 
 /* SQL text to update existing entity fields from schema */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks';
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks';
 
 /* SQL text to set default column width where needed */
-EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks';
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks';
 
 /* SQL text to insert entity field value with ID 21c5eaf7-4dba-4717-9986-0f563aef9c53 */
 INSERT INTO [${mjSchema}].[EntityFieldValue]
@@ -1217,7 +1217,7 @@ UPDATE [${mjSchema}].[EntityField] SET ValueListType='List' WHERE ID='C104492A-2
    END;
 
 /* SQL text to sync schema info from database schemas */
-EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks';
+EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks';
 
 /* Index for Foreign Keys for FormUpload */
 -----------------------------------------------------------------
@@ -1622,7 +1622,7 @@ GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormUpload] TO [cdp_Develope
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormUpload] TO [cdp_Developer], [cdp_Integration];
 
 /* SQL text to delete unneeded entity fields (1 scoped entities) */
-EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks', @EntityIDs='890AE739-1A57-4070-9358-D1788CC2C4C0';
+EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks', @EntityIDs='890AE739-1A57-4070-9358-D1788CC2C4C0';
 
 /* SQL text to insert 4 new entity field(s) */
 
@@ -1879,10 +1879,10 @@ EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,stag
       END;
 
 /* SQL text to update existing entity fields from schema (1 scoped entities) */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks', @EntityIDs='890AE739-1A57-4070-9358-D1788CC2C4C0';
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks', @EntityIDs='890AE739-1A57-4070-9358-D1788CC2C4C0';
 
 /* SQL text to set default column width where needed */
-EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${commonSchema},${mjSchema}_BizAppsTasks,${commonSchema},${mjSchema}_bizappstasks';
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},__mj_BizAppsCommon,__mj_BizAppsTasks,__mj_BizAppsCommon,__mj_bizappstasks';
 
 /* Set field properties for entity */
 

@@ -7,10 +7,14 @@
       "Email": "forms-automation@localhost.invalid",
       "Type": "User",
       "IsActive": true,
-      "Title": "Service principal for MJ Forms on-submit automations and entity bindings"
+      "Title": "MJ Forms automation service principal"
     },
     "primaryKey": {
       "ID": "9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84"
+    },
+    "sync": {
+      "lastModified": "2026-08-08T18:25:28.582Z",
+      "checksum": "937bd291fb1a1c84b0209c3d05635895a0d480fe1208ddaa32060d865f194b35"
     }
   }
 ]
