@@ -6352,6 +6352,23 @@ input CreatemjBizAppsFormsFormStyleInput {
   RestoreContext___: RestoreContextInput
 }
 
+input CreatemjBizAppsFormsFormUploadInput {
+  AnonymousSessionID: String
+  ContentType: String
+  DistributionID: String
+  FileID: String
+  FileName: String
+  FormID: String
+  ID: String
+  ProviderKey: String
+  QuestionID: String
+  ResponseDraftID: String
+  RestoreContext___: RestoreContextInput
+  SizeBytes: Int
+  Status: String
+  UploadedByUserID: String
+}
+
 input CreatemjBizAppsFormsFormVersionInput {
   DefinitionSnapshot: String
   FormID: String
@@ -25418,6 +25435,7 @@ type Mutation {
   CreatemjBizAppsFormsFormResponse(input: CreatemjBizAppsFormsFormResponseInput!): mjBizAppsFormsFormResponse_!
   CreatemjBizAppsFormsFormResponseAnswer(input: CreatemjBizAppsFormsFormResponseAnswerInput!): mjBizAppsFormsFormResponseAnswer_!
   CreatemjBizAppsFormsFormStyle(input: CreatemjBizAppsFormsFormStyleInput!): mjBizAppsFormsFormStyle_!
+  CreatemjBizAppsFormsFormUpload(input: CreatemjBizAppsFormsFormUploadInput!): mjBizAppsFormsFormUpload_!
   CreatemjBizAppsFormsFormVersion(input: CreatemjBizAppsFormsFormVersionInput!): mjBizAppsFormsFormVersion_!
   DeleteFile(ID: String!, options___: DeleteOptionsInput!): MJFile_!
   DeleteFileCategory(ID: String!, options___: DeleteOptionsInput!): MJFileCategory_!
@@ -25819,6 +25837,7 @@ type Mutation {
   DeletemjBizAppsFormsFormResponse(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormResponse_!
   DeletemjBizAppsFormsFormResponseAnswer(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormResponseAnswer_!
   DeletemjBizAppsFormsFormStyle(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormStyle_!
+  DeletemjBizAppsFormsFormUpload(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormUpload_!
   DeletemjBizAppsFormsFormVersion(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormVersion_!
   EmbedText(modelSize: String!, textToEmbed: [String!]!): EmbedTextResult!
   EndLiveKitRoom(roomName: String!): Boolean!
@@ -26425,6 +26444,7 @@ type Mutation {
   UpdatemjBizAppsFormsFormResponse(input: UpdatemjBizAppsFormsFormResponseInput!): mjBizAppsFormsFormResponse_!
   UpdatemjBizAppsFormsFormResponseAnswer(input: UpdatemjBizAppsFormsFormResponseAnswerInput!): mjBizAppsFormsFormResponseAnswer_!
   UpdatemjBizAppsFormsFormStyle(input: UpdatemjBizAppsFormsFormStyleInput!): mjBizAppsFormsFormStyle_!
+  UpdatemjBizAppsFormsFormUpload(input: UpdatemjBizAppsFormsFormUploadInput!): mjBizAppsFormsFormUpload_!
   UpdatemjBizAppsFormsFormVersion(input: UpdatemjBizAppsFormsFormVersionInput!): mjBizAppsFormsFormVersion_!
   UploadRealtimeRecording(agentSessionId: String!, audioBase64: String!, consent: Boolean, durationMs: Int, mimeType: String!, peaks: [Float!]): UploadRealtimeRecordingResult!
   UploadRealtimeRecordingSegment(agentSessionId: String!, audioBase64: String!, mimeType: String!, segmentIndex: Int!): Boolean!
@@ -28284,6 +28304,9 @@ type Query {
   RunmjBizAppsFormsFormStyleDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormStyleViewResult!
   RunmjBizAppsFormsFormStyleViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormStyleViewResult!
   RunmjBizAppsFormsFormStyleViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormStyleViewResult!
+  RunmjBizAppsFormsFormUploadDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormUploadViewResult!
+  RunmjBizAppsFormsFormUploadViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormUploadViewResult!
+  RunmjBizAppsFormsFormUploadViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormUploadViewResult!
   RunmjBizAppsFormsFormVersionDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormVersionViewResult!
   RunmjBizAppsFormsFormVersionViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormVersionViewResult!
   RunmjBizAppsFormsFormVersionViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormVersionViewResult!
@@ -28330,6 +28353,7 @@ type Query {
   mjBizAppsFormsFormResponse(ID: String!): mjBizAppsFormsFormResponse_
   mjBizAppsFormsFormResponseAnswer(ID: String!): mjBizAppsFormsFormResponseAnswer_
   mjBizAppsFormsFormStyle(ID: String!): mjBizAppsFormsFormStyle_
+  mjBizAppsFormsFormUpload(ID: String!): mjBizAppsFormsFormUpload_
   mjBizAppsFormsFormVersion(ID: String!): mjBizAppsFormsFormVersion_
   readSqlLogFile(maxLines: Int, sessionId: String!): String!
   sqlLoggingConfig: SqlLoggingConfig!
@@ -33214,6 +33238,16 @@ type RunmjBizAppsFormsFormStyleViewResult {
   ErrorMessage: String
   ExecutionTime: Int
   Results: [mjBizAppsFormsFormStyle_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormUploadViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormUpload_!]!
   RowCount: Int
   Success: Boolean!
   TotalRowCount: Int
@@ -40023,6 +40057,24 @@ input UpdatemjBizAppsFormsFormStyleInput {
   RestoreContext___: RestoreContextInput
 }
 
+input UpdatemjBizAppsFormsFormUploadInput {
+  AnonymousSessionID: String
+  ContentType: String
+  DistributionID: String
+  FileID: String
+  FileName: String
+  FormID: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  ProviderKey: String
+  QuestionID: String
+  ResponseDraftID: String
+  RestoreContext___: RestoreContextInput
+  SizeBytes: Int
+  Status: String
+  UploadedByUserID: String
+}
+
 input UpdatemjBizAppsFormsFormVersionInput {
   DefinitionSnapshot: String
   FormID: String
@@ -40287,6 +40339,7 @@ type mjBizAppsFormsFormDistribution_ {
   Status: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsMJ_BizApps_Forms_FormUploads_DistributionIDArray: [mjBizAppsFormsFormUpload_!]!
 }
 
 """
@@ -40453,6 +40506,7 @@ type mjBizAppsFormsFormQuestion_ {
   _mj__UpdatedAt: Timestamp!
   mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions_QuestionIDArray: [mjBizAppsFormsFormQuestionOption_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_QuestionIDArray: [mjBizAppsFormsFormResponseAnswer_!]!
+  mjBizAppsFormsMJ_BizApps_Forms_FormUploads_QuestionIDArray: [mjBizAppsFormsFormUpload_!]!
 }
 
 """
@@ -40562,6 +40616,68 @@ type mjBizAppsFormsFormStyle_ {
 }
 
 """
+Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file
+"""
+type mjBizAppsFormsFormUpload_ {
+  """
+  The anonymous session id at upload time. A fallback correlation key; blank is tolerated
+  """
+  AnonymousSessionID: String
+
+  """Stored content type"""
+  ContentType: String
+  Distribution: String!
+
+  """
+  The distribution the upload was made through. The hard scope every provenance check enforces
+  """
+  DistributionID: String!
+  File: String!
+
+  """The uploaded file"""
+  FileID: String!
+
+  """Original sanitized filename"""
+  FileName: String
+  Form: String!
+
+  """
+  The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed
+  """
+  FormID: String!
+  ID: String!
+
+  """
+  Storage key of the file, so the Forms path prefix can be checked without loading the file row
+  """
+  ProviderKey: String
+
+  """The question the file answers"""
+  QuestionID: String
+
+  """
+  The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows
+  """
+  ResponseDraftID: String
+
+  """Size in bytes"""
+  SizeBytes: Int
+
+  """
+  Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance
+  """
+  Status: String!
+  UploadedByUser: String
+
+  """
+  The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record
+  """
+  UploadedByUserID: String
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
 Immutable published snapshots of a form; responses pin the version they were filled against
 """
 type mjBizAppsFormsFormVersion_ {
@@ -40622,5 +40738,6 @@ type mjBizAppsFormsForm_ {
   mjBizAppsFormsMJ_BizApps_Forms_FormPages_FormIDArray: [mjBizAppsFormsFormPage_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_FormIDArray: [mjBizAppsFormsFormQuestion_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormIDArray: [mjBizAppsFormsFormResponse_!]!
+  mjBizAppsFormsMJ_BizApps_Forms_FormUploads_FormIDArray: [mjBizAppsFormsFormUpload_!]!
   mjBizAppsFormsMJ_BizApps_Forms_FormVersions_FormIDArray: [mjBizAppsFormsFormVersion_!]!
 }
