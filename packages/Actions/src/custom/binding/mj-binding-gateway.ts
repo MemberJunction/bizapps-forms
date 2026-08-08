@@ -54,7 +54,11 @@ export class MJBindingGateway implements BindingTargetGateway {
    * such record" from "we could not find out", because the two lead to opposite actions.
    */
   public async findMatch(query: MatchQuery): Promise<MatchedRecord | null> {
-    const filter = query.criteria.map(criterionToSql).join(' AND ');
+    const entityInfo = new Metadata().EntityByName(query.entityName);
+    if (!entityInfo) {
+      throw new Error(`Entity "${query.entityName}" could not be resolved for an identity lookup.`);
+    }
+    const filter = query.criteria.map((c) => criterionToSql(c, entityInfo)).join(' AND ');
     const result = await new RunView().RunView<Record<string, unknown>>(
       {
         EntityName: query.entityName,
@@ -133,9 +137,27 @@ export class MJBindingGateway implements BindingTargetGateway {
  * value against a raw column only works by accident of collation — and the accident differs
  * between SQL Server and PostgreSQL, so a binding that matched in one would silently create
  * duplicates in the other.
+ *
+ * THE COLUMN NAME COMES FROM METADATA, NEVER FROM THE CRITERION. The criterion's field name is
+ * used only to LOOK UP the real `EntityFieldInfo`, and the canonical `field.Name` is what gets
+ * written into the SQL. A name is authored configuration, so it is not user input in the usual
+ * sense, but it is still a string travelling into an identifier position — and resolving it
+ * through metadata means no amount of `]` or comment syntax in an authored field name can become
+ * SQL, without needing to reason about escaping at all.
+ *
+ * The executor already refuses a binding whose fields are not real columns, so this is the second
+ * of two gates. It exists because this gateway is exported and callable on its own: a check that
+ * lives only in the caller protects only the callers that remember it.
  */
-function criterionToSql(criterion: { field: string; value: string; normalize: IdentityNormalization }): string {
-  const column = `[${criterion.field}]`;
+function criterionToSql(
+  criterion: { field: string; value: string; normalize: IdentityNormalization },
+  entity: EntityInfo,
+): string {
+  const field = entity.FieldByName(criterion.field);
+  if (!field) {
+    throw new Error(`"${criterion.field}" is not a field of "${entity.Name}" and cannot be matched on.`);
+  }
+  const column = `[${field.Name}]`;
   switch (criterion.normalize) {
     case 'LowerCaseTrim':
       return `LOWER(LTRIM(RTRIM(${column}))) = ${sqlLiteral(criterion.value.trim().toLowerCase())}`;

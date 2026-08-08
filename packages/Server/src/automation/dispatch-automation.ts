@@ -31,6 +31,7 @@ import {
   bindingFailed,
   executeBinding,
   parseBindingConfig,
+  sqlLiteral,
   MJBindingGateway,
   type BindingOutcome,
 } from '@mj-biz-apps/forms-actions';
@@ -220,7 +221,10 @@ async function recordLedgerRow(
   const existing = await new RunView().RunView<{ ID: string }>(
     {
       EntityName: ENTITY.BindingRecord,
-      ExtraFilter: `BindingID='${bindingId}' AND FormResponseID='${ctx.responseId}'`,
+      // Both are GUIDs minted by this system — the binding id from the published snapshot, the
+      // response id validated as a UUID before it became a primary key — but escaped anyway, so
+      // the safety of this query does not rest on a fact established three modules away.
+      ExtraFilter: `BindingID=${sqlLiteral(bindingId)} AND FormResponseID=${sqlLiteral(ctx.responseId)}`,
       Fields: ['ID'],
       ResultType: 'simple',
       MaxRows: 1,
