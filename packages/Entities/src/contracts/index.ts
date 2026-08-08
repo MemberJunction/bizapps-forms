@@ -8,6 +8,7 @@
 export * from './json-value';
 export * from './conditional-rule';
 export * from './form-definition';
+export * from './published-automation-builder';
 export * from './answer-format';
 export * from './answer-canonical';
 export * from './entity-binding';

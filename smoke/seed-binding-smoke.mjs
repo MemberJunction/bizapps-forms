@@ -9,6 +9,7 @@
  * Run against a local dev database only. It writes real rows.
  */
 import { spawnSync } from 'node:child_process';
+import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
 
 // Credentials come from the process environment, not from parsing .env here: a password may
 // legitimately contain the characters a naive .env parser treats as syntax. Run this via
@@ -32,6 +33,53 @@ function sql(query) {
     throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
   }
   return res.stdout.trim();
+}
+
+/**
+ * Read one authored automation exactly as publish reads it.
+ *
+ * The column list IS `AUTHORED_AUTOMATION_FIELDS`, so a field the mapper reads but publish never
+ * requests fails here rather than publishing as `undefined`. `FOR JSON` is what makes the types
+ * survive the trip — bits come back as booleans and ints as numbers, where a text-mode sqlcmd read
+ * would hand every column back as a string and quietly publish `"1"` where `true` belongs.
+ */
+function readAuthoredAutomationRow(automationId) {
+  const columns = AUTHORED_AUTOMATION_FIELDS.map((f) => (f === 'Trigger' ? '[Trigger]' : f)).join(', ');
+  const json = sqlWide(
+    `SET NOCOUNT ON; SELECT ${columns} FROM __mj_BizAppsForms.FormAutomation ` +
+      `WHERE ID='${automationId}' FOR JSON PATH, INCLUDE_NULL_VALUES;`,
+  ).trim();
+  const [row] = JSON.parse(json || '[]');
+  if (!row) {
+    throw new Error(`automation ${automationId} was not written; cannot build a snapshot from it`);
+  }
+  return row;
+}
+
+/**
+ * Run a query whose single column may exceed sqlcmd's 256-character default.
+ *
+ * `-y 0` lifts that truncation but is mutually exclusive with both `-W` and `-h`, so this is a
+ * separate invocation rather than a flag on {@link sql}, and the header row it therefore prints is
+ * stripped here. Truncation is the nastiest kind of failure to leave in: the output still looks
+ * like JSON, it is just half a document.
+ */
+function sqlWide(query) {
+  const res = spawnSync(
+    'docker',
+    ['exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
+      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-y', '0', '-Q', query],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (res.status !== 0) {
+    throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
+  }
+  // Drop sqlcmd's column header and its dashed rule; keep the payload lines.
+  return res.stdout
+    .split('\n')
+    .filter((line) => !/^JSON_/.test(line) && !/^-+$/.test(line.trim()) && line.trim() !== '')
+    .join('')
+    .trim();
 }
 
 const BINDING_ID = '11111111-2222-4333-8444-555555555001';
@@ -126,19 +174,16 @@ IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsForms.FormAutomation WHERE ID='${AUTOMA
 console.log('  ok    binding + automation rows');
 
 // 3. Republish: put the automation INTO the snapshot, which is what actually executes.
-const automationJson = JSON.stringify([
-  {
-    id: AUTOMATION_ID,
-    name: 'Smoke: create Person',
-    targetType: 'EntityBinding',
-    bindingId: BINDING_ID,
-    trigger: 'OnComplete',
-    executionMode: 'Sync',
-    displayOrder: 1,
-    continueOnError: true,
-    isActive: true,
-  },
-]).replace(/'/g, "''");
+//
+// The snapshot is built by the SAME `buildPublishedAutomations` that publish uses, reading the row
+// that was just written, rather than by hand-writing the JSON here. Hand-writing it is what let a
+// real bug survive a green smoke run: publish emitted a hardcoded empty array for months, and this
+// script's own literal made the snapshot look correct anyway, so the suite asserted the contents
+// while stepping around the code meant to produce them. Anything the mapper gets wrong — a field
+// name, an omitted id, the sort — now fails here too.
+const authored = readAuthoredAutomationRow(AUTOMATION_ID);
+const automationJson = JSON.stringify(buildPublishedAutomations([authored])).replace(/'/g, "''");
+console.log(`  ok    snapshot automations built by the real mapper (${AUTHORED_AUTOMATION_FIELDS.length} columns read)`);
 
 sql(`
 DECLARE @VerID UNIQUEIDENTIFIER = (

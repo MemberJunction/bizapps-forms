@@ -6,7 +6,8 @@ import type {
   mjBizAppsFormsFormQuestionOptionEntity,
   mjBizAppsFormsFormStyleEntity,
 } from '@mj-biz-apps/forms-entities';
-import { buildPublishedAutomations, buildPublishedDefinition, type AuthoredAutomationRow } from './snapshot-builder';
+import { buildPublishedDefinition } from './snapshot-builder';
+import { buildPublishedAutomations, type AuthoredAutomationRow } from '@mj-biz-apps/forms-entities';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 
 /**
@@ -206,45 +207,3 @@ function automationRow(overrides: Partial<AuthoredAutomationRow> = {}): Authored
     ...overrides,
   };
 }
-
-describe('buildPublishedAutomations', () => {
-  it('sorts by DisplayOrder so the snapshot order does not depend on the query', () => {
-    const built = buildPublishedAutomations([
-      automationRow({ ID: 'third', DisplayOrder: 30 }),
-      automationRow({ ID: 'first', DisplayOrder: 10 }),
-      automationRow({ ID: 'second', DisplayOrder: 20 }),
-    ]);
-
-    expect(built.map((a) => a.id)).toEqual(['first', 'second', 'third']);
-  });
-
-  it('emits only the target id that matches the target type', () => {
-    const [action] = buildPublishedAutomations([automationRow({ TargetType: 'Action', ActionID: 'act-1' })]);
-    const [binding] = buildPublishedAutomations([
-      automationRow({ TargetType: 'EntityBinding', ActionID: null, BindingID: 'bind-1' }),
-    ]);
-
-    expect(action.actionId).toBe('act-1');
-    // Not `null`: the contract types these as optional, and serializing a null would publish a
-    // field the parser is entitled to treat as absent.
-    expect(action.bindingId).toBeUndefined();
-    expect(binding.bindingId).toBe('bind-1');
-    expect(binding.actionId).toBeUndefined();
-  });
-
-  it('parses a conditional rule so the runner can evaluate it from the snapshot', () => {
-    const [built] = buildPublishedAutomations([
-      automationRow({ ConditionalRule: '{"show":{"all":[{"questionId":"q1","op":"equals","value":"Yes"}]}}' }),
-    ]);
-
-    expect(built.conditionalRule?.show?.all?.[0].value).toBe('Yes');
-  });
-
-  it('omits a conditional rule that does not parse, so the automation always fires', () => {
-    const [built] = buildPublishedAutomations([automationRow({ ConditionalRule: 'not json' })]);
-
-    // Absent means "always fires", which matches the contract. The alternative — publishing a
-    // half-understood rule — would gate a side effect on a condition nobody authored.
-    expect(built.conditionalRule).toBeUndefined();
-  });
-});

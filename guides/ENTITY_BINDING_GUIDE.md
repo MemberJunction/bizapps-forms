@@ -4,7 +4,7 @@ How the on-submit automation layer and entity binding actually work, how to conf
 what to check when one misbehaves.
 
 This describes **what is built**. The design intent and the reasoning behind the decisions live in
-[`plans/ENTITY_BINDING_SPEC.md`](../plans/ENTITY_BINDING_SPEC.md); where the two disagree, this
+[`plans/done/ENTITY_BINDING_SPEC.md`](../plans/done/ENTITY_BINDING_SPEC.md); where the two disagree, this
 file is the one that matches the code. Section 9 lists what is specified but not yet built.
 
 ---
