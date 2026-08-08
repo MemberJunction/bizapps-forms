@@ -26,7 +26,7 @@ function sql(query) {
   const res = spawnSync(
     'docker',
     ['exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
-      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-h', '-1', '-W', '-Q', query],
+      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-Q', query],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
   if (res.status !== 0) {
@@ -68,7 +68,7 @@ function sqlWide(query) {
   const res = spawnSync(
     'docker',
     ['exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
-      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-y', '0', '-Q', query],
+      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-y', '0', '-Q', query],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
   if (res.status !== 0) {

@@ -24,7 +24,7 @@ const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
 
 function sql(q) {
   const r = spawnSync('docker', ['exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost',
-    '-d', env.DB_DATABASE, '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-h', '-1', '-W', '-Q',
+    '-d', env.DB_DATABASE, '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-Q',
     `SET NOCOUNT ON; ${q}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (r.status !== 0) throw new Error(r.stderr || r.stdout);
   return r.stdout.trim();

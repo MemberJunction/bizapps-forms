@@ -36,6 +36,7 @@
     "mergemain:update-lock": "node ci/merge_main_and_update_lock.mjs",
     "smoke:binding": "node smoke/binding-path.mjs",
     "smoke:binding:seed": "node smoke/seed-binding-smoke.mjs",
+    "smoke:automation": "node smoke/automation-semantics-path.mjs",
     "smoke:provenance": "node smoke/upload-provenance-path.mjs"
   },
   "repository": {
