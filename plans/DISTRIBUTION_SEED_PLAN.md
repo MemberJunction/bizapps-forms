@@ -1,8 +1,8 @@
 # Distribution seed plan — the metadata sync migration Forms never shipped
 
-**Status: steps 1–3 and 5–7 DONE and verified on 2026-08-08** (branch
-`feat/distribution-metadata-seed`). Step 4 — the fresh-DB `mj app install` rehearsal — is the one
-piece not done; see §7 for what was proved instead and what that does not cover.
+**Status: ALL STEPS DONE and verified on 2026-08-08** (branch
+`feat/distribution-metadata-seed`, 5 commits). Step 4 was run in the only form available before
+release — see §9. Automations now ship ON by default; §7's `users/` caveat is superseded.
 
 Written 2026-08-08, from a read of `MJ` @ `v5.51.0` (`packages/OpenApp/Engine`,
 `packages/MetadataSync`, `packages/MJCLI`, `@memberjunction/skyway-core`) and of the two sibling
@@ -322,3 +322,58 @@ drop `--exclude users`, regenerate the seed, `npm run seed:manifest`.
 3. **The metadata JSON files carry rewritten `sync` blocks** from the scratch-DB push. Content is
    unchanged (verified: only `.mj-sync.json` differs in substance) and the gate ignores `sync` by
    design, but the diff noise can be reverted if preferred.
+
+
+---
+
+## 9. Step 4 — the install rehearsal (2026-08-08)
+
+**A true `mj app install` cannot run against an unmerged branch.** The install engine fetches the
+manifest and migrations *from GitHub at a version tag*
+(`FetchManifestFromGitHub` / `DownloadMigrations(manifest.repository, manifest.version, …)`), and
+there is no install-from-branch flag. That half — GitHub fetch, npm wiring, `mj.config.cjs`
+dynamicPackages edits — waits for the v0.8.0 release.
+
+**What was run instead is the database half, which is where the risk lives.** A copy of the dev
+database was taken back to the state a host is genuinely in before installing Forms: the teardown
+script plus MJ's own removal semantics (FK-graph doom out from the app's `__mj.Entity` rows, the
+CodeGen-created Application, `SchemaInfo`), then every object in `__mj_BizAppsForms` dropped.
+Verified absent: schema 0, entities 0, roles 0. Then `npm run mj:migrate` ran the **whole set from
+zero** — something that had never been done, since the dev database has only ever had migrations
+applied incrementally.
+
+**Result: 7 applied, 0 failed**, and the resulting install is correct:
+
+| | |
+|---|---|
+| tables / registered entities | 16 / 15 |
+| entities missing the `MJ_BizApps_Forms: ` prefix | **0** |
+| `SchemaInfo.EntityNamePrefix` | `MJ_BizApps_Forms: ` |
+| Form Respondent role / its `CanCreate` grants | 1 / **2** (responses + answers, and nothing else) |
+| automation principal active / role grant | 1 / **1** — automations ON |
+| actions · prompts · styles · categories · app · dashboards | 6 · 2 · 11 · 9 · 1 · 2 |
+
+### The defect it found
+
+`smoke/seed-binding-smoke.mjs` minted its own `Forms Automation Service` user and
+`Forms Automation Runner` role under `11111111-…-003/-004`. Harmless while nothing else created
+that identity; fatal once the seed started shipping one, because `Role.Name` is UNIQUE — any
+database that had run the fixture could no longer apply `V202608081700` at all. Fixed to adopt the
+seed's GUIDs and to guard on Name rather than ID. This is only reachable by running migrations from
+zero against a database the fixture had touched: unit tests do not run migrations, and migrations do
+not run the fixture.
+
+### Three failures that were the rehearsal's own fault, recorded so nobody re-derives them
+
+Skyway is not per-migration transactional here, so a failed migration leaves partial state and the
+next attempt fails somewhere new. Each of these looked like a shipping defect and was not:
+`DROP SCHEMA` silently failing because the schema was not empty; the CodeGen-created Application
+(`C2B2D4AF-…`, named for the schema) surviving a removal that MJ's own `DeleteAppOwnedApplications`
+would have handled; and `FormCategory` rows left behind by the first two. **Restore the database
+between attempts** rather than patching forward.
+
+### Still outstanding
+
+`MJ_Forms_Dev` is untouched and still holds the drifted smoke identity, so it cannot apply the seed
+until reconciled: remove the `11111111-…-003/-004` rows, `mj sync push`, then `npm run mj:migrate`.
+A backup was taken (`/var/opt/mssql/backup/dev_pre_reconcile.bak`).
