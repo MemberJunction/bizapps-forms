@@ -115,6 +115,8 @@ apps/{MJAPI,MJExplorer}
 
 ## Migrations
 - Highest `migrations/` version folder; `VYYYYMMDDHHMM__v<ver>__<Description>.sql`; hardcoded UUIDs; no `__mj_*` timestamp columns (CodeGen adds them); no FK indexes (CodeGen adds them); `sp_addextendedproperty` on every business column; single multi-`ADD` `ALTER`s; new tables in schema `__mj_BizAppsForms`; use the `${flyway:defaultSchema}` placeholder.
+- **`migrations/` is the only thing that ships.** `mj-app.json`'s `metadata.directory` is a dev-time pointer MJ's install engine **never reads** (it says so in `manifest-schema.ts`); seeding happens exclusively through migrations. So a `mj sync push` whose result exists only in your dev DB is an **unshipped change** — regenerate `V…__Metadata_Sync.sql` and run `npm run seed:manifest`. `npm run lint:distribution` enforces both this and the placeholder rule below; see `migrations/README.md` for the regeneration recipe (it is not a plain re-push — the generator's output needs two schema substitutions).
+- **Only `${flyway:defaultSchema}` and `${mjSchema}` may appear in shipped SQL** (teardown scripts: `${mjSchema}` only). `mj migrate` builds its placeholder map from *this* repo's `mj.config.cjs`, but `mj app install` builds it from the *host's* — and Skyway leaves an unknown `${…}` untouched instead of failing, so a third placeholder ships as a literal string and fails silently on someone else's database.
 
 ## MJ entity & data patterns (must follow)
 - Create entities via `md.GetEntityObject<T>('Name', contextUser)` — never `new EntityClass()`. Look up entities with `md.EntityByName(name)`, not `Entities.find`.
