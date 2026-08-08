@@ -84,7 +84,16 @@ function sqlWide(query) {
 
 const BINDING_ID = '11111111-2222-4333-8444-555555555001';
 const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
-const PRINCIPAL_ID = '11111111-2222-4333-8444-555555555003';
+// The principal and its role SHIP in V202608081700__v0.8.x__Metadata_Sync.sql, so these GUIDs must
+// be the seed's GUIDs — this fixture may only adopt them, never mint its own. It used to invent
+// `11111111-…-003`/`-004`, which is fine while nothing else creates that identity and fatal the
+// moment something does: `Role.Name` is UNIQUE, so a database that had run this script could no
+// longer apply the seed migration at all ("Cannot insert duplicate key … (Forms Automation
+// Runner)"). Found by rehearsing the migration set from zero against a database this script had
+// touched. The IF NOT EXISTS guards below are kept so the fixture still stands alone on a database
+// where the migrations have not run.
+const PRINCIPAL_ID = '9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84';
+const PRINCIPAL_ROLE_ID = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0';
 const Q_EMAIL = 'AE1FF634-ADE2-4AE9-9B16-1A417CC73AE8';
 const Q_NAME = '17B03D45-7C90-4CA5-AB78-C98404D2C7EC';
 
@@ -111,14 +120,16 @@ console.log('--- seeding binding smoke fixtures ---');
 
 // 1. Service principal + the role the automations run under.
 sql(`
-IF NOT EXISTS (SELECT 1 FROM __mj.[User] WHERE ID='${PRINCIPAL_ID}')
+IF NOT EXISTS (SELECT 1 FROM __mj.[User] WHERE Name='Forms Automation Service')
   INSERT INTO __mj.[User] (ID, Name, FirstName, LastName, Email, Type, IsActive)
-  VALUES ('${PRINCIPAL_ID}', 'Forms Automation Service', 'Forms', 'Automation', 'forms-automation@local', 'User', 1);
+  VALUES ('${PRINCIPAL_ID}', 'Forms Automation Service', 'Forms', 'Automation Service', 'forms-automation@localhost.invalid', 'User', 1);
 
+-- Guarded on NAME, not ID, because Role.Name is the UNIQUE column — an ID check would pass on a
+-- database that already has the role under a different GUID and then fail on the insert.
 DECLARE @RoleID UNIQUEIDENTIFIER = (SELECT ID FROM __mj.Role WHERE Name='Forms Automation Runner');
 IF @RoleID IS NULL
 BEGIN
-  SET @RoleID = '11111111-2222-4333-8444-555555555004';
+  SET @RoleID = '${PRINCIPAL_ROLE_ID}';
   INSERT INTO __mj.Role (ID, Name, Description) VALUES (@RoleID, 'Forms Automation Runner', 'Runs on-submit automations and entity bindings.');
 END
 IF NOT EXISTS (SELECT 1 FROM __mj.UserRole WHERE UserID='${PRINCIPAL_ID}' AND RoleID=@RoleID)
