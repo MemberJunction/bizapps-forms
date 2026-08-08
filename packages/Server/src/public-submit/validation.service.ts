@@ -85,6 +85,16 @@ export function answerValueOf(input: FormAnswerInput): AnswerValue {
   if (Array.isArray(input.jsonValue)) {
     return jsonArrayToScalarArray(input.jsonValue);
   }
+  // A file answer populates `fileId` and nothing else, so omitting it here made every FileUpload
+  // answer read as unanswered: `collectVisibleQuestion` dropped it before persistence (leaving
+  // `FormResponseAnswer.FileID` permanently null on the public submit path) and, when the question
+  // was required, rejected the whole submit with `"<prompt>" is required.` — after the upload had
+  // already succeeded, so nothing the respondent could do would clear it. Last in the precedence,
+  // matching the stored-shape collapse in `@mj-biz-apps/forms-entities`, so the transport and the
+  // storage readings of the same answer cannot disagree.
+  if (input.fileId != null) {
+    return input.fileId;
+  }
   return undefined;
 }
 

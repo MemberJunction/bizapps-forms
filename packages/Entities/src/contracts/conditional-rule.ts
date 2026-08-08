@@ -82,7 +82,7 @@ export interface ConditionalRule {
  */
 export function evaluateConditionalRule(
   rule: ConditionalRule | undefined,
-  answers: Map<string, AnswerValue>,
+  answers: ReadonlyMap<string, AnswerValue>,
 ): boolean {
   if (!rule || !rule.show) {
     return true;
@@ -94,7 +94,7 @@ export function evaluateConditionalRule(
  * Evaluate a single group. `all` conditions are AND-ed; `any` conditions are OR-ed;
  * when both are present, both must hold. An empty/absent group is vacuously true.
  */
-export function evaluateGroup(group: ConditionalGroup, answers: Map<string, AnswerValue>): boolean {
+export function evaluateGroup(group: ConditionalGroup, answers: ReadonlyMap<string, AnswerValue>): boolean {
   const allPass =
     group.all === undefined || group.all.every((c) => evaluateCondition(c, answers));
   const anyPass =
@@ -105,7 +105,7 @@ export function evaluateGroup(group: ConditionalGroup, answers: Map<string, Answ
 /** Evaluate one leaf condition against the supplied answers. */
 export function evaluateCondition(
   condition: ConditionalCondition,
-  answers: Map<string, AnswerValue>,
+  answers: ReadonlyMap<string, AnswerValue>,
 ): boolean {
   const answer = answers.get(condition.questionId);
   switch (condition.op) {

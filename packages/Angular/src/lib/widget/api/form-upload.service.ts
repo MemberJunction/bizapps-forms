@@ -29,17 +29,27 @@ export type UploadProgress = (fraction: number | null) => void;
 /**
  * Build the multipart body for an upload. Pure + framework-free so the field wiring
  * (which the server matches on) is unit-testable. Field names mirror the WP-B seam:
- * `file`, `distributionSlug`, `questionId`.
+ * `file`, `distributionSlug`, `questionId`, `responseId`.
+ *
+ * `responseId` is the widget's client-minted response id, and it is what later proves this file
+ * belongs to this respondent's submission. The anonymous session id cannot do that job — it is
+ * legitimately blank in ordinary public-link flows — so without this field the server can only
+ * scope an upload to a distribution, which on a public form is no scope at all. Omitted when the
+ * caller has no id yet; the server's lenient mode exists for exactly that window.
  */
 export function buildUploadFormData(
   file: File,
   distributionSlug: string,
   questionId: string,
+  responseId?: string,
 ): FormData {
   const body = new FormData();
   body.append('file', file, file.name);
   body.append('distributionSlug', distributionSlug);
   body.append('questionId', questionId);
+  if (responseId) {
+    body.append('responseId', responseId);
+  }
   return body;
 }
 
@@ -83,12 +93,13 @@ export class FormUploadService {
     distributionSlug: string,
     questionId: string,
     onProgress?: UploadProgress,
+    responseId?: string,
   ): Promise<UploadedFile> {
     const url = this.endpoint();
     if (!url) {
       return Promise.reject(new Error('Uploads are not available for this form.'));
     }
-    const body = buildUploadFormData(file, distributionSlug, questionId);
+    const body = buildUploadFormData(file, distributionSlug, questionId, responseId);
     return this.send(url, body, onProgress);
   }
 

@@ -14,7 +14,9 @@
  *   - 'Forms: Analyze Written Responses'
  *   - 'Forms: Generate Form From Brief'
  *   - 'Forms: Create Form From Template'
+ *   - 'Forms: Bind Response To Entity'
  */
+import { BindResponseToEntityAction } from './binding/bind-response-to-entity.action';
 import { UpsertRespondentPersonAction } from './on-submit/upsert-respondent-person.action';
 import { SendConfirmationEmailAction } from './on-submit/send-confirmation-email.action';
 import { CreateFollowupTaskAction } from './on-submit/create-followup-task.action';
@@ -79,6 +81,7 @@ const FORMS_ACTION_CLASSES = [
   AnalyzeWrittenResponsesAction,
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
+  BindResponseToEntityAction,
 ] as const;
 
 /** Force-load all Forms action subclasses so their @RegisterClass decorators fire. */

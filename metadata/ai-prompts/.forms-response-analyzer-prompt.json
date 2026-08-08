@@ -34,7 +34,7 @@
             "ID": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"
           },
           "sync": {
-            "lastModified": "2026-07-01T16:45:08.391Z",
+            "lastModified": "2026-08-08T18:25:26.967Z",
             "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
           }
         }
@@ -44,7 +44,7 @@
       "ID": "B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E"
     },
     "sync": {
-      "lastModified": "2026-07-01T19:12:32.326Z",
+      "lastModified": "2026-08-08T18:25:26.951Z",
       "checksum": "0fc86019c50ab36735aef406768505e91ebfab976ebe3761b5ad0717fdcffe15"
     }
   }

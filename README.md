@@ -191,13 +191,23 @@ npx mj migrate --schema __mj_BizAppsTasks  --dir /path/to/bizapps-tasks/migratio
 **4. Install Forms.**
 
 ```bash
-npm run mj:migrate          # apply migrations to the __mj_BizAppsForms schema
-npx mj sync push --dir metadata   # roles, entity permissions, actions, AI prompts, styles
+npm run mj:migrate          # schema, tables, AND the metadata seed
 npm run mj:codegen          # generate entity / action / resolver / Angular subclasses
 ```
 
-> The metadata push is **not** optional. It creates the `Form Respondent` role and its
-> CanCreate-only entity permissions — without them the anonymous submit path cannot work at all.
+> **There is no separate metadata step any more.** Roles, entity permissions, actions, AI prompts,
+> styles, categories, the application and its dashboards all ship inside
+> `migrations/V…__Metadata_Sync.sql`, because `mj-app.json`'s `metadata.directory` is a dev-time
+> pointer MJ's install engine never reads — migrations are the only channel to a database that is
+> not yours. Earlier versions of this guide told you to run `mj sync push` here; that was the whole
+> bug, and it meant every install but the author's got a Forms deployment with no `Form Respondent`
+> role and no anonymous submit path, while reporting success at every step.
+>
+> **`mj sync push` is an authoring tool, not an install step, and a host never runs it.** It is how a
+> *contributor* who edited `metadata/` pushes the change into a dev database and generates the seed
+> migration. The push is how metadata gets into a migration; the migration is how it reaches anybody
+> else. See [`migrations/README.md`](migrations/README.md) — and `npm run lint:distribution` fails
+> the build if you edit `metadata/` without regenerating.
 
 **5. Build and run.**
 
@@ -227,7 +237,10 @@ npm run smoke:respondent -- <distribution-slug>
 
 MJ Forms is an Open App: it does not run standalone in production, it installs **into** another
 MemberJunction application (the way [bizapps-caliber](https://github.com/MemberJunction/bizapps-caliber)
-hosts it). `mj app install` handles the schema, metadata and package wiring from `mj-app.json`.
+hosts it). `mj app install` handles the schema, migrations and package wiring from `mj-app.json`.
+The metadata arrives *through* those migrations, not from the `metadata/` directory — the install
+engine never reads it — and `mj app remove` retires the rows Forms wrote into the shared `__mj`
+schema via `migrations-teardown/`.
 
 One requirement it **cannot** wire for you, because it lives in the host's own server config:
 
@@ -236,7 +249,7 @@ One requirement it **cannot** wire for you, because it lives in the host's own s
 module.exports = {
   magicLink: {
     enabled: true,
-    restrictedRoleName: 'Form Respondent',   // the role Forms seeds via its metadata
+    restrictedRoleName: 'Form Respondent',   // the role Forms' seed migration creates
     grantableRoleNames: ['Form Respondent'],
     explorerUrl: process.env.MJ_EXPLORER_BASE_URL,
   },

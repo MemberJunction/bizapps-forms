@@ -54,6 +54,7 @@ export function mockDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
     pages: [
       {
         id: 'pg-1',

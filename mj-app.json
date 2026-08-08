@@ -3,7 +3,7 @@
   "manifestVersion": 1,
   "name": "mj-bizapps-forms",
   "displayName": "MJ Forms",
-  "description": "Forms, surveys & intake for MemberJunction — anonymous-friendly, mobile-first, responses as first-class records.",
+  "description": "Forms, surveys & intake for MemberJunction \u2014 anonymous-friendly, mobile-first, responses as first-class records.",
   "version": "0.7.0",
   "license": "ISC",
   "icon": "fa-solid fa-list-check",
@@ -12,7 +12,7 @@
     "url": "https://memberjunction.com"
   },
   "repository": "https://github.com/MemberJunction/bizapps-forms",
-  "mjVersionRange": ">=5.51.0 <6.0.0",
+  "mjVersionRange": ">=6.1.0-edge.1 <7.0.0",
   "dependencies": {
     "mj-bizapps-common": {
       "version": ">=5.31.0 <6.0.0",
@@ -29,7 +29,8 @@
   },
   "migrations": {
     "directory": "migrations",
-    "engine": "skyway"
+    "engine": "skyway",
+    "teardownDirectory": "migrations-teardown"
   },
   "metadata": {
     "directory": "metadata"

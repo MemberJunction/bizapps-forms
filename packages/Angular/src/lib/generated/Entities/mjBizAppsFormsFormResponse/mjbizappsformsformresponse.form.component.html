@@ -164,6 +164,56 @@
         }
     </mj-collapsible-panel>
 
+    <!-- Form Entity Binding Records Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormEntityBindingRecords"
+        SectionName="Form Entity Binding Records"
+        Icon="fa fa-tasks"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormEntityBindingRecords')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Entity Binding Records','FormResponseID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Binding Records')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormEntityBindingRecords')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormEntityBindingRecords', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Form Automation Runs Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormAutomationRuns"
+        SectionName="Form Automation Runs"
+        Icon="fa fa-tasks"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormAutomationRuns')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Automation Runs','FormResponseID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automation Runs')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormAutomationRuns')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormAutomationRuns', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
     <mj-form-panel-slot Entity="{{record.EntityInfo.Name}}" Slot="after-related" [Record]="record" [FormComponent]="this" [FormContext]="formContext"></mj-form-panel-slot>
 </mj-record-form-container>
         

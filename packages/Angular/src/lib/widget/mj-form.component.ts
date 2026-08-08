@@ -117,6 +117,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private clientResponseId: string = generateClientResponseId();
 
   /**
+   * The response id uploads are tagged with.
+   *
+   * Exposed as a method rather than the field so the template reads the CURRENT id — it is
+   * regenerated when the form resets, and an upload tagged with a stale id would fail its
+   * provenance check on the next submission.
+   */
+  protected currentResponseId(): string {
+    return this.clientResponseId;
+  }
+
+  /**
    * Server-echoed response id, if returned. Kept only as a fallback/consistency signal —
    * {@link clientResponseId} is authoritative, so submits never block on the server echo.
    */

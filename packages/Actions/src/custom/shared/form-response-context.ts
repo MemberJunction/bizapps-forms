@@ -6,9 +6,10 @@
  * All reads go through RunView with `.Success` checks (RunView never throws);
  * `contextUser` is always passed (CLAUDE.md MJ patterns).
  */
-import { Metadata, RunView } from '@memberjunction/core';
+import { LogError, Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import {
+  CanonicalAnswers,
   mjBizAppsFormsFormResponseEntity,
   mjBizAppsFormsFormResponseAnswerEntity,
   mjBizAppsFormsFormQuestionEntity,
@@ -23,7 +24,15 @@ const ENTITY = {
   Form: 'MJ_BizApps_Forms: Forms',
 } as const;
 
-/** One answer paired with the type of the question it answers. */
+/**
+ * One answer paired with the type of the question it answers.
+ *
+ * Carries a faithful projection of every typed column. `dateValue`, `fileId` and `score` were
+ * missing until entity binding needed them, which meant a Date or FileUpload answer was
+ * invisible to every on-submit hook — a response could contain a resume and an appointment date
+ * and a hook reading this shape would see neither, with nothing to indicate they had been
+ * dropped rather than left unanswered.
+ */
 export interface AnswerWithType {
   answerId: string;
   questionId: string;
@@ -31,8 +40,11 @@ export interface AnswerWithType {
   prompt: string;
   textValue: string | null;
   numericValue: number | null;
+  dateValue: Date | null;
   booleanValue: boolean | null;
   jsonValue: string | null;
+  fileId: string | null;
+  score: number | null;
 }
 
 /** Everything an on-submit hook needs about a submitted response. */
@@ -40,6 +52,13 @@ export interface FormResponseContext {
   response: mjBizAppsFormsFormResponseEntity;
   form: mjBizAppsFormsFormEntity;
   answers: AnswerWithType[];
+  /**
+   * The same answers collapsed to one value each and addressable by question GUID in any
+   * casing — the shape a consumer wants when it is writing answers ONWARD (parameter mapping,
+   * entity binding) rather than inspecting them column by column. Built once here so no
+   * consumer re-derives the collapse or forgets to case-fold the lookup.
+   */
+  canonicalAnswers: CanonicalAnswers;
 }
 
 /**
@@ -63,11 +82,24 @@ export async function loadFormResponseContext(
     return null;
   }
 
-  const answers = await loadAnswers(responseId, contextUser);
-  return { response, form, answers };
+  const answerRows = await loadAnswerRows(responseId, contextUser);
+  const questionsById = await loadQuestionsById(
+    answerRows.map((a) => a.QuestionID),
+    responseId,
+    contextUser,
+  );
+  const answers = answerRows.map((a) => toAnswerWithType(a, questionsById.get(a.QuestionID)));
+
+  // The generated answer entities structurally satisfy `StoredAnswerRow` (same column names and
+  // types), so the canonical view is built straight from the rows — no second projection to keep
+  // in step with the first.
+  return { response, form, answers, canonicalAnswers: new CanonicalAnswers(answerRows) };
 }
 
-async function loadAnswers(responseId: string, contextUser: UserInfo): Promise<AnswerWithType[]> {
+async function loadAnswerRows(
+  responseId: string,
+  contextUser: UserInfo,
+): Promise<mjBizAppsFormsFormResponseAnswerEntity[]> {
   const rv = new RunView();
   const answerResult = await rv.RunView<mjBizAppsFormsFormResponseAnswerEntity>(
     {
@@ -77,32 +109,42 @@ async function loadAnswers(responseId: string, contextUser: UserInfo): Promise<A
     },
     contextUser,
   );
-  if (!answerResult.Success || answerResult.Results.length === 0) {
+  if (!answerResult.Success) {
+    // A failed read and a genuinely unanswered response both used to return `[]`, which is a
+    // dangerous pair to conflate now that consumers WRITE from these answers: a transient read
+    // failure would present as "the respondent answered nothing" and a binding would happily
+    // create a record with every mapped field blank. The callers' contract still degrades to an
+    // empty list, but the failure is no longer silent.
+    LogError(
+      `loadFormResponseContext: failed to read answers for response ${responseId}: ${answerResult.ErrorMessage}`,
+    );
     return [];
   }
+  return answerResult.Results;
+}
 
-  const questionsById = await loadQuestionsById(
-    answerResult.Results.map((a) => a.QuestionID),
-    contextUser,
-  );
-
-  return answerResult.Results.map((a) => {
-    const q = questionsById.get(a.QuestionID);
-    return {
-      answerId: a.ID,
-      questionId: a.QuestionID,
-      questionType: q?.QuestionType ?? 'ShortText',
-      prompt: q?.Prompt ?? '',
-      textValue: a.TextValue,
-      numericValue: a.NumericValue,
-      booleanValue: a.BooleanValue,
-      jsonValue: a.JSONValue,
-    };
-  });
+function toAnswerWithType(
+  answer: mjBizAppsFormsFormResponseAnswerEntity,
+  question: mjBizAppsFormsFormQuestionEntity | undefined,
+): AnswerWithType {
+  return {
+    answerId: answer.ID,
+    questionId: answer.QuestionID,
+    questionType: question?.QuestionType ?? 'ShortText',
+    prompt: question?.Prompt ?? '',
+    textValue: answer.TextValue,
+    numericValue: answer.NumericValue,
+    dateValue: answer.DateValue,
+    booleanValue: answer.BooleanValue,
+    jsonValue: answer.JSONValue,
+    fileId: answer.FileID,
+    score: answer.Score,
+  };
 }
 
 async function loadQuestionsById(
   questionIds: string[],
+  responseId: string,
   contextUser: UserInfo,
 ): Promise<Map<string, mjBizAppsFormsFormQuestionEntity>> {
   const map = new Map<string, mjBizAppsFormsFormQuestionEntity>();
@@ -120,10 +162,19 @@ async function loadQuestionsById(
     },
     contextUser,
   );
-  if (result.Success) {
-    for (const q of result.Results) {
-      map.set(q.ID, q);
-    }
+  if (!result.Success) {
+    // Same hazard as the answer read above, and worth stating separately because the degradation
+    // is quieter: without the questions, EVERY answer falls back to `questionType: 'ShortText'`
+    // and an empty prompt, which no consumer can tell apart from a form genuinely built that way.
+    // `Forms: Analyze Written Responses` treats ShortText as analyzable, so it would ship every
+    // answer to the scoring prompt and persist a Score against it.
+    LogError(
+      `loadFormResponseContext: failed to read questions for response ${responseId}: ${result.ErrorMessage}`,
+    );
+    return map;
+  }
+  for (const q of result.Results) {
+    map.set(q.ID, q);
   }
   return map;
 }

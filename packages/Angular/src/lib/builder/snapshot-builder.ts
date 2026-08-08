@@ -1,6 +1,7 @@
 import type {
   mjBizAppsFormsFormStyleEntity,
   FormStyleTokens,
+  PublishedFormAutomation,
   PublishedFormDefinition,
   PublishedFormPage,
   PublishedFormQuestion,
@@ -27,11 +28,18 @@ import {
  *
  * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
  * supplied it is used verbatim instead of deriving tokens from `style`.
+ *
+ * `automations` is REQUIRED rather than defaulted, because defaulting it is exactly how this
+ * silently broke once: publish emitted a hardcoded empty array, every configured binding
+ * therefore never fired, and nothing failed — the submit path simply fell back to the legacy
+ * hook list. A caller that genuinely has none (the live Preview, which renders a form and runs
+ * nothing) must now say so explicitly.
  */
 export function buildPublishedDefinition(
   tree: FormTree,
   style: mjBizAppsFormsFormStyleEntity | undefined,
   formVersionId: string,
+  automations: readonly PublishedFormAutomation[],
   styleTokensOverride?: FormStyleTokens,
 ): PublishedFormDefinition {
   const form = tree.form;
@@ -52,6 +60,12 @@ export function buildPublishedDefinition(
     pages: [...tree.pages]
       .sort((a, b) => a.entity.DisplayOrder - b.entity.DisplayOrder)
       .map((p, index) => buildPage(p, index)),
+    // Emitted always, even when empty, so the snapshot a publish produces always matches the
+    // contract a parse expects — the two sides are whitelists that strip anything the other adds
+    // unilaterally, so a field present on one and absent on the other is silently lost rather
+    // than loudly broken. An empty array is also what keeps an already-published form on the
+    // legacy hook list, so it is a meaningful value rather than a placeholder.
+    automations: [...automations],
   };
 }
 

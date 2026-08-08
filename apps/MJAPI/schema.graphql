@@ -744,6 +744,17 @@ input CreateMJAIAgentConfigurationInput {
   Status: String
 }
 
+input CreateMJAIAgentCredentialInput {
+  AgentID: String
+  CredentialID: String
+  EnvVariableName: String
+  ID: String
+  Priority: Int
+  Purpose: String
+  RestoreContext___: RestoreContextInput
+  Status: String
+}
+
 input CreateMJAIAgentDataSourceInput {
   AgentID: String
   CachePolicy: String
@@ -792,6 +803,20 @@ input CreateMJAIAgentExampleInput {
   SuccessScore: Float
   Type: String
   UserID: String
+}
+
+input CreateMJAIAgentHarnessInput {
+  AIModelID: String
+  AIVendorID: String
+  CapabilitySettings: String
+  DefaultModel: String
+  Description: String
+  DriverClass: String
+  ExecutablePath: String
+  ID: String
+  Name: String
+  RestoreContext___: RestoreContextInput
+  Status: String
 }
 
 input CreateMJAIAgentInput {
@@ -1029,6 +1054,7 @@ input CreateMJAIAgentRunInput {
   CompanyID: String
   CompletedAt: Timestamp
   ConfigurationID: String
+  ContinuationDepth: Int
   ConversationDetailID: String
   ConversationDetailSequence: Int
   ConversationID: String
@@ -1036,6 +1062,7 @@ input CreateMJAIAgentRunInput {
   EffortLevel: Int
   ErrorMessage: String
   ExternalReferenceID: String
+  ExternalSessionID: String
   FinalPayload: String
   FinalStep: String
   ID: String
@@ -1823,6 +1850,7 @@ input CreateMJAPIApplicationScopeInput {
   Priority: Int
   ResourcePattern: String
   RestoreContext___: RestoreContextInput
+  RowFilterID: String
   ScopeID: String
 }
 
@@ -1855,6 +1883,7 @@ input CreateMJAPIKeyScopeInput {
   Priority: Int
   ResourcePattern: String
   RestoreContext___: RestoreContextInput
+  RowFilterID: String
   ScopeID: String
 }
 
@@ -1940,13 +1969,18 @@ input CreateMJActionContextTypeInput {
 input CreateMJActionExecutionLogInput {
   ActionID: String
   EndedAt: Timestamp
+  EntityActionID: String
+  EntityActionInvocationTypeID: String
   ID: String
   Message: String
   Params: String
   RestoreContext___: RestoreContextInput
   ResultCode: String
+  ResultParams: String
   RetentionPeriod: Int
   StartedAt: Timestamp
+  TargetEntityID: String
+  TargetRecordID: String
   UserID: String
 }
 
@@ -2003,6 +2037,7 @@ input CreateMJActionParamInput {
   ID: String
   IsArray: Boolean
   IsRequired: Boolean
+  LogValue: Boolean
   MediaModality: String
   Name: String
   RestoreContext___: RestoreContextInput
@@ -2725,7 +2760,7 @@ input CreateMJContentSourceInput {
   ID: String
   Name: String
   RestoreContext___: RestoreContextInput
-  ScheduledActionID: String
+  ScheduledJobID: String
   SegmenterKey: String
   URL: String
   VectorIndexID: String
@@ -3285,7 +3320,11 @@ input CreateMJEntityActionInput {
   ActionID: String
   EntityID: String
   ID: String
+  LoggingMode: String
   RestoreContext___: RestoreContextInput
+  ScopeEntityID: String
+  ScopeRecordID: String
+  Sequence: Int
   Status: String
 }
 
@@ -3311,6 +3350,7 @@ input CreateMJEntityActionParamInput {
   Comments: String
   EntityActionID: String
   ID: String
+  LogValue: Boolean
   RestoreContext___: RestoreContextInput
   Value: String
   ValueType: String
@@ -3464,6 +3504,9 @@ input CreateMJEntityInput {
   AllowCaching: Boolean
   AllowCreateAPI: Boolean
   AllowDeleteAPI: Boolean
+  AllowDirectSQLDelete: Boolean
+  AllowDirectSQLInsert: Boolean
+  AllowDirectSQLUpdate: Boolean
   AllowMultipleSubtypes: Boolean
   AllowRecordMerge: Boolean
   AllowUpdateAPI: Boolean
@@ -3494,6 +3537,7 @@ input CreateMJEntityInput {
   FullTextSearchEnabled: Boolean
   FullTextSearchFunction: String
   FullTextSearchFunctionGenerated: Boolean
+  GeneratedBaseViewName: String
   ID: String
   Icon: String
   IncludeInAPI: Boolean
@@ -3615,6 +3659,7 @@ input CreateMJEntityRelationshipInput {
   JoinView: String
   RelatedEntityID: String
   RelatedEntityJoinField: String
+  RelatedRecordCollection: String
   RestoreContext___: RestoreContextInput
   Sequence: Int
   Type: String
@@ -4443,13 +4488,6 @@ input CreateMJOutputFormatTypeInput {
   RestoreContext___: RestoreContextInput
 }
 
-input CreateMJOutputTriggerTypeInput {
-  Description: String
-  ID: String
-  Name: String
-  RestoreContext___: RestoreContextInput
-}
-
 input CreateMJPermissionDomainInput {
   Description: String
   DisplayOrder: Int
@@ -4900,64 +4938,6 @@ input CreateMJRemoteOperationInput {
   TimeoutMS: Int
 }
 
-input CreateMJReportCategoryInput {
-  Description: String
-  ID: String
-  Name: String
-  ParentID: String
-  RestoreContext___: RestoreContextInput
-  UserID: String
-}
-
-input CreateMJReportInput {
-  CategoryID: String
-  Configuration: String
-  ConversationDetailID: String
-  ConversationID: String
-  DataContextID: String
-  Description: String
-  EnvironmentID: String
-  ID: String
-  Name: String
-  OutputDeliveryTypeID: String
-  OutputFormatTypeID: String
-  OutputFrequency: String
-  OutputTargetEmail: String
-  OutputTriggerTypeID: String
-  OutputWorkflowID: String
-  RestoreContext___: RestoreContextInput
-  SharingScope: String
-  Thumbnail: String
-  UserID: String
-}
-
-input CreateMJReportSnapshotInput {
-  ID: String
-  ReportID: String
-  RestoreContext___: RestoreContextInput
-  ResultSet: String
-  UserID: String
-}
-
-input CreateMJReportUserStateInput {
-  ID: String
-  ReportID: String
-  ReportState: String
-  RestoreContext___: RestoreContextInput
-  UserID: String
-}
-
-input CreateMJReportVersionInput {
-  Configuration: String
-  DataContextUpdated: Boolean
-  Description: String
-  ID: String
-  Name: String
-  ReportID: String
-  RestoreContext___: RestoreContextInput
-  VersionNumber: Int
-}
-
 input CreateMJResourceLinkInput {
   FolderID: String
   ID: String
@@ -5024,34 +5004,6 @@ input CreateMJSQLDialectInput {
   WebURL: String
 }
 
-input CreateMJScheduledActionInput {
-  ActionID: String
-  CreatedByUserID: String
-  CronExpression: String
-  CustomCronExpression: String
-  DayOfMonth: Int
-  DayOfWeek: String
-  Description: String
-  ID: String
-  IntervalDays: Int
-  Month: String
-  Name: String
-  RestoreContext___: RestoreContextInput
-  Status: String
-  Timezone: String
-  Type: String
-}
-
-input CreateMJScheduledActionParamInput {
-  ActionParamID: String
-  Comments: String
-  ID: String
-  RestoreContext___: RestoreContextInput
-  ScheduledActionID: String
-  Value: String
-  ValueType: String
-}
-
 input CreateMJScheduledJobInput {
   ConcurrencyMode: String
   Configuration: String
@@ -5067,6 +5019,7 @@ input CreateMJScheduledJobInput {
   LockedAt: Timestamp
   LockedByInstance: String
   MaxRuntimeMinutes: Int
+  MissedRunPolicy: String
   Name: String
   NextRunAt: Timestamp
   NotifyOnFailure: Boolean
@@ -5462,6 +5415,7 @@ input CreateMJTaggedItemInput {
 }
 
 input CreateMJTaskDependencyInput {
+  Condition: String
   DependencyType: String
   DependsOnTaskID: String
   ID: String
@@ -5471,13 +5425,19 @@ input CreateMJTaskDependencyInput {
 
 input CreateMJTaskInput {
   AgentID: String
+  AgentRunID: String
+  ClaimExpiresAt: Timestamp
+  ClaimedBy: String
   CompletedAt: Timestamp
   ConversationDetailID: String
   Description: String
   DueAt: Timestamp
   EnvironmentID: String
+  ErrorMessage: String
   ID: String
+  InputPayload: String
   Name: String
+  OutputPayload: String
   ParentID: String
   PercentComplete: Int
   ProjectID: String
@@ -6043,39 +6003,6 @@ input CreateMJViewTypeInput {
   SupportsConfiguration: Boolean
 }
 
-input CreateMJWorkflowEngineInput {
-  Description: String
-  DriverClass: String
-  DriverPath: String
-  ID: String
-  Name: String
-  RestoreContext___: RestoreContextInput
-}
-
-input CreateMJWorkflowInput {
-  AutoRunEnabled: Boolean
-  AutoRunInterval: Int
-  AutoRunIntervalUnits: String
-  Description: String
-  ExternalSystemRecordID: String
-  ID: String
-  Name: String
-  RestoreContext___: RestoreContextInput
-  SubclassName: String
-  WorkflowEngineID: String
-}
-
-input CreateMJWorkflowRunInput {
-  EndedAt: Timestamp
-  ExternalSystemRecordID: String
-  ID: String
-  RestoreContext___: RestoreContextInput
-  Results: String
-  StartedAt: Timestamp
-  Status: String
-  WorkflowID: String
-}
-
 input CreateMJWorkspaceInput {
   Configuration: String
   Description: String
@@ -6136,13 +6063,6 @@ input CreateQuerySystemUserInput {
   UsesTemplate: Boolean
 }
 
-type CreateReportResultType {
-  ErrorMessage: String!
-  ReportID: String!
-  ReportName: String!
-  Success: Boolean!
-}
-
 input CreateScheduleInput {
   CompanyIntegrationID: String!
   CronExpression: String!
@@ -6174,6 +6094,41 @@ input CreateVersionLabelInput {
   Scope: String
 }
 
+input CreatemjBizAppsFormsFormAutomationInput {
+  ActionID: String
+  AgentID: String
+  BindingID: String
+  ConditionalRule: String
+  ContinueOnError: Boolean
+  Description: String
+  DisplayOrder: Int
+  ExecutionMode: String
+  FormID: String
+  ID: String
+  IsActive: Boolean
+  Name: String
+  ParameterMapping: String
+  RestoreContext___: RestoreContextInput
+  TargetType: String
+  TimeoutMS: Int
+  Trigger: String
+}
+
+input CreatemjBizAppsFormsFormAutomationRunInput {
+  AIAgentRunID: String
+  ActionExecutionLogID: String
+  AttemptCount: Int
+  CompletedAt: Timestamp
+  ErrorMessage: String
+  FormAutomationID: String
+  FormResponseID: String
+  ID: String
+  OutputSummary: String
+  RestoreContext___: RestoreContextInput
+  StartedAt: Timestamp
+  Status: String
+}
+
 input CreatemjBizAppsFormsFormCategoryInput {
   Description: String
   DisplayRank: Int
@@ -6201,6 +6156,31 @@ input CreatemjBizAppsFormsFormDistributionInput {
   RestoreContext___: RestoreContextInput
   Slug: String
   Status: String
+}
+
+input CreatemjBizAppsFormsFormEntityBindingInput {
+  Description: String
+  FieldMappings: String
+  FormID: String
+  ID: String
+  IdentityRule: String
+  MergePolicy: String
+  Name: String
+  RestoreContext___: RestoreContextInput
+  Status: String
+  TargetEntityID: String
+  TargetEntityName: String
+}
+
+input CreatemjBizAppsFormsFormEntityBindingRecordInput {
+  BindingID: String
+  FormResponseID: String
+  ID: String
+  Outcome: String
+  RestoreContext___: RestoreContextInput
+  TargetEntityID: String
+  TargetRecordID: String
+  WrittenFields: String
 }
 
 input CreatemjBizAppsFormsFormInput {
@@ -6290,6 +6270,23 @@ input CreatemjBizAppsFormsFormStyleInput {
   LogoURL: String
   Name: String
   RestoreContext___: RestoreContextInput
+}
+
+input CreatemjBizAppsFormsFormUploadInput {
+  AnonymousSessionID: String
+  ContentType: String
+  DistributionID: String
+  FileID: String
+  FileName: String
+  FormID: String
+  ID: String
+  ProviderKey: String
+  QuestionID: String
+  ResponseDraftID: String
+  RestoreContext___: RestoreContextInput
+  SizeBytes: Int
+  Status: String
+  UploadedByUserID: String
 }
 
 input CreatemjBizAppsFormsFormVersionInput {
@@ -6550,12 +6547,6 @@ type ExecuteRemoteOperationResultType {
   handle: String
   outputJSON: String
   resultCode: String
-  success: Boolean!
-}
-
-type ExecuteTaskGraphResult {
-  errorMessage: String
-  results: [TaskExecutionResultType!]!
   success: Boolean!
 }
 
@@ -7517,6 +7508,39 @@ type MJAIAgentConfiguration_ {
 }
 
 """
+Credentials an agent carries into its harness sandbox, injected as environment variables at session creation. Custody of the secret itself stays in Credential/CredentialEngine - this table records only the GRANT EDGE, in the same reviewable style as AIAgentAction. Distinct from AICredentialBinding, which is inference-selection plumbing for AIPromptRunner failover when MJ itself executes a prompt.
+"""
+type MJAIAgentCredential_ {
+  Agent: String
+  AgentID: String!
+  Credential: String!
+  CredentialID: String!
+
+  """
+  Environment variable the adapter sets inside the sandbox for this credential, e.g. ANTHROPIC_API_KEY or GITHUB_TOKEN. NULL lets the adapter choose, which is the normal case for HarnessLLM because the adapter knows its own vendor's variable name.
+  """
+  EnvVariableName: String
+  ID: String!
+
+  """
+  Failover ordering within a Purpose - lower runs first. Lets an agent carry a primary and a standby key for the same purpose without a schema change.
+  """
+  Priority: Int!
+
+  """
+  What this credential is for. HarnessLLM is the API key the harness uses to reach its own model vendor; when absent, the runtime falls back to vendor-scoped AICredentialBinding rows for AIAgentHarness.AIVendorID. Integration is any other granted secret the agent needs inside the sandbox, such as a source-control or ticketing token.
+  """
+  Purpose: String!
+
+  """
+  Whether this grant is live. Revoked withdraws the credential from future sessions while preserving the record that it was once granted, which is the point of auditing a credential grant at all. Pending stages a grant that is not yet in force.
+  """
+  Status: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
 Defines data sources that should be preloaded into the data parameter before agent execution. Supports both RunView and RunQuery sources with configurable caching.
 """
 type MJAIAgentDataSource_ {
@@ -7712,6 +7736,54 @@ type MJAIAgentExample_ {
   Optional user scope. When populated, this example is specific to this user.
   """
   UserID: String
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
+Registry of external agent harnesses this installation can launch as the reasoning substrate for an MJ agent (Claude Code, Codex CLI, OpenCode, Pi, Cline). A row makes a harness AVAILABLE; an agent opts in by naming it in AIAgent.TypeConfiguration. Empty table = no agent can run on a harness, which is the pre-migration behaviour.
+"""
+type MJAIAgentHarness_ {
+  AIModel: String
+  AIModelID: String
+  AIVendor: String
+  AIVendorID: String
+
+  """
+  Strongly-typed JSON of what this harness can do (the IHarnessCapabilitySettings interface, bound via JSONType metadata): session continuity (SessionResume), turn-protocol support (StructuredOutput), in-sandbox permission interception (PermissionHooks), and whether the harness can act as an MCP client for the read-only loopback (McpClient). The runtime gates behaviour on these - when SessionResume is false the adapter must replay prior context into a fresh invocation each turn, which costs extra tokens and has to be budgeted for. Held as JSON so a new capability needs no schema migration, just an added property on the interface. NULL/omitted = not supported.
+  """
+  CapabilitySettings: String
+
+  """
+  Default model passed to the harness where the harness supports being told which model to use. NULL leaves the harness on its own default.
+  """
+  DefaultModel: String
+
+  """
+  Human-readable description of the harness - what it is good at, what it requires to be installed, and any deployment caveats.
+  """
+  Description: String
+
+  """
+  ClassFactory registration key for the BaseHarnessAdapter subclass that drives this harness (e.g. ClaudeCodeAdapter, CodexAdapter, StdioJsonAdapter). Resolved at run time, so a customer can register a proprietary adapter without forking core - the same extension mechanism AI model vendor drivers use.
+  """
+  DriverClass: String!
+
+  """
+  Path to the harness CLI binary or entry point when the adapter shells out. NULL when the adapter embeds a vendor SDK and therefore launches nothing.
+  """
+  ExecutablePath: String
+  ID: String!
+
+  """
+  Unique name of the harness, e.g. Claude Code, Codex CLI, OpenCode, Pi, Cline. This is a LOOKUP KEY, not a label: an agent selects its harness by this name in AIAgent.TypeConfiguration ("harnessName"), so duplicates would make selection ambiguous at run time.
+  """
+  Name: String!
+
+  """
+  Whether this harness may be launched. Inactive keeps the row and its history for auditing while taking the harness out of service - preferable to deleting it, which would orphan agents configured to use it.
+  """
+  Status: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
 }
@@ -8414,6 +8486,11 @@ type MJAIAgentRun_ {
   The AI Configuration used for this agent execution. When set, this configuration was used for all prompts executed by this agent and its sub-agents.
   """
   ConfigurationID: String
+
+  """
+  How many task-graph continuations led to this run. 0 (the default, and the value every ordinary run carries) means the run was not started by a finished graph. A run started because a graph declared continuation='reinvoke' records its source graph's depth plus one, and any graph that run subsequently submits inherits that value — which is what allows MAX_REINVOKE_DEPTH to bound a chain of graph-reinvokes-agent-emits-graph. Without a durable value here the cap could never fire, because a reinvoked agent has no other way to learn it was a continuation. Distinct from ParentRunID, which tracks sub-agent lineage within a single turn; a continuation is a NEW top-level turn caused by work that already completed.
+  """
+  ContinuationDepth: Int!
   Conversation: String
   ConversationDetail: String
 
@@ -8451,6 +8528,11 @@ type MJAIAgentRun_ {
   ExternalReferenceID: String
 
   """
+  Session identifier reported by the external harness backing this run. Kept for two reasons that outlive the run: resuming the session across turns, and correlating this run with the vendor's own session logs when diagnosing behaviour INSIDE the sandbox, where MJ's audit trail necessarily stops at the turn boundary. NULL for every run not backed by a harness.
+  """
+  ExternalSessionID: String
+
+  """
   JSON serialization of the final Payload state at the end of the agent run
   """
   FinalPayload: String
@@ -8483,6 +8565,7 @@ type MJAIAgentRun_ {
   MJExperimentSessionIterations_AIAgentRunIDArray: [MJExperimentSessionIteration_!]!
   MJExperimentSessions_AgentRunIDArray: [MJExperimentSession_!]!
   MJProcessRunDetails_AIAgentRunIDArray: [MJProcessRunDetail_!]!
+  MJTasks_AgentRunIDArray: [MJTask_!]!
   MJUserRoutineRuns_AgentRunIDArray: [MJUserRoutineRun_!]!
 
   """Final message from the agent to the end user at the end of a run"""
@@ -9354,6 +9437,7 @@ type MJAIAgent_ {
   MJAIAgentCoAgents_CoAgentIDArray: [MJAIAgentCoAgent_!]!
   MJAIAgentCoAgents_TargetAgentIDArray: [MJAIAgentCoAgent_!]!
   MJAIAgentConfigurations_AgentIDArray: [MJAIAgentConfiguration_!]!
+  MJAIAgentCredentials_AgentIDArray: [MJAIAgentCredential_!]!
   MJAIAgentDataSources_AgentIDArray: [MJAIAgentDataSource_!]!
   MJAIAgentExamples_AgentIDArray: [MJAIAgentExample_!]!
   MJAIAgentLearningCycles_AgentIDArray: [MJAIAgentLearningCycle_!]!
@@ -10255,6 +10339,7 @@ type MJAIModel_ {
   IsActive: Boolean!
   MJAIActions_DefaultModelIDArray: [MJAIAction_!]!
   MJAIAgentExamples_EmbeddingModelIDArray: [MJAIAgentExample_!]!
+  MJAIAgentHarnesses_AIModelIDArray: [MJAIAgentHarness_!]!
   MJAIAgentModels_ModelIDArray: [MJAIAgentModel_!]!
   MJAIAgentNotes_EmbeddingModelIDArray: [MJAIAgentNote_!]!
   MJAIAgentRuns_OverrideModelIDArray: [MJAIAgentRun_!]!
@@ -11412,6 +11497,7 @@ type MJAIVendor_ {
   """Detailed description of the vendor and their AI offerings."""
   Description: String
   ID: String!
+  MJAIAgentHarnesses_AIVendorIDArray: [MJAIAgentHarness_!]!
   MJAIAgentRuns_OverrideVendorIDArray: [MJAIAgentRun_!]!
   MJAICredentialBindings_AIVendorIDArray: [MJAICredentialBinding_!]!
   MJAIModelCosts_VendorIDArray: [MJAIModelCost_!]!
@@ -11457,6 +11543,12 @@ type MJAPIApplicationScope_ {
   Glob pattern for matching resources (e.g., Users,Accounts or Skip* or *). NULL means match all resources.
   """
   ResourcePattern: String
+  RowFilter: String
+
+  """
+  Optional row-level filter acting as a CEILING for every API key operating under this application — a restriction keys inherit and cannot widen. Composes with the per-key filter (APIKeyScope.RowFilterID) and with role-based RLS using AND, never OR, so no layer can broaden another. References the same RowLevelSecurityFilter catalog used by role-based RLS. NULL (the default) means the application imposes no row ceiling. The same authoring constraints as APIKeyScope.RowFilterID apply: exact single-entity resource pattern, all referenced columns must exist on that entity, and all referrers of the filter record must resolve to the same entity.
+  """
+  RowFilterID: String
   Scope: String!
 
   """Reference to the scope this rule applies to."""
@@ -11533,6 +11625,12 @@ type MJAPIKeyScope_ {
   Glob pattern for matching resources (e.g., Users,Accounts or Skip* or *). NULL means match all resources under this scope.
   """
   ResourcePattern: String
+  RowFilter: String
+
+  """
+  Optional row-level filter narrowing WHICH RECORDS this scope grant applies to, in addition to the resource pattern that governs which entities. References the same RowLevelSecurityFilter catalog used by role-based RLS, so the filter text flows through the standard {{Token}} substitution engine and every existing RLS enforcement point (RunView, Load by primary key, save, delete, search). NULL (the default) means no row restriction — behavior identical to before this column existed. When set, the rule's ResourcePattern must name a single exact entity (no wildcards, no comma-separated lists), every column the filter references must resolve to a real non-virtual field on that entity, and every other referrer of the same filter record must resolve to that same entity. Critically, this filter is evaluated INDEPENDENTLY of the role-RLS exemption: a user exempt from role RLS is still bound by their key's filter, because narrowing a principal below what their roles allow is the entire purpose of a key ceiling.
+  """
+  RowFilterID: String
   Scope: String!
   ScopeID: String!
   _mj__CreatedAt: Timestamp!
@@ -11831,15 +11929,29 @@ type MJActionExecutionLog_ {
 
   """Timestamp when the action execution ended (timezone-aware)"""
   EndedAt: Timestamp
+  EntityAction: String
+
+  """
+  Optional. The Entity Action binding that caused this run. NULL when the action was invoked directly - from a resolver, a script, an agent step or a scheduled action.
+  """
+  EntityActionID: String
+  EntityActionInvocationType: String
+
+  """
+  Optional. Which lifecycle event fired the binding - AfterUpdate, Validate, List and so on. Recorded separately from EntityActionID because one binding may be attached to several invocation types, and telling a Validate refusal apart from an AfterUpdate side effect is the first question anyone asks of this log.
+  """
+  EntityActionInvocationTypeID: String
   ID: String!
   MJProcessRunDetails_ActionExecutionLogIDArray: [MJProcessRunDetail_!]!
   MJUserRoutineRuns_ActionExecutionLogIDArray: [MJUserRoutineRun_!]!
 
-  """JSON-formatted output data or response from the action execution"""
+  """
+  Human-readable summary message returned by the action - the reason for a refusal, or a short description of what was done. Not the action's output data: parameter values live in Params and ResultParams, and the outcome code in ResultCode.
+  """
   Message: String
 
   """
-  JSON-formatted input parameters passed to the action during execution, storing the exact values used for this specific run.
+  JSON-formatted input parameters AS THE ACTION WAS CALLED, captured once when execution starts and never overwritten. Custom and Generated actions mutate their parameter array in place, so this is the only durable record of the values actually passed in; the final state lives in ResultParams. Parameter values may be redacted per ActionParam.LogValue / EntityActionParam.LogValue, and whole-record value types are never written - see the parameter's own documentation.
   """
   Params: String
 
@@ -11848,11 +11960,27 @@ type MJActionExecutionLog_ {
   """
   ResultCode: String
 
+  """
+  JSON-formatted FINAL parameter set captured when the action finished - the inputs as the action left them, plus any output parameters it produced. Written on FAILURE exactly as on success, under the same redaction rules: a failed run's partially-mutated inputs are usually the most diagnostic thing available, and an audit trail that records only successes is not an audit trail. Distinct from Params, which holds the values the action was called with and is never overwritten. NULL means one thing only - the run never finished (process died, host killed) - so it is a signal rather than an absence, and must not be backfilled.
+  """
+  ResultParams: String
+
   """Number of days to retain the log; NULL for indefinite retention."""
   RetentionPeriod: Int
 
   """Timestamp when the action execution started (timezone-aware)"""
   StartedAt: Timestamp!
+  TargetEntity: String
+
+  """
+  Optional. The entity of the record this run operated on. Deliberately denormalized rather than joined through EntityActionID: it survives the binding being deleted or retargeted, and it lets the log be queried by record with no join. Kept generic because every invoker has a subject - not only Entity Actions.
+  """
+  TargetEntityID: String
+
+  """
+  Optional. The primary key of the record this run operated on, as text, paired with TargetEntityID. For multi-record invocation types (List, View) one log row is written per record, so this is always a single record.
+  """
+  TargetRecordID: String
   User: String!
   UserID: String!
   _mj__CreatedAt: Timestamp!
@@ -11925,8 +12053,12 @@ type MJActionParam_ {
   Determines if this parameter must be provided for input parameters or will always be populated for output parameters.
   """
   IsRequired: Boolean!
+
+  """
+  Whether this parameter's VALUE may be written to ActionExecutionLog.Params. Default 1. Set to 0 for parameters that carry records, credentials or personal data - for example the Data payload of Execute Agent. Independent of the hard rule that Entity Action params of ValueType 'Entity Object' or 'Entity Object Data' are never logged regardless of this flag. When logging is suppressed the log records the parameter name, its type and a redaction marker, never the value.
+  """
+  LogValue: Boolean!
   MJEntityActionParams_ActionParamIDArray: [MJEntityActionParam_!]!
-  MJScheduledActionParams_ActionParamIDArray: [MJScheduledActionParam_!]!
 
   """
   Specifies the type of media this parameter outputs when ValueType is MediaOutput. Used for action discovery and validation.
@@ -12048,7 +12180,6 @@ type MJAction_ {
   MJEntityActions_ActionIDArray: [MJEntityAction_!]!
   MJMCPServerTools_GeneratedActionIDArray: [MJMCPServerTool_!]!
   MJRecordProcesses_ActionIDArray: [MJRecordProcess_!]!
-  MJScheduledActions_ActionIDArray: [MJScheduledAction_!]!
 
   """
   Universal maximum execution time in milliseconds for a single action invocation. Enforced by ActionEngine across ALL action types (Custom, Generated, Runtime) via AbortSignal passed through RunActionParams. NULL means use the engine default.
@@ -13907,6 +14038,7 @@ type MJContentItemChunk_ {
   One-based page number this chunk came from, for paginated sources such as PDFs or slide decks. Provides citation-grade provenance alongside the character offsets. NULL when the source is not paginated.
   """
   PageNumber: Int
+  ParentChunk: String
 
   """
   Optional self-reference to another chunk of the same Content Item that is the parent of this one, expressing a chapter to sub-chapter hierarchy — for example a five-minute chapter of a recording and the individual speaker turns within it, or a document section and its subsections. NULL for top-level segments.
@@ -14377,12 +14509,12 @@ type MJContentSource_ {
   MJContentSourceParams_ContentSourceIDArray: [MJContentSourceParam_!]!
   MJTagSuggestions_SourceContentSourceIDArray: [MJTagSuggestion_!]!
   Name: String
-  ScheduledAction: String
+  ScheduledJob: String
 
   """
-  Optional link to a MJ Scheduled Action that automatically runs the classification pipeline for this source on a cron schedule.
+  Optional link to the Scheduled Job that runs this content source on a recurring basis. Replaces the retired ScheduledActionID link; the job is of type Action and carries its action + parameters in ScheduledJob.Configuration.
   """
-  ScheduledActionID: String
+  ScheduledJobID: String
 
   """
   Registration key of the segmentation strategy used to split this source's content into embeddable chunks — for example StructuralText (document headings), AdaptiveBoundary (target size closing on the nearest natural break), SemanticText (LLM-detected topic boundaries), Transcript (audio/video chapters), PagedContent (one segment per page), or FixedWindow (uniform windows). NULL falls back to the Content Type's value, then to a built-in default.
@@ -14746,7 +14878,6 @@ type MJConversationDetail_ {
   MJConversationDetailAttachments_ConversationDetailIDArray: [MJConversationDetailAttachment_!]!
   MJConversationDetailRatings_ConversationDetailIDArray: [MJConversationDetailRating_!]!
   MJConversationDetails_ParentIDArray: [MJConversationDetail_!]!
-  MJReports_ConversationDetailIDArray: [MJReport_!]!
   MJTasks_ConversationDetailIDArray: [MJTask_!]!
 
   """
@@ -15004,7 +15135,6 @@ type MJConversation_ {
   MJConversationArtifacts_ConversationIDArray: [MJConversationArtifact_!]!
   MJConversationDetails_ConversationIDArray: [MJConversationDetail_!]!
   MJConversations_LastConversationIDArray: [MJConversation_!]!
-  MJReports_ConversationIDArray: [MJReport_!]!
   MJUserRoutines_ConversationIDArray: [MJUserRoutine_!]!
   Name: String
   Project: String
@@ -15190,6 +15320,7 @@ type MJCredential_ {
 
   """Timestamp of the last successful validation against the provider."""
   LastValidatedAt: Timestamp
+  MJAIAgentCredentials_CredentialIDArray: [MJAIAgentCredential_!]!
   MJAICredentialBindings_CredentialIDArray: [MJAICredentialBinding_!]!
   MJCompanyIntegrations_CredentialIDArray: [MJCompanyIntegration_!]!
   MJExternalDataSources_CredentialIDArray: [MJExternalDataSource_!]!
@@ -15524,7 +15655,6 @@ type MJDataContext_ {
   LastRefreshedAt: Timestamp
   MJConversations_DataContextIDArray: [MJConversation_!]!
   MJDataContextItems_DataContextIDArray: [MJDataContextItem_!]!
-  MJReports_DataContextIDArray: [MJReport_!]!
   Name: String!
   User: String!
   UserID: String!
@@ -16060,6 +16190,7 @@ type MJEntityActionInvocationType_ {
   """Order in which this invocation type appears in UI lists and menus."""
   DisplaySequence: Int!
   ID: String!
+  MJActionExecutionLogs_EntityActionInvocationTypeIDArray: [MJActionExecutionLog_!]!
   MJEntityActionInvocations_InvocationTypeIDArray: [MJEntityActionInvocation_!]!
 
   """Name of the invocation type such as Record Created/Updated/etc."""
@@ -16103,11 +16234,18 @@ type MJEntityActionParam_ {
   ID: String!
 
   """
+  Optional per-binding override of ActionParam.LogValue. NULL (the default) inherits the parameter definition. Set to 0 when this particular binding passes something sensitive through a parameter that is ordinarily safe to log - a message body through a generic Text parameter, for instance. Cannot re-enable logging for a value type the hard rule suppresses.
+  """
+  LogValue: Boolean
+
+  """
   Value of the parameter, used only when ValueType is Static or Script. When value is Script, any valid JavaScript code can be provided. The script will have access to an object called EntityActionContext. This object will have a property called EntityObject on it that will contain the BaseEntity derived sub-class with the current data for the entity object this action is operating against. The script must provide the parameter value to the EntityActionContext.result property. This scripting capabilty is designed for very small and simple code, for anything of meaningful complexity, create a sub-class instead.
   """
   Value: String
 
-  """Type of the value, which can be Static, Entity Object, or Script."""
+  """
+  How the parameter value is produced at invocation time. Static = the literal Value (parsed as JSON when it parses). Entity Object = the live BaseEntity instance, for actions that call entity methods. Entity Object Data = entity.GetAll(), a plain object - use this for any action that SERIALIZES the value, such as the Data payload of Execute Agent, because a BaseEntity serializes to {} (its fields are getters, not enumerable own properties). Entity Field = the named field's value. Script = evaluated expression with the entity in scope.
+  """
   ValueType: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
@@ -16122,9 +16260,31 @@ type MJEntityAction_ {
   Entity: String!
   EntityID: String!
   ID: String!
+
+  """
+  How much of this binding's activity reaches ActionExecutionLog. All (default) writes a row per invocation. FailuresOnly writes only runs that did not succeed - the right setting for a high-frequency binding on a busy entity, where the successful runs are noise. None disables logging for the binding entirely and should be rare, because it also removes the failure record.
+  """
+  LoggingMode: String!
+  MJActionExecutionLogs_EntityActionIDArray: [MJActionExecutionLog_!]!
   MJEntityActionFilters_EntityActionIDArray: [MJEntityActionFilter_!]!
   MJEntityActionInvocations_EntityActionIDArray: [MJEntityActionInvocation_!]!
   MJEntityActionParams_EntityActionIDArray: [MJEntityActionParam_!]!
+  ScopeEntity: String
+
+  """
+  Optional. Together with ScopeRecordID, narrows this Entity Action to records related to ONE specific record - for example a single Deal Type, Contract Type, Pipeline or Company - rather than every record of EntityID. NULL (the default) means the action applies to all records, which is the pre-existing behaviour. How a scope record relates to the subject record is resolved by the app that owns the scope entity; the framework only stores and filters on the pair.
+  """
+  ScopeEntityID: String
+
+  """
+  Optional. The primary key of the scope record, as text, paired with ScopeEntityID. Both columns are NULL or both are set (CK_EntityAction_Scope). Lets a configuration record such as a Deal Type surface "the workflows bound to me" as a real relationship rather than something buried in filter code.
+  """
+  ScopeRecordID: String
+
+  """
+  Execution order when multiple Entity Actions are bound to the same entity and invocation type. Lower runs first; ties fall back to creation order. Defaults to 0 so existing rows are unaffected.
+  """
+  Sequence: Int!
 
   """Status of the entity action (Pending, Active, Disabled)."""
   Status: String!
@@ -16945,6 +17105,11 @@ type MJEntityRelationship_ {
   RelatedEntityJoinField: String!
 
   """
+  Optional JSON policy object that declares this relationship as a first-class related-record collection, so CodeGen can emit a typed DeclareRelatedRecords(...) declaration on the entity subclass. Shape is IRelatedRecordCollectionConfig: Name (the generated property name, e.g. "Lines"), Load ('explicit' | 'immediate' | 'lazy' | 'never'), Source ('database' | 'cache'), ReadOnly, OnRemove ('delete' | 'orphan' | 'refuse'), OrderBy, Sequence ({ Field, From }), and ClearAfterSave. Source 'cache' reads the related records from whichever loaded BaseEngine already holds that entity, costing no query, and defaults ReadOnly to true because those are the engine's own instances; 'lazy' fills on first access and requires both. RelatedEntity and RelatedEntityJoinField are NOT repeated here — they are read from this row's own columns. NULL means the relationship is not a declared collection, which is the default and reproduces pre-6.2 behaviour exactly.
+  """
+  RelatedRecordCollection: String
+
+  """
   Used for display order in generated forms and in other places in the UI where relationships for an entity are shown
   """
   Sequence: Int!
@@ -16994,6 +17159,21 @@ type MJEntity_ {
   Global flag controlling if deletes are allowed for any user, or not. If set to 1, a GraqhQL mutation and stored procedure are created. Permissions are still required to perform the action but if this flag is set to 0, no user will be able to perform the action.
   """
   AllowDeleteAPI: Boolean!
+
+  """
+  When 1, this entity may have rows removed by DELETE statements that do not go through BaseEntity.Delete() — purge and retention routines, or integration sync reconciling a remote source. Default 0, meaning every delete is expected to flow through BaseEntity so that record-change tracking, entity actions, cascade handling and cache invalidation all run. This column DECLARES intent for the code paths and tooling that consult it; it does not and cannot prevent anyone from executing SQL. Requires TrackRecordChanges = 0 and TrustServerCacheCompletely = 0, and additionally requires DeleteType = 'Hard' — a direct DELETE removes the row outright rather than setting DeletedAt, which would defeat soft delete.
+  """
+  AllowDirectSQLDelete: Boolean!
+
+  """
+  When 1, this entity may be populated by INSERT statements that do not go through BaseEntity.Save() — bulk loads, ETL/integration sync, or rows created as a side effect of a stored procedure. Default 0, meaning every insert is expected to flow through BaseEntity so that record-change tracking, entity actions, validation and cache invalidation all run. This column DECLARES intent for the code paths and tooling that consult it; it does not and cannot prevent anyone from executing SQL. Requires TrackRecordChanges = 0 and TrustServerCacheCompletely = 0, because a direct insert produces neither an audit row nor a cache-invalidation event.
+  """
+  AllowDirectSQLInsert: Boolean!
+
+  """
+  When 1, this entity may be modified by UPDATE statements that do not go through BaseEntity.Save() — bulk backfills, integration sync, or maintenance routines. Default 0, meaning every update is expected to flow through BaseEntity so that record-change tracking, entity actions, validation and cache invalidation all run. This column DECLARES intent for the code paths and tooling that consult it; it does not and cannot prevent anyone from executing SQL. Requires TrackRecordChanges = 0 and TrustServerCacheCompletely = 0, because a direct update produces neither an audit row nor a cache-invalidation event.
+  """
+  AllowDirectSQLUpdate: Boolean!
 
   """
   When false (default), child types are disjoint - a record can only be one child type at a time. When true, a record can simultaneously exist as multiple child types (e.g., a Person can be both a Member and a Volunteer).
@@ -17129,6 +17309,11 @@ type MJEntity_ {
 
   """Indicates if the search function was auto-generated by CodeGen."""
   FullTextSearchFunctionGenerated: Boolean!
+
+  """
+  When set, CodeGen generates the entity's full base view under THIS name instead of BaseView, and the application owns BaseView — which is expected to wrap it (SELECT g.*, <extras> FROM <GeneratedBaseViewName> g). This gives an entity a custom base view WITHOUT inheriting the generated SQL: related-entity display joins, geo columns and recursive root-ID columns keep regenerating underneath, so a foreign key added later still appears. NULL (the default, and every pre-existing row) means the previous all-or-nothing behaviour: BaseViewGenerated alone decides whether CodeGen writes BaseView, and there is no second view. BaseView remains the public surface — entity field discovery, permissions and the generated CRUD procedures all target it. SQL SERVER ONLY: layering relies on sp_refreshview to re-resolve the application-owned outer view's SELECT * against a regenerated inner view. PostgreSQL freezes a view's column list at creation and has no refresh equivalent, so CodeGen rejects this column on PostgreSQL rather than let the outer view go silently stale.
+  """
+  GeneratedBaseViewName: String
   ID: String!
 
   """
@@ -17145,6 +17330,7 @@ type MJEntity_ {
   MJAIAgentRuns_PrimaryScopeEntityIDArray: [MJAIAgentRun_!]!
   MJAIAgentSessions_LinkedEntityIDArray: [MJAIAgentSession_!]!
   MJAccessControlRules_EntityIDArray: [MJAccessControlRule_!]!
+  MJActionExecutionLogs_TargetEntityIDArray: [MJActionExecutionLog_!]!
   MJApplicationEntities_EntityIDArray: [MJApplicationEntity_!]!
   MJArchiveConfigurationEntities_EntityIDArray: [MJArchiveConfigurationEntity_!]!
   MJArchiveRunDetails_EntityIDArray: [MJArchiveRunDetail_!]!
@@ -17162,6 +17348,7 @@ type MJEntity_ {
   MJEntityAIActions_EntityIDArray: [MJEntityAIAction_!]!
   MJEntityAIActions_OutputEntityIDArray: [MJEntityAIAction_!]!
   MJEntityActions_EntityIDArray: [MJEntityAction_!]!
+  MJEntityActions_ScopeEntityIDArray: [MJEntityAction_!]!
   MJEntityCommunicationMessageTypes_EntityIDArray: [MJEntityCommunicationMessageType_!]!
   MJEntityDocuments_EntityIDArray: [MJEntityDocument_!]!
   MJEntityFields_EntityIDArray: [MJEntityField_!]!
@@ -17346,7 +17533,6 @@ type MJEnvironment_ {
   MJConversations_EnvironmentIDArray: [MJConversation_!]!
   MJDashboards_EnvironmentIDArray: [MJDashboard_!]!
   MJProjects_EnvironmentIDArray: [MJProject_!]!
-  MJReports_EnvironmentIDArray: [MJReport_!]!
   MJTasks_EnvironmentIDArray: [MJTask_!]!
   MJUserRoutines_EnvironmentIDArray: [MJUserRoutine_!]!
 
@@ -19666,7 +19852,6 @@ Defines methods for delivering generated outputs such as email, file storage, AP
 type MJOutputDeliveryType_ {
   Description: String
   ID: String!
-  MJReports_OutputDeliveryTypeIDArray: [MJReport_!]!
   Name: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
@@ -19683,19 +19868,6 @@ type MJOutputFormatType_ {
   """
   DisplayFormat: String
   ID: String!
-  MJReports_OutputFormatTypeIDArray: [MJReport_!]!
-  Name: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
-Defines events that can trigger output generation such as schedules, data changes, or manual requests.
-"""
-type MJOutputTriggerType_ {
-  Description: String
-  ID: String!
-  MJReports_OutputTriggerTypeIDArray: [MJReport_!]!
   Name: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
@@ -21079,130 +21251,6 @@ type MJRemoteOperation_ {
 }
 
 """
-Organizes reports into logical groupings for navigation, access control, and discovery within the reporting system.
-"""
-type MJReportCategory_ {
-  Description: String
-  ID: String!
-  MJReportCategories_ParentIDArray: [MJReportCategory_!]!
-  MJReports_CategoryIDArray: [MJReport_!]!
-  Name: String!
-  Parent: String
-  ParentID: String
-  RootParentID: String
-  User: String!
-  UserID: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
-Stores point-in-time captures of report outputs, preserving historical data and enabling comparison over time.
-"""
-type MJReportSnapshot_ {
-  ID: String!
-  Report: String!
-  ReportID: String!
-
-  """Field ResultSet for entity Report Snapshots."""
-  ResultSet: String!
-  User: String!
-  UserID: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""Tracks individual user state within interactive reports"""
-type MJReportUserState_ {
-  ID: String!
-  Report: String!
-  ReportID: String!
-
-  """JSON serialized state of user interaction with the report"""
-  ReportState: String
-  User: String!
-  UserID: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""Stores iterations of report logic, structure, and layout changes"""
-type MJReportVersion_ {
-  """JSON configuration of report structure, layout and logic"""
-  Configuration: String
-
-  """Indicates if the data context was updated in this version"""
-  DataContextUpdated: Boolean!
-
-  """Description of this report version"""
-  Description: String
-  ID: String!
-
-  """Name of this report version"""
-  Name: String!
-  Report: String!
-  ReportID: String!
-
-  """Report version number, sequential per report starting at 1"""
-  VersionNumber: Int!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
-Defines report configurations including data sources, layouts, filters, and scheduling for automated report generation.
-"""
-type MJReport_ {
-  Category: String
-  CategoryID: String
-
-  """Field Configuration for entity Reports."""
-  Configuration: String
-  Conversation: String
-  ConversationDetail: String
-  ConversationDetailID: String
-  ConversationID: String
-  DataContext: String
-  DataContextID: String
-  Description: String
-  Environment: String!
-  EnvironmentID: String!
-  ID: String!
-  MJReportSnapshots_ReportIDArray: [MJReportSnapshot_!]!
-  MJReportUserStates_ReportIDArray: [MJReportUserState_!]!
-  MJReportVersions_ReportIDArray: [MJReportVersion_!]!
-  Name: String!
-  OutputDeliveryType: String
-  OutputDeliveryTypeID: String
-  OutputFormatType: String
-  OutputFormatTypeID: String
-
-  """
-  For scheduled reports, the frequency of generation (Daily, Weekly, Monthly, etc.).
-  """
-  OutputFrequency: String
-
-  """Email address(es) to send the report to when using email delivery."""
-  OutputTargetEmail: String
-  OutputTriggerType: String
-  OutputTriggerTypeID: String
-  OutputWorkflow: String
-  OutputWorkflowID: String
-
-  """Field SharingScope for entity Reports."""
-  SharingScope: String!
-
-  """
-  Thumbnail image for the report that can be displayed in gallery views. Can contain either a URL to an image file or a Base64-encoded image string.
-  """
-  Thumbnail: String
-  User: String!
-  UserID: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
 Table to track user links to shared resources such as views, dashboards, etc.
 """
 type MJResourceLink_ {
@@ -21358,6 +21406,8 @@ type MJRowLevelSecurityFilter_ {
   """
   FilterText: String
   ID: String!
+  MJAPIApplicationScopes_RowFilterIDArray: [MJAPIApplicationScope_!]!
+  MJAPIKeyScopes_RowFilterIDArray: [MJAPIKeyScope_!]!
   MJEntityPermissions_CreateRLSFilterIDArray: [MJEntityPermission_!]!
   MJEntityPermissions_DeleteRLSFilterIDArray: [MJEntityPermission_!]!
   MJEntityPermissions_ReadRLSFilterIDArray: [MJEntityPermission_!]!
@@ -21398,70 +21448,6 @@ type MJSQLDialect_ {
 
   """URL to the database vendor or documentation website"""
   WebURL: String
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
-Stores parameter values for scheduled action executions, configuring inputs for automated action runs.
-"""
-type MJScheduledActionParam_ {
-  ActionParam: String!
-  ActionParamID: String!
-  Comments: String
-  ID: String!
-  ScheduledAction: String!
-  ScheduledActionID: String!
-
-  """Field Value for entity Scheduled Action Params."""
-  Value: String
-
-  """Field ValueType for entity Scheduled Action Params."""
-  ValueType: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""Track scheduled actions and their details"""
-type MJScheduledAction_ {
-  Action: String!
-  ActionID: String!
-  CreatedByUser: String!
-  CreatedByUserID: String!
-
-  """
-  Cron expression defining the schedule, automatically maintained by the system unless Type is Custom, in which case the user directly sets this
-  """
-  CronExpression: String
-
-  """Field CustomCronExpression for entity Scheduled Actions."""
-  CustomCronExpression: String
-
-  """Day of the month for the scheduled action"""
-  DayOfMonth: Int
-
-  """Day of the week for the scheduled action"""
-  DayOfWeek: String
-  Description: String
-  ID: String!
-
-  """Interval in days for the scheduled action"""
-  IntervalDays: Int
-  MJContentSources_ScheduledActionIDArray: [MJContentSource_!]!
-  MJScheduledActionParams_ScheduledActionIDArray: [MJScheduledActionParam_!]!
-
-  """Month for the scheduled action"""
-  Month: String
-  Name: String!
-
-  """Status of the scheduled action (Pending, Active, Disabled, Expired)"""
-  Status: String!
-
-  """Timezone for the scheduled action, if not specified defaults to UTC/Z"""
-  Timezone: String!
-
-  """Type of the scheduled action (Daily, Weekly, Monthly, Yearly, Custom)"""
-  Type: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
 }
@@ -21619,12 +21605,18 @@ type MJScheduledJob_ {
   """
   LockedByInstance: String
   MJCompanyIntegrations_ScheduledJobIDArray: [MJCompanyIntegration_!]!
+  MJContentSources_ScheduledJobIDArray: [MJContentSource_!]!
   MJScheduledJobRuns_ScheduledJobIDArray: [MJScheduledJobRun_!]!
 
   """
   Optional per-job override for the acquire-time lock lease length, in minutes. When set and positive, the engine uses max(default lease, MaxRuntimeMinutes) as the initial ExpectedCompletionAt — so it only ever EXTENDS the default lease, never shrinks it. Intended for jobs whose work is a single long-running call that cannot heartbeat mid-flight (e.g. one slow synchronous action). Jobs that heartbeat via the plugin opt-in pattern do not need this. NULL = use the engine default lease (LeaseTimeoutMinutes). See plans/scheduled-job-engine-heartbeat-lease.md (GH #2749).
   """
   MaxRuntimeMinutes: Int
+
+  """
+  What this job does about fire times that passed while the scheduler was not running (a deploy, a crash, a sleeping machine). RunOnce (the default) performs a single catch-up run and then resumes the normal schedule — correct for digests, syncs and anything where only the latest state matters, and identical to the behavior every job had before this column existed. RunAll replays each missed occurrence, one per poll tick so a long outage drains gradually rather than dispatching at once — correct for per-period work such as billing or metric snapshots, where skipping a period loses data nothing else recreates. Skip performs no catch-up at all and simply advances to the next future occurrence — correct for work whose value expires, such as a cache warm. A run is only treated as missed when a LATER occurrence has also come due, so a job that merely became due seconds ago is never misclassified; this is evaluated cron-relatively rather than against a fixed grace window, which would misjudge both a per-minute job after a short pause and a monthly job that is a week late.
+  """
+  MissedRunPolicy: String!
 
   """
   Human-readable name for this scheduled job. Should clearly identify what the job does.
@@ -22894,6 +22886,11 @@ type MJTaggedItem_ {
 Defines dependencies between tasks to create a directed acyclic graph (DAG) for workflow orchestration
 """
 type MJTaskDependency_ {
+  """
+  Optional boolean expression gating this dependency edge. NULL (the default, and the value every pre-existing row carries) means the edge is unconditional, so adding this column changes the meaning of no existing graph. When present it is evaluated by the shared GraphTraversalEngine against the same context a design-time AIAgentStepPath.Condition sees, which is what lets a runtime task graph and a flow-editor graph be the same graph. A condition that evaluates false skips the edge; one that fails to evaluate ALSO skips it, but is reported distinctly so a graph stalled by a malformed expression cannot be mistaken for one that finished normally.
+  """
+  Condition: String
+
   """Type of dependency relationship (Prerequisite, Corequisite, Optional)"""
   DependencyType: String!
   DependsOnTask: String!
@@ -22928,6 +22925,22 @@ Core task management entity supporting multi-agent and multi-human collaboration
 type MJTask_ {
   Agent: String
   AgentID: String
+  AgentRun: String
+
+  """
+  The specific AI Agent Run that executed this task. Distinct from the conversation-level link: sibling tasks in one graph each get their own run, so this is what run-history and Gantt views should follow.
+  """
+  AgentRunID: String
+
+  """
+  When the current dispatcher claim lapses. Long-running tasks extend it by heartbeat; reconciliation treats an expired claim as an orphaned task and returns it to Pending.
+  """
+  ClaimExpiresAt: Timestamp
+
+  """
+  Identifier of the dispatcher instance currently executing this task. Part of the compare-and-swap claim protocol; set only by the dispatcher, never by user-facing writes. Null when unclaimed. Human-assigned tasks never carry a claim.
+  """
+  ClaimedBy: String
 
   """Timestamp when the task was completed"""
   CompletedAt: Timestamp
@@ -22941,13 +22954,28 @@ type MJTask_ {
   DueAt: Timestamp
   Environment: String!
   EnvironmentID: String!
+
+  """
+  Failure detail when Status is Failed. Null for tasks that have not failed.
+  """
+  ErrorMessage: String
   ID: String!
+
+  """
+  Structured input for this task, stored as JSON. Replaces the legacy __TASK_METADATA__ marker that was embedded in Description.
+  """
+  InputPayload: String
   MJTaskDependencies_DependsOnTaskIDArray: [MJTaskDependency_!]!
   MJTaskDependencies_TaskIDArray: [MJTaskDependency_!]!
   MJTasks_ParentIDArray: [MJTask_!]!
 
   """Display name for the task"""
   Name: String!
+
+  """
+  Structured output produced by this task, stored as JSON. Downstream tasks read their dependencies' outputs from here. Replaces the legacy __TASK_OUTPUT__ marker that was embedded in Description.
+  """
+  OutputPayload: String
   Parent: String
   ParentID: String
 
@@ -24225,6 +24253,7 @@ type MJUserViewRunDetail_ {
   """Field RecordID for entity User View Run Details."""
   RecordID: String!
   UserViewID: String!
+  UserViewRun: String!
   UserViewRunID: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
@@ -24433,14 +24462,9 @@ type MJUser_ {
   MJRecordMergeLogs_ApprovedByUserIDArray: [MJRecordMergeLog_!]!
   MJRecordMergeLogs_InitiatedByUserIDArray: [MJRecordMergeLog_!]!
   MJRemoteOperations_CodeApprovedByUserIDArray: [MJRemoteOperation_!]!
-  MJReportCategories_UserIDArray: [MJReportCategory_!]!
-  MJReportSnapshots_UserIDArray: [MJReportSnapshot_!]!
-  MJReportUserStates_UserIDArray: [MJReportUserState_!]!
-  MJReports_UserIDArray: [MJReport_!]!
   MJResourceLinks_UserIDArray: [MJResourceLink_!]!
   MJResourcePermissions_SharedByUserIDArray: [MJResourcePermission_!]!
   MJResourcePermissions_UserIDArray: [MJResourcePermission_!]!
-  MJScheduledActions_CreatedByUserIDArray: [MJScheduledAction_!]!
   MJScheduledJobRuns_ExecutedByUserIDArray: [MJScheduledJobRun_!]!
   MJScheduledJobs_NotifyUserIDArray: [MJScheduledJob_!]!
   MJScheduledJobs_OwnerUserIDArray: [MJScheduledJob_!]!
@@ -24776,84 +24800,6 @@ type MJViewType_ {
   _mj__UpdatedAt: Timestamp!
 }
 
-"""
-Registers available workflow execution engines with their capabilities, configuration, and supported workflow types.
-"""
-type MJWorkflowEngine_ {
-  Description: String
-
-  """Class name implementing the workflow engine interface."""
-  DriverClass: String!
-
-  """Import path for the workflow engine driver."""
-  DriverPath: String!
-  ID: String!
-  MJWorkflows_WorkflowEngineIDArray: [MJWorkflow_!]!
-  Name: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
-Tracks execution instances of workflows including status, timing, context data, and detailed step-by-step results.
-"""
-type MJWorkflowRun_ {
-  EndedAt: Timestamp
-
-  """Field ExternalSystemRecordID for entity Workflow Runs."""
-  ExternalSystemRecordID: String!
-  ID: String!
-
-  """
-  JSON-formatted detailed results from the workflow execution, including outputs from each step and any error information.
-  """
-  Results: String
-  StartedAt: Timestamp!
-  Status: String!
-  Workflow: String!
-  WorkflowEngineName: String!
-  WorkflowID: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
-"""
-Defines automated workflows with steps, conditions, and actions for orchestrating complex business processes.
-"""
-type MJWorkflow_ {
-  """
-  If set to 1, the workflow will be run automatically on the interval specified by the AutoRunIntervalType and AutoRunInterval fields
-  """
-  AutoRunEnabled: Boolean!
-
-  """
-  The interval, denominated in the units specified in the AutoRunIntervalUnits column, between auto runs of this workflow.
-  """
-  AutoRunInterval: Int
-  AutoRunIntervalMinutes: Int
-
-  """Minutes, Hours, Days, Weeks, Months, Years"""
-  AutoRunIntervalUnits: String
-  Description: String
-
-  """
-  The unique identifier of this workflow in an external system, used for synchronization with external workflow engines.
-  """
-  ExternalSystemRecordID: String!
-  ID: String!
-  MJReports_OutputWorkflowIDArray: [MJReport_!]!
-  MJWorkflowRuns_WorkflowIDArray: [MJWorkflowRun_!]!
-  Name: String!
-
-  """
-  If specified, this subclass key, via the ClassFactory, will be instantiated, to execute this workflow. If not specified the WorkflowBase class will be used by default.
-  """
-  SubclassName: String
-  WorkflowEngineID: String!
-  _mj__CreatedAt: Timestamp!
-  _mj__UpdatedAt: Timestamp!
-}
-
 """Tracks the resources that are active within a given worksapce"""
 type MJWorkspaceItem_ {
   """
@@ -24966,8 +24912,10 @@ type Mutation {
   CreateMJAIAgentClientTool(input: CreateMJAIAgentClientToolInput!): MJAIAgentClientTool_!
   CreateMJAIAgentCoAgent(input: CreateMJAIAgentCoAgentInput!): MJAIAgentCoAgent_!
   CreateMJAIAgentConfiguration(input: CreateMJAIAgentConfigurationInput!): MJAIAgentConfiguration_!
+  CreateMJAIAgentCredential(input: CreateMJAIAgentCredentialInput!): MJAIAgentCredential_!
   CreateMJAIAgentDataSource(input: CreateMJAIAgentDataSourceInput!): MJAIAgentDataSource_!
   CreateMJAIAgentExample(input: CreateMJAIAgentExampleInput!): MJAIAgentExample_!
+  CreateMJAIAgentHarness(input: CreateMJAIAgentHarnessInput!): MJAIAgentHarness_!
   CreateMJAIAgentLearningCycle(input: CreateMJAIAgentLearningCycleInput!): MJAIAgentLearningCycle_!
   CreateMJAIAgentModality(input: CreateMJAIAgentModalityInput!): MJAIAgentModality_!
   CreateMJAIAgentModel(input: CreateMJAIAgentModelInput!): MJAIAgentModel_!
@@ -25217,7 +25165,6 @@ type Mutation {
   CreateMJOpenAppInstallHistory(input: CreateMJOpenAppInstallHistoryInput!): MJOpenAppInstallHistory_!
   CreateMJOutputDeliveryType(input: CreateMJOutputDeliveryTypeInput!): MJOutputDeliveryType_!
   CreateMJOutputFormatType(input: CreateMJOutputFormatTypeInput!): MJOutputFormatType_!
-  CreateMJOutputTriggerType(input: CreateMJOutputTriggerTypeInput!): MJOutputTriggerType_!
   CreateMJPermissionDomain(input: CreateMJPermissionDomainInput!): MJPermissionDomain_!
   CreateMJProcessRun(input: CreateMJProcessRunInput!): MJProcessRun_!
   CreateMJProcessRunDetail(input: CreateMJProcessRunDetailInput!): MJProcessRunDetail_!
@@ -25249,19 +25196,12 @@ type Mutation {
   CreateMJRecordProcessWatermark(input: CreateMJRecordProcessWatermarkInput!): MJRecordProcessWatermark_!
   CreateMJRemoteOperation(input: CreateMJRemoteOperationInput!): MJRemoteOperation_!
   CreateMJRemoteOperationCategory(input: CreateMJRemoteOperationCategoryInput!): MJRemoteOperationCategory_!
-  CreateMJReport(input: CreateMJReportInput!): MJReport_!
-  CreateMJReportCategory(input: CreateMJReportCategoryInput!): MJReportCategory_!
-  CreateMJReportSnapshot(input: CreateMJReportSnapshotInput!): MJReportSnapshot_!
-  CreateMJReportUserState(input: CreateMJReportUserStateInput!): MJReportUserState_!
-  CreateMJReportVersion(input: CreateMJReportVersionInput!): MJReportVersion_!
   CreateMJResourceLink(input: CreateMJResourceLinkInput!): MJResourceLink_!
   CreateMJResourcePermission(input: CreateMJResourcePermissionInput!): MJResourcePermission_!
   CreateMJResourceType(input: CreateMJResourceTypeInput!): MJResourceType_!
   CreateMJRole(input: CreateMJRoleInput!): MJRole_!
   CreateMJRowLevelSecurityFilter(input: CreateMJRowLevelSecurityFilterInput!): MJRowLevelSecurityFilter_!
   CreateMJSQLDialect(input: CreateMJSQLDialectInput!): MJSQLDialect_!
-  CreateMJScheduledAction(input: CreateMJScheduledActionInput!): MJScheduledAction_!
-  CreateMJScheduledActionParam(input: CreateMJScheduledActionParamInput!): MJScheduledActionParam_!
   CreateMJScheduledJob(input: CreateMJScheduledJobInput!): MJScheduledJob_!
   CreateMJScheduledJobRun(input: CreateMJScheduledJobRunInput!): MJScheduledJobRun_!
   CreateMJScheduledJobType(input: CreateMJScheduledJobTypeInput!): MJScheduledJobType_!
@@ -25335,25 +25275,26 @@ type Mutation {
   CreateMJVersionLabelItem(input: CreateMJVersionLabelItemInput!): MJVersionLabelItem_!
   CreateMJVersionLabelRestore(input: CreateMJVersionLabelRestoreInput!): MJVersionLabelRestore_!
   CreateMJViewType(input: CreateMJViewTypeInput!): MJViewType_!
-  CreateMJWorkflow(input: CreateMJWorkflowInput!): MJWorkflow_!
-  CreateMJWorkflowEngine(input: CreateMJWorkflowEngineInput!): MJWorkflowEngine_!
-  CreateMJWorkflowRun(input: CreateMJWorkflowRunInput!): MJWorkflowRun_!
   CreateMJWorkspace(input: CreateMJWorkspaceInput!): MJWorkspace_!
   CreateMJWorkspaceItem(input: CreateMJWorkspaceItemInput!): MJWorkspaceItem_!
   CreateMediaAccessToken(fileId: String!): MediaAccessTokenResult!
   CreatePreAuthUploadUrl(input: CreatePreAuthUploadUrlInput!): CreatePreAuthUploadUrlPayload!
   CreateQueryExtended(input: CreateQuerySystemUserInput!): QueryMutationResultType!
-  CreateReportFromConversationDetailID(ConversationDetailID: String!): CreateReportResultType!
   CreateVersionLabel(input: CreateVersionLabelInput!, sessionId: String): CreateLabelResultOutput!
   CreatemjBizAppsFormsForm(input: CreatemjBizAppsFormsFormInput!): mjBizAppsFormsForm_!
+  CreatemjBizAppsFormsFormAutomation(input: CreatemjBizAppsFormsFormAutomationInput!): mjBizAppsFormsFormAutomation_!
+  CreatemjBizAppsFormsFormAutomationRun(input: CreatemjBizAppsFormsFormAutomationRunInput!): mjBizAppsFormsFormAutomationRun_!
   CreatemjBizAppsFormsFormCategory(input: CreatemjBizAppsFormsFormCategoryInput!): mjBizAppsFormsFormCategory_!
   CreatemjBizAppsFormsFormDistribution(input: CreatemjBizAppsFormsFormDistributionInput!): mjBizAppsFormsFormDistribution_!
+  CreatemjBizAppsFormsFormEntityBinding(input: CreatemjBizAppsFormsFormEntityBindingInput!): mjBizAppsFormsFormEntityBinding_!
+  CreatemjBizAppsFormsFormEntityBindingRecord(input: CreatemjBizAppsFormsFormEntityBindingRecordInput!): mjBizAppsFormsFormEntityBindingRecord_!
   CreatemjBizAppsFormsFormPage(input: CreatemjBizAppsFormsFormPageInput!): mjBizAppsFormsFormPage_!
   CreatemjBizAppsFormsFormQuestion(input: CreatemjBizAppsFormsFormQuestionInput!): mjBizAppsFormsFormQuestion_!
   CreatemjBizAppsFormsFormQuestionOption(input: CreatemjBizAppsFormsFormQuestionOptionInput!): mjBizAppsFormsFormQuestionOption_!
   CreatemjBizAppsFormsFormResponse(input: CreatemjBizAppsFormsFormResponseInput!): mjBizAppsFormsFormResponse_!
   CreatemjBizAppsFormsFormResponseAnswer(input: CreatemjBizAppsFormsFormResponseAnswerInput!): mjBizAppsFormsFormResponseAnswer_!
   CreatemjBizAppsFormsFormStyle(input: CreatemjBizAppsFormsFormStyleInput!): mjBizAppsFormsFormStyle_!
+  CreatemjBizAppsFormsFormUpload(input: CreatemjBizAppsFormsFormUploadInput!): mjBizAppsFormsFormUpload_!
   CreatemjBizAppsFormsFormVersion(input: CreatemjBizAppsFormsFormVersionInput!): mjBizAppsFormsFormVersion_!
   DeleteFile(ID: String!, options___: DeleteOptionsInput!): MJFile_!
   DeleteFileCategory(ID: String!, options___: DeleteOptionsInput!): MJFileCategory_!
@@ -25366,8 +25307,10 @@ type Mutation {
   DeleteMJAIAgentClientTool(ID: String!, options___: DeleteOptionsInput!): MJAIAgentClientTool_!
   DeleteMJAIAgentCoAgent(ID: String!, options___: DeleteOptionsInput!): MJAIAgentCoAgent_!
   DeleteMJAIAgentConfiguration(ID: String!, options___: DeleteOptionsInput!): MJAIAgentConfiguration_!
+  DeleteMJAIAgentCredential(ID: String!, options___: DeleteOptionsInput!): MJAIAgentCredential_!
   DeleteMJAIAgentDataSource(ID: String!, options___: DeleteOptionsInput!): MJAIAgentDataSource_!
   DeleteMJAIAgentExample(ID: String!, options___: DeleteOptionsInput!): MJAIAgentExample_!
+  DeleteMJAIAgentHarness(ID: String!, options___: DeleteOptionsInput!): MJAIAgentHarness_!
   DeleteMJAIAgentLearningCycle(ID: String!, options___: DeleteOptionsInput!): MJAIAgentLearningCycle_!
   DeleteMJAIAgentModality(ID: String!, options___: DeleteOptionsInput!): MJAIAgentModality_!
   DeleteMJAIAgentModel(ID: String!, options___: DeleteOptionsInput!): MJAIAgentModel_!
@@ -25617,7 +25560,6 @@ type Mutation {
   DeleteMJOpenAppInstallHistory(ID: String!, options___: DeleteOptionsInput!): MJOpenAppInstallHistory_!
   DeleteMJOutputDeliveryType(ID: String!, options___: DeleteOptionsInput!): MJOutputDeliveryType_!
   DeleteMJOutputFormatType(ID: String!, options___: DeleteOptionsInput!): MJOutputFormatType_!
-  DeleteMJOutputTriggerType(ID: String!, options___: DeleteOptionsInput!): MJOutputTriggerType_!
   DeleteMJPermissionDomain(ID: String!, options___: DeleteOptionsInput!): MJPermissionDomain_!
   DeleteMJProcessRun(ID: String!, options___: DeleteOptionsInput!): MJProcessRun_!
   DeleteMJProcessRunDetail(ID: String!, options___: DeleteOptionsInput!): MJProcessRunDetail_!
@@ -25649,19 +25591,12 @@ type Mutation {
   DeleteMJRecordProcessWatermark(ID: String!, options___: DeleteOptionsInput!): MJRecordProcessWatermark_!
   DeleteMJRemoteOperation(ID: String!, options___: DeleteOptionsInput!): MJRemoteOperation_!
   DeleteMJRemoteOperationCategory(ID: String!, options___: DeleteOptionsInput!): MJRemoteOperationCategory_!
-  DeleteMJReport(ID: String!, options___: DeleteOptionsInput!): MJReport_!
-  DeleteMJReportCategory(ID: String!, options___: DeleteOptionsInput!): MJReportCategory_!
-  DeleteMJReportSnapshot(ID: String!, options___: DeleteOptionsInput!): MJReportSnapshot_!
-  DeleteMJReportUserState(ID: String!, options___: DeleteOptionsInput!): MJReportUserState_!
-  DeleteMJReportVersion(ID: String!, options___: DeleteOptionsInput!): MJReportVersion_!
   DeleteMJResourceLink(ID: String!, options___: DeleteOptionsInput!): MJResourceLink_!
   DeleteMJResourcePermission(ID: String!, options___: DeleteOptionsInput!): MJResourcePermission_!
   DeleteMJResourceType(ID: String!, options___: DeleteOptionsInput!): MJResourceType_!
   DeleteMJRole(ID: String!, options___: DeleteOptionsInput!): MJRole_!
   DeleteMJRowLevelSecurityFilter(ID: String!, options___: DeleteOptionsInput!): MJRowLevelSecurityFilter_!
   DeleteMJSQLDialect(ID: String!, options___: DeleteOptionsInput!): MJSQLDialect_!
-  DeleteMJScheduledAction(ID: String!, options___: DeleteOptionsInput!): MJScheduledAction_!
-  DeleteMJScheduledActionParam(ID: String!, options___: DeleteOptionsInput!): MJScheduledActionParam_!
   DeleteMJScheduledJob(ID: String!, options___: DeleteOptionsInput!): MJScheduledJob_!
   DeleteMJScheduledJobRun(ID: String!, options___: DeleteOptionsInput!): MJScheduledJobRun_!
   DeleteMJScheduledJobType(ID: String!, options___: DeleteOptionsInput!): MJScheduledJobType_!
@@ -25735,22 +25670,24 @@ type Mutation {
   DeleteMJVersionLabelItem(ID: String!, options___: DeleteOptionsInput!): MJVersionLabelItem_!
   DeleteMJVersionLabelRestore(ID: String!, options___: DeleteOptionsInput!): MJVersionLabelRestore_!
   DeleteMJViewType(ID: String!, options___: DeleteOptionsInput!): MJViewType_!
-  DeleteMJWorkflow(ID: String!, options___: DeleteOptionsInput!): MJWorkflow_!
-  DeleteMJWorkflowEngine(ID: String!, options___: DeleteOptionsInput!): MJWorkflowEngine_!
-  DeleteMJWorkflowRun(ID: String!, options___: DeleteOptionsInput!): MJWorkflowRun_!
   DeleteMJWorkspace(ID: String!, options___: DeleteOptionsInput!): MJWorkspace_!
   DeleteMJWorkspaceItem(ID: String!, options___: DeleteOptionsInput!): MJWorkspaceItem_!
   DeleteQueryExtended(ID: String!, options: DeleteOptionsInput): DeleteQueryResultType!
   DeleteStorageObject(input: DeleteStorageObjectInput!): Boolean!
   DeletemjBizAppsFormsForm(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsForm_!
+  DeletemjBizAppsFormsFormAutomation(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormAutomation_!
+  DeletemjBizAppsFormsFormAutomationRun(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormAutomationRun_!
   DeletemjBizAppsFormsFormCategory(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormCategory_!
   DeletemjBizAppsFormsFormDistribution(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormDistribution_!
+  DeletemjBizAppsFormsFormEntityBinding(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormEntityBinding_!
+  DeletemjBizAppsFormsFormEntityBindingRecord(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormEntityBindingRecord_!
   DeletemjBizAppsFormsFormPage(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormPage_!
   DeletemjBizAppsFormsFormQuestion(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormQuestion_!
   DeletemjBizAppsFormsFormQuestionOption(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormQuestionOption_!
   DeletemjBizAppsFormsFormResponse(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormResponse_!
   DeletemjBizAppsFormsFormResponseAnswer(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormResponseAnswer_!
   DeletemjBizAppsFormsFormStyle(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormStyle_!
+  DeletemjBizAppsFormsFormUpload(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormUpload_!
   DeletemjBizAppsFormsFormVersion(ID: String!, options___: DeleteOptionsInput!): mjBizAppsFormsFormVersion_!
   EmbedText(modelSize: String!, textToEmbed: [String!]!): EmbedTextResult!
   EndLiveKitRoom(roomName: String!): Boolean!
@@ -25760,7 +25697,6 @@ type Mutation {
   ExecuteRemoteBrowserGoal(agentSessionID: String!, goal: String!, maxSteps: Int, preferredStrategy: String, startUrl: String): RemoteBrowserGoalResultType!
   ExecuteRemoteOperation(input: ExecuteRemoteOperationInput!): ExecuteRemoteOperationResultType!
   ExecuteSimplePrompt(messages: String, modelPower: String, preferredModels: [String!], responseFormat: String, systemPrompt: String!): SimplePromptResult!
-  ExecuteTaskGraph(conversationDetailId: String!, createNotifications: Boolean, environmentId: String!, sessionId: String!, taskGraphJson: String!): ExecuteTaskGraphResult!
   ExecuteTransactionGroup(group: TransactionInputType!): TransactionOutputType!
   GenerateSeedTaxonomy(sampleSize: Int, sourceID: String!): GenerateSeedTaxonomyResult!
   InitiateMCPOAuth(input: InitiateMCPOAuthInput!): InitiateMCPOAuthResult!
@@ -25969,8 +25905,10 @@ type Mutation {
   UpdateMJAIAgentClientTool(input: UpdateMJAIAgentClientToolInput!): MJAIAgentClientTool_!
   UpdateMJAIAgentCoAgent(input: UpdateMJAIAgentCoAgentInput!): MJAIAgentCoAgent_!
   UpdateMJAIAgentConfiguration(input: UpdateMJAIAgentConfigurationInput!): MJAIAgentConfiguration_!
+  UpdateMJAIAgentCredential(input: UpdateMJAIAgentCredentialInput!): MJAIAgentCredential_!
   UpdateMJAIAgentDataSource(input: UpdateMJAIAgentDataSourceInput!): MJAIAgentDataSource_!
   UpdateMJAIAgentExample(input: UpdateMJAIAgentExampleInput!): MJAIAgentExample_!
+  UpdateMJAIAgentHarness(input: UpdateMJAIAgentHarnessInput!): MJAIAgentHarness_!
   UpdateMJAIAgentLearningCycle(input: UpdateMJAIAgentLearningCycleInput!): MJAIAgentLearningCycle_!
   UpdateMJAIAgentModality(input: UpdateMJAIAgentModalityInput!): MJAIAgentModality_!
   UpdateMJAIAgentModel(input: UpdateMJAIAgentModelInput!): MJAIAgentModel_!
@@ -26220,7 +26158,6 @@ type Mutation {
   UpdateMJOpenAppInstallHistory(input: UpdateMJOpenAppInstallHistoryInput!): MJOpenAppInstallHistory_!
   UpdateMJOutputDeliveryType(input: UpdateMJOutputDeliveryTypeInput!): MJOutputDeliveryType_!
   UpdateMJOutputFormatType(input: UpdateMJOutputFormatTypeInput!): MJOutputFormatType_!
-  UpdateMJOutputTriggerType(input: UpdateMJOutputTriggerTypeInput!): MJOutputTriggerType_!
   UpdateMJPermissionDomain(input: UpdateMJPermissionDomainInput!): MJPermissionDomain_!
   UpdateMJProcessRun(input: UpdateMJProcessRunInput!): MJProcessRun_!
   UpdateMJProcessRunDetail(input: UpdateMJProcessRunDetailInput!): MJProcessRunDetail_!
@@ -26252,19 +26189,12 @@ type Mutation {
   UpdateMJRecordProcessWatermark(input: UpdateMJRecordProcessWatermarkInput!): MJRecordProcessWatermark_!
   UpdateMJRemoteOperation(input: UpdateMJRemoteOperationInput!): MJRemoteOperation_!
   UpdateMJRemoteOperationCategory(input: UpdateMJRemoteOperationCategoryInput!): MJRemoteOperationCategory_!
-  UpdateMJReport(input: UpdateMJReportInput!): MJReport_!
-  UpdateMJReportCategory(input: UpdateMJReportCategoryInput!): MJReportCategory_!
-  UpdateMJReportSnapshot(input: UpdateMJReportSnapshotInput!): MJReportSnapshot_!
-  UpdateMJReportUserState(input: UpdateMJReportUserStateInput!): MJReportUserState_!
-  UpdateMJReportVersion(input: UpdateMJReportVersionInput!): MJReportVersion_!
   UpdateMJResourceLink(input: UpdateMJResourceLinkInput!): MJResourceLink_!
   UpdateMJResourcePermission(input: UpdateMJResourcePermissionInput!): MJResourcePermission_!
   UpdateMJResourceType(input: UpdateMJResourceTypeInput!): MJResourceType_!
   UpdateMJRole(input: UpdateMJRoleInput!): MJRole_!
   UpdateMJRowLevelSecurityFilter(input: UpdateMJRowLevelSecurityFilterInput!): MJRowLevelSecurityFilter_!
   UpdateMJSQLDialect(input: UpdateMJSQLDialectInput!): MJSQLDialect_!
-  UpdateMJScheduledAction(input: UpdateMJScheduledActionInput!): MJScheduledAction_!
-  UpdateMJScheduledActionParam(input: UpdateMJScheduledActionParamInput!): MJScheduledActionParam_!
   UpdateMJScheduledJob(input: UpdateMJScheduledJobInput!): MJScheduledJob_!
   UpdateMJScheduledJobRun(input: UpdateMJScheduledJobRunInput!): MJScheduledJobRun_!
   UpdateMJScheduledJobType(input: UpdateMJScheduledJobTypeInput!): MJScheduledJobType_!
@@ -26338,21 +26268,23 @@ type Mutation {
   UpdateMJVersionLabelItem(input: UpdateMJVersionLabelItemInput!): MJVersionLabelItem_!
   UpdateMJVersionLabelRestore(input: UpdateMJVersionLabelRestoreInput!): MJVersionLabelRestore_!
   UpdateMJViewType(input: UpdateMJViewTypeInput!): MJViewType_!
-  UpdateMJWorkflow(input: UpdateMJWorkflowInput!): MJWorkflow_!
-  UpdateMJWorkflowEngine(input: UpdateMJWorkflowEngineInput!): MJWorkflowEngine_!
-  UpdateMJWorkflowRun(input: UpdateMJWorkflowRunInput!): MJWorkflowRun_!
   UpdateMJWorkspace(input: UpdateMJWorkspaceInput!): MJWorkspace_!
   UpdateMJWorkspaceItem(input: UpdateMJWorkspaceItemInput!): MJWorkspaceItem_!
   UpdateQueryExtended(input: UpdateQuerySystemUserInput!): QueryMutationResultType!
   UpdatemjBizAppsFormsForm(input: UpdatemjBizAppsFormsFormInput!): mjBizAppsFormsForm_!
+  UpdatemjBizAppsFormsFormAutomation(input: UpdatemjBizAppsFormsFormAutomationInput!): mjBizAppsFormsFormAutomation_!
+  UpdatemjBizAppsFormsFormAutomationRun(input: UpdatemjBizAppsFormsFormAutomationRunInput!): mjBizAppsFormsFormAutomationRun_!
   UpdatemjBizAppsFormsFormCategory(input: UpdatemjBizAppsFormsFormCategoryInput!): mjBizAppsFormsFormCategory_!
   UpdatemjBizAppsFormsFormDistribution(input: UpdatemjBizAppsFormsFormDistributionInput!): mjBizAppsFormsFormDistribution_!
+  UpdatemjBizAppsFormsFormEntityBinding(input: UpdatemjBizAppsFormsFormEntityBindingInput!): mjBizAppsFormsFormEntityBinding_!
+  UpdatemjBizAppsFormsFormEntityBindingRecord(input: UpdatemjBizAppsFormsFormEntityBindingRecordInput!): mjBizAppsFormsFormEntityBindingRecord_!
   UpdatemjBizAppsFormsFormPage(input: UpdatemjBizAppsFormsFormPageInput!): mjBizAppsFormsFormPage_!
   UpdatemjBizAppsFormsFormQuestion(input: UpdatemjBizAppsFormsFormQuestionInput!): mjBizAppsFormsFormQuestion_!
   UpdatemjBizAppsFormsFormQuestionOption(input: UpdatemjBizAppsFormsFormQuestionOptionInput!): mjBizAppsFormsFormQuestionOption_!
   UpdatemjBizAppsFormsFormResponse(input: UpdatemjBizAppsFormsFormResponseInput!): mjBizAppsFormsFormResponse_!
   UpdatemjBizAppsFormsFormResponseAnswer(input: UpdatemjBizAppsFormsFormResponseAnswerInput!): mjBizAppsFormsFormResponseAnswer_!
   UpdatemjBizAppsFormsFormStyle(input: UpdatemjBizAppsFormsFormStyleInput!): mjBizAppsFormsFormStyle_!
+  UpdatemjBizAppsFormsFormUpload(input: UpdatemjBizAppsFormsFormUploadInput!): mjBizAppsFormsFormUpload_!
   UpdatemjBizAppsFormsFormVersion(input: UpdatemjBizAppsFormsFormVersionInput!): mjBizAppsFormsFormVersion_!
   UploadRealtimeRecording(agentSessionId: String!, audioBase64: String!, consent: Boolean, durationMs: Int, mimeType: String!, peaks: [Float!]): UploadRealtimeRecordingResult!
   UploadRealtimeRecordingSegment(agentSessionId: String!, audioBase64: String!, mimeType: String!, segmentIndex: Int!): Boolean!
@@ -26582,7 +26514,6 @@ type Query {
   GetRegistryComponent(hash: String, name: String!, namespace: String!, registryName: String!, version: String): ComponentSpecWithHashType!
   GetRemoteBrowserGoalResult(agentSessionID: String!, goalRunID: String!): RemoteBrowserGoalResultType!
   GetRemoteBrowserSelection(agentSessionID: String!): RemoteBrowserSelection!
-  GetReportData(ReportID: String!): RunReportResultType!
   GetServerTelemetryActiveEvents: [TelemetryEventGQL!]!
   GetServerTelemetryDuplicates(minCount: Int! = 2): [TelemetryPatternGQL!]!
   GetServerTelemetryEvents(filter: TelemetryEventFilterInput): [TelemetryEventGQL!]!
@@ -26626,8 +26557,10 @@ type Query {
   MJAIAgentClientTool(ID: String!): MJAIAgentClientTool_
   MJAIAgentCoAgent(ID: String!): MJAIAgentCoAgent_
   MJAIAgentConfiguration(ID: String!): MJAIAgentConfiguration_
+  MJAIAgentCredential(ID: String!): MJAIAgentCredential_
   MJAIAgentDataSource(ID: String!): MJAIAgentDataSource_
   MJAIAgentExample(ID: String!): MJAIAgentExample_
+  MJAIAgentHarness(ID: String!): MJAIAgentHarness_
   MJAIAgentLearningCycle(ID: String!): MJAIAgentLearningCycle_
   MJAIAgentModality(ID: String!): MJAIAgentModality_
   MJAIAgentModel(ID: String!): MJAIAgentModel_
@@ -26877,7 +26810,6 @@ type Query {
   MJOpenAppInstallHistory(ID: String!): MJOpenAppInstallHistory_
   MJOutputDeliveryType(ID: String!): MJOutputDeliveryType_
   MJOutputFormatType(ID: String!): MJOutputFormatType_
-  MJOutputTriggerType(ID: String!): MJOutputTriggerType_
   MJPermissionDomain(ID: String!): MJPermissionDomain_
   MJProcessRun(ID: String!): MJProcessRun_
   MJProcessRunDetail(ID: String!): MJProcessRunDetail_
@@ -26909,19 +26841,12 @@ type Query {
   MJRecordProcessWatermark(ID: String!): MJRecordProcessWatermark_
   MJRemoteOperation(ID: String!): MJRemoteOperation_
   MJRemoteOperationCategory(ID: String!): MJRemoteOperationCategory_
-  MJReport(ID: String!): MJReport_
-  MJReportCategory(ID: String!): MJReportCategory_
-  MJReportSnapshot(ID: String!): MJReportSnapshot_
-  MJReportUserState(ID: String!): MJReportUserState_
-  MJReportVersion(ID: String!): MJReportVersion_
   MJResourceLink(ID: String!): MJResourceLink_
   MJResourcePermission(ID: String!): MJResourcePermission_
   MJResourceType(ID: String!): MJResourceType_
   MJRole(ID: String!): MJRole_
   MJRowLevelSecurityFilter(ID: String!): MJRowLevelSecurityFilter_
   MJSQLDialect(ID: String!): MJSQLDialect_
-  MJScheduledAction(ID: String!): MJScheduledAction_
-  MJScheduledActionParam(ID: String!): MJScheduledActionParam_
   MJScheduledJob(ID: String!): MJScheduledJob_
   MJScheduledJobRun(ID: String!): MJScheduledJobRun_
   MJScheduledJobType(ID: String!): MJScheduledJobType_
@@ -26995,9 +26920,6 @@ type Query {
   MJVersionLabelItem(ID: String!): MJVersionLabelItem_
   MJVersionLabelRestore(ID: String!): MJVersionLabelRestore_
   MJViewType(ID: String!): MJViewType_
-  MJWorkflow(ID: String!): MJWorkflow_
-  MJWorkflowEngine(ID: String!): MJWorkflowEngine_
-  MJWorkflowRun(ID: String!): MJWorkflowRun_
   MJWorkspace(ID: String!): MJWorkspace_
   MJWorkspaceItem(ID: String!): MJWorkspaceItem_
 
@@ -27039,6 +26961,9 @@ type Query {
   RunMJAIAgentConfigurationDynamicView(input: RunDynamicViewInput!): RunMJAIAgentConfigurationViewResult!
   RunMJAIAgentConfigurationViewByID(input: RunViewByIDInput!): RunMJAIAgentConfigurationViewResult!
   RunMJAIAgentConfigurationViewByName(input: RunViewByNameInput!): RunMJAIAgentConfigurationViewResult!
+  RunMJAIAgentCredentialDynamicView(input: RunDynamicViewInput!): RunMJAIAgentCredentialViewResult!
+  RunMJAIAgentCredentialViewByID(input: RunViewByIDInput!): RunMJAIAgentCredentialViewResult!
+  RunMJAIAgentCredentialViewByName(input: RunViewByNameInput!): RunMJAIAgentCredentialViewResult!
   RunMJAIAgentDataSourceDynamicView(input: RunDynamicViewInput!): RunMJAIAgentDataSourceViewResult!
   RunMJAIAgentDataSourceViewByID(input: RunViewByIDInput!): RunMJAIAgentDataSourceViewResult!
   RunMJAIAgentDataSourceViewByName(input: RunViewByNameInput!): RunMJAIAgentDataSourceViewResult!
@@ -27046,6 +26971,9 @@ type Query {
   RunMJAIAgentExampleDynamicView(input: RunDynamicViewInput!): RunMJAIAgentExampleViewResult!
   RunMJAIAgentExampleViewByID(input: RunViewByIDInput!): RunMJAIAgentExampleViewResult!
   RunMJAIAgentExampleViewByName(input: RunViewByNameInput!): RunMJAIAgentExampleViewResult!
+  RunMJAIAgentHarnessDynamicView(input: RunDynamicViewInput!): RunMJAIAgentHarnessViewResult!
+  RunMJAIAgentHarnessViewByID(input: RunViewByIDInput!): RunMJAIAgentHarnessViewResult!
+  RunMJAIAgentHarnessViewByName(input: RunViewByNameInput!): RunMJAIAgentHarnessViewResult!
   RunMJAIAgentLearningCycleDynamicView(input: RunDynamicViewInput!): RunMJAIAgentLearningCycleViewResult!
   RunMJAIAgentLearningCycleViewByID(input: RunViewByIDInput!): RunMJAIAgentLearningCycleViewResult!
   RunMJAIAgentLearningCycleViewByName(input: RunViewByNameInput!): RunMJAIAgentLearningCycleViewResult!
@@ -27795,9 +27723,6 @@ type Query {
   RunMJOutputFormatTypeDynamicView(input: RunDynamicViewInput!): RunMJOutputFormatTypeViewResult!
   RunMJOutputFormatTypeViewByID(input: RunViewByIDInput!): RunMJOutputFormatTypeViewResult!
   RunMJOutputFormatTypeViewByName(input: RunViewByNameInput!): RunMJOutputFormatTypeViewResult!
-  RunMJOutputTriggerTypeDynamicView(input: RunDynamicViewInput!): RunMJOutputTriggerTypeViewResult!
-  RunMJOutputTriggerTypeViewByID(input: RunViewByIDInput!): RunMJOutputTriggerTypeViewResult!
-  RunMJOutputTriggerTypeViewByName(input: RunViewByNameInput!): RunMJOutputTriggerTypeViewResult!
   RunMJPermissionDomainDynamicView(input: RunDynamicViewInput!): RunMJPermissionDomainViewResult!
   RunMJPermissionDomainViewByID(input: RunViewByIDInput!): RunMJPermissionDomainViewResult!
   RunMJPermissionDomainViewByName(input: RunViewByNameInput!): RunMJPermissionDomainViewResult!
@@ -27891,21 +27816,6 @@ type Query {
   RunMJRemoteOperationDynamicView(input: RunDynamicViewInput!): RunMJRemoteOperationViewResult!
   RunMJRemoteOperationViewByID(input: RunViewByIDInput!): RunMJRemoteOperationViewResult!
   RunMJRemoteOperationViewByName(input: RunViewByNameInput!): RunMJRemoteOperationViewResult!
-  RunMJReportCategoryDynamicView(input: RunDynamicViewInput!): RunMJReportCategoryViewResult!
-  RunMJReportCategoryViewByID(input: RunViewByIDInput!): RunMJReportCategoryViewResult!
-  RunMJReportCategoryViewByName(input: RunViewByNameInput!): RunMJReportCategoryViewResult!
-  RunMJReportDynamicView(input: RunDynamicViewInput!): RunMJReportViewResult!
-  RunMJReportSnapshotDynamicView(input: RunDynamicViewInput!): RunMJReportSnapshotViewResult!
-  RunMJReportSnapshotViewByID(input: RunViewByIDInput!): RunMJReportSnapshotViewResult!
-  RunMJReportSnapshotViewByName(input: RunViewByNameInput!): RunMJReportSnapshotViewResult!
-  RunMJReportUserStateDynamicView(input: RunDynamicViewInput!): RunMJReportUserStateViewResult!
-  RunMJReportUserStateViewByID(input: RunViewByIDInput!): RunMJReportUserStateViewResult!
-  RunMJReportUserStateViewByName(input: RunViewByNameInput!): RunMJReportUserStateViewResult!
-  RunMJReportVersionDynamicView(input: RunDynamicViewInput!): RunMJReportVersionViewResult!
-  RunMJReportVersionViewByID(input: RunViewByIDInput!): RunMJReportVersionViewResult!
-  RunMJReportVersionViewByName(input: RunViewByNameInput!): RunMJReportVersionViewResult!
-  RunMJReportViewByID(input: RunViewByIDInput!): RunMJReportViewResult!
-  RunMJReportViewByName(input: RunViewByNameInput!): RunMJReportViewResult!
   RunMJResourceLinkDynamicView(input: RunDynamicViewInput!): RunMJResourceLinkViewResult!
   RunMJResourceLinkViewByID(input: RunViewByIDInput!): RunMJResourceLinkViewResult!
   RunMJResourceLinkViewByName(input: RunViewByNameInput!): RunMJResourceLinkViewResult!
@@ -27924,12 +27834,6 @@ type Query {
   RunMJSQLDialectDynamicView(input: RunDynamicViewInput!): RunMJSQLDialectViewResult!
   RunMJSQLDialectViewByID(input: RunViewByIDInput!): RunMJSQLDialectViewResult!
   RunMJSQLDialectViewByName(input: RunViewByNameInput!): RunMJSQLDialectViewResult!
-  RunMJScheduledActionDynamicView(input: RunDynamicViewInput!): RunMJScheduledActionViewResult!
-  RunMJScheduledActionParamDynamicView(input: RunDynamicViewInput!): RunMJScheduledActionParamViewResult!
-  RunMJScheduledActionParamViewByID(input: RunViewByIDInput!): RunMJScheduledActionParamViewResult!
-  RunMJScheduledActionParamViewByName(input: RunViewByNameInput!): RunMJScheduledActionParamViewResult!
-  RunMJScheduledActionViewByID(input: RunViewByIDInput!): RunMJScheduledActionViewResult!
-  RunMJScheduledActionViewByName(input: RunViewByNameInput!): RunMJScheduledActionViewResult!
   RunMJScheduledJobDynamicView(input: RunDynamicViewInput!): RunMJScheduledJobViewResult!
   RunMJScheduledJobRunDynamicView(input: RunDynamicViewInput!): RunMJScheduledJobRunViewResult!
   RunMJScheduledJobRunViewByID(input: RunViewByIDInput!): RunMJScheduledJobRunViewResult!
@@ -28149,15 +28053,6 @@ type Query {
   RunMJViewTypeDynamicView(input: RunDynamicViewInput!): RunMJViewTypeViewResult!
   RunMJViewTypeViewByID(input: RunViewByIDInput!): RunMJViewTypeViewResult!
   RunMJViewTypeViewByName(input: RunViewByNameInput!): RunMJViewTypeViewResult!
-  RunMJWorkflowDynamicView(input: RunDynamicViewInput!): RunMJWorkflowViewResult!
-  RunMJWorkflowEngineDynamicView(input: RunDynamicViewInput!): RunMJWorkflowEngineViewResult!
-  RunMJWorkflowEngineViewByID(input: RunViewByIDInput!): RunMJWorkflowEngineViewResult!
-  RunMJWorkflowEngineViewByName(input: RunViewByNameInput!): RunMJWorkflowEngineViewResult!
-  RunMJWorkflowRunDynamicView(input: RunDynamicViewInput!): RunMJWorkflowRunViewResult!
-  RunMJWorkflowRunViewByID(input: RunViewByIDInput!): RunMJWorkflowRunViewResult!
-  RunMJWorkflowRunViewByName(input: RunViewByNameInput!): RunMJWorkflowRunViewResult!
-  RunMJWorkflowViewByID(input: RunViewByIDInput!): RunMJWorkflowViewResult!
-  RunMJWorkflowViewByName(input: RunViewByNameInput!): RunMJWorkflowViewResult!
   RunMJWorkspaceDynamicView(input: RunDynamicViewInput!): RunMJWorkspaceViewResult!
   RunMJWorkspaceItemDynamicView(input: RunDynamicViewInput!): RunMJWorkspaceItemViewResult!
   RunMJWorkspaceItemViewByID(input: RunViewByIDInput!): RunMJWorkspaceItemViewResult!
@@ -28175,6 +28070,12 @@ type Query {
   RunViews(input: [RunViewGenericInput!]!): [RunViewGenericResult!]!
   RunViewsSystemUser(input: [RunViewGenericInput!]!): [RunViewGenericResult!]!
   RunViewsWithCacheCheck(input: [RunViewWithCacheCheckInput!]!): RunViewsWithCacheCheckOutput!
+  RunmjBizAppsFormsFormAutomationDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormAutomationViewResult!
+  RunmjBizAppsFormsFormAutomationRunDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormAutomationRunViewResult!
+  RunmjBizAppsFormsFormAutomationRunViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormAutomationRunViewResult!
+  RunmjBizAppsFormsFormAutomationRunViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormAutomationRunViewResult!
+  RunmjBizAppsFormsFormAutomationViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormAutomationViewResult!
+  RunmjBizAppsFormsFormAutomationViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormAutomationViewResult!
   RunmjBizAppsFormsFormCategoryDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormCategoryViewResult!
   RunmjBizAppsFormsFormCategoryViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormCategoryViewResult!
   RunmjBizAppsFormsFormCategoryViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormCategoryViewResult!
@@ -28182,6 +28083,12 @@ type Query {
   RunmjBizAppsFormsFormDistributionViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormDistributionViewResult!
   RunmjBizAppsFormsFormDistributionViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormDistributionViewResult!
   RunmjBizAppsFormsFormDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormViewResult!
+  RunmjBizAppsFormsFormEntityBindingDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormEntityBindingViewResult!
+  RunmjBizAppsFormsFormEntityBindingRecordDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormEntityBindingRecordViewResult!
+  RunmjBizAppsFormsFormEntityBindingRecordViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormEntityBindingRecordViewResult!
+  RunmjBizAppsFormsFormEntityBindingRecordViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormEntityBindingRecordViewResult!
+  RunmjBizAppsFormsFormEntityBindingViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormEntityBindingViewResult!
+  RunmjBizAppsFormsFormEntityBindingViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormEntityBindingViewResult!
   RunmjBizAppsFormsFormPageDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormPageViewResult!
   RunmjBizAppsFormsFormPageViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormPageViewResult!
   RunmjBizAppsFormsFormPageViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormPageViewResult!
@@ -28200,6 +28107,9 @@ type Query {
   RunmjBizAppsFormsFormStyleDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormStyleViewResult!
   RunmjBizAppsFormsFormStyleViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormStyleViewResult!
   RunmjBizAppsFormsFormStyleViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormStyleViewResult!
+  RunmjBizAppsFormsFormUploadDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormUploadViewResult!
+  RunmjBizAppsFormsFormUploadViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormUploadViewResult!
+  RunmjBizAppsFormsFormUploadViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormUploadViewResult!
   RunmjBizAppsFormsFormVersionDynamicView(input: RunDynamicViewInput!): RunmjBizAppsFormsFormVersionViewResult!
   RunmjBizAppsFormsFormVersionViewByID(input: RunViewByIDInput!): RunmjBizAppsFormsFormVersionViewResult!
   RunmjBizAppsFormsFormVersionViewByName(input: RunViewByNameInput!): RunmjBizAppsFormsFormVersionViewResult!
@@ -28234,14 +28144,19 @@ type Query {
   colors: [Color!]!
   debugCurrentUserEmail: String!
   mjBizAppsFormsForm(ID: String!): mjBizAppsFormsForm_
+  mjBizAppsFormsFormAutomation(ID: String!): mjBizAppsFormsFormAutomation_
+  mjBizAppsFormsFormAutomationRun(ID: String!): mjBizAppsFormsFormAutomationRun_
   mjBizAppsFormsFormCategory(ID: String!): mjBizAppsFormsFormCategory_
   mjBizAppsFormsFormDistribution(ID: String!): mjBizAppsFormsFormDistribution_
+  mjBizAppsFormsFormEntityBinding(ID: String!): mjBizAppsFormsFormEntityBinding_
+  mjBizAppsFormsFormEntityBindingRecord(ID: String!): mjBizAppsFormsFormEntityBindingRecord_
   mjBizAppsFormsFormPage(ID: String!): mjBizAppsFormsFormPage_
   mjBizAppsFormsFormQuestion(ID: String!): mjBizAppsFormsFormQuestion_
   mjBizAppsFormsFormQuestionOption(ID: String!): mjBizAppsFormsFormQuestionOption_
   mjBizAppsFormsFormResponse(ID: String!): mjBizAppsFormsFormResponse_
   mjBizAppsFormsFormResponseAnswer(ID: String!): mjBizAppsFormsFormResponseAnswer_
   mjBizAppsFormsFormStyle(ID: String!): mjBizAppsFormsFormStyle_
+  mjBizAppsFormsFormUpload(ID: String!): mjBizAppsFormsFormUpload_
   mjBizAppsFormsFormVersion(ID: String!): mjBizAppsFormsFormVersion_
   readSqlLogFile(maxLines: Int, sessionId: String!): String!
   sqlLoggingConfig: SqlLoggingConfig!
@@ -28761,6 +28676,16 @@ type RunMJAIAgentConfigurationViewResult {
   UserViewRunID: String
 }
 
+type RunMJAIAgentCredentialViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [MJAIAgentCredential_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
 type RunMJAIAgentDataSourceViewResult {
   ErrorMessage: String
   ExecutionTime: Int
@@ -28775,6 +28700,16 @@ type RunMJAIAgentExampleViewResult {
   ErrorMessage: String
   ExecutionTime: Int
   Results: [MJAIAgentExample_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunMJAIAgentHarnessViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [MJAIAgentHarness_!]!
   RowCount: Int
   Success: Boolean!
   TotalRowCount: Int
@@ -31281,16 +31216,6 @@ type RunMJOutputFormatTypeViewResult {
   UserViewRunID: String
 }
 
-type RunMJOutputTriggerTypeViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJOutputTriggerType_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
 type RunMJPermissionDomainViewResult {
   ErrorMessage: String
   ExecutionTime: Int
@@ -31601,56 +31526,6 @@ type RunMJRemoteOperationViewResult {
   UserViewRunID: String
 }
 
-type RunMJReportCategoryViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJReportCategory_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJReportSnapshotViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJReportSnapshot_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJReportUserStateViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJReportUserState_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJReportVersionViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJReportVersion_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJReportViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJReport_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
 type RunMJResourceLinkViewResult {
   ErrorMessage: String
   ExecutionTime: Int
@@ -31705,26 +31580,6 @@ type RunMJSQLDialectViewResult {
   ErrorMessage: String
   ExecutionTime: Int
   Results: [MJSQLDialect_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJScheduledActionParamViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJScheduledActionParam_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJScheduledActionViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJScheduledAction_!]!
   RowCount: Int
   Success: Boolean!
   TotalRowCount: Int
@@ -32461,36 +32316,6 @@ type RunMJViewTypeViewResult {
   UserViewRunID: String
 }
 
-type RunMJWorkflowEngineViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJWorkflowEngine_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJWorkflowRunViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJWorkflowRun_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
-type RunMJWorkflowViewResult {
-  ErrorMessage: String
-  ExecutionTime: Int
-  Results: [MJWorkflow_!]!
-  RowCount: Int
-  Success: Boolean!
-  TotalRowCount: Int
-  UserViewRunID: String
-}
-
 type RunMJWorkspaceItemViewResult {
   ErrorMessage: String
   ExecutionTime: Int
@@ -32613,15 +32438,6 @@ type RunQueryWithCacheCheckResultOutput {
 
   """'current', 'stale', 'no_validation', or 'error'"""
   status: String!
-}
-
-type RunReportResultType {
-  ErrorMessage: String!
-  ExecutionTime: Float!
-  ReportID: String!
-  Results: String!
-  RowCount: Float!
-  Success: Boolean!
 }
 
 type RunTagHealthResult {
@@ -33012,6 +32828,26 @@ type RunViewsWithCacheCheckOutput {
   success: Boolean!
 }
 
+type RunmjBizAppsFormsFormAutomationRunViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormAutomationRun_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormAutomationViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormAutomation_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
 type RunmjBizAppsFormsFormCategoryViewResult {
   ErrorMessage: String
   ExecutionTime: Int
@@ -33026,6 +32862,26 @@ type RunmjBizAppsFormsFormDistributionViewResult {
   ErrorMessage: String
   ExecutionTime: Int
   Results: [mjBizAppsFormsFormDistribution_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormEntityBindingRecordViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormEntityBindingRecord_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormEntityBindingViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormEntityBinding_!]!
   RowCount: Int
   Success: Boolean!
   TotalRowCount: Int
@@ -33086,6 +32942,16 @@ type RunmjBizAppsFormsFormStyleViewResult {
   ErrorMessage: String
   ExecutionTime: Int
   Results: [mjBizAppsFormsFormStyle_!]!
+  RowCount: Int
+  Success: Boolean!
+  TotalRowCount: Int
+  UserViewRunID: String
+}
+
+type RunmjBizAppsFormsFormUploadViewResult {
+  ErrorMessage: String
+  ExecutionTime: Int
+  Results: [mjBizAppsFormsFormUpload_!]!
   RowCount: Int
   Success: Boolean!
   TotalRowCount: Int
@@ -33572,6 +33438,7 @@ type Subscription {
   colorSubscription: ColorNotification!
   onMCPOAuthEvent: MCPOAuthEventNotification!
   statusUpdates(sessionId: String!): PushStatusNotification!
+  taskGraphFrames(parentTaskId: ID!): TaskGraphFrameNotification!
 }
 
 """
@@ -33639,11 +33506,17 @@ type SyncRunSummaryOutput {
   TotalRecords: Float
 }
 
-type TaskExecutionResultType {
-  error: String
-  output: String
-  success: Boolean!
-  taskId: String!
+type TaskGraphFrameNotification {
+  assignedUserId: ID
+  completedCount: Float
+  date: Timestamp!
+  errorMessage: String
+  kind: String!
+  parentTaskId: ID!
+  status: String
+  taskId: ID
+  taskName: String
+  totalCount: Float
 }
 
 input TelemetryEventFilterInput {
@@ -33953,6 +33826,18 @@ input UpdateMJAIAgentConfigurationInput {
   Status: String
 }
 
+input UpdateMJAIAgentCredentialInput {
+  AgentID: String
+  CredentialID: String
+  EnvVariableName: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  Priority: Int
+  Purpose: String
+  RestoreContext___: RestoreContextInput
+  Status: String
+}
+
 input UpdateMJAIAgentDataSourceInput {
   AgentID: String
   CachePolicy: String
@@ -34003,6 +33888,21 @@ input UpdateMJAIAgentExampleInput {
   SuccessScore: Float
   Type: String
   UserID: String
+}
+
+input UpdateMJAIAgentHarnessInput {
+  AIModelID: String
+  AIVendorID: String
+  CapabilitySettings: String
+  DefaultModel: String
+  Description: String
+  DriverClass: String
+  ExecutablePath: String
+  ID: String!
+  Name: String
+  OldValues___: [KeyValuePairInput!]
+  RestoreContext___: RestoreContextInput
+  Status: String
 }
 
 input UpdateMJAIAgentInput {
@@ -34251,6 +34151,7 @@ input UpdateMJAIAgentRunInput {
   CompanyID: String
   CompletedAt: Timestamp
   ConfigurationID: String
+  ContinuationDepth: Int
   ConversationDetailID: String
   ConversationDetailSequence: Int
   ConversationID: String
@@ -34258,6 +34159,7 @@ input UpdateMJAIAgentRunInput {
   EffortLevel: Int
   ErrorMessage: String
   ExternalReferenceID: String
+  ExternalSessionID: String
   FinalPayload: String
   FinalStep: String
   ID: String!
@@ -35093,6 +34995,7 @@ input UpdateMJAPIApplicationScopeInput {
   Priority: Int
   ResourcePattern: String
   RestoreContext___: RestoreContextInput
+  RowFilterID: String
   ScopeID: String
 }
 
@@ -35128,6 +35031,7 @@ input UpdateMJAPIKeyScopeInput {
   Priority: Int
   ResourcePattern: String
   RestoreContext___: RestoreContextInput
+  RowFilterID: String
   ScopeID: String
 }
 
@@ -35220,14 +35124,19 @@ input UpdateMJActionContextTypeInput {
 input UpdateMJActionExecutionLogInput {
   ActionID: String
   EndedAt: Timestamp
+  EntityActionID: String
+  EntityActionInvocationTypeID: String
   ID: String!
   Message: String
   OldValues___: [KeyValuePairInput!]
   Params: String
   RestoreContext___: RestoreContextInput
   ResultCode: String
+  ResultParams: String
   RetentionPeriod: Int
   StartedAt: Timestamp
+  TargetEntityID: String
+  TargetRecordID: String
   UserID: String
 }
 
@@ -35287,6 +35196,7 @@ input UpdateMJActionParamInput {
   ID: String!
   IsArray: Boolean
   IsRequired: Boolean
+  LogValue: Boolean
   MediaModality: String
   Name: String
   OldValues___: [KeyValuePairInput!]
@@ -36063,7 +35973,7 @@ input UpdateMJContentSourceInput {
   Name: String
   OldValues___: [KeyValuePairInput!]
   RestoreContext___: RestoreContextInput
-  ScheduledActionID: String
+  ScheduledJobID: String
   SegmenterKey: String
   URL: String
   VectorIndexID: String
@@ -36666,8 +36576,12 @@ input UpdateMJEntityActionInput {
   ActionID: String
   EntityID: String
   ID: String!
+  LoggingMode: String
   OldValues___: [KeyValuePairInput!]
   RestoreContext___: RestoreContextInput
+  ScopeEntityID: String
+  ScopeRecordID: String
+  Sequence: Int
   Status: String
 }
 
@@ -36695,6 +36609,7 @@ input UpdateMJEntityActionParamInput {
   Comments: String
   EntityActionID: String
   ID: String!
+  LogValue: Boolean
   OldValues___: [KeyValuePairInput!]
   RestoreContext___: RestoreContextInput
   Value: String
@@ -36858,6 +36773,9 @@ input UpdateMJEntityInput {
   AllowCaching: Boolean
   AllowCreateAPI: Boolean
   AllowDeleteAPI: Boolean
+  AllowDirectSQLDelete: Boolean
+  AllowDirectSQLInsert: Boolean
+  AllowDirectSQLUpdate: Boolean
   AllowMultipleSubtypes: Boolean
   AllowRecordMerge: Boolean
   AllowUpdateAPI: Boolean
@@ -36888,6 +36806,7 @@ input UpdateMJEntityInput {
   FullTextSearchEnabled: Boolean
   FullTextSearchFunction: String
   FullTextSearchFunctionGenerated: Boolean
+  GeneratedBaseViewName: String
   ID: String!
   Icon: String
   IncludeInAPI: Boolean
@@ -37016,6 +36935,7 @@ input UpdateMJEntityRelationshipInput {
   OldValues___: [KeyValuePairInput!]
   RelatedEntityID: String
   RelatedEntityJoinField: String
+  RelatedRecordCollection: String
   RestoreContext___: RestoreContextInput
   Sequence: Int
   Type: String
@@ -37904,14 +37824,6 @@ input UpdateMJOutputFormatTypeInput {
   RestoreContext___: RestoreContextInput
 }
 
-input UpdateMJOutputTriggerTypeInput {
-  Description: String
-  ID: String!
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  RestoreContext___: RestoreContextInput
-}
-
 input UpdateMJPermissionDomainInput {
   Description: String
   DisplayOrder: Int
@@ -38393,69 +38305,6 @@ input UpdateMJRemoteOperationInput {
   TimeoutMS: Int
 }
 
-input UpdateMJReportCategoryInput {
-  Description: String
-  ID: String!
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  ParentID: String
-  RestoreContext___: RestoreContextInput
-  UserID: String
-}
-
-input UpdateMJReportInput {
-  CategoryID: String
-  Configuration: String
-  ConversationDetailID: String
-  ConversationID: String
-  DataContextID: String
-  Description: String
-  EnvironmentID: String
-  ID: String!
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  OutputDeliveryTypeID: String
-  OutputFormatTypeID: String
-  OutputFrequency: String
-  OutputTargetEmail: String
-  OutputTriggerTypeID: String
-  OutputWorkflowID: String
-  RestoreContext___: RestoreContextInput
-  SharingScope: String
-  Thumbnail: String
-  UserID: String
-}
-
-input UpdateMJReportSnapshotInput {
-  ID: String!
-  OldValues___: [KeyValuePairInput!]
-  ReportID: String
-  RestoreContext___: RestoreContextInput
-  ResultSet: String
-  UserID: String
-}
-
-input UpdateMJReportUserStateInput {
-  ID: String!
-  OldValues___: [KeyValuePairInput!]
-  ReportID: String
-  ReportState: String
-  RestoreContext___: RestoreContextInput
-  UserID: String
-}
-
-input UpdateMJReportVersionInput {
-  Configuration: String
-  DataContextUpdated: Boolean
-  Description: String
-  ID: String!
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  ReportID: String
-  RestoreContext___: RestoreContextInput
-  VersionNumber: Int
-}
-
 input UpdateMJResourceLinkInput {
   FolderID: String
   ID: String!
@@ -38528,36 +38377,6 @@ input UpdateMJSQLDialectInput {
   WebURL: String
 }
 
-input UpdateMJScheduledActionInput {
-  ActionID: String
-  CreatedByUserID: String
-  CronExpression: String
-  CustomCronExpression: String
-  DayOfMonth: Int
-  DayOfWeek: String
-  Description: String
-  ID: String!
-  IntervalDays: Int
-  Month: String
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  RestoreContext___: RestoreContextInput
-  Status: String
-  Timezone: String
-  Type: String
-}
-
-input UpdateMJScheduledActionParamInput {
-  ActionParamID: String
-  Comments: String
-  ID: String!
-  OldValues___: [KeyValuePairInput!]
-  RestoreContext___: RestoreContextInput
-  ScheduledActionID: String
-  Value: String
-  ValueType: String
-}
-
 input UpdateMJScheduledJobInput {
   ConcurrencyMode: String
   Configuration: String
@@ -38573,6 +38392,7 @@ input UpdateMJScheduledJobInput {
   LockedAt: Timestamp
   LockedByInstance: String
   MaxRuntimeMinutes: Int
+  MissedRunPolicy: String
   Name: String
   NextRunAt: Timestamp
   NotifyOnFailure: Boolean
@@ -38998,6 +38818,7 @@ input UpdateMJTaggedItemInput {
 }
 
 input UpdateMJTaskDependencyInput {
+  Condition: String
   DependencyType: String
   DependsOnTaskID: String
   ID: String!
@@ -39008,14 +38829,20 @@ input UpdateMJTaskDependencyInput {
 
 input UpdateMJTaskInput {
   AgentID: String
+  AgentRunID: String
+  ClaimExpiresAt: Timestamp
+  ClaimedBy: String
   CompletedAt: Timestamp
   ConversationDetailID: String
   Description: String
   DueAt: Timestamp
   EnvironmentID: String
+  ErrorMessage: String
   ID: String!
+  InputPayload: String
   Name: String
   OldValues___: [KeyValuePairInput!]
+  OutputPayload: String
   ParentID: String
   PercentComplete: Int
   ProjectID: String
@@ -39622,42 +39449,6 @@ input UpdateMJViewTypeInput {
   SupportsConfiguration: Boolean
 }
 
-input UpdateMJWorkflowEngineInput {
-  Description: String
-  DriverClass: String
-  DriverPath: String
-  ID: String!
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  RestoreContext___: RestoreContextInput
-}
-
-input UpdateMJWorkflowInput {
-  AutoRunEnabled: Boolean
-  AutoRunInterval: Int
-  AutoRunIntervalUnits: String
-  Description: String
-  ExternalSystemRecordID: String
-  ID: String!
-  Name: String
-  OldValues___: [KeyValuePairInput!]
-  RestoreContext___: RestoreContextInput
-  SubclassName: String
-  WorkflowEngineID: String
-}
-
-input UpdateMJWorkflowRunInput {
-  EndedAt: Timestamp
-  ExternalSystemRecordID: String
-  ID: String!
-  OldValues___: [KeyValuePairInput!]
-  RestoreContext___: RestoreContextInput
-  Results: String
-  StartedAt: Timestamp
-  Status: String
-  WorkflowID: String
-}
-
 input UpdateMJWorkspaceInput {
   Configuration: String
   Description: String
@@ -39704,6 +39495,43 @@ input UpdateQuerySystemUserInput {
   UsesTemplate: Boolean
 }
 
+input UpdatemjBizAppsFormsFormAutomationInput {
+  ActionID: String
+  AgentID: String
+  BindingID: String
+  ConditionalRule: String
+  ContinueOnError: Boolean
+  Description: String
+  DisplayOrder: Int
+  ExecutionMode: String
+  FormID: String
+  ID: String!
+  IsActive: Boolean
+  Name: String
+  OldValues___: [KeyValuePairInput!]
+  ParameterMapping: String
+  RestoreContext___: RestoreContextInput
+  TargetType: String
+  TimeoutMS: Int
+  Trigger: String
+}
+
+input UpdatemjBizAppsFormsFormAutomationRunInput {
+  AIAgentRunID: String
+  ActionExecutionLogID: String
+  AttemptCount: Int
+  CompletedAt: Timestamp
+  ErrorMessage: String
+  FormAutomationID: String
+  FormResponseID: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  OutputSummary: String
+  RestoreContext___: RestoreContextInput
+  StartedAt: Timestamp
+  Status: String
+}
+
 input UpdatemjBizAppsFormsFormCategoryInput {
   Description: String
   DisplayRank: Int
@@ -39733,6 +39561,33 @@ input UpdatemjBizAppsFormsFormDistributionInput {
   RestoreContext___: RestoreContextInput
   Slug: String
   Status: String
+}
+
+input UpdatemjBizAppsFormsFormEntityBindingInput {
+  Description: String
+  FieldMappings: String
+  FormID: String
+  ID: String!
+  IdentityRule: String
+  MergePolicy: String
+  Name: String
+  OldValues___: [KeyValuePairInput!]
+  RestoreContext___: RestoreContextInput
+  Status: String
+  TargetEntityID: String
+  TargetEntityName: String
+}
+
+input UpdatemjBizAppsFormsFormEntityBindingRecordInput {
+  BindingID: String
+  FormResponseID: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  Outcome: String
+  RestoreContext___: RestoreContextInput
+  TargetEntityID: String
+  TargetRecordID: String
+  WrittenFields: String
 }
 
 input UpdatemjBizAppsFormsFormInput {
@@ -39831,6 +39686,24 @@ input UpdatemjBizAppsFormsFormStyleInput {
   RestoreContext___: RestoreContextInput
 }
 
+input UpdatemjBizAppsFormsFormUploadInput {
+  AnonymousSessionID: String
+  ContentType: String
+  DistributionID: String
+  FileID: String
+  FileName: String
+  FormID: String
+  ID: String!
+  OldValues___: [KeyValuePairInput!]
+  ProviderKey: String
+  QuestionID: String
+  ResponseDraftID: String
+  RestoreContext___: RestoreContextInput
+  SizeBytes: Int
+  Status: String
+  UploadedByUserID: String
+}
+
 input UpdatemjBizAppsFormsFormVersionInput {
   DefinitionSnapshot: String
   FormID: String
@@ -39900,6 +39773,121 @@ type WriteRecordOutput {
   Success: Boolean!
 }
 
+"""
+One execution attempt of an automation against one response, linking out to the MJ action or agent log that holds the detail
+"""
+type mjBizAppsFormsFormAutomationRun_ {
+  AIAgentRun: String
+
+  """The MJ agent run for this attempt, when an Agent ran"""
+  AIAgentRunID: String
+  ActionExecutionLog: String
+
+  """The MJ action execution log for this attempt, when an Action ran"""
+  ActionExecutionLogID: String
+
+  """
+  How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap
+  """
+  AttemptCount: Int!
+
+  """When this attempt finished, successfully or not"""
+  CompletedAt: Timestamp
+
+  """Why this attempt failed"""
+  ErrorMessage: String
+  FormAutomation: String!
+  FormAutomationID: String!
+  FormResponseID: String!
+  ID: String!
+
+  """JSON digest of the result, small enough to show in an activity view"""
+  OutputSummary: String
+
+  """When this attempt began"""
+  StartedAt: Timestamp
+
+  """
+  Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record
+  """
+  Status: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
+One configured on-submit automation for a form: an Action, an Agent or an entity binding, with its trigger, ordering, condition and execution mode
+"""
+type mjBizAppsFormsFormAutomation_ {
+  Action: String
+
+  """The MJ Action to run; set only when TargetType is Action"""
+  ActionID: String
+  Agent: String
+
+  """The MJ AI Agent to run; set only when TargetType is Agent"""
+  AgentID: String
+  Binding: String
+
+  """
+  The entity binding to execute; set only when TargetType is EntityBinding
+  """
+  BindingID: String
+
+  """
+  JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run
+  """
+  ConditionalRule: String
+
+  """
+  When false, a failure halts the remaining Sync automations for that response
+  """
+  ContinueOnError: Boolean!
+
+  """What this automation is for"""
+  Description: String
+
+  """
+  Run order within an execution mode; Sync automations always run before Async ones regardless
+  """
+  DisplayOrder: Int!
+
+  """
+  Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting
+  """
+  ExecutionMode: String!
+  Form: String!
+  FormID: String!
+  ID: String!
+
+  """Whether this automation is eligible to run"""
+  IsActive: Boolean!
+
+  """
+  Author-facing label, e.g. "Email confirmation"
+  """
+  Name: String!
+
+  """
+  JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids
+  """
+  ParameterMapping: String
+
+  """Which kind of target runs: Action, Agent or EntityBinding"""
+  TargetType: String!
+
+  """Optional per-automation execution cap in milliseconds"""
+  TimeoutMS: Int
+
+  """
+  Which save fires this automation: a completed submission, a partial autosave, or both
+  """
+  Trigger: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsFormAutomationRuns_FormAutomationIDArray: [mjBizAppsFormsFormAutomationRun_!]!
+}
+
 """Hierarchical categories that organize forms into a browsable tree"""
 type mjBizAppsFormsFormCategory_ {
   """Detailed description of this category"""
@@ -39924,8 +39912,8 @@ type mjBizAppsFormsFormCategory_ {
   RootParentID: String
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_FormCategories_ParentIDArray: [mjBizAppsFormsFormCategory_!]!
-  mjBizAppsFormsMJ_BizApps_Forms_Forms_CategoryIDArray: [mjBizAppsFormsForm_!]!
+  mjBizAppsFormsFormCategories_ParentIDArray: [mjBizAppsFormsFormCategory_!]!
+  mjBizAppsFormsForms_CategoryIDArray: [mjBizAppsFormsForm_!]!
 }
 
 """
@@ -39980,6 +39968,82 @@ type mjBizAppsFormsFormDistribution_ {
   Status: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsFormUploads_DistributionIDArray: [mjBizAppsFormsFormUpload_!]!
+}
+
+"""
+Durable record of which target record a submission produced, making re-execution idempotent and the lineage queryable
+"""
+type mjBizAppsFormsFormEntityBindingRecord_ {
+  Binding: String!
+  BindingID: String!
+  FormResponseID: String!
+  ID: String!
+
+  """
+  What the binding did: created a record, merged into an existing one, changed nothing, or skipped
+  """
+  Outcome: String!
+
+  """Entity the record belongs to, captured at execution time"""
+  TargetEntityID: String!
+
+  """
+  Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped
+  """
+  TargetRecordID: String
+
+  """JSON list of the field names actually written by this execution"""
+  WrittenFields: String
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+}
+
+"""
+Declares that submissions to a form create or update a record of a target entity, via a field mapping, an identity rule and a merge policy
+"""
+type mjBizAppsFormsFormEntityBinding_ {
+  """What this binding is for"""
+  Description: String
+
+  """
+  JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions
+  """
+  FieldMappings: String!
+  Form: String!
+  FormID: String!
+  ID: String!
+
+  """
+  JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several
+  """
+  IdentityRule: String!
+
+  """
+  JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout
+  """
+  MergePolicy: String
+
+  """
+  Author-facing label for this binding, e.g. "Create CRM Lead"
+  """
+  Name: String!
+
+  """Whether this binding is eligible to run"""
+  Status: String!
+  TargetEntity: String!
+
+  """Entity whose records this binding writes"""
+  TargetEntityID: String!
+
+  """
+  Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle
+  """
+  TargetEntityName: String!
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
+  mjBizAppsFormsFormAutomations_BindingIDArray: [mjBizAppsFormsFormAutomation_!]!
+  mjBizAppsFormsFormEntityBindingRecords_BindingIDArray: [mjBizAppsFormsFormEntityBindingRecord_!]!
 }
 
 """An ordered page/section of a form"""
@@ -40002,7 +40066,7 @@ type mjBizAppsFormsFormPage_ {
   Title: String
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_PageIDArray: [mjBizAppsFormsFormQuestion_!]!
+  mjBizAppsFormsFormQuestions_PageIDArray: [mjBizAppsFormsFormQuestion_!]!
 }
 
 """A selectable choice offered by a choice-style question"""
@@ -40069,8 +40133,9 @@ type mjBizAppsFormsFormQuestion_ {
   ValidationRule: String
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions_QuestionIDArray: [mjBizAppsFormsFormQuestionOption_!]!
-  mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_QuestionIDArray: [mjBizAppsFormsFormResponseAnswer_!]!
+  mjBizAppsFormsFormQuestionOptions_QuestionIDArray: [mjBizAppsFormsFormQuestionOption_!]!
+  mjBizAppsFormsFormResponseAnswers_QuestionIDArray: [mjBizAppsFormsFormResponseAnswer_!]!
+  mjBizAppsFormsFormUploads_QuestionIDArray: [mjBizAppsFormsFormUpload_!]!
 }
 
 """
@@ -40138,7 +40203,9 @@ type mjBizAppsFormsFormResponse_ {
   SubmittedAt: Timestamp
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_ResponseIDArray: [mjBizAppsFormsFormResponseAnswer_!]!
+  mjBizAppsFormsFormAutomationRuns_FormResponseIDArray: [mjBizAppsFormsFormAutomationRun_!]!
+  mjBizAppsFormsFormEntityBindingRecords_FormResponseIDArray: [mjBizAppsFormsFormEntityBindingRecord_!]!
+  mjBizAppsFormsFormResponseAnswers_ResponseIDArray: [mjBizAppsFormsFormResponseAnswer_!]!
 }
 
 """
@@ -40174,7 +40241,69 @@ type mjBizAppsFormsFormStyle_ {
   Name: String!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_Forms_StyleIDArray: [mjBizAppsFormsForm_!]!
+  mjBizAppsFormsForms_StyleIDArray: [mjBizAppsFormsForm_!]!
+}
+
+"""
+Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file
+"""
+type mjBizAppsFormsFormUpload_ {
+  """
+  The anonymous session id at upload time. A fallback correlation key; blank is tolerated
+  """
+  AnonymousSessionID: String
+
+  """Stored content type"""
+  ContentType: String
+  Distribution: String!
+
+  """
+  The distribution the upload was made through. The hard scope every provenance check enforces
+  """
+  DistributionID: String!
+  File: String!
+
+  """The uploaded file"""
+  FileID: String!
+
+  """Original sanitized filename"""
+  FileName: String
+  Form: String!
+
+  """
+  The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed
+  """
+  FormID: String!
+  ID: String!
+
+  """
+  Storage key of the file, so the Forms path prefix can be checked without loading the file row
+  """
+  ProviderKey: String
+
+  """The question the file answers"""
+  QuestionID: String
+
+  """
+  The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows
+  """
+  ResponseDraftID: String
+
+  """Size in bytes"""
+  SizeBytes: Int
+
+  """
+  Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance
+  """
+  Status: String!
+  UploadedByUser: String
+
+  """
+  The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record
+  """
+  UploadedByUserID: String
+  _mj__CreatedAt: Timestamp!
+  _mj__UpdatedAt: Timestamp!
 }
 
 """
@@ -40199,7 +40328,7 @@ type mjBizAppsFormsFormVersion_ {
   VersionNumber: Int!
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormVersionIDArray: [mjBizAppsFormsFormResponse_!]!
+  mjBizAppsFormsFormResponses_FormVersionIDArray: [mjBizAppsFormsFormResponse_!]!
 }
 
 """The root definition of a form/survey/intake instrument"""
@@ -40232,9 +40361,12 @@ type mjBizAppsFormsForm_ {
   StyleID: String
   _mj__CreatedAt: Timestamp!
   _mj__UpdatedAt: Timestamp!
-  mjBizAppsFormsMJ_BizApps_Forms_FormDistributions_FormIDArray: [mjBizAppsFormsFormDistribution_!]!
-  mjBizAppsFormsMJ_BizApps_Forms_FormPages_FormIDArray: [mjBizAppsFormsFormPage_!]!
-  mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_FormIDArray: [mjBizAppsFormsFormQuestion_!]!
-  mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormIDArray: [mjBizAppsFormsFormResponse_!]!
-  mjBizAppsFormsMJ_BizApps_Forms_FormVersions_FormIDArray: [mjBizAppsFormsFormVersion_!]!
+  mjBizAppsFormsFormAutomations_FormIDArray: [mjBizAppsFormsFormAutomation_!]!
+  mjBizAppsFormsFormDistributions_FormIDArray: [mjBizAppsFormsFormDistribution_!]!
+  mjBizAppsFormsFormEntityBindings_FormIDArray: [mjBizAppsFormsFormEntityBinding_!]!
+  mjBizAppsFormsFormPages_FormIDArray: [mjBizAppsFormsFormPage_!]!
+  mjBizAppsFormsFormQuestions_FormIDArray: [mjBizAppsFormsFormQuestion_!]!
+  mjBizAppsFormsFormResponses_FormIDArray: [mjBizAppsFormsFormResponse_!]!
+  mjBizAppsFormsFormUploads_FormIDArray: [mjBizAppsFormsFormUpload_!]!
+  mjBizAppsFormsFormVersions_FormIDArray: [mjBizAppsFormsFormVersion_!]!
 }

@@ -38,6 +38,7 @@
               [submitting]="phase() === 'submitting'"
               [submitDisabled]="!submitAllowed()"
               [distributionSlug]="distributionSlug()"
+              [responseId]="currentResponseId()"
               (submit)="onSubmit()"
               (progressChange)="onProgress()"
             />
@@ -47,6 +48,7 @@
               [submitting]="phase() === 'submitting'"
               [submitDisabled]="!submitAllowed()"
               [distributionSlug]="distributionSlug()"
+              [responseId]="currentResponseId()"
               (submit)="onSubmit()"
               (progressChange)="onProgress()"
             />

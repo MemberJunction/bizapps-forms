@@ -254,6 +254,81 @@
         }
     </mj-collapsible-panel>
 
+    <!-- Form Automations Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormAutomations"
+        SectionName="Form Automations"
+        Icon="fa fa-bolt"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormAutomations')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Automations','FormID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automations')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormAutomations')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormAutomations', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Form Entity Bindings Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormEntityBindings"
+        SectionName="Form Entity Bindings"
+        Icon="fa fa-plug"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormEntityBindings')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Entity Bindings','FormID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Bindings')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormEntityBindings')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormEntityBindings', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Form Uploads Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormUploads"
+        SectionName="Form Uploads"
+        Icon="fa fa-file-upload"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormUploads')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Uploads','FormID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Uploads')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormUploads')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormUploads', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
     <mj-form-panel-slot Entity="{{record.EntityInfo.Name}}" Slot="after-related" [Record]="record" [FormComponent]="this" [FormContext]="formContext"></mj-form-panel-slot>
 </mj-record-form-container>
         

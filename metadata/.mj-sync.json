@@ -17,7 +17,19 @@
     "dashboards",
     "application-roles",
     "entity-permissions",
-    "actions"
+    "actions",
+    "users",
+    "user-roles"
   ],
-  "emitSyncNotes": false
+  "emitSyncNotes": false,
+  "sqlLogging": {
+    "enabled": true,
+    "outputDirectory": "./sql_logging",
+    "formatAsMigration": true,
+    "filterPatterns": [
+      "*spCreateAIPromptRun*",
+      "*spUpdateAIPromptRun*"
+    ],
+    "filterType": "exclude"
+  }
 }

@@ -1,0 +1,25 @@
+[
+  {
+    "_comments": [
+      "Grants the seeded 'Forms Automation Service' principal its 'Forms Automation Runner' role.",
+      "WITHOUT THIS ROW THE USER IS USELESS AND THE DIAGNOSTICS ARE WORSE THAN NOT SHIPPING IT:",
+      "resolveAutomationPrincipal() finds the user by NAME and returns it, so automations start",
+      "running and then fail on permissions at the first read, instead of being skipped with a log",
+      "line that names the missing principal. The user and this grant ship together or not at all.",
+      "It grants NOTHING on any binding target entity — see metadata/roles/.roles.json. That set is",
+      "the real ceiling on what a form author can reach through a binding, and it stays the",
+      "deployment's decision."
+    ],
+    "fields": {
+      "UserID": "@lookup:MJ: Users.Name=Forms Automation Service",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner"
+    },
+    "primaryKey": {
+      "ID": "9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B85"
+    },
+    "sync": {
+      "lastModified": "2026-08-08T18:25:28.607Z",
+      "checksum": "342b0e28808dc118a02add181f6db0c511abd951b0c6a88501e9143bc1e33d3e"
+    }
+  }
+]

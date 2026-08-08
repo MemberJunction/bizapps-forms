@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
+import {  } from "@memberjunction/ng-entity-viewer"
 
 @RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Form Distributions') // Tell MemberJunction about this class
 @Component({
@@ -17,7 +18,8 @@ export class mjBizAppsFormsFormDistributionFormComponent extends BaseFormCompone
         this.initSections([
             { sectionKey: 'distributionConfiguration', sectionName: 'Distribution Configuration', isExpanded: true },
             { sectionKey: 'accessAndLimits', sectionName: 'Access and Limits', isExpanded: true },
-            { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false }
+            { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormUploads', sectionName: 'Form Uploads', isExpanded: false }
         ]);
     }
 }
