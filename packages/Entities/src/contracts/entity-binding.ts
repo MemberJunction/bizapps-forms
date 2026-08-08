@@ -280,6 +280,11 @@ export function parseMergePolicy(raw: JSONValue | null | undefined): MergePolicy
     );
   }
   const perField = asObject(obj.fields) ?? {};
+  // Keys are folded on the way in and looked up folded, because everything else that compares a
+  // target field name folds too. An authored `{"email": "writeOnce"}` against a column named
+  // `Email` must not silently degrade to the default — the whole point of naming a field here is
+  // to protect it, so getting the casing slightly wrong would remove exactly the guard the author
+  // went out of their way to add.
   const fields: Record<string, MergeRule> = {};
   for (const [field, rule] of Object.entries(perField)) {
     if (typeof rule !== 'string' || !MERGE_RULES.has(rule)) {
@@ -287,12 +292,16 @@ export function parseMergePolicy(raw: JSONValue | null | undefined): MergePolicy
         `MergePolicy for "${field}" must be one of neverBlank, latestWins, writeOnce — got ${JSON.stringify(rule)}.`,
       );
     }
-    fields[field] = rule as MergeRule;
+    const key = field.toLowerCase();
+    if (key in fields && fields[key] !== rule) {
+      throw new BindingConfigError(`MergePolicy names "${field}" more than once, with conflicting rules.`);
+    }
+    fields[key] = rule as MergeRule;
   }
   return { default: (fallback as MergeRule) ?? 'neverBlank', fields };
 }
 
 /** The rule that applies to one field, per-field override winning over the default. */
 export function mergeRuleFor(policy: MergePolicy, targetField: string): MergeRule {
-  return policy.fields?.[targetField] ?? policy.default ?? 'neverBlank';
+  return policy.fields?.[targetField.toLowerCase()] ?? policy.default ?? 'neverBlank';
 }

@@ -86,9 +86,17 @@ export interface MergePlanInput {
 export function planMerge(input: MergePlanInput): Map<string, CanonicalAnswerValue> {
   const plan = new Map<string, CanonicalAnswerValue>();
   const identity = new Set(input.identityFields.map((f) => f.toLowerCase()));
+  // The existing record is keyed by whatever casing the database returned, while target fields are
+  // keyed by whatever casing the author typed. SQL Server resolves `[email]` against a column named
+  // `Email` happily, so a mapping can pass every validation gate and match the right record, and
+  // then read `undefined` here for the value it is about to overwrite — which turns `writeOnce`
+  // into "always write" and makes every replay look like a change. Fold once, compare folded.
+  const current = input.existing
+    ? new Map([...input.existing].map(([field, value]) => [field.toLowerCase(), value]))
+    : null;
 
   for (const [targetField, incoming] of input.mapped) {
-    if (input.existing === null) {
+    if (current === null) {
       // Creating: every supplied value is written, whatever rule governs later updates — the
       // rules describe what may overwrite, and there is nothing here to overwrite yet. Blanks
       // are still skipped, because writing '' where the column would otherwise be null records
@@ -103,11 +111,11 @@ export function planMerge(input: MergePlanInput): Map<string, CanonicalAnswerVal
       continue;
     }
 
-    const current = input.existing.get(targetField);
-    if (valuesMatch(current, incoming)) {
+    const currentValue = current.get(targetField.toLowerCase());
+    if (valuesMatch(currentValue, incoming)) {
       continue;
     }
-    if (allowsWrite(mergeRuleFor(input.policy, targetField), current, incoming)) {
+    if (allowsWrite(mergeRuleFor(input.policy, targetField), currentValue, incoming)) {
       plan.set(targetField, incoming);
     }
   }

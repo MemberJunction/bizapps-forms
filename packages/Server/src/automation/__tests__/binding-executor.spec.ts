@@ -30,7 +30,10 @@ class FakeGateway implements BindingTargetGateway {
     } = {},
   ) {}
 
-  async describeEntity(): Promise<ReadonlySet<string> | null> {
+  public capabilityAsked: { create: boolean; update: boolean } | null = null;
+
+  async describeEntity(_name: string, needs: { create: boolean; update: boolean }): Promise<ReadonlySet<string> | null> {
+    this.capabilityAsked = needs;
     if (this.options.describeThrows) {
       throw new Error('metadata unavailable');
     }
@@ -299,5 +302,97 @@ describe('executeBinding', () => {
 
       expect(!result.ok && result.failure.retryable).toBe(true);
     });
+  });
+});
+
+describe('executeBinding — regressions found in adversarial review', () => {
+  it('never creates a record when the submission supplied nothing to write', async () => {
+    const gateway = new FakeGateway();
+    const config = configOf({
+      identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }),
+      fieldMappings: parseFieldMappings({
+        version: 1,
+        fields: [{ targetField: 'Notes', source: { kind: 'question', questionId: 'q-notes' } }],
+      }),
+    });
+
+    const result = await run(gateway, config, answersOf([{ QuestionID: 'q-other', TextValue: 'x' }]));
+
+    // A blank insert satisfies no lookup, may trip a NOT NULL column as a mystery write failure,
+    // and nothing downstream can tell it from a real record.
+    expect(result.ok && result.outcome.kind).toBe('Skipped');
+    expect(gateway.writes).toEqual([]);
+  });
+
+  it('refuses a config whose identity field no mapping can ever supply', async () => {
+    const config = configOf({
+      fieldMappings: parseFieldMappings({
+        version: 1,
+        fields: [{ targetField: 'FirstName', source: { kind: 'question', questionId: 'q-first' } }],
+      }),
+      identityRule: parseIdentityRule({ mode: 'MatchThenCreate', match: [{ targetField: 'Email' }] }),
+    });
+
+    const result = await run(new FakeGateway(), config);
+
+    // Otherwise this presents as "the respondent left it blank" on every submission forever, while
+    // creating a duplicate each time because the created record never carries the match value.
+    expect(!result.ok && result.failure.scope).toBe('config');
+    expect(!result.ok && result.failure.message).toContain('Email');
+  });
+
+  it('does not rewrite the tenant scope field on an existing record', async () => {
+    const gateway = new FakeGateway({
+      match: { recordId: 'p1', values: new Map([['Email', 'a@b.com'], ['CompanyID', 'co-1']]), multipleFound: false },
+    });
+    const config = configOf({
+      identityRule: parseIdentityRule({
+        mode: 'MatchThenCreate',
+        match: [{ targetField: 'Email' }],
+        scope: [{ targetField: 'CompanyID', value: 'co-2' }],
+      }),
+    });
+
+    await run(gateway, config);
+
+    expect(gateway.writes[0]?.values.CompanyID).toBeUndefined();
+  });
+
+  it('writes a file answer as its bare GUID, not the wrapper object', async () => {
+    const gateway = new FakeGateway();
+    const config = configOf({
+      fieldMappings: parseFieldMappings({
+        version: 1,
+        fields: [
+          { targetField: 'Email', source: { kind: 'question', questionId: 'q-email' } },
+          { targetField: 'Notes', source: { kind: 'question', questionId: 'q-file' } },
+        ],
+      }),
+      identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }),
+    });
+    const answers = answersOf([
+      { QuestionID: 'q-email', TextValue: 'a@b.com' },
+      { QuestionID: 'q-file', FileID: 'file-guid-1' },
+    ]);
+
+    await run(gateway, config, answers);
+
+    // Passed through, the wrapper reaches Set() as an object and stringifies to "[object Object]" —
+    // a write that succeeds, corrupts the column and reports success.
+    expect(gateway.writes[0].values.Notes).toBe('file-guid-1');
+  });
+
+  it('asks the entity only for the capability its identity mode actually needs', async () => {
+    const createOnly = new FakeGateway();
+    await run(createOnly, configOf({ identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }) }));
+
+    const updateOnly = new FakeGateway({ match: { recordId: 'p1', values: new Map(), multipleFound: false } });
+    await run(
+      updateOnly,
+      configOf({ identityRule: parseIdentityRule({ mode: 'MatchOrSkip', match: [{ targetField: 'Email' }] }) }),
+    );
+
+    expect(createOnly.capabilityAsked).toEqual({ create: true, update: false });
+    expect(updateOnly.capabilityAsked).toEqual({ create: false, update: true });
   });
 });

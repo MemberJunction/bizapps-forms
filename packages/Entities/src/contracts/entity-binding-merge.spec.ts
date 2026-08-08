@@ -283,3 +283,33 @@ describe('resolveMappedValues', () => {
     expect(resolved.values.has('Notes')).toBe(false);
   });
 });
+
+describe('field-name casing (regression: authored casing need not match the column)', () => {
+  it('protects a writeOnce field even when the mapping uses different casing than the column', () => {
+    const plan = planMerge({
+      mapped: mapped({ email: 'new@x.com' }),
+      existing: existing({ Email: 'original@x.com' }), // as the database returned it
+      policy: parseMergePolicy({ fields: { email: 'writeOnce' } }),
+      identityFields: [],
+    });
+
+    // Before this was folded, the existing value read as undefined, writeOnce saw a blank to fill,
+    // and the address it exists to protect was overwritten with nothing reported.
+    expect(plan.has('email')).toBe(false);
+  });
+
+  it('reports no change when only the casing of the field name differs', () => {
+    const plan = planMerge({
+      mapped: mapped({ firstName: 'Ada' }),
+      existing: existing({ FirstName: 'Ada' }),
+      policy: parseMergePolicy(null),
+      identityFields: [],
+    });
+
+    expect(plan.size).toBe(0);
+  });
+
+  it('refuses a merge policy that names the same field twice with conflicting rules', () => {
+    expect(() => parseMergePolicy({ fields: { Email: 'writeOnce', email: 'latestWins' } })).toThrow();
+  });
+});

@@ -10,7 +10,7 @@
 import { CompositeKey, LogError, Metadata, RunView } from '@memberjunction/core';
 import type { BaseEntity, EntityInfo, UserInfo } from '@memberjunction/core';
 import type { CanonicalAnswerValue, IdentityNormalization } from '@mj-biz-apps/forms-entities';
-import type { BindingTargetGateway, MatchedRecord, MatchQuery } from './binding-executor';
+import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery } from './binding-executor';
 
 export class MJBindingGateway implements BindingTargetGateway {
   constructor(private readonly contextUser: UserInfo) {}
@@ -24,12 +24,19 @@ export class MJBindingGateway implements BindingTargetGateway {
    * with `AllowCreateAPI` off would fail on every single submission, and finding that out at
    * authoring time is much cheaper.
    */
-  public async describeEntity(entityName: string): Promise<ReadonlySet<string> | null> {
+  public async describeEntity(entityName: string, needs: EntityCapability): Promise<ReadonlySet<string> | null> {
     const entity = new Metadata().EntityByName(entityName);
     if (!entity || !entity.IncludeInAPI || entity.VirtualEntity) {
       return null;
     }
-    if (!entity.AllowCreateAPI && !entity.AllowUpdateAPI) {
+    // Checked against what this binding's identity mode can actually DO, not merely "can it be
+    // written at all". An entity with creates disabled and updates enabled would pass an
+    // either-flag check and then fail on every submission that had no match — at write time, per
+    // response, in production, instead of once at authoring time.
+    if (needs.create && !entity.AllowCreateAPI) {
+      return null;
+    }
+    if (needs.update && !entity.AllowUpdateAPI) {
       return null;
     }
     return new Set(entity.Fields.filter((f) => !f.ReadOnly).map((f) => f.Name));
@@ -110,7 +117,12 @@ export class MJBindingGateway implements BindingTargetGateway {
     if (!(await record.Save())) {
       throw new Error(record.LatestResult?.CompleteMessage ?? 'save failed');
     }
-    return record.PrimaryKey.ToConcatenatedString();
+    // Bare values joined by '|', matching what `primaryKeyOf` produces on the read side and what
+    // `compositeKeyFor` parses back. NOT `PrimaryKey.ToConcatenatedString()`, which emits MJ's
+    // `FieldName|Value` form ("ID|9f3e…"): that reads back as a value no query can join to the
+    // target's ID column, and it would have put two different spellings of the same record into
+    // one ledger column depending on whether the submission created it or left it unchanged.
+    return record.PrimaryKey.KeyValuePairs.map((pair) => String(pair.Value)).join('|');
   }
 }
 
@@ -135,9 +147,18 @@ function criterionToSql(criterion: { field: string; value: string; normalize: Id
   }
 }
 
-/** Single-quote a value for SQL, doubling any quote it contains. */
-export function sqlLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+/**
+ * Single-quote a value for SQL, doubling any quote it contains.
+ *
+ * `N`-prefixed so the literal is nvarchar. Without it SQL Server parses the literal as varchar in
+ * the database's collation codepage, which silently replaces any character that codepage lacks
+ * with `?` BEFORE the comparison happens — so a respondent whose name or email contains a
+ * non-Latin character matches nothing, and the binding creates them a second record on every
+ * submission. PostgreSQL rejects the prefix, which is why this is behind a dialect check.
+ */
+export function sqlLiteral(value: string, dialect: 'sqlserver' | 'postgresql' = 'sqlserver'): string {
+  const quoted = `'${value.replace(/'/g, "''")}'`;
+  return dialect === 'sqlserver' ? `N${quoted}` : quoted;
 }
 
 /** Read the primary key out of a `simple` result row, pipe-joined for a composite key. */
