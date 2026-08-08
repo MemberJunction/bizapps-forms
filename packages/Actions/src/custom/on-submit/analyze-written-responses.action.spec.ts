@@ -87,7 +87,10 @@ const state: {
   answerSaveResult: () => true,
 };
 
-vi.mock('@memberjunction/core', () => {
+// Partial mock — see the note in upsert-respondent-person.action.spec.ts: the real module must
+// be spread back in so the generated entity classes can reach `BaseEntity` at runtime.
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       if (entityName === 'MJ_BizApps_Forms: Form Responses' || entityName === 'MJ_BizApps_Forms: Forms') {
@@ -109,7 +112,7 @@ vi.mock('@memberjunction/core', () => {
       return { Success: true, Results: results as T[] };
     }
   }
-  return { Metadata, RunView };
+  return { ...actual, Metadata, RunView };
 });
 
 /** An answer entity that records its saved state into shared `state.savedAnswers`. */

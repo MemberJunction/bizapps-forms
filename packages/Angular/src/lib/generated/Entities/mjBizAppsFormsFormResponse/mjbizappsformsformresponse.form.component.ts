@@ -20,7 +20,9 @@ export class mjBizAppsFormsFormResponseFormComponent extends BaseFormComponent {
             { sectionKey: 'respondentDetails', sectionName: 'Respondent Details', isExpanded: true },
             { sectionKey: 'submissionMetadata', sectionName: 'Submission Metadata', isExpanded: false },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
-            { sectionKey: 'mJBizAppsFormsFormResponseAnswers', sectionName: 'Form Response Answers', isExpanded: false }
+            { sectionKey: 'mJBizAppsFormsFormResponseAnswers', sectionName: 'Form Response Answers', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormEntityBindingRecords', sectionName: 'Form Entity Binding Records', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormAutomationRuns', sectionName: 'Form Automation Runs', isExpanded: false }
         ]);
     }
 }

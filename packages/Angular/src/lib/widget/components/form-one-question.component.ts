@@ -38,6 +38,8 @@ export class FormOneQuestionComponent {
   public readonly submitDisabled = input<boolean>(false);
   /** Distribution slug, forwarded to FileUpload questions for scoped uploads. */
   public readonly distributionSlug = input<string>('');
+  /** Passed through to file uploads so each one can be tied back to this response. */
+  public readonly responseId = input<string>('');
   public readonly submit = output<void>();
   /** Fires when the respondent advances a step — a natural autosave checkpoint. */
   public readonly progressChange = output<void>();

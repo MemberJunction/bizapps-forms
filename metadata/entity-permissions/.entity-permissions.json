@@ -151,5 +151,83 @@
       "lastModified": "2026-06-30T17:14:17.916Z",
       "checksum": "ea32969efd7b15362a2a4464cf8433bf8c311249c592150a0c8ae9ee5d666afa"
     }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Responses",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "C32417FF-A983-4D04-A54B-FE593F63F986"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Response Answers",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "3E2FAFDD-5A3E-4FAA-93E2-DFA006F226CF"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automations",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "3D54D732-9A83-4662-87F2-E8EA1EC3B20B"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Entity Bindings",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "BA2C82E3-A028-4DF6-B9A2-9CC29154CDCD"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Automation Runs",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "D435D85D-298C-4143-961D-F5163B3EB6B0"
+    }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Entity Binding Records",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "79C78D57-35AD-473A-8D87-E3FD15C3259C"
+    }
   }
 ]

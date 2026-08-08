@@ -9,6 +9,238 @@ export const loadModule = () => {
      
  
 /**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Automation Runs
+ */
+export const mjBizAppsFormsFormAutomationRunSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FormAutomationID: z.string().describe(`
+        * * Field Name: FormAutomationID
+        * * Display Name: Form Automation
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Automations (vwFormAutomations.ID)`),
+    FormResponseID: z.string().describe(`
+        * * Field Name: FormResponseID
+        * * Display Name: Form Response
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Responses (vwFormResponses.ID)`),
+    Status: z.union([z.literal('Failed'), z.literal('Pending'), z.literal('Running'), z.literal('Skipped'), z.literal('Succeeded')]).describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(20)
+        * * Default Value: Pending
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Failed
+    *   * Pending
+    *   * Running
+    *   * Skipped
+    *   * Succeeded
+        * * Description: Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record`),
+    AttemptCount: z.number().describe(`
+        * * Field Name: AttemptCount
+        * * Display Name: Attempt Count
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap`),
+    StartedAt: z.date().nullable().describe(`
+        * * Field Name: StartedAt
+        * * Display Name: Started At
+        * * SQL Data Type: datetimeoffset
+        * * Description: When this attempt began`),
+    CompletedAt: z.date().nullable().describe(`
+        * * Field Name: CompletedAt
+        * * Display Name: Completed At
+        * * SQL Data Type: datetimeoffset
+        * * Description: When this attempt finished, successfully or not`),
+    ActionExecutionLogID: z.string().nullable().describe(`
+        * * Field Name: ActionExecutionLogID
+        * * Display Name: Action Execution Log ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Action Execution Logs (vwActionExecutionLogs.ID)
+        * * Description: The MJ action execution log for this attempt, when an Action ran`),
+    AIAgentRunID: z.string().nullable().describe(`
+        * * Field Name: AIAgentRunID
+        * * Display Name: AI Agent Run ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: AI Agent Runs (vwAIAgentRuns.ID)
+        * * Description: The MJ agent run for this attempt, when an Agent ran`),
+    ErrorMessage: z.string().nullable().describe(`
+        * * Field Name: ErrorMessage
+        * * Display Name: Error Message
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Why this attempt failed`),
+    OutputSummary: z.string().nullable().describe(`
+        * * Field Name: OutputSummary
+        * * Display Name: Output Summary
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON digest of the result, small enough to show in an activity view`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    FormAutomation: z.string().describe(`
+        * * Field Name: FormAutomation
+        * * Display Name: Form Automation Name
+        * * SQL Data Type: nvarchar(255)`),
+    ActionExecutionLog: z.string().nullable().describe(`
+        * * Field Name: ActionExecutionLog
+        * * Display Name: Action Execution Log
+        * * SQL Data Type: nvarchar(425)`),
+    AIAgentRun: z.string().nullable().describe(`
+        * * Field Name: AIAgentRun
+        * * Display Name: AI Agent Run
+        * * SQL Data Type: nvarchar(255)`),
+});
+
+export type mjBizAppsFormsFormAutomationRunEntityType = z.infer<typeof mjBizAppsFormsFormAutomationRunSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Automations
+ */
+export const mjBizAppsFormsFormAutomationSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FormID: z.string().describe(`
+        * * Field Name: FormID
+        * * Display Name: Form ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Author-facing label, e.g. "Email confirmation"`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: What this automation is for`),
+    TargetType: z.union([z.literal('Action'), z.literal('Agent'), z.literal('EntityBinding')]).describe(`
+        * * Field Name: TargetType
+        * * Display Name: Target Type
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Action
+    *   * Agent
+    *   * EntityBinding
+        * * Description: Which kind of target runs: Action, Agent or EntityBinding`),
+    ActionID: z.string().nullable().describe(`
+        * * Field Name: ActionID
+        * * Display Name: Action
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Actions (vwActions.ID)
+        * * Description: The MJ Action to run; set only when TargetType is Action`),
+    AgentID: z.string().nullable().describe(`
+        * * Field Name: AgentID
+        * * Display Name: Agent
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: AI Agents (vwAIAgents.ID)
+        * * Description: The MJ AI Agent to run; set only when TargetType is Agent`),
+    BindingID: z.string().nullable().describe(`
+        * * Field Name: BindingID
+        * * Display Name: Binding
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Entity Bindings (vwFormEntityBindings.ID)
+        * * Description: The entity binding to execute; set only when TargetType is EntityBinding`),
+    Trigger: z.union([z.literal('OnComplete'), z.literal('OnCompleteOrPartial'), z.literal('OnPartial')]).describe(`
+        * * Field Name: Trigger
+        * * Display Name: Trigger
+        * * SQL Data Type: nvarchar(30)
+        * * Default Value: OnComplete
+    * * Value List Type: List
+    * * Possible Values 
+    *   * OnComplete
+    *   * OnCompleteOrPartial
+    *   * OnPartial
+        * * Description: Which save fires this automation: a completed submission, a partial autosave, or both`),
+    ExecutionMode: z.union([z.literal('Async'), z.literal('Sync')]).describe(`
+        * * Field Name: ExecutionMode
+        * * Display Name: Execution Mode
+        * * SQL Data Type: nvarchar(10)
+        * * Default Value: Async
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Async
+    *   * Sync
+        * * Description: Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting`),
+    DisplayOrder: z.number().describe(`
+        * * Field Name: DisplayOrder
+        * * Display Name: Display Order
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Run order within an execution mode; Sync automations always run before Async ones regardless`),
+    ConditionalRule: z.string().nullable().describe(`
+        * * Field Name: ConditionalRule
+        * * Display Name: Conditional Rule
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run`),
+    ParameterMapping: z.string().nullable().describe(`
+        * * Field Name: ParameterMapping
+        * * Display Name: Parameter Mapping
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids`),
+    ContinueOnError: z.boolean().describe(`
+        * * Field Name: ContinueOnError
+        * * Display Name: Continue On Error
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: When false, a failure halts the remaining Sync automations for that response`),
+    TimeoutMS: z.number().nullable().describe(`
+        * * Field Name: TimeoutMS
+        * * Display Name: Timeout (ms)
+        * * SQL Data Type: int
+        * * Description: Optional per-automation execution cap in milliseconds`),
+    IsActive: z.boolean().describe(`
+        * * Field Name: IsActive
+        * * Display Name: Is Active
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Whether this automation is eligible to run`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Form: z.string().describe(`
+        * * Field Name: Form
+        * * Display Name: Form
+        * * SQL Data Type: nvarchar(255)`),
+    Action: z.string().nullable().describe(`
+        * * Field Name: Action
+        * * Display Name: Action Name
+        * * SQL Data Type: nvarchar(425)`),
+    Agent: z.string().nullable().describe(`
+        * * Field Name: Agent
+        * * Display Name: Agent Name
+        * * SQL Data Type: nvarchar(255)`),
+    Binding: z.string().nullable().describe(`
+        * * Field Name: Binding
+        * * Display Name: Binding Name
+        * * SQL Data Type: nvarchar(255)`),
+});
+
+export type mjBizAppsFormsFormAutomationEntityType = z.infer<typeof mjBizAppsFormsFormAutomationSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Forms: Form Categories
  */
 export const mjBizAppsFormsFormCategorySchema = z.object({
@@ -178,6 +410,151 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
 });
 
 export type mjBizAppsFormsFormDistributionEntityType = z.infer<typeof mjBizAppsFormsFormDistributionSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Entity Binding Records
+ */
+export const mjBizAppsFormsFormEntityBindingRecordSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    BindingID: z.string().describe(`
+        * * Field Name: BindingID
+        * * Display Name: Binding ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Entity Bindings (vwFormEntityBindings.ID)`),
+    FormResponseID: z.string().describe(`
+        * * Field Name: FormResponseID
+        * * Display Name: Form Response ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Responses (vwFormResponses.ID)`),
+    TargetEntityID: z.string().describe(`
+        * * Field Name: TargetEntityID
+        * * Display Name: Target Entity ID
+        * * SQL Data Type: uniqueidentifier
+        * * Description: Entity the record belongs to, captured at execution time`),
+    TargetRecordID: z.string().nullable().describe(`
+        * * Field Name: TargetRecordID
+        * * Display Name: Target Record ID
+        * * SQL Data Type: nvarchar(750)
+        * * Description: Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped`),
+    Outcome: z.union([z.literal('Created'), z.literal('Merged'), z.literal('Skipped'), z.literal('Unchanged')]).describe(`
+        * * Field Name: Outcome
+        * * Display Name: Outcome
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Created
+    *   * Merged
+    *   * Skipped
+    *   * Unchanged
+        * * Description: What the binding did: created a record, merged into an existing one, changed nothing, or skipped`),
+    WrittenFields: z.string().nullable().describe(`
+        * * Field Name: WrittenFields
+        * * Display Name: Written Fields
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON list of the field names actually written by this execution`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Binding: z.string().describe(`
+        * * Field Name: Binding
+        * * Display Name: Binding
+        * * SQL Data Type: nvarchar(255)`),
+});
+
+export type mjBizAppsFormsFormEntityBindingRecordEntityType = z.infer<typeof mjBizAppsFormsFormEntityBindingRecordSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Entity Bindings
+ */
+export const mjBizAppsFormsFormEntityBindingSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FormID: z.string().describe(`
+        * * Field Name: FormID
+        * * Display Name: Form ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
+    Name: z.string().describe(`
+        * * Field Name: Name
+        * * Display Name: Name
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Author-facing label for this binding, e.g. "Create CRM Lead"`),
+    Description: z.string().nullable().describe(`
+        * * Field Name: Description
+        * * Display Name: Description
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: What this binding is for`),
+    TargetEntityID: z.string().describe(`
+        * * Field Name: TargetEntityID
+        * * Display Name: Target Entity ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Entities (vwEntities.ID)
+        * * Description: Entity whose records this binding writes`),
+    TargetEntityName: z.string().describe(`
+        * * Field Name: TargetEntityName
+        * * Display Name: Target Entity Name
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle`),
+    FieldMappings: z.string().describe(`
+        * * Field Name: FieldMappings
+        * * Display Name: Field Mappings
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions`),
+    IdentityRule: z.string().describe(`
+        * * Field Name: IdentityRule
+        * * Display Name: Identity Rule
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several`),
+    MergePolicy: z.string().nullable().describe(`
+        * * Field Name: MergePolicy
+        * * Display Name: Merge Policy
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout`),
+    Status: z.union([z.literal('Active'), z.literal('Disabled')]).describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(20)
+        * * Default Value: Active
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Active
+    *   * Disabled
+        * * Description: Whether this binding is eligible to run`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    Form: z.string().describe(`
+        * * Field Name: Form
+        * * Display Name: Form
+        * * SQL Data Type: nvarchar(255)`),
+    TargetEntity: z.string().describe(`
+        * * Field Name: TargetEntity
+        * * Display Name: Target Entity
+        * * SQL Data Type: nvarchar(255)`),
+});
+
+export type mjBizAppsFormsFormEntityBindingEntityType = z.infer<typeof mjBizAppsFormsFormEntityBindingSchema>;
 
 /**
  * zod schema definition for the entity MJ_BizApps_Forms: Form Pages
@@ -601,6 +978,115 @@ export const mjBizAppsFormsFormStyleSchema = z.object({
 export type mjBizAppsFormsFormStyleEntityType = z.infer<typeof mjBizAppsFormsFormStyleSchema>;
 
 /**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Uploads
+ */
+export const mjBizAppsFormsFormUploadSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FileID: z.string().describe(`
+        * * Field Name: FileID
+        * * Display Name: File
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Files (vwFiles.ID)
+        * * Description: The uploaded file`),
+    DistributionID: z.string().describe(`
+        * * Field Name: DistributionID
+        * * Display Name: Distribution
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Distributions (vwFormDistributions.ID)
+        * * Description: The distribution the upload was made through. The hard scope every provenance check enforces`),
+    FormID: z.string().describe(`
+        * * Field Name: FormID
+        * * Display Name: Form
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+        * * Description: The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed`),
+    QuestionID: z.string().nullable().describe(`
+        * * Field Name: QuestionID
+        * * Display Name: Question
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Questions (vwFormQuestions.ID)
+        * * Description: The question the file answers`),
+    ResponseDraftID: z.string().nullable().describe(`
+        * * Field Name: ResponseDraftID
+        * * Display Name: Response Draft
+        * * SQL Data Type: uniqueidentifier
+        * * Description: The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows`),
+    AnonymousSessionID: z.string().nullable().describe(`
+        * * Field Name: AnonymousSessionID
+        * * Display Name: Anonymous Session
+        * * SQL Data Type: nvarchar(255)
+        * * Description: The anonymous session id at upload time. A fallback correlation key; blank is tolerated`),
+    UploadedByUserID: z.string().nullable().describe(`
+        * * Field Name: UploadedByUserID
+        * * Display Name: Uploaded By User
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+        * * Description: The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record`),
+    ProviderKey: z.string().nullable().describe(`
+        * * Field Name: ProviderKey
+        * * Display Name: Provider Key
+        * * SQL Data Type: nvarchar(1000)
+        * * Description: Storage key of the file, so the Forms path prefix can be checked without loading the file row`),
+    FileName: z.string().nullable().describe(`
+        * * Field Name: FileName
+        * * Display Name: File Name
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Original sanitized filename`),
+    ContentType: z.string().nullable().describe(`
+        * * Field Name: ContentType
+        * * Display Name: Content Type
+        * * SQL Data Type: nvarchar(255)
+        * * Description: Stored content type`),
+    SizeBytes: z.number().nullable().describe(`
+        * * Field Name: SizeBytes
+        * * Display Name: Size (Bytes)
+        * * SQL Data Type: bigint
+        * * Description: Size in bytes`),
+    Status: z.union([z.literal('Active'), z.literal('Revoked')]).describe(`
+        * * Field Name: Status
+        * * Display Name: Status
+        * * SQL Data Type: nvarchar(20)
+        * * Default Value: Active
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Active
+    *   * Revoked
+        * * Description: Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    File: z.string().describe(`
+        * * Field Name: File
+        * * Display Name: File Reference
+        * * SQL Data Type: nvarchar(500)`),
+    Distribution: z.string().describe(`
+        * * Field Name: Distribution
+        * * Display Name: Distribution Reference
+        * * SQL Data Type: nvarchar(255)`),
+    Form: z.string().describe(`
+        * * Field Name: Form
+        * * Display Name: Form Reference
+        * * SQL Data Type: nvarchar(255)`),
+    UploadedByUser: z.string().nullable().describe(`
+        * * Field Name: UploadedByUser
+        * * Display Name: Uploaded By User Reference
+        * * SQL Data Type: nvarchar(100)`),
+});
+
+export type mjBizAppsFormsFormUploadEntityType = z.infer<typeof mjBizAppsFormsFormUploadSchema>;
+
+/**
  * zod schema definition for the entity MJ_BizApps_Forms: Form Versions
  */
 export const mjBizAppsFormsFormVersionSchema = z.object({
@@ -745,6 +1231,619 @@ export const mjBizAppsFormsFormSchema = z.object({
 export type mjBizAppsFormsFormEntityType = z.infer<typeof mjBizAppsFormsFormSchema>;
  
  
+
+/**
+ * MJ_BizApps_Forms: Form Automation Runs - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormAutomationRun
+ * * Base View: vwFormAutomationRuns
+ * * @description One execution attempt of an automation against one response, linking out to the MJ action or agent log that holds the detail
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Automation Runs')
+export class mjBizAppsFormsFormAutomationRunEntity extends BaseEntity<mjBizAppsFormsFormAutomationRunEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Automation Runs record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Automation Runs record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormAutomationRunEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FormAutomationID
+    * * Display Name: Form Automation
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Automations (vwFormAutomations.ID)
+    */
+    get FormAutomationID(): string {
+        return this.Get('FormAutomationID');
+    }
+    set FormAutomationID(value: string) {
+        this.Set('FormAutomationID', value);
+    }
+
+    /**
+    * * Field Name: FormResponseID
+    * * Display Name: Form Response
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Responses (vwFormResponses.ID)
+    */
+    get FormResponseID(): string {
+        return this.Get('FormResponseID');
+    }
+    set FormResponseID(value: string) {
+        this.Set('FormResponseID', value);
+    }
+
+    /**
+    * * Field Name: Status
+    * * Display Name: Status
+    * * SQL Data Type: nvarchar(20)
+    * * Default Value: Pending
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Failed
+    *   * Pending
+    *   * Running
+    *   * Skipped
+    *   * Succeeded
+    * * Description: Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record
+    */
+    get Status(): 'Failed' | 'Pending' | 'Running' | 'Skipped' | 'Succeeded' {
+        return this.Get('Status');
+    }
+    set Status(value: 'Failed' | 'Pending' | 'Running' | 'Skipped' | 'Succeeded') {
+        this.Set('Status', value);
+    }
+
+    /**
+    * * Field Name: AttemptCount
+    * * Display Name: Attempt Count
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap
+    */
+    get AttemptCount(): number {
+        return this.Get('AttemptCount');
+    }
+    set AttemptCount(value: number) {
+        this.Set('AttemptCount', value);
+    }
+
+    /**
+    * * Field Name: StartedAt
+    * * Display Name: Started At
+    * * SQL Data Type: datetimeoffset
+    * * Description: When this attempt began
+    */
+    get StartedAt(): Date | null {
+        return this.Get('StartedAt');
+    }
+    set StartedAt(value: Date | null) {
+        this.Set('StartedAt', value);
+    }
+
+    /**
+    * * Field Name: CompletedAt
+    * * Display Name: Completed At
+    * * SQL Data Type: datetimeoffset
+    * * Description: When this attempt finished, successfully or not
+    */
+    get CompletedAt(): Date | null {
+        return this.Get('CompletedAt');
+    }
+    set CompletedAt(value: Date | null) {
+        this.Set('CompletedAt', value);
+    }
+
+    /**
+    * * Field Name: ActionExecutionLogID
+    * * Display Name: Action Execution Log ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Action Execution Logs (vwActionExecutionLogs.ID)
+    * * Description: The MJ action execution log for this attempt, when an Action ran
+    */
+    get ActionExecutionLogID(): string | null {
+        return this.Get('ActionExecutionLogID');
+    }
+    set ActionExecutionLogID(value: string | null) {
+        this.Set('ActionExecutionLogID', value);
+    }
+
+    /**
+    * * Field Name: AIAgentRunID
+    * * Display Name: AI Agent Run ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: AI Agent Runs (vwAIAgentRuns.ID)
+    * * Description: The MJ agent run for this attempt, when an Agent ran
+    */
+    get AIAgentRunID(): string | null {
+        return this.Get('AIAgentRunID');
+    }
+    set AIAgentRunID(value: string | null) {
+        this.Set('AIAgentRunID', value);
+    }
+
+    /**
+    * * Field Name: ErrorMessage
+    * * Display Name: Error Message
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Why this attempt failed
+    */
+    get ErrorMessage(): string | null {
+        return this.Get('ErrorMessage');
+    }
+    set ErrorMessage(value: string | null) {
+        this.Set('ErrorMessage', value);
+    }
+
+    /**
+    * * Field Name: OutputSummary
+    * * Display Name: Output Summary
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON digest of the result, small enough to show in an activity view
+    */
+    get OutputSummary(): string | null {
+        return this.Get('OutputSummary');
+    }
+    set OutputSummary(value: string | null) {
+        this.Set('OutputSummary', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: FormAutomation
+    * * Display Name: Form Automation Name
+    * * SQL Data Type: nvarchar(255)
+    */
+    get FormAutomation(): string {
+        return this.Get('FormAutomation');
+    }
+
+    /**
+    * * Field Name: ActionExecutionLog
+    * * Display Name: Action Execution Log
+    * * SQL Data Type: nvarchar(425)
+    */
+    get ActionExecutionLog(): string | null {
+        return this.Get('ActionExecutionLog');
+    }
+
+    /**
+    * * Field Name: AIAgentRun
+    * * Display Name: AI Agent Run
+    * * SQL Data Type: nvarchar(255)
+    */
+    get AIAgentRun(): string | null {
+        return this.Get('AIAgentRun');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Forms: Form Automations - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormAutomation
+ * * Base View: vwFormAutomations
+ * * @description One configured on-submit automation for a form: an Action, an Agent or an entity binding, with its trigger, ordering, condition and execution mode
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Automations')
+export class mjBizAppsFormsFormAutomationEntity extends BaseEntity<mjBizAppsFormsFormAutomationEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Automations record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Automations record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormAutomationEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * Validate() method override for MJ_BizApps_Forms: Form Automations entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
+    * * Table-Level: Ensures that based on the selected TargetType, only the corresponding ID field (ActionID, AgentID, or BindingID) is populated, while the other two ID fields must remain empty.
+    * @public
+    * @method
+    * @override
+    */
+    public override Validate(): ValidationResult {
+        const result = super.Validate();
+        this.ValidateTargetTypeRelationships(result);
+        result.Success = result.Success && (result.Errors.length === 0);
+
+        return result;
+    }
+
+    /**
+    * Ensures that based on the selected TargetType, only the corresponding ID field (ActionID, AgentID, or BindingID) is populated, while the other two ID fields must remain empty.
+    * @param result - the ValidationResult object to add any errors or warnings to
+    * @public
+    * @method
+    */
+    public ValidateTargetTypeRelationships(result: ValidationResult) {
+        const targetType = this.TargetType;
+        const actionId = this.ActionID;
+        const agentId = this.AgentID;
+        const bindingId = this.BindingID;
+    
+        let isValid = false;
+        let errorMessage = "";
+    
+        if (targetType === "Action") {
+            if (actionId != null && agentId == null && bindingId == null) {
+                isValid = true;
+            } else {
+                errorMessage = "When TargetType is 'Action', ActionID must be specified, and both AgentID and BindingID must be null.";
+            }
+        } else if (targetType === "Agent") {
+            if (agentId != null && actionId == null && bindingId == null) {
+                isValid = true;
+            } else {
+                errorMessage = "When TargetType is 'Agent', AgentID must be specified, and both ActionID and BindingID must be null.";
+            }
+        } else if (targetType === "EntityBinding") {
+            if (bindingId != null && actionId == null && agentId == null) {
+                isValid = true;
+            } else {
+                errorMessage = "When TargetType is 'EntityBinding', BindingID must be specified, and both ActionID and AgentID must be null.";
+            }
+        } else {
+            errorMessage = "TargetType must be 'Action', 'Agent', or 'EntityBinding'.";
+        }
+    
+        if (!isValid) {
+            result.Errors.push(new ValidationErrorInfo(
+                "TargetType",
+                errorMessage,
+                targetType,
+                ValidationErrorType.Failure
+            ));
+        }
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FormID
+    * * Display Name: Form ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    */
+    get FormID(): string {
+        return this.Get('FormID');
+    }
+    set FormID(value: string) {
+        this.Set('FormID', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Author-facing label, e.g. "Email confirmation"
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: What this automation is for
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: TargetType
+    * * Display Name: Target Type
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Action
+    *   * Agent
+    *   * EntityBinding
+    * * Description: Which kind of target runs: Action, Agent or EntityBinding
+    */
+    get TargetType(): 'Action' | 'Agent' | 'EntityBinding' {
+        return this.Get('TargetType');
+    }
+    set TargetType(value: 'Action' | 'Agent' | 'EntityBinding') {
+        this.Set('TargetType', value);
+    }
+
+    /**
+    * * Field Name: ActionID
+    * * Display Name: Action
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Actions (vwActions.ID)
+    * * Description: The MJ Action to run; set only when TargetType is Action
+    */
+    get ActionID(): string | null {
+        return this.Get('ActionID');
+    }
+    set ActionID(value: string | null) {
+        this.Set('ActionID', value);
+    }
+
+    /**
+    * * Field Name: AgentID
+    * * Display Name: Agent
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: AI Agents (vwAIAgents.ID)
+    * * Description: The MJ AI Agent to run; set only when TargetType is Agent
+    */
+    get AgentID(): string | null {
+        return this.Get('AgentID');
+    }
+    set AgentID(value: string | null) {
+        this.Set('AgentID', value);
+    }
+
+    /**
+    * * Field Name: BindingID
+    * * Display Name: Binding
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Entity Bindings (vwFormEntityBindings.ID)
+    * * Description: The entity binding to execute; set only when TargetType is EntityBinding
+    */
+    get BindingID(): string | null {
+        return this.Get('BindingID');
+    }
+    set BindingID(value: string | null) {
+        this.Set('BindingID', value);
+    }
+
+    /**
+    * * Field Name: Trigger
+    * * Display Name: Trigger
+    * * SQL Data Type: nvarchar(30)
+    * * Default Value: OnComplete
+    * * Value List Type: List
+    * * Possible Values 
+    *   * OnComplete
+    *   * OnCompleteOrPartial
+    *   * OnPartial
+    * * Description: Which save fires this automation: a completed submission, a partial autosave, or both
+    */
+    get Trigger(): 'OnComplete' | 'OnCompleteOrPartial' | 'OnPartial' {
+        return this.Get('Trigger');
+    }
+    set Trigger(value: 'OnComplete' | 'OnCompleteOrPartial' | 'OnPartial') {
+        this.Set('Trigger', value);
+    }
+
+    /**
+    * * Field Name: ExecutionMode
+    * * Display Name: Execution Mode
+    * * SQL Data Type: nvarchar(10)
+    * * Default Value: Async
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Async
+    *   * Sync
+    * * Description: Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting
+    */
+    get ExecutionMode(): 'Async' | 'Sync' {
+        return this.Get('ExecutionMode');
+    }
+    set ExecutionMode(value: 'Async' | 'Sync') {
+        this.Set('ExecutionMode', value);
+    }
+
+    /**
+    * * Field Name: DisplayOrder
+    * * Display Name: Display Order
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: Run order within an execution mode; Sync automations always run before Async ones regardless
+    */
+    get DisplayOrder(): number {
+        return this.Get('DisplayOrder');
+    }
+    set DisplayOrder(value: number) {
+        this.Set('DisplayOrder', value);
+    }
+
+    /**
+    * * Field Name: ConditionalRule
+    * * Display Name: Conditional Rule
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run
+    */
+    get ConditionalRule(): string | null {
+        return this.Get('ConditionalRule');
+    }
+    set ConditionalRule(value: string | null) {
+        this.Set('ConditionalRule', value);
+    }
+
+    /**
+    * * Field Name: ParameterMapping
+    * * Display Name: Parameter Mapping
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids
+    */
+    get ParameterMapping(): string | null {
+        return this.Get('ParameterMapping');
+    }
+    set ParameterMapping(value: string | null) {
+        this.Set('ParameterMapping', value);
+    }
+
+    /**
+    * * Field Name: ContinueOnError
+    * * Display Name: Continue On Error
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: When false, a failure halts the remaining Sync automations for that response
+    */
+    get ContinueOnError(): boolean {
+        return this.Get('ContinueOnError');
+    }
+    set ContinueOnError(value: boolean) {
+        this.Set('ContinueOnError', value);
+    }
+
+    /**
+    * * Field Name: TimeoutMS
+    * * Display Name: Timeout (ms)
+    * * SQL Data Type: int
+    * * Description: Optional per-automation execution cap in milliseconds
+    */
+    get TimeoutMS(): number | null {
+        return this.Get('TimeoutMS');
+    }
+    set TimeoutMS(value: number | null) {
+        this.Set('TimeoutMS', value);
+    }
+
+    /**
+    * * Field Name: IsActive
+    * * Display Name: Is Active
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Whether this automation is eligible to run
+    */
+    get IsActive(): boolean {
+        return this.Get('IsActive');
+    }
+    set IsActive(value: boolean) {
+        this.Set('IsActive', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: Form
+    * * Display Name: Form
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Form(): string {
+        return this.Get('Form');
+    }
+
+    /**
+    * * Field Name: Action
+    * * Display Name: Action Name
+    * * SQL Data Type: nvarchar(425)
+    */
+    get Action(): string | null {
+        return this.Get('Action');
+    }
+
+    /**
+    * * Field Name: Agent
+    * * Display Name: Agent Name
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Agent(): string | null {
+        return this.Get('Agent');
+    }
+
+    /**
+    * * Field Name: Binding
+    * * Display Name: Binding Name
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Binding(): string | null {
+        return this.Get('Binding');
+    }
+}
+
 
 /**
  * MJ_BizApps_Forms: Form Categories - strongly typed entity sub-class
@@ -1164,6 +2263,370 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
     */
     get Form(): string {
         return this.Get('Form');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Forms: Form Entity Binding Records - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormEntityBindingRecord
+ * * Base View: vwFormEntityBindingRecords
+ * * @description Durable record of which target record a submission produced, making re-execution idempotent and the lineage queryable
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Entity Binding Records')
+export class mjBizAppsFormsFormEntityBindingRecordEntity extends BaseEntity<mjBizAppsFormsFormEntityBindingRecordEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Entity Binding Records record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Entity Binding Records record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormEntityBindingRecordEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: BindingID
+    * * Display Name: Binding ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Entity Bindings (vwFormEntityBindings.ID)
+    */
+    get BindingID(): string {
+        return this.Get('BindingID');
+    }
+    set BindingID(value: string) {
+        this.Set('BindingID', value);
+    }
+
+    /**
+    * * Field Name: FormResponseID
+    * * Display Name: Form Response ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Responses (vwFormResponses.ID)
+    */
+    get FormResponseID(): string {
+        return this.Get('FormResponseID');
+    }
+    set FormResponseID(value: string) {
+        this.Set('FormResponseID', value);
+    }
+
+    /**
+    * * Field Name: TargetEntityID
+    * * Display Name: Target Entity ID
+    * * SQL Data Type: uniqueidentifier
+    * * Description: Entity the record belongs to, captured at execution time
+    */
+    get TargetEntityID(): string {
+        return this.Get('TargetEntityID');
+    }
+    set TargetEntityID(value: string) {
+        this.Set('TargetEntityID', value);
+    }
+
+    /**
+    * * Field Name: TargetRecordID
+    * * Display Name: Target Record ID
+    * * SQL Data Type: nvarchar(750)
+    * * Description: Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped
+    */
+    get TargetRecordID(): string | null {
+        return this.Get('TargetRecordID');
+    }
+    set TargetRecordID(value: string | null) {
+        this.Set('TargetRecordID', value);
+    }
+
+    /**
+    * * Field Name: Outcome
+    * * Display Name: Outcome
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Created
+    *   * Merged
+    *   * Skipped
+    *   * Unchanged
+    * * Description: What the binding did: created a record, merged into an existing one, changed nothing, or skipped
+    */
+    get Outcome(): 'Created' | 'Merged' | 'Skipped' | 'Unchanged' {
+        return this.Get('Outcome');
+    }
+    set Outcome(value: 'Created' | 'Merged' | 'Skipped' | 'Unchanged') {
+        this.Set('Outcome', value);
+    }
+
+    /**
+    * * Field Name: WrittenFields
+    * * Display Name: Written Fields
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON list of the field names actually written by this execution
+    */
+    get WrittenFields(): string | null {
+        return this.Get('WrittenFields');
+    }
+    set WrittenFields(value: string | null) {
+        this.Set('WrittenFields', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: Binding
+    * * Display Name: Binding
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Binding(): string {
+        return this.Get('Binding');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Forms: Form Entity Bindings - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormEntityBinding
+ * * Base View: vwFormEntityBindings
+ * * @description Declares that submissions to a form create or update a record of a target entity, via a field mapping, an identity rule and a merge policy
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Entity Bindings')
+export class mjBizAppsFormsFormEntityBindingEntity extends BaseEntity<mjBizAppsFormsFormEntityBindingEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Entity Bindings record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Entity Bindings record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormEntityBindingEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FormID
+    * * Display Name: Form ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    */
+    get FormID(): string {
+        return this.Get('FormID');
+    }
+    set FormID(value: string) {
+        this.Set('FormID', value);
+    }
+
+    /**
+    * * Field Name: Name
+    * * Display Name: Name
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Author-facing label for this binding, e.g. "Create CRM Lead"
+    */
+    get Name(): string {
+        return this.Get('Name');
+    }
+    set Name(value: string) {
+        this.Set('Name', value);
+    }
+
+    /**
+    * * Field Name: Description
+    * * Display Name: Description
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: What this binding is for
+    */
+    get Description(): string | null {
+        return this.Get('Description');
+    }
+    set Description(value: string | null) {
+        this.Set('Description', value);
+    }
+
+    /**
+    * * Field Name: TargetEntityID
+    * * Display Name: Target Entity ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Entities (vwEntities.ID)
+    * * Description: Entity whose records this binding writes
+    */
+    get TargetEntityID(): string {
+        return this.Get('TargetEntityID');
+    }
+    set TargetEntityID(value: string) {
+        this.Set('TargetEntityID', value);
+    }
+
+    /**
+    * * Field Name: TargetEntityName
+    * * Display Name: Target Entity Name
+    * * SQL Data Type: nvarchar(500)
+    * * Description: Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle
+    */
+    get TargetEntityName(): string {
+        return this.Get('TargetEntityName');
+    }
+    set TargetEntityName(value: string) {
+        this.Set('TargetEntityName', value);
+    }
+
+    /**
+    * * Field Name: FieldMappings
+    * * Display Name: Field Mappings
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions
+    */
+    get FieldMappings(): string {
+        return this.Get('FieldMappings');
+    }
+    set FieldMappings(value: string) {
+        this.Set('FieldMappings', value);
+    }
+
+    /**
+    * * Field Name: IdentityRule
+    * * Display Name: Identity Rule
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several
+    */
+    get IdentityRule(): string {
+        return this.Get('IdentityRule');
+    }
+    set IdentityRule(value: string) {
+        this.Set('IdentityRule', value);
+    }
+
+    /**
+    * * Field Name: MergePolicy
+    * * Display Name: Merge Policy
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout
+    */
+    get MergePolicy(): string | null {
+        return this.Get('MergePolicy');
+    }
+    set MergePolicy(value: string | null) {
+        this.Set('MergePolicy', value);
+    }
+
+    /**
+    * * Field Name: Status
+    * * Display Name: Status
+    * * SQL Data Type: nvarchar(20)
+    * * Default Value: Active
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Active
+    *   * Disabled
+    * * Description: Whether this binding is eligible to run
+    */
+    get Status(): 'Active' | 'Disabled' {
+        return this.Get('Status');
+    }
+    set Status(value: 'Active' | 'Disabled') {
+        this.Set('Status', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: Form
+    * * Display Name: Form
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Form(): string {
+        return this.Get('Form');
+    }
+
+    /**
+    * * Field Name: TargetEntity
+    * * Display Name: Target Entity
+    * * SQL Data Type: nvarchar(255)
+    */
+    get TargetEntity(): string {
+        return this.Get('TargetEntity');
     }
 }
 
@@ -2235,6 +3698,273 @@ export class mjBizAppsFormsFormStyleEntity extends BaseEntity<mjBizAppsFormsForm
     */
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Forms: Form Uploads - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormUpload
+ * * Base View: vwFormUploads
+ * * @description Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Uploads')
+export class mjBizAppsFormsFormUploadEntity extends BaseEntity<mjBizAppsFormsFormUploadEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Uploads record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Uploads record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormUploadEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FileID
+    * * Display Name: File
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Files (vwFiles.ID)
+    * * Description: The uploaded file
+    */
+    get FileID(): string {
+        return this.Get('FileID');
+    }
+    set FileID(value: string) {
+        this.Set('FileID', value);
+    }
+
+    /**
+    * * Field Name: DistributionID
+    * * Display Name: Distribution
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Distributions (vwFormDistributions.ID)
+    * * Description: The distribution the upload was made through. The hard scope every provenance check enforces
+    */
+    get DistributionID(): string {
+        return this.Get('DistributionID');
+    }
+    set DistributionID(value: string) {
+        this.Set('DistributionID', value);
+    }
+
+    /**
+    * * Field Name: FormID
+    * * Display Name: Form
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    * * Description: The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed
+    */
+    get FormID(): string {
+        return this.Get('FormID');
+    }
+    set FormID(value: string) {
+        this.Set('FormID', value);
+    }
+
+    /**
+    * * Field Name: QuestionID
+    * * Display Name: Question
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Questions (vwFormQuestions.ID)
+    * * Description: The question the file answers
+    */
+    get QuestionID(): string | null {
+        return this.Get('QuestionID');
+    }
+    set QuestionID(value: string | null) {
+        this.Set('QuestionID', value);
+    }
+
+    /**
+    * * Field Name: ResponseDraftID
+    * * Display Name: Response Draft
+    * * SQL Data Type: uniqueidentifier
+    * * Description: The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows
+    */
+    get ResponseDraftID(): string | null {
+        return this.Get('ResponseDraftID');
+    }
+    set ResponseDraftID(value: string | null) {
+        this.Set('ResponseDraftID', value);
+    }
+
+    /**
+    * * Field Name: AnonymousSessionID
+    * * Display Name: Anonymous Session
+    * * SQL Data Type: nvarchar(255)
+    * * Description: The anonymous session id at upload time. A fallback correlation key; blank is tolerated
+    */
+    get AnonymousSessionID(): string | null {
+        return this.Get('AnonymousSessionID');
+    }
+    set AnonymousSessionID(value: string | null) {
+        this.Set('AnonymousSessionID', value);
+    }
+
+    /**
+    * * Field Name: UploadedByUserID
+    * * Display Name: Uploaded By User
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
+    * * Description: The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record
+    */
+    get UploadedByUserID(): string | null {
+        return this.Get('UploadedByUserID');
+    }
+    set UploadedByUserID(value: string | null) {
+        this.Set('UploadedByUserID', value);
+    }
+
+    /**
+    * * Field Name: ProviderKey
+    * * Display Name: Provider Key
+    * * SQL Data Type: nvarchar(1000)
+    * * Description: Storage key of the file, so the Forms path prefix can be checked without loading the file row
+    */
+    get ProviderKey(): string | null {
+        return this.Get('ProviderKey');
+    }
+    set ProviderKey(value: string | null) {
+        this.Set('ProviderKey', value);
+    }
+
+    /**
+    * * Field Name: FileName
+    * * Display Name: File Name
+    * * SQL Data Type: nvarchar(500)
+    * * Description: Original sanitized filename
+    */
+    get FileName(): string | null {
+        return this.Get('FileName');
+    }
+    set FileName(value: string | null) {
+        this.Set('FileName', value);
+    }
+
+    /**
+    * * Field Name: ContentType
+    * * Display Name: Content Type
+    * * SQL Data Type: nvarchar(255)
+    * * Description: Stored content type
+    */
+    get ContentType(): string | null {
+        return this.Get('ContentType');
+    }
+    set ContentType(value: string | null) {
+        this.Set('ContentType', value);
+    }
+
+    /**
+    * * Field Name: SizeBytes
+    * * Display Name: Size (Bytes)
+    * * SQL Data Type: bigint
+    * * Description: Size in bytes
+    */
+    get SizeBytes(): number | null {
+        return this.Get('SizeBytes');
+    }
+    set SizeBytes(value: number | null) {
+        this.Set('SizeBytes', value);
+    }
+
+    /**
+    * * Field Name: Status
+    * * Display Name: Status
+    * * SQL Data Type: nvarchar(20)
+    * * Default Value: Active
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Active
+    *   * Revoked
+    * * Description: Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance
+    */
+    get Status(): 'Active' | 'Revoked' {
+        return this.Get('Status');
+    }
+    set Status(value: 'Active' | 'Revoked') {
+        this.Set('Status', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: File
+    * * Display Name: File Reference
+    * * SQL Data Type: nvarchar(500)
+    */
+    get File(): string {
+        return this.Get('File');
+    }
+
+    /**
+    * * Field Name: Distribution
+    * * Display Name: Distribution Reference
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Distribution(): string {
+        return this.Get('Distribution');
+    }
+
+    /**
+    * * Field Name: Form
+    * * Display Name: Form Reference
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Form(): string {
+        return this.Get('Form');
+    }
+
+    /**
+    * * Field Name: UploadedByUser
+    * * Display Name: Uploaded By User Reference
+    * * SQL Data Type: nvarchar(100)
+    */
+    get UploadedByUser(): string | null {
+        return this.Get('UploadedByUser');
     }
 }
 

@@ -12,6 +12,7 @@ export function buildMockForm(_distributionSlug: string): PublishedFormDefinitio
     name: 'Community Event Sign-up',
     description: 'A short form demonstrating every Phase-1 question type.',
     renderMode: 'Scroll',
+    automations: [],
     settings: {
       anonymousAllowed: true,
       captchaRequired: false,

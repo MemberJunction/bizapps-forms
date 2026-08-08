@@ -24,6 +24,7 @@ import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { DistributionManagerComponent } from './distribution-manager.component';
+import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
@@ -40,7 +41,7 @@ import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import { isValidReorder } from './reorder';
 
 /** Which workspace tab is showing. */
-type BuilderTab = 'build' | 'design' | 'distribute';
+type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit';
 
 /**
  * The visual form builder — registered as the override for the
@@ -71,6 +72,7 @@ type BuilderTab = 'build' | 'design' | 'distribute';
     DistributionManagerComponent,
     DesignPanelComponent,
     FormPreviewModalComponent,
+    AutomationTabComponent,
   ],
   providers: [BuilderStateService, DesignStateService, PublishService],
   templateUrl: './form-builder.component.html',
@@ -233,6 +235,16 @@ export class FormBuilderComponent extends BaseFormComponent {
     return sources;
   }
 
+  /** Every question on the form, in page/display order — what the On Submit tab maps from. */
+  protected get mappableQuestions(): MappableQuestion[] {
+    if (!this.tree) {
+      return [];
+    }
+    return this.tree.pages.flatMap((page) =>
+      page.questions.map((q) => ({ id: q.entity.ID, prompt: q.entity.Prompt, type: q.entity.QuestionType })),
+    );
+  }
+
   protected metaFor(node: QuestionNode): QuestionTypeMeta {
     return questionTypeMeta(node.entity.QuestionType);
   }
@@ -355,7 +367,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     const style = this.record.StyleID
       ? (await this.design.loadStyleById(this.record.StyleID)) ?? undefined
       : undefined;
-    this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview');
+    // No automations: Preview renders the form, it never runs a submission's side effects.
+    this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
     this.cdr.markForCheck();
   }
 
@@ -364,7 +377,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree) {
       return;
     }
-    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', tokens);
+    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', [], tokens);
     this.cdr.markForCheck();
   }
 

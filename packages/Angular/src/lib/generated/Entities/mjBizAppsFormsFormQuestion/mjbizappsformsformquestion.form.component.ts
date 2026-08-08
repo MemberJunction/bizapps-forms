@@ -21,7 +21,8 @@ export class mjBizAppsFormsFormQuestionFormComponent extends BaseFormComponent {
             { sectionKey: 'rulesAndConfiguration', sectionName: 'Rules and Configuration', isExpanded: true },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
             { sectionKey: 'mJBizAppsFormsFormQuestionOptions', sectionName: 'Form Question Options', isExpanded: false },
-            { sectionKey: 'mJBizAppsFormsFormResponseAnswers', sectionName: 'Form Response Answers', isExpanded: false }
+            { sectionKey: 'mJBizAppsFormsFormResponseAnswers', sectionName: 'Form Response Answers', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormUploads', sectionName: 'Form Uploads', isExpanded: false }
         ]);
     }
 }

@@ -17,8 +17,549 @@ import { MaxLength } from 'class-validator';
 import * as mj_core_schema_server_object_types from '@memberjunction/server'
 
 
-import { mjBizAppsFormsFormCategoryEntity, mjBizAppsFormsFormDistributionEntity, mjBizAppsFormsFormPageEntity, mjBizAppsFormsFormQuestionOptionEntity, mjBizAppsFormsFormQuestionEntity, mjBizAppsFormsFormResponseAnswerEntity, mjBizAppsFormsFormResponseEntity, mjBizAppsFormsFormStyleEntity, mjBizAppsFormsFormVersionEntity, mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
+import { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormAutomationEntity, mjBizAppsFormsFormCategoryEntity, mjBizAppsFormsFormDistributionEntity, mjBizAppsFormsFormEntityBindingRecordEntity, mjBizAppsFormsFormEntityBindingEntity, mjBizAppsFormsFormPageEntity, mjBizAppsFormsFormQuestionOptionEntity, mjBizAppsFormsFormQuestionEntity, mjBizAppsFormsFormResponseAnswerEntity, mjBizAppsFormsFormResponseEntity, mjBizAppsFormsFormStyleEntity, mjBizAppsFormsFormUploadEntity, mjBizAppsFormsFormVersionEntity, mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
     
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Forms: Form Automation Runs
+//****************************************************************************
+@ObjectType({ description: `One execution attempt of an automation against one response, linking out to the MJ action or agent log that holds the detail` })
+export class mjBizAppsFormsFormAutomationRun_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    FormAutomationID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    FormResponseID: string;
+        
+    @Field({description: `Outcome of this attempt. Skipped means a condition did not hold, which the MJ logs cannot record`}) 
+    @MaxLength(20)
+    Status: string;
+        
+    @Field(() => Int, {description: `How many times this automation has been attempted for this response; the recovery sweep stops re-driving at the configured cap`}) 
+    AttemptCount: number;
+        
+    @Field({nullable: true, description: `When this attempt began`}) 
+    StartedAt?: Date;
+        
+    @Field({nullable: true, description: `When this attempt finished, successfully or not`}) 
+    CompletedAt?: Date;
+        
+    @Field({nullable: true, description: `The MJ action execution log for this attempt, when an Action ran`}) 
+    @MaxLength(36)
+    ActionExecutionLogID?: string;
+        
+    @Field({nullable: true, description: `The MJ agent run for this attempt, when an Agent ran`}) 
+    @MaxLength(36)
+    AIAgentRunID?: string;
+        
+    @Field({nullable: true, description: `Why this attempt failed`}) 
+    ErrorMessage?: string;
+        
+    @Field({nullable: true, description: `JSON digest of the result, small enough to show in an activity view`}) 
+    OutputSummary?: string;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field() 
+    @MaxLength(255)
+    FormAutomation: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(425)
+    ActionExecutionLog?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    AIAgentRun?: string;
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Automation Runs
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsFormsFormAutomationRunInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    FormAutomationID?: string;
+
+    @Field({ nullable: true })
+    FormResponseID?: string;
+
+    @Field({ nullable: true })
+    Status?: string;
+
+    @Field(() => Int, { nullable: true })
+    AttemptCount?: number;
+
+    @Field({ nullable: true })
+    StartedAt: Date | null;
+
+    @Field({ nullable: true })
+    CompletedAt: Date | null;
+
+    @Field({ nullable: true })
+    ActionExecutionLogID: string | null;
+
+    @Field({ nullable: true })
+    AIAgentRunID: string | null;
+
+    @Field({ nullable: true })
+    ErrorMessage: string | null;
+
+    @Field({ nullable: true })
+    OutputSummary: string | null;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Automation Runs
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsFormsFormAutomationRunInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    FormAutomationID?: string;
+
+    @Field({ nullable: true })
+    FormResponseID?: string;
+
+    @Field({ nullable: true })
+    Status?: string;
+
+    @Field(() => Int, { nullable: true })
+    AttemptCount?: number;
+
+    @Field({ nullable: true })
+    StartedAt?: Date | null;
+
+    @Field({ nullable: true })
+    CompletedAt?: Date | null;
+
+    @Field({ nullable: true })
+    ActionExecutionLogID?: string | null;
+
+    @Field({ nullable: true })
+    AIAgentRunID?: string | null;
+
+    @Field({ nullable: true })
+    ErrorMessage?: string | null;
+
+    @Field({ nullable: true })
+    OutputSummary?: string | null;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Forms: Form Automation Runs
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsFormsFormAutomationRunViewResult {
+    @Field(() => [mjBizAppsFormsFormAutomationRun_])
+    Results: mjBizAppsFormsFormAutomationRun_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsFormsFormAutomationRun_)
+export class mjBizAppsFormsFormAutomationRunResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsFormsFormAutomationRunViewResult)
+    async RunmjBizAppsFormsFormAutomationRunViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormAutomationRunViewResult)
+    async RunmjBizAppsFormsFormAutomationRunViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormAutomationRunViewResult)
+    async RunmjBizAppsFormsFormAutomationRunDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Forms: Form Automation Runs';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsFormsFormAutomationRun_, { nullable: true })
+    async mjBizAppsFormsFormAutomationRun(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsFormsFormAutomationRun_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automation Runs', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomationRuns')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automation Runs', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Automation Runs', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormAutomationRun_)
+    async CreatemjBizAppsFormsFormAutomationRun(
+        @Arg('input', () => CreatemjBizAppsFormsFormAutomationRunInput) input: CreatemjBizAppsFormsFormAutomationRunInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Forms: Form Automation Runs', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormAutomationRun_)
+    async UpdatemjBizAppsFormsFormAutomationRun(
+        @Arg('input', () => UpdatemjBizAppsFormsFormAutomationRunInput) input: UpdatemjBizAppsFormsFormAutomationRunInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Forms: Form Automation Runs', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormAutomationRun_)
+    async DeletemjBizAppsFormsFormAutomationRun(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Forms: Form Automation Runs', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Forms: Form Automations
+//****************************************************************************
+@ObjectType({ description: `One configured on-submit automation for a form: an Action, an Agent or an entity binding, with its trigger, ordering, condition and execution mode` })
+export class mjBizAppsFormsFormAutomation_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    FormID: string;
+        
+    @Field({description: `Author-facing label, e.g. "Email confirmation"`}) 
+    @MaxLength(255)
+    Name: string;
+        
+    @Field({nullable: true, description: `What this automation is for`}) 
+    Description?: string;
+        
+    @Field({description: `Which kind of target runs: Action, Agent or EntityBinding`}) 
+    @MaxLength(20)
+    TargetType: string;
+        
+    @Field({nullable: true, description: `The MJ Action to run; set only when TargetType is Action`}) 
+    @MaxLength(36)
+    ActionID?: string;
+        
+    @Field({nullable: true, description: `The MJ AI Agent to run; set only when TargetType is Agent`}) 
+    @MaxLength(36)
+    AgentID?: string;
+        
+    @Field({nullable: true, description: `The entity binding to execute; set only when TargetType is EntityBinding`}) 
+    @MaxLength(36)
+    BindingID?: string;
+        
+    @Field({description: `Which save fires this automation: a completed submission, a partial autosave, or both`}) 
+    @MaxLength(30)
+    Trigger: string;
+        
+    @Field({description: `Sync automations are awaited before the respondent sees a confirmation; Async are dispatched without waiting`}) 
+    @MaxLength(10)
+    ExecutionMode: string;
+        
+    @Field(() => Int, {description: `Run order within an execution mode; Sync automations always run before Async ones regardless`}) 
+    DisplayOrder: number;
+        
+    @Field({nullable: true, description: `JSON condition over the response answers; when it does not hold the automation is recorded as skipped rather than run. Null means always run`}) 
+    ConditionalRule?: string;
+        
+    @Field({nullable: true, description: `JSON describing how the target's inputs are built from response context, static values and specific answers. Null means the standard response context ids`}) 
+    ParameterMapping?: string;
+        
+    @Field(() => Boolean, {description: `When false, a failure halts the remaining Sync automations for that response`}) 
+    ContinueOnError: boolean;
+        
+    @Field(() => Int, {nullable: true, description: `Optional per-automation execution cap in milliseconds`}) 
+    TimeoutMS?: number;
+        
+    @Field(() => Boolean, {description: `Whether this automation is eligible to run`}) 
+    IsActive: boolean;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field() 
+    @MaxLength(255)
+    Form: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(425)
+    Action?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    Agent?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    Binding?: string;
+        
+    @Field(() => [mjBizAppsFormsFormAutomationRun_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormAutomationIDArray: mjBizAppsFormsFormAutomationRun_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns
+    
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Automations
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsFormsFormAutomationInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    Name?: string;
+
+    @Field({ nullable: true })
+    Description: string | null;
+
+    @Field({ nullable: true })
+    TargetType?: string;
+
+    @Field({ nullable: true })
+    ActionID: string | null;
+
+    @Field({ nullable: true })
+    AgentID: string | null;
+
+    @Field({ nullable: true })
+    BindingID: string | null;
+
+    @Field({ nullable: true })
+    Trigger?: string;
+
+    @Field({ nullable: true })
+    ExecutionMode?: string;
+
+    @Field(() => Int, { nullable: true })
+    DisplayOrder?: number;
+
+    @Field({ nullable: true })
+    ConditionalRule: string | null;
+
+    @Field({ nullable: true })
+    ParameterMapping: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    ContinueOnError?: boolean;
+
+    @Field(() => Int, { nullable: true })
+    TimeoutMS: number | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Automations
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsFormsFormAutomationInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    Name?: string;
+
+    @Field({ nullable: true })
+    Description?: string | null;
+
+    @Field({ nullable: true })
+    TargetType?: string;
+
+    @Field({ nullable: true })
+    ActionID?: string | null;
+
+    @Field({ nullable: true })
+    AgentID?: string | null;
+
+    @Field({ nullable: true })
+    BindingID?: string | null;
+
+    @Field({ nullable: true })
+    Trigger?: string;
+
+    @Field({ nullable: true })
+    ExecutionMode?: string;
+
+    @Field(() => Int, { nullable: true })
+    DisplayOrder?: number;
+
+    @Field({ nullable: true })
+    ConditionalRule?: string | null;
+
+    @Field({ nullable: true })
+    ParameterMapping?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    ContinueOnError?: boolean;
+
+    @Field(() => Int, { nullable: true })
+    TimeoutMS?: number | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsActive?: boolean;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Forms: Form Automations
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsFormsFormAutomationViewResult {
+    @Field(() => [mjBizAppsFormsFormAutomation_])
+    Results: mjBizAppsFormsFormAutomation_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsFormsFormAutomation_)
+export class mjBizAppsFormsFormAutomationResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsFormsFormAutomationViewResult)
+    async RunmjBizAppsFormsFormAutomationViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormAutomationViewResult)
+    async RunmjBizAppsFormsFormAutomationViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormAutomationViewResult)
+    async RunmjBizAppsFormsFormAutomationDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Forms: Form Automations';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsFormsFormAutomation_, { nullable: true })
+    async mjBizAppsFormsFormAutomation(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsFormsFormAutomation_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automations', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomations')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automations', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Automations', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @FieldResolver(() => [mjBizAppsFormsFormAutomationRun_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormAutomationIDArray(@Root() mjbizappsformsformautomation_: mjBizAppsFormsFormAutomation_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automation Runs', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomationRuns')} WHERE ${provider.QuoteIdentifier('FormAutomationID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automation Runs', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformautomation_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Automation Runs', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormAutomation_)
+    async CreatemjBizAppsFormsFormAutomation(
+        @Arg('input', () => CreatemjBizAppsFormsFormAutomationInput) input: CreatemjBizAppsFormsFormAutomationInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Forms: Form Automations', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormAutomation_)
+    async UpdatemjBizAppsFormsFormAutomation(
+        @Arg('input', () => UpdatemjBizAppsFormsFormAutomationInput) input: UpdatemjBizAppsFormsFormAutomationInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Forms: Form Automations', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormAutomation_)
+    async DeletemjBizAppsFormsFormAutomation(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Forms: Form Automations', key, options, provider, userPayload, pubSub);
+    }
+    
+}
 
 //****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Categories
@@ -307,6 +848,9 @@ export class mjBizAppsFormsFormDistribution_ {
     @MaxLength(255)
     Form: string;
         
+    @Field(() => [mjBizAppsFormsFormUpload_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormUploads_DistributionIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormUploads
+    
 }
 
 //****************************************************************************
@@ -472,6 +1016,16 @@ export class mjBizAppsFormsFormDistributionResolver extends ResolverBase {
         return result;
     }
     
+    @FieldResolver(() => [mjBizAppsFormsFormUpload_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormUploads_DistributionIDArray(@Root() mjbizappsformsformdistribution_: mjBizAppsFormsFormDistribution_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('DistributionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformdistribution_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Uploads', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
     @Mutation(() => mjBizAppsFormsFormDistribution_)
     async CreatemjBizAppsFormsFormDistribution(
         @Arg('input', () => CreatemjBizAppsFormsFormDistributionInput) input: CreatemjBizAppsFormsFormDistributionInput,
@@ -497,6 +1051,451 @@ export class mjBizAppsFormsFormDistributionResolver extends ResolverBase {
         const provider = GetReadWriteProvider(providers);
         const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
         return this.DeleteRecord('MJ_BizApps_Forms: Form Distributions', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Forms: Form Entity Binding Records
+//****************************************************************************
+@ObjectType({ description: `Durable record of which target record a submission produced, making re-execution idempotent and the lineage queryable` })
+export class mjBizAppsFormsFormEntityBindingRecord_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    BindingID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    FormResponseID: string;
+        
+    @Field({description: `Entity the record belongs to, captured at execution time`}) 
+    @MaxLength(36)
+    TargetEntityID: string;
+        
+    @Field({nullable: true, description: `Primary key of the record written, pipe-joined for a composite key. Null when the binding was skipped`}) 
+    @MaxLength(750)
+    TargetRecordID?: string;
+        
+    @Field({description: `What the binding did: created a record, merged into an existing one, changed nothing, or skipped`}) 
+    @MaxLength(20)
+    Outcome: string;
+        
+    @Field({nullable: true, description: `JSON list of the field names actually written by this execution`}) 
+    WrittenFields?: string;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field() 
+    @MaxLength(255)
+    Binding: string;
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Entity Binding Records
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsFormsFormEntityBindingRecordInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    BindingID?: string;
+
+    @Field({ nullable: true })
+    FormResponseID?: string;
+
+    @Field({ nullable: true })
+    TargetEntityID?: string;
+
+    @Field({ nullable: true })
+    TargetRecordID: string | null;
+
+    @Field({ nullable: true })
+    Outcome?: string;
+
+    @Field({ nullable: true })
+    WrittenFields: string | null;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Entity Binding Records
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsFormsFormEntityBindingRecordInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    BindingID?: string;
+
+    @Field({ nullable: true })
+    FormResponseID?: string;
+
+    @Field({ nullable: true })
+    TargetEntityID?: string;
+
+    @Field({ nullable: true })
+    TargetRecordID?: string | null;
+
+    @Field({ nullable: true })
+    Outcome?: string;
+
+    @Field({ nullable: true })
+    WrittenFields?: string | null;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Forms: Form Entity Binding Records
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsFormsFormEntityBindingRecordViewResult {
+    @Field(() => [mjBizAppsFormsFormEntityBindingRecord_])
+    Results: mjBizAppsFormsFormEntityBindingRecord_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsFormsFormEntityBindingRecord_)
+export class mjBizAppsFormsFormEntityBindingRecordResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsFormsFormEntityBindingRecordViewResult)
+    async RunmjBizAppsFormsFormEntityBindingRecordViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormEntityBindingRecordViewResult)
+    async RunmjBizAppsFormsFormEntityBindingRecordViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormEntityBindingRecordViewResult)
+    async RunmjBizAppsFormsFormEntityBindingRecordDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Forms: Form Entity Binding Records';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsFormsFormEntityBindingRecord_, { nullable: true })
+    async mjBizAppsFormsFormEntityBindingRecord(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsFormsFormEntityBindingRecord_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Binding Records', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindingRecords')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Binding Records', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Entity Binding Records', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormEntityBindingRecord_)
+    async CreatemjBizAppsFormsFormEntityBindingRecord(
+        @Arg('input', () => CreatemjBizAppsFormsFormEntityBindingRecordInput) input: CreatemjBizAppsFormsFormEntityBindingRecordInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Forms: Form Entity Binding Records', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormEntityBindingRecord_)
+    async UpdatemjBizAppsFormsFormEntityBindingRecord(
+        @Arg('input', () => UpdatemjBizAppsFormsFormEntityBindingRecordInput) input: UpdatemjBizAppsFormsFormEntityBindingRecordInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Forms: Form Entity Binding Records', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormEntityBindingRecord_)
+    async DeletemjBizAppsFormsFormEntityBindingRecord(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Forms: Form Entity Binding Records', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Forms: Form Entity Bindings
+//****************************************************************************
+@ObjectType({ description: `Declares that submissions to a form create or update a record of a target entity, via a field mapping, an identity rule and a merge policy` })
+export class mjBizAppsFormsFormEntityBinding_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    FormID: string;
+        
+    @Field({description: `Author-facing label for this binding, e.g. "Create CRM Lead"`}) 
+    @MaxLength(255)
+    Name: string;
+        
+    @Field({nullable: true, description: `What this binding is for`}) 
+    Description?: string;
+        
+    @Field({description: `Entity whose records this binding writes`}) 
+    @MaxLength(36)
+    TargetEntityID: string;
+        
+    @Field({description: `Name of the target entity, stored alongside the ID because a runtime-created entity has a different ID in each environment and the name is the only portable handle`}) 
+    @MaxLength(500)
+    TargetEntityName: string;
+        
+    @Field({description: `JSON mapping of question GUIDs to target entity fields, with optional per-field transforms and conditions`}) 
+    FieldMappings: string;
+        
+    @Field({description: `JSON rule deciding whether a submission updates an existing record or creates one: match fields, tenant scope, and what to do on no match or several`}) 
+    IdentityRule: string;
+        
+    @Field({nullable: true, description: `JSON per-field merge policy (neverBlank, latestWins, writeOnce). Null means neverBlank throughout`}) 
+    MergePolicy?: string;
+        
+    @Field({description: `Whether this binding is eligible to run`}) 
+    @MaxLength(20)
+    Status: string;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field() 
+    @MaxLength(255)
+    Form: string;
+        
+    @Field() 
+    @MaxLength(255)
+    TargetEntity: string;
+        
+    @Field(() => [mjBizAppsFormsFormAutomation_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_BindingIDArray: mjBizAppsFormsFormAutomation_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomations
+    
+    @Field(() => [mjBizAppsFormsFormEntityBindingRecord_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_BindingIDArray: mjBizAppsFormsFormEntityBindingRecord_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords
+    
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Entity Bindings
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsFormsFormEntityBindingInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    Name?: string;
+
+    @Field({ nullable: true })
+    Description: string | null;
+
+    @Field({ nullable: true })
+    TargetEntityID?: string;
+
+    @Field({ nullable: true })
+    TargetEntityName?: string;
+
+    @Field({ nullable: true })
+    FieldMappings?: string;
+
+    @Field({ nullable: true })
+    IdentityRule?: string;
+
+    @Field({ nullable: true })
+    MergePolicy: string | null;
+
+    @Field({ nullable: true })
+    Status?: string;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Entity Bindings
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsFormsFormEntityBindingInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    Name?: string;
+
+    @Field({ nullable: true })
+    Description?: string | null;
+
+    @Field({ nullable: true })
+    TargetEntityID?: string;
+
+    @Field({ nullable: true })
+    TargetEntityName?: string;
+
+    @Field({ nullable: true })
+    FieldMappings?: string;
+
+    @Field({ nullable: true })
+    IdentityRule?: string;
+
+    @Field({ nullable: true })
+    MergePolicy?: string | null;
+
+    @Field({ nullable: true })
+    Status?: string;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Forms: Form Entity Bindings
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsFormsFormEntityBindingViewResult {
+    @Field(() => [mjBizAppsFormsFormEntityBinding_])
+    Results: mjBizAppsFormsFormEntityBinding_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsFormsFormEntityBinding_)
+export class mjBizAppsFormsFormEntityBindingResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsFormsFormEntityBindingViewResult)
+    async RunmjBizAppsFormsFormEntityBindingViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormEntityBindingViewResult)
+    async RunmjBizAppsFormsFormEntityBindingViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormEntityBindingViewResult)
+    async RunmjBizAppsFormsFormEntityBindingDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Forms: Form Entity Bindings';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsFormsFormEntityBinding_, { nullable: true })
+    async mjBizAppsFormsFormEntityBinding(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsFormsFormEntityBinding_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Bindings', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindings')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Bindings', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Entity Bindings', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @FieldResolver(() => [mjBizAppsFormsFormAutomation_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_BindingIDArray(@Root() mjbizappsformsformentitybinding_: mjBizAppsFormsFormEntityBinding_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automations', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomations')} WHERE ${provider.QuoteIdentifier('BindingID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automations', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformentitybinding_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Automations', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormEntityBindingRecord_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_BindingIDArray(@Root() mjbizappsformsformentitybinding_: mjBizAppsFormsFormEntityBinding_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Binding Records', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindingRecords')} WHERE ${provider.QuoteIdentifier('BindingID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Binding Records', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformentitybinding_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Entity Binding Records', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormEntityBinding_)
+    async CreatemjBizAppsFormsFormEntityBinding(
+        @Arg('input', () => CreatemjBizAppsFormsFormEntityBindingInput) input: CreatemjBizAppsFormsFormEntityBindingInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Forms: Form Entity Bindings', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormEntityBinding_)
+    async UpdatemjBizAppsFormsFormEntityBinding(
+        @Arg('input', () => UpdatemjBizAppsFormsFormEntityBindingInput) input: UpdatemjBizAppsFormsFormEntityBindingInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Forms: Form Entity Bindings', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormEntityBinding_)
+    async DeletemjBizAppsFormsFormEntityBinding(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Forms: Form Entity Bindings', key, options, provider, userPayload, pubSub);
     }
     
 }
@@ -940,6 +1939,9 @@ export class mjBizAppsFormsFormQuestion_ {
     @Field(() => [mjBizAppsFormsFormResponseAnswer_])
     mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_QuestionIDArray: mjBizAppsFormsFormResponseAnswer_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers
     
+    @Field(() => [mjBizAppsFormsFormUpload_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormUploads_QuestionIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormUploads
+    
 }
 
 //****************************************************************************
@@ -1110,6 +2112,16 @@ export class mjBizAppsFormsFormQuestionResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponseAnswers')} WHERE ${provider.QuoteIdentifier('QuestionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Response Answers', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformquestion_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Response Answers', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormUpload_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormUploads_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('QuestionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformquestion_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Uploads', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -1425,6 +2437,12 @@ export class mjBizAppsFormsFormResponse_ {
     @Field(() => [mjBizAppsFormsFormResponseAnswer_])
     mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_ResponseIDArray: mjBizAppsFormsFormResponseAnswer_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers
     
+    @Field(() => [mjBizAppsFormsFormEntityBindingRecord_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_FormResponseIDArray: mjBizAppsFormsFormEntityBindingRecord_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords
+    
+    @Field(() => [mjBizAppsFormsFormAutomationRun_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormResponseIDArray: mjBizAppsFormsFormAutomationRun_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns
+    
 }
 
 //****************************************************************************
@@ -1567,6 +2585,26 @@ export class mjBizAppsFormsFormResponseResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponseAnswers')} WHERE ${provider.QuoteIdentifier('ResponseID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Response Answers', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformresponse_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Response Answers', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormEntityBindingRecord_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_FormResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Binding Records', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindingRecords')} WHERE ${provider.QuoteIdentifier('FormResponseID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Binding Records', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformresponse_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Entity Binding Records', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormAutomationRun_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automation Runs', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomationRuns')} WHERE ${provider.QuoteIdentifier('FormResponseID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automation Runs', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsformresponse_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Automation Runs', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         
@@ -1804,6 +2842,272 @@ export class mjBizAppsFormsFormStyleResolver extends ResolverBase {
         const provider = GetReadWriteProvider(providers);
         const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
         return this.DeleteRecord('MJ_BizApps_Forms: Form Styles', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Forms: Form Uploads
+//****************************************************************************
+@ObjectType({ description: `Records that a file was uploaded through the Forms upload endpoint, for a specific distribution and draft response, so a submitted file id can be told apart from an arbitrary one. __mj.File has no owner column, so this is the only evidence of who produced a file` })
+export class mjBizAppsFormsFormUpload_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field({description: `The uploaded file`}) 
+    @MaxLength(36)
+    FileID: string;
+        
+    @Field({description: `The distribution the upload was made through. The hard scope every provenance check enforces`}) 
+    @MaxLength(36)
+    DistributionID: string;
+        
+    @Field({description: `The form the distribution belonged to at upload time, denormalized so the record survives a distribution being repointed`}) 
+    @MaxLength(36)
+    FormID: string;
+        
+    @Field({nullable: true, description: `The question the file answers`}) 
+    @MaxLength(36)
+    QuestionID?: string;
+        
+    @Field({nullable: true, description: `The client-minted response id the upload was made for. The primary correlation key, because the anonymous session id is documented to be blank in otherwise valid flows`}) 
+    @MaxLength(36)
+    ResponseDraftID?: string;
+        
+    @Field({nullable: true, description: `The anonymous session id at upload time. A fallback correlation key; blank is tolerated`}) 
+    @MaxLength(255)
+    AnonymousSessionID?: string;
+        
+    @Field({nullable: true, description: `The session principal that made the upload. Audit only — never a correlation key, since anonymous sessions share one user record`}) 
+    @MaxLength(36)
+    UploadedByUserID?: string;
+        
+    @Field({nullable: true, description: `Storage key of the file, so the Forms path prefix can be checked without loading the file row`}) 
+    @MaxLength(1000)
+    ProviderKey?: string;
+        
+    @Field({nullable: true, description: `Original sanitized filename`}) 
+    @MaxLength(500)
+    FileName?: string;
+        
+    @Field({nullable: true, description: `Stored content type`}) 
+    @MaxLength(255)
+    ContentType?: string;
+        
+    @Field(() => Int, {nullable: true, description: `Size in bytes`}) 
+    SizeBytes?: number;
+        
+    @Field({description: `Revoked means the upload was withdrawn or garbage-collected; a revoked row fails provenance`}) 
+    @MaxLength(20)
+    Status: string;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field() 
+    @MaxLength(500)
+    File: string;
+        
+    @Field() 
+    @MaxLength(255)
+    Distribution: string;
+        
+    @Field() 
+    @MaxLength(255)
+    Form: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(100)
+    UploadedByUser?: string;
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Uploads
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsFormsFormUploadInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    FileID?: string;
+
+    @Field({ nullable: true })
+    DistributionID?: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    QuestionID: string | null;
+
+    @Field({ nullable: true })
+    ResponseDraftID: string | null;
+
+    @Field({ nullable: true })
+    AnonymousSessionID: string | null;
+
+    @Field({ nullable: true })
+    UploadedByUserID: string | null;
+
+    @Field({ nullable: true })
+    ProviderKey: string | null;
+
+    @Field({ nullable: true })
+    FileName: string | null;
+
+    @Field({ nullable: true })
+    ContentType: string | null;
+
+    @Field(() => Int, { nullable: true })
+    SizeBytes: number | null;
+
+    @Field({ nullable: true })
+    Status?: string;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Uploads
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsFormsFormUploadInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    FileID?: string;
+
+    @Field({ nullable: true })
+    DistributionID?: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    QuestionID?: string | null;
+
+    @Field({ nullable: true })
+    ResponseDraftID?: string | null;
+
+    @Field({ nullable: true })
+    AnonymousSessionID?: string | null;
+
+    @Field({ nullable: true })
+    UploadedByUserID?: string | null;
+
+    @Field({ nullable: true })
+    ProviderKey?: string | null;
+
+    @Field({ nullable: true })
+    FileName?: string | null;
+
+    @Field({ nullable: true })
+    ContentType?: string | null;
+
+    @Field(() => Int, { nullable: true })
+    SizeBytes?: number | null;
+
+    @Field({ nullable: true })
+    Status?: string;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Forms: Form Uploads
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsFormsFormUploadViewResult {
+    @Field(() => [mjBizAppsFormsFormUpload_])
+    Results: mjBizAppsFormsFormUpload_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsFormsFormUpload_)
+export class mjBizAppsFormsFormUploadResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsFormsFormUploadViewResult)
+    async RunmjBizAppsFormsFormUploadViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormUploadViewResult)
+    async RunmjBizAppsFormsFormUploadViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormUploadViewResult)
+    async RunmjBizAppsFormsFormUploadDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Forms: Form Uploads';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsFormsFormUpload_, { nullable: true })
+    async mjBizAppsFormsFormUpload(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsFormsFormUpload_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Uploads', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormUpload_)
+    async CreatemjBizAppsFormsFormUpload(
+        @Arg('input', () => CreatemjBizAppsFormsFormUploadInput) input: CreatemjBizAppsFormsFormUploadInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Forms: Form Uploads', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormUpload_)
+    async UpdatemjBizAppsFormsFormUpload(
+        @Arg('input', () => UpdatemjBizAppsFormsFormUploadInput) input: UpdatemjBizAppsFormsFormUploadInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Forms: Form Uploads', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormUpload_)
+    async DeletemjBizAppsFormsFormUpload(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Forms: Form Uploads', key, options, provider, userPayload, pubSub);
     }
     
 }
@@ -2075,6 +3379,15 @@ export class mjBizAppsFormsForm_ {
     @Field(() => [mjBizAppsFormsFormResponse_])
     mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormIDArray: mjBizAppsFormsFormResponse_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponses
     
+    @Field(() => [mjBizAppsFormsFormAutomation_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_FormIDArray: mjBizAppsFormsFormAutomation_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomations
+    
+    @Field(() => [mjBizAppsFormsFormEntityBinding_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings_FormIDArray: mjBizAppsFormsFormEntityBinding_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings
+    
+    @Field(() => [mjBizAppsFormsFormUpload_])
+    mjBizAppsFormsMJ_BizApps_Forms_FormUploads_FormIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormUploads
+    
 }
 
 //****************************************************************************
@@ -2257,6 +3570,36 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponses')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Responses', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Responses', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormAutomation_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automations', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomations')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automations', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Automations', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormEntityBinding_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Bindings', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindings')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Bindings', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Entity Bindings', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormUpload_])
+    async mjBizAppsFormsMJ_BizApps_Forms_FormUploads_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Uploads', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         

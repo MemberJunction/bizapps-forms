@@ -11,5 +11,14 @@
       "lastModified": "2026-06-30T17:14:17.407Z",
       "checksum": "271ce6830df7c360ee8babe085d268590eedee346748adcd4c0997cb5fb1e57b"
     }
+  },
+  {
+    "fields": {
+      "Name": "Forms Automation Runner",
+      "Description": "The role on-submit automations and entity bindings execute under. Deliberately separate from the anonymous 'Form Respondent' role: a respondent may only create a response, while an automation must read that response back and write business records downstream. Grants read on the response entities, update on Form Responses only (so 'Forms: Upsert Respondent Person' can stamp RespondentPersonID back onto the response), plus write on the Forms-owned automation/binding bookkeeping tables. Grants NOTHING on any binding target entity \u2014 those are added per deployment, and the set of them is the hard ceiling on what a form author can reach through a binding. Assign only to the seeded automation service user; never to a person."
+    },
+    "primaryKey": {
+      "ID": "5154187D-0AB9-4C75-A444-CFC3D10E1BC0"
+    }
   }
 ]

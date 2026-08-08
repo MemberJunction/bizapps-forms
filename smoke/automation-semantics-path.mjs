@@ -1,0 +1,327 @@
+/**
+ * Intensive end-to-end smoke test for on-submit automation SEMANTICS.
+ *
+ * `binding-path.mjs` proves one automation works. This proves the rules that decide WHETHER and IN
+ * WHAT ORDER an automation runs — trigger, isActive, conditional rule, display order, and the
+ * identity ledger's short-circuit. Every one of those failures is silent in production: an
+ * automation that should not have fired leaves a business record nobody asked for, and one that
+ * should have fired leaves nothing at all. Neither raises an error, and both look identical to a
+ * green unit suite, because the unit suite plans automations against a fake dispatcher and never
+ * discovers that the plan and the dispatcher disagree.
+ *
+ * Each scenario rewrites the authored `FormAutomation` row, republishes the snapshot THROUGH THE
+ * REAL MAPPER (`buildPublishedAutomations`), then submits through the real anonymous path and
+ * reads what actually happened. Republishing via the mapper is deliberate: it means the mapper is
+ * exercised once per scenario rather than trusted.
+ *
+ * Prerequisites: MJAPI running, and `smoke/seed-binding-smoke.mjs` already run.
+ *   set -a && . ./.env && set +a && node smoke/automation-semantics-path.mjs
+ */
+import { spawnSync } from 'node:child_process';
+import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
+
+const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const SLUG = process.argv[2] || 'contact-us-e2e';
+const env = process.env;
+const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
+
+let failures = 0;
+const pass = (m) => console.log(`  ok    ${m}`);
+const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
+const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
+
+function sql(query) {
+  const res = spawnSync('docker', [
+    'exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
+    '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-s', '|', '-Q', `SET NOCOUNT ON; ${query}`,
+  ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (res.status !== 0) throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
+  return res.stdout.trim();
+}
+
+/** `-y 0` lifts sqlcmd's 256-char truncation; it is exclusive with both `-W` and `-h`. */
+function sqlWide(query) {
+  const res = spawnSync('docker', [
+    'exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
+    '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-y', '0', '-Q', query,
+  ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (res.status !== 0) throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
+  return res.stdout
+    .split('\n')
+    .filter((l) => !/^JSON_/.test(l) && !/^-+$/.test(l.trim()) && l.trim() !== '')
+    .join('')
+    .trim();
+}
+
+/** Rebuild the published snapshot's automations from the authored rows, via the real mapper. */
+function republish() {
+  const columns = AUTHORED_AUTOMATION_FIELDS.map((f) => (f === 'Trigger' ? '[Trigger]' : f)).join(', ');
+  const formId = sql(`SELECT TOP 1 CAST(f.ID AS varchar(40)) FROM __mj_BizAppsForms.Form f
+    JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID=f.ID WHERE d.Slug='${SLUG}';`).trim();
+  const json = sqlWide(`SET NOCOUNT ON; SELECT ${columns} FROM __mj_BizAppsForms.FormAutomation
+    WHERE FormID='${formId}' FOR JSON PATH, INCLUDE_NULL_VALUES;`);
+  const rows = JSON.parse(json || '[]');
+  const published = JSON.stringify(buildPublishedAutomations(rows)).replace(/'/g, "''");
+  sql(`
+DECLARE @VerID UNIQUEIDENTIFIER = (
+  SELECT TOP 1 v.ID FROM __mj_BizAppsForms.FormVersion v
+  JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID=v.FormID
+  WHERE d.Slug='${SLUG}' AND v.Status='Published' ORDER BY v.VersionNumber DESC);
+DECLARE @Snap NVARCHAR(MAX) = (SELECT DefinitionSnapshot FROM __mj_BizAppsForms.FormVersion WHERE ID=@VerID);
+SET @Snap = JSON_MODIFY(@Snap, '$.automations', JSON_QUERY('${published}'));
+UPDATE __mj_BizAppsForms.FormVersion SET DefinitionSnapshot=@Snap WHERE ID=@VerID;`);
+  return rows.length;
+}
+
+/** Set columns on the automation under test, then republish so the change actually takes effect. */
+function configure(assignments) {
+  sql(`UPDATE __mj_BizAppsForms.FormAutomation SET ${assignments} WHERE ID='${AUTOMATION_ID}';`);
+  republish();
+}
+
+async function gql(token, query, variables) {
+  const res = await fetch(`${BASE}/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query, variables }),
+  });
+  const body = await res.json();
+  if (body.errors) throw new Error(`GraphQL error: ${JSON.stringify(body.errors).slice(0, 300)}`);
+  return body.data;
+}
+
+async function newSession() {
+  const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();
+  const token = (html.match(/data-token="([^"]+)"/) || [])[1];
+  if (!token) throw new Error('no anonymous session token on the host page');
+  return token;
+}
+
+async function definitionFor(token) {
+  const published = await gql(token,
+    'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
+  return JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
+}
+
+/** Submit through the real public path. `partial` drives the Complete/Partial distinction. */
+async function submit(token, definition, { email, name, partial = false, responseId }) {
+  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  const answers = questions.map((q) => {
+    if (q.type === 'Email') return { questionId: q.id, textValue: email };
+    if (q.prompt.toLowerCase().includes('name')) return { questionId: q.id, textValue: name };
+    if (['Number', 'Rating', 'NPS'].includes(q.type)) return { questionId: q.id, numericValue: 7 };
+    if (q.type === 'YesNo') return { questionId: q.id, booleanValue: true };
+    if (['Date', 'Time'].includes(q.type)) return { questionId: q.id, dateValue: new Date(0).toISOString() };
+    if (['MultiChoice', 'Dropdown', 'SingleChoice'].includes(q.type)) return { questionId: q.id, jsonValue: JSON.stringify(['smoke']) };
+    if (q.type === 'Phone') return { questionId: q.id, textValue: '+1 555 010 1234' };
+    return { questionId: q.id, textValue: 'semantics smoke' };
+  });
+
+  const data = await gql(token, `
+    mutation S($input: FormSubmissionInputType!) {
+      SubmitFormResponse(input: $input) { success responseId status errors { message } }
+    }`, {
+    input: {
+      distributionSlug: SLUG,
+      formVersionId: definition.formVersionId,
+      partial,
+      ...(responseId ? { responseId } : {}),
+      startedAt: new Date(0).toISOString(),
+      clientMeta: { referrer: '', userAgent: 'semantics-smoke' },
+      answers,
+    },
+  });
+  const r = data?.SubmitFormResponse;
+  if (!r?.success) throw new Error(`submit failed: ${r?.errors?.[0]?.message ?? 'unknown'}`);
+  return r;
+}
+
+const runsFor = (responseId) =>
+  sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormAutomationRun WHERE FormResponseID='${responseId}';`).trim();
+const ledgerCountFor = (responseId) =>
+  sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormEntityBindingRecord WHERE FormResponseID='${responseId}';`).trim();
+const outcomeFor = (responseId) =>
+  sql(`SELECT TOP 1 Outcome FROM __mj_BizAppsForms.FormEntityBindingRecord WHERE FormResponseID='${responseId}';`).trim();
+
+const unique = Date.now();
+const emailFor = (tag) => `semantics-${unique}-${tag}@example.com`;
+
+async function main() {
+  console.log(`Automation-semantics smoke test\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
+
+  const seeded = republish();
+  check(seeded > 0, `snapshot rebuilt from ${seeded} authored automation row(s) via the real mapper`,
+    'run smoke/seed-binding-smoke.mjs first');
+
+  // ---------------------------------------------------------------- trigger
+  // An OnComplete automation must not fire on an autosave. Getting this wrong sends a confirmation
+  // email on every keystroke, and it is the exact behaviour the legacy hook list had.
+  configure(`[Trigger]='OnComplete', IsActive=1, ConditionalRule=NULL`);
+  {
+    const token = await newSession();
+    const def = await definitionFor(token);
+    const partial = await submit(token, def, { email: emailFor('partial'), name: 'Partial', partial: true });
+    check(runsFor(partial.responseId) === '0',
+      'an OnComplete automation does NOT fire on a partial autosave',
+      `got ${runsFor(partial.responseId)} run(s) — autosaves would trigger side effects on every keystroke`);
+    check(partial.status === 'Partial', `the partial save is recorded as Partial (got ${partial.status})`);
+
+    // ...and the SAME response, completed, does fire exactly once.
+    const completed = await submit(token, def, {
+      email: emailFor('partial'), name: 'Partial Completed', partial: false, responseId: partial.responseId,
+    });
+    check(runsFor(completed.responseId) === '1',
+      'completing that same response fires it exactly once',
+      `got ${runsFor(completed.responseId)}`);
+  }
+
+  // ---------------------------------------------------------------- isActive
+  // A disabled automation is a deliberate state an author set. Running it anyway is the kind of
+  // bug that is only ever noticed via its side effects.
+  configure(`IsActive=0`);
+  {
+    const token = await newSession();
+    const def = await definitionFor(token);
+    check((def.automations ?? []).some((a) => a.isActive === false),
+      'the snapshot carries the disabled automation rather than dropping it',
+      'dropping it makes "disabled" indistinguishable from "never configured"');
+    const res = await submit(token, def, { email: emailFor('inactive'), name: 'Inactive' });
+    check(runsFor(res.responseId) === '0',
+      'a disabled automation does not run',
+      `got ${runsFor(res.responseId)} run(s)`);
+    check(ledgerCountFor(res.responseId) === '0', 'and it writes no binding record');
+  }
+
+  // ------------------------------------------------------------- conditional
+  // A rule that does not match must skip; the same rule matching must run. Both directions are
+  // asserted because a rule evaluator that always returns true passes the second alone.
+  const probeDef = await definitionFor(await newSession());
+  const emailQ = emailQuestionId(probeDef);
+  const conditionFalse = JSON.stringify({
+    show: { all: [{ questionId: emailQ, op: 'equals', value: 'never-matches@example.com' }] },
+  }).replace(/'/g, "''");
+  configure(`IsActive=1, ConditionalRule='${conditionFalse}'`);
+  {
+    const token = await newSession();
+    const def = await definitionFor(token);
+    const res = await submit(token, def, { email: emailFor('cond-no'), name: 'NoMatch' });
+    check(runsFor(res.responseId) === '0',
+      'an automation whose condition does not match does not run',
+      `got ${runsFor(res.responseId)} run(s)`);
+  }
+
+  const matchEmail = emailFor('cond-yes');
+  const conditionTrue = JSON.stringify({
+    show: { all: [{ questionId: emailQ, op: 'equals', value: matchEmail }] },
+  }).replace(/'/g, "''");
+  configure(`ConditionalRule='${conditionTrue}'`);
+  {
+    const token = await newSession();
+    const def = await definitionFor(token);
+    const res = await submit(token, def, { email: matchEmail, name: 'Match' });
+    check(runsFor(res.responseId) === '1',
+      'the same automation DOES run when its condition matches',
+      `got ${runsFor(res.responseId)} run(s) — a condition that never matches is indistinguishable from a broken evaluator`);
+  }
+
+  // ------------------------------------------------------------------ ledger
+  // Re-submitting under the SAME response id must not bind twice. AlwaysCreate would otherwise
+  // create a second business record per replay; here the identity rule is MatchThenCreate, so the
+  // observable guarantee is one ledger row and one target record.
+  configure(`ConditionalRule=NULL`);
+  {
+    const token = await newSession();
+    const def = await definitionFor(token);
+    const email = emailFor('ledger');
+    const first = await submit(token, def, { email, name: 'Ledger' });
+    const again = await submit(await newSession(), def, {
+      email, name: 'Ledger', responseId: first.responseId,
+    });
+    check(again.responseId === first.responseId, 'the replay reuses the same response id');
+    check(ledgerCountFor(first.responseId) === '1',
+      'a replayed submission leaves exactly ONE ledger row',
+      `got ${ledgerCountFor(first.responseId)} — more than one means the unique index is the only thing preventing a duplicate write`);
+    check(['Created', 'Unchanged', 'Merged'].includes(outcomeFor(first.responseId)),
+      `the ledger records a real outcome (got ${outcomeFor(first.responseId)})`);
+  }
+
+  // ---------------------------------------------------------------- ordering
+  // Two automations on one form. `planAutomations` decides the order (Sync before Async, then
+  // DisplayOrder) and the dispatcher carries it out; nothing until now proved the two agree on a
+  // form with more than one. Order matters concretely here: `Upsert Respondent Person` stamps
+  // `FormResponse.RespondentPersonID`, so anything later that reads it sees a different value if
+  // the order flips.
+  const SECOND_ID = '11111111-2222-4333-8444-555555555005';
+  sql(`
+DECLARE @ActionID UNIQUEIDENTIFIER = (SELECT ID FROM __mj.Action WHERE Name='Forms: Upsert Respondent Person');
+DECLARE @FormID UNIQUEIDENTIFIER = (SELECT TOP 1 f.ID FROM __mj_BizAppsForms.Form f
+  JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID=f.ID WHERE d.Slug='${SLUG}');
+IF NOT EXISTS (SELECT 1 FROM __mj_BizAppsForms.FormAutomation WHERE ID='${SECOND_ID}')
+  INSERT INTO __mj_BizAppsForms.FormAutomation
+    (ID, FormID, Name, TargetType, ActionID, [Trigger], ExecutionMode, DisplayOrder, ContinueOnError, IsActive)
+  VALUES ('${SECOND_ID}', @FormID, 'Smoke: upsert person action', 'Action', @ActionID,
+          'OnComplete', 'Sync', 2, 1, 1);
+ELSE
+  UPDATE __mj_BizAppsForms.FormAutomation SET IsActive=1, DisplayOrder=2, ContinueOnError=1 WHERE ID='${SECOND_ID}';`);
+  configure(`[Trigger]='OnComplete', IsActive=1, ConditionalRule=NULL, DisplayOrder=1`);
+  {
+    const token = await newSession();
+    const def = await definitionFor(token);
+    check((def.automations ?? []).length === 2, `the snapshot carries both automations (got ${(def.automations ?? []).length})`);
+    check(
+      (def.automations ?? []).map((a) => a.displayOrder).join(',') === '1,2',
+      'the mapper published them in DisplayOrder',
+      `got ${(def.automations ?? []).map((a) => a.displayOrder).join(',')}`,
+    );
+
+    const res = await submit(token, def, { email: emailFor('order'), name: 'Ordered' });
+    const runs = sql(`SELECT Status FROM __mj_BizAppsForms.FormAutomationRun
+      WHERE FormResponseID='${res.responseId}' ORDER BY StartedAt ASC, __mj_CreatedAt ASC;`)
+      .split('\n').map((l) => l.trim()).filter(Boolean);
+    check(runs.length === 2, `both automations ran (got ${runs.length} run(s))`);
+    check(runs.every((s) => s === 'Succeeded'), `neither failed (${runs.join(', ')})`);
+    check(ledgerCountFor(res.responseId) === '1', 'the binding still wrote exactly one ledger row');
+
+    // The Action half actually did its work: the response carries the Person it upserted.
+    const stamped = sql(`SELECT TOP 1 ISNULL(CAST(RespondentPersonID AS varchar(40)),'')
+      FROM __mj_BizAppsForms.FormResponse WHERE ID='${res.responseId}';`).trim();
+    check(stamped.length > 0,
+      'the Action automation wrote through to the response (RespondentPersonID stamped)',
+      'empty means the Action ran under an identity that cannot update Form Responses');
+  }
+
+  // Restore the seeded configuration so a following binding-path run starts from a known state.
+  sql(`UPDATE __mj_BizAppsForms.FormAutomation SET IsActive=0 WHERE ID='${SECOND_ID}';`);
+  configure(`[Trigger]='OnComplete', IsActive=1, ConditionalRule=NULL, DisplayOrder=1`);
+  {
+    const def = await definitionFor(await newSession());
+    const active = (def.automations ?? []).filter((a) => a.isActive);
+    check(active.length === 1, `restored to a single active automation (got ${active.length})`);
+  }
+
+  console.log(failures === 0
+    ? '\nPASS — automation semantics hold end to end against a real database.'
+    : `\nFAIL — ${failures} check(s) failed.`);
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+/**
+ * The Email question's id, as the PUBLISHED SNAPSHOT spells it.
+ *
+ * Read from the snapshot rather than from SQL on purpose. `buildConditionAnswers` keys its map by
+ * the snapshot's question ids precisely because the two spellings differ — client-minted lowercase
+ * versus SQL Server's uppercase `uniqueidentifier` — so a rule built from the SQL spelling would
+ * match nothing and this test would report a broken evaluator that is in fact fine. Asking the
+ * snapshot means the rule is written in the same alphabet the rule engine reads.
+ */
+function emailQuestionId(definition) {
+  const question = (definition.pages ?? [])
+    .flatMap((p) => p.questions ?? [])
+    .find((q) => q.type === 'Email');
+  if (!question) {
+    throw new Error('the fixture form has no Email question; conditional scenarios cannot be built');
+  }
+  return question.id;
+}
+
+main().catch((err) => { console.error(`\nFAIL — ${err.message}`); process.exit(1); });

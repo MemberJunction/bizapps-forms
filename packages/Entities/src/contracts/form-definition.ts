@@ -109,6 +109,46 @@ export interface PublishedFormPage {
   questions: PublishedFormQuestion[];
 }
 
+/** What an automation runs when it fires. */
+export type FormAutomationTargetType = 'Action' | 'Agent' | 'EntityBinding';
+
+/** Which save fires an automation. `OnComplete` is the default — partial saves fire nothing. */
+export type FormAutomationTrigger = 'OnComplete' | 'OnPartial' | 'OnCompleteOrPartial';
+
+/** `Sync` is awaited before the respondent's confirmation; `Async` is dispatched and not awaited. */
+export type FormAutomationExecutionMode = 'Sync' | 'Async';
+
+/**
+ * One configured on-submit automation, as captured at publish time.
+ *
+ * Automations execute from the SNAPSHOT, never from the live `FormAutomation` rows: a response
+ * is pinned to the form version it was answered against, so it must also run that version's
+ * automation config. The authoring table is where an author edits; this is what actually ran,
+ * which is the thing an audit needs to be able to reconstruct.
+ *
+ * `id` is the `FormAutomation.ID` this was cloned from, kept stable across publishes so run
+ * records and ledger rows stay attributable to a configuration a human can still find.
+ */
+export interface PublishedFormAutomation {
+  id: string;
+  name: string;
+  targetType: FormAutomationTargetType;
+  /** Set when `targetType` is `Action`. */
+  actionId?: string;
+  /** Set when `targetType` is `Agent`. */
+  agentId?: string;
+  /** Set when `targetType` is `EntityBinding`. */
+  bindingId?: string;
+  trigger: FormAutomationTrigger;
+  executionMode: FormAutomationExecutionMode;
+  displayOrder: number;
+  /** Fire only when the response's answers match. Absent => always fires. */
+  conditionalRule?: ConditionalRule;
+  /** When false, a failure halts later `Sync` automations for this response. */
+  continueOnError: boolean;
+  isActive: boolean;
+}
+
 /**
  * The full published form definition — the snapshot stored in
  * `FormVersion.DefinitionSnapshot` and returned by the S1 `PublishedForm` query.
@@ -122,4 +162,10 @@ export interface PublishedFormDefinition {
   settings: FormSettings;
   styleTokens: FormStyleTokens;
   pages: PublishedFormPage[];
+  /**
+   * On-submit automations, in authoring order. Always present (empty for a form that configures
+   * none, and for every snapshot published before automations existed) so no consumer has to
+   * distinguish "no automations" from "an older snapshot".
+   */
+  automations: PublishedFormAutomation[];
 }

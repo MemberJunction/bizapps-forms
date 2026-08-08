@@ -28,6 +28,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
 import { LogError, LogStatus, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { FileStorageEngine } from '@memberjunction/storage';
+import { UserCache } from '@memberjunction/sqlserver-dataprovider';
 
 import { getUploadConfig, UPLOAD_ROUTE } from './config.js';
 import { parseMultipart } from './multipart.js';
@@ -108,12 +109,18 @@ export class UploadMiddleware extends BaseServerMiddleware {
       distributionSlug: parsed.fields.distributionSlug,
       distributionId: parsed.fields.distributionId,
       questionId: parsed.fields.questionId,
+      responseId: parsed.fields.responseId,
     };
     const ctx: UploadContext = {
       contextUser,
       metadataProvider: new Metadata(),
       runViewProvider: new RunView(),
       storage: this.storageEngine(),
+      // The File row and its provenance row are written as the system user, never as the
+      // anonymous caller: the anonymous role holds no `MJ: Files` grant, and a provenance row the
+      // caller could write would prove nothing about who uploaded the file.
+      elevatedUser: UserCache.Instance.GetSystemUser(),
+      sessionId: userPayloadOf(req)?.sessionId,
     };
 
     const result = await runUpload(ctx, uploadReq);

@@ -1,0 +1,16 @@
+[
+  {
+    "fields": {
+      "Name": "Forms Automation Service",
+      "FirstName": "Forms",
+      "LastName": "Automation Service",
+      "Email": "forms-automation@localhost.invalid",
+      "Type": "User",
+      "IsActive": true,
+      "Title": "Service principal for MJ Forms on-submit automations and entity bindings"
+    },
+    "primaryKey": {
+      "ID": "9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84"
+    }
+  }
+]

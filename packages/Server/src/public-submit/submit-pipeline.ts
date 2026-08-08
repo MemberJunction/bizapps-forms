@@ -29,6 +29,19 @@ import { checkRespondentScope } from './scope-check.service';
 import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
 import { validateSubmission } from './validation.service';
+import {
+  evaluateProvenance,
+  loadUploadLedger,
+  provenanceIsStrict,
+  type UploadLedgerRow,
+} from '../upload/upload-provenance.service';
+import { loadFormResponseContext } from '@mj-biz-apps/forms-actions';
+import { planAutomations } from './automation-plan';
+import { runAutomations } from '../automation/automation-runner';
+import { dispatchAutomation } from '../automation/dispatch-automation';
+import { buildConditionAnswers } from '../automation/condition-answers';
+import { allowedBindingEntities } from '../automation/allowed-entities';
+import { resolveAutomationPrincipal } from '../automation/service-principal';
 
 /** Normalized submission input the pipeline consumes (resolver maps GraphQL -> this). */
 export interface PipelineSubmission {
@@ -194,6 +207,16 @@ export async function runSubmitPipeline(
   const validation = validateSubmission(resolved.definition, submission.answers, !complete);
   if (validation.errors.length > 0) {
     return { success: false, errors: validation.errors };
+  }
+
+  // 7b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
+  //     column, so the foreign key proves only that the file exists — without this a submission
+  //     can name any file in the instance and it becomes their answer. Checked before persistence,
+  //     so a foreign id never reaches the database, and on partial saves too, so it is caught at
+  //     first sight rather than at promotion.
+  const provenance = await checkFileProvenance(ctx, resolved, submission);
+  if (provenance.errors.length > 0) {
+    return { success: false, errors: provenance.errors };
   }
 
   // 8. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
@@ -384,6 +407,17 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
 
 /** Invoke the (injectable) hook firer; swallow any error so the submit still succeeds. */
 async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinition, responseId: string): Promise<void> {
+  // A form that configures its own automations runs those; one that does not keeps the legacy
+  // hard-coded hook list. That fallback is what makes this switch safe to land before any form has
+  // been re-published: every existing snapshot carries an empty `automations` array, so every
+  // existing form takes the legacy path and behaves exactly as it did. The constant list can only
+  // be deleted once a back-fill has given every form equivalent automations AND a parity test has
+  // shown the two produce the same effects.
+  if (resolved.definition.automations.length > 0 && !ctx.fireHooks) {
+    await runConfiguredAutomations(resolved, responseId);
+    return;
+  }
+
   // Default firer runs under the system user internally; the anonymous ctx.contextUser is
   // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
   const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
@@ -397,5 +431,106 @@ async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinitio
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] on-submit hooks failed for response ${responseId}: ${message}`);
+  }
+}
+
+/**
+ * Reject (strict) or strip (lenient) any file answer whose upload cannot be vouched for.
+ *
+ * Runs under the elevated principal because the ledger is deliberately unreadable by the anonymous
+ * respondent — a session that could read it could enumerate other people's uploads, and one that
+ * could write it could forge the very evidence being checked.
+ *
+ * A failed LOOKUP fails the submission rather than waving the file through. That is the
+ * uncomfortable direction on purpose: the alternative is that a database blip turns into silently
+ * accepting unverified files, which is precisely the state this check exists to end.
+ */
+async function checkFileProvenance(
+  ctx: PipelineContext,
+  resolved: ResolvedDefinition,
+  submission: PipelineSubmission,
+): Promise<{ errors: FieldError[] }> {
+  const fileAnswers = submission.answers.filter((a) => Boolean(a.fileId));
+  if (fileAnswers.length === 0) {
+    return { errors: [] };
+  }
+
+  const strict = provenanceIsStrict();
+  let ledger: Map<string, UploadLedgerRow>;
+  try {
+    ledger = await loadUploadLedger(
+      fileAnswers.map((a) => a.fileId as string),
+      ctx.elevatedUser,
+    );
+  } catch (error) {
+    console.warn(`[forms] upload provenance lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+    return {
+      errors: [{ message: 'Your uploaded file could not be verified. Please try again.' }],
+    };
+  }
+
+  const errors: FieldError[] = [];
+  for (const answer of fileAnswers) {
+    const verdict = evaluateProvenance(ledger.get((answer.fileId as string).trim().toLowerCase()), {
+      fileId: answer.fileId as string,
+      distributionId: resolved.distribution.ID,
+      clientResponseId: submission.clientResponseId,
+      sessionId: ctx.sessionId,
+    }, strict);
+    if (verdict.ok) {
+      continue;
+    }
+    if (strict) {
+      errors.push({ questionId: answer.questionId, message: 'That file could not be verified as your upload.' });
+    } else {
+      // Lenient: drop the file rather than persist an unverified one. The rest of the answer still
+      // saves, and a required file question then fails validation on its own terms.
+      delete (answer as { fileId?: string }).fileId;
+      console.warn(`[forms] stripped unverified file answer (${verdict.failure}) on question ${answer.questionId}`);
+    }
+  }
+  return { errors };
+}
+
+/**
+ * Run the automations a form actually configured.
+ *
+ * Refuses to run anything when the service principal cannot be resolved, rather than falling back
+ * to a broader identity. A deployment that has not provisioned the principal gets no automations
+ * and a clear log line; quietly running privileged work as the system user instead would restore
+ * exactly the broad grants the dedicated principal exists to avoid, at the moment nobody is
+ * looking. Wrapped whole, because a submission that is already saved must never fail here.
+ */
+async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId: string): Promise<void> {
+  try {
+    const principal = resolveAutomationPrincipal();
+    if (!principal) {
+      return;
+    }
+    const context = await loadFormResponseContext(responseId, principal);
+    if (!context) {
+      console.warn(`[forms] automations skipped: response ${responseId} could not be read back.`);
+      return;
+    }
+
+    const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
+    const plan = planAutomations(resolved.definition.automations, { complete: true, answers });
+
+    await runAutomations({
+      plan,
+      dispatch: (automation) =>
+        dispatchAutomation(automation, {
+          responseId,
+          formId: resolved.definition.formId,
+          formVersionId: resolved.version.ID,
+          distributionId: resolved.distribution.ID,
+          answers: context.canonicalAnswers,
+          principal,
+          allowedEntities: allowedBindingEntities(),
+        }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
   }
 }

@@ -14,8 +14,12 @@ import {
   parseFormSettings,
   parseValidationRule,
   type ConditionalRule,
+  type FormAutomationExecutionMode,
+  type FormAutomationTargetType,
+  type FormAutomationTrigger,
   type FormQuestionType,
   type FormRenderMode,
+  type PublishedFormAutomation,
   type FormSettings,
   type FormStyleTokens,
   type JSONObject,
@@ -99,7 +103,73 @@ function buildDefinition(root: JSONObject): PublishedFormDefinition | undefined 
     settings,
     styleTokens,
     pages,
+    automations: parseAutomations(root.automations),
   };
+}
+
+/**
+ * Parse the automation array, dropping entries that are not well-formed.
+ *
+ * Deliberately lenient where the rest of this parser is strict: a malformed PAGE or QUESTION
+ * fails the whole snapshot, because a respondent must never be shown a form we only half
+ * understand. An automation is different — it is invisible to the respondent, so refusing to
+ * serve the form because one automation entry is corrupt would take the form down for everyone
+ * to protect a side effect. A dropped automation does not fire, which is the safe direction.
+ * An absent array (every snapshot published before automations existed) is simply none.
+ */
+function parseAutomations(value: JSONValue | undefined): PublishedFormAutomation[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const automations: PublishedFormAutomation[] = [];
+  for (const raw of value) {
+    const automation = parseAutomation(asObject(raw));
+    if (automation) {
+      automations.push(automation);
+    }
+  }
+  return automations;
+}
+
+function parseAutomation(obj: JSONObject | undefined): PublishedFormAutomation | undefined {
+  if (!obj) {
+    return undefined;
+  }
+  const id = asString(obj.id);
+  const name = asString(obj.name);
+  const targetType = parseTargetType(obj.targetType);
+  const trigger = parseTrigger(obj.trigger);
+  const executionMode = parseExecutionMode(obj.executionMode);
+  const displayOrder = asNumber(obj.displayOrder);
+  if (!id || name === undefined || !targetType || !trigger || !executionMode || displayOrder === undefined) {
+    return undefined;
+  }
+  return {
+    id,
+    name,
+    targetType,
+    actionId: asString(obj.actionId),
+    agentId: asString(obj.agentId),
+    bindingId: asString(obj.bindingId),
+    trigger,
+    executionMode,
+    displayOrder,
+    conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    continueOnError: asBoolean(obj.continueOnError) ?? true,
+    isActive: asBoolean(obj.isActive) ?? true,
+  };
+}
+
+function parseTargetType(value: JSONValue | undefined): FormAutomationTargetType | undefined {
+  return value === 'Action' || value === 'Agent' || value === 'EntityBinding' ? value : undefined;
+}
+
+function parseTrigger(value: JSONValue | undefined): FormAutomationTrigger | undefined {
+  return value === 'OnComplete' || value === 'OnPartial' || value === 'OnCompleteOrPartial' ? value : undefined;
+}
+
+function parseExecutionMode(value: JSONValue | undefined): FormAutomationExecutionMode | undefined {
+  return value === 'Sync' || value === 'Async' ? value : undefined;
 }
 
 function parseRenderMode(value: JSONValue | undefined): FormRenderMode | undefined {

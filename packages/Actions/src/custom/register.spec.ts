@@ -17,11 +17,12 @@ const S3_ACTION_NAMES = [
 const AUTHORING_ACTION_NAMES = [
   'Forms: Generate Form From Brief',
   'Forms: Create Form From Template',
+  'Forms: Bind Response To Entity',
 ] as const;
 
 describe('action registration', () => {
-  it('LoadFormsActions reports all six action classes', () => {
-    expect(LoadFormsActions()).toBe(6);
+  it('LoadFormsActions reports all seven action classes', () => {
+    expect(LoadFormsActions()).toBe(7);
   });
 
   it.each([...S3_ACTION_NAMES, ...AUTHORING_ACTION_NAMES])(

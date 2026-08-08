@@ -23,7 +23,10 @@ export class mjBizAppsFormsFormFormComponent extends BaseFormComponent {
             { sectionKey: 'mJBizAppsFormsFormVersions', sectionName: 'Form Versions', isExpanded: false },
             { sectionKey: 'mJBizAppsFormsFormQuestions', sectionName: 'Form Questions', isExpanded: false },
             { sectionKey: 'mJBizAppsFormsFormPages', sectionName: 'Form Pages', isExpanded: false },
-            { sectionKey: 'mJBizAppsFormsFormResponses', sectionName: 'Form Responses', isExpanded: false }
+            { sectionKey: 'mJBizAppsFormsFormResponses', sectionName: 'Form Responses', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormAutomations', sectionName: 'Form Automations', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormEntityBindings', sectionName: 'Form Entity Bindings', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormUploads', sectionName: 'Form Uploads', isExpanded: false }
         ]);
     }
 }

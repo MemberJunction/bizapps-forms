@@ -56,10 +56,30 @@ performing its default form submit. Neither exists until a real server serves a 
 So a green `npm test` is necessary and **not sufficient** for anything touching the public path:
 
 ```bash
+npm run smoke:binding:seed                        # seeds the binding fixtures the next two need
 npm run smoke:respondent -- <distribution-slug>   # drives the real public surface end to end
+npm run smoke:binding                             # entity binding: create / merge / match / ledger
+npm run smoke:automation                          # WHETHER and IN WHAT ORDER an automation runs
+npm run smoke:provenance                          # a file id cannot be claimed across sessions
 npm run lint:generated                            # CodeGen scope gate
 npm run lint:ui                                   # design-token gate
 ```
+
+**None of these run in CI.** `smoke/**` appears in `build.yml`'s path filter, so editing one
+triggers the workflow — but no job executes them, and the fixtures they need (a form at slug
+`contact-us-e2e`) are not reproducible from the repo. They are manual, and they are the only thing
+standing between you and the failure class below.
+
+> A publish bug once made entity binding completely inert — the snapshot never carried the
+> configured automations, so no binding ever fired — while the whole unit suite AND the binding
+> smoke test stayed green. The smoke test hand-wrote the `automations` JSON it spliced into the
+> snapshot, so it asserted the snapshot's *contents* while stepping around the code that was
+> supposed to produce them. **A fixture that reproduces the thing under test is not a test of it.**
+> The seed now builds the snapshot with the same `buildPublishedAutomations` publish uses.
+
+Also: `sqlcmd` exits **0** on a SQL error unless you pass `-b`, so a mistyped column name comes
+back as error *text where data was expected* and flows onward as if it were a value. Every smoke
+script passes `-b`. Keep it that way.
 
 The smoke test is the one that would have caught 0.2.1. It deliberately submits using the
 `formVersionId` read from the published snapshot — exactly what the widget sends — rather than one

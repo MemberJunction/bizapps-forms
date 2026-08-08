@@ -14,17 +14,27 @@
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import type { UserInfo } from '@memberjunction/core';
+import { LEGACY_ON_SUBMIT_ACTION_NAMES, type LegacyOnSubmitActionName } from '@mj-biz-apps/forms-entities';
 import { UserCache } from '@memberjunction/sqlserver-dataprovider';
 
-/** The S3 action names — the frozen contract WP-E implements. */
-export const ON_SUBMIT_ACTION_NAMES = [
-  'Forms: Upsert Respondent Person',
-  'Forms: Send Confirmation Email',
-  'Forms: Create Followup Task',
-  'Forms: Analyze Written Responses',
-] as const;
+/**
+ * The S3 action names — the frozen contract WP-E implements.
+ *
+ * Re-exported from the shared contract rather than restated here, because the builder seeds an
+ * equivalent automation for each of these the first time a form configures anything. Two copies of
+ * this list would let the two paths drift, and the symptom would be a form quietly losing one of
+ * its on-submit behaviours when its author added something unrelated.
+ */
+export const ON_SUBMIT_ACTION_NAMES = LEGACY_ON_SUBMIT_ACTION_NAMES;
 
-export type OnSubmitActionName = (typeof ON_SUBMIT_ACTION_NAMES)[number];
+/**
+ * The union of the four names, not `string`.
+ *
+ * This was briefly widened to `string` when the list moved to the shared contract, which removed
+ * the compile-time check that made the list "frozen" in the first place — a mistyped action name
+ * would then have failed only at runtime, as a hook that silently never fired.
+ */
+export type OnSubmitActionName = LegacyOnSubmitActionName;
 
 /** Per-hook outcome for observability/tests. */
 export interface HookFireResult {

@@ -28,6 +28,7 @@
               [value]="runtime().valueFor(q.id)"
               [errorMessage]="runtime().visibleErrorFor(q)"
               [distributionSlug]="distributionSlug()"
+              [responseId]="responseId()"
               (valueChange)="onValueChange(q, $event)"
               (focusout)="onBlur(q, $event)"
             />
