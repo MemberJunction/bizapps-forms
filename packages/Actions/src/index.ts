@@ -4,3 +4,4 @@ export * from './custom/register';
 // answers the on-submit actions see — re-deriving it there would be a second reading of the same
 // rows, free to drift from this one.
 export * from './custom/shared/form-response-context';
+export * from './custom/binding';

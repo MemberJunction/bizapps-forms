@@ -13,6 +13,8 @@ import { LogError, Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam } from '@memberjunction/actions-base';
+import { AgentRunner } from '@memberjunction/ai-agents';
+import type { MJAIAgentEntityExtended } from '@memberjunction/ai-core-plus';
 import {
   parseFieldMappings,
   parseIdentityRule,
@@ -25,8 +27,13 @@ import type {
   mjBizAppsFormsFormEntityBindingEntity,
   mjBizAppsFormsFormEntityBindingRecordEntity,
 } from '@mj-biz-apps/forms-entities';
-import { bindingFailed, executeBinding, parseBindingConfig, type BindingOutcome } from './binding-executor';
-import { MJBindingGateway } from './mj-binding-gateway';
+import {
+  bindingFailed,
+  executeBinding,
+  parseBindingConfig,
+  MJBindingGateway,
+  type BindingOutcome,
+} from '@mj-biz-apps/forms-actions';
 
 const ENTITY = {
   AutomationRun: 'MJ_BizApps_Forms: Form Automation Runs',
@@ -72,10 +79,7 @@ async function dispatchByTarget(
     case 'Action':
       return runActionTarget(automation, ctx);
     case 'Agent':
-      // Agents dispatch through the same Action machinery via the `Forms: Invoke Agent` action
-      // rather than a second bespoke path, so there is one place where an agent is started for a
-      // response. Until that action ships, saying so beats pretending it ran.
-      throw new Error(`Agent automations are not dispatched yet ("${automation.name}").`);
+      return runAgentTarget(automation, ctx);
     case 'EntityBinding':
       return runBindingTarget(automation, ctx);
     default:
@@ -113,6 +117,51 @@ async function runActionTarget(
     throw new Error(result.Message ?? `Action "${action.Name}" reported failure.`);
   }
   return result.Message ?? undefined;
+}
+
+/**
+ * Run an MJ AI Agent for this response.
+ *
+ * The agent is given the response's identifiers as a message, not the answers themselves. An agent
+ * that needs the answers reads them back under its own context — which keeps a respondent's
+ * personal data out of the conversation record that agent runs persist, and means the agent sees
+ * the same answers as everything else rather than a copy taken at dispatch time.
+ *
+ * Which agent runs comes from the published snapshot, never from anything the client sent: an
+ * anonymous submission must not be able to choose what runs under the service principal.
+ */
+async function runAgentTarget(
+  automation: PublishedFormAutomation,
+  ctx: DispatchContext,
+): Promise<string | undefined> {
+  if (!automation.agentId) {
+    throw new Error(`Automation "${automation.name}" is an Agent target with no agent.`);
+  }
+  const agent = await new Metadata().GetEntityObject<MJAIAgentEntityExtended>('MJ: AI Agents', ctx.principal);
+  if (!agent || !(await agent.Load(automation.agentId))) {
+    throw new Error(`Agent ${automation.agentId} for "${automation.name}" could not be loaded.`);
+  }
+
+  const result = await new AgentRunner().RunAgent({
+    agent,
+    contextUser: ctx.principal,
+    conversationMessages: [
+      {
+        role: 'user',
+        content:
+          `A form response was submitted. FormResponseID=${ctx.responseId}, FormID=${ctx.formId}, ` +
+          `FormVersionID=${ctx.formVersionId}, DistributionID=${ctx.distributionId}.`,
+      },
+    ],
+  });
+  if (!result.success) {
+    // The run entity carries the detail; the result itself only reports success. Naming the run id
+    // is what makes the failure findable, since the agent's own log is where the reason lives.
+    throw new Error(
+      `Agent "${agent.Name}" reported failure${result.agentRun?.ID ? ` (AIAgentRun ${result.agentRun.ID})` : ''}.`,
+    );
+  }
+  return result.agentRun?.ID ? `AgentRun ${result.agentRun.ID}` : undefined;
 }
 
 /** Execute an entity binding and record the identity-ledger row. */

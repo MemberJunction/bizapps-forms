@@ -68,7 +68,19 @@
       [attr.aria-selected]="activeTab === 'distribute'"
       (click)="setTab('distribute')"
     >Distribute</button>
+    <button
+      type="button"
+      class="fb-tab"
+      role="tab"
+      [class.is-on]="activeTab === 'onsubmit'"
+      [attr.aria-selected]="activeTab === 'onsubmit'"
+      (click)="setTab('onsubmit')"
+    >On Submit</button>
   </nav>
+
+  @if (activeTab === 'onsubmit' && tree) {
+    <mjf-automation-tab [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
+  }
 
   @if (activeTab === 'build') {
     <div class="fb-body">
