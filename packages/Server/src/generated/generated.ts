@@ -343,7 +343,7 @@ export class mjBizAppsFormsFormAutomation_ {
     Binding?: string;
         
     @Field(() => [mjBizAppsFormsFormAutomationRun_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormAutomationIDArray: mjBizAppsFormsFormAutomationRun_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns
+    mjBizAppsFormsFormAutomationRuns_FormAutomationIDArray: mjBizAppsFormsFormAutomationRun_[]; // Link to mjBizAppsFormsFormAutomationRuns
     
 }
 
@@ -523,7 +523,7 @@ export class mjBizAppsFormsFormAutomationResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormAutomationRun_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormAutomationIDArray(@Root() mjbizappsformsformautomation_: mjBizAppsFormsFormAutomation_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormAutomationRuns_FormAutomationIDArray(@Root() mjbizappsformsformautomation_: mjBizAppsFormsFormAutomation_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automation Runs', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomationRuns')} WHERE ${provider.QuoteIdentifier('FormAutomationID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automation Runs', userPayload, EntityPermissionType.Read, 'AND');
@@ -606,10 +606,10 @@ export class mjBizAppsFormsFormCategory_ {
     RootParentID?: string;
         
     @Field(() => [mjBizAppsFormsForm_])
-    mjBizAppsFormsMJ_BizApps_Forms_Forms_CategoryIDArray: mjBizAppsFormsForm_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_Forms
+    mjBizAppsFormsForms_CategoryIDArray: mjBizAppsFormsForm_[]; // Link to mjBizAppsFormsForms
     
     @Field(() => [mjBizAppsFormsFormCategory_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormCategories_ParentIDArray: mjBizAppsFormsFormCategory_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormCategories
+    mjBizAppsFormsFormCategories_ParentIDArray: mjBizAppsFormsFormCategory_[]; // Link to mjBizAppsFormsFormCategories
     
 }
 
@@ -735,7 +735,7 @@ export class mjBizAppsFormsFormCategoryResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsForm_])
-    async mjBizAppsFormsMJ_BizApps_Forms_Forms_CategoryIDArray(@Root() mjbizappsformsformcategory_: mjBizAppsFormsFormCategory_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsForms_CategoryIDArray(@Root() mjbizappsformsformcategory_: mjBizAppsFormsFormCategory_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Forms', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwForms')} WHERE ${provider.QuoteIdentifier('CategoryID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Forms', userPayload, EntityPermissionType.Read, 'AND');
@@ -745,7 +745,7 @@ export class mjBizAppsFormsFormCategoryResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormCategory_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormCategories_ParentIDArray(@Root() mjbizappsformsformcategory_: mjBizAppsFormsFormCategory_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormCategories_ParentIDArray(@Root() mjbizappsformsformcategory_: mjBizAppsFormsFormCategory_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Categories', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormCategories')} WHERE ${provider.QuoteIdentifier('ParentID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Categories', userPayload, EntityPermissionType.Read, 'AND');
@@ -849,7 +849,7 @@ export class mjBizAppsFormsFormDistribution_ {
     Form: string;
         
     @Field(() => [mjBizAppsFormsFormUpload_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormUploads_DistributionIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormUploads
+    mjBizAppsFormsFormUploads_DistributionIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsFormUploads
     
 }
 
@@ -1017,7 +1017,7 @@ export class mjBizAppsFormsFormDistributionResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormUpload_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormUploads_DistributionIDArray(@Root() mjbizappsformsformdistribution_: mjBizAppsFormsFormDistribution_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormUploads_DistributionIDArray(@Root() mjbizappsformsformdistribution_: mjBizAppsFormsFormDistribution_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('DistributionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
@@ -1305,10 +1305,10 @@ export class mjBizAppsFormsFormEntityBinding_ {
     TargetEntity: string;
         
     @Field(() => [mjBizAppsFormsFormAutomation_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_BindingIDArray: mjBizAppsFormsFormAutomation_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomations
+    mjBizAppsFormsFormAutomations_BindingIDArray: mjBizAppsFormsFormAutomation_[]; // Link to mjBizAppsFormsFormAutomations
     
     @Field(() => [mjBizAppsFormsFormEntityBindingRecord_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_BindingIDArray: mjBizAppsFormsFormEntityBindingRecord_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords
+    mjBizAppsFormsFormEntityBindingRecords_BindingIDArray: mjBizAppsFormsFormEntityBindingRecord_[]; // Link to mjBizAppsFormsFormEntityBindingRecords
     
 }
 
@@ -1452,7 +1452,7 @@ export class mjBizAppsFormsFormEntityBindingResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormAutomation_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_BindingIDArray(@Root() mjbizappsformsformentitybinding_: mjBizAppsFormsFormEntityBinding_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormAutomations_BindingIDArray(@Root() mjbizappsformsformentitybinding_: mjBizAppsFormsFormEntityBinding_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automations', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomations')} WHERE ${provider.QuoteIdentifier('BindingID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automations', userPayload, EntityPermissionType.Read, 'AND');
@@ -1462,7 +1462,7 @@ export class mjBizAppsFormsFormEntityBindingResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormEntityBindingRecord_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_BindingIDArray(@Root() mjbizappsformsformentitybinding_: mjBizAppsFormsFormEntityBinding_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormEntityBindingRecords_BindingIDArray(@Root() mjbizappsformsformentitybinding_: mjBizAppsFormsFormEntityBinding_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Binding Records', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindingRecords')} WHERE ${provider.QuoteIdentifier('BindingID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Binding Records', userPayload, EntityPermissionType.Read, 'AND');
@@ -1537,7 +1537,7 @@ export class mjBizAppsFormsFormPage_ {
     Form: string;
         
     @Field(() => [mjBizAppsFormsFormQuestion_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_PageIDArray: mjBizAppsFormsFormQuestion_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormQuestions
+    mjBizAppsFormsFormQuestions_PageIDArray: mjBizAppsFormsFormQuestion_[]; // Link to mjBizAppsFormsFormQuestions
     
 }
 
@@ -1657,7 +1657,7 @@ export class mjBizAppsFormsFormPageResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormQuestion_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_PageIDArray(@Root() mjbizappsformsformpage_: mjBizAppsFormsFormPage_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormQuestions_PageIDArray(@Root() mjbizappsformsformpage_: mjBizAppsFormsFormPage_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Questions', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormQuestions')} WHERE ${provider.QuoteIdentifier('PageID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Questions', userPayload, EntityPermissionType.Read, 'AND');
@@ -1934,13 +1934,13 @@ export class mjBizAppsFormsFormQuestion_ {
     Page?: string;
         
     @Field(() => [mjBizAppsFormsFormQuestionOption_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions_QuestionIDArray: mjBizAppsFormsFormQuestionOption_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions
+    mjBizAppsFormsFormQuestionOptions_QuestionIDArray: mjBizAppsFormsFormQuestionOption_[]; // Link to mjBizAppsFormsFormQuestionOptions
     
     @Field(() => [mjBizAppsFormsFormResponseAnswer_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_QuestionIDArray: mjBizAppsFormsFormResponseAnswer_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers
+    mjBizAppsFormsFormResponseAnswers_QuestionIDArray: mjBizAppsFormsFormResponseAnswer_[]; // Link to mjBizAppsFormsFormResponseAnswers
     
     @Field(() => [mjBizAppsFormsFormUpload_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormUploads_QuestionIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormUploads
+    mjBizAppsFormsFormUploads_QuestionIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsFormUploads
     
 }
 
@@ -2096,7 +2096,7 @@ export class mjBizAppsFormsFormQuestionResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormQuestionOption_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormQuestionOptions_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormQuestionOptions_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Question Options', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormQuestionOptions')} WHERE ${provider.QuoteIdentifier('QuestionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Question Options', userPayload, EntityPermissionType.Read, 'AND');
@@ -2106,7 +2106,7 @@ export class mjBizAppsFormsFormQuestionResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormResponseAnswer_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormResponseAnswers_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Response Answers', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponseAnswers')} WHERE ${provider.QuoteIdentifier('QuestionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Response Answers', userPayload, EntityPermissionType.Read, 'AND');
@@ -2116,7 +2116,7 @@ export class mjBizAppsFormsFormQuestionResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormUpload_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormUploads_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormUploads_QuestionIDArray(@Root() mjbizappsformsformquestion_: mjBizAppsFormsFormQuestion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('QuestionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
@@ -2435,13 +2435,13 @@ export class mjBizAppsFormsFormResponse_ {
     RespondentPerson?: string;
         
     @Field(() => [mjBizAppsFormsFormResponseAnswer_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_ResponseIDArray: mjBizAppsFormsFormResponseAnswer_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers
+    mjBizAppsFormsFormResponseAnswers_ResponseIDArray: mjBizAppsFormsFormResponseAnswer_[]; // Link to mjBizAppsFormsFormResponseAnswers
     
     @Field(() => [mjBizAppsFormsFormEntityBindingRecord_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_FormResponseIDArray: mjBizAppsFormsFormEntityBindingRecord_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords
+    mjBizAppsFormsFormEntityBindingRecords_FormResponseIDArray: mjBizAppsFormsFormEntityBindingRecord_[]; // Link to mjBizAppsFormsFormEntityBindingRecords
     
     @Field(() => [mjBizAppsFormsFormAutomationRun_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormResponseIDArray: mjBizAppsFormsFormAutomationRun_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns
+    mjBizAppsFormsFormAutomationRuns_FormResponseIDArray: mjBizAppsFormsFormAutomationRun_[]; // Link to mjBizAppsFormsFormAutomationRuns
     
 }
 
@@ -2579,7 +2579,7 @@ export class mjBizAppsFormsFormResponseResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormResponseAnswer_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormResponseAnswers_ResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormResponseAnswers_ResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Response Answers', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponseAnswers')} WHERE ${provider.QuoteIdentifier('ResponseID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Response Answers', userPayload, EntityPermissionType.Read, 'AND');
@@ -2589,7 +2589,7 @@ export class mjBizAppsFormsFormResponseResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormEntityBindingRecord_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindingRecords_FormResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormEntityBindingRecords_FormResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Binding Records', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindingRecords')} WHERE ${provider.QuoteIdentifier('FormResponseID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Binding Records', userPayload, EntityPermissionType.Read, 'AND');
@@ -2599,7 +2599,7 @@ export class mjBizAppsFormsFormResponseResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormAutomationRun_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomationRuns_FormResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormAutomationRuns_FormResponseIDArray(@Root() mjbizappsformsformresponse_: mjBizAppsFormsFormResponse_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automation Runs', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomationRuns')} WHERE ${provider.QuoteIdentifier('FormResponseID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automation Runs', userPayload, EntityPermissionType.Read, 'AND');
@@ -2676,7 +2676,7 @@ export class mjBizAppsFormsFormStyle_ {
     _mj__UpdatedAt: Date;
         
     @Field(() => [mjBizAppsFormsForm_])
-    mjBizAppsFormsMJ_BizApps_Forms_Forms_StyleIDArray: mjBizAppsFormsForm_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_Forms
+    mjBizAppsFormsForms_StyleIDArray: mjBizAppsFormsForm_[]; // Link to mjBizAppsFormsForms
     
 }
 
@@ -2808,7 +2808,7 @@ export class mjBizAppsFormsFormStyleResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsForm_])
-    async mjBizAppsFormsMJ_BizApps_Forms_Forms_StyleIDArray(@Root() mjbizappsformsformstyle_: mjBizAppsFormsFormStyle_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsForms_StyleIDArray(@Root() mjbizappsformsformstyle_: mjBizAppsFormsFormStyle_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Forms', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwForms')} WHERE ${provider.QuoteIdentifier('StyleID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Forms', userPayload, EntityPermissionType.Read, 'AND');
@@ -3149,7 +3149,7 @@ export class mjBizAppsFormsFormVersion_ {
     Form: string;
         
     @Field(() => [mjBizAppsFormsFormResponse_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormVersionIDArray: mjBizAppsFormsFormResponse_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponses
+    mjBizAppsFormsFormResponses_FormVersionIDArray: mjBizAppsFormsFormResponse_[]; // Link to mjBizAppsFormsFormResponses
     
 }
 
@@ -3269,7 +3269,7 @@ export class mjBizAppsFormsFormVersionResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormResponse_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormVersionIDArray(@Root() mjbizappsformsformversion_: mjBizAppsFormsFormVersion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormResponses_FormVersionIDArray(@Root() mjbizappsformsformversion_: mjBizAppsFormsFormVersion_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Responses', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponses')} WHERE ${provider.QuoteIdentifier('FormVersionID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Responses', userPayload, EntityPermissionType.Read, 'AND');
@@ -3365,28 +3365,28 @@ export class mjBizAppsFormsForm_ {
     OwnerUser?: string;
         
     @Field(() => [mjBizAppsFormsFormDistribution_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormDistributions_FormIDArray: mjBizAppsFormsFormDistribution_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormDistributions
+    mjBizAppsFormsFormDistributions_FormIDArray: mjBizAppsFormsFormDistribution_[]; // Link to mjBizAppsFormsFormDistributions
     
     @Field(() => [mjBizAppsFormsFormVersion_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormVersions_FormIDArray: mjBizAppsFormsFormVersion_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormVersions
+    mjBizAppsFormsFormVersions_FormIDArray: mjBizAppsFormsFormVersion_[]; // Link to mjBizAppsFormsFormVersions
     
     @Field(() => [mjBizAppsFormsFormQuestion_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_FormIDArray: mjBizAppsFormsFormQuestion_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormQuestions
+    mjBizAppsFormsFormQuestions_FormIDArray: mjBizAppsFormsFormQuestion_[]; // Link to mjBizAppsFormsFormQuestions
     
     @Field(() => [mjBizAppsFormsFormPage_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormPages_FormIDArray: mjBizAppsFormsFormPage_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormPages
+    mjBizAppsFormsFormPages_FormIDArray: mjBizAppsFormsFormPage_[]; // Link to mjBizAppsFormsFormPages
     
     @Field(() => [mjBizAppsFormsFormResponse_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormIDArray: mjBizAppsFormsFormResponse_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormResponses
+    mjBizAppsFormsFormResponses_FormIDArray: mjBizAppsFormsFormResponse_[]; // Link to mjBizAppsFormsFormResponses
     
     @Field(() => [mjBizAppsFormsFormAutomation_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_FormIDArray: mjBizAppsFormsFormAutomation_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormAutomations
+    mjBizAppsFormsFormAutomations_FormIDArray: mjBizAppsFormsFormAutomation_[]; // Link to mjBizAppsFormsFormAutomations
     
     @Field(() => [mjBizAppsFormsFormEntityBinding_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings_FormIDArray: mjBizAppsFormsFormEntityBinding_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings
+    mjBizAppsFormsFormEntityBindings_FormIDArray: mjBizAppsFormsFormEntityBinding_[]; // Link to mjBizAppsFormsFormEntityBindings
     
     @Field(() => [mjBizAppsFormsFormUpload_])
-    mjBizAppsFormsMJ_BizApps_Forms_FormUploads_FormIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsMJ_BizApps_Forms_FormUploads
+    mjBizAppsFormsFormUploads_FormIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsFormUploads
     
 }
 
@@ -3524,7 +3524,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
     
     @FieldResolver(() => [mjBizAppsFormsFormDistribution_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormDistributions_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormDistributions_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Distributions', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormDistributions')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Distributions', userPayload, EntityPermissionType.Read, 'AND');
@@ -3534,7 +3534,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormVersion_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormVersions_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormVersions_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Versions', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormVersions')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Versions', userPayload, EntityPermissionType.Read, 'AND');
@@ -3544,7 +3544,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormQuestion_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormQuestions_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormQuestions_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Questions', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormQuestions')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Questions', userPayload, EntityPermissionType.Read, 'AND');
@@ -3554,7 +3554,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormPage_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormPages_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormPages_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Pages', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormPages')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Pages', userPayload, EntityPermissionType.Read, 'AND');
@@ -3564,7 +3564,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormResponse_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormResponses_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormResponses_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Responses', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormResponses')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Responses', userPayload, EntityPermissionType.Read, 'AND');
@@ -3574,7 +3574,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormAutomation_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormAutomations_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormAutomations_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Automations', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormAutomations')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Automations', userPayload, EntityPermissionType.Read, 'AND');
@@ -3584,7 +3584,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormEntityBinding_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormEntityBindings_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormEntityBindings_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Entity Bindings', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormEntityBindings')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Entity Bindings', userPayload, EntityPermissionType.Read, 'AND');
@@ -3594,7 +3594,7 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
     }
         
     @FieldResolver(() => [mjBizAppsFormsFormUpload_])
-    async mjBizAppsFormsMJ_BizApps_Forms_FormUploads_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+    async mjBizAppsFormsFormUploads_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
         this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Uploads', userPayload);
         const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
