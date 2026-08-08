@@ -128,13 +128,26 @@ module.exports = {
       // to a schema that does not exist. These lower-case twins must sit above the generic
       // rule for the same greedy-match reason as the mixed-case ones.
       { schema: '__mj_bizappsforms', placeholder: '${flyway:defaultSchema}' },
-      // bizapps-common had no rule at all, so the generic '__mj' rule mangled
-      // '__mj_BizAppsCommon' into '${mjSchema}_BizAppsCommon' — visible in the shipped
-      // T-SQL. That happens to resolve correctly on SQL Server (mjSchema is '__mj'), which
-      // is why it went unnoticed; it is still a reference this repo does not control being
-      // rewritten by accident. Name it explicitly, in both cases.
-      { schema: '__mj_BizAppsCommon', placeholder: '${commonSchema}' },
-      { schema: '__mj_bizappscommon', placeholder: '${commonSchema}' },
+      // The sibling schemas map to THEMSELVES. These identity rules exist only to shadow the
+      // greedy '__mj' rule below, which would otherwise match the '__mj' PREFIX of
+      // '__mj_BizAppsCommon' and emit '${mjSchema}_BizAppsCommon'.
+      //
+      // A previous version mapped them to a '${commonSchema}' placeholder instead. That was
+      // wrong in a way only visible OFF this machine: `mj migrate` builds Skyway's placeholder
+      // map from THIS file, so '${commonSchema}' resolved locally and the migrations looked
+      // fine — but `mj app install` builds it from the HOST's mj.config.cjs
+      // (MJCLI/src/utils/open-app-context.ts -> openApps.migrationPlaceholders), which has
+      // never heard of us. Skyway deliberately leaves an unknown '${...}' untouched rather
+      // than failing (skyway-core/executor/placeholder.js), so the literal string
+      // '${commonSchema}' would have survived into the @ExcludedSchemaNames lists and stopped
+      // excluding bizapps-common — letting our migration's CodeGen sweeps
+      // (spUpdateExistingEntitiesFromSchema, spDeleteUnneededEntityFields) run over another
+      // installed app's metadata. Only '${flyway:defaultSchema}' and '${mjSchema}' are
+      // supplied by the install engine itself; nothing else may appear in shipped SQL.
+      { schema: '__mj_BizAppsCommon', placeholder: '__mj_BizAppsCommon' },
+      { schema: '__mj_bizappscommon', placeholder: '__mj_bizappscommon' },
+      { schema: '__mj_BizAppsTasks', placeholder: '__mj_BizAppsTasks' },
+      { schema: '__mj_bizappstasks', placeholder: '__mj_bizappstasks' },
       { schema: '__mj', placeholder: '${mjSchema}' },
     ],
   },
