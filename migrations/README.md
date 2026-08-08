@@ -21,6 +21,27 @@ appended into the feature migration instead. `migrations/metadata-seed.manifest.
 metadata hashes the current seed was generated from — `npm run lint:distribution` fails if they
 have drifted, which is the only thing standing between a metadata edit and a silent non-ship.
 
+## The loop, whenever you touch `metadata/`
+
+```
+edit metadata/  →  regenerate the seed migration  →  npm run seed:manifest  →  commit both
+```
+
+Miss the middle step and the edit exists only in your database. `npm run lint:distribution` fails
+the build when the manifest and `metadata/` disagree, which is the only thing standing between a
+metadata edit and a silent non-ship.
+
+**Add a NEW seed migration; never edit an existing one.** Migrations are append-only history —
+`V202608081700` is applied wherever it is applied, and rewriting it changes what a database that
+already ran it believes it ran. A later metadata change becomes
+`V<newstamp>__v<ver>__Metadata_Sync.sql` containing just that change's records, exactly as
+`bizapps-tasks` ships two. (Regenerating the *whole* seed into a new file also works and is simpler
+to produce, but then it must be written to tolerate rows that already exist.)
+
+**Nothing generates this at build time.** There is no CI step that produces a seed; the gate only
+detects that you owed one. That is deliberate — generating it requires a database whose Forms
+metadata is empty, which no build agent has.
+
 ## Regenerating the metadata seed
 
 The push must run against a database whose Forms metadata is empty, or it logs `spUpdate*` calls
