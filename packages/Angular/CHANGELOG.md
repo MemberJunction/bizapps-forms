@@ -1,5 +1,21 @@
 # @mj-biz-apps/forms-ng
 
+## 0.8.0
+
+### Minor Changes
+
+- de1998f: Upgrade MemberJunction to 6.1.0-edge.1 (task-graph line) and regenerate CodeGen
+  output against the 6.1 generator: GraphQL reverse-relationship resolver fields
+  lose the redundant schema prefix (mjBizAppsFormsMJ*BizApps_Forms_Forms*… →
+  mjBizAppsFormsForms\_…), shrinking apps/MJAPI/schema.graphql accordingly.
+
+### Patch Changes
+
+- Updated dependencies [be2f81b]
+- Updated dependencies [c30ac35]
+- Updated dependencies [de1998f]
+  - @mj-biz-apps/forms-entities@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes

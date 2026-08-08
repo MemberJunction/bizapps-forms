@@ -3,8 +3,8 @@
   "manifestVersion": 1,
   "name": "mj-bizapps-forms",
   "displayName": "MJ Forms",
-  "description": "Forms, surveys & intake for MemberJunction \u2014 anonymous-friendly, mobile-first, responses as first-class records.",
-  "version": "0.7.0",
+  "description": "Forms, surveys & intake for MemberJunction — anonymous-friendly, mobile-first, responses as first-class records.",
+  "version": "0.8.0",
   "license": "ISC",
   "icon": "fa-solid fa-list-check",
   "publisher": {

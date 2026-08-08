@@ -48,7 +48,7 @@
     "@memberjunction/ng-tabstrip": "6.1.0-edge.1",
     "@memberjunction/ng-timeline": "6.1.0-edge.1",
     "@memberjunction/ng-workspace-initializer": "6.1.0-edge.1",
-    "@mj-biz-apps/forms-ng": "0.7.0",
+    "@mj-biz-apps/forms-ng": "0.8.0",
     "@okta/okta-auth-js": "^7.14.1",
     "@workos-inc/authkit-js": "^0.20.1",
     "ag-grid-angular": "^35.0.1",
