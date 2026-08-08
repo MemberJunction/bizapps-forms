@@ -154,10 +154,19 @@ INSERT INTO @Entities VALUES
   ('MJ_BizApps_Forms: Form Automation Runs', 1, 1, 1),
   ('MJ_BizApps_Forms: Form Entity Binding Records', 1, 1, 1);
 
-INSERT INTO __mj.EntityPermission (ID, EntityID, RoleID, CanCreate, CanRead, CanUpdate, CanDelete)
-SELECT NEWID(), e.ID, @RoleID, x.C, x.R, x.U, 0
-FROM @Entities x JOIN __mj.Entity e ON e.Name = x.Name
-WHERE NOT EXISTS (SELECT 1 FROM __mj.EntityPermission p WHERE p.EntityID=e.ID AND p.RoleID=@RoleID);
+-- UPSERT, not insert-if-missing. Most of these grants now SHIP in the metadata seed, so a
+-- plain "insert what is absent" silently no-ops against the shipped row and leaves whatever
+-- flags it carries -- which is how this fixture passed while the run it set up failed on
+-- 'Does NOT have permission to Read MJ_BizApps_Forms: Forms'. A fixture must establish its
+-- preconditions, not hope they already hold.
+MERGE __mj.EntityPermission AS tgt
+USING (SELECT e.ID AS EntityID, x.C, x.R, x.U FROM @Entities x JOIN __mj.Entity e ON e.Name = x.Name) AS src
+   ON tgt.EntityID = src.EntityID AND tgt.RoleID = @RoleID
+WHEN MATCHED AND (tgt.CanCreate <> src.C OR tgt.CanRead <> src.R OR tgt.CanUpdate <> src.U)
+  THEN UPDATE SET CanCreate = src.C, CanRead = src.R, CanUpdate = src.U
+WHEN NOT MATCHED BY TARGET
+  THEN INSERT (ID, EntityID, RoleID, CanCreate, CanRead, CanUpdate, CanDelete)
+       VALUES (NEWID(), src.EntityID, @RoleID, src.C, src.R, src.U, 0);
 `);
 console.log('  ok    entity permissions for the principal');
 
