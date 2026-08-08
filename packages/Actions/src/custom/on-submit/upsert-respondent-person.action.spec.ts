@@ -79,7 +79,12 @@ const state: {
   getEntityCalls: [],
 };
 
-vi.mock('@memberjunction/core', () => {
+// Partial mock: the real module is spread back in, and only the two data-access classes are
+// replaced. A from-scratch `{ Metadata, RunView }` module worked only while nothing on this
+// import graph used @memberjunction/core at RUNTIME — the generated entity classes reach for
+// `BaseEntity` the moment the forms-entities barrel is actually loaded, which it now is.
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       state.getEntityCalls.push(entityName);
@@ -104,7 +109,7 @@ vi.mock('@memberjunction/core', () => {
       return { Success: true, Results: results as T[] };
     }
   }
-  return { Metadata, RunView };
+  return { ...actual, Metadata, RunView };
 });
 
 // Import the action AFTER the mock is declared so it binds to the mocked core.
