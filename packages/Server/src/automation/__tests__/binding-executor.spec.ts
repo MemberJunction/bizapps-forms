@@ -1,0 +1,303 @@
+import { describe, expect, it } from 'vitest';
+import {
+  CanonicalAnswers,
+  parseFieldMappings,
+  parseIdentityRule,
+  parseMergePolicy,
+  type CanonicalAnswerValue,
+  type StoredAnswerRow,
+} from '@mj-biz-apps/forms-entities';
+import {
+  executeBinding,
+  type BindingConfig,
+  type BindingTargetGateway,
+  type MatchedRecord,
+  type MatchQuery,
+} from '../binding-executor';
+
+/** A gateway backed by a plain in-memory record, recording what it was asked to write. */
+class FakeGateway implements BindingTargetGateway {
+  public writes: { recordId: string | null; values: Record<string, CanonicalAnswerValue> }[] = [];
+  public queries: MatchQuery[] = [];
+
+  constructor(
+    private readonly options: {
+      writableFields?: string[] | null;
+      match?: MatchedRecord | null;
+      describeThrows?: boolean;
+      matchThrows?: boolean;
+      writeThrows?: boolean;
+    } = {},
+  ) {}
+
+  async describeEntity(): Promise<ReadonlySet<string> | null> {
+    if (this.options.describeThrows) {
+      throw new Error('metadata unavailable');
+    }
+    if (this.options.writableFields === null) {
+      return null;
+    }
+    return new Set(this.options.writableFields ?? ['Email', 'FirstName', 'Phone', 'Notes', 'CompanyID', 'LeadSource']);
+  }
+
+  async findMatch(query: MatchQuery): Promise<MatchedRecord | null> {
+    this.queries.push(query);
+    if (this.options.matchThrows) {
+      throw new Error('connection reset');
+    }
+    return this.options.match ?? null;
+  }
+
+  async writeRecord(
+    _entityName: string,
+    recordId: string | null,
+    values: ReadonlyMap<string, CanonicalAnswerValue>,
+  ): Promise<string> {
+    if (this.options.writeThrows) {
+      throw new Error('save refused');
+    }
+    this.writes.push({ recordId, values: Object.fromEntries(values) });
+    return recordId ?? 'new-record-1';
+  }
+}
+
+function answersOf(rows: Partial<StoredAnswerRow>[]): CanonicalAnswers {
+  return new CanonicalAnswers(rows.map((r) => ({ QuestionID: 'q', ...r }) as StoredAnswerRow));
+}
+
+function configOf(overrides: Partial<BindingConfig> = {}): BindingConfig {
+  return {
+    targetEntityName: 'MJ_BizApps_Common: People',
+    fieldMappings: parseFieldMappings({
+      version: 1,
+      fields: [
+        { targetField: 'Email', source: { kind: 'question', questionId: 'q-email' }, required: true },
+        { targetField: 'FirstName', source: { kind: 'question', questionId: 'q-first' } },
+      ],
+    }),
+    identityRule: parseIdentityRule({
+      mode: 'MatchThenCreate',
+      match: [{ targetField: 'Email', normalize: 'LowerCaseTrim' }],
+    }),
+    mergePolicy: parseMergePolicy(null),
+    ...overrides,
+  };
+}
+
+const goodAnswers = answersOf([
+  { QuestionID: 'q-email', TextValue: 'a@b.com' },
+  { QuestionID: 'q-first', TextValue: 'Ada' },
+]);
+
+async function run(gateway: BindingTargetGateway, config = configOf(), answers = goodAnswers, allowed = null) {
+  return executeBinding({ config, answers, gateway, allowedEntities: allowed });
+}
+
+describe('executeBinding', () => {
+  describe('creating', () => {
+    it('creates a record when nothing matches', async () => {
+      const gateway = new FakeGateway({ match: null });
+
+      const result = await run(gateway);
+
+      expect(result.ok && result.outcome.kind).toBe('Created');
+      expect(result.ok && result.outcome.targetRecordId).toBe('new-record-1');
+      expect(gateway.writes[0].values).toEqual({ Email: 'a@b.com', FirstName: 'Ada' });
+    });
+
+    it('never looks anything up in AlwaysCreate mode', async () => {
+      const gateway = new FakeGateway();
+      const config = configOf({ identityRule: parseIdentityRule({ mode: 'AlwaysCreate' }) });
+
+      const result = await run(gateway, config);
+
+      expect(result.ok && result.outcome.kind).toBe('Created');
+      expect(gateway.queries).toEqual([]);
+    });
+  });
+
+  describe('merging', () => {
+    it('merges into a matched record and reports what it wrote', async () => {
+      const gateway = new FakeGateway({
+        match: { recordId: 'person-1', values: new Map([['Email', 'a@b.com'], ['FirstName', 'Someone']]), multipleFound: false },
+      });
+
+      const result = await run(gateway);
+
+      expect(result.ok && result.outcome.kind).toBe('Merged');
+      expect(result.ok && result.outcome.writtenFields).toEqual(['FirstName']);
+      expect(gateway.writes[0]).toEqual({ recordId: 'person-1', values: { FirstName: 'Ada' } });
+    });
+
+    it('writes nothing at all when the matched record already agrees', async () => {
+      const gateway = new FakeGateway({
+        match: { recordId: 'person-1', values: new Map([['Email', 'a@b.com'], ['FirstName', 'Ada']]), multipleFound: false },
+      });
+
+      const result = await run(gateway);
+
+      expect(result.ok && result.outcome.kind).toBe('Unchanged');
+      expect(gateway.writes).toEqual([]);
+    });
+  });
+
+  describe('identity', () => {
+    it('passes the configured normalization to the lookup', async () => {
+      const gateway = new FakeGateway();
+
+      await run(gateway);
+
+      expect(gateway.queries[0].criteria).toEqual([
+        { field: 'Email', value: 'a@b.com', normalize: 'LowerCaseTrim' },
+      ]);
+    });
+
+    it('ands the tenant scope into the lookup and stamps it on create', async () => {
+      const gateway = new FakeGateway();
+      const config = configOf({
+        identityRule: parseIdentityRule({
+          mode: 'MatchThenCreate',
+          match: [{ targetField: 'Email' }],
+          scope: [{ targetField: 'CompanyID', value: 'co-1' }],
+        }),
+      });
+
+      const result = await run(gateway, config);
+
+      expect(gateway.queries[0].criteria).toContainEqual({ field: 'CompanyID', value: 'co-1', normalize: 'ExactMatch' });
+      expect(result.ok && gateway.writes[0].values.CompanyID).toBe('co-1');
+    });
+
+    it('skips rather than creating when the submission carries no identity value', async () => {
+      const gateway = new FakeGateway();
+      const answers = answersOf([{ QuestionID: 'q-first', TextValue: 'Ada' }]);
+      const config = configOf({
+        fieldMappings: parseFieldMappings({
+          version: 1,
+          fields: [
+            { targetField: 'Email', source: { kind: 'question', questionId: 'q-email' } },
+            { targetField: 'FirstName', source: { kind: 'question', questionId: 'q-first' } },
+          ],
+        }),
+      });
+
+      const result = await run(gateway, config, answers);
+
+      // A duplicate person costs a manual merge nobody may notice; an unbound submission keeps the
+      // answers and can be re-driven later.
+      expect(result.ok && result.outcome.kind).toBe('Skipped');
+      expect(gateway.writes).toEqual([]);
+    });
+
+    it('skips when MatchOrSkip finds nothing, rather than creating', async () => {
+      const gateway = new FakeGateway({ match: null });
+      const config = configOf({
+        identityRule: parseIdentityRule({ mode: 'MatchOrSkip', match: [{ targetField: 'Email' }] }),
+      });
+
+      const result = await run(gateway, config);
+
+      expect(result.ok && result.outcome.kind).toBe('Skipped');
+      expect(gateway.writes).toEqual([]);
+    });
+
+    it('binds to the oldest match by default, and refuses when configured to', async () => {
+      const multiple: MatchedRecord = {
+        recordId: 'oldest',
+        values: new Map([['Email', 'a@b.com']]),
+        multipleFound: true,
+      };
+
+      const lenient = await run(new FakeGateway({ match: multiple }));
+      const strict = await run(
+        new FakeGateway({ match: multiple }),
+        configOf({
+          identityRule: parseIdentityRule({
+            mode: 'MatchThenCreate',
+            match: [{ targetField: 'Email' }],
+            onMultipleMatch: 'Fail',
+          }),
+        }),
+      );
+
+      expect(lenient.ok && lenient.outcome.targetRecordId).toBe('oldest');
+      expect(strict.ok).toBe(false);
+    });
+
+    it('treats a failed lookup as retryable, never as "no match"', async () => {
+      const gateway = new FakeGateway({ matchThrows: true });
+
+      const result = await run(gateway);
+
+      // Falling through to create here would duplicate a record every time the database hiccuped.
+      expect(result.ok).toBe(false);
+      expect(!result.ok && result.failure.retryable).toBe(true);
+      expect(gateway.writes).toEqual([]);
+    });
+  });
+
+  describe('configuration failures are reported as config, not candidate', () => {
+    it('refuses an entity that is not on the allow-list', async () => {
+      const result = await executeBinding({
+        config: configOf(),
+        answers: goodAnswers,
+        gateway: new FakeGateway(),
+        allowedEntities: new Set(['MJ_BizApps_Forms: Forms']),
+      });
+
+      expect(!result.ok && result.failure.scope).toBe('config');
+      expect(!result.ok && result.failure.retryable).toBe(false);
+    });
+
+    it('refuses an entity that does not resolve', async () => {
+      const result = await run(new FakeGateway({ writableFields: null }));
+
+      expect(!result.ok && result.failure.scope).toBe('config');
+    });
+
+    it('lists EVERY unwritable target field in one error', async () => {
+      const gateway = new FakeGateway({ writableFields: ['Email'] });
+      const config = configOf({
+        fieldMappings: parseFieldMappings({
+          version: 1,
+          fields: [
+            { targetField: 'Email', source: { kind: 'question', questionId: 'q-email' } },
+            { targetField: 'Nope', source: { kind: 'question', questionId: 'q-first' } },
+            { targetField: 'AlsoNope', source: { kind: 'static', value: 'x' } },
+          ],
+        }),
+      });
+
+      const result = await run(gateway, config);
+
+      expect(!result.ok && result.failure.scope).toBe('config');
+      expect(!result.ok && result.failure.message).toContain('Nope');
+      expect(!result.ok && result.failure.message).toContain('AlsoNope');
+      expect(gateway.writes).toEqual([]);
+    });
+
+    it('treats a metadata read failure as retryable, unlike a genuinely missing entity', async () => {
+      const result = await run(new FakeGateway({ describeThrows: true }));
+
+      expect(!result.ok && result.failure.retryable).toBe(true);
+    });
+  });
+
+  describe('candidate failures', () => {
+    it('refuses a submission missing a required mapped value, without partially writing', async () => {
+      const gateway = new FakeGateway();
+      const answers = answersOf([{ QuestionID: 'q-first', TextValue: 'Ada' }]);
+
+      const result = await run(gateway, configOf(), answers);
+
+      expect(!result.ok && result.failure.scope).toBe('candidate');
+      expect(gateway.writes).toEqual([]);
+    });
+
+    it('reports a failed write as retryable', async () => {
+      const result = await run(new FakeGateway({ writeThrows: true }));
+
+      expect(!result.ok && result.failure.retryable).toBe(true);
+    });
+  });
+});
