@@ -1,8 +1,31 @@
 # The Forms automation service principal
 
 `Forms Automation Service` is the identity on-submit automations and entity bindings execute as.
-It is seeded here rather than left to each deployment so that a fresh install fails in a way that
-names the missing piece: without the user, automations do not run at all and the log says only
+
+> **This directory SHIPS, and it ships with `metadata/user-roles/`.**
+> `V202608081700__v0.8.x__Metadata_Sync.sql` creates both the user and its `Forms Automation
+> Runner` grant, so automations work on a fresh install with no manual step.
+>
+> **The two must ship together.** `resolveAutomationPrincipal()` finds the user by NAME, so
+> shipping the user WITHOUT the role grant is strictly worse than shipping neither: instead of
+> "automations skipped, principal absent" — a log line that names the missing piece — you get a
+> principal that resolves and then fails on permissions at the first read. `metadata/user-roles/`
+> did not exist until 2026-08-08, which is why an earlier pass excluded this directory entirely.
+>
+> `packages/Server/src/automation/service-principal.ts` argues the user is "a deployment step,
+> deliberately". That reasoning holds for the part that is genuinely a deployment decision — the
+> grants on **binding target entities**, which remain unshipped and are the real ceiling on what a
+> form author can reach. It does not extend to the principal itself, which cannot authenticate
+> (unroutable `.invalid` address per RFC 2606, no directory account) and is the same shape as MJ
+> core's own `System` user.
+>
+> Two things this file got wrong before it ever shipped, both found by pushing it: its `Title` was
+> 72 characters against a 50-character limit (so the record could never have saved), and
+> `MJ_Forms_Dev`'s principal was created by `smoke/seed-binding-smoke.mjs` under a different GUID
+> (`11111111-…-555555555003`) and email. The dev database still needs reconciling to the shipped
+> GUIDs. See plans/DISTRIBUTION_SEED_PLAN.md.
+
+The argument for seeding it: without the user, automations do not run at all and the log says only
 that the principal is absent, which reads like a broken install. With it seeded, the first thing
 you hit is the specific grant you have not made yet.
 
