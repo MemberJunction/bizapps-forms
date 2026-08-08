@@ -384,6 +384,14 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
 
 /** Invoke the (injectable) hook firer; swallow any error so the submit still succeeds. */
 async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinition, responseId: string): Promise<void> {
+  // NOTE: this still fires the legacy hard-coded hook list for every form. The switch to
+  // `resolved.definition.automations` is deliberately NOT made here yet: dispatching a configured
+  // automation needs a target dispatcher (Action / Agent / EntityBinding) and an answers map built
+  // under the service principal, and half of that landing early would mean a form that configures
+  // automations gets silent failures instead of hooks. When it does land, the safe shape is
+  // "automations when the snapshot has any, legacy list otherwise" — every existing snapshot
+  // carries an empty array, so every existing form keeps its current behaviour untouched.
+  //
   // Default firer runs under the system user internally; the anonymous ctx.contextUser is
   // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
   const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
