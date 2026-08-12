@@ -56,6 +56,11 @@ jobs:
       - name: Validate repository.url in packages
         run: ./.github/scripts/validate-package-repository.sh
 
+      # A gate whose own test is not wired into CI is a gate nobody is checking — and this one
+      # spent its whole life unable to detect the mis-casing it exists for.
+      - name: CI guard script tests
+        run: ./.github/scripts/__tests__/validate-package-lock-case.test.sh
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
