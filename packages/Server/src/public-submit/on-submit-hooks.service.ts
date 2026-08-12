@@ -15,7 +15,7 @@ import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import type { UserInfo } from '@memberjunction/core';
 import { LEGACY_ON_SUBMIT_ACTION_NAMES, type LegacyOnSubmitActionName } from '@mj-biz-apps/forms-entities';
-import { UserCache } from '@memberjunction/sqlserver-dataprovider';
+import { UserCache } from '@memberjunction/generic-database-provider';
 
 /**
  * The S3 action names — the frozen contract WP-E implements.

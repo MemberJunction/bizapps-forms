@@ -31,14 +31,17 @@
     "@memberjunction/ai-core-plus": "^6.1.0-edge.1",
     "@memberjunction/core": "^6.1.0-edge.1",
     "@memberjunction/core-entities": "^6.1.0-edge.1",
+    "@memberjunction/generic-database-provider": "^6.1.0-edge.2",
     "@memberjunction/global": "^6.1.0-edge.1",
     "@memberjunction/server": "^6.1.0-edge.1",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.1",
-    "@memberjunction/storage": "^6.1.0-edge.1"
+    "@memberjunction/storage": "^6.1.0-edge.1",
+    "type-graphql": "2.0.0-beta.3"
   },
   "devDependencies": {
+    "@memberjunction/generic-database-provider": "6.1.0-edge.2",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
+    "type-graphql": "2.0.0-beta.3",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },

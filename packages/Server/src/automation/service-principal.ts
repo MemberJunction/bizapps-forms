@@ -16,7 +16,7 @@
  *    applied yet. A skipped automation is visible and recoverable; an over-privileged one is not.
  * 2. **The caller never chooses it.** There is no parameter here that a request can influence.
  */
-import { UserCache } from '@memberjunction/sqlserver-dataprovider';
+import { UserCache } from '@memberjunction/generic-database-provider';
 import { LogError } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 
