@@ -5,12 +5,14 @@
 -- `mj app remove` separately walks the foreign-key graph out from this app's `__mj.Entity` rows
 -- (RemoveAppEntityMetadata) and retires app-owned Applications and SchemaInfo. Neither reaches the
 -- metadata-seed payload: the roles, actions, AI prompts, templates and dashboards that
--- `V202608081700__v0.8.x__Metadata_Sync.sql` writes into `__mj`. Without this file they survive a
+-- `V202608081700__v0.8.x__Metadata_Sync.sql` writes into `__mj`, plus the row-level-security
+-- filters `V202608131600__v0.10.x__Respondent_Grant_Hardening.sql` adds. Without this file they survive a
 -- remove, and the next install re-INSERTs the same fixed UUIDs and fails on a primary-key
 -- collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Eighteen rows — the ones the seed creates that nothing
--- else creates. Their children are NOT listed, because listing them is what breaks: a static
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Twenty-one rows — the ones this app's migrations create
+-- that nothing else creates (eighteen from the seed, plus the three row-level-security filters
+-- V202608131600 adds for #39). Their children are NOT listed, because listing them is what breaks: a static
 -- delete list only orders rows the SEED made, while a real installation also holds runtime
 -- children (action execution logs, prompt runs, user-application grants, dashboard state) that a
 -- pristine canary database does not. bizapps-caliber shipped the static version first and had 11
@@ -54,8 +56,29 @@ CREATE TABLE #FormsDoomed (
 
 INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     -- Roles. Doom their EntityPermission and UserRole children by construction.
+    --
+    -- ⚠️ DOOMED BY CANONICAL ID, WHICH DELIBERATELY MISSES AN ADOPTED ROLE (#39). Since 0.8.0's
+    -- role create became adopt-or-skip by NAME, a host where a sibling app minted `Form Respondent`
+    -- first carries it under that app's id — so the row below matches nothing there and the role
+    -- survives this teardown. That is correct, not a gap: the row is not ours, and restoring the
+    -- pre-Forms state is this file's whole contract. Nothing is left dangling by it either — the
+    -- permission rows on that surviving role all point at Forms ENTITIES, and `mj app remove` walks
+    -- those out separately (RemoveAppEntityMetadata); `EntityPermission.EntityID` is NOT NULL, so
+    -- they go with the entities regardless of which role owns them.
     ('${mjSchema}', 'Role',              'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C', 0),  -- Form Respondent
     ('${mjSchema}', 'Role',              '5154187D-0AB9-4C75-A444-CFC3D10E1BC0', 0),  -- Forms Automation Runner
+    -- Row-level-security filters seeded by V202608131600 (#39). Listed for the same reason as the
+    -- Dashboards below — every reference to them is NULLABLE, so the engine would release the
+    -- references and keep the rows, and the next install would then re-INSERT the same fixed UUIDs
+    -- and fail on a primary-key collision.
+    --
+    -- Forms owns these records precisely so that a CO-INSTALLED app's uninstall cannot null the
+    -- filter slots on Forms' permission rows and hand the anonymous role its grants back unfiltered
+    -- — the regression #39 documents. The symmetric obligation is this list: when FORMS is the app
+    -- being removed, its own filters go with it.
+    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Respondent Gate Only, Never A Writer
+    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Respondent Own Distribution
+    ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Respondent Own Form Versions
     -- Actions (ActionParam.ActionID is NOT NULL, so the 9 params follow automatically).
     ('${mjSchema}', 'Action',            '7F0A0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Generate Form From Brief
     ('${mjSchema}', 'Action',            '7F0A0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Create Form From Template
