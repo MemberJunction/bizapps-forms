@@ -238,6 +238,32 @@ by blast radius instead: new-file / shipped-file-edit / verification.
    > `npm run smoke:scope` against a real host (with a second distribution id for the isolation
    > check) is now a **release-checklist item**, not a merge blocker — it must be executed and its
    > output recorded before the release that carries v0.10.x is published.
+
+   > **SUPERSEDED, 2026-08-13 — the smoke was executed, so §5.5 is met in full.** The repo owner
+   > asked for a host to be created rather than for the criterion to be relaxed. A dev harness was
+   > reconstructed from `cc13065^` (the commit that removed it), pointed at a sandbox copy of the
+   > database, and both smokes were run. **The harness is deliberately not committed** — it is
+   > scaffolding, and this repo ships libraries; the reconstruction recipe is in the commit message
+   > of `14fe7fb`. The result is a PAIR, which is what makes it evidence rather than a green tick:
+   >
+   > | database | result |
+   > |---|---|
+   > | hardened (v0.10.x applied) | **12/12 pass**, exit 0 |
+   > | shipped 0.8.0 grant state | **8 fail**, exit 1 |
+   >
+   > Same server binary, same script. On the unhardened database the run prints
+   > `NOT denied — the server returned {"ID":"06CAB099-…","Status":"Complete"}` (finding 1 performed
+   > as an exploit: an anonymous session writing a response row straight past the submit pipeline)
+   > and `LEAKED {"Slug":"other-form-scope-smoke","PublicLinkToken":"HARVESTABLE-LINK-TOKEN"}`
+   > (finding 2: one form's respondent harvesting another form's live public link). Both denials
+   > hold on the hardened database, `PublishedForm` still resolves, and the same session still
+   > submits successfully throughout — the deny-all create filter costs the product nothing.
+   >
+   > Running it also exposed **three wrong-reason passes in the smoke itself** — the same defect
+   > class as the tautological postconditions, and invisible without a vulnerable database to run
+   > against. They are described in `14fe7fb`; the short version is that a negative security test
+   > must be proved to FAIL before its passing is worth anything. The release-checklist item above
+   > stands as good practice, but it is no longer what this criterion is waiting on.
 6. **Repo gates:** `npm run lint:distribution` green (placeholder discipline + manifest freshness);
    package builds + unit tests green; no `${…}` placeholder other than the two permitted appears in
    either touched migration.
