@@ -79,17 +79,57 @@ async function gql(token, query, variables) {
 const errorText = (errors) => (errors ?? []).map((e) => e.message).join(' | ');
 
 /**
- * Assert an operation was refused. Checks that it FAILED and that no row came back, rather than
- * matching MJ's wording: the denial arrives as a thrown permission error today, but a future MJ
- * could answer with a null payload instead, and this test's invariant is "no row was written or
- * read", not "the message said Permission".
+ * The distribution id this session is scoped to, read out of its own JWT.
+ *
+ * `{{ScopeResourceID}}` in the read filters is substituted with exactly this value, so reading it
+ * here is not a shortcut around the test — it is the test's whole premise made visible. The payload
+ * is base64url-decoded WITHOUT verifying the signature, which is correct for a smoke: the server
+ * already verified it (it answered the request), and this script only needs to know what it claims.
+ */
+function scopedDistributionId(token) {
+  try {
+    const payload = token.split('.')[1];
+    const json = Buffer.from(payload + '='.repeat((4 - (payload.length % 4)) % 4), 'base64url').toString('utf8');
+    return JSON.parse(json)?.mj_scopes?.[0]?.resourceId ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Does this error say "you are not allowed", as opposed to any other kind of failure?
+ *
+ * ⚠️ MATCHING THE ERROR CATEGORY IS DELIBERATE, and the looser rule was tried first and was wrong.
+ * The original version of this file accepted ANY error as proof of denial. Running it against a
+ * database in the pre-#39 state — where the exploit is wide open — showed two checks passing
+ * anyway: the direct answer-write "passed" on a FOREIGN KEY violation from a made-up ResponseID,
+ * and reads "passed" on a null payload that only meant the probe id matched no row. Both would
+ * have reported a vulnerable database as secure, which is the exact failure mode this file exists
+ * to prevent. So a denial must LOOK like a denial.
+ *
+ * The two shapes MJ emits are checked, not one: generated read resolvers call
+ * `CheckUserReadPermissions` (→ "does not have read permissions on …") and create goes through
+ * `CheckCreateRLS` (→ "Access denied for new … record"). If a future MJ rewords these, this test
+ * fails loudly and gets updated — far better than silently going green forever.
+ */
+const isPermissionError = (errors) => /permission|access denied|not authorized|unauthorized/i.test(errorText(errors));
+
+/**
+ * Assert an operation was refused BECAUSE it was not permitted.
+ *
+ * A null payload with no error is reported as a FAILURE, not a pass: it means the probe proved
+ * nothing, and an inconclusive security check that reads as green is worse than a red one.
  */
 function checkDenied(label, field, { data, errors }) {
   const payload = data?.[field];
-  if (errors && !payload) {
+  if (payload) {
+    fail(label, `NOT denied — the server returned ${JSON.stringify(payload).slice(0, 160)}`);
+  } else if (isPermissionError(errors)) {
     pass(`${label} is denied  (${errorText(errors).slice(0, 90)})`);
+  } else if (errors) {
+    fail(label, `failed, but NOT on permissions — so this proves nothing: ${errorText(errors).slice(0, 200)}`);
   } else {
-    fail(label, payload ? `NOT denied — the server returned ${JSON.stringify(payload).slice(0, 160)}` : 'no error and no payload; expected an explicit denial');
+    fail(label, 'no error and no payload: inconclusive, not a denial');
   }
 }
 
@@ -142,14 +182,6 @@ async function main() {
       },
     }));
 
-  checkDenied('generic CreatemjBizAppsFormsFormResponseAnswer', 'CreatemjBizAppsFormsFormResponseAnswer',
-    await gql(token, `
-      mutation X($input: CreatemjBizAppsFormsFormResponseAnswerInput!) {
-        CreatemjBizAppsFormsFormResponseAnswer(input: $input) { ID }
-      }`, {
-      input: { FormResponseID: '00000000-0000-0000-0000-000000000001', TextValue: 'direct write' },
-    }));
-
   // ── 3. And the pipeline still works for the same session. ───────────────────────────────────
   // Without this the file would prove only that something is broken. The deny-all create filter is
   // supposed to cost nothing, because `PublicFormResolver` elevates to the system user for every
@@ -183,30 +215,74 @@ async function main() {
     'the SAME session still submits through the pipeline (the deny-all filter costs nothing)',
     result?.errors?.[0]?.message ?? errorText(submission.errors) ?? 'no error message returned');
 
+  // ── 3b. The second half of the exploit: writing an answer onto a REAL response row. ─────────
+  // Deliberately ordered AFTER the legitimate submit, so it can cite a response id that genuinely
+  // exists. With a made-up id the INSERT is rejected by `FK_FormResponseAnswer_FormResponse` — an
+  // error, and therefore a "denial" to a naive check, on a database where the grant is wide open.
+  // Pointing it at a real row leaves entity permissions as the ONLY thing that can stop it, which
+  // is the whole point of the probe. It also mirrors the realistic attack: append answers to a
+  // response that the pipeline already validated.
+  if (result?.responseId) {
+    checkDenied('generic CreatemjBizAppsFormsFormResponseAnswer (onto a REAL response row)',
+      'CreatemjBizAppsFormsFormResponseAnswer',
+      await gql(token, `
+        mutation X($input: CreatemjBizAppsFormsFormResponseAnswerInput!) {
+          CreatemjBizAppsFormsFormResponseAnswer(input: $input) { ID }
+        }`, {
+        input: {
+          ResponseID: result.responseId,
+          QuestionID: questions[0]?.id,
+          TextValue: 'direct write, bypassing the pipeline',
+        },
+      }));
+  } else {
+    skip('generic CreatemjBizAppsFormsFormResponseAnswer (onto a REAL response row)',
+      'the legitimate submit above returned no responseId, so there is no real row to target; a made-up id would be rejected by the foreign key rather than by permissions, which proves nothing');
+  }
+
   // ── 4. The five retired definition reads are gone. ──────────────────────────────────────────
   // Not merely filtered — removed, because no anonymous code path ever read them: the published
   // version's DefinitionSnapshot already carries the questions, options, pages and style tokens.
-  for (const [label, field, query] of [
-    ['Forms', 'mjBizAppsFormsForm', 'query R($id: String!) { mjBizAppsFormsForm(ID: $id) { ID Name } }'],
-    ['Form Questions', 'mjBizAppsFormsFormQuestion', 'query R($id: String!) { mjBizAppsFormsFormQuestion(ID: $id) { ID } }'],
-    ['Form Styles', 'mjBizAppsFormsFormStyle', 'query R($id: String!) { mjBizAppsFormsFormStyle(ID: $id) { ID } }'],
+  // All FIVE are probed, not a representative sample: the five were removed in one decision, and a
+  // loop that covers three of them would let a partially-applied migration pass while the file
+  // claims otherwise.
+  //
+  // Each probe uses a REAL id wherever the published snapshot carries one (the form, its pages, its
+  // questions and their options), so that on a database still holding these grants the query
+  // returns an actual row — a visible leak — rather than a null that could be mistaken for a
+  // denial. `MJ: Row Level Security`-style permission checks run BEFORE the row lookup
+  // (`CheckUserReadPermissions` is the first statement of every generated read resolver), so the
+  // denial is reported identically whether or not the id exists; the real ids are there to make
+  // the FAILING case unambiguous, not the passing one.
+  const firstOptionId = questions.flatMap((q) => q.options ?? []).map((o) => o.id)[0];
+  const UNKNOWN_ID = '00000000-0000-0000-0000-000000000000';
+  for (const [label, field, probeId] of [
+    ['Forms', 'mjBizAppsFormsForm', definition.formId],
+    ['Form Questions', 'mjBizAppsFormsFormQuestion', questions[0]?.id],
+    ['Form Question Options', 'mjBizAppsFormsFormQuestionOption', firstOptionId],
+    ['Form Pages', 'mjBizAppsFormsFormPage', (definition.pages ?? [])[0]?.id],
+    // The snapshot embeds style TOKENS, not the style row's id, so this one has no real id to cite.
+    // It still proves the grant is gone, because the permission check precedes the lookup.
+    ['Form Styles', 'mjBizAppsFormsFormStyle', undefined],
   ]) {
-    checkDenied(`read on ${label}`, field, await gql(token, query, { id: arbitraryFormId }));
+    checkDenied(`read on ${label}`, field,
+      await gql(token, `query R($id: String!) { ${field}(ID: $id) { ID } }`, { id: probeId ?? UNKNOWN_ID }));
   }
 
   // ── 5. Cross-form isolation on the one entity that still carries a read. ────────────────────
   // Form Distributions is the enumeration surface finding 2 named: the row carries
   // `PublicLinkToken`, so an unfiltered read handed every respondent every other form's live link.
-  const own = await gql(token,
-    'query D($id: String!) { mjBizAppsFormsFormDistribution(ID: $id) { ID Slug } }',
-    { id: definition.distributionId ?? '' });
-  if (definition.distributionId) {
+  const ownDistributionId = scopedDistributionId(token);
+  if (ownDistributionId) {
+    const own = await gql(token,
+      'query D($id: String!) { mjBizAppsFormsFormDistribution(ID: $id) { ID Slug } }',
+      { id: ownDistributionId });
     check(own.data?.mjBizAppsFormsFormDistribution?.ID,
       'the session CAN read the distribution it was scoped to',
-      errorText(own.errors) || 'returned null — the scope filter is rejecting the session\'s own row');
+      errorText(own.errors) || 'returned null — the scope filter is rejecting the session\'s OWN row, which would break every form');
   } else {
     skip('the session CAN read the distribution it was scoped to',
-      'the published snapshot carries no distributionId to probe with');
+      'the session JWT carries no mj_scopes[0].resourceId — if that is true on a real host, the read filters can never match and every form is broken');
   }
 
   if (OTHER_DISTRIBUTION_ID) {
@@ -219,7 +295,7 @@ async function main() {
       row ? `LEAKED ${JSON.stringify(row).slice(0, 160)}` : undefined);
   } else {
     skip('the session CANNOT read another form\'s distribution',
-      'pass a second distribution id as argv[2] or FORMS_SMOKE_OTHER_DISTRIBUTION_ID. Not faked: with one distribution in the database, "isolated" and "nothing else existed" are the same observation.');
+      'pass a second distribution id as the SECOND argument (after the slug), or set FORMS_SMOKE_OTHER_DISTRIBUTION_ID. Not faked: with one distribution in the database, "isolated" and "nothing else existed" are the same observation.');
   }
 
   console.log(

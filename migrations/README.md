@@ -65,6 +65,16 @@ instead of `spCreate*` and the result is not replayable on a fresh install.
 #    BACKUP MJ_Forms_Dev / RESTORE AS MJ_Forms_SeedGen, then against the copy:
 #      - run migrations-teardown/V001 (with ${mjSchema} -> __mj) to clear the core rows
 #      - DELETE the Forms business data + FormStyle + FormCategory
+#      - RE-CREATE the three 7F0E000x row-level-security filter records (#39). The teardown you
+#        just ran deleted them, correctly — they are Forms-owned and in its doom list — but the
+#        four Form Respondent permission records reference them by @lookup, so the push cannot
+#        resolve them. Re-run just the filter section of
+#        V202608131600__v0.10.x__Respondent_Grant_Hardening.sql. If you skip this the push FAILS
+#        LOUDLY ("Lookup failed: No record found in 'MJ: Row Level Security Filters'"), which is
+#        the point: it cannot quietly regenerate a seed that re-grants unfiltered create.
+#        The filter RECORDS cannot live in metadata/ — MJ grants no role Create on
+#        'MJ: Row Level Security Filters', so pushing them is refused. Only the references are
+#        expressible there.
 # 2. Push. Expect every directory to report "created" and none to report "updated".
 DB_DATABASE=MJ_Forms_SeedGen npx mj sync push --dir metadata --exclude users --ci
 # 3. The log lands in metadata/sql_logging/. Two substitutions are REQUIRED before it can ship:
