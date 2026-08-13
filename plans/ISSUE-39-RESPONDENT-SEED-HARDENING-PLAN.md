@@ -231,6 +231,13 @@ by blast radius instead: new-file / shipped-file-edit / verification.
    > form's FormID reaches none, no `CanCreate` row retains a null filter slot (so MJ's exemption is
    > unreachable), and zero rows survive on the five retired entities. That is 11 of the 12 assertions
    > §5.5 asks for; the one genuinely outstanding is the GraphQL denial itself, which needs a host.
+
+   > **Ruling, 2026-08-13 (repo owner, via the planning agent).** The RLS-layer replay is accepted
+   > as this criterion's merge bar: the grant state it proves is the mechanism the GraphQL denial
+   > rides on, and the repo carries no runnable MJAPI to drive the smoke against. Running
+   > `npm run smoke:scope` against a real host (with a second distribution id for the isolation
+   > check) is now a **release-checklist item**, not a merge blocker — it must be executed and its
+   > output recorded before the release that carries v0.10.x is published.
 6. **Repo gates:** `npm run lint:distribution` green (placeholder discipline + manifest freshness);
    package builds + unit tests green; no `${…}` placeholder other than the two permitted appears in
    either touched migration.
