@@ -10,9 +10,11 @@
 -- remove, and the next install re-INSERTs the same fixed UUIDs and fails on a primary-key
 -- collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Twenty-one rows — the ones this app's migrations create
--- that nothing else creates (eighteen from the seed, plus the three row-level-security filters
--- V202608131600 adds for #39). Their children are NOT listed, because listing them is what breaks: a static
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Twenty-two rows — the ones this app's migrations create
+-- that nothing else creates: nineteen from the metadata seed, plus the three row-level-security
+-- filters V202608131600 adds for #39. (This line said "Eighteen" while the list held nineteen, from
+-- the file's first revision until 2026-08-13. Recounted rather than incremented, which is how the
+-- off-by-one was found; if you add a row here, count the list again instead of trusting this number.) Their children are NOT listed, because listing them is what breaks: a static
 -- delete list only orders rows the SEED made, while a real installation also holds runtime
 -- children (action execution logs, prompt runs, user-application grants, dashboard state) that a
 -- pristine canary database does not. bizapps-caliber shipped the static version first and had 11
