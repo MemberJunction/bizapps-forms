@@ -14,7 +14,24 @@
     "sync": {
       "lastModified": "2026-08-08T18:25:27.624Z",
       "checksum": "b270c3ebf247b03a778627d3ccd6c37c4ebdf18f38f4d91b018998b1de8a7e93"
-    }
+    },
+    "_comments": [
+      "The four Form Respondent grants in this file are shipped by V202608081700 with every RLS filter",
+      "column NULL, and V202608131600__v0.10.x__Respondent_Grant_Hardening.sql then attaches the",
+      "filters that make them safe: a deny-all create filter on the two response grants, and",
+      "distribution-scoped read filters on Form Distributions and Form Versions (#39).",
+      "",
+      "THIS FILE CANNOT EXPRESS THAT ATTACHMENT — mj-sync has no filter lookup here — so the two are",
+      "coupled only by running in order. If you REGENERATE the metadata seed, its new migration gets",
+      "a LATER timestamp than V202608131600 and will therefore re-create these four grants unfiltered,",
+      "AFTER the hardening ran. That silently restores the generic-Create bypass of the submit pipeline",
+      "and instance-wide reads for every anonymous respondent. Re-apply the hardening in a migration",
+      "newer than the regenerated seed, or teach this directory to carry the filter ids first.",
+      "",
+      "Five further grants (Forms, Form Questions, Form Question Options, Form Pages, Form Styles) were",
+      "removed from this file and are DELETEd by that same migration: no anonymous code path ever read",
+      "them, because the published version's DefinitionSnapshot already carries the whole definition."
+    ]
   },
   {
     "fields": {
@@ -31,23 +48,6 @@
     "sync": {
       "lastModified": "2026-08-08T18:25:27.640Z",
       "checksum": "b50083202c2d1056c0c66261b7bf1bfe68616d68bd994950df1a6ca15ebe1b1c"
-    }
-  },
-  {
-    "fields": {
-      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms",
-      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
-      "CanRead": true,
-      "CanCreate": false,
-      "CanUpdate": false,
-      "CanDelete": false
-    },
-    "primaryKey": {
-      "ID": "D21031C5-3141-4E24-A21E-95728ABF3584"
-    },
-    "sync": {
-      "lastModified": "2026-08-08T18:25:27.654Z",
-      "checksum": "48385ed1202e7e701bfb9875e7b75c6e24c9808cc7af19315f96218b7e7151cd"
     }
   },
   {
@@ -69,57 +69,6 @@
   },
   {
     "fields": {
-      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages",
-      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
-      "CanRead": true,
-      "CanCreate": false,
-      "CanUpdate": false,
-      "CanDelete": false
-    },
-    "primaryKey": {
-      "ID": "7E255850-054D-4F7C-B905-574B61A3A2D6"
-    },
-    "sync": {
-      "lastModified": "2026-08-08T18:25:27.741Z",
-      "checksum": "9afa8b06339ce8fb712b500ab605fe1fe23b65b7a6707332ad80f74244bbf5c9"
-    }
-  },
-  {
-    "fields": {
-      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions",
-      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
-      "CanRead": true,
-      "CanCreate": false,
-      "CanUpdate": false,
-      "CanDelete": false
-    },
-    "primaryKey": {
-      "ID": "2B47C8EF-13AE-4CC4-AE99-3E516642507B"
-    },
-    "sync": {
-      "lastModified": "2026-08-08T18:25:27.755Z",
-      "checksum": "8da19c8098a71c03fc188e990807fff91731514729c48ecbffbf769edc1fa490"
-    }
-  },
-  {
-    "fields": {
-      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Question Options",
-      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
-      "CanRead": true,
-      "CanCreate": false,
-      "CanUpdate": false,
-      "CanDelete": false
-    },
-    "primaryKey": {
-      "ID": "26E9996E-1523-4541-B772-DE12CA853874"
-    },
-    "sync": {
-      "lastModified": "2026-08-08T18:25:27.767Z",
-      "checksum": "780ed097a38aecbd7f4175a997335250bc35585a3c9cb98df44ba3b73ea28bf9"
-    }
-  },
-  {
-    "fields": {
       "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Distributions",
       "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
       "CanRead": true,
@@ -133,23 +82,6 @@
     "sync": {
       "lastModified": "2026-08-08T18:25:27.692Z",
       "checksum": "0d2db0e6ffce1697310ceae5409f20bde7a6092cfc7b8cb24626d46db1d13eac"
-    }
-  },
-  {
-    "fields": {
-      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Styles",
-      "RoleID": "@lookup:MJ: Roles.Name=Form Respondent",
-      "CanRead": true,
-      "CanCreate": false,
-      "CanUpdate": false,
-      "CanDelete": false
-    },
-    "primaryKey": {
-      "ID": "4469927D-21EB-46FA-B12B-C30E1C5FAD11"
-    },
-    "sync": {
-      "lastModified": "2026-08-08T18:25:27.705Z",
-      "checksum": "ea32969efd7b15362a2a4464cf8433bf8c311249c592150a0c8ae9ee5d666afa"
     }
   },
   {

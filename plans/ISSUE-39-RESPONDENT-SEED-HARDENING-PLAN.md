@@ -46,13 +46,23 @@ them — a special case designed out of existence. (Decision D3 below; confirmed
 
 ### 1.2 A trap the issue implies but does not spell out: the hardcoded RoleID
 
-Adopt-or-skip on the role INSERT alone is **insufficient**. The seed's 9 permission rows and 2
-application-role rows all hardcode `@RoleID = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'`. On a host
-where `Form Respondent` pre-exists under a different ID (Caliber-minted), skipping the role create
-and then running those batches unchanged FK-fails (or worse, silently attaches grants to a
-nonexistent role). Every batch that references the Form Respondent role must **resolve the ID by
-name** — the same move Caliber #220 made on its side ("resolve the role by name everywhere and
-create it only as a fallback").
+Adopt-or-skip on the role INSERT alone is **insufficient**. The seed's 9 `Form Respondent`
+permission rows hardcode `@RoleID = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'`. On a host where
+`Form Respondent` pre-exists under a different ID (Caliber-minted), skipping the role create and
+then running those batches unchanged FK-fails (or worse, silently attaches grants to a nonexistent
+role). Every batch that references the Form Respondent role must **resolve the ID by name** — the
+same move Caliber #220 made on its side ("resolve the role by name everywhere and create it only as
+a fallback").
+
+> **Correction, 2026-08-13 (implementation).** This paragraph originally read "9 permission rows and
+> 2 application-role rows". The two `spCreateApplicationRole` rows do **not** reference this role:
+> they carry `DEAFCCEC…` (Developer) and `E0AFCCEC…` (UI), and `Form Respondent` is deliberately
+> granted no application access — `metadata/application-roles/.application-roles.json` says so in a
+> comment, because respondents use the headless widget and never the Explorer shell. The by-name
+> rewrite therefore covers **18** `SET @RoleID_… =` lines and no application-role rows: 9 permission
+> rows on `A18E13FC…`, and 9 on `5154187D…` (`Forms Automation Runner` — 8 permission rows plus the
+> `spCreateUserRole` grant for the automation service principal, which has the identical failure
+> mode and was not called out in the original plan).
 
 ---
 
@@ -167,12 +177,13 @@ security migration is the worst outcome; a loud one is cheap.
 |---|---|---|
 | 1 | `migrations/V202608081700__v0.8.x__Metadata_Sync.sql` | **Edit in place (D4/D5).** Both role creates → `IF NOT EXISTS` by name; every `@RoleID_…` SET for the two roles → by-name lookup; header comment gains a dated paragraph explaining the edit and why Skyway tolerates it. No other statement changes. |
 | 2 | `migrations/V2026____v0.10.x__Respondent_Grant_Hardening.sql` *(new; timestamp fixed at implementation)* | Creates 3 Forms-owned `RowLevelSecurityFilter` records (guarded INSERT, hardcoded new UUIDs): deny-all create; scoped Distribution read; scoped Versions read. Unconditionally points the 4 surviving Form Respondent slots at them (UPDATE by role-name/entity-name join). DELETEs the 5 dead read grants. UPDATEs the role Description. Postcondition THROWs (D6). Only `${flyway:defaultSchema}` / `${mjSchema}` placeholders. `sp_addextendedproperty` n/a (no new columns). |
-| 3 | `migrations/metadata-seed.manifest.json` | Regenerate via `npm run seed:manifest` (file 1 changed). |
+| 3 | `migrations/metadata-seed.manifest.json` | Regenerate via `npm run seed:manifest`. **Corrected 2026-08-13:** the reason given here ("file 1 changed") was wrong — the manifest hashes `metadata/` only, so editing a migration never affects it. It is regenerated because of the new file 9 below. |
+| 9 | `metadata/entity-permissions/.entity-permissions.json` *(added 2026-08-13)* | Drop the five objects D3 removes, so the directory the seed is generated FROM agrees with what ships. Without this the next regeneration re-creates them under a **later** timestamp than the corrective migration and silently reopens finding 2. The four survivors carry a `_comments` block recording the same hazard for their filter attachment, which mj-sync cannot express here. |
 | 4 | `migrations-teardown/V001__Retire_Forms_Core_Rows.sql` | Add the 3 filter-record UUIDs to the doom table. Review the role row: dooming by canonical ID is **correct** for adopted hosts (adopted role has a different ID and survives teardown — the pre-Forms state is restored, which is the documented teardown contract). Record that reasoning in the file. |
 | 5 | `.changeset/<name>.md` | **minor** — 0.9.0 → 0.10.0 (migration present). |
 | 6 | `plans/FORMS_BUILD_PLAN.md` | Progress-log entry; link issue #39 and this plan. |
 | 7 | `migrations-pg/` | **No port** (see out-of-scope): the PG chain deliberately stops before the 0.8.0 Metadata_Sync (no seed = neither the vulnerability nor the role INSERT exists there). Add one line to `migrations-pg/README.md` recording that v0.10.x is seed-repair and joins the Metadata_Sync PG-parity debt. |
-| 8 | `smoke/respondent-path.mjs` | Extend (or add a sibling smoke) with the negative case: an anonymous session JWT calling the generic `CreateMJBizAppsFormsFormResponse` mutation must be **denied**, while the same session's `SubmitFormResponse` succeeds. This is the exploit-shaped acceptance test — the one signal that cannot lie. |
+| 8 | `smoke/respondent-scope-path.mjs` *(sibling, per the option in this row)* | The negative case: an anonymous session JWT calling the generic create mutation must be **denied**, while the same session's `SubmitFormResponse` succeeds. This is the exploit-shaped acceptance test — the one signal that cannot lie. **Two corrections, 2026-08-13:** the mutation is `CreatemjBizAppsFormsFormResponse` (lowercase `mj`), not `CreateMJBizAppsFormsFormResponse`; and it went in a sibling file rather than into `respondent-path.mjs`, because that script asserts the path WORKS and this one asserts its limits — opposite failure modes, and the sibling can also carry the cross-form read checks, which do not belong in a happy-path script. **⚠️ Written but NOT RUN:** this repo no longer contains a runnable MJAPI (the dev harness was dropped in the pnpm migration, `cc13065`), so it needs a host. §5.5 was instead evidenced at the RLS layer — see §5. |
 
 No TypeScript changes. `scope-check.service.ts`, the resolvers, and the widget are correct as-is —
 that is the point of the design: the flags they read do not change.
@@ -206,6 +217,20 @@ by blast radius instead: new-file / shipped-file-edit / verification.
    denied (smoke, file 8). `SubmitFormResponse` through the pipeline still succeeds for the same
    session. `PublishedForm` still resolves. Cross-form read: a RunView on Form Distributions under
    an anonymous session returns only the scoped distribution row.
+
+   > **Status, 2026-08-13 (implementation): evidenced, but not by the smoke.** The smoke exists and
+   > is wired as `npm run smoke:scope`; it cannot be executed from this repo, which no longer
+   > carries a runnable MJAPI. What was proved instead, against SQL Server, is the layer that does
+   > the work — MJ's generated single-record resolver emits
+   > `SELECT … WHERE ID = @p0 <getRowLevelSecurityWhereClause(…, Read, 'AND')>`, so that exact shape
+   > was replayed with the filter text **read back out of the database** rather than retyped: the
+   > session's own distribution is readable, a second planted distribution is not (0 rows), an
+   > absent scope claim matches nothing without erroring — and an *uncast* comparison was shown to
+   > error, so the cast-to-text decision is falsifiable rather than asserted — the loader's own
+   > `FormID + Status='Published'` predicate still resolves the session's version while another
+   > form's FormID reaches none, no `CanCreate` row retains a null filter slot (so MJ's exemption is
+   > unreachable), and zero rows survive on the five retired entities. That is 11 of the 12 assertions
+   > §5.5 asks for; the one genuinely outstanding is the GraphQL denial itself, which needs a host.
 6. **Repo gates:** `npm run lint:distribution` green (placeholder discipline + manifest freshness);
    package builds + unit tests green; no `${…}` placeholder other than the two permitted appears in
    either touched migration.
