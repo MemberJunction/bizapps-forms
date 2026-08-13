@@ -12,7 +12,7 @@
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql';
 import { AppContext, GetReadOnlyProvider, GetReadWriteProvider, ResolverBase } from '@memberjunction/server';
 import type { UserInfo } from '@memberjunction/core';
-import { UserCache } from '@memberjunction/sqlserver-dataprovider';
+import { UserCache } from '@memberjunction/generic-database-provider';
 import type { FieldError, FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition } from './definition-loader.service';
 import {
