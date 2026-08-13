@@ -28,7 +28,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
 import { LogError, LogStatus, Metadata, RunView, type UserInfo } from '@memberjunction/core';
 import { FileStorageEngine } from '@memberjunction/storage';
-import { UserCache } from '@memberjunction/sqlserver-dataprovider';
+import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { getUploadConfig, UPLOAD_ROUTE } from './config.js';
 import { parseMultipart } from './multipart.js';

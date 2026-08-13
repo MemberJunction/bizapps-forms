@@ -86,18 +86,21 @@ const GENERATED_ROOTS = [
 /**
  * Generated artifacts that do NOT live under a `generated/` directory.
  *
- * `apps/MJAPI/schema.graphql` is the emitted GraphQL SDL for whatever resolvers the
- * host loaded. It is as much CodeGen output as `generated.ts`, but it sits in the app
- * rather than a package, so scanning GENERATED_ROOTS alone never touched it — and it
- * shipped with 392 foreign-schema references through the entire #10 fix, which pruned
- * the three package directories and missed this one. The gate reported PASS the whole
- * time.
+ * Empty since the MJAPI/MJExplorer dev harness was removed in the pnpm migration.
+ * The one entry was `apps/MJAPI/schema.graphql` — the emitted GraphQL SDL for
+ * whatever resolvers the host loaded, as much CodeGen output as `generated.ts`, and
+ * the artifact that shipped 392 foreign-schema references through the entire #10 fix
+ * while this gate reported PASS.
  *
- * Like GENERATED_ROOTS, a missing entry is a hard error rather than a skip.
+ * That SDL is no longer emitted anywhere in this repo, so the coverage is GONE, not
+ * relocated: resolver scoping is now checked only through the three package
+ * `generated/` roots above. To restore it, link this repo into an MJ checkout, emit
+ * the SDL there, and point this list at it.
+ *
+ * Like GENERATED_ROOTS, a missing entry is a hard error rather than a skip — so an
+ * entry added back must exist.
  */
-const GENERATED_FILES = [
-  'apps/MJAPI/schema.graphql',
-];
+const GENERATED_FILES = [];
 
 /** Extensions inspected for declarations and imports. */
 const CODE_EXTS = ['.ts', '.js', '.mjs', '.html'];

@@ -33,11 +33,10 @@ module.exports = {
 
   /** Build commands run after code generation */
   commands: [
-    { workingDirectory: './packages/Entities', command: 'npm', args: ['run', 'build'], when: 'after' },
-    { workingDirectory: './packages/Actions', command: 'npm', args: ['run', 'build'], when: 'after' },
-    { workingDirectory: './packages/Server', command: 'npm', args: ['run', 'build'], when: 'after' },
-    { workingDirectory: './packages/Angular', command: 'npm', args: ['run', 'build'], when: 'after' },
-    { workingDirectory: './apps/MJAPI', command: 'npm', args: ['start'], timeout: 30000, when: 'after' },
+    { workingDirectory: './packages/Entities', command: 'pnpm', args: ['run', 'build'], when: 'after' },
+    { workingDirectory: './packages/Actions', command: 'pnpm', args: ['run', 'build'], when: 'after' },
+    { workingDirectory: './packages/Server', command: 'pnpm', args: ['run', 'build'], when: 'after' },
+    { workingDirectory: './packages/Angular', command: 'pnpm', args: ['run', 'build'], when: 'after' },
   ],
 
   // ============================================================================
