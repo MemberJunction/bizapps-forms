@@ -65,28 +65,36 @@ you edited — and that delta appends to the chain rather than replacing it. Thi
 recipe; you do not need the appendix.
 
 ```bash
-# 1. Work on a COPY. Never generate against MJ_Forms_Dev.
-#    BACKUP MJ_Forms_Dev / RESTORE AS MJ_Forms_SeedGen.
-# 2. Bring the copy to HEAD before pushing anything — core first, then this app's chain:
+# 1. Build the generation database from the SHIPPED CHAIN, not from dev work. Start empty and run
+#    `mj app install` for this app, which installs bizapps-common, then bizapps-tasks, then Forms,
+#    and leaves you at head. Restoring a backup of MJ_Forms_Dev is the tempting shortcut and the
+#    wrong one: a dev database holds records no seed ever shipped, so the push diffs against rows a
+#    fresh install does not have and emits spUpdate* calls that quietly match nothing there.
+#    Nothing detects that — CHECK 1 compares metadata/ to a hash manifest, not to seed contents.
+# 2. If you started from a copy rather than empty, bring it to HEAD — core first, then this app:
 npx mj migrate -t v<mj-version>     # core __mj — NOT npm run mj:migrate; see the root CLAUDE.md
 npm run mj:migrate                  # through V202608131600 and whatever follows it
-#    From a genuinely empty database instead, `mj app install` does the whole thing in dependency
-#    order (bizapps-common, then bizapps-tasks, then Forms) and leaves you at head.
 # 3. Push. Expect a small log: the records you touched, and nothing else.
 DB_DATABASE=MJ_Forms_SeedGen npx mj sync push --dir metadata --exclude users --ci
-# 4. The log lands in metadata/sql_logging/. Two substitutions are REQUIRED before it can ship:
+# 4. The log lands in metadata/sql_logging/. THREE edits are REQUIRED before it can ship:
 #      ${flyway:defaultSchema} -> ${mjSchema}          on every core SP call (all of them)
 #      literal [__mj_BizAppsForms] -> [${flyway:defaultSchema}]  on the Forms-schema SP calls
 #    MetadataSync writes core SP calls with the default-schema placeholder because in MJ's own
 #    repo the default schema IS the core schema. Here it is __mj_BizAppsForms, so shipping the
 #    log verbatim calls __mj_BizAppsForms.spCreateRole — an object that does not exist.
+#      @RoleID literal -> (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
+#    on the Form Respondent permission records. The generator emits whatever id it read from YOUR
+#    database; #39 changed the shipped seed to resolve this role BY NAME because it is a shared
+#    role a sibling app may have minted under a different id. A literal is unportable, and CHECK 3
+#    cannot see a grant bound to an id it does not recognise — see its header.
 # 5. Move it to migrations/V<stamp>__v<ver>__Metadata_Sync.sql — a NEW file, beside the existing
 #    seeds, with a header saying what changed and why.
 npm run seed:manifest && npm run lint:distribution
 ```
 
-Then prove it: restore the copy from the backup again and run the migration chain itself, not the
-push. Count the records.
+Then prove it on a database that has never seen your dev work: install from empty, run the chain
+including your new file, and count the records. Replaying against the copy you generated from proves
+nothing — it already contains them.
 
 **Why head, and not an empty database.** Against a migrated-to-head copy the three `7F0E000x`
 row-level-security filter records already exist, so the `@lookup` references in the four
@@ -94,7 +102,14 @@ row-level-security filter records already exist, so the `@lookup` references in 
 is the default: the teardown / manual filter re-create ritual in the appendix is not part of the
 normal loop, it is what you do when you have to rebuild the seed from nothing.
 
-**What CHECK 3 will hold you to** (`npm run lint:distribution`, and CI on every push and PR). Any
+**"At head" and "from the shipped chain" are two requirements, not one.** Head is what makes the
+`@lookup`s resolve; provenance is what makes the delta replayable. A database that is at head *and*
+carries records someone created by hand produces a delta that updates rows a fresh install never
+had. The from-empty recipe used to prevent this structurally by demanding an empty database; the
+delta path has to ask for it explicitly instead.
+
+**What CHECK 3 will hold you to** (`npm run lint:distribution`, and the Distribution Gate workflow
+on every push and PR that touches `migrations/`, `migrations-pg/`, `metadata/` or the gate itself). Any
 seed sorting after `V202608131600` grants the anonymous `Form Respondent` role a filtered create or
 read, or nothing at all: a `CanCreate`/`CanRead` whose RLS filter is cleared, omitted or NULL fails,
 `CanUpdate`/`CanDelete` for that role fails outright, and one of the four guarded grants pointed at
