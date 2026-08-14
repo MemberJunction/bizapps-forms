@@ -2,7 +2,7 @@
   {
     "fields": {
       "Name": "Form Respondent",
-      "Description": "Restricted role for anonymous/external respondents who reach a published MJ Form via a scoped magic-link distribution. The ONE deliberate exception to the magic-link read-only convention: it grants CanCreate on Form Responses and Form Response Answers ONLY (no read/update/delete on those), plus read-only on the published form-definition entities the respondent widget must load. It grants nothing else. Authorization is enforced server-side from the session's mj_scopes union; this role is the entity-permission boundary. Never assign to internal/SSO users."
+      "Description": "Restricted role for anonymous/external respondents who reach a published MJ Form via a scoped magic-link distribution. The ONE deliberate exception to the magic-link read-only convention. It grants exactly four things and nothing else: CanCreate on Form Responses and Form Response Answers, each carrying a DENY-ALL create filter — forms-server's checkRespondentScope reads only the CanCreate flag, while the real write is performed by the system user, so an unfiltered grant would buy nothing but a bypass of the submit pipeline via MJ's generic Create mutation; and scope-filtered read on Form Distributions and Form Versions, filtered to the distribution the session's own invite names. It holds NO read on the two response entities (one shared anonymous principal backs every respondent, so no filter can make that read safe) and NOTHING on Forms, Form Questions, Form Question Options, Form Pages or Form Styles — the published version's DefinitionSnapshot already carries all of that, so no anonymous code path reads them. This is a SHARED role: co-installed apps may add their own grants to it, and this app asserts only its own four facts. Authorization is enforced server-side from the session's mj_scopes union; this role is the entity-permission boundary. Never assign to internal/SSO users."
     },
     "primaryKey": {
       "ID": "A18E13FC-B2C1-4E77-A3D7-EE775BDE098C"
@@ -10,7 +10,12 @@
     "sync": {
       "lastModified": "2026-08-08T18:25:24.176Z",
       "checksum": "271ce6830df7c360ee8babe085d268590eedee346748adcd4c0997cb5fb1e57b"
-    }
+    },
+    "_comments": [
+      "Description corrected to match what V202608131600 writes (#39). The 0.8.0 text promised",
+      "'read-only on the published form-definition entities the respondent widget must load' --",
+      "stale twice over, because the widget never loaded them and those grants are now gone."
+    ]
   },
   {
     "fields": {

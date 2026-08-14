@@ -37,6 +37,48 @@
 --
 -- The 5 `spUpdateTemplateParam` calls are the generator's own create-then-update of template params
 -- it created moments earlier in this same file. They are not updates to pre-existing state.
+--
+-- =============================================================================================
+-- ⚠️ THIS FILE WAS EDITED IN PLACE ON 2026-08-13 (#39), WHICH `migrations/README.md` OTHERWISE
+--    FORBIDS. Read this before touching it, and do not treat the edit as a precedent.
+-- =============================================================================================
+-- WHAT CHANGED, AND NOTHING ELSE DID. Both `spCreateRole` calls are now guarded by
+-- `IF NOT EXISTS (… WHERE Name = …)` — adopt-or-skip — and the 18 `SET @RoleID_… =` lines that
+-- addressed the two Forms roles by their hardcoded UUIDs now resolve them BY NAME. No record was
+-- added, removed or otherwise altered, so `metadata/` and the seed manifest are untouched.
+--
+-- WHY IT HAD TO BE THIS FILE, RATHER THAN A LATER MIGRATION. `__mj.Role` carries
+-- `UQ__Role__737584F6A210197E UNIQUE(Name)`, and `spCreateRole` is a plain INSERT with no existence
+-- check. So on any database where `Form Respondent` already exists — which is every host that
+-- installed bizapps-caliber before this release, since it created the role itself following
+-- `host-readiness`'s description of it — this file failed with
+-- `Msg 2627 … duplicate key value is (Form Respondent)` and HALTED THE MIGRATION CHAIN. A repair
+-- shipped as a later migration can never run on such a host, because the chain never reaches it.
+-- Editing here was the only way to unbrick it. The `Forms Automation Runner` create got the same
+-- guard: its collision is theoretical (the name is Forms-specific) but it is the identical
+-- blind-INSERT failure class, and the guard is one line.
+--
+-- WHY THE EDIT IS SAFE FOR HOSTS THAT ALREADY APPLIED IT. Skyway's `Migrate()` resolves
+-- already-applied migrations by VERSION and never checksum-validates them — checksum checking lives
+-- only in the separate `Validate()` command, which `mj migrate` and `mj app install` do not invoke.
+-- So an applied host skips this file unchanged, and a host stuck on the duplicate-role failure
+-- re-runs the corrected text. Both converge; neither notices the rewrite.
+--
+-- THE HARDCODED ROLE ID IS NOW A DEFAULT, NOT AN ASSUMPTION. `A18E13FC-B2C1-4E77-A3D7-EE775BDE098C`
+-- is still the id when Forms creates `Form Respondent` fresh, so the teardown script and the docs
+-- keep meaning something — but nothing else may assume it, because on an adopted host the role
+-- carries whichever id the app that got there first minted. That is why the by-name rewrite covers
+-- every reference and not just the create: adopt-or-skip ALONE would have left the nine permission
+-- rows pointing at an id that does not exist on exactly the hosts the guard was added to rescue.
+--
+-- WHAT THIS FILE STILL SHIPS THAT IS WRONG, AND WHERE IT IS FIXED. The nine `Form Respondent`
+-- permission rows below still pass every RLS filter parameter `_Clear = 1`, i.e. explicitly NULL —
+-- findings 1 and 2 of #39, an unfiltered create that bypasses the whole submit pipeline and an
+-- unfiltered read that is instance-wide on one shared anonymous principal. That is corrected by
+-- `V202608131600__v0.10.x__Respondent_Grant_Hardening.sql`, which runs immediately after this file
+-- on a fresh install and heals hosts that already applied it. It is deliberately NOT fixed here:
+-- this edit is kept to the one change that could only be made in place, so the diff of a shipped
+-- file stays reviewable, and so the hardening reads in one place instead of two.
 -- =============================================================================================
 
 -- Save MJ: Roles (core SP call only)
@@ -50,7 +92,10 @@ SET
 SET
   @Name_50ffc957 = N'Form Respondent'
 SET
-  @Description_50ffc957 = N'Restricted role for anonymous/external respondents who reach a published MJ Form via a scoped magic-link distribution. The ONE deliberate exception to the magic-link read-only convention: it grants CanCreate on Form Responses and Form Response Answers ONLY (no read/update/delete on those), plus read-only on the published form-definition entities the respondent widget must load. It grants nothing else. Authorization is enforced server-side from the session''s mj_scopes union; this role is the entity-permission boundary. Never assign to internal/SSO users.' EXEC [${mjSchema}].spCreateRole @ID = @ID_50ffc957,
+  @Description_50ffc957 = N'Restricted role for anonymous/external respondents who reach a published MJ Form via a scoped magic-link distribution. The ONE deliberate exception to the magic-link read-only convention: it grants CanCreate on Form Responses and Form Response Answers ONLY (no read/update/delete on those), plus read-only on the published form-definition entities the respondent widget must load. It grants nothing else. Authorization is enforced server-side from the session''s mj_scopes union; this role is the entity-permission boundary. Never assign to internal/SSO users.'
+
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Role] WHERE Name = @Name_50ffc957)
+EXEC [${mjSchema}].spCreateRole @ID = @ID_50ffc957,
   @Name = @Name_50ffc957,
   @Description = @Description_50ffc957,
   @DirectoryID = @DirectoryID_50ffc957,
@@ -71,7 +116,10 @@ SET
 SET
   @Name_7133d57d = N'Forms Automation Runner'
 SET
-  @Description_7133d57d = N'The role on-submit automations and entity bindings execute under. Deliberately separate from the anonymous ''Form Respondent'' role: a respondent may only create a response, while an automation must read that response back and write business records downstream. Grants read on the response entities AND on the form definition it dispatches against (Forms, Form Questions) -- without those two the runtime cannot load the form or type its answers, and every automation fails on a permission error -- update on Form Responses only (so ''Forms: Upsert Respondent Person'' can stamp RespondentPersonID back onto the response), plus write on the Forms-owned automation/binding bookkeeping tables. Grants NOTHING on any binding target entity — those are added per deployment, and the set of them is the hard ceiling on what a form author can reach through a binding. Assign only to the seeded automation service user; never to a person.' EXEC [${mjSchema}].spCreateRole @ID = @ID_7133d57d,
+  @Description_7133d57d = N'The role on-submit automations and entity bindings execute under. Deliberately separate from the anonymous ''Form Respondent'' role: a respondent may only create a response, while an automation must read that response back and write business records downstream. Grants read on the response entities AND on the form definition it dispatches against (Forms, Form Questions) -- without those two the runtime cannot load the form or type its answers, and every automation fails on a permission error -- update on Form Responses only (so ''Forms: Upsert Respondent Person'' can stamp RespondentPersonID back onto the response), plus write on the Forms-owned automation/binding bookkeeping tables. Grants NOTHING on any binding target entity — those are added per deployment, and the set of them is the hard ceiling on what a form author can reach through a binding. Assign only to the seeded automation service user; never to a person.'
+
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Role] WHERE Name = @Name_7133d57d)
+EXEC [${mjSchema}].spCreateRole @ID = @ID_7133d57d,
   @Name = @Name_7133d57d,
   @Description = @Description_7133d57d,
   @DirectoryID = @DirectoryID_7133d57d,
@@ -2821,7 +2869,7 @@ SET
 SET
   @EntityID_37e62a12 = '63600739-7165-4BDC-B7D7-19A1B1951DFA'
 SET
-  @RoleID_37e62a12 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_37e62a12 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_37e62a12 = 1
 SET
@@ -2868,7 +2916,7 @@ SET
 SET
   @EntityID_0709aee0 = 'D03BCDF5-0B32-4EA8-88E8-F73D70A90810'
 SET
-  @RoleID_0709aee0 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_0709aee0 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_0709aee0 = 1
 SET
@@ -2915,7 +2963,7 @@ SET
 SET
   @EntityID_74d3a13e = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8'
 SET
-  @RoleID_74d3a13e = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_74d3a13e = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_74d3a13e = 0
 SET
@@ -2962,7 +3010,7 @@ SET
 SET
   @EntityID_ada00951 = '622E2804-5B6D-4B43-92A4-294ADC538F50'
 SET
-  @RoleID_ada00951 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_ada00951 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_ada00951 = 0
 SET
@@ -3009,7 +3057,7 @@ SET
 SET
   @EntityID_55d52c7c = '1FC60BDA-25B8-473B-ACE5-1238670D3535'
 SET
-  @RoleID_55d52c7c = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_55d52c7c = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_55d52c7c = 0
 SET
@@ -3056,7 +3104,7 @@ SET
 SET
   @EntityID_04602f26 = '1EF36DB1-004D-4672-8A57-A0F3B71C0050'
 SET
-  @RoleID_04602f26 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_04602f26 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_04602f26 = 0
 SET
@@ -3103,7 +3151,7 @@ SET
 SET
   @EntityID_6f2e474d = '63600739-7165-4BDC-B7D7-19A1B1951DFA'
 SET
-  @RoleID_6f2e474d = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_6f2e474d = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_6f2e474d = 0
 SET
@@ -3150,7 +3198,7 @@ SET
 SET
   @EntityID_1f73f1b9 = 'A3BFAA2D-3158-4EED-9934-76D1E35D20F6'
 SET
-  @RoleID_1f73f1b9 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_1f73f1b9 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_1f73f1b9 = 0
 SET
@@ -3197,7 +3245,7 @@ SET
 SET
   @EntityID_6d0425b8 = 'C396B99F-0677-47F8-BAEF-BCB08DE5CF97'
 SET
-  @RoleID_6d0425b8 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_6d0425b8 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_6d0425b8 = 0
 SET
@@ -3244,7 +3292,7 @@ SET
 SET
   @EntityID_739ca229 = 'BF3016E2-8BA7-4975-83B6-02C9435C1441'
 SET
-  @RoleID_739ca229 = 'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'
+  @RoleID_739ca229 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Form Respondent')
 SET
   @CanCreate_739ca229 = 0
 SET
@@ -3291,7 +3339,7 @@ SET
 SET
   @EntityID_eeec1e43 = 'D03BCDF5-0B32-4EA8-88E8-F73D70A90810'
 SET
-  @RoleID_eeec1e43 = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_eeec1e43 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_eeec1e43 = 0
 SET
@@ -3338,7 +3386,7 @@ SET
 SET
   @EntityID_c123fdc2 = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8'
 SET
-  @RoleID_c123fdc2 = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_c123fdc2 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_c123fdc2 = 0
 SET
@@ -3385,7 +3433,7 @@ SET
 SET
   @EntityID_25dab81d = 'C396B99F-0677-47F8-BAEF-BCB08DE5CF97'
 SET
-  @RoleID_25dab81d = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_25dab81d = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_25dab81d = 0
 SET
@@ -3432,7 +3480,7 @@ SET
 SET
   @EntityID_7073de3b = 'B91DEFE0-A2C5-4462-BBC3-D3BFD01D631A'
 SET
-  @RoleID_7073de3b = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_7073de3b = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_7073de3b = 0
 SET
@@ -3479,7 +3527,7 @@ SET
 SET
   @EntityID_4d7ca8e2 = 'C7F71A7D-FA84-45E8-BDE3-FE1CCC46A778'
 SET
-  @RoleID_4d7ca8e2 = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_4d7ca8e2 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_4d7ca8e2 = 0
 SET
@@ -3526,7 +3574,7 @@ SET
 SET
   @EntityID_4903b982 = 'DC399B21-517E-4E71-9571-037AB9E2641E'
 SET
-  @RoleID_4903b982 = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_4903b982 = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_4903b982 = 1
 SET
@@ -3573,7 +3621,7 @@ SET
 SET
   @EntityID_7cb9a3fb = 'ED974050-6DA2-40DA-813B-38927002246B'
 SET
-  @RoleID_7cb9a3fb = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0'
+  @RoleID_7cb9a3fb = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner')
 SET
   @CanCreate_7cb9a3fb = 1
 SET
@@ -4577,7 +4625,7 @@ SET
 SET
   @UserID_e0d4027b = '9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84'
 SET
-  @RoleID_e0d4027b = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0' EXEC [${mjSchema}].spCreateUserRole @ID = @ID_e0d4027b,
+  @RoleID_e0d4027b = (SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner') EXEC [${mjSchema}].spCreateUserRole @ID = @ID_e0d4027b,
   @UserID = @UserID_e0d4027b,
   @RoleID = @RoleID_e0d4027b;
 

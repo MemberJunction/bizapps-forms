@@ -29,6 +29,25 @@ migrations already carry the metadata, so CodeGen logged almost nothing while
 still building every object. The catalog is the record of what was actually
 built.
 
+## What is deliberately NOT here
+
+The PostgreSQL chain stops before the metadata seed, and everything downstream of that stop is
+absent for the same reason rather than by oversight. Recorded here so the gap is a known quantity
+instead of something the next reader has to infer from a directory listing:
+
+| SQL Server migration | why there is no PostgreSQL twin |
+|---|---|
+| `V202608081400__…Backfill_Legacy_Automations` | backfills rows the seed creates; nothing to backfill without it |
+| `V202608081700__…Metadata_Sync` | 4,600 lines of `EXEC __mj.spCreate*` calls. The converter emits these as raw T-SQL, and a PostgreSQL core exposes the equivalents as functions with a different call shape — porting it is a hand-authored rewrite, not a conversion |
+| `V202608081800__…Seed_SchemaInfo_EntityNamePrefix` | seeds a row the file above depends on |
+| `V202608131600__…Respondent_Grant_Hardening` | repairs grants that only the seed creates, so on PostgreSQL there is nothing for it to repair — neither the vulnerability it closes nor the rows it corrects exist (#39) |
+
+The consequence is worth stating plainly: **a PostgreSQL host installs the Forms schema but none of
+the seed payload** — no roles, no grants, no actions, prompts, styles or dashboards — so the
+anonymous respondent path does not run there at all. Port the seed and this file in the same change
+if that is ever taken on; shipping the hardening without the seed would repair nothing, and shipping
+the seed without the hardening would import the vulnerability #39 closed.
+
 ## Prerequisite
 
 `FormResponse.RespondentPersonID` hard-FKs `__mj_BizAppsCommon.Person(ID)`, so
