@@ -11,7 +11,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } f
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { runChecks, buildManifest, findRespondentGrants, RESPONDENT_GUARDED_GRANTS } from './check-distribution-seed.mjs';
+import {
+    runChecks,
+    buildManifest,
+    findRespondentGrants,
+    findPermissionCalls,
+    countPermissionProcedureMentions,
+    RESPONDENT_GUARDED_GRANTS,
+} from './check-distribution-seed.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -30,6 +37,9 @@ function fixture(build) {
     const root = mkdtempSync(join(tmpdir(), 'dist-gate-'));
     cpSync(join(REPO_ROOT, 'metadata'), join(root, 'metadata'), {
         recursive: true,
+        // `dereference` so a symlink under metadata/ is copied as content: cases below WRITE into
+        // this copy, and through a link those writes would land in the real working tree.
+        dereference: true,
         filter: (src) => !src.includes(`${'metadata'}/sql_logging`),
     });
     mkdirSync(join(root, 'migrations'), { recursive: true });
@@ -515,6 +525,164 @@ for (const guarded of RESPONDENT_GUARDED_GRANTS) {
         'the hardening migration declares a different filter for this pair',
     );
 }
+
+// ---------------------------------------------------------------------------
+// CHECK 3 — hardening against the parser false negatives found by adversarial
+// review of PR #42. Every case below was a silent pass before its fix: the gate
+// read the file, understood none of it, and reported health.
+// ---------------------------------------------------------------------------
+
+/** A record that MUST be caught: CanCreate on Form Responses with the create filter cleared. */
+const VIOLATION = { suffix: 'ad00be01', entityId: FORM_RESPONSES, canCreate: 1, createFilter: 'clear' };
+
+/** Asserts the seed's violation is still seen through whatever `decorate` did to the file. */
+function stillCaught(name, sql) {
+    withSeed(POST, sql, (violations) => {
+        check(name, violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
+    });
+}
+
+// 21. Astral characters. The mask was built with [...sql] (code points) but indexed against sql
+//     (UTF-16 code units), so each emoji slid the mask one unit further out of alignment; at three
+//     the record was blanked outright. Seed text is generated from metadata/ descriptions, where an
+//     emoji is ordinary prose.
+stillCaught('sees through emoji in a preceding comment (mask/source index alignment)', `-- Regenerated 🚀🚀🚀 seed delta\n${permissionRecord(VIOLATION)}`);
+
+// 22. Block-comment nesting turned a header into a file-wide blindfold. `migrations/*.sql` contains
+//     the two characters `/*`, so depth went 1 -> 2, the real `*/` returned it to 1, and the scan
+//     ran off the end blanking every record below. Nesting is T-SQL-correct and, for a gate, the
+//     wrong trade: over-running to EOF hides violations, while stopping early can only expose
+//     comment text as code, which fails loudly.
+stillCaught(
+    'sees past a header comment that mentions `migrations/*.sql` (unbalanced /* )',
+    `/*\n * MJ Forms 0.11 seed delta. Substitutions applied per migrations/*.sql convention.\n */\n${permissionRecord(VIOLATION)}`,
+);
+
+// 23. Capability detection must fail CLOSED. It compared the resolved argument to the string '1',
+//     so every flag it could not read came back "not granted" — which skips all four rules and
+//     reports health. The file already argues (for @RoleID) that "I cannot tell" is not "this is
+//     fine"; these four are the same argument applied to Can*.
+const CAN_CREATE_SET = `SET\n  @CanCreate_${VIOLATION.suffix} = 1`;
+const CAN_CREATE_ARG = `  @CanCreate = @CanCreate_${VIOLATION.suffix},`;
+for (const [name, sql] of [
+    ['a trailing comment on the flag\'s assignment', permissionRecord(VIOLATION).replace(CAN_CREATE_SET, `${CAN_CREATE_SET} -- respondents may submit`)],
+    ['a comment line above the flag\'s argument', permissionRecord(VIOLATION).replace(CAN_CREATE_ARG, `  -- the one deliberate write (#39)\n${CAN_CREATE_ARG}`)],
+    ['a quoted flag value', permissionRecord(VIOLATION).replace(CAN_CREATE_SET, `SET\n  @CanCreate_${VIOLATION.suffix} = '1'`)],
+    ['a CAST expression as the flag', permissionRecord(VIOLATION).replace(CAN_CREATE_ARG, '  @CanCreate = CAST(1 AS BIT),')],
+]) {
+    stillCaught(`reads CanCreate as granted despite ${name}`, sql);
+}
+
+// 24. Role-name matching was exact where SQL Server's `=` is not: a default collation is
+//     case-insensitive and pads trailing blanks, so all three of these resolve to the real role on
+//     the host while the gate read them as some other role and skipped the call.
+const AS_WRITTEN = `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent')`;
+for (const [name, subselect] of [
+    ['upper case', `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'FORM RESPONDENT')`],
+    ['a trailing blank', `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent ')`],
+    ['a bracketed column name', `(SELECT ID FROM [\${mjSchema}].[Role] WHERE [Name] = N'Form Respondent')`],
+]) {
+    stillCaught(`matches the role named with ${name}`, permissionRecord(VIOLATION).replace(AS_WRITTEN, subselect));
+}
+
+// 25. Two calls in one batch, the first unterminated: the argument scan ran past the first call into
+//     the second, and the second's `@RoleID` overwrote the first's in the FIRST call's own argument
+//     map — re-attributing a respondent grant to whatever role came next, and skipping it.
+stillCaught(
+    'reads the first of two calls in a batch when it carries no terminating semicolon',
+    permissionRecord(VIOLATION).replace(/;\n/, '\n').replace(/\nGO\n/, '\n') +
+        permissionRecord({ ...VIOLATION, suffix: 'be01cf02', entityId: FORMS }).replace(/Form Respondent/g, 'Integration'),
+);
+
+// 26. #41's exploit in the shape MJ's `_Clear` convention exists for: an UPDATE that nulls the
+//     filter and says nothing about the capability, leaving the host row at CanCreate = 1 with no
+//     filter. The rules keyed off "if the call GRANTS CanCreate", and this call grants nothing — it
+//     only takes the filter away, which is the whole attack.
+withSeed(
+    POST,
+    `-- Save MJ: Entity Permissions (core SP call only)
+DECLARE @EntityID_z UNIQUEIDENTIFIER, @RoleID_z UNIQUEIDENTIFIER
+SET
+  @EntityID_z = '${FORM_RESPONSES}'
+SET
+  @RoleID_z = (SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent')
+EXEC [\${mjSchema}].spUpdateEntityPermission @ID = '60470C16-21AB-48DF-BD12-EB3482F365F7',
+  @EntityID = @EntityID_z,
+  @RoleID = @RoleID_z,
+  @CreateRLSFilterID_Clear = 1;
+GO
+`,
+    (violations) => {
+        check(
+            'flags an update that clears a filter without restating the capability',
+            violations.some((v) => v.includes('clears') || v.includes('_Clear')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 27. Rule 4 needs to know WHICH grant it is looking at, and an entity named through a bracketed
+//     column went unresolved — so a guarded pair pointed at another app's filter record read as an
+//     ordinary non-NULL filter and passed.
+withSeed(
+    POST,
+    seedSql(
+        permissionRecord({
+            suffix: 'cf02da03',
+            entityName: 'MJ_BizApps_Forms: Form Responses',
+            canCreate: 1,
+            createFilter: OWN_DISTRIBUTION_FILTER,
+        }).replace("WHERE Name = N'MJ_BizApps_Forms: Form Responses'", "WHERE [Name] = N'MJ_BizApps_Forms: Form Responses'"),
+    ),
+    (violations) => {
+        check(
+            'applies rule 4 to an entity named through a bracketed column',
+            violations.some((v) => v.includes(OWN_DISTRIBUTION_FILTER) && v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 28. The backstop. Zero parsed calls is indistinguishable from a clean file, so the gate asserts
+//     that it understood everything it saw: if the SQL names a permission procedure more often than
+//     the parser recognised a call, it says so instead of reporting health. A PostgreSQL seed is the
+//     concrete case — `migrations-pg/` is scanned but the parser is T-SQL-only, and the converter
+//     renders these calls as `SELECT`s.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        writeFileSync(
+            join(root, 'migrations', POST),
+            `SELECT \${mjSchema}.spcreateentitypermission('60470c16-21ab-48df-bd12-eb3482f365f7'::uuid, '${FORM_RESPONSES.toLowerCase()}'::uuid, (SELECT id FROM \${mjSchema}.role WHERE name = 'Form Respondent'), true, false, false, false, NULL, NULL, 'Allow');\n`,
+        );
+    },
+    (violations) => {
+        check(
+            'refuses a seed whose permission calls it could not parse (PostgreSQL shape)',
+            violations.some((v) => v.includes('could not parse') || v.includes('did not recognise')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 29. …and the backstop must be quiet on the shape that actually ships, or it is just noise. The
+//     real seed names the procedure 17 times and the parser reads 17 calls.
+check(
+    'the backstop agrees with the parser on the shipped seed (17 calls, none missed)',
+    countPermissionProcedureMentions(shippedSeed) === 17 && findPermissionCalls(shippedSeed).length === 17,
+    `mentions=${countPermissionProcedureMentions(shippedSeed)} parsed=${findPermissionCalls(shippedSeed).length}`,
+);
+
+// 30. The file class is matched by name, so a naming slip walked a generated seed straight past the
+//     gate. Widened to the spellings a person actually types; D7's boundary (hand-authored
+//     migrations stay out of scope) is unchanged.
+withSeed(
+    'V202609010000__v0.11.x__MetadataSync.sql',
+    seedSql(permissionRecord(VIOLATION)),
+    (violations) => {
+        check('scans a seed named MetadataSync, without the underscore', violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
+    },
+);
 
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
