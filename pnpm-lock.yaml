@@ -104,7 +104,7 @@ importers:
         specifier: 6.1.0-edge.2
         version: 6.1.0-edge.2
       '@mj-biz-apps/forms-entities':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../Entities
       zod:
         specifier: ^3.25.76
@@ -162,7 +162,7 @@ importers:
         specifier: ^6.1.0-edge.1
         version: 6.1.0-edge.2(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2))(@angular/router@21.1.3(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2))(@angular/platform-browser@21.1.3(@angular/animations@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)))(@angular/common@21.1.3(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2))(rxjs@7.8.2))(@angular/core@21.1.3(@angular/compiler@21.1.3)(rxjs@7.8.2)))(rxjs@7.8.2))(rxjs@7.8.2)(ws@8.21.3)
       '@mj-biz-apps/forms-entities':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../Entities
     devDependencies:
       '@angular/animations':
@@ -217,7 +217,7 @@ importers:
         specifier: ^6.1.0-edge.1
         version: 6.1.0-edge.2(@aws-sdk/credential-provider-node@3.972.79)(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@smithy/signature-v4@5.7.0)(chokidar@3.6.0)(debug@4.4.3)(encoding@0.1.13)(typescript@5.9.3)(ws@8.21.3)(zod@3.25.76)
       '@mj-biz-apps/forms-entities':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../Entities
     devDependencies:
       typescript:
@@ -279,16 +279,16 @@ importers:
         specifier: ^6.1.0-edge.1
         version: 6.1.0-edge.2(encoding@0.1.13)(typescript@5.9.3)
       '@mj-biz-apps/forms-actions':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../Actions
       '@mj-biz-apps/forms-core-entities-server':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../CoreEntitiesServer
       '@mj-biz-apps/forms-entities':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../Entities
       '@mj-biz-apps/forms-ng':
-        specifier: 0.9.0
+        specifier: 0.10.0
         version: link:../Angular
       class-validator:
         specifier: ^0.14.3
