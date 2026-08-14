@@ -761,9 +761,22 @@ native entities. This is the reporting differentiator no incumbent has.
   the edited one adopting the role on the same database; convergence and byte-identical idempotence;
   Caliber co-install with its own THROW 50021 still passing and a simulated Caliber uninstall
   leaving all four slots filtered; and the shipped filter text, read back out of the database,
-  proving cross-form isolation and fail-closed behaviour on an absent scope claim. **Not verified:**
-  the end-to-end exploit smoke (`smoke/respondent-scope-path.mjs`) is written but unrun — this repo
-  no longer contains a runnable MJAPI, since the dev harness was dropped in the pnpm migration.
+  proving cross-form isolation and fail-closed behaviour on an absent scope claim.
+
+  **And then it was verified end to end**, after an earlier revision of this entry recorded the
+  exploit smoke as written-but-unrun. A dev harness was reconstructed from `cc13065^` (the commit
+  that dropped it; not committed back — it is scaffolding) and **all five smoke suites plus the
+  binding fixture** were run against a hardened sandbox: respondent, scope (12/12), binding (13/13),
+  automation semantics, and upload provenance — the last being the one that most needed running,
+  since `POST /forms/upload` resolves its definition under the anonymous user and therefore sits
+  behind the new scoped read filters. The scope suite was also run against the **unhardened** state
+  and fails there 8/12, printing the response-create exploit and the `PublicLinkToken` leak
+  verbatim; without that half a green run could not distinguish a working test from a test that
+  cannot fail — which is not hypothetical, because running it that way is what exposed three checks
+  in the smoke itself that had been passing for the wrong reason. Two operational notes for whoever
+  runs these next: the suites need `FORMS_RATELIMIT_MAX` raised (documented in
+  `guides/ENTITY_BINDING_GUIDE.md`; `smoke:automation` submits 8 times against a default of 5/min),
+  and the two that shell out to `sqlcmd` need `.env` exported into the process.
 
 - **2026-08-08 — MJ Forms had never been installable by anyone but its author.** Asked whether an MJ
   upgrade needs an `mj sync` migration (it does not — MJ ships its own core Metadata_Sync per release
