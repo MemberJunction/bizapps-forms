@@ -1,7 +1,10 @@
 # Issue #41 — Seed-regeneration gate, and the delta-first regeneration path
 
 **Issue:** [MemberJunction/bizapps-forms#41](https://github.com/MemberJunction/bizapps-forms/issues/41)
-**Status:** PLANNED (no implementation yet)
+**Status:** IMPLEMENTED on `plan/issue-41-seed-regeneration-gate` — §4 commit 1 (the gate + spec)
+is `d9924ee`, §4 commit 2 (the README) is `ec836ec`. AC1-AC6 verified on that head; AC7's outward
+steps (filing Appendix A, closing #41, leaving draft) await the §7.4 sign-off and are the repo
+owner's to take.
 **Planned:** 2026-08-13 · **Planning agent:** this PR's author
 **Supporting research:** [`plans/RESEARCH-METADATA-SYNC-RELEASE-PRACTICE.md`](RESEARCH-METADATA-SYNC-RELEASE-PRACTICE.md)
 (how MJ / bizapps-common / bizapps-caliber create their seeds, and why the release-time cadence
