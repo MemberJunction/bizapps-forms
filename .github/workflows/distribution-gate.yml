@@ -15,9 +15,16 @@ on:
     paths:
       - 'metadata/**'
       - 'migrations/**'
+      # CHECK 3 scans this directory, so the first PostgreSQL seed must trigger the gate that
+      # will refuse it. Without this entry a PR adding one runs no gate at all.
+      - 'migrations-pg/**'
       - 'migrations-teardown/**'
       - 'mj-app.json'
       - 'scripts/check-distribution-seed.mjs'
+      # The gate's own tests. The workflow RUNS this file below but did not trigger on it, and
+      # `npm test` is Vitest and never executes a plain-Node .mjs spec — so a PR that weakened or
+      # deleted a CHECK 3 case ran neither step. A gate whose tests nothing runs is a gate on trust.
+      - 'scripts/check-distribution-seed.spec.mjs'
       - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
   pull_request:
@@ -25,9 +32,16 @@ on:
     paths:
       - 'metadata/**'
       - 'migrations/**'
+      # CHECK 3 scans this directory, so the first PostgreSQL seed must trigger the gate that
+      # will refuse it. Without this entry a PR adding one runs no gate at all.
+      - 'migrations-pg/**'
       - 'migrations-teardown/**'
       - 'mj-app.json'
       - 'scripts/check-distribution-seed.mjs'
+      # The gate's own tests. The workflow RUNS this file below but did not trigger on it, and
+      # `npm test` is Vitest and never executes a plain-Node .mjs spec — so a PR that weakened or
+      # deleted a CHECK 3 case ran neither step. A gate whose tests nothing runs is a gate on trust.
+      - 'scripts/check-distribution-seed.spec.mjs'
       - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
 
