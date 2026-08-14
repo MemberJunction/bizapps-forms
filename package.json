@@ -23,6 +23,7 @@
     "lint:distribution": "node scripts/check-distribution-seed.mjs",
     "seed:manifest": "node scripts/write-seed-manifest.mjs",
     "smoke:respondent": "node smoke/respondent-path.mjs",
+    "smoke:scope": "node smoke/respondent-scope-path.mjs",
     "install:deps": "pnpm install",
     "setup": "echo 'Please run: pnpm run mj:migrate && pnpm run mj:codegen && pnpm run build'",
     "change": "changeset",

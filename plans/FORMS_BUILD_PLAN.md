@@ -710,6 +710,74 @@ native entities. This is the reporting differentiator no incumbent has.
 
 ## 12. Progress Log
 
+- **2026-08-13 — the seed that finally shipped was shipping an exploit, and could not install
+  where it was needed most.** Found from the other side: bizapps-caliber#219 was bricked by our
+  0.8.0 seed, and fixing it there surfaced three defects here (#39, plan
+  `plans/ISSUE-39-RESPONDENT-SEED-HARDENING-PLAN.md`, PR #40). All three were re-verified against
+  this repo before any code was written.
+
+  1. **The `CanCreate` grant doubled as direct write access.** The seed created all nine
+     `Form Respondent` permission rows with every RLS filter column explicitly NULL, and MJ's
+     `UserExemptFromRowLevelSecurity` treats a null `CreateRLSFilterID` as exemption from
+     create-time RLS. Since MJ publishes a generic `Create<Entity>` mutation for every entity, the
+     flag that exists only to satisfy `checkRespondentScope` also let any anonymous respondent
+     write response rows that never entered `submit-pipeline.ts` — past Turnstile, the rate
+     limiter, the `MaxResponses` quota, field validation and the open/close window, all of which
+     live only there. Caliber proved the class by exploit against its own widget role.
+  2. **Every unfiltered read was an instance-wide read**, because one shared anonymous principal
+     backs every respondent: any respondent to any form could enumerate every `FormDistribution`
+     row, `PublicLinkToken` included.
+  3. **`spCreateRole` was a blind INSERT into a table whose `Name` is UNIQUE**, so 0.8.0 halted the
+     chain with `Msg 2627` on every host that had installed Caliber first — and a repair shipped as
+     a later migration could never run there, because the chain never reaches it.
+
+  **Two things verification found that the issue did not state, and both changed the fix.** Five of
+  the seven read grants were *dead*: the entire anonymous surface is `PublishedForm`,
+  `SubmitFormResponse` and the upload endpoint, all of which resolve through
+  `resolvePublishedDefinition`, which reads only Distributions and Versions — the published
+  version's `DefinitionSnapshot` already carries the questions, options, pages and style tokens. So
+  they were **removed rather than filtered**, a special case designed out of existence. And
+  adopt-or-skip on the role INSERT alone would not have worked: the nine permission rows and the
+  automation principal's `UserRole` all hardcoded the role id, so on exactly the hosts the guard
+  rescues they would have pointed at an id that does not exist.
+
+  Shipped as `V202608131600__v0.10.x__Respondent_Grant_Hardening.sql` (three Forms-owned RLS filter
+  records, attached unconditionally — pointing our rows at *Caliber's* records is what let Caliber's
+  uninstall return them to NULL), plus an **in-place edit of the 0.8.0 seed**, which
+  `migrations/README.md` otherwise forbids and now records as its one exception: the file could not
+  apply at all on the hosts needing the fix, and Skyway's `Migrate()` resolves applied migrations by
+  version without ever checksum-validating them.
+
+  **Two lessons worth carrying.** A postcondition that re-tests the predicate of the statement above
+  it is a tautology that reads like protection — two of the first draft's three checks were exactly
+  that, and were replaced by one reachable check scoped to `MJ_BizApps_Forms:` entities (never
+  role-wide: `Form Respondent` is shared, and a role-wide assertion about a sibling app's rows is
+  what bricked Caliber). And a fix that lives only in `migrations/` while `metadata/` still
+  describes the old state is half a fix — the next seed regeneration gets a later timestamp and
+  silently undoes it, which is now recorded in `.entity-permissions.json` itself.
+
+  Verified by replay against SQL Server, 33 assertions across three suites: every postcondition
+  proved to fire on a database engineered to break it; the pre-edit seed reproducing `Msg 2627` and
+  the edited one adopting the role on the same database; convergence and byte-identical idempotence;
+  Caliber co-install with its own THROW 50021 still passing and a simulated Caliber uninstall
+  leaving all four slots filtered; and the shipped filter text, read back out of the database,
+  proving cross-form isolation and fail-closed behaviour on an absent scope claim.
+
+  **And then it was verified end to end**, after an earlier revision of this entry recorded the
+  exploit smoke as written-but-unrun. A dev harness was reconstructed from `cc13065^` (the commit
+  that dropped it; not committed back — it is scaffolding) and **all five smoke suites plus the
+  binding fixture** were run against a hardened sandbox: respondent, scope (12/12), binding (13/13),
+  automation semantics, and upload provenance — the last being the one that most needed running,
+  since `POST /forms/upload` resolves its definition under the anonymous user and therefore sits
+  behind the new scoped read filters. The scope suite was also run against the **unhardened** state
+  and fails there 8/12, printing the response-create exploit and the `PublicLinkToken` leak
+  verbatim; without that half a green run could not distinguish a working test from a test that
+  cannot fail — which is not hypothetical, because running it that way is what exposed three checks
+  in the smoke itself that had been passing for the wrong reason. Two operational notes for whoever
+  runs these next: the suites need `FORMS_RATELIMIT_MAX` raised (documented in
+  `guides/ENTITY_BINDING_GUIDE.md`; `smoke:automation` submits 8 times against a default of 5/min),
+  and the two that shell out to `sqlcmd` need `.env` exported into the process.
+
 - **2026-08-08 — MJ Forms had never been installable by anyone but its author.** Asked whether an MJ
   upgrade needs an `mj sync` migration (it does not — MJ ships its own core Metadata_Sync per release
   band, applied by `npx mj migrate -t`), which surfaced that **this repo had never shipped a metadata

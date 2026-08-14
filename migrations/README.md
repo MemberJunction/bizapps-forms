@@ -33,7 +33,20 @@ metadata edit and a silent non-ship.
 
 **Add a NEW seed migration; never edit an existing one.** Migrations are append-only history —
 `V202608081700` is applied wherever it is applied, and rewriting it changes what a database that
-already ran it believes it ran. A later metadata change becomes
+already ran it believes it ran.
+
+> **The one exception, and what earned it (2026-08-13, #39).** `V202608081700` was edited in place
+> to make its two `spCreateRole` calls adopt-or-skip by name. It qualified on a test worth reusing
+> before anyone claims the exception again: **the file could not apply at all** on the hosts that
+> needed fixing — `Role.Name` is UNIQUE and `spCreateRole` is a bare INSERT, so on any database where
+> `Form Respondent` already existed it failed with `Msg 2627` and halted the chain, which means a
+> repair shipped as a LATER migration could never have run there. Editing the file was the only path
+> to a chain that applies. It is safe for hosts that already applied it because Skyway's `Migrate()`
+> resolves applied migrations by version and never checksum-validates them (checksums live only in
+> the separate `Validate()`), so an applied host skips the file and a stuck host runs the corrected
+> text. The edit changed no record — only how the role id is resolved — so `metadata/` and the seed
+> manifest were untouched. Everything else #39 fixed shipped as a new migration
+> (`V202608131600__v0.10.x__Respondent_Grant_Hardening.sql`), which is the rule, not the exception. A later metadata change becomes
 `V<newstamp>__v<ver>__Metadata_Sync.sql` containing just that change's records, exactly as
 `bizapps-tasks` ships two. (Regenerating the *whole* seed into a new file also works and is simpler
 to produce, but then it must be written to tolerate rows that already exist.)
@@ -52,6 +65,16 @@ instead of `spCreate*` and the result is not replayable on a fresh install.
 #    BACKUP MJ_Forms_Dev / RESTORE AS MJ_Forms_SeedGen, then against the copy:
 #      - run migrations-teardown/V001 (with ${mjSchema} -> __mj) to clear the core rows
 #      - DELETE the Forms business data + FormStyle + FormCategory
+#      - RE-CREATE the three 7F0E000x row-level-security filter records (#39). The teardown you
+#        just ran deleted them, correctly — they are Forms-owned and in its doom list — but the
+#        four Form Respondent permission records reference them by @lookup, so the push cannot
+#        resolve them. Re-run just the filter section of
+#        V202608131600__v0.10.x__Respondent_Grant_Hardening.sql. If you skip this the push FAILS
+#        LOUDLY ("Lookup failed: No record found in 'MJ: Row Level Security Filters'"), which is
+#        the point: it cannot quietly regenerate a seed that re-grants unfiltered create.
+#        The filter RECORDS cannot live in metadata/ — MJ grants no role Create on
+#        'MJ: Row Level Security Filters', so pushing them is refused. Only the references are
+#        expressible there.
 # 2. Push. Expect every directory to report "created" and none to report "updated".
 DB_DATABASE=MJ_Forms_SeedGen npx mj sync push --dir metadata --exclude users --ci
 # 3. The log lands in metadata/sql_logging/. Two substitutions are REQUIRED before it can ship:
