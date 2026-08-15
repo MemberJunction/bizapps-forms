@@ -26,7 +26,8 @@ import {
   findSessionResponse,
 } from './response-lookup.service';
 import { checkRespondentScope } from './scope-check.service';
-import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
+import { buildSourceMetadata, distributionRateLimitKey, rateLimitKey } from './source-metadata.service';
+import { getPublicSubmitConfig } from './config';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
 import { validateSubmission } from './validation.service';
 import {
@@ -177,11 +178,27 @@ export async function runSubmitPipeline(
     return fail(`Captcha verification failed (${turnstile.errorCode}).`);
   }
 
-  // 4. Rate-limit (per session + distribution).
+  // 4. Rate-limit — TWO gates, both fail-closed:
+  //    (a) per (session, distribution): the fine-grained limit for a well-behaved caller.
+  //    (b) per distribution (global): keyed ONLY on the server-resolved distribution id, so a
+  //        caller rotating the client-settable `x-session-id` header cannot escape it by landing
+  //        in a fresh per-session bucket every request. This is the ceiling that bounds the
+  //        on-submit-hook amplification (confirmation email, AI runs, entity upserts) an attacker
+  //        would otherwise trigger once per forged session.
+  const now = Date.now();
   const limit = FormsRateLimiter.Instance.check(
     rateLimitKey({ sessionId: ctx.sessionId, distributionId: resolved.distribution.ID }),
+    now,
   );
   if (!limit.allowed) {
+    return fail('Too many submissions; please retry shortly.');
+  }
+  const globalLimit = FormsRateLimiter.Instance.check(
+    distributionRateLimitKey(resolved.distribution.ID),
+    now,
+    getPublicSubmitConfig().globalRateLimitMax,
+  );
+  if (!globalLimit.allowed) {
     return fail('Too many submissions; please retry shortly.');
   }
 

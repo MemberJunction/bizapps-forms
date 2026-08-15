@@ -47,9 +47,25 @@ export interface SourceMetadataInputs {
 /**
  * The composite key used for per-(session, distribution) rate-limiting and dedupe.
  * Distinct distributions of the same form do not share a bucket.
+ *
+ * SECURITY NOTE: `sessionId` is `UserPayload.sessionId`, populated from the CLIENT-SETTABLE
+ * `x-session-id` HTTP header (see {@link SourceMetadataInputs.sessionId}). A caller that rotates
+ * that header per request lands in a fresh per-session bucket every time, so this key alone does
+ * NOT bound abuse. The per-distribution ceiling below ({@link distributionRateLimitKey}), keyed
+ * only on the server-resolved distribution id, is what caps total volume regardless of the header.
  */
 export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'distributionId'>): string {
   return `${inputs.distributionId}:${hashSessionId(inputs.sessionId)}`;
+}
+
+/**
+ * The per-distribution GLOBAL rate-limit key — derived solely from the server-resolved
+ * distribution id, with no client-supplied component. Namespaced with a `dist:` prefix so it can
+ * never collide with a composite per-session {@link rateLimitKey} (which is `<distId>:<hash>`).
+ * This is the abuse ceiling an attacker cannot escape by rotating the `x-session-id` header.
+ */
+export function distributionRateLimitKey(distributionId: string): string {
+  return `dist:${distributionId}`;
 }
 
 /**
