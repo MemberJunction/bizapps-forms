@@ -1,0 +1,10 @@
+{
+  "reason": "Four migrations from the 0.8.x/0.10.x line landed without PostgreSQL counterparts after the repo had previously reached parity.",
+  "note": "DEBT, recorded so it is visible rather than silent. Removing an entry means writing the port and replaying it against a real PostgreSQL instance. Adding one is not a way to skip that work.",
+  "unported": [
+    "V202608081400__v0.8.x__Backfill_Legacy_Automations.sql",
+    "V202608081700__v0.8.x__Metadata_Sync.sql",
+    "V202608081800__v0.8.x__Seed_SchemaInfo_EntityNamePrefix.sql",
+    "V202608131600__v0.10.x__Respondent_Grant_Hardening.sql"
+  ]
+}

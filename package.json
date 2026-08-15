@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n\u274c Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\"",
+    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n❌ Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\" && pnpm run check:pg-parity",
     "build": "pnpm run build:stream",
     "build:stream": "turbo --log-order=stream build --filter=\"@mj-biz-apps/*\"",
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/forms-entities\" --filter=\"@mj-biz-apps/forms-actions\"",
@@ -34,7 +34,8 @@
     "smoke:binding": "node smoke/binding-path.mjs",
     "smoke:binding:seed": "node smoke/seed-binding-smoke.mjs",
     "smoke:automation": "node smoke/automation-semantics-path.mjs",
-    "smoke:provenance": "node smoke/upload-provenance-path.mjs"
+    "smoke:provenance": "node smoke/upload-provenance-path.mjs",
+    "check:pg-parity": "node scripts/check-pg-parity.mjs"
   },
   "repository": {
     "type": "git",
