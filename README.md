@@ -6,7 +6,7 @@
 
 ### Forms, surveys &amp; intake — beautiful, free, and built on _your_ data.
 
-**A free, open-source [MemberJunction](https://github.com/MemberJunction/MJ) Open App.**
+**A source-available [MemberJunction](https://github.com/MemberJunction/MJ) Open App.**
 Anonymous-friendly public links. Gorgeous on mobile. Set up in two minutes by a human _or_ an AI agent.
 And every response is a **first-class record in your MemberJunction database** — not an export trapped in someone else's silo.
 
@@ -37,7 +37,7 @@ are largely **reuse, not new build**.
 
 So MJ Forms ships the simple 80% **beautifully and for free**, and makes the powerful 20% _possible_
 by leaning on MJ infrastructure — **Actions, Agents, AI Prompts, RSU** — instead of a bespoke
-workflow engine. It's deliberately **free and open source (ISC)**, with a soft spot for the audiences
+workflow engine. It's deliberately **source-available under the Business Source License 1.1**, with a soft spot for the audiences
 MJ already serves best: **nonprofits and associations**, for whom per-response metered survey tools
 are a real, recurring budget pain.
 
@@ -330,4 +330,4 @@ branches **from `next`**; they must track the same-named remote. Never commit di
 ## 📄 License
 
 [ISC](https://opensource.org/license/isc-license-txt) © [MemberJunction](https://memberjunction.com).
-Free and open source, forever.
+Full source on GitHub — free and unrestricted for nonprofits, forever.
