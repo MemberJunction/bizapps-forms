@@ -101,6 +101,49 @@ export function assetPathPrefix(formId: string): string {
   return `${ASSET_STORAGE_PREFIX}/${formId}`;
 }
 
+/**
+ * Room for the multipart envelope around the file: boundaries, part headers, the `formId` field.
+ *
+ * Generous on purpose. This is not a second size limit — {@link getAssetConfig}'s `maxBytes` is
+ * the one an author is told about and the one {@link validateImage} enforces. This only has to be
+ * large enough that the envelope never decides the verdict.
+ */
+const MULTIPART_ENVELOPE_HEADROOM = 64 * 1024;
+
+/**
+ * Byte cap for the raw request body, deliberately ABOVE the file cap.
+ *
+ * The body reader is a memory guard, not the size policy. Capping the body at exactly `maxBytes`
+ * made it the policy by accident: it fired before the file was ever inspected, so an author who
+ * picked a slightly-too-big photo read "Upload exceeds the maximum size of 5242880 bytes" and
+ * `validateImage`'s "Image exceeds the maximum size of 5 MB." was unreachable through the route.
+ * It also rejected a file of exactly 5 MB, because the envelope pushed the body past the cap —
+ * making the advertised limit a lie by a few hundred bytes.
+ *
+ * With headroom, the file cap is judged by the code that knows it is judging a file, and the
+ * body reader only stops a body too large to be one of ours at all.
+ */
+export function assetBodyCap(): number {
+  return getAssetConfig().maxBytes + MULTIPART_ENVELOPE_HEADROOM;
+}
+
+/**
+ * The one wording for "too big", shared by the body reader and the file check.
+ *
+ * Both can reject an oversized upload, at different layers and against different numbers, and an
+ * author should not be able to tell which one fired — the limit they were told about is the same
+ * either way. Two copies of this sentence is how they came to disagree in the first place.
+ */
+export function assetTooLargeMessage(): string {
+  return `Image exceeds the maximum size of ${formatBytes(getAssetConfig().maxBytes)}.`;
+}
+
+/** Byte cap rendered for a person: authors read "5 MB", not "5242880 bytes". */
+function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? `${Number(mb.toFixed(mb % 1 === 0 ? 0 : 1))} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
 /** True when a stored object's provider key sits under the public asset prefix. */
 export function isPublicAssetKey(providerKey: string | null | undefined): boolean {
   return typeof providerKey === 'string' && providerKey.startsWith(`${ASSET_STORAGE_PREFIX}/`);

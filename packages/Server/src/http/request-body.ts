@@ -41,13 +41,29 @@ export interface JsonErrorResponse {
  * oversized upload never buffers unbounded memory. Also short-circuits on a `Content-Length`
  * that already exceeds the cap — that check is what stops a hostile client before a byte is read.
  *
+ * `tooLargeMessage` exists because this cap is a MEMORY GUARD, not a route's size policy, and the
+ * two are usually different numbers: a route that allows a 5 MB file has to allow a slightly
+ * larger body to carry it. Reporting `maxBytes` to the caller therefore quotes an internal number
+ * that contradicts whatever limit the route advertises. A route with its own size rule passes its
+ * own wording here; the default is for routes where the body cap IS the policy.
+ *
  * Never rejects: every outcome, including a stream error, comes back as a {@link BodyReadResult}
  * carrying the HTTP status the caller should send.
  */
-export function readCappedBody(req: ReadableRequest, maxBytes: number): Promise<BodyReadResult> {
+export function readCappedBody(
+  req: ReadableRequest,
+  maxBytes: number,
+  tooLargeMessage?: string,
+): Promise<BodyReadResult> {
+  const tooLarge = (): BodyReadResult => ({
+    ok: false,
+    status: 413,
+    error: tooLargeMessage ?? `Upload exceeds the maximum size of ${maxBytes} bytes.`,
+  });
+
   const declared = Number(req.headers['content-length'] ?? '');
   if (Number.isFinite(declared) && declared > maxBytes) {
-    return Promise.resolve(tooLarge(maxBytes));
+    return Promise.resolve(tooLarge());
   }
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
@@ -60,7 +76,7 @@ export function readCappedBody(req: ReadableRequest, maxBytes: number): Promise<
       total += chunk.length;
       if (total > maxBytes) {
         aborted = true;
-        resolve(tooLarge(maxBytes));
+        resolve(tooLarge());
         return;
       }
       chunks.push(chunk);
@@ -77,10 +93,6 @@ export function readCappedBody(req: ReadableRequest, maxBytes: number): Promise<
       }
     });
   });
-}
-
-function tooLarge(maxBytes: number): BodyReadResult {
-  return { ok: false, status: 413, error: `Upload exceeds the maximum size of ${maxBytes} bytes.` };
 }
 
 /** Send a JSON error body with the given status. A no-op once a response has started. */

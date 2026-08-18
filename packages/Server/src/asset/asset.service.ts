@@ -24,6 +24,7 @@ import type { EntityInfo, RunViewParams, RunViewResult, UserInfo } from '@member
 import { FORM_ENTITY } from '../public-submit/entity-names.js';
 import {
   assetPathPrefix,
+  assetTooLargeMessage,
   assetTypeAllowed,
   getAssetConfig,
   isPublicAssetKey,
@@ -197,7 +198,7 @@ export function validateImage(file: ParsedFile | undefined): AssetUploadResult {
     return failUpload(400, 'The selected file is empty.');
   }
   if (file.data.length > cfg.maxBytes) {
-    return failUpload(413, `Image exceeds the maximum size of ${formatBytes(cfg.maxBytes)}.`);
+    return failUpload(413, assetTooLargeMessage());
   }
   if (!assetTypeAllowed(file.contentType, cfg.allowedTypes)) {
     return failUpload(415, `"${bareContentType(file.contentType)}" is not an accepted image type.`);
@@ -370,10 +371,4 @@ function safeFileName(filename: string): string {
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned || 'image';
-}
-
-/** Byte cap rendered for a person: authors read "5 MB", not "5242880 bytes". */
-function formatBytes(bytes: number): string {
-  const mb = bytes / (1024 * 1024);
-  return mb >= 1 ? `${Number(mb.toFixed(mb % 1 === 0 ? 0 : 1))} MB` : `${Math.round(bytes / 1024)} KB`;
 }

@@ -30,7 +30,14 @@ import type { MJFileEntity } from '@memberjunction/core-entities';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { parseMultipart } from '../upload/multipart.js';
-import { ASSET_RESPONSE_HEADERS, ASSET_ROUTE, assetPublicUrl, getAssetConfig } from './config.js';
+import {
+  ASSET_RESPONSE_HEADERS,
+  ASSET_ROUTE,
+  assetBodyCap,
+  assetPublicUrl,
+  assetTooLargeMessage,
+  getAssetConfig,
+} from './config.js';
 import {
   loadAssetBytes,
   runAssetUpload,
@@ -96,7 +103,9 @@ export class AssetMiddleware extends BaseServerMiddleware {
       return;
     }
 
-    const body = await readCappedBody(req, getAssetConfig().maxBytes);
+    // The body cap is ABOVE the file cap (see assetBodyCap) so the size verdict belongs to
+    // validateImage, which knows it is judging a file. Both layers speak with one voice.
+    const body = await readCappedBody(req, assetBodyCap(), assetTooLargeMessage());
     if (!body.ok || !body.body) {
       sendJsonError(res, body.status ?? 400, body.error ?? 'Failed to read upload.');
       return;
