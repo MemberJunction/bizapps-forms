@@ -27,7 +27,8 @@ const LAYOUT_CSS = /* css */ `
 .fb-seg button.is-on { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary, var(--mj-text-inverse)); }
 
 /* Tabs */
-.fb-tabs { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); }
+.fb-tabs { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); overflow-x: auto; scrollbar-width: thin; }
+.fb-tab { flex: 0 0 auto; }  /* five tabs exceed a 360px viewport; the strip scrolls rather than the page */
 .fb-tab { font: inherit; font-weight: 600; font-size: 0.875rem; padding: 10px 14px; cursor: pointer; border: none; background: transparent; color: var(--mj-text-secondary); border-bottom: 2px solid transparent; }
 .fb-tab.is-on { color: var(--mj-brand-primary); border-bottom-color: var(--mj-brand-primary); }
 

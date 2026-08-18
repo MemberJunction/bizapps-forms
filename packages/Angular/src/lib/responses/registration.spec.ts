@@ -85,6 +85,14 @@ describe('builder Responses tab wiring', () => {
     expect(template()).toContain("@if (activeTab === 'responses' && tree) {");
   });
 
+  it('does not also render the Distribute panel underneath it', () => {
+    // The body chain ended in a bare `@else`, which matched every tab that was not
+    // build/design — so Responses (and On Submit before it) rendered the distribution
+    // manager stacked below, firing its queries and defeating the lazy-load entirely.
+    expect(template()).toContain("} @else if (activeTab === 'distribute') {");
+    expect(template()).not.toMatch(/\}\s*@else\s*\{\s*\n\s*<div class="fb-distribute">/);
+  });
+
   it('relays the tab\'s deep links to the Explorer host', () => {
     expect(template()).toContain('(OpenRecord)="openLinkedRecord($event)"');
     expect(component()).toMatch(/this\.Navigate\.emit\(\{\s*Kind: 'record'/);

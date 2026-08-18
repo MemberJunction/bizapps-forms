@@ -150,7 +150,11 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   }
 
   public async openResponse(responseId: string): Promise<void> {
-    if (!this.report) return;
+    // Ignore a click while a detail load is already in flight. The list stays mounted
+    // during the load, and the read is now two round trips whose count depends on whether
+    // the response has file answers — so without this, two fast clicks resolve in
+    // data-dependent order and the user can land on the response they did not pick.
+    if (!this.report || this.loading) return;
     this.beginLoad();
     try {
       this.responseDetail = this.useMock

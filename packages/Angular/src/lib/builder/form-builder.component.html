@@ -224,7 +224,7 @@
         (previewRequested)="previewWithTokens($event)"
       ></mjf-design-panel>
     </div>
-  } @else {
+  } @else if (activeTab === 'distribute') {
     <div class="fb-distribute">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>

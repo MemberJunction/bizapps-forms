@@ -64,6 +64,20 @@ describe('renderAnswer / buildResponseDetail', () => {
     expect(detail.answers[0]).toMatchObject({ prompt: 'Prompt qc', displayValue: 'Red' });
   });
 
+  it('reports how many answers it could not label, so the loss is never silent', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        answers: [
+          answer('r1', 'deleted-q', { TextValue: 'orphan' }),
+          answer('r1', 'kept', { TextValue: 'fine' }),
+        ],
+        questions: [q('kept', 'ShortText')],
+      }),
+    );
+    expect(detail.answers).toHaveLength(1);
+    expect(detail.unlabelledAnswerCount).toBe(1);
+  });
+
   it('skips answers whose question is gone from the version being labelled', () => {
     const detail = buildResponseDetail(
       detailInput({
@@ -276,6 +290,25 @@ describe('buildResponseDetail — what the submission did', () => {
       detailInput({ bindingRecords: [bindingRecord('br-1', 'Created', { WrittenFields: '{not json' })] }),
     );
     expect(detail.bindingRecords[0].writtenFields).toEqual([]);
+  });
+
+  it('keeps the answers when a satellite section could not be read, and names what is missing', () => {
+    // Losing Read on Form Automation Runs must cost the user that SECTION, not the whole
+    // response. The answers are the primary content; the sections are context.
+    const detail = buildResponseDetail(
+      detailInput({
+        answers: [answer('r1', 'qt', { TextValue: 'still here' })],
+        questions: [q('qt', 'ShortText')],
+        unavailableSections: ['automation runs'],
+      }),
+    );
+    expect(detail.answers).toHaveLength(1);
+    expect(detail.automationRuns).toEqual([]);
+    expect(detail.unavailableSections).toEqual(['automation runs']);
+  });
+
+  it('reports nothing unavailable on a clean load', () => {
+    expect(buildResponseDetail(detailInput()).unavailableSections).toEqual([]);
   });
 
   it('reports no runs and no binding records for a submission that triggered nothing', () => {

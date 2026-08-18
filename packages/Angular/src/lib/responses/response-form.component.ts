@@ -224,9 +224,13 @@ export class ResponseFormComponent extends BaseFormComponent {
       return await this.data.loadQuestionsForVersion(this.record.FormVersionID);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown error';
+      // Says only what is true. The raw section below carries audit fields — ids,
+      // timestamps, SourceMetadata — and NOT the answers, so promising otherwise sent
+      // people looking for data that was never there.
       this.labelWarning =
         'This response’s form version has no published definition, so its answers cannot be ' +
-        'labelled. The raw record below still shows what was captured.';
+        'labelled and are not shown. The answers are still stored; re-publishing a version ' +
+        'of this form restores the labels.';
       LogError(
         `ResponseFormComponent: no published definition for version ` +
           `${this.record.FormVersionID} of response ${this.record.ID} — ${message}`,

@@ -52,6 +52,8 @@ export interface ResponseDetailInput {
   bindingRecords: BindingRecordRow[];
   /** `TargetEntityID` → entity display name, resolved by the caller from `Metadata`. */
   entityNameById: ReadonlyMap<string, string>;
+  /** Sections whose read failed; they arrive empty and are reported as missing, not empty. */
+  unavailableSections?: string[];
 }
 
 /**
@@ -82,13 +84,16 @@ export function buildResponseRows(
 /** Builds one response's full detail: labelled answers, plus what the submission did. */
 export function buildResponseDetail(input: ResponseDetailInput): ResponseDetail {
   const { response } = input;
+  const { views, unlabelled } = buildAnswerViews(input.answers, input.questions, input.uploads);
   return {
     responseId: response.ID,
     status: response.Status,
     startedAt: toDate(response.StartedAt),
     submittedAt: toDate(response.SubmittedAt),
     respondent: respondentLabel(response),
-    answers: buildAnswerViews(input.answers, input.questions, input.uploads),
+    answers: views,
+    unlabelledAnswerCount: unlabelled,
+    unavailableSections: input.unavailableSections ?? [],
     automationRuns: input.automationRuns.map(toAutomationRunView),
     bindingRecords: input.bindingRecords.map((b) => toBindingRecordView(b, input.entityNameById)),
   };
@@ -106,14 +111,21 @@ function buildAnswerViews(
   answers: AnswerRow[],
   questions: PublishedFormQuestion[],
   uploads: UploadRow[],
-): ResponseAnswerView[] {
+): { views: ResponseAnswerView[]; unlabelled: number } {
   const questionById = new Map(questions.map((q) => [q.id, q]));
   const uploadByFileId = new Map(uploads.map((u) => [u.FileID, u]));
   const views: ResponseAnswerView[] = [];
+  let unlabelled = 0;
 
   for (const a of answers) {
     const q = questionById.get(a.QuestionID);
-    if (!q || q.type === 'Statement') {
+    if (!q) {
+      // A real answer we cannot name. Counted, not forgotten.
+      unlabelled++;
+      continue;
+    }
+    if (q.type === 'Statement') {
+      // Display-only prose; a Statement never carries an answer worth showing.
       continue;
     }
     views.push({
@@ -126,7 +138,7 @@ function buildAnswerViews(
       file: toFileView(a, uploadByFileId),
     });
   }
-  return views;
+  return { views, unlabelled };
 }
 
 /**

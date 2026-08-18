@@ -55,8 +55,7 @@ type StatusFilter = 'all' | ResponseStatus;
           </thead>
           <tbody>
             @for (r of filtered(); track r.responseId) {
-              <tr (click)="Open.emit(r.responseId)" tabindex="0"
-                  (keydown.enter)="Open.emit(r.responseId)">
+              <tr (click)="Open.emit(r.responseId)">
                 <td>
                   <span class="status" [class.status--complete]="r.status === 'Complete'">
                     {{ r.status }}
@@ -65,7 +64,15 @@ type StatusFilter = 'all' | ResponseStatus;
                 <td>{{ r.respondent }}</td>
                 <td class="num">{{ r.answeredCount }}</td>
                 <td>{{ submittedLabel(r) }}</td>
-                <td class="open-cell"><i class="fa-solid fa-chevron-right"></i></td>
+                <td class="open-cell">
+                  <button
+                    type="button"
+                    class="open-btn"
+                    [attr.aria-label]="'Open response from ' + r.respondent"
+                    (click)="$event.stopPropagation(); Open.emit(r.responseId)">
+                    <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+                  </button>
+                </td>
               </tr>
             }
           </tbody>
@@ -99,7 +106,7 @@ type StatusFilter = 'all' | ResponseStatus;
         gap: var(--mj-space-1);
       }
       .chip {
-        padding: var(--mj-space-1) var(--mj-space-2-5);
+        padding: var(--mj-space-1) var(--mj-space-2);
         border: 1px solid var(--mj-border-default);
         border-radius: var(--mj-radius-full);
         background: var(--mj-bg-surface);
@@ -157,12 +164,28 @@ type StatusFilter = 'all' | ResponseStatus;
         color: var(--mj-text-secondary);
       }
       .status--complete {
-        background: var(--mj-status-success);
-        color: var(--mj-text-inverse);
+        background: var(--mj-status-success-bg, var(--mj-bg-surface-sunken));
+        color: var(--mj-status-success-text, var(--mj-text-secondary));
       }
       .open-cell {
-        color: var(--mj-text-muted);
         text-align: right;
+      }
+      /*
+       * The row is clickable for convenience, but this button is what makes a response
+       * reachable and nameable by keyboard and screen reader. A tabbable <tr> with no role
+       * announces as a table row with no name and only responds to Enter.
+       */
+      .open-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--mj-text-muted);
+        cursor: pointer;
+      }
+      .open-btn:hover {
+        color: var(--mj-text-primary);
       }
     `,
   ],
@@ -200,7 +223,10 @@ export class FormsResponseListComponent {
 
   public readonly filtered = computed(() => {
     const term = this.search().trim().toLowerCase();
-    const status = this.statusFilter();
+    // Ignore a status selection whose chips are not on screen. Otherwise a caller that
+    // swaps mixed-status rows for single-status ones strands the user on an empty list
+    // with no visible control to clear the filter they can no longer see.
+    const status = this.StatusFiltersApply() ? this.statusFilter() : 'all';
     return this._rows().filter((r) => {
       if (status !== 'all' && r.status !== status) return false;
       if (term && !r.respondent.toLowerCase().includes(term)) return false;

@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import {
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  EventEmitter,
+  Input,
+  Output,
+  ViewChild,
+} from '@angular/core';
 import { MJ_CORE_ENTITY } from '../shared/entity-names';
 import type {
   ResponseAnswerView,
@@ -27,7 +36,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
     <div class="detail">
       <header class="detail-head">
         @if (ShowBack) {
-          <button type="button" class="back" (click)="Back.emit()">
+          <button #backButton type="button" class="back" (click)="Back.emit()">
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to responses
           </button>
         }
@@ -40,8 +49,22 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
         </div>
       </header>
 
+      @if (Detail.unlabelledAnswerCount > 0) {
+        <p class="unlabelled" role="status">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          {{ Detail.unlabelledAnswerCount }}
+          {{ Detail.unlabelledAnswerCount === 1 ? 'answer is' : 'answers are' }} not shown:
+          the form version being used for labels has no matching question, so there is no
+          truthful prompt to show them under.
+        </p>
+      }
+
       @if (Detail.answers.length === 0) {
-        <p class="empty">This response has no answers.</p>
+        <p class="empty">
+          {{ Detail.unlabelledAnswerCount > 0
+             ? 'None of this response’s answers could be labelled.'
+             : 'This response has no answers.' }}
+        </p>
       } @else {
         <dl class="answers">
           @for (a of Detail.answers; track a.questionId) {
@@ -70,27 +93,38 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
                 @if (a.score !== null) {
                   <div class="score-row">
-                    <span class="score" title="AI score">
-                      <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> {{ a.score }}
+                    <span class="score">
+                      <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+                      <span class="score-label">AI score</span>
+                      {{ a.score }}
                     </span>
                     @if (a.scoreRationale) {
                       <button
                         type="button"
                         class="score-toggle"
                         [attr.aria-expanded]="IsRationaleOpen(a)"
+                        [attr.aria-controls]="'rationale-' + a.questionId"
                         (click)="ToggleRationale(a)">
-                        {{ IsRationaleOpen(a) ? 'Hide' : 'Why?' }}
+                        Why this score?
                       </button>
                     }
                   </div>
                   @if (a.scoreRationale && IsRationaleOpen(a)) {
-                    <p class="rationale">{{ a.scoreRationale }}</p>
+                    <p class="rationale" [id]="'rationale-' + a.questionId">{{ a.scoreRationale }}</p>
                   }
                 }
               </dd>
             </div>
           }
         </dl>
+      }
+
+      @if (Detail.unavailableSections.length > 0) {
+        <p class="unlabelled" role="status">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          Could not load {{ Detail.unavailableSections.join(', ') }} for this response — your
+          role may not have read access. What is shown below is incomplete rather than empty.
+        </p>
       }
 
       @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0) {
@@ -155,7 +189,12 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
         color: var(--mj-brand-primary);
         cursor: pointer;
         font-size: 13px;
-        padding: 0;
+        /* The sole escape from the detail view on a phone — it gets a real tap target. */
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--mj-space-1);
+        padding: 0 var(--mj-space-1);
       }
       .meta {
         display: flex;
@@ -180,12 +219,22 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
         color: var(--mj-text-secondary);
       }
       .status--complete {
-        background: var(--mj-status-success);
-        color: var(--mj-text-inverse);
+        background: var(--mj-status-success-bg, var(--mj-bg-surface-sunken));
+        color: var(--mj-status-success-text, var(--mj-text-secondary));
       }
       .empty {
         color: var(--mj-text-muted);
         font-style: italic;
+      }
+      .unlabelled {
+        margin: 0 0 var(--mj-space-3);
+        font-size: 13px;
+        color: var(--mj-status-warning-text, var(--mj-text-secondary));
+      }
+      .score-label {
+        /* Named for assistive tech and for anyone who does not know the wand glyph;
+           a title attribute alone never appears on touch. */
+        font-weight: 600;
       }
       .answers {
         margin: 0;
@@ -388,7 +437,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
     `,
   ],
 })
-export class FormsResponseDetailComponent {
+export class FormsResponseDetailComponent implements AfterViewInit {
   @Input({ required: true }) Detail!: ResponseDetail;
 
   /**
@@ -405,6 +454,17 @@ export class FormsResponseDetailComponent {
    * `OpenEntityRecord` on a dashboard, `Navigate` on a form component.
    */
   @Output() OpenRecord = new EventEmitter<ResponseRecordLink>();
+
+  @ViewChild('backButton') private backButton?: ElementRef<HTMLButtonElement>;
+
+  /**
+   * Opening a response destroys the row the user activated, which drops focus to `<body>` —
+   * a keyboard user then has to tab from the top of the Explorer shell to get back. Moving
+   * focus to Back both restores a sensible position and announces the view change.
+   */
+  public ngAfterViewInit(): void {
+    this.backButton?.nativeElement.focus();
+  }
 
   /** Question ids whose score rationale is expanded. */
   private readonly openRationales = new Set<string>();

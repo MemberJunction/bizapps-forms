@@ -135,6 +135,8 @@ export function mockResponseDetail(
     startedAt: row?.startedAt ?? null,
     submittedAt: row?.submittedAt ?? null,
     respondent: row?.respondent ?? 'Anonymous',
+    unlabelledAnswerCount: 0,
+    unavailableSections: [],
     answers: [
       ...answerable.map((q) => ({
         questionId: q.id,

@@ -117,6 +117,22 @@ export interface ResponseDetail {
   submittedAt: Date | null;
   respondent: string;
   answers: ResponseAnswerView[];
+  /**
+   * Answers present on the response that could NOT be labelled, because the version being
+   * labelled from has no such question — a question deleted since, or a version whose
+   * definition snapshot is unavailable entirely.
+   *
+   * Those answers are omitted from {@link answers} (there is nothing truthful to label them
+   * with) but the COUNT is surfaced so their omission is visible. Dropping them silently
+   * renders as "this person answered nothing", which the reader has no way to detect.
+   */
+  unlabelledAnswerCount: number;
+  /**
+   * Human-readable names of the sections that could not be read (e.g. because the user's
+   * role lacks Read on that entity), so the view can say a section is MISSING rather than
+   * EMPTY. Those are opposite claims and the reader cannot tell them apart otherwise.
+   */
+  unavailableSections: string[];
   /** What the submission triggered. Empty when it triggered nothing. */
   automationRuns: ResponseAutomationRunView[];
   /** What business records it wrote. Empty when it wrote none. */

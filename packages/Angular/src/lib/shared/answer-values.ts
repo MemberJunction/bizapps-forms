@@ -66,8 +66,11 @@ export function extractChoiceValues(a: AnswerRow): string[] {
  * A `FileUpload` answer renders as the empty string, NOT as its `FileID`. The file's name,
  * type and size live on the `FormUpload` provenance row, not on the answer, so a raw GUID
  * is the one thing this function can produce that is guaranteed to mean nothing to a
- * reader. The detail view joins uploads and renders the real filename; the export pivot
- * has no such join and correctly emits nothing rather than a GUID column.
+ * reader. The detail view joins uploads and renders the real filename.
+ *
+ * The EXPORT does not use this for a file answer — see `exportAnswerValue` in
+ * `dashboard/services/export-pivot.ts`. A spreadsheet has no join to make, and there the id
+ * is the joinable key into `MJ: Files`, so the export emits it deliberately.
  */
 export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
   if (q.type === 'YesNo') {

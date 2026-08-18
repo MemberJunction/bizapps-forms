@@ -5,11 +5,13 @@ import {
   Input,
   OnInit,
   Output,
+  computed,
   inject,
   signal,
 } from '@angular/core';
 import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 import { ResponsesDataService } from './responses-data.service';
+import { resolveResponsesView } from './responses-view-state';
 import { buildResponseRows } from './response-aggregations';
 import type { ResponseDetail, ResponseListRow, ResponseRecordLink } from './response-models';
 import { FormsResponseListComponent } from './response-list.component';
@@ -39,7 +41,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
       <header class="rt-head">
         <div>
           <h2 class="rt-title">Responses</h2>
-          @if (!Loading() && Questions() !== null) {
+          @if (View() === 'list' || View() === 'detail' || View() === 'no-responses') {
             <p class="rt-hint">
               {{ Rows().length }} {{ Rows().length === 1 ? 'response' : 'responses' }} across every
               published version of this form.
@@ -57,9 +59,15 @@ import { FormsResponseDetailComponent } from './response-detail.component';
         </p>
       }
 
-      @if (Loading()) {
+      @switch (View()) {
+      @case ('loading') {
         <p class="rt-hint"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
-      } @else if (Questions() === null) {
+      }
+      @case ('failed') {
+        <!-- The error banner above already says what went wrong; adding an empty state here
+             would guess at a cause we do not have. -->
+      }
+      @case ('never-published') {
         <div class="rt-empty">
           <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
           <p class="rt-empty-title">No responses yet — this form has never been published.</p>
@@ -68,7 +76,8 @@ import { FormsResponseDetailComponent } from './response-detail.component';
             creates the link people fill in.
           </p>
         </div>
-      } @else if (Rows().length === 0) {
+      }
+      @case ('no-responses') {
         <div class="rt-empty">
           <i class="fa-solid fa-inbox" aria-hidden="true"></i>
           <p class="rt-empty-title">No responses yet.</p>
@@ -76,13 +85,18 @@ import { FormsResponseDetailComponent } from './response-detail.component';
             This form is published; submissions will appear here as they come in.
           </p>
         </div>
-      } @else if (Detail(); as d) {
-        <mj-forms-response-detail
-          [Detail]="d"
-          (Back)="CloseDetail()"
-          (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
-      } @else {
+      }
+      @case ('detail') {
+        @if (Detail(); as d) {
+          <mj-forms-response-detail
+            [Detail]="d"
+            (Back)="CloseDetail()"
+            (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
+        }
+      }
+      @case ('list') {
         <mj-forms-response-list [Rows]="Rows()" (Open)="OpenResponse($event)"></mj-forms-response-list>
+      }
       }
     </section>
   `,
@@ -175,11 +189,33 @@ export class ResponsesTabComponent implements OnInit {
   public readonly Detail = signal<ResponseDetail | null>(null);
 
   /**
+   * Whether the LIST load failed, as opposed to a single response failing to open. Only
+   * this drives the view; a detail failure leaves the list on screen under its banner.
+   */
+  private readonly loadFailed = signal(false);
+
+  /**
    * The published questions used to label answers, or null when the form has never been
    * published — which is a distinct empty state from "published, no responses yet", and the
    * only one with an action attached.
    */
   public readonly Questions = signal<PublishedFormQuestion[] | null>(null);
+
+  /**
+   * Which single view to show. Resolved by a pure function rather than a chain of template
+   * conditions, because "no published version" and "the load failed" both look like an
+   * absent question list — and reading the second as the first told authors their live form
+   * had never been published.
+   */
+  public readonly View = computed(() =>
+    resolveResponsesView({
+      loading: this.Loading(),
+      failed: this.loadFailed(),
+      isPublished: this.Questions() !== null,
+      rowCount: this.Rows().length,
+      hasDetail: this.Detail() !== null,
+    }),
+  );
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -214,6 +250,7 @@ export class ResponsesTabComponent implements OnInit {
   private async load(): Promise<void> {
     this.Loading.set(true);
     this.Error.set(null);
+    this.loadFailed.set(false);
     try {
       const questions = await this.data.loadLatestPublishedQuestions(this.FormID);
       this.Questions.set(questions);
@@ -225,6 +262,7 @@ export class ResponsesTabComponent implements OnInit {
       const { responses, answers } = await this.data.loadResponsesForForm(this.FormID);
       this.Rows.set(buildResponseRows(responses, answers));
     } catch (err) {
+      this.loadFailed.set(true);
       this.fail(err, 'Failed to load this form’s responses.');
     } finally {
       this.Loading.set(false);

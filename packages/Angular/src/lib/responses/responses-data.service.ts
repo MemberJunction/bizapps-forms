@@ -16,7 +16,7 @@
  *     hides every response submitted against an earlier one.
  */
 import { Injectable } from '@angular/core';
-import { Metadata, RunView, RunViewResult } from '@memberjunction/core';
+import { LogError, Metadata, RunView, RunViewResult } from '@memberjunction/core';
 import type { RunViewParams } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormResponseEntityType,
@@ -233,24 +233,53 @@ export class ResponsesDataService {
         responseRes.ErrorMessage || answersRes.ErrorMessage || 'Response not found.',
       );
     }
-    if (!runsRes.Success || !bindingRes.Success) {
-      throw new Error(
-        runsRes.ErrorMessage ||
-          bindingRes.ErrorMessage ||
-          `Failed to load what response ${responseId} triggered.`,
-      );
-    }
+    // The response and its answers are the page. The satellite sections are context, so a
+    // failure there (typically a role without Read on that entity) degrades to "this
+    // section is unavailable" rather than costing the user every answer they came to read.
+    // Nothing is swallowed: each failure is logged with the response id and named in the UI.
+    const unavailableSections: string[] = [];
+    const runs = this.resultsOrDegrade(runsRes, 'automation runs', responseId, unavailableSections);
+    const bindings = this.resultsOrDegrade(
+      bindingRes,
+      'created records',
+      responseId,
+      unavailableSections,
+    );
 
     const answers = answersRes.Results;
     return buildResponseDetail({
       response: responseRes.Results[0],
       answers,
       questions,
-      uploads: await this.loadUploadsForAnswers(answers),
-      automationRuns: runsRes.Results,
-      bindingRecords: bindingRes.Results,
-      entityNameById: this.resolveEntityNames(bindingRes.Results),
+      uploads: await this.loadUploadsForAnswers(answers, responseId, unavailableSections),
+      automationRuns: runs,
+      bindingRecords: bindings,
+      entityNameById: this.resolveEntityNames(bindings),
+      unavailableSections,
     });
+  }
+
+  /**
+   * A satellite section's rows, or `[]` with the section recorded as unavailable.
+   *
+   * Logged, never silent — `.Success === false` here is nearly always a missing Read grant,
+   * and an admin debugging "why is this section empty" needs the entity name and the reason.
+   */
+  private resultsOrDegrade<T>(
+    result: RunViewResult<T>,
+    sectionName: string,
+    responseId: string,
+    unavailableSections: string[],
+  ): T[] {
+    if (result.Success) {
+      return result.Results;
+    }
+    unavailableSections.push(sectionName);
+    LogError(
+      `ResponsesDataService: could not read ${sectionName} for response ${responseId} — ` +
+        `${result.ErrorMessage || 'no error message'}. Rendering the response without them.`,
+    );
+    return [];
   }
 
   /**
@@ -260,6 +289,8 @@ export class ResponsesDataService {
    */
   private async loadUploadsForAnswers(
     answers: mjBizAppsFormsFormResponseAnswerEntityType[],
+    responseId: string,
+    unavailableSections: string[],
   ): Promise<mjBizAppsFormsFormUploadEntityType[]> {
     const filter = uploadsForFileIdsFilter(
       answers.map((a) => a.FileID).filter((id): id is string => !!id),
@@ -273,10 +304,10 @@ export class ResponsesDataService {
       ResultType: 'simple',
       Fields: ['ID', 'FileID', 'FileName', 'ContentType', 'SizeBytes', 'Status'],
     })) as RunViewResult<mjBizAppsFormsFormUploadEntityType>;
-    if (!res.Success) {
-      throw new Error(res.ErrorMessage || 'Failed to load the uploaded files.');
-    }
-    return res.Results;
+    // Degrades rather than throws, which is also what makes `ResponseFileView.isResolved`
+    // reachable: an unreadable provenance row now renders as a named-but-unresolved file
+    // instead of failing the whole response, which is what that flag always claimed.
+    return this.resultsOrDegrade(res, 'file details', responseId, unavailableSections);
   }
 
   /**
