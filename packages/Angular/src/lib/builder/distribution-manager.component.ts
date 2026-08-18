@@ -10,7 +10,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
-import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
+import { resolveApiOrigin } from './mj-api-origin';
 import { LogError } from '@memberjunction/core';
 import { FORMS_UI_CSS } from '../shared';
 import {
@@ -269,27 +269,17 @@ export class DistributionManagerComponent implements OnInit {
    * `http://localhost:4121/f/:slug` (the shell-free respondent host).
    *
    * Resolution order: an explicit `publicBaseUrl` input → the configured GraphQL API
-   * origin (`GraphQLDataProvider.Instance.ConfigData.URL`) → `window.location.origin`
-   * as a last resort.
+   * origin ({@link resolveApiOrigin}) → `window.location.origin` as a last resort.
    */
   private get effectiveBaseUrl(): string {
     if (this.publicBaseUrl.length > 0) {
       return this.publicBaseUrl;
     }
-    const apiOrigin = this.resolveApiOrigin();
+    const apiOrigin = resolveApiOrigin();
     if (apiOrigin) {
       return apiOrigin;
     }
     return typeof window !== 'undefined' ? window.location.origin : '';
   }
 
-  /** Origin of the configured MJAPI GraphQL endpoint, or '' if unavailable. */
-  private resolveApiOrigin(): string {
-    try {
-      const url = GraphQLDataProvider.Instance?.ConfigData?.URL;
-      return url ? new URL(url).origin : '';
-    } catch {
-      return '';
-    }
-  }
 }
