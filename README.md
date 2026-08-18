@@ -131,8 +131,9 @@ bizapps-forms/
 │  ├─ Server/               @mj-biz-apps/forms-server                (bootstrap + resolvers + submit endpoint)
 │  └─ Angular/              @mj-biz-apps/forms-ng                    (Explorer builder/admin + <mj-form> widget)
 └─ apps/
-   ├─ MJAPI/               GraphQL API server      (port 4121)
-   └─ MJExplorer/          Builder / admin UI      (port 4321)
+   └─ MJAPI/               API-only dev harness    (mj-forms-api-harness, `node server.mjs`)
+                           No MJExplorer here — the builder UI runs in MJ's own host.
+                           See docs/local-host.md.
 ```
 
 </details>
@@ -212,10 +213,15 @@ npm run mj:codegen          # generate entity / action / resolver / Angular subc
 **5. Build and run.**
 
 ```bash
-npm run build               # build all packages + apps (turbo), including the <mj-form> bundle
-npm run start:api           # MJAPI         → http://localhost:4121
-npm run start:explorer      # MJExplorer    → http://localhost:4321
+pnpm run build              # build all packages (turbo), including the <mj-form> bundle
+cd apps/MJAPI && node server.mjs   # the API harness → http://localhost:4121
 ```
+
+> There is **no `start:api` / `start:explorer` script** — they did not survive the pnpm migration,
+> and this repo has no Explorer at all. `apps/MJAPI` is an API-only harness, which is enough for the
+> respondent path, the submit endpoint and the smoke scripts. For the **builder / admin UI**, run
+> MJ's own host with this repo linked in: `cd ~/Projects/MJ && pnpm start` (Explorer `:4201`).
+> **[docs/local-host.md](docs/local-host.md)** is the full procedure.
 
 > `npm run build` now also emits `dist/widget/mj-form.js`, the `<mj-form>` custom-element bundle
 > the respondent page loads — it is part of `forms-ng`'s `build`, not a separate step you have to
