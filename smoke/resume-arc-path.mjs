@@ -25,6 +25,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { sessionIdFor } from './lib/session.mjs';
 
 const BASE = 'http://localhost:4121';
 const SLUG = 'contact-us-e2e';
@@ -68,7 +69,13 @@ async function gql(token, query, variables) {
 async function gqlRaw(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      // Mirrors the widget's per-instance correlator; without it every request shares one
+      // rate-limit bucket. See smoke/lib/session.mjs.
+      'x-session-id': sessionIdFor(token),
+    },
     body: JSON.stringify({ query, variables }),
   });
   const text = await res.text();
