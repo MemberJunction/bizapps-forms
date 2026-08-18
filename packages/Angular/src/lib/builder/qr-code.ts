@@ -220,8 +220,16 @@ export function generateQrMatrix(text: string): QrMatrix {
   modules[size - 8][8] = true;
   reserveFormatAreas(modules, size);
 
+  // Snapshot BEFORE any data goes in: every cell still occupied is a function pattern or
+  // a reserved format area, and the mask must not touch it. Deriving this from the matrix
+  // rather than from a geometric predicate is the point — the previous predicate listed
+  // finder/separator/timing by coordinate and simply did not know about alignment patterns
+  // or the dark module, so mask 0 inverted the alignment pattern into a checkerboard and
+  // every code from version 2 up (i.e. every real form URL) came out unscannable.
+  const reserved = modules.map((row) => row.map((m) => m !== null));
+
   placeData(modules, size, codewords);
-  applyMask0(modules, size);
+  applyMask0(modules, size, reserved);
   placeFormatBits(modules, size);
 
   return { size, modules: modules.map((row) => row.map((m) => m === true)) };
@@ -330,11 +338,17 @@ function placeData(modules: (boolean | null)[][], size: number, codewords: numbe
   }
 }
 
-/** Mask pattern 0: invert where (row + col) % 2 === 0, data modules only. */
-function applyMask0(modules: (boolean | null)[][], size: number): void {
+/**
+ * Mask pattern 0: invert where (row + col) % 2 === 0, over data modules only.
+ *
+ * `reserved` marks every function-pattern and format cell, captured before the data was
+ * placed. Masking one of those corrupts the fixed geometry a scanner locks onto, which is
+ * a silent failure: the image still looks like a QR code and simply will not read.
+ */
+function applyMask0(modules: (boolean | null)[][], size: number, reserved: boolean[][]): void {
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
-      if (isFunctionModule(r, c, size) || modules[r][c] === null) {
+      if (reserved[r][c] || modules[r][c] === null) {
         continue;
       }
       if ((r + c) % 2 === 0) {
@@ -342,16 +356,6 @@ function applyMask0(modules: (boolean | null)[][], size: number): void {
       }
     }
   }
-}
-
-function isFunctionModule(r: number, c: number, size: number): boolean {
-  // Finder + separators.
-  if (r <= 8 && c <= 8) return true;
-  if (r <= 8 && c >= size - 8) return true;
-  if (r >= size - 8 && c <= 8) return true;
-  // Timing.
-  if (r === 6 || c === 6) return true;
-  return false;
 }
 
 /** Format info for ECC-M + mask 0, with BCH(15,5) + mask 0x5412. Precomputed. */
@@ -382,7 +386,16 @@ function placeFormatBits(modules: (boolean | null)[][], size: number): void {
   });
 }
 
-/** Render a QR matrix to a self-contained SVG string (token-colored, no external refs). */
+/**
+ * Render a QR matrix to a self-contained SVG string (no external refs).
+ *
+ * A QR code is dark-modules-on-light by specification, and it is NOT a themeable surface.
+ * Colouring it with `--mj-text-primary` on `--mj-bg-surface` looked right and inverted the
+ * whole code in dark mode — light modules on a dark ground, which a good many scanners
+ * (and most printed workflows) simply refuse. The `--mjf-qr-*` tokens exist so the code
+ * stays dark-on-light in both themes, and their literal fallbacks mean a downloaded file,
+ * opened anywhere with no MJ stylesheet in sight, still renders correctly.
+ */
 export function qrMatrixToSvg(matrix: QrMatrix, options?: { quietZone?: number }): string {
   const quiet = options?.quietZone ?? 4;
   const dim = matrix.size + quiet * 2;
@@ -397,8 +410,8 @@ export function qrMatrixToSvg(matrix: QrMatrix, options?: { quietZone?: number }
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${dim} ${dim}" ` +
     `shape-rendering="crispEdges" role="img" aria-label="QR code">` +
-    `<rect width="${dim}" height="${dim}" fill="var(--mj-bg-surface, #fff)"/>` +
-    `<g fill="var(--mj-text-primary, #000)">${rects.join('')}</g>` +
+    `<rect width="${dim}" height="${dim}" fill="var(--mjf-qr-light, #ffffff)"/>` +
+    `<g fill="var(--mjf-qr-dark, #111111)">${rects.join('')}</g>` +
     `</svg>`
   );
 }
