@@ -47,12 +47,27 @@
   --mjf-rating-active: var(--mjf-accent);
   --mjf-rating-inactive: var(--mj-border-strong);
   --mjf-btn-radius: var(--mj-radius-md);
+
+  /* Design-tab controls. Every one is authored in the builder's Design tab and travels
+     in FormStyle.CSSVariables, so a control that sets one of these changes the published
+     form — not just the sample. */
+  --mjf-page-bg-image: none;
+  --mjf-title-size: 1.75rem;
+  --mjf-title-align: left;
+  --mjf-question-size: 1.0625rem;
+  --mjf-question-align: left;
   --mjf-pill-radius: 999px;
   --mjf-focus-ring: 0 0 0 3px color-mix(in srgb, var(--mjf-accent) 35%, transparent);
 
   font-family: var(--mjf-font-body);
   color: var(--mjf-page-ink);
-  background: var(--mjf-page-bg);
+  background-color: var(--mjf-page-bg);
+  /* Longhand, not the `background` shorthand: the shorthand would reset the image every
+     time a theme sets only a colour. */
+  background-image: var(--mjf-page-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }
 
 .mjf-shell {
@@ -69,13 +84,15 @@
 .mjf-header__title {
   margin: 0 0 0.25rem;
   font-family: var(--mjf-font-display);
-  font-size: 1.75rem;
+  font-size: var(--mjf-title-size);
+  text-align: var(--mjf-title-align);
   line-height: 1.2;
   color: var(--mjf-page-ink);
 }
 
 .mjf-header__desc {
   margin: 0;
+  text-align: var(--mjf-title-align);
   color: var(--mj-text-muted);
 }
 

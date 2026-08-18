@@ -8,7 +8,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import type { ConditionalRule, ValidationRule } from '@mj-biz-apps/forms-entities';
-import { BUILDER_CONTROL_STYLES } from './builder-styles';
+import { FORMS_UI_CSS } from '../shared';
 import type { QuestionNode } from './builder-models';
 import { questionTypeHasOptions, questionTypeMeta } from './question-type-catalog';
 import {
@@ -24,18 +24,77 @@ import {
 } from './json-fields';
 
 const QUESTION_EDITOR_CSS = /* css */ `
-.qe { display: flex; flex-direction: column; gap: 4px; }
-.qe-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.qe-section { border-top: 1px solid var(--mj-border-subtle); padding-top: 14px; margin-top: 6px; }
-.qe-section-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mj-text-muted); margin: 0 0 10px; }
-.qe-required { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.qe-required span { font-size: 0.8125rem; font-weight: 600; color: var(--mj-text-secondary); }
+:host { display: block; }
+.qe { display: flex; flex-direction: column; gap: var(--mjf-gap); }
+
+.qe-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mjf-gap-sm);
+  padding-bottom: var(--mjf-gap);
+  border-bottom: 1px solid var(--mjf-rule);
+}
+.qe-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
+
+/* Groups are separated by space, not by a rule per group. One divider under the
+   panel title is enough structure; four more make a 340px column look like a form
+   made of forms. */
+.qe-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
+.qe-section-title {
+  margin: 0;
+  font-size: var(--mjf-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mj-text-muted);
+}
+
+.qe-required {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mjf-gap-sm);
+  padding: 10px 12px;
+  border: 1px solid var(--mj-border-subtle);
+  border-radius: var(--mjf-radius-sm);
+  background: var(--mj-bg-surface-sunken);
+}
+.qe-required span { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
+
 .qe-options { display: flex; flex-direction: column; gap: 6px; }
 .qe-option { display: flex; align-items: center; gap: 6px; }
 .qe-option .mjf-input { flex: 1; }
-.qe-opt-remove { flex: none; width: 30px; height: 30px; cursor: pointer; border-radius: var(--mj-radius-md, 8px); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-muted); }
-.qe-opt-remove:hover { background: var(--mj-bg-surface-hover); color: var(--mj-status-error, var(--mj-color-error-600)); }
-.qe-empty { font-size: 0.875rem; color: var(--mj-text-muted); padding: 24px 0; text-align: center; }
+.qe-opt-remove {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  border-radius: var(--mjf-radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--mj-text-muted);
+  transition: background var(--mjf-ease), color var(--mjf-ease);
+}
+.qe-opt-remove:hover { background: var(--mj-status-error-bg); color: var(--mj-status-error-text); }
+.qe-opt-remove:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
+
+/* Nothing selected. The panel is 340px of empty otherwise, and empty space with no
+   explanation reads as a loading failure. */
+.qe-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--mjf-gap-sm);
+  padding: 56px var(--mjf-card-pad);
+  text-align: center;
+}
+.qe-empty i { font-size: 1.25rem; color: var(--mj-text-disabled); }
+.qe-empty-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
+.qe-empty p { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); max-width: 30ch; }
 `;
 
 /**
@@ -55,7 +114,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
     ValidationRuleEditorComponent,
   ],
   templateUrl: './question-editor.component.html',
-  styles: [BUILDER_CONTROL_STYLES, QUESTION_EDITOR_CSS],
+  styles: [FORMS_UI_CSS, QUESTION_EDITOR_CSS],
 })
 export class QuestionEditorComponent {
   @Input() node: QuestionNode | null = null;

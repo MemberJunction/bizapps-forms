@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
+import { FORMS_UI_CSS } from '../../shared';
 import type { FormSummaryStats } from '../models/reporting.model';
 
 /** Top-line stat cards: total responses, completion rate, avg time, last submit. */
@@ -7,70 +8,55 @@ import type { FormSummaryStats } from '../models/reporting.model';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="stat-grid">
-      <div class="stat-card">
-        <span class="stat-icon"><i class="fa-solid fa-inbox"></i></span>
-        <span class="stat-value">{{ stats.totalResponses }}</span>
-        <span class="stat-label">Responses</span>
-        <span class="stat-sub">{{ stats.completeResponses }} complete · {{ stats.partialResponses }} partial</span>
+    <section class="mjf-section">
+      <h3 class="mjf-section-title">Big picture</h3>
+      <div class="stat-card mjf-card mjf-card--pad">
+        <div class="stat">
+          <span class="stat-value">{{ stats.totalResponses }}</span>
+          <span class="stat-label">Responses</span>
+          <span class="stat-sub">{{ stats.completeResponses }} complete · {{ stats.partialResponses }} partial</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ pct(stats.completionRate) }}</span>
+          <span class="stat-label">Completion rate</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ durationLabel }}</span>
+          <span class="stat-label">Avg. time to complete</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value">{{ lastLabel }}</span>
+          <span class="stat-label">Last response</span>
+        </div>
       </div>
-      <div class="stat-card">
-        <span class="stat-icon"><i class="fa-solid fa-circle-check"></i></span>
-        <span class="stat-value">{{ pct(stats.completionRate) }}</span>
-        <span class="stat-label">Completion rate</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-icon"><i class="fa-solid fa-clock"></i></span>
-        <span class="stat-value">{{ durationLabel }}</span>
-        <span class="stat-label">Avg. time to complete</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-icon"><i class="fa-solid fa-calendar-day"></i></span>
-        <span class="stat-value">{{ lastLabel }}</span>
-        <span class="stat-label">Last response</span>
-      </div>
-    </div>
+    </section>
   `,
   styles: [
+    FORMS_UI_CSS,
     `
-      :host {
-        display: block;
-      }
-      .stat-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--mj-space-3);
-      }
+      :host { display: block; }
+
+      /* One card holding four figures, rather than four cards holding one each. The
+         numbers are a single reading — "how is this form doing" — and boxing each one
+         separately made a summary of four values fill the width like a dashboard of
+         unrelated widgets. */
       .stat-card {
-        display: flex;
-        flex-direction: column;
-        gap: var(--mj-space-1);
-        padding: var(--mj-space-4);
-        background: var(--mj-bg-surface-card);
-        border: 1px solid var(--mj-border-subtle);
-        border-radius: var(--mj-radius-lg);
-        box-shadow: var(--mj-shadow-sm);
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: var(--mjf-stack);
+        align-items: start;
       }
-      .stat-icon {
-        color: var(--mj-brand-primary);
-        font-size: 16px;
-      }
+      .stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
       .stat-value {
-        font-size: 26px;
-        font-weight: 700;
+        font-size: 2rem;
+        font-weight: 600;
+        line-height: 1.15;
+        letter-spacing: var(--mj-tracking-tight, -0.02em);
         color: var(--mj-text-primary);
         font-variant-numeric: tabular-nums;
       }
-      .stat-label {
-        font-size: 12px;
-        color: var(--mj-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .stat-sub {
-        font-size: 12px;
-        color: var(--mj-text-muted);
-      }
+      .stat-label { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
+      .stat-sub { margin-top: 2px; font-size: var(--mjf-label); color: var(--mj-text-muted); }
     `,
   ],
 })

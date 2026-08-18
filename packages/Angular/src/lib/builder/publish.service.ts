@@ -147,6 +147,31 @@ export class PublishService {
     return buildPublishedAutomations(result.Results ?? []);
   }
 
+  /**
+   * The snapshot currently serving the public link, or null when nothing is published.
+   *
+   * The builder compares this against the draft to decide whether there is anything to
+   * publish — see `publish-fingerprint.ts` for why that is a comparison and not a flag.
+   */
+  public async latestPublishedSnapshot(formId: string): Promise<string | null> {
+    const rv = new RunView();
+    const result = await rv.RunView<{ DefinitionSnapshot: string | null }>({
+      EntityName: FORMS_ENTITY.FormVersion,
+      ExtraFilter: `FormID='${formId}' AND Status='Published'`,
+      OrderBy: 'VersionNumber DESC',
+      Fields: ['DefinitionSnapshot'],
+      MaxRows: 1,
+      ResultType: 'simple',
+    });
+    if (!result.Success) {
+      LogError(
+        `Forms publish: could not read the published snapshot for form ${formId}: ${result.ErrorMessage}`,
+      );
+      return null;
+    }
+    return result.Results?.[0]?.DefinitionSnapshot ?? null;
+  }
+
   private async maxVersionNumber(formId: string): Promise<number> {
     const rv = new RunView();
     const result = await rv.RunView<{ VersionNumber: number }>(

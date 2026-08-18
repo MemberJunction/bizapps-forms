@@ -7,6 +7,7 @@ import type {
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
+import { FORMS_UI_CSS } from '../shared';
 import { ResponsesDataService } from './responses-data.service';
 import type { ResponseDetail, ResponseRecordLink } from './response-models';
 import { FormsResponseDetailComponent } from './response-detail.component';
@@ -37,28 +38,27 @@ import { FormsResponseDetailComponent } from './response-detail.component';
   providers: [ResponsesDataService],
   imports: [FormsResponseDetailComponent],
   template: `
-    <div class="rf">
-      <header class="rf-head">
-        <h2 class="rf-title">
-          <i class="fa-solid fa-file-lines" aria-hidden="true"></i>
-          {{ record.Form }}
-        </h2>
-        <p class="rf-sub">Response from {{ respondent }}</p>
+    <div class="mjf-page rf">
+      <header class="mjf-page-head">
+        <div class="mjf-page-headings">
+          <h2 class="mjf-page-title rf-title">{{ record.Form }}</h2>
+          <p class="mjf-page-sub">Response from {{ respondent }}</p>
+        </div>
       </header>
 
       @if (error; as e) {
-        <p class="rf-error" role="alert">
-          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ e }}
+        <p class="mjf-alert" role="alert">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>{{ e }}</span>
         </p>
       }
       @if (labelWarning; as w) {
         <p class="rf-warn" role="status">
-          <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ w }}
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i> <span>{{ w }}</span>
         </p>
       }
 
       @if (busy) {
-        <p class="rf-hint"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
+        <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
       } @else if (detail; as d) {
         <mj-forms-response-detail
           [Detail]="d"
@@ -97,76 +97,58 @@ import { FormsResponseDetailComponent } from './response-detail.component';
     </div>
   `,
   styles: [
+    FORMS_UI_CSS,
     `
-      :host {
-        display: block;
-      }
-      .rf {
-        padding: 16px;
-        background: var(--mj-bg-surface);
-        color: var(--mj-text-primary);
-      }
-      .rf-head {
-        margin-bottom: 16px;
-      }
-      .rf-title {
-        margin: 0;
-        font-size: 1.05rem;
-        font-weight: 700;
-      }
-      .rf-sub,
-      .rf-hint {
-        margin: 4px 0 0;
-        font-size: 0.8125rem;
-        color: var(--mj-text-secondary);
-      }
-      .rf-error {
-        margin: 0 0 12px;
-        font-size: 0.8125rem;
-        color: var(--mj-status-error-text, var(--mj-status-error));
-      }
+      :host { display: block; height: 100%; overflow: auto; background: var(--mj-bg-page); }
+
+      /* Opened as an entity record rather than as a page of its own, so the form's name
+         is a heading, not the app title. */
+      .rf-title { font-size: 1.5rem; }
+
       .rf-warn {
-        margin: 0 0 12px;
-        font-size: 0.8125rem;
-        color: var(--mj-status-warning-text, var(--mj-text-secondary));
+        display: flex;
+        align-items: flex-start;
+        gap: var(--mjf-gap-sm);
+        margin: 0;
+        padding: 12px 16px;
+        font-size: var(--mjf-meta);
+        line-height: 1.5;
+        border: 1px solid var(--mj-status-warning-border);
+        border-radius: var(--mjf-radius-sm);
+        background: var(--mj-status-warning-bg);
+        color: var(--mj-status-warning-text);
       }
+
+      /* Collapsed by default: the audit fields matter to whoever is debugging a dedupe
+         or a session, and to nobody else reading the response. */
       .rf-raw {
-        margin-top: 24px;
-        padding-top: 12px;
-        border-top: 1px solid var(--mj-border-subtle);
-        font-size: 0.8125rem;
+        padding-top: var(--mjf-gap);
+        border-top: 1px solid var(--mjf-rule);
+        font-size: var(--mjf-meta);
         color: var(--mj-text-secondary);
       }
       .rf-raw summary {
-        cursor: pointer;
-        min-height: 44px;
         display: flex;
         align-items: center;
+        min-height: var(--mjf-tap);
+        font-weight: 600;
+        cursor: pointer;
+        color: var(--mj-text-secondary);
       }
+      .rf-raw summary:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; border-radius: var(--mjf-radius-sm); }
       .rf-raw-grid {
         display: grid;
-        grid-template-columns: minmax(140px, max-content) 1fr;
-        gap: 4px 16px;
-        margin: 8px 0 0;
+        grid-template-columns: minmax(150px, max-content) 1fr;
+        gap: 6px var(--mjf-stack);
+        margin: var(--mjf-gap-sm) 0 0;
       }
-      .rf-raw-grid dt {
-        font-weight: 600;
-      }
-      .rf-raw-grid dd {
-        margin: 0;
-        overflow-wrap: anywhere;
-        font-variant-numeric: tabular-nums;
-      }
-      .rf-raw-json {
-        white-space: pre-wrap;
-      }
+      .rf-raw-grid dt { font-weight: 600; color: var(--mj-text-muted); }
+      .rf-raw-grid dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+      .rf-raw-json { white-space: pre-wrap; font-family: var(--mj-font-family-mono, monospace); }
+
       @media (max-width: 600px) {
-        .rf-raw-grid {
-          grid-template-columns: 1fr;
-        }
-        .rf-raw-grid dd {
-          margin-bottom: 8px;
-        }
+        .rf-raw-grid { grid-template-columns: 1fr; }
+        .rf-raw-grid dd { margin-bottom: var(--mjf-gap-sm); }
       }
     `,
   ],

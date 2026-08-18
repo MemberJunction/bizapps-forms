@@ -5,7 +5,7 @@ import type {
   mjBizAppsFormsFormStyleEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
-import { withBrandToken, withRadiusPx } from './style-tokens';
+import { serializeCssVariables, withBrandToken, withButtonRadiusPx } from './style-tokens';
 
 /** A field the theme editor can persist onto a style. */
 export interface BrandEdit {
@@ -13,7 +13,7 @@ export interface BrandEdit {
   logoURL?: string;
   /** Token name → value (color / font stack); applied via {@link withBrandToken}. */
   tokens?: Record<string, string>;
-  /** Corner radius in px, applied across the four radius tokens via {@link withRadiusPx}. */
+  /** Button corner radius in px, applied via {@link withButtonRadiusPx}. Buttons only. */
   radiusPx?: number;
 }
 
@@ -117,6 +117,53 @@ export class DesignStateService {
     return copy;
   }
 
+  /**
+   * The style this form may safely be edited through, creating one if needed.
+   *
+   * The Design tab edits tokens directly now, with no preset gallery in between, so it must
+   * never write to a style another form is also using — one author restyling their form
+   * would silently restyle everyone else's. `DisplayRank = 0` is the existing marker for
+   * "belongs to a single form" (`duplicateStyle` already sets it, and `loadStyles` hides
+   * rank-0 rows from the gallery), so a rank-0 style assigned to this form is editable as
+   * is. Anything else — a shared preset, or no style at all — is forked first.
+   */
+  public async ensureOwnStyle(
+    form: mjBizAppsFormsFormEntity,
+  ): Promise<mjBizAppsFormsFormStyleEntity | undefined> {
+    if (form.StyleID) {
+      const current = await this.loadStyleById(form.StyleID);
+      if (current && current.DisplayRank === 0) {
+        return current;
+      }
+      if (current) {
+        const fork = await this.duplicateStyle(current);
+        if (!fork) {
+          return undefined;
+        }
+        fork.Name = `${form.Name} theme`;
+        if (!(await this.saveChecked(fork, 'name the forked style'))) {
+          return undefined;
+        }
+        return (await this.applyStyleToForm(form, fork.ID)) ? fork : undefined;
+      }
+    }
+
+    const created = await this.md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(
+      FORMS_ENTITY.FormStyle,
+      this.user,
+    );
+    created.NewRecord();
+    created.Name = `${form.Name} theme`;
+    created.Description = 'Design for this form.';
+    created.CSSVariables = serializeCssVariables({});
+    created.DisplayRank = 0;
+    created.IsActive = true;
+    if (!(await this.saveChecked(created, 'create the form style'))) {
+      return undefined;
+    }
+    return (await this.applyStyleToForm(form, created.ID)) ? created : undefined;
+  }
+
   /** Persist branding-basics edits (name, logo, brand tokens) onto a style. */
   public async saveBranding(
     style: mjBizAppsFormsFormStyleEntity,
@@ -132,7 +179,7 @@ export class DesignStateService {
       style.CSSVariables = withBrandToken(style.CSSVariables, token, value);
     }
     if (edit.radiusPx !== undefined) {
-      style.CSSVariables = withRadiusPx(style.CSSVariables, edit.radiusPx);
+      style.CSSVariables = withButtonRadiusPx(style.CSSVariables, edit.radiusPx);
     }
     return this.saveChecked(style, 'save branding');
   }

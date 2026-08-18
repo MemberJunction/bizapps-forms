@@ -8,12 +8,15 @@
 }
 
 .mjf-question__label {
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: 0.25rem;
   font-family: var(--mjf-font-body);
   font-weight: 600;
-  font-size: 1.0625rem;
+  font-size: var(--mjf-question-size);
+  /* justify-content, not text-align: the label is a flex row (prompt + required marker),
+     so text-align would not move it. */
+  justify-content: var(--mjf-question-align);
   line-height: 1.4;
   color: var(--mjf-page-ink);
 }

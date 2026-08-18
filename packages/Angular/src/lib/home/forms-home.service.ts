@@ -10,13 +10,15 @@
  * mutated client-side, so this stays independent of generated Forms types.
  */
 import { Injectable } from '@angular/core';
-import { RunView, type RunViewResult } from '@memberjunction/core';
+import { LogError, Metadata, RunView, type RunViewResult } from '@memberjunction/core';
 import type { MJActionEntityType } from '@memberjunction/core-entities';
+import type { mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
 import type { ActionParam, ActionResult } from '@memberjunction/actions-base';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 
 import {
   HOME_ENTITY,
+  type FormStatus,
   type FormCategorySimpleRecord,
   type FormResponseSimpleRecord,
   type FormSimpleRecord,
@@ -73,6 +75,36 @@ export class FormsHomeService {
    * Runs an authoring/template Action by name with the given input params and
    * returns the created form id from the action's output params.
    */
+  /**
+   * Moves a form between lifecycle states — the archive/restore path behind the list's
+   * row actions.
+   *
+   * This is how "delete a form" is offered, and the reason it is not a delete: every
+   * child table (FormVersion, FormPage, FormQuestion, FormDistribution, FormResponse,
+   * FormUpload, FormAutomation, FormEntityBinding) holds a plain FK to `Form(ID)` with no
+   * `ON DELETE CASCADE`, so removing a row would fail for any form that has ever been
+   * edited — and would destroy submitted responses for one that succeeded. `Closed`
+   * already means "no longer accepting responses", which is the honest version of what an
+   * author wants when they reach for delete, and it is reversible.
+   */
+  public async setStatus(formId: string, status: FormStatus): Promise<string | null> {
+    const md = new Metadata();
+    const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>(HOME_ENTITY.forms);
+    if (!(await form.Load(formId))) {
+      const message = `Could not load form ${formId} to set its status to ${status}.`;
+      LogError(message);
+      return message;
+    }
+    form.Status = status;
+    if (await form.Save()) {
+      return null;
+    }
+    const message =
+      form.LatestResult?.CompleteMessage ?? `Saving form ${formId} as ${status} failed.`;
+    LogError(`setStatus(${formId}, ${status}) failed: ${message}`);
+    return message;
+  }
+
   public async runAuthoringAction(
     actionName: string,
     inputs: ActionParam[],

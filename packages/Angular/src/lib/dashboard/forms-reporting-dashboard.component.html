@@ -1,17 +1,23 @@
-<div class="reporting">
-  <header class="rep-header">
-    <div class="title-row">
-      <h2 class="rep-title"><i class="fa-solid fa-chart-column"></i> Forms Reporting</h2>
-      @if (useMock) {
-        <span class="mock-badge" title="Showing seeded sample data until live responses exist">Sample data</span>
+<div class="mjf-page reporting">
+  <header class="mjf-page-head">
+    <div class="mjf-page-headings">
+      <div class="title-row">
+        <h2 class="mjf-page-title">Forms Reporting</h2>
+        @if (useMock) {
+          <span class="mjf-badge mjf-badge--info" title="Showing seeded sample data until live responses exist">Sample data</span>
+        }
+      </div>
+      @if (selectedForm) {
+        <p class="mjf-page-sub">{{ selectedForm.name }}</p>
       }
     </div>
 
-    <div class="controls">
+    <div class="mjf-page-actions">
       @if (forms.length > 0) {
         <label class="form-picker">
           <span class="sr-only">Select a form</span>
           <select
+            class="mjf-select"
             [ngModel]="selectedForm?.formId"
             (ngModelChange)="onFormChange($event)"
             aria-label="Select a form to report on">
@@ -22,44 +28,48 @@
         </label>
       }
       <div class="export-group" role="group" aria-label="Export responses">
-        <button type="button" class="btn" [disabled]="!report || loading" (click)="export('csv')">
-          <i class="fa-solid fa-file-csv"></i> CSV
+        <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="!report || loading" (click)="export('csv')">
+          <i class="fa-solid fa-file-csv" aria-hidden="true"></i> CSV
         </button>
-        <button type="button" class="btn" [disabled]="!report || loading" (click)="export('excel')">
-          <i class="fa-solid fa-file-excel"></i> Excel
+        <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="!report || loading" (click)="export('excel')">
+          <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Excel
         </button>
       </div>
     </div>
   </header>
 
   @if (errorMessage) {
-    <div class="alert" role="alert">
-      <i class="fa-solid fa-triangle-exclamation"></i> {{ errorMessage }}
+    <div class="mjf-alert" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span>{{ errorMessage }}</span>
     </div>
   }
 
   @if (loading) {
-    <div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div>
+    <div class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</div>
   }
 
   @if (!loading && forms.length === 0) {
-    <div class="empty-state">
-      <i class="fa-solid fa-inbox"></i>
-      <p>No published forms to report on yet.</p>
+    <div class="mjf-empty">
+      <span class="mjf-empty-icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></span>
+      <span class="mjf-empty-title">Nothing to report on yet</span>
+      <p class="mjf-empty-body">
+        Analytics appear once a form is published and starts collecting responses.
+      </p>
     </div>
   }
 
   @if (report; as r) {
-    <nav class="tabs" role="tablist">
+    <nav class="mjf-tabs" role="tablist" aria-label="Report sections">
       @for (t of tabs; track t.key) {
         <button
           type="button"
           role="tab"
-          class="tab"
-          [class.tab--active]="activeTab === t.key"
+          class="mjf-tab"
+          [class.is-on]="activeTab === t.key"
           [attr.aria-selected]="activeTab === t.key"
           (click)="setTab(t.key)">
-          <i [class]="t.icon"></i> {{ t.label }}
+          <i [class]="t.icon" aria-hidden="true"></i> {{ t.label }}
         </button>
       }
     </nav>

@@ -10,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import { FORMS_UI_CSS } from '../shared';
 import { ResponsesDataService } from './responses-data.service';
 import { resolveResponsesView } from './responses-view-state';
 import { buildResponseRows } from './response-aggregations';
@@ -37,51 +38,53 @@ import { FormsResponseDetailComponent } from './response-detail.component';
   providers: [ResponsesDataService],
   imports: [FormsResponseListComponent, FormsResponseDetailComponent],
   template: `
-    <section class="rt">
-      <header class="rt-head">
-        <div>
-          <h2 class="rt-title">Responses</h2>
+    <section class="mjf-page rt">
+      <header class="mjf-page-head">
+        <div class="mjf-page-headings">
+          <h2 class="mjf-page-title rt-title">Responses</h2>
           @if (View() === 'list' || View() === 'detail' || View() === 'no-responses') {
-            <p class="rt-hint">
+            <p class="mjf-page-sub">
               {{ Rows().length }} {{ Rows().length === 1 ? 'response' : 'responses' }} across every
               published version of this form.
             </p>
           }
         </div>
-        <button type="button" class="rt-refresh" [disabled]="Loading()" (click)="Refresh()">
-          <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Refresh
-        </button>
+        <div class="mjf-page-actions">
+          <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="Loading()" (click)="Refresh()">
+            <i class="fa-solid fa-rotate-right" [class.fa-spin]="Loading()" aria-hidden="true"></i> Refresh
+          </button>
+        </div>
       </header>
 
       @if (Error(); as e) {
-        <p class="rt-error" role="alert">
-          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ e }}
+        <p class="mjf-alert" role="alert">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> <span>{{ e }}</span>
         </p>
       }
 
       @switch (View()) {
       @case ('loading') {
-        <p class="rt-hint"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
+        <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading responses…</p>
       }
       @case ('failed') {
         <!-- The error banner above already says what went wrong; adding an empty state here
              would guess at a cause we do not have. -->
       }
       @case ('never-published') {
-        <div class="rt-empty">
-          <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
-          <p class="rt-empty-title">No responses yet — this form has never been published.</p>
-          <p class="rt-hint">
+        <div class="mjf-empty">
+          <span class="mjf-empty-icon"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i></span>
+          <span class="mjf-empty-title">Not published yet</span>
+          <p class="mjf-empty-body">
             Publish and distribute this form to start collecting responses. The Distribute tab
             creates the link people fill in.
           </p>
         </div>
       }
       @case ('no-responses') {
-        <div class="rt-empty">
-          <i class="fa-solid fa-inbox" aria-hidden="true"></i>
-          <p class="rt-empty-title">No responses yet.</p>
-          <p class="rt-hint">
+        <div class="mjf-empty">
+          <span class="mjf-empty-icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></span>
+          <span class="mjf-empty-title">No responses yet</span>
+          <p class="mjf-empty-body">
             This form is published; submissions will appear here as they come in.
           </p>
         </div>
@@ -101,73 +104,13 @@ import { FormsResponseDetailComponent } from './response-detail.component';
     </section>
   `,
   styles: [
+    FORMS_UI_CSS,
     `
-      :host {
-        display: block;
-      }
-      .rt {
-        padding: 16px;
-        background: var(--mj-bg-surface);
-        color: var(--mj-text-primary);
-      }
-      .rt-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 12px;
-        flex-wrap: wrap;
-        margin-bottom: 16px;
-      }
-      .rt-title {
-        margin: 0;
-        font-size: 1rem;
-        font-weight: 700;
-      }
-      .rt-hint {
-        margin: 4px 0 0;
-        font-size: 0.8125rem;
-        color: var(--mj-text-secondary);
-      }
-      .rt-error {
-        margin: 0 0 12px;
-        font-size: 0.8125rem;
-        color: var(--mj-status-error-text, var(--mj-status-error));
-      }
-      .rt-refresh {
-        font: inherit;
-        font-size: 0.8125rem;
-        min-height: 44px;
-        padding: 0 12px;
-        border: 1px solid var(--mj-border-default);
-        border-radius: var(--mj-radius-md, 8px);
-        background: var(--mj-bg-surface);
-        color: var(--mj-text-secondary);
-        cursor: pointer;
-      }
-      .rt-refresh:hover:not(:disabled) {
-        background: var(--mj-bg-surface-hover);
-      }
-      .rt-refresh:disabled {
-        color: var(--mj-text-disabled);
-        cursor: default;
-      }
-      .rt-empty {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 6px;
-        padding: 40px 16px;
-        text-align: center;
-        color: var(--mj-text-muted);
-      }
-      .rt-empty i {
-        font-size: 1.75rem;
-      }
-      .rt-empty-title {
-        margin: 0;
-        font-weight: 600;
-        color: var(--mj-text-secondary);
-      }
+      :host { display: block; background: var(--mj-bg-page); }
+
+      /* The tab is embedded under a builder header that already names the form, so the
+         page title steps down a size from a standalone page's. */
+      .rt-title { font-size: 1.375rem; }
     `,
   ],
 })
@@ -260,7 +203,7 @@ export class ResponsesTabComponent implements OnInit {
         return;
       }
       const { responses, answers } = await this.data.loadResponsesForForm(this.FormID);
-      this.Rows.set(buildResponseRows(responses, answers));
+      this.Rows.set(buildResponseRows(responses, answers, questions));
     } catch (err) {
       this.loadFailed.set(true);
       this.fail(err, 'Failed to load this form’s responses.');

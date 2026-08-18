@@ -89,41 +89,30 @@ describe('renderAnswer / buildResponseDetail', () => {
   });
 });
 
-describe('buildResponseDetail — AI scoring', () => {
-  it('surfaces the score and its rationale on a scored answer', () => {
+describe('the AI score is not surfaced', () => {
+  /**
+   * `Forms: Analyze Written Responses` scores every ShortText answer, so a form asking
+   * for a first name stamped "Soham" with a 100. The columns still exist and the
+   * automation still runs; the view model deliberately does not carry them, so the
+   * meaningless number cannot reappear in the detail view by accident.
+   */
+  it('omits score fields from the answer view even when the row carries them', () => {
     const detail = buildResponseDetail(
       detailInput({
-        answers: [answer('r1', 'qt', { TextValue: 'Great product', Score: 8.5, ScoreRationale: 'Positive sentiment' })],
-        questions: [q('qt', 'LongText')],
+        questions: [{ ...q('q-name', 'ShortText', 1), prompt: 'First name' }],
+        answers: [
+          answer('r1', 'q-name', {
+            TextValue: 'Soham',
+            Score: 100,
+            ScoreRationale: 'A confident, well-formed first name.',
+          }),
+        ],
       }),
     );
-    expect(detail.answers[0].score).toBe(8.5);
-    expect(detail.answers[0].scoreRationale).toBe('Positive sentiment');
-  });
-
-  it('treats a score of ZERO as scored — every scored answer in the dev DB is 0.0000', () => {
-    // Not hypothetical: `Forms: Analyze Written Responses` scores junk text 0, and a
-    // truthiness check anywhere on this path would hide the AI output completely.
-    const detail = buildResponseDetail(
-      detailInput({
-        answers: [answer('r1', 'qt', { TextValue: 'test string', Score: 0, ScoreRationale: 'Not a genuine inquiry.' })],
-        questions: [q('qt', 'LongText')],
-      }),
-    );
-    expect(detail.answers[0].score).toBe(0);
-    expect(detail.answers[0].score).not.toBeNull();
-    expect(detail.answers[0].scoreRationale).toBe('Not a genuine inquiry.');
-  });
-
-  it('leaves score null on an unscored answer rather than defaulting it to zero', () => {
-    const detail = buildResponseDetail(
-      detailInput({
-        answers: [answer('r1', 'qt', { TextValue: 'no score here' })],
-        questions: [q('qt', 'LongText')],
-      }),
-    );
-    expect(detail.answers[0].score).toBeNull();
-    expect(detail.answers[0].scoreRationale).toBeNull();
+    expect(detail.answers).toHaveLength(1);
+    expect(detail.answers[0].displayValue).toBe('Soham');
+    expect(Object.keys(detail.answers[0])).not.toContain('score');
+    expect(Object.keys(detail.answers[0])).not.toContain('scoreRationale');
   });
 });
 
@@ -315,5 +304,120 @@ describe('buildResponseDetail — what the submission did', () => {
     const detail = buildResponseDetail(detailInput());
     expect(detail.automationRuns).toEqual([]);
     expect(detail.bindingRecords).toEqual([]);
+  });
+});
+
+/**
+ * Regressions for two bugs that shipped past the whole existing suite, because every
+ * spec above happened to use one answer, or answers already in question order, or a
+ * response with a linked Person.
+ */
+describe('answers are ordered by the form, not by the query', () => {
+  /** A form asking first name then last name; the view returns them the other way round. */
+  function outOfOrderInput() {
+    const first = { ...q('q-first', 'ShortText', 1), prompt: 'First name' };
+    const last = { ...q('q-last', 'ShortText', 2), prompt: 'Last name' };
+    return detailInput({
+      questions: [first, last],
+      answers: [
+        answer('r1', 'q-last', { TextValue: 'Desai' }),
+        answer('r1', 'q-first', { TextValue: 'Soham' }),
+      ],
+    });
+  }
+
+  it('renders questions in display order however the answers arrive', () => {
+    const detail = buildResponseDetail(outOfOrderInput());
+    expect(detail.answers.map((a) => a.prompt)).toEqual(['First name', 'Last name']);
+    expect(detail.answers.map((a) => a.displayValue)).toEqual(['Soham', 'Desai']);
+  });
+
+  it('skips questions this response did not answer rather than emitting blanks', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        questions: [
+          { ...q('q-first', 'ShortText', 1), prompt: 'First name' },
+          { ...q('q-skipped', 'ShortText', 2), prompt: 'Middle name' },
+        ],
+        answers: [answer('r1', 'q-first', { TextValue: 'Soham' })],
+      }),
+    );
+    expect(detail.answers.map((a) => a.prompt)).toEqual(['First name']);
+  });
+
+  it('still counts an answer whose question is gone from the snapshot', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        questions: [{ ...q('q-first', 'ShortText', 1), prompt: 'First name' }],
+        answers: [
+          answer('r1', 'q-first', { TextValue: 'Soham' }),
+          answer('r1', 'q-deleted', { TextValue: 'orphaned' }),
+        ],
+      }),
+    );
+    expect(detail.answers).toHaveLength(1);
+    expect(detail.unlabelledAnswerCount).toBe(1);
+  });
+});
+
+describe('a respondent who told us who they are is not "Anonymous"', () => {
+  const nameQuestions = [
+    { ...q('q-first', 'ShortText', 1), prompt: 'First name' },
+    { ...q('q-last', 'ShortText', 2), prompt: 'Last name' },
+    { ...q('q-email', 'Email', 3), prompt: 'Email address' },
+  ];
+  const nameAnswers = [
+    answer('r1', 'q-first', { TextValue: 'Soham' }),
+    answer('r1', 'q-last', { TextValue: 'Desai' }),
+    answer('r1', 'q-email', { TextValue: 'soham@example.com' }),
+  ];
+
+  it('builds a name from the first/last answers on the detail view', () => {
+    const detail = buildResponseDetail(
+      detailInput({ questions: nameQuestions, answers: nameAnswers }),
+    );
+    expect(detail.respondent).toBe('Soham Desai');
+  });
+
+  it('does the same in the list, so the two surfaces never disagree', () => {
+    const rows = buildResponseRows(
+      [response('r1', 'Complete', new Date(), new Date())],
+      nameAnswers,
+      nameQuestions,
+    );
+    expect(rows[0].respondent).toBe('Soham Desai');
+  });
+
+  it('falls back to the email address when the form never asked for a name', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        questions: [{ ...q('q-email', 'Email', 1), prompt: 'Email address' }],
+        answers: [answer('r1', 'q-email', { TextValue: 'soham@example.com' })],
+      }),
+    );
+    expect(detail.respondent).toBe('soham@example.com');
+  });
+
+  it('prefers the linked Person over anything the form collected', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        response: response('r1', 'Complete', new Date(), new Date(), {
+          RespondentPerson: 'Person Of Record',
+        }),
+        questions: nameQuestions,
+        answers: nameAnswers,
+      }),
+    );
+    expect(detail.respondent).toBe('Person Of Record');
+  });
+
+  it('still says Anonymous when the form asked for neither name nor email', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        questions: [{ ...q('q-nps', 'NPS', 1), prompt: 'How likely are you to recommend us?' }],
+        answers: [answer('r1', 'q-nps', { NumericValue: 9 })],
+      }),
+    );
+    expect(detail.respondent).toBe('Anonymous');
   });
 });

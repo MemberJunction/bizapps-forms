@@ -49,20 +49,6 @@ const ANSWER_FIELDS = [
   'FileID',
 ] as const;
 
-/**
- * The answer columns the EXPORT read selects — the value columns plus `Score`, which the
- * pivot turns into a per-question score column. `ScoreRationale` is deliberately absent:
- * it is model prose and never reaches the spreadsheet.
- */
-const EXPORT_ANSWER_FIELDS = [...ANSWER_FIELDS, 'Score'] as const;
-
-/**
- * The answer columns the DETAIL read selects — the value columns plus the full AI scoring
- * the `Forms: Analyze Written Responses` automation writes. Neither the list nor the funnel
- * aggregates scoring, so only these two reads pay for it.
- */
-const DETAIL_ANSWER_FIELDS = [...ANSWER_FIELDS, 'Score', 'ScoreRationale'] as const;
-
 /** The response columns every read of this surface selects. */
 const RESPONSE_FIELDS = [
   'ID',
@@ -108,9 +94,8 @@ export function uploadsForFileIdsFilter(fileIds: readonly string[]): string | nu
  * The four reads that make up a response's detail, batched into one `RunViews` call.
  *
  * A pure function returning the params rather than an inline literal, so a test can assert
- * WHICH entities are read and WHICH columns are asked for — in particular that `Score` and
- * `ScoreRationale` are selected, whose absence is exactly the bug this slice fixed and
- * which nothing else would catch. Exported for unit testing.
+ * WHICH entities are read and WHICH columns are asked for — a silently-missing column is a
+ * class of bug nothing else here would catch. Exported for unit testing.
  */
 export function responseDetailQueries(responseId: string): RunViewParams[] {
   return [
@@ -124,7 +109,7 @@ export function responseDetailQueries(responseId: string): RunViewParams[] {
       EntityName: FORMS_ENTITY.FormResponseAnswer,
       ExtraFilter: `ResponseID='${responseId}'`,
       ResultType: 'simple',
-      Fields: [...DETAIL_ANSWER_FIELDS],
+      Fields: [...ANSWER_FIELDS],
     },
     {
       EntityName: FORMS_ENTITY.FormAutomationRun,
@@ -340,8 +325,7 @@ export class ResponsesDataService {
 
   /**
    * Loads all answer rows for a form (across ALL its versions' responses). Used by the
-   * export service to pivot responses into a wide matrix — which is why this read selects
-   * `Score` where the list read does not.
+   * export service to pivot responses into a wide matrix.
    */
   public async loadAnswersForForm(
     formId: string,
@@ -350,7 +334,7 @@ export class ResponsesDataService {
       EntityName: FORMS_ENTITY.FormResponseAnswer,
       ExtraFilter: answersForFormFilter(formId),
       ResultType: 'simple',
-      Fields: [...EXPORT_ANSWER_FIELDS],
+      Fields: [...ANSWER_FIELDS],
     })) as RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>;
     if (!res.Success) {
       throw new Error(res.ErrorMessage || 'Failed to load answers.');

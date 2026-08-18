@@ -78,7 +78,10 @@ describe('builder Responses tab wiring', () => {
   });
 
   it('scopes the tab to the loaded form, not to every response in the database', () => {
-    expect(template()).toMatch(/<mjf-responses-tab\s+\[FormID\]="tree\.form\.ID"/);
+    // Attributes may precede [FormID] (the pane carries a layout class), so this
+    // matches anywhere inside the opening tag rather than immediately after the name —
+    // while still refusing any binding other than the loaded form's ID.
+    expect(template()).toMatch(/<mjf-responses-tab\b[^>]*\s\[FormID\]="tree\.form\.ID"/);
   });
 
   it('mounts it behind its own @if, so opening the builder to edit runs no responses query', () => {

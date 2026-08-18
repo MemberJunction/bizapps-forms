@@ -55,9 +55,24 @@ interface MappingRow {
       <header class="fb-panel-head">
         <h2>On Submit</h2>
         <p class="fb-hint">
-          What runs when someone completes this form. Changes take effect when you republish —
-          automations run from the published snapshot, so a response always runs the configuration
-          its own version was published with.
+          What happens after someone presses submit. Two kinds of thing can run:
+        </p>
+        <ul class="at-explainer">
+          <li>
+            <strong>Save the answers into a real record</strong> — map questions onto the fields
+            of an MJ entity (a Person, say) so a submission creates or updates that record, not
+            just a response row. Mapped records are query-able and Skip-accessible like any
+            other data.
+          </li>
+          <li>
+            <strong>Run an Action or an AI Agent</strong> — score the submission, notify someone,
+            kick off a workflow.
+          </li>
+        </ul>
+        <p class="fb-hint">
+          Changes take effect when you republish: automations run from the published snapshot, so
+          a response always runs the configuration its own version was published with. Every run
+          is recorded and shows up under “What this submission did” on the response.
         </p>
       </header>
 
@@ -66,7 +81,10 @@ interface MappingRow {
       } @else {
         <!-- Configured automations -->
         @if (automations().length === 0) {
-          <p class="fb-empty">Nothing runs on submit yet.</p>
+          <p class="fb-empty">
+            Nothing runs on submit yet — responses are still saved and readable on the Responses
+            tab. Add a mapping or an automation below to do more with them.
+          </p>
         } @else {
           <ul class="fb-list">
             @for (a of automations(); track a.ID) {
@@ -188,6 +206,10 @@ interface MappingRow {
     </section>
   `,
   styles: [`
+    .at-explainer { margin: 8px 0 12px; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+    .at-explainer li { font-size: 0.8125rem; line-height: 1.55; color: var(--mj-text-secondary); }
+    .at-explainer strong { color: var(--mj-text-primary); }
+
     .fb-panel { padding: var(--mj-space-4, 1rem); color: var(--mj-text, inherit); }
     .fb-hint { color: var(--mj-text-muted, #666); font-size: 0.875rem; }
     .fb-empty { color: var(--mj-text-muted, #666); font-style: italic; }

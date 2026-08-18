@@ -98,7 +98,72 @@ export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
   return a.TextValue ?? a.JSONValue ?? '';
 }
 
-/** Respondent display label: person name, else anonymous session marker. */
+/**
+ * Prompts that identify a respondent by name, most specific first.
+ *
+ * Matched against the question prompt because the published snapshot carries no
+ * "this field is the respondent's name" marker — `PublishedFormQuestion` has id, type,
+ * prompt and settings, and nothing semantic. The On Submit tab's entity binding is where
+ * an author states that mapping properly; until a response has been bound to a Person,
+ * the prompt is the only signal available.
+ */
+const NAME_PROMPTS: readonly { re: RegExp; part: 'full' | 'first' | 'last' }[] = [
+  { re: /\b(full|display)\s*name\b|^name$|\byour name\b/i, part: 'full' },
+  { re: /\b(first|given|fore)\s*name\b/i, part: 'first' },
+  { re: /\b(last|family|sur)\s*name\b|\bsurname\b/i, part: 'last' },
+];
+
+/**
+ * Respondent display label from the linked Person only.
+ *
+ * Prefer {@link deriveRespondent} wherever the response's answers are in hand: a public
+ * form has no Person row, so this returns "Anonymous" for every submission — including
+ * ones that asked for and got a name and an email address.
+ */
 export function respondentLabel(r: ResponseRow): string {
   return r.RespondentPerson || 'Anonymous';
+}
+
+/**
+ * Who submitted this response: the linked Person if there is one, else whatever the form
+ * itself collected, else genuinely anonymous.
+ *
+ * "Anonymous" is a statement about identity, not about authentication. A respondent who
+ * typed their name and email into the form is not anonymous to the person reading the
+ * response, and labelling them that way hides data the form already holds. It stays
+ * accurate for a form that asked for neither.
+ */
+export function deriveRespondent(
+  r: ResponseRow,
+  answers: readonly AnswerRow[],
+  questions: readonly PublishedFormQuestion[],
+): string {
+  if (r.RespondentPerson) {
+    return r.RespondentPerson;
+  }
+
+  const answerByQuestion = new Map(answers.map((a) => [a.QuestionID, a]));
+  const parts: Partial<Record<'full' | 'first' | 'last', string>> = {};
+  let email = '';
+
+  for (const q of questions) {
+    const value = (() => {
+      const a = answerByQuestion.get(q.id);
+      return a ? renderAnswer(q, a).trim() : '';
+    })();
+    if (!value) continue;
+
+    if (!email && q.type === 'Email') {
+      email = value;
+      continue;
+    }
+    // First match wins per part, so an earlier question beats a later duplicate.
+    const match = NAME_PROMPTS.find((n) => n.re.test(q.prompt));
+    if (match && !parts[match.part]) {
+      parts[match.part] = value;
+    }
+  }
+
+  const name = parts.full || [parts.first, parts.last].filter(Boolean).join(' ');
+  return name || email || 'Anonymous';
 }

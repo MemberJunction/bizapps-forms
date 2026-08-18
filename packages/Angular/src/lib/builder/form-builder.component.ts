@@ -14,6 +14,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
   mjBizAppsFormsFormEntity,
+  mjBizAppsFormsFormStyleEntity,
   FormQuestionType,
   FormRenderMode,
   FormStyleTokens,
@@ -41,6 +42,7 @@ import {
 } from './question-type-catalog';
 import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
+import { definitionFingerprint, storedSnapshotFingerprint } from './publish-fingerprint';
 import { isValidReorder } from './reorder';
 
 /**
@@ -51,6 +53,15 @@ import { isValidReorder } from './reorder';
  * came back. Collection follows configuration.
  */
 type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit' | 'responses';
+
+/**
+ * Stand-in version id used only while fingerprinting.
+ *
+ * `formVersionId` is excluded from the comparison anyway (it is a fresh GUID per publish),
+ * but `buildPublishedDefinition` requires one — a constant keeps the built snapshot itself
+ * deterministic rather than relying on the exclusion to hide a value that changes.
+ */
+const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
 
 /**
  * The visual form builder — registered as the override for the
@@ -103,19 +114,91 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected statusMessage = '';
 
   /**
-   * True when the draft has edits not yet in the published snapshot. The public link serves
-   * the last published `FormVersion`, so theme/content changes only go live on Publish — this
-   * drives the "unpublished changes" hint so that isn't surprising.
+   * Fingerprint of the snapshot currently on the public link; null when never published.
+   * Refreshed on load and after a successful publish.
    */
-  protected dirty = false;
+  private publishedFingerprint: string | null = null;
+
+  /** Fingerprint of the draft as it stands. Recomputed after every edit. */
+  private draftFingerprint: string | null = null;
+
+  /**
+   * The style the draft currently resolves to, cached so the fingerprint stays synchronous.
+   * A style change is publishable, so this is refreshed whenever one is applied.
+   */
+  private appliedStyle: mjBizAppsFormsFormStyleEntity | undefined;
+
+  /**
+   * True when the draft differs from what the public link is serving.
+   *
+   * A comparison, not a flag. The previous boolean latch could only ever be set by an edit
+   * and cleared by a publish, so adding a question and deleting it again left the form
+   * claiming unpublished changes it did not have.
+   */
+  protected get dirty(): boolean {
+    return (
+      this.publishedFingerprint !== null &&
+      this.draftFingerprint !== null &&
+      this.publishedFingerprint !== this.draftFingerprint
+    );
+  }
 
   /** Non-null while the full-screen WYSIWYG Preview is open (holds the draft definition). */
   protected previewDef: PublishedFormDefinition | null = null;
 
-  /** Mark the draft as having changes not yet published, and refresh the view. */
+  /**
+   * What the Publish control should currently offer.
+   *
+   * The button used to be a solid primary CTA at all times, which made a fully-published
+   * form look like it still owed the author an action — press it and nothing meaningful
+   * happens. State now lives in the control itself:
+   *
+   *  - `publish`  — a Draft that has never gone live. There IS something to do.
+   *  - `update`   — live, with edits the public link has not seen yet. The urgent case.
+   *  - `current`  — live and in sync. Nothing to do, and the button says so instead of
+   *                 pretending otherwise.
+   */
+  protected get publishState(): 'publish' | 'update' | 'current' {
+    if (this.dirty) return 'update';
+    return this.record.Status === 'Published' ? 'current' : 'publish';
+  }
+
+  /**
+   * Recompute the draft fingerprint and refresh the view.
+   *
+   * Called wherever the old `markDirty()` was — same frequency, but it re-derives the answer
+   * instead of latching it, so an edit that restores the published state reports clean.
+   */
   private markDirty(): void {
-    this.dirty = true;
+    this.draftFingerprint = this.tree
+      ? definitionFingerprint(
+          buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, []),
+        )
+      : null;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * The draft as a published definition, for the Design tab's live sample.
+   *
+   * Same builder as publish and as Preview, so the Design tab shows the actual form rather
+   * than a stand-in — the whole point of styling it is seeing your own questions.
+   */
+  protected get designPreviewDefinition(): PublishedFormDefinition | null {
+    return this.tree
+      ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
+      : null;
+  }
+
+  /** Read the live snapshot and the current draft, so `dirty` has both sides to compare. */
+  private async refreshPublishState(): Promise<void> {
+    this.appliedStyle = this.record.StyleID
+      ? ((await this.design.loadStyleById(this.record.StyleID)) ?? undefined)
+      : undefined;
+    this.publishedFingerprint = storedSnapshotFingerprint(
+      await this.publisher.latestPublishedSnapshot(this.record.ID),
+    );
+    this.markDirty();
   }
 
   override async ngOnInit(): Promise<void> {
@@ -140,6 +223,7 @@ export class FormBuilderComponent extends BaseFormComponent {
         this.tree.pages.push(page);
       }
     }
+    await this.refreshPublishState();
     this.busy = false;
     this.cdr.markForCheck();
   }
@@ -350,7 +434,9 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = false;
     if (result.success) {
       this.statusMessage = `Published version ${result.versionNumber}.`;
-      this.dirty = false;
+      // The draft IS the published snapshot now; re-read rather than assume, so a publish
+      // that transformed anything server-side still leaves the two sides comparable.
+      await this.refreshPublishState();
     } else {
       this.statusMessage = result.error ?? 'Publish failed.';
     }
@@ -377,7 +463,9 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** The Design panel persisted `Form.StyleID`; the theme reaches the live link only on Publish. */
   protected onStyleApplied(): void {
-    this.markDirty();
+    // The applied style is part of the published snapshot, so the cache backing the
+    // fingerprint has to be re-read before the comparison means anything.
+    void this.refreshPublishState();
   }
 
   // -- WYSIWYG preview ------------------------------------------------------
@@ -392,15 +480,6 @@ export class FormBuilderComponent extends BaseFormComponent {
       : undefined;
     // No automations: Preview renders the form, it never runs a submission's side effects.
     this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
-    this.cdr.markForCheck();
-  }
-
-  /** Design-tab "Preview form": render the draft with the current (possibly unsaved) theme. */
-  protected previewWithTokens(tokens: FormStyleTokens): void {
-    if (!this.tree) {
-      return;
-    }
-    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', [], tokens);
     this.cdr.markForCheck();
   }
 

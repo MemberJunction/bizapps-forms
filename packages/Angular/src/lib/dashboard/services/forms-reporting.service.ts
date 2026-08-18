@@ -131,7 +131,7 @@ export class FormsReportingService {
       summary: buildSummary(responses),
       breakdowns: buildBreakdowns(questions, answers),
       funnel: buildFunnel(definition, answers),
-      responses: buildResponseRows(responses, answers),
+      responses: buildResponseRows(responses, answers, questions),
     };
   }
 }

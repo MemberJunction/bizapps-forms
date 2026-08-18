@@ -64,10 +64,6 @@ export interface ResponseAnswerView {
   type: FormQuestionType;
   /** Human-readable rendering of the answer. */
   displayValue: string;
-  /** AI score written by `Forms: Analyze Written Responses`; null when unscored. */
-  score: number | null;
-  /** The model's stated reason for the score; null when unscored. */
-  scoreRationale: string | null;
   /** The uploaded file, when this is a file answer whose upload row resolved. */
   file: ResponseFileView | null;
 }

@@ -1,96 +1,345 @@
-import { BUILDER_CONTROL_STYLES } from './builder-styles';
+import { FORMS_UI_CSS } from '../shared';
 
+/**
+ * The builder shell: header, tab strip, and the three-pane Build workspace.
+ *
+ * Controls (buttons, fields, badges, the switch) come from `FORMS_UI_CSS`. This file
+ * used to carry its own copy of all of them — that is why the builder and the home
+ * list drifted into two visual languages, and why they are now one.
+ */
 const LAYOUT_CSS = /* css */ `
 :host { display: block; height: 100%; color: var(--mj-text-primary); font-family: var(--mj-font-family, inherit); }
 .fb { display: flex; flex-direction: column; height: 100%; min-height: 480px; background: var(--mj-bg-page); }
 
-/* Topbar */
-.fb-top { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); flex-wrap: wrap; }
-.fb-name { font: inherit; font-size: 1.05rem; font-weight: 700; color: var(--mj-text-primary); background: transparent; border: 1px solid transparent; border-radius: var(--mj-radius-md, 8px); padding: 6px 8px; min-width: 200px; flex: 1 1 200px; }
-.fb-name:hover { border-color: var(--mj-border-subtle); }
-.fb-name:focus { outline: 2px solid var(--mjf-focus-ring, var(--mj-brand-primary)); border-color: var(--mj-brand-primary); }
-.fb-spacer { flex: 1; }
-.fb-status { font-size: 0.8125rem; color: var(--mj-text-secondary); }
-.fb-dirty {
+/* ------------------------------------------------------------------- topbar */
+
+.fb-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--mjf-gap-sm);
+  padding: 14px var(--mjf-gutter);
+  border-bottom: 1px solid var(--mjf-rule);
+  background: var(--mj-bg-surface);
+}
+
+/* The form name edits in place. Chromeless until you reach for it — the title of the
+   page you are on should not look like a text box. */
+.fb-name {
+  flex: 1 1 220px;
+  min-width: 180px;
+  font: inherit;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: var(--mj-tracking-tight, -0.01em);
+  color: var(--mj-text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--mjf-radius-sm);
+  padding: 6px 10px;
+  margin-left: -10px;
+  transition: background var(--mjf-ease), border-color var(--mjf-ease);
+}
+.fb-name:hover { background: var(--mj-bg-surface-hover); }
+.fb-name:focus { outline: none; background: var(--mj-bg-surface); border-color: var(--mj-brand-primary); box-shadow: 0 0 0 3px var(--mj-brand-accent-subtle, transparent); }
+
+.fb-status { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
+
+/* The "nothing to publish" state. Quiet on purpose: it is a status, not an action, so it
+   reads as text with a check rather than as a button you have failed to press. Success
+   tone at low saturation — the point is reassurance, not celebration. */
+.fb-published {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  font-size: 0.8125rem;
-  color: var(--mj-status-warning, var(--mj-text-secondary));
+  gap: 6px;
+  min-height: var(--mjf-tap);
+  padding: 0 14px;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: var(--mjf-radius-sm);
+  color: var(--mj-status-success-text);
+  background: var(--mj-status-success-bg);
+  border: 1px solid var(--mj-status-success-border);
 }
-.fb-dirty i { font-size: 0.5rem; }
-.mjf-btn.is-attention { box-shadow: 0 0 0 3px var(--mj-brand-primary-subtle, transparent); }
+.fb-published i { font-size: 0.875rem; }
 
-/* Segmented control */
-.fb-seg { display: inline-flex; border: 1px solid var(--mj-border-default); border-radius: var(--mj-radius-full, 999px); overflow: hidden; }
-.fb-seg button { font: inherit; font-size: 0.8125rem; font-weight: 600; padding: 6px 14px; cursor: pointer; border: none; background: var(--mj-bg-surface); color: var(--mj-text-secondary); }
-.fb-seg button.is-on { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary, var(--mj-text-inverse)); }
+/* The publish action itself carries no extra ring: it only appears when there is
+   genuinely something to publish, so its presence is the signal. */
+.fb-publish { min-width: 140px; }
 
-/* Tabs */
-.fb-tabs { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); overflow-x: auto; scrollbar-width: thin; }
-.fb-tab { flex: 0 0 auto; }  /* five tabs exceed a 360px viewport; the strip scrolls rather than the page */
-.fb-tab { font: inherit; font-weight: 600; font-size: 0.875rem; padding: 10px 14px; cursor: pointer; border: none; background: transparent; color: var(--mj-text-secondary); border-bottom: 2px solid transparent; }
-.fb-tab.is-on { color: var(--mj-brand-primary); border-bottom-color: var(--mj-brand-primary); }
+/* ---------------------------------------------------------------------- tabs */
 
-/* Body grid */
-.fb-body { flex: 1; display: grid; grid-template-columns: 220px 1fr 320px; min-height: 0; overflow: hidden; }
-.fb-pane { overflow-y: auto; padding: 16px; }
-.fb-pane--left { border-right: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); }
-.fb-pane--center { background: var(--mj-bg-page); }
-.fb-pane--right { border-left: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); }
+/* flex:none here is load-bearing, not cosmetic. .fb is a fixed-height flex column, so
+   any child that omits it is a shrink candidate. The tab strip has no intrinsic content
+   height to defend itself with, so when a tall pane (Responses, On Submit) followed it,
+   the strip was crushed to 1px and the user lost every route back out of the tab. */
+.fb-tabs {
+  flex: none;
+  display: flex;
+  gap: var(--mjf-stack);
+  padding: 0 var(--mjf-gutter);
+  border-bottom: 1px solid var(--mjf-rule);
+  background: var(--mj-bg-surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.fb-tabs::-webkit-scrollbar { display: none; }
+.fb-tab {
+  flex: 0 0 auto;  /* five tabs exceed a 360px viewport; the strip scrolls rather than the page */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0;
+  margin-bottom: -1px;
+  font: inherit;
+  font-size: var(--mjf-body);
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--mj-text-secondary);
+  transition: color var(--mjf-ease), border-color var(--mjf-ease);
+}
+/* The icon rides the tab's own colour, so it is muted when inactive and brand-coloured
+   when selected — one rule, correct in both themes, no per-icon colour to maintain. */
+.fb-tab i { font-size: 0.8125rem; opacity: 0.75; }
+.fb-tab.is-on i { opacity: 1; color: var(--mj-brand-primary); }
+.fb-tab:hover { color: var(--mj-text-primary); }
+.fb-tab:hover i { opacity: 1; }
+.fb-tab.is-on { color: var(--mj-text-primary); font-weight: 600; border-bottom-color: var(--mj-brand-primary); }
+.fb-tab:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; border-radius: var(--mjf-radius-sm); }
 
-/* Palette */
-.fb-palette-group { margin-bottom: 16px; }
-.fb-palette-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mj-text-muted); margin: 0 0 8px; }
-.fb-palette { display: flex; flex-direction: column; gap: 6px; }
-.fb-palette-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; font: inherit; font-size: 0.875rem; padding: 8px 10px; cursor: pointer; border-radius: var(--mj-radius-md, 8px); border: 1px solid var(--mj-border-subtle); background: var(--mj-bg-surface-card, var(--mj-bg-surface)); color: var(--mj-text-primary); }
-.fb-palette-item:hover { background: var(--mj-bg-surface-hover); border-color: var(--mj-border-default); }
-.fb-palette-item i { width: 18px; text-align: center; color: var(--mj-text-secondary); }
+/* Panes that are direct flex children of .fb. The grid-based Build pane declares its
+   own sizing below; these two are whole components, so they get it from the host. */
+.fb-pane-host { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
-/* Canvas */
-.fb-canvas { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
-.fb-canvas-head h2 { margin: 0 0 4px; font-size: 1.25rem; color: var(--mj-text-primary); }
-.fb-canvas-head p { margin: 0; color: var(--mj-text-secondary); font-size: 0.9rem; }
-.fb-q-list { display: flex; flex-direction: column; gap: 12px; }
-.fb-q { display: flex; gap: 12px; padding: 14px 16px; border-radius: var(--mj-radius-lg, 12px); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface-card, var(--mj-bg-surface)); cursor: pointer; }
-.fb-q:hover { border-color: var(--mj-border-strong); }
+/* ----------------------------------------------------------------- build body */
+
+.fb-body { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 340px; min-height: 0; overflow: hidden; }
+.fb-pane { overflow-y: auto; padding: var(--mjf-stack); }
+.fb-pane--left { border-right: 1px solid var(--mjf-rule); background: var(--mj-bg-surface); }
+.fb-pane--center { background: var(--mj-bg-page); padding: var(--mjf-stack) var(--mjf-gutter) 96px; }
+.fb-pane--right { border-left: 1px solid var(--mjf-rule); background: var(--mj-bg-surface); }
+
+/* ------------------------------------------------------------------- palette */
+
+.fb-palette-group { margin-bottom: var(--mjf-stack); }
+.fb-palette-title {
+  margin: 0 0 var(--mjf-gap-sm);
+  font-size: var(--mjf-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mj-text-muted);
+}
+.fb-palette { display: flex; flex-direction: column; gap: 2px; }
+
+/* Borderless. A vertical stack of ~14 bordered boxes reads as a wall; the icon column
+   is what makes the list scannable, so the border was only adding weight. */
+.fb-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  text-align: left;
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--mj-text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--mjf-radius-sm);
+  transition: background var(--mjf-ease), color var(--mjf-ease);
+}
+.fb-palette-item:hover:not(:disabled) { background: var(--mj-bg-surface-hover); }
+.fb-palette-item:hover:not(:disabled) i { color: var(--mj-brand-primary); }
+.fb-palette-item:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -2px; }
+.fb-palette-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.fb-palette-item i { flex: none; width: 16px; text-align: center; font-size: var(--mjf-meta); color: var(--mj-text-muted); transition: color var(--mjf-ease); }
+
+/* -------------------------------------------------------------------- canvas */
+
+.fb-canvas { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--mjf-stack); }
+.fb-canvas-head { display: flex; flex-direction: column; gap: 6px; }
+.fb-canvas-head h2 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: var(--mj-tracking-tight, -0.01em); color: var(--mj-text-primary); }
+.fb-canvas-head p { margin: 0; max-width: 60ch; font-size: var(--mjf-body); line-height: 1.55; color: var(--mj-text-secondary); }
+
+.fb-q-list { display: flex; flex-direction: column; gap: 10px; }
+
+/* One question. Previously this was ~120px tall for a one-line question, because the
+   three actions were stacked in a fixed column down the right edge. They are a row
+   now, revealed on hover, so the card is as tall as its content. */
+.fb-q {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--mjf-radius);
+  border: 1px solid var(--mj-border-subtle);
+  background: var(--mj-bg-surface);
+  cursor: pointer;
+  transition: border-color var(--mjf-ease), box-shadow var(--mjf-ease);
+}
+.fb-q:hover { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
+.fb-q:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .fb-q.is-selected { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
 
 /* Drag handle — pointer/touch reorder (arrows remain the keyboard fallback). */
-.fb-q-handle { flex: none; align-self: stretch; width: 26px; display: flex; align-items: center; justify-content: center; cursor: grab; border: none; background: transparent; color: var(--mj-text-muted); border-radius: var(--mj-radius-sm, 6px); touch-action: none; }
+.fb-q-handle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 28px;
+  cursor: grab;
+  border: none;
+  background: transparent;
+  color: var(--mj-text-disabled);
+  border-radius: var(--mjf-radius-sm);
+  touch-action: none;
+  transition: color var(--mjf-ease), background var(--mjf-ease);
+}
+.fb-q:hover .fb-q-handle:not(:disabled) { color: var(--mj-text-secondary); }
 .fb-q-handle:hover:not(:disabled) { background: var(--mj-bg-surface-hover); color: var(--mj-text-primary); }
-.fb-q-handle:focus-visible { outline: 2px solid var(--mjf-focus-ring, var(--mj-brand-primary)); outline-offset: 1px; }
+.fb-q-handle:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 .fb-q-handle:disabled { opacity: 0.35; cursor: not-allowed; }
 .fb-q-handle:active { cursor: grabbing; }
 
 /* CDK drag-drop visual states — token-only so dark mode stays intact. */
-.fb-q-list.cdk-drop-list-dragging .fb-q:not(.cdk-drag-placeholder) { transition: transform var(--mj-transition-base, 0.18s ease); }
-.cdk-drag-preview.fb-q { box-shadow: 0 6px 18px var(--mjf-drag-shadow, var(--mj-shadow-color, rgba(0, 0, 0, 0.18))); border-color: var(--mj-brand-primary); }
-.fb-q-drag-preview { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: var(--mj-radius-lg, 12px); border: 1px solid var(--mj-brand-primary); background: var(--mj-bg-surface-card, var(--mj-bg-surface)); color: var(--mj-text-primary); box-shadow: 0 6px 18px var(--mjf-drag-shadow, var(--mj-shadow-color, rgba(0, 0, 0, 0.18))); }
+.fb-q-list.cdk-drop-list-dragging .fb-q:not(.cdk-drag-placeholder) { transition: transform var(--mjf-ease); }
+.cdk-drag-preview.fb-q { box-shadow: var(--mj-shadow-lg); border-color: var(--mj-brand-primary); }
+.fb-q-drag-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--mjf-radius);
+  border: 1px solid var(--mj-brand-primary);
+  background: var(--mj-bg-surface);
+  color: var(--mj-text-primary);
+  box-shadow: var(--mj-shadow-lg);
+}
 .cdk-drag-placeholder { opacity: 0.4; border-style: dashed !important; border-color: var(--mj-brand-primary) !important; background: var(--mj-bg-surface-sunken) !important; }
-.cdk-drag-animating { transition: transform var(--mj-transition-base, 0.2s cubic-bezier(0, 0, 0.2, 1)); }
-.fb-q-main { flex: 1; min-width: 0; }
-.fb-q-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.fb-q-num { font-size: 0.75rem; font-weight: 700; color: var(--mj-text-muted); }
-.fb-q-label { font-weight: 600; color: var(--mj-text-primary); word-break: break-word; }
-.fb-q-help { font-size: 0.8125rem; color: var(--mj-text-muted); margin-top: 3px; }
-.fb-q-side { display: flex; flex-direction: column; gap: 6px; align-items: center; }
-.fb-q-btn { width: 30px; height: 28px; cursor: pointer; border-radius: var(--mj-radius-sm, 6px); border: 1px solid var(--mj-border-subtle); background: var(--mj-bg-surface); color: var(--mj-text-muted); }
-.fb-q-btn:hover { background: var(--mj-bg-surface-hover); color: var(--mj-text-primary); }
-.fb-q-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.fb-canvas-empty { text-align: center; color: var(--mj-text-muted); padding: 40px 0; }
+.cdk-drag-animating { transition: transform var(--mjf-ease); }
 
-.fb-distribute { padding: 20px; max-width: 880px; margin: 0 auto; }
-.fb-design { flex: 1; min-height: 0; padding: 16px; overflow: hidden; }
+/* The number sits in its own gutter so every question label starts on the same
+   vertical line, however many digits the index has. */
+.fb-q-num {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  font-size: var(--mjf-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  border-radius: var(--mjf-radius-sm);
+  color: var(--mj-text-muted);
+  background: var(--mj-bg-surface-sunken);
+}
+.fb-q.is-selected .fb-q-num { color: var(--mj-brand-primary); background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface)); }
+
+.fb-q-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-right: 8px; }
+.fb-q-label { font-size: var(--mjf-body); font-weight: 600; color: var(--mj-text-primary); word-break: break-word; }
+.fb-q-help { font-size: var(--mjf-meta); color: var(--mj-text-muted); word-break: break-word; }
+.fb-q-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.fb-q-tags .mjf-badge { padding: 1px 8px; font-size: 0.6875rem; }
+
+/* Actions live in the card's top-right corner and appear on hover. They stay visible
+   whenever focus is inside the card, so the keyboard path never depends on hover. */
+.fb-q-side {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--mjf-radius-sm);
+  background: var(--mj-bg-surface);
+  box-shadow: var(--mj-shadow-sm);
+  opacity: 0;
+  transition: opacity var(--mjf-ease);
+}
+.fb-q:hover .fb-q-side,
+.fb-q:focus-within .fb-q-side { opacity: 1; }
+@media (hover: none) { .fb-q-side { opacity: 1; } }
+
+.fb-q-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: var(--mjf-meta);
+  cursor: pointer;
+  border-radius: var(--mjf-radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--mj-text-muted);
+  transition: background var(--mjf-ease), color var(--mjf-ease);
+}
+.fb-q-btn:hover:not(:disabled) { background: var(--mj-bg-surface-hover); color: var(--mj-text-primary); }
+.fb-q-btn:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -1px; }
+.fb-q-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fb-q-btn--danger:hover:not(:disabled) { background: var(--mj-status-error-bg); color: var(--mj-status-error-text); }
+
+.fb-canvas-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--mjf-gap-sm);
+  padding: 56px var(--mjf-card-pad);
+  text-align: center;
+  color: var(--mj-text-secondary);
+  border: 1px dashed var(--mj-border-default);
+  border-radius: var(--mjf-radius);
+}
+.fb-canvas-empty i { font-size: 1.5rem; color: var(--mj-text-disabled); }
+.fb-canvas-empty p { margin: 0; font-size: var(--mjf-meta); }
+
+/* ------------------------------------------------------- non-Build tab panes */
+
+.fb-distribute { padding: var(--mjf-stack) var(--mjf-gutter); max-width: 920px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.fb-design { flex: 1; min-height: 0; padding: var(--mjf-stack) var(--mjf-gutter); overflow: hidden; }
 .fb-design mjf-design-panel { display: block; height: 100%; }
 
-/* Mobile: stack the panes. */
+/* --------------------------------------------------------------- small screens */
+
+@media (max-width: 1100px) {
+  .fb-body { grid-template-columns: 220px minmax(0, 1fr); }
+  /* The properties panel becomes a full-width strip under the canvas rather than a
+     340px column squeezing the canvas to nothing. */
+  .fb-pane--right { grid-column: 1 / -1; border-left: none; border-top: 1px solid var(--mjf-rule); }
+}
+
 @media (max-width: 900px) {
+  .fb-top { padding: 12px var(--mjf-gutter); }
+  .fb-tabs { padding: 0 var(--mjf-gutter); gap: var(--mjf-gap); }
   .fb-body { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; }
-  .fb-pane--left, .fb-pane--right { border: none; border-top: 1px solid var(--mj-border-default); }
-  .fb-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  /* Stacked, the canvas leads. Source order puts the ~14-item palette first, which on a
+     phone means a full screen of controls before you can see the form you opened. */
+  .fb-pane--center { order: 1; }
+  .fb-pane--left { order: 2; }
+  .fb-pane--right { order: 3; }
+  .fb-pane { padding: var(--mjf-gap) var(--mjf-gutter); }
+  .fb-pane--center { padding-bottom: 48px; }
+  .fb-pane--left, .fb-pane--right { border: none; border-top: 1px solid var(--mjf-rule); }
+  .fb-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px; }
+  .fb-q-side { position: static; opacity: 1; box-shadow: none; background: transparent; }
 }
 `;
 
-/** Combined styles for the form builder shell (controls + layout). */
-export const FORM_BUILDER_STYLES = `${BUILDER_CONTROL_STYLES}\n${LAYOUT_CSS}`;
+/** Combined styles for the form builder shell (shared design layer + layout). */
+export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${LAYOUT_CSS}`;

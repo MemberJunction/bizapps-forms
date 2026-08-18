@@ -56,10 +56,13 @@ describe('responseDetailQueries', () => {
     ]);
   });
 
-  it('selects Score and ScoreRationale — their absence is what made AI output invisible', () => {
+  it('selects the answer value columns, and does not pay for AI scoring it no longer shows', () => {
     const answers = queries.find((q) => q.EntityName === FORMS_ENTITY.FormResponseAnswer);
-    expect(answers?.Fields).toContain('Score');
-    expect(answers?.Fields).toContain('ScoreRationale');
+    expect(answers?.Fields).toEqual(
+      expect.arrayContaining(['QuestionID', 'TextValue', 'NumericValue', 'FileID']),
+    );
+    expect(answers?.Fields).not.toContain('Score');
+    expect(answers?.Fields).not.toContain('ScoreRationale');
   });
 
   it('reads the automation name off the base view rather than a second query', () => {

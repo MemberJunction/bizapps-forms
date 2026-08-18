@@ -1,9 +1,14 @@
 @if (!node) {
-  <div class="qe-empty">Select a question to edit its settings.</div>
+  <div class="qe-empty">
+    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+    <span class="qe-empty-title">No question selected</span>
+    <p>Pick a question on the canvas to edit its wording, validation and logic.</p>
+  </div>
 } @else {
   <div class="qe">
     <div class="qe-head">
-      <span class="mjf-pill"><i [class]="typeIcon" aria-hidden="true"></i> {{ typeLabel }}</span>
+      <span class="qe-head-title">Question settings</span>
+      <span class="mjf-badge"><i [class]="typeIcon" aria-hidden="true"></i> {{ typeLabel }}</span>
     </div>
 
     <div class="mjf-field">
@@ -11,8 +16,8 @@
       <textarea
         #promptInput
         id="qe-prompt"
-        class="mjf-input"
-        rows="2"
+        class="mjf-textarea"
+        rows="3"
         [value]="node.entity.Prompt"
         (change)="setPrompt(promptInput.value)"
       ></textarea>
@@ -69,7 +74,7 @@
             </div>
           }
         </div>
-        <button type="button" class="mjf-btn mjf-btn--ghost" style="margin-top:8px" (click)="addOption()">
+        <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="addOption()">
           <i class="fa-solid fa-plus" aria-hidden="true"></i> Add option
         </button>
       </div>

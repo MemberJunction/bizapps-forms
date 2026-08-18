@@ -9,7 +9,7 @@
       aria-label="Form name"
     />
 
-    <div class="fb-seg" role="group" aria-label="Render mode">
+    <div class="mjf-seg" role="group" aria-label="Render mode">
       <button
         type="button"
         [class.is-on]="record.RenderMode === 'Scroll'"
@@ -24,22 +24,46 @@
       >One question</button>
     </div>
 
-    <div class="fb-spacer"></div>
+    <span class="mjf-spacer"></span>
 
     @if (statusMessage) {
       <span class="fb-status" role="status">{{ statusMessage }}</span>
     }
-    @if (dirty) {
-      <span class="fb-dirty" role="status" title="Your changes go live on the public link only after you Publish.">
-        <i class="fa-solid fa-circle" aria-hidden="true"></i> Unpublished changes
-      </span>
-    }
     <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="busy || !tree" (click)="openPreview()">
       <i class="fa-solid fa-eye" aria-hidden="true"></i> Preview
     </button>
-    <button type="button" class="mjf-btn mjf-btn--primary" [class.is-attention]="dirty" [disabled]="busy" (click)="publish()">
-      <i class="fa-solid fa-rocket" aria-hidden="true"></i> Publish
-    </button>
+
+    <!-- One control, three states: the button IS the publish status, so a live and
+         in-sync form no longer shows a primary CTA with nothing behind it. -->
+    @switch (publishState) {
+      @case ('current') {
+        <span class="fb-published" role="status" title="Everything in this form is live on its public link.">
+          <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Published
+        </span>
+      }
+      @case ('update') {
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--primary fb-publish"
+          [disabled]="busy"
+          title="Your edits are not on the public link yet. Publishing pushes them live."
+          (click)="publish()"
+        >
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish changes
+        </button>
+      }
+      @case ('publish') {
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--primary fb-publish"
+          [disabled]="busy"
+          title="Publish this form to make its public link live."
+          (click)="publish()"
+        >
+          <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish
+        </button>
+      }
+    }
   </header>
 
   <!-- Tabs -->
@@ -51,7 +75,7 @@
       [class.is-on]="activeTab === 'build'"
       [attr.aria-selected]="activeTab === 'build'"
       (click)="setTab('build')"
-    >Build</button>
+    ><i class="fa-solid fa-list-check" aria-hidden="true"></i> Build</button>
     <button
       type="button"
       class="fb-tab"
@@ -59,7 +83,7 @@
       [class.is-on]="activeTab === 'design'"
       [attr.aria-selected]="activeTab === 'design'"
       (click)="setTab('design')"
-    >Design</button>
+    ><i class="fa-solid fa-palette" aria-hidden="true"></i> Design</button>
     <button
       type="button"
       class="fb-tab"
@@ -67,7 +91,7 @@
       [class.is-on]="activeTab === 'distribute'"
       [attr.aria-selected]="activeTab === 'distribute'"
       (click)="setTab('distribute')"
-    >Distribute</button>
+    ><i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Distribute</button>
     <button
       type="button"
       class="fb-tab"
@@ -75,7 +99,7 @@
       [class.is-on]="activeTab === 'onsubmit'"
       [attr.aria-selected]="activeTab === 'onsubmit'"
       (click)="setTab('onsubmit')"
-    >On Submit</button>
+    ><i class="fa-solid fa-bolt" aria-hidden="true"></i> On Submit</button>
     <button
       type="button"
       class="fb-tab"
@@ -83,16 +107,16 @@
       [class.is-on]="activeTab === 'responses'"
       [attr.aria-selected]="activeTab === 'responses'"
       (click)="setTab('responses')"
-    >Responses</button>
+    ><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses</button>
   </nav>
 
   @if (activeTab === 'onsubmit' && tree) {
-    <mjf-automation-tab [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
+    <mjf-automation-tab class="fb-pane-host" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
   }
 
   <!-- Created on activation, so the responses query never runs on builder open. -->
   @if (activeTab === 'responses' && tree) {
-    <mjf-responses-tab [FormID]="tree.form.ID" (OpenRecord)="openLinkedRecord($event)" />
+    <mjf-responses-tab class="fb-pane-host" [FormID]="tree.form.ID" (OpenRecord)="openLinkedRecord($event)" />
   }
 
   @if (activeTab === 'build') {
@@ -131,7 +155,10 @@
 
           @for (page of pages; track page.entity.ID) {
             @if (page.questions.length === 0) {
-              <p class="fb-canvas-empty">Add a question from the palette to get started.</p>
+              <div class="fb-canvas-empty">
+                <i class="fa-solid fa-list-check" aria-hidden="true"></i>
+                <p>Pick a question type from the left to start building this form.</p>
+              </div>
             }
             <div
               class="fb-q-list"
@@ -162,18 +189,18 @@
                   [attr.aria-label]="'Drag to reorder question ' + node.entity.Prompt"
                   (click)="$event.stopPropagation()"
                 ><i class="fa-solid fa-grip-vertical" aria-hidden="true"></i></button>
+                <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
                 <div class="fb-q-main">
-                  <div class="fb-q-top">
-                    <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
-                    <span class="mjf-pill"><i [class]="metaFor(node).icon" aria-hidden="true"></i> {{ metaFor(node).label }}</span>
-                    @if (node.entity.IsRequired) {
-                      <span class="mjf-pill">Required</span>
-                    }
-                  </div>
                   <div class="fb-q-label">{{ node.entity.Prompt }}</div>
                   @if (node.entity.HelpText) {
                     <div class="fb-q-help">{{ node.entity.HelpText }}</div>
                   }
+                  <div class="fb-q-tags">
+                    <span class="mjf-badge"><i [class]="metaFor(node).icon" aria-hidden="true"></i> {{ metaFor(node).label }}</span>
+                    @if (node.entity.IsRequired) {
+                      <span class="mjf-badge">Required</span>
+                    }
+                  </div>
                 </div>
                 <div class="fb-q-side">
                   <button
@@ -192,7 +219,7 @@
                   ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
                   <button
                     type="button"
-                    class="fb-q-btn"
+                    class="fb-q-btn fb-q-btn--danger"
                     [disabled]="busy"
                     (click)="deleteQuestion(page, node); $event.stopPropagation()"
                     aria-label="Delete question"
@@ -220,8 +247,8 @@
     <div class="fb-design">
       <mjf-design-panel
         [form]="record"
+        [definition]="designPreviewDefinition"
         (styleApplied)="onStyleApplied()"
-        (previewRequested)="previewWithTokens($event)"
       ></mjf-design-panel>
     </div>
   } @else if (activeTab === 'distribute') {

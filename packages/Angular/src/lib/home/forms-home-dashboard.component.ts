@@ -12,14 +12,43 @@ import { CompositeKey, LogError } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
+import { FORMS_UI_CSS } from '../shared';
 import { FormsHomeService } from './forms-home.service';
+import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import {
   HOME_ACTION,
   HOME_ENTITY,
   STARTER_TEMPLATES,
+  type FormStatus,
   type FormSummaryRow,
   type StarterTemplateChoice,
 } from './home-models';
+
+/**
+ * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
+ * (and therefore the CodeGen union) fails the build here rather than quietly
+ * rendering the new state as neutral grey.
+ */
+const STATUS_TONE: Record<FormStatus, string> = {
+  Published: 'mjf-badge--success',
+  Draft: 'mjf-badge--info',
+  Closed: 'mjf-badge--warning',
+};
+
+/**
+ * The status an archived form sits in.
+ *
+ * `Closed` is an existing lifecycle state meaning "no longer accepting responses", which
+ * is the closest thing the schema has to archived — there is no soft-delete column, and
+ * no FK to a form cascades, so a real delete is not on offer. Named so the list's
+ * archive semantics are one constant rather than a string repeated in four predicates.
+ */
+const ARCHIVED_STATUS: FormStatus = 'Closed';
+
+/** "1 form" / "12 forms" — the list page says both numbers out loud a lot. */
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
 
 /** Which authoring panel (if any) is open. */
 type AuthoringPanel = 'none' | 'ai' | 'template';
@@ -51,7 +80,7 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   providers: [FormsHomeService],
   imports: [FormsModule, DatePipe],
   templateUrl: './forms-home-dashboard.component.html',
-  styleUrls: ['./forms-home-dashboard.component.css'],
+  styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
@@ -62,6 +91,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public errorMessage: string | null = null;
 
   public forms: FormSummaryRow[] = [];
+  /** `forms` narrowed by `query`. Maintained by `applyFilter`, not recomputed in the template. */
+  public visibleForms: FormSummaryRow[] = [];
+  public query = '';
+  /** Archived forms are hidden by default; the toolbar toggles them back in. */
+  public showArchived = false;
   public readonly templates: readonly StarterTemplateChoice[] = STARTER_TEMPLATES;
 
   public panel: AuthoringPanel = 'none';
@@ -88,10 +122,87 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.beginLoad();
     try {
       this.forms = await this.data.loadForms();
+      this.applyFilter();
     } catch (err) {
       this.fail(err, 'Failed to load forms.');
     } finally {
       this.endLoad();
+    }
+  }
+
+  // --- Listing ---------------------------------------------------------------
+
+  /** "12 forms · 340 responses" — the page subtitle. */
+  public get summaryLine(): string {
+    const responses = this.forms.reduce((sum, f) => sum + f.responseCount, 0);
+    return `${plural(this.forms.length, 'form')} · ${plural(responses, 'response')}`;
+  }
+
+  /** Shown beside the search box; only interesting once a search is narrowing the list. */
+  public get countLine(): string {
+    return this.query.trim()
+      ? `${this.visibleForms.length} of ${this.forms.length}`
+      : plural(this.forms.length, 'form');
+  }
+
+  public badgeToneFor(status: FormStatus): string {
+    // The map is total over the compile-time union; the fallback covers a stored row
+    // whose value predates a CHECK-constraint change and so isn't in it yet.
+    return STATUS_TONE[status] ?? '';
+  }
+
+  /** Narrows the list to `query`, and hides archived forms unless asked for. */
+  public applyFilter(): void {
+    const needle = this.query.trim().toLowerCase();
+    this.visibleForms = this.forms.filter((f) => {
+      if (!this.showArchived && f.status === ARCHIVED_STATUS) return false;
+      if (!needle) return true;
+      return (
+        f.name.toLowerCase().includes(needle) ||
+        (f.categoryName?.toLowerCase().includes(needle) ?? false)
+      );
+    });
+    this.cdr.markForCheck();
+  }
+
+  public get archivedCount(): number {
+    return this.forms.filter((f) => f.status === ARCHIVED_STATUS).length;
+  }
+
+  public toggleArchived(): void {
+    this.showArchived = !this.showArchived;
+    this.applyFilter();
+  }
+
+  public isArchived(row: FormSummaryRow): boolean {
+    return row.status === ARCHIVED_STATUS;
+  }
+
+  /**
+   * Archives a form, or restores an archived one to Draft.
+   *
+   * Not a delete, and not labelled as one: see `FormsHomeService.setStatus` for why the
+   * schema cannot support removing a form without destroying the responses it collected.
+   * Restore returns it to Draft rather than Published, so bringing a form back never
+   * silently reopens a public link.
+   */
+  public async toggleArchive(row: FormSummaryRow): Promise<void> {
+    const next: FormStatus = this.isArchived(row) ? 'Draft' : ARCHIVED_STATUS;
+    this.busy = true;
+    this.errorMessage = null;
+    this.cdr.markForCheck();
+    try {
+      const failure = await this.data.setStatus(row.id, next);
+      if (failure) {
+        this.errorMessage = failure;
+        return;
+      }
+      await this.loadForms();
+    } catch (err) {
+      this.fail(err, `Could not ${next === ARCHIVED_STATUS ? 'archive' : 'restore'} this form.`);
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
     }
   }
 

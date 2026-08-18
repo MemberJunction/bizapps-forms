@@ -7,6 +7,8 @@ import { RegisterClass } from '@memberjunction/global';
 import type { ExportFormat } from '@memberjunction/export-engine';
 import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/forms-entities';
 
+import { FORMS_UI_CSS } from '../shared';
+import { FORMS_REPORTING_CSS } from './forms-reporting-dashboard.styles';
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
 import {
@@ -51,7 +53,7 @@ type DashboardTab = 'summary' | 'questions' | 'funnel' | 'responses';
     FormsResponseDetailComponent,
   ],
   templateUrl: './forms-reporting-dashboard.component.html',
-  styleUrls: ['./forms-reporting-dashboard.component.css'],
+  styles: [FORMS_UI_CSS, FORMS_REPORTING_CSS],
 })
 export class FormsReportingDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsReportingService);
