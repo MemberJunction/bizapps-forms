@@ -238,5 +238,18 @@
       "lastModified": "2026-08-08T18:25:58.926Z",
       "checksum": "52080a2fa32d573c455a3f19349a5df096182d58b5ae4e683068ebca6292745d"
     }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Uploads",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": false,
+      "CanUpdate": false,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "7A49C1D4-8E02-4F5B-9C63-D18B52E7A930"
+    }
   }
 ]

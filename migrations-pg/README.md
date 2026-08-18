@@ -41,6 +41,7 @@ instead of something the next reader has to infer from a directory listing:
 | `V202608081700__…Metadata_Sync` | 4,600 lines of `EXEC __mj.spCreate*` calls. The converter emits these as raw T-SQL, and a PostgreSQL core exposes the equivalents as functions with a different call shape — porting it is a hand-authored rewrite, not a conversion |
 | `V202608081800__…Seed_SchemaInfo_EntityNamePrefix` | seeds a row the file above depends on |
 | `V202608131600__…Respondent_Grant_Hardening` | repairs grants that only the seed creates, so on PostgreSQL there is nothing for it to repair — neither the vulnerability it closes nor the rows it corrects exist (#39) |
+| `V202608181030__…Automation_Runner_Form_Uploads_Read` | same reason as the row above: it grants a permission on `Forms Automation Runner`, a role only the seed creates. On PostgreSQL the role, the eight grants it repairs alongside, and the automation runtime that needs the read do not exist, so there is nothing to grant it to (#49) |
 
 The consequence is worth stating plainly: **a PostgreSQL host installs the Forms schema but none of
 the seed payload** — no roles, no grants, no actions, prompts, styles or dashboards — so the

@@ -42,6 +42,24 @@ function respondentPerms(): Record<string, boolean> {
   };
 }
 
+/**
+ * The published definition the fake distribution serves: the shared fake's ShortText question
+ * plus the FileUpload question ('q-file') the requests here upload against — the endpoint now
+ * verifies the question exists on the definition AND is a FileUpload question.
+ */
+function makeUploadDefinition() {
+  const definition = makeDefinition();
+  definition.pages[0].questions.push({
+    id: 'q-file',
+    type: 'FileUpload',
+    prompt: 'Upload your résumé',
+    isRequired: false,
+    displayOrder: 2,
+    options: [],
+  });
+  return definition;
+}
+
 /** RunView provider that resolves an open published distribution for slug 'public-1'. */
 function runViewProvider(options: { openDistribution?: boolean } = {}) {
   const open = options.openDistribution ?? true;
@@ -51,7 +69,7 @@ function runViewProvider(options: { openDistribution?: boolean } = {}) {
       if (params.EntityName === FORM_DISTRIBUTION_ENTITY && open) {
         rows = [makeDistribution()];
       } else if (params.EntityName === FORM_VERSION_ENTITY && open) {
-        rows = [makeVersion(makeDefinition())];
+        rows = [makeVersion(makeUploadDefinition())];
       }
       return { Success: true, Results: rows as T[], RowCount: rows.length, TotalRowCount: rows.length, ExecutionTime: 0, ErrorMessage: '' } as RunViewResult<T>;
     },
@@ -79,7 +97,7 @@ function request(overrides?: Partial<UploadRequest>): UploadRequest {
 }
 
 /** Provenance rows recorded by the stub, so tests can assert what the endpoint wrote. */
-const recordedProvenance: { fileId: string; responseId?: string; distributionId: string }[] = [];
+const recordedProvenance: { fileId: string; responseId?: string; distributionId: string; questionId?: string }[] = [];
 
 function context(opts: {
   perms?: Record<string, boolean>;
@@ -102,6 +120,7 @@ function context(opts: {
         fileId: input.fileId,
         responseId: input.responseId,
         distributionId: input.distributionId,
+        questionId: input.questionId,
       });
       return true;
     },
@@ -173,6 +192,39 @@ describe('runUpload', () => {
   it('rejects (400) when the distribution slug/id is missing', async () => {
     const result = await runUpload(context({}), request({ distributionSlug: undefined, distributionId: undefined }));
     expect(result.failure?.status).toBe(400);
+  });
+
+  it('rejects (400) a questionId that is not on the published definition — before storing bytes', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-not-real' }));
+    expect(result.failure?.status).toBe(400);
+    expect(result.failure?.error).toMatch(/Unknown "questionId"/);
+    // The whole point: an unknown question must never reach storage (it used to travel all the
+    // way to the provenance insert and orphan the stored bytes + MJ: Files row on the way out).
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects (400) a questionId that is not a FileUpload question', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-name' }));
+    expect(result.failure?.status).toBe(400);
+    expect(result.failure?.error).toMatch(/not a FileUpload question/);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('accepts a questionId differing only by GUID case, and records the definition spelling', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'Q-FILE' }));
+
+    expect(result.ok).toBe(true);
+    // Reached storage — an accepted upload must actually store, not merely avoid rejection.
+    expect(upload).toHaveBeenCalledOnce();
+    // The LEDGER carries the definition's spelling, not whatever case the client sent. The id is
+    // matched case-folded (client mints lowercase, SQL Server returns uppercase) but written
+    // canonically, so `FormUpload.QuestionID` cannot disagree with the published definition about
+    // which question an upload answered.
+    expect(recordedProvenance).toHaveLength(1);
+    expect(recordedProvenance[0].questionId).toBe('q-file');
   });
 
   it('rejects (404) when the distribution does not resolve to an open form', async () => {

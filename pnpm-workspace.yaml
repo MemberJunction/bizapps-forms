@@ -1,7 +1,12 @@
-# pnpm workspace definition. The npm `workspaces` array in package.json is left in
-# place because other tooling still reads it (the OpenApp install engine's
-# findWorkspacePackageJsonFiles, and the publish workflow's jq steps) — pnpm itself
-# ignores it and uses this file. Keep the two glob lists in sync.
+# pnpm workspace definition. The npm `workspaces` array in package.json is left in place
+# because the OpenApp install engine still reads it (findWorkspacePackageJsonFiles) — pnpm
+# itself ignores it and uses this file. Keep the two `packages/*` globs in sync; the
+# `apps/MJAPI` entry below is deliberately pnpm-only (see its own note).
+#
+# CORRECTED 2026-08-18: this note used to also credit "the publish workflow's jq steps" with
+# reading `workspaces`. No workflow reads that field — `grep -rn workspaces .github/` returns
+# nothing; every jq in publish.yml reads a fixed path (packages/Entities/package.json or
+# mj-app.json). The claim survived into a PR description before anyone checked it.
 
 # LOAD-BEARING. pnpm 10 defaults this to false, which makes internal deps pinned at
 # an exact version resolve from the REGISTRY instead of linking to the local package.
@@ -38,3 +43,13 @@ onlyBuiltDependencies:
 
 packages:
   - 'packages/*'
+  # The MJAPI dev harness is a workspace member so its @memberjunction/* deps dedupe
+  # against packages/* through one lockfile. Outside the workspace it resolves its own
+  # copies of graphql/@memberjunction/server, and two instances split the type-graphql
+  # registry: schema generation then dies at boot (duplicate "RunViewByIDInput" /
+  # CannotDetermineGraphQLTypeError) — the 2026-08-18 estate failure. What keeps the harness
+  # out of any release is `"private": true` in its package.json, not this list. It is also
+  # deliberately absent from package.json `workspaces`, which the OpenApp install engine
+  # enumerates (findWorkspacePackageJsonFiles) — so the two glob lists are NOT in sync, and
+  # the note at the top of this file is scoped to the `packages/*` entry they share.
+  - 'apps/MJAPI'

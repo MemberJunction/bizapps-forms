@@ -54,3 +54,5 @@ metadata/sql_logging
 
 # Playwright MCP session scratch (traces, downloads, storage state) — tooling output, never source
 .playwright-mcp/
+.dev-file-storage/
+apps/MJAPI/schema.graphql

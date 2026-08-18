@@ -34,7 +34,8 @@
     "smoke:binding": "node smoke/binding-path.mjs",
     "smoke:binding:seed": "node smoke/seed-binding-smoke.mjs",
     "smoke:automation": "node smoke/automation-semantics-path.mjs",
-    "smoke:provenance": "node smoke/upload-provenance-path.mjs"
+    "smoke:provenance": "node smoke/upload-provenance-path.mjs",
+    "smoke:resume-arc": "node smoke/resume-arc-path.mjs"
   },
   "repository": {
     "type": "git",
@@ -54,7 +55,8 @@
     "turbo": "^2.7.3",
     "typescript": "^5.9.3",
     "@types/node": "^22.10.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@mj-biz-apps/forms-entities": "workspace:*"
   },
   "pnpm": {
     "overrides": {
