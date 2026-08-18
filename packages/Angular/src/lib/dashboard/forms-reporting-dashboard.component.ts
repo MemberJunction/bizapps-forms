@@ -2,19 +2,20 @@ import { ChangeDetectionStrategy, ChangeDetectorRef, Component, inject } from '@
 import { FormsModule } from '@angular/forms';
 import { BaseDashboard } from '@memberjunction/ng-shared';
 import type { ResourceData } from '@memberjunction/core-entities';
-import { LogError } from '@memberjunction/core';
+import { CompositeKey, LogError } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import type { ExportFormat } from '@memberjunction/export-engine';
-import type {
-  mjBizAppsFormsFormResponseAnswerEntityType,
-  PublishedFormQuestion,
-} from '@mj-biz-apps/forms-entities';
+import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/forms-entities';
 
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
-import { mockReport, mockReportableForms } from './services/forms-reporting-mock';
+import {
+  mockReport,
+  mockReportableForms,
+  mockResponseDetail,
+} from './services/forms-reporting-mock';
 import type { FormReportData, ReportableForm } from './models/reporting.model';
-import type { ResponseDetail } from '../responses/response-models';
+import type { ResponseDetail, ResponseRecordLink } from '../responses/response-models';
 import { ResponsesDataService } from '../responses/responses-data.service';
 
 import { FormsSummaryStatsComponent } from './components/summary-stats.component';
@@ -151,7 +152,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     this.beginLoad();
     try {
       this.responseDetail = this.useMock
-        ? this.mockResponseDetail(responseId)
+        ? this.mockDetail(responseId)
         : await this.data.loadResponseDetail(responseId, this.report.questions);
     } catch (err) {
       this.fail(err, 'Failed to load the response.');
@@ -162,6 +163,17 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   public closeResponse(): void {
     this.responseDetail = null;
+  }
+
+  /**
+   * Relays a deep link from the response detail (a stored file, an action log, an agent
+   * run, a bound business record) to the container, which owns tab/routing behaviour.
+   */
+  public openLinkedRecord(link: ResponseRecordLink): void {
+    this.OpenEntityRecord.emit({
+      EntityName: link.entityName,
+      RecordPKey: CompositeKey.FromID(link.recordId),
+    });
   }
 
   public async export(format: ExportFormat): Promise<void> {
@@ -184,29 +196,9 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
   }
 
   /** Builds a detail view from the mock report (no extra fetch). */
-  private mockResponseDetail(responseId: string): ResponseDetail {
+  private mockDetail(responseId: string): ResponseDetail {
     const row = this.report?.responses.find((r) => r.responseId === responseId);
-    return {
-      responseId,
-      status: row?.status ?? 'Complete',
-      startedAt: row?.startedAt ?? null,
-      submittedAt: row?.submittedAt ?? null,
-      respondent: row?.respondent ?? 'Anonymous',
-      answers: this.mockDetailAnswers(),
-    };
-  }
-
-  private mockDetailAnswers(): ResponseDetail['answers'] {
-    const qs: PublishedFormQuestion[] = this.report?.questions ?? [];
-    return qs
-      .filter((q) => q.type !== 'Statement')
-      .slice(0, 4)
-      .map((q) => ({
-        questionId: q.id,
-        prompt: q.prompt,
-        type: q.type,
-        displayValue: 'Sample answer',
-      }));
+    return mockResponseDetail(responseId, this.report?.questions ?? [], row);
   }
 
   private beginLoad(): void {

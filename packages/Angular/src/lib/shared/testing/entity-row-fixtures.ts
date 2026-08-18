@@ -11,6 +11,9 @@
 import type {
   mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormResponseAnswerEntityType,
+  mjBizAppsFormsFormUploadEntityType,
+  mjBizAppsFormsFormAutomationRunEntityType,
+  mjBizAppsFormsFormEntityBindingRecordEntityType,
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 
@@ -76,5 +79,85 @@ export function answer(
     __mj_UpdatedAt: now,
     File: null,
     ...vals,
+  };
+}
+
+/** A `FormUpload` provenance row for a stored file. */
+export function upload(
+  fileId: string,
+  overrides: Partial<mjBizAppsFormsFormUploadEntityType> = {},
+): mjBizAppsFormsFormUploadEntityType {
+  const now = new Date();
+  return {
+    ID: `up-${fileId}`,
+    FileID: fileId,
+    DistributionID: 'd1',
+    FormID: 'f1',
+    QuestionID: null,
+    ResponseDraftID: null,
+    AnonymousSessionID: null,
+    UploadedByUserID: null,
+    ProviderKey: null,
+    FileName: `${fileId}.pdf`,
+    ContentType: 'application/pdf',
+    SizeBytes: 2048,
+    Status: 'Active',
+    __mj_CreatedAt: now,
+    __mj_UpdatedAt: now,
+    File: `${fileId}.pdf`,
+    Distribution: 'Public link',
+    Form: 'Test Form',
+    UploadedByUser: null,
+    ...overrides,
+  };
+}
+
+/** A `FormAutomationRun` row — one attempt of one on-submit automation. */
+export function automationRun(
+  id: string,
+  status: mjBizAppsFormsFormAutomationRunEntityType['Status'],
+  overrides: Partial<mjBizAppsFormsFormAutomationRunEntityType> = {},
+): mjBizAppsFormsFormAutomationRunEntityType {
+  const now = new Date();
+  return {
+    ID: id,
+    FormAutomationID: `auto-${id}`,
+    FormResponseID: 'r1',
+    Status: status,
+    AttemptCount: 1,
+    StartedAt: null,
+    CompletedAt: null,
+    ActionExecutionLogID: null,
+    AIAgentRunID: null,
+    ErrorMessage: null,
+    OutputSummary: null,
+    __mj_CreatedAt: now,
+    __mj_UpdatedAt: now,
+    FormAutomation: `Automation ${id}`,
+    ActionExecutionLog: null,
+    AIAgentRun: null,
+    ...overrides,
+  };
+}
+
+/** A `FormEntityBindingRecord` ledger row — the business record a submission wrote. */
+export function bindingRecord(
+  id: string,
+  outcome: mjBizAppsFormsFormEntityBindingRecordEntityType['Outcome'],
+  overrides: Partial<mjBizAppsFormsFormEntityBindingRecordEntityType> = {},
+): mjBizAppsFormsFormEntityBindingRecordEntityType {
+  const now = new Date();
+  return {
+    ID: id,
+    BindingID: `bind-${id}`,
+    FormResponseID: 'r1',
+    TargetEntityID: 'entity-1',
+    TargetRecordID: 'rec-1',
+    Outcome: outcome,
+    WrittenFields: null,
+    __mj_CreatedAt: now,
+    __mj_UpdatedAt: now,
+    Binding: `Binding ${id}`,
+    ...overrides,
   };
 }

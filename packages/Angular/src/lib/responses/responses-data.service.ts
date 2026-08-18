@@ -16,11 +16,14 @@
  *     hides every response submitted against an earlier one.
  */
 import { Injectable } from '@angular/core';
-import { RunView, RunViewResult } from '@memberjunction/core';
+import { Metadata, RunView, RunViewResult } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormResponseAnswerEntityType,
   mjBizAppsFormsFormVersionEntityType,
+  mjBizAppsFormsFormUploadEntityType,
+  mjBizAppsFormsFormAutomationRunEntityType,
+  mjBizAppsFormsFormEntityBindingRecordEntityType,
   PublishedFormDefinition,
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
@@ -32,7 +35,7 @@ import { buildResponseDetail } from './response-aggregations';
 /** DB schema for the Forms tables/views — the IN-subquery view must be qualified. */
 const FORMS_SCHEMA = '__mj_BizAppsForms';
 
-/** The answer columns every read of this surface selects. */
+/** The answer columns the list/export reads select. */
 const ANSWER_FIELDS = [
   'ID',
   'ResponseID',
@@ -44,6 +47,20 @@ const ANSWER_FIELDS = [
   'JSONValue',
   'FileID',
 ] as const;
+
+/**
+ * The answer columns the EXPORT read selects — the value columns plus `Score`, which the
+ * pivot turns into a per-question score column. `ScoreRationale` is deliberately absent:
+ * it is model prose and never reaches the spreadsheet.
+ */
+const EXPORT_ANSWER_FIELDS = [...ANSWER_FIELDS, 'Score'] as const;
+
+/**
+ * The answer columns the DETAIL read selects — the value columns plus the full AI scoring
+ * the `Forms: Analyze Written Responses` automation writes. Neither the list nor the funnel
+ * aggregates scoring, so only these two reads pay for it.
+ */
+const DETAIL_ANSWER_FIELDS = [...ANSWER_FIELDS, 'Score', 'ScoreRationale'] as const;
 
 /** The response columns every read of this surface selects. */
 const RESPONSE_FIELDS = [
@@ -105,12 +122,20 @@ export class ResponsesDataService {
     return { responses: responsesRes.Results, answers: answersRes.Results };
   }
 
-  /** Loads one response's labelled answers for the detail view. */
+  /**
+   * Loads one response's full detail: its labelled answers (with AI scores and the files
+   * behind file answers) plus what the submission triggered — automation attempts and the
+   * business records they wrote.
+   *
+   * Two round trips, not five. The first batches everything keyed on the response id; the
+   * uploads join needs the answers' `FileID`s, so it can only run once they are back — and
+   * is skipped entirely when no answer references a file, which is the common case.
+   */
   public async loadResponseDetail(
     responseId: string,
     questions: PublishedFormQuestion[],
   ): Promise<ResponseDetail> {
-    const [responseRes, answersRes] = (await this.rv.RunViews([
+    const [responseRes, answersRes, runsRes, bindingRes] = (await this.rv.RunViews([
       {
         EntityName: FORMS_ENTITY.FormResponse,
         ExtraFilter: `ID='${responseId}'`,
@@ -121,11 +146,48 @@ export class ResponsesDataService {
         EntityName: FORMS_ENTITY.FormResponseAnswer,
         ExtraFilter: `ResponseID='${responseId}'`,
         ResultType: 'simple',
-        Fields: [...ANSWER_FIELDS],
+        Fields: [...DETAIL_ANSWER_FIELDS],
+      },
+      {
+        EntityName: FORMS_ENTITY.FormAutomationRun,
+        ExtraFilter: `FormResponseID='${responseId}'`,
+        ResultType: 'simple',
+        // FormAutomation is the base view's denormalised automation name — no second read.
+        Fields: [
+          'ID',
+          'FormAutomationID',
+          'FormAutomation',
+          'Status',
+          'AttemptCount',
+          'StartedAt',
+          'CompletedAt',
+          'ErrorMessage',
+          'OutputSummary',
+          'ActionExecutionLogID',
+          'AIAgentRunID',
+        ],
+        OrderBy: '__mj_CreatedAt',
+      },
+      {
+        EntityName: FORMS_ENTITY.FormEntityBindingRecord,
+        ExtraFilter: `FormResponseID='${responseId}'`,
+        ResultType: 'simple',
+        Fields: [
+          'ID',
+          'BindingID',
+          'Binding',
+          'TargetEntityID',
+          'TargetRecordID',
+          'Outcome',
+          'WrittenFields',
+        ],
+        OrderBy: '__mj_CreatedAt',
       },
     ])) as [
       RunViewResult<mjBizAppsFormsFormResponseEntityType>,
       RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>,
+      RunViewResult<mjBizAppsFormsFormAutomationRunEntityType>,
+      RunViewResult<mjBizAppsFormsFormEntityBindingRecordEntityType>,
     ];
 
     if (!responseRes.Success || !answersRes.Success || responseRes.Results.length === 0) {
@@ -133,13 +195,83 @@ export class ResponsesDataService {
         responseRes.ErrorMessage || answersRes.ErrorMessage || 'Response not found.',
       );
     }
+    if (!runsRes.Success || !bindingRes.Success) {
+      throw new Error(
+        runsRes.ErrorMessage ||
+          bindingRes.ErrorMessage ||
+          `Failed to load what response ${responseId} triggered.`,
+      );
+    }
 
-    return buildResponseDetail(responseRes.Results[0], answersRes.Results, questions);
+    const answers = answersRes.Results;
+    return buildResponseDetail({
+      response: responseRes.Results[0],
+      answers,
+      questions,
+      uploads: await this.loadUploadsForAnswers(answers),
+      automationRuns: runsRes.Results,
+      bindingRecords: bindingRes.Results,
+      entityNameById: this.resolveEntityNames(bindingRes.Results),
+    });
+  }
+
+  /**
+   * Provenance rows for the files these answers reference. Returns `[]` without querying
+   * when no answer holds a `FileID` — the overwhelmingly common case for a form with no
+   * upload question.
+   */
+  private async loadUploadsForAnswers(
+    answers: mjBizAppsFormsFormResponseAnswerEntityType[],
+  ): Promise<mjBizAppsFormsFormUploadEntityType[]> {
+    const fileIds = [...new Set(answers.map((a) => a.FileID).filter((id): id is string => !!id))];
+    if (fileIds.length === 0) {
+      return [];
+    }
+    const inList = fileIds.map((id) => `'${id}'`).join(',');
+    const res = (await this.rv.RunView({
+      EntityName: FORMS_ENTITY.FormUpload,
+      ExtraFilter: `FileID IN (${inList})`,
+      ResultType: 'simple',
+      Fields: ['ID', 'FileID', 'FileName', 'ContentType', 'SizeBytes', 'Status'],
+    })) as RunViewResult<mjBizAppsFormsFormUploadEntityType>;
+    if (!res.Success) {
+      throw new Error(res.ErrorMessage || 'Failed to load the uploaded files.');
+    }
+    return res.Results;
+  }
+
+  /**
+   * `TargetEntityID` → canonical entity name for the binding ledger.
+   *
+   * The column is deliberately NOT a foreign key (the ledger points at arbitrary entities),
+   * so the view carries no denormalised name and there is nothing to join. Metadata is
+   * already loaded client-side, so this is an in-memory O(1) lookup per row, not a query.
+   *
+   * `Name`, not `DisplayName`: this value is also what a deep link navigates by, and
+   * `OpenEntityRecord` / `Navigate` resolve entities by their canonical name. An id
+   * metadata cannot name is left out, and the row renders without a link.
+   */
+  private resolveEntityNames(
+    records: mjBizAppsFormsFormEntityBindingRecordEntityType[],
+  ): ReadonlyMap<string, string> {
+    const md = new Metadata();
+    const names = new Map<string, string>();
+    for (const r of records) {
+      if (names.has(r.TargetEntityID)) {
+        continue;
+      }
+      const entity = md.EntityByID(r.TargetEntityID);
+      if (entity) {
+        names.set(r.TargetEntityID, entity.Name);
+      }
+    }
+    return names;
   }
 
   /**
    * Loads all answer rows for a form (across ALL its versions' responses). Used by the
-   * export service to pivot responses into a wide matrix.
+   * export service to pivot responses into a wide matrix — which is why this read selects
+   * `Score` where the list read does not.
    */
   public async loadAnswersForForm(
     formId: string,
@@ -148,7 +280,7 @@ export class ResponsesDataService {
       EntityName: FORMS_ENTITY.FormResponseAnswer,
       ExtraFilter: answersForFormFilter(formId),
       ResultType: 'simple',
-      Fields: [...ANSWER_FIELDS],
+      Fields: [...EXPORT_ANSWER_FIELDS],
     })) as RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>;
     if (!res.Success) {
       throw new Error(res.ErrorMessage || 'Failed to load answers.');

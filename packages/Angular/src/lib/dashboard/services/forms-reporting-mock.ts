@@ -14,6 +14,7 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntityType,
 } from '@mj-biz-apps/forms-entities';
 import type { FormReportData, ReportableForm } from '../models/reporting.model';
+import type { ResponseDetail } from '../../responses/response-models';
 import { flattenQuestions } from '../../shared/published-questions';
 import { buildResponseRows } from '../../responses/response-aggregations';
 import { buildSummary, buildBreakdowns, buildFunnel } from './reporting-aggregations';
@@ -99,6 +100,103 @@ export function mockReport(): FormReportData {
     breakdowns: buildBreakdowns(questions, answers),
     funnel: buildFunnel(definition, answers),
     responses: buildResponseRows(responses, answers),
+  };
+}
+
+/**
+ * Builds the mock detail for one response — the `useMock` twin of
+ * `ResponsesDataService.loadResponseDetail`.
+ *
+ * It deliberately populates EVERY enriched branch (a scored free-text answer, a file
+ * answer, automation runs including a failure, and a binding-ledger row), because the
+ * point of mock mode is to render the UI before real data exists. A mock that only fills
+ * the fields the old detail view had is a mock that hides exactly the new UI you are
+ * trying to look at.
+ */
+export function mockResponseDetail(
+  responseId: string,
+  questions: PublishedFormQuestion[],
+  row?: {
+    status: 'Complete' | 'Partial';
+    startedAt: Date | null;
+    submittedAt: Date | null;
+    respondent: string;
+  },
+): ResponseDetail {
+  const answerable = questions.filter((q) => q.type !== 'Statement').slice(0, 4);
+  return {
+    responseId,
+    status: row?.status ?? 'Complete',
+    startedAt: row?.startedAt ?? null,
+    submittedAt: row?.submittedAt ?? null,
+    respondent: row?.respondent ?? 'Anonymous',
+    answers: [
+      ...answerable.map((q) => ({
+        questionId: q.id,
+        prompt: q.prompt,
+        type: q.type,
+        displayValue: 'Sample answer',
+        // Only the free-text question is scored — that is what the AI automation does.
+        score: q.type === 'LongText' ? 7.5 : null,
+        scoreRationale:
+          q.type === 'LongText' ? 'Constructive feedback with a clear, specific suggestion.' : null,
+        file: null,
+      })),
+      {
+        questionId: 'mock-q-file',
+        prompt: 'Attach anything that helps us understand your answer',
+        type: 'FileUpload' as const,
+        displayValue: '',
+        score: null,
+        scoreRationale: null,
+        file: {
+          fileId: 'mock-file-0001',
+          fileName: 'screenshot.png',
+          contentType: 'image/png',
+          sizeBytes: 184_320,
+          isRevoked: false,
+        },
+      },
+    ],
+    automationRuns: [
+      {
+        runId: 'mock-run-1',
+        automationName: 'Send confirmation email',
+        status: 'Succeeded',
+        attemptCount: 1,
+        startedAt: new Date(Date.now() - 12_000),
+        completedAt: new Date(Date.now() - 10_600),
+        durationSeconds: 1.4,
+        errorMessage: null,
+        outputSummary: 'Sent to sample.person@example.com',
+        actionExecutionLogId: 'mock-log-1',
+        aiAgentRunId: null,
+      },
+      {
+        runId: 'mock-run-2',
+        automationName: 'Analyze written responses',
+        status: 'Failed',
+        attemptCount: 3,
+        startedAt: new Date(Date.now() - 10_000),
+        completedAt: new Date(Date.now() - 7_800),
+        durationSeconds: 2.2,
+        errorMessage: 'Model provider returned 429 after 3 attempts.',
+        outputSummary: null,
+        actionExecutionLogId: null,
+        aiAgentRunId: 'mock-agent-run-1',
+      },
+    ],
+    bindingRecords: [
+      {
+        bindingRecordId: 'mock-binding-rec-1',
+        bindingName: 'Send responses to People',
+        targetEntityId: 'mock-entity-people',
+        targetEntityName: 'MJ_BizApps_Common: People',
+        targetRecordId: 'mock-person-1',
+        outcome: 'Created',
+        writtenFields: ['FirstName', 'LastName', 'Email'],
+      },
+    ],
   };
 }
 

@@ -8,6 +8,7 @@
 export * from './models/reporting.model';
 export * from './services/reporting-aggregations';
 export * from './services/forms-reporting.service';
+export * from './services/export-pivot';
 export * from './services/forms-reporting-export.service';
 export * from './components/summary-stats.component';
 export * from './components/question-breakdown.component';

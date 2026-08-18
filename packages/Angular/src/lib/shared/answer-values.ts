@@ -60,7 +60,15 @@ export function extractChoiceValues(a: AnswerRow): string[] {
   return [];
 }
 
-/** Renders an answer to a human-readable string, label-mapping choices. */
+/**
+ * Renders an answer to a human-readable string, label-mapping choices.
+ *
+ * A `FileUpload` answer renders as the empty string, NOT as its `FileID`. The file's name,
+ * type and size live on the `FormUpload` provenance row, not on the answer, so a raw GUID
+ * is the one thing this function can produce that is guaranteed to mean nothing to a
+ * reader. The detail view joins uploads and renders the real filename; the export pivot
+ * has no such join and correctly emits nothing rather than a GUID column.
+ */
 export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
   if (q.type === 'YesNo') {
     return a.BooleanValue === true ? 'Yes' : a.BooleanValue === false ? 'No' : '';
@@ -79,7 +87,7 @@ export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
     return d ? d.toISOString() : '';
   }
   if (q.type === 'FileUpload') {
-    return a.FileID ? `File: ${a.FileID}` : '';
+    return '';
   }
   if (TEXT_TYPES.has(q.type)) {
     return a.TextValue ?? '';
