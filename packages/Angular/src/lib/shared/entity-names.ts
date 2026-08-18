@@ -18,6 +18,7 @@ export const FORMS_ENTITY = {
   FormPage: 'MJ_BizApps_Forms: Form Pages',
   FormQuestion: 'MJ_BizApps_Forms: Form Questions',
   FormQuestionOption: 'MJ_BizApps_Forms: Form Question Options',
+  FormScreen: 'MJ_BizApps_Forms: Form Screens',
   FormResponse: 'MJ_BizApps_Forms: Form Responses',
   FormResponseAnswer: 'MJ_BizApps_Forms: Form Response Answers',
   FormDistribution: 'MJ_BizApps_Forms: Form Distributions',

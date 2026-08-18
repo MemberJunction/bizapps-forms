@@ -9,6 +9,7 @@ import type {
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import type { ExportColumn, ExportData } from '@memberjunction/export-engine';
+import { answerColumnFor } from '@mj-biz-apps/forms-entities';
 import { renderAnswer } from '../../shared/answer-values';
 import type { ResponseListRow } from '../../responses/response-models';
 
@@ -42,7 +43,10 @@ export function buildExportColumns(questions: PublishedFormQuestion[]): ExportCo
  * only evidence in the sheet that a file was submitted at all.
  */
 function exportAnswerValue(q: PublishedFormQuestion, a: AnswerRow): string {
-  if (q.type === 'FileUpload') {
+  // Keyed on the answer COLUMN, not the type name, so `Signature` — a file answer produced by a
+  // canvas rather than a picker — exports its joinable id like any other file instead of the
+  // empty string `renderAnswer` gives it.
+  if (answerColumnFor(q.type) === 'file') {
     return a.FileID ?? '';
   }
   return renderAnswer(q, a);

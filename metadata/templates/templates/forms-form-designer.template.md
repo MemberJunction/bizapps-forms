@@ -24,14 +24,26 @@ The JSON MUST match this shape exactly:
   ]
 }
 
-Allowed "type" values (Phase 1 ONLY):
-ShortText, LongText, Email, Phone, Number, SingleChoice, MultiChoice, Dropdown, Rating, NPS, YesNo, Date, Time, FileUpload, Statement.
+Allowed "type" values:
+ShortText, LongText, Email, Phone, Website, Number,
+SingleChoice, MultiChoice, Dropdown, PictureChoice,
+Rating, NPS, OpinionScale, Ranking, Matrix,
+YesNo, Checkbox, Legal,
+Date, Time,
+Address, ContactInfo,
+FileUpload, Signature,
+Statement.
 
 Rules:
-- "options" are REQUIRED for SingleChoice, MultiChoice, and Dropdown; provide at least two. Do NOT add options to any other type.
-- Use Email for email addresses, Phone for phone numbers, Number for numeric inputs (e.g. a "+1 count" or quantity).
-- Rating settings may include { "min": number, "max": number }. NPS is a fixed 0-10 scale (no options needed).
+- "options" are REQUIRED for SingleChoice, MultiChoice, Dropdown, PictureChoice, Ranking and Matrix; provide at least two. Do NOT add options to any other type.
+- Matrix options carry a "matrixAxis" of "Row" or "Column"; supply at least two of each.
+- Use Email for email addresses, Phone for phone numbers, Website for URLs, Number for numeric inputs (e.g. a "+1 count" or quantity).
+- Prefer ContactInfo over separate first-name / last-name / email / phone questions, and Address over separate street / city / postcode questions. Both collect the whole block in one field.
+- Rating settings may include { "max": number } (stars, default 5). NPS is a fixed 0-10 scale. OpinionScale settings may include { "min": number, "max": number, "labelMin": string, "labelMax": string }.
+- Checkbox is a single box to tick (consent, opt-in); its settings may include { "placeholder": string } for the text beside the box. Legal shows terms then Accept / Decline; put the terms in settings as { "terms": string }.
+- Signature captures a drawn signature; it needs no settings.
 - Statement is display-only (a section header / instructional text); it is never required and has no options.
+- Do NOT emit a welcome or thank-you "question". Those are SCREENS, configured separately from the questions, and a Statement standing in for one appears in the middle of the form instead of around it.
 - Keep prompts concise. Mark only genuinely-required fields as required.
 - Return valid JSON parseable by JSON.parse. Output the JSON object and nothing else.
 

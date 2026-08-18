@@ -10,28 +10,8 @@
  */
 import type { ConditionalRule, ValidationRule } from './conditional-rule';
 import type { JSONValue } from './json-value';
+import type { FormQuestionType, MatrixAxis } from './question-types';
 
-/**
- * Phase-1 table-stakes question types (FORMS_BUILD_PLAN §5.3). This union is the
- * exhaustive Phase-1 set — Phase-2 types (Matrix, Ranking, Address, Signature,
- * Payment, Calculated) are intentionally NOT included.
- */
-export type FormQuestionType =
-  | 'ShortText'
-  | 'LongText'
-  | 'Email'
-  | 'Phone'
-  | 'Number'
-  | 'SingleChoice'
-  | 'MultiChoice'
-  | 'Dropdown'
-  | 'Rating'
-  | 'NPS'
-  | 'YesNo'
-  | 'Date'
-  | 'Time'
-  | 'FileUpload'
-  | 'Statement';
 
 /** Render mode for the whole form (FORMS_BUILD_PLAN §2 principle 2). */
 export type FormRenderMode = 'Scroll' | 'OneQuestion';
@@ -67,13 +47,25 @@ export interface FormSettings {
   redirectUrl?: string;
 }
 
-/** A selectable option for choice-style questions (Single/Multi/Dropdown). */
+/**
+ * A selectable option for any option-carrying question — see `QuestionOptionMode`.
+ *
+ * The two optional fields below are per-`optionMode` and mutually exclusive in practice:
+ * `imageURL` is read only by `PictureChoice`, `matrixAxis` only by `Matrix`. They live on the
+ * one option shape rather than in three parallel shapes because everything else about an
+ * option (label, value, order, default) is identical across all four modes, and three
+ * near-copies would have to be kept in step by hand.
+ */
 export interface PublishedFormQuestionOption {
   id: string;
   label: string;
   value: string;
   displayOrder: number;
   isDefault?: boolean;
+  /** `PictureChoice` only: the image shown above the label. */
+  imageURL?: string;
+  /** `Matrix` only: which axis this option is part of. Absent is treated as `Row`. */
+  matrixAxis?: MatrixAxis;
 }
 
 /**
@@ -106,6 +98,17 @@ export interface PublishedFormPage {
   displayOrder: number;
   /** Page-level show/hide logic (S2). Absent => always visible. */
   conditionalRule?: ConditionalRule;
+  /**
+   * When true, ADVANCING PAST this page banks a `Partial` response immediately rather than
+   * waiting for the autosave debounce.
+   *
+   * The autosave controller already writes partials on a timer, so this does not add a
+   * capability — it makes the timing AUTHORABLE. An author who puts the contact details on
+   * page 1 of a ten-page form wants that page banked the moment it is left, because a
+   * respondent who abandons on page 6 is a lead either way. Absent/false keeps the timer-only
+   * behaviour every existing form has.
+   */
+  isPartialSubmitPoint?: boolean;
   questions: PublishedFormQuestion[];
 }
 
@@ -150,6 +153,51 @@ export interface PublishedFormAutomation {
 }
 
 /**
+ * A screen that BRACKETS the intake rather than living inside it.
+ *
+ * WHY THIS IS NOT A QUESTION TYPE. `Statement` — display-only content that sits between two
+ * questions — is a question, and correctly so: it is on a page, in the display order, subject
+ * to the page's conditional rule. A welcome or ending screen is none of those things. It is
+ * never answered, produces no `FormResponseAnswer`, appears in no aggregation and no export
+ * column, cannot be referenced by a conditional rule, and has no page. Modelling it as a
+ * question would push a "…but not this one" branch into every consumer that walks the
+ * question list — the same tax `Statement` levies today, on a type that shares far less with
+ * a question than `Statement` does.
+ *
+ * In the widget this falls out as PHASES of the shell — `welcome` before intake, `ending`
+ * after submit — so the intake components never see a screen at all.
+ */
+export type FormScreenType = 'Welcome' | 'Ending';
+
+/** A published welcome or ending screen. */
+export interface PublishedFormScreen {
+  id: string;
+  screenType: FormScreenType;
+  title: string;
+  /** Body copy shown under the title. Plain text; the widget does not render HTML. */
+  body?: string;
+  /** Label for the screen's single button ("Start", "Done"). Widget supplies a default. */
+  buttonLabel?: string;
+  /** Optional image shown above the title. */
+  mediaURL?: string;
+  /**
+   * `Ending` only: where to send the respondent instead of showing the screen.
+   *
+   * Takes precedence over this screen's own copy, and over `FormSettings.redirectUrl`, which
+   * remains the form-wide fallback for forms with no ending screens at all.
+   */
+  redirectURL?: string;
+  displayOrder: number;
+  /**
+   * `Ending` only: show this ending when the response matches. Absent => matches nothing on
+   * its own; use {@link isDefault} for the catch-all.
+   */
+  conditionalRule?: ConditionalRule;
+  /** `Ending` only: the fallback shown when no conditional ending matched. */
+  isDefault?: boolean;
+}
+
+/**
  * The full published form definition — the snapshot stored in
  * `FormVersion.DefinitionSnapshot` and returned by the S1 `PublishedForm` query.
  */
@@ -168,4 +216,19 @@ export interface PublishedFormDefinition {
    * distinguish "no automations" from "an older snapshot".
    */
   automations: PublishedFormAutomation[];
+  /**
+   * The screen shown BEFORE intake begins, if the author configured one.
+   *
+   * Optional rather than always-present, unlike `automations`: absent means "start on the
+   * first question", which is what every form published before screens existed does and what
+   * most short forms should keep doing. An empty-object placeholder would force the widget to
+   * distinguish a blank welcome screen from no welcome screen.
+   */
+  welcomeScreen?: PublishedFormScreen;
+  /**
+   * Ending screens in authoring order. Always present (empty for a form that configures none)
+   * so a consumer never has to tell "no endings" from "an older snapshot" — the resolution
+   * order in {@link resolveEndingScreen} treats both identically anyway.
+   */
+  endScreens: PublishedFormScreen[];
 }

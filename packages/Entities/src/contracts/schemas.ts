@@ -107,7 +107,14 @@ function coerceJSON(json: string | object): object {
 // These assignments do nothing at runtime but fail `tsc` if a zod schema's
 // inferred type diverges from the hand-written interface in either direction.
 
-type AssertExtends<A, B> = A extends B ? (B extends A ? true : never) : never;
+// `[A] extends [B]`, not `A extends B`. A naked type parameter on the left of a conditional
+// DISTRIBUTES over its union, so the bare form checked each member of A separately and collapsed
+// the result back to `true` — it could not fail in either direction, so every guard below had
+// been passing vacuously since the day it was written. Wrapping both sides in one-tuples
+// suppresses distribution and makes the comparison the whole-union one it reads as.
+// Verified by construction: with the bare form neither a widened nor a narrowed union errors;
+// with this form both do, and identical unions still pass.
+type AssertExtends<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 
 const _operatorMatch: AssertExtends<z.infer<typeof conditionalOperatorSchema>, ConditionalOperator> = true;
 const _conditionMatch: AssertExtends<z.infer<typeof conditionalConditionSchema>, ConditionalCondition> = true;

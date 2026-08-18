@@ -7,6 +7,7 @@
 import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
+  isAnswerableQuestionType,
   isAnswerSupplied,
   type AnswerValue,
   type FormAnswerInput,
@@ -27,6 +28,34 @@ export class FormRuntime {
   // --- Answer access -------------------------------------------------------
 
   public readonly answerMap = this.answers.asReadonly();
+
+  /**
+   * The live answer map, for consumers that evaluate a rule over the WHOLE response rather
+   * than one question — ending-screen resolution is the only one today.
+   *
+   * Read-only by type so a caller cannot mutate the runtime's state behind its back: every
+   * write goes through `setValue`, which is what keeps the derived signals correct.
+   */
+  public currentAnswers(): ReadonlyMap<string, AnswerValue> {
+    return this.answers();
+  }
+
+  /**
+   * Ids of the questions that currently hold a real answer.
+   *
+   * Uses the contract's `isAnswerSupplied` — the same "is this answered" definition the required
+   * check and the conditional evaluator use — rather than "has a map entry", which a focused-then-
+   * abandoned field also satisfies.
+   */
+  public answeredQuestionIds(): ReadonlySet<string> {
+    const ids = new Set<string>();
+    for (const [questionId, value] of this.answers()) {
+      if (isAnswerSupplied(value)) {
+        ids.add(questionId);
+      }
+    }
+    return ids;
+  }
 
   public valueFor(questionId: string): AnswerValue {
     return this.answers().get(questionId);
@@ -73,12 +102,12 @@ export class FormRuntime {
       .filter((q) => evaluateConditionalRule(q.conditionalRule, map));
   }
 
-  /** Every visible, non-statement question across the form, in document order. */
+  /** Every visible, answer-collecting question across the form, in document order. */
   public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() => {
     const out: PublishedFormQuestion[] = [];
     for (const page of this.visiblePages()) {
       for (const q of this.visibleQuestions(page)) {
-        if (q.type !== 'Statement') {
+        if (isAnswerableQuestionType(q.type)) {
           out.push(q);
         }
       }

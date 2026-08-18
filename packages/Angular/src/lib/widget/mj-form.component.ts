@@ -19,10 +19,14 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import type {
-  FormSubmissionInput,
-  FormSubmissionResult,
-  PublishedFormDefinition,
+import {
+  endingMessage,
+  endingRedirectUrl,
+  resolveEndingScreen,
+  type FormSubmissionInput,
+  type FormSubmissionResult,
+  type PublishedFormDefinition,
+  type PublishedFormScreen,
 } from '@mj-biz-apps/forms-entities';
 
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
@@ -31,7 +35,8 @@ import { applyStyleTokens } from './core/theming';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
-import { outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
+import { passedSubmitPoints } from './core/partial-submit-point';
+import { initialPhaseFor, outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
 import {
   canRenderChallenge,
   canSubmit,
@@ -39,6 +44,7 @@ import {
   isConfigGap,
   isTurnstileError,
 } from './core/turnstile-gate';
+import { FormScreenComponent } from './components/form-screen.component';
 import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
@@ -48,7 +54,12 @@ import type { WidgetPhase } from './core/submit-phase';
   selector: 'mj-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormScrollComponent, FormOneQuestionComponent, TurnstileChallengeComponent],
+  imports: [
+    FormScreenComponent,
+    FormScrollComponent,
+    FormOneQuestionComponent,
+    TurnstileChallengeComponent,
+  ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
 })
@@ -79,6 +90,22 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /** Subtle, non-blocking autosave indicator. */
   protected readonly autosaveStatus = signal<AutosaveStatus>('idle');
+
+  /**
+   * The ending screen this response resolved to, set once at submit time.
+   *
+   * Captured rather than recomputed on every render, because it is resolved from the answers
+   * AS SUBMITTED. Recomputing would re-read a runtime the respondent can no longer edit but
+   * which a stray autosave or a re-render could still perturb, and a thank-you page that
+   * changes after it is shown is a genuinely disorienting thing to ship.
+   */
+  private readonly endingScreen = signal<PublishedFormScreen | undefined>(undefined);
+
+  /** The welcome screen, when the form has one. */
+  protected readonly welcomeScreen = computed(() => this.definition()?.welcomeScreen);
+
+  /** The resolved ending screen for the template. */
+  protected readonly activeEndingScreen = computed(() => this.endingScreen());
 
   /** Public Cloudflare Turnstile site key (global; from widget config). May be undefined. */
   protected readonly siteKey = this.config.turnstileSiteKey;
@@ -133,6 +160,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
+  /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
+  private bankedSubmitPoints = new Set<string>();
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -163,9 +192,24 @@ export class MjFormComponent implements OnInit, OnDestroy {
         () => this.savePartial(),
         (status) => this.autosaveStatus.set(status),
       );
-      this.phase.set('ready');
+      this.endingScreen.set(undefined);
+      this.bankedSubmitPoints = new Set<string>();
+      this.phase.set(initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
+    }
+  }
+
+  /**
+   * Leave the welcome screen and begin intake.
+   *
+   * Guarded on the phase so a double-tap on the start button cannot pull an already-submitting
+   * form back to `ready` — the same re-entrancy the submit guard exists for, on the other end
+   * of the lifecycle.
+   */
+  protected startIntake(): void {
+    if (this.phase() === 'welcome') {
+      this.phase.set('ready');
     }
   }
 
@@ -176,6 +220,35 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** Progress checkpoint from a child render mode → schedule a debounced partial save. */
   protected onProgress(): void {
     this.autosave?.ping();
+    void this.bankPassedSubmitPoints();
+  }
+
+  /**
+   * Bank a partial the moment the respondent moves past a page the author marked as a submit
+   * point, instead of waiting for the debounce.
+   *
+   * Each page fires at most once — `bankedSubmitPoints` is what makes this a checkpoint rather
+   * than a second, undebounced autosave that writes on every keystroke after the point is
+   * crossed.
+   */
+  private async bankPassedSubmitPoints(): Promise<void> {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt || this.phase() !== 'ready') {
+      return;
+    }
+    const passed = passedSubmitPoints(def.pages, rt.answeredQuestionIds());
+    const fresh = passed.filter((pageId) => !this.bankedSubmitPoints.has(pageId));
+    if (fresh.length === 0) {
+      return;
+    }
+    for (const pageId of fresh) {
+      this.bankedSubmitPoints.add(pageId);
+    }
+    // `settle()` rather than a direct save: it cancels the pending debounce and awaits any save
+    // already in flight, so this cannot put a second write carrying the same clientResponseId on
+    // the wire — the PK-collision source the submit path guards against the same way.
+    await this.autosave?.settle();
   }
 
   protected async onSubmit(): Promise<void> {
@@ -236,11 +309,38 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       return;
     }
+    this.resolveEnding();
     // Success always reaches 'done' (both render modes). Redirect ONLY when a URL is set, and
     // only after 'done' — so a blocked/slow navigation still shows the confirmation.
-    if (outcome.redirect && res.redirectUrl) {
-      this.redirect(res.redirectUrl);
+    const url = this.endingRedirect(res);
+    if (url) {
+      this.redirect(url);
     }
+  }
+
+  /** Pick the ending screen for the answers as submitted. */
+  private resolveEnding(): void {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt) {
+      return;
+    }
+    this.endingScreen.set(resolveEndingScreen(def.endScreens ?? [], rt.currentAnswers()));
+  }
+
+  /**
+   * Where to send the respondent, or `undefined` to show a screen.
+   *
+   * The SERVER's echoed `redirectUrl` still wins: it is the only party that knows about a
+   * redirect the snapshot does not carry, and `outcomeForResult` already gates it on success.
+   * Below that, the resolved ending's own URL beats the form-wide one — which is what lets an
+   * author send qualified respondents to a booking page and everyone else to a thank-you.
+   */
+  private endingRedirect(res: FormSubmissionResult): string | undefined {
+    if (outcomeForResult(res).redirect && res.redirectUrl) {
+      return res.redirectUrl;
+    }
+    return endingRedirectUrl(this.endingScreen(), this.definition()?.settings ?? {});
   }
 
   /** Called by the challenge when the respondent solves it — holds the single-use token. */
@@ -337,12 +437,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
     };
   }
 
+  /**
+   * The confirmation message for a form with no ending screen.
+   *
+   * The server's echoed message wins over the form's own setting, because a server that
+   * overrode it (a quota message, say) knows something the snapshot does not.
+   */
   protected confirmationMessage(): string {
-    return (
-      this.result()?.confirmationMessage ??
-      this.definition()?.settings.confirmationMessage ??
-      'Thank you — your response has been recorded.'
-    );
+    const echoed = this.result()?.confirmationMessage;
+    if (echoed) {
+      return echoed;
+    }
+    return endingMessage(undefined, this.definition()?.settings ?? {});
   }
 
   protected retry(): void {

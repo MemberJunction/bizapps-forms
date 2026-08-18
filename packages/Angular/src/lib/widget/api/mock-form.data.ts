@@ -1,6 +1,10 @@
 /**
  * Seed data for {@link FormsMockApiService}: a single multi-page published form that
- * covers all 15 Phase-1 question types, conditional show/hide, and validation rules.
+ * covers every question type, conditional show/hide, validation rules, and both screen kinds.
+ *
+ * It is the dev harness's only form, so anything not represented here is a control nobody sees
+ * until it reaches a real respondent. That is why the third page below exists purely to hold one
+ * of each newer type rather than to make narrative sense as a sign-up form.
  */
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 
@@ -10,7 +14,7 @@ export function buildMockForm(_distributionSlug: string): PublishedFormDefinitio
     formId: 'mock-form-1',
     formVersionId: 'mock-version-1',
     name: 'Community Event Sign-up',
-    description: 'A short form demonstrating every Phase-1 question type.',
+    description: 'A short form demonstrating every question type.',
     renderMode: 'Scroll',
     automations: [],
     settings: {
@@ -192,6 +196,142 @@ export function buildMockForm(_distributionSlug: string): PublishedFormDefinitio
             settings: { accept: 'image/*' },
           },
         ],
+      },
+      {
+        id: 'page-3',
+        title: 'Everything else',
+        description: 'One of each remaining control, so none of them ships unseen.',
+        displayOrder: 3,
+        questions: [
+          {
+            id: 'q-contact',
+            type: 'ContactInfo',
+            prompt: 'Who should we contact about this?',
+            isRequired: false,
+            displayOrder: 1,
+            options: [],
+          },
+          {
+            id: 'q-address',
+            type: 'Address',
+            prompt: 'Where should we post your badge?',
+            isRequired: false,
+            displayOrder: 2,
+            options: [],
+          },
+          {
+            id: 'q-website',
+            type: 'Website',
+            prompt: 'Your website',
+            isRequired: false,
+            displayOrder: 3,
+            options: [],
+          },
+          {
+            id: 'q-picture',
+            type: 'PictureChoice',
+            prompt: 'Which session interests you most?',
+            isRequired: false,
+            displayOrder: 4,
+            options: [
+              { id: 'pc-1', label: 'Workshop', value: 'workshop', displayOrder: 1 },
+              { id: 'pc-2', label: 'Panel', value: 'panel', displayOrder: 2 },
+              { id: 'pc-3', label: 'Social', value: 'social', displayOrder: 3 },
+            ],
+          },
+          {
+            id: 'q-scale',
+            type: 'OpinionScale',
+            prompt: 'How likely are you to bring a colleague?',
+            isRequired: false,
+            displayOrder: 5,
+            options: [],
+            settings: { min: 1, max: 7, labelMin: 'Not at all', labelMax: 'Very likely' },
+          },
+          {
+            id: 'q-rank',
+            type: 'Ranking',
+            prompt: 'Rank these in order of interest',
+            isRequired: false,
+            displayOrder: 6,
+            options: [
+              { id: 'rk-1', label: 'Talks', value: 'talks', displayOrder: 1 },
+              { id: 'rk-2', label: 'Food', value: 'food', displayOrder: 2 },
+              { id: 'rk-3', label: 'Networking', value: 'networking', displayOrder: 3 },
+            ],
+          },
+          {
+            id: 'q-matrix',
+            type: 'Matrix',
+            prompt: 'How did we do?',
+            isRequired: false,
+            displayOrder: 7,
+            options: [
+              { id: 'mx-r1', label: 'Venue', value: 'venue', displayOrder: 1, matrixAxis: 'Row' },
+              { id: 'mx-r2', label: 'Catering', value: 'catering', displayOrder: 2, matrixAxis: 'Row' },
+              { id: 'mx-c1', label: 'Poor', value: 'poor', displayOrder: 3, matrixAxis: 'Column' },
+              { id: 'mx-c2', label: 'Fine', value: 'fine', displayOrder: 4, matrixAxis: 'Column' },
+              { id: 'mx-c3', label: 'Great', value: 'great', displayOrder: 5, matrixAxis: 'Column' },
+            ],
+          },
+          {
+            id: 'q-consent',
+            type: 'Checkbox',
+            prompt: 'Newsletter',
+            isRequired: false,
+            displayOrder: 8,
+            options: [],
+            settings: { placeholder: 'Email me about future events' },
+          },
+          {
+            id: 'q-legal',
+            type: 'Legal',
+            prompt: 'Code of conduct',
+            isRequired: true,
+            displayOrder: 9,
+            options: [],
+            settings: {
+              terms:
+                'Attendees are expected to treat one another with respect. Harassment of any kind is not tolerated, and organisers may ask anyone behaving otherwise to leave without a refund.',
+            },
+          },
+          {
+            id: 'q-signature',
+            type: 'Signature',
+            prompt: 'Sign to confirm',
+            isRequired: false,
+            displayOrder: 10,
+            options: [],
+          },
+        ],
+      },
+    ],
+    welcomeScreen: {
+      id: 'screen-welcome',
+      screenType: 'Welcome',
+      title: 'Community Event Sign-up',
+      body: 'Takes about two minutes. Your progress is saved as you go.',
+      buttonLabel: 'Start',
+      displayOrder: 0,
+    },
+    endScreens: [
+      {
+        // Conditional first: resolution takes the first ending whose rule matches, and only
+        // falls through to the default when none do.
+        id: 'screen-end-vip',
+        screenType: 'Ending',
+        title: 'See you in the front row',
+        body: 'You ranked talks first, so we have saved you a seat near the stage.',
+        displayOrder: 0,
+        conditionalRule: { show: { all: [{ questionId: 'q-rank', op: 'contains', value: 'talks' }] } },
+      },
+      {
+        id: 'screen-end-default',
+        screenType: 'Ending',
+        title: 'Thanks for signing up',
+        body: 'We have your details and will email the schedule closer to the day.',
+        displayOrder: 1,
+        isDefault: true,
       },
     ],
   };

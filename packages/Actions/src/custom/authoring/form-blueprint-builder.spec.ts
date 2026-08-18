@@ -49,7 +49,18 @@ function snapshot(entity: FakeEntity): Record<string, unknown> {
   return out;
 }
 
-vi.mock('@memberjunction/core', () => ({
+/**
+ * PARTIAL mock: spread the real module, then override only what this test fakes.
+ *
+ * It used to REPLACE the module with a two-export object, which worked only for as long as
+ * nothing else in the import graph needed a third export. `form-blueprint.ts` deriving its type
+ * enum from the shared contract at RUNTIME (rather than via an erased `import type`) pulled the
+ * generated entity subclasses in behind it, and the whole file then failed to load with
+ * `No "BaseEntity" export is defined on the mock` — a failure about a symbol this test never
+ * mentions. `importOriginal` keeps the override to the two classes it actually fakes.
+ */
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
   Metadata: class {
     async GetEntityObject(entityName: string): Promise<FakeEntity> {
       return new FakeEntity(entityName);

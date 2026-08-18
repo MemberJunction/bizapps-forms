@@ -6,10 +6,27 @@
  * these to its `phase` signal. This is the guard layer that closes the "success but no
  * thank-you screen" and "double-submit" bugs.
  */
-import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities';
+import type { FormSubmissionResult, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 
-/** Lifecycle phase of the widget. Mirrors the component's `WidgetPhase`. */
-export type WidgetPhase = 'loading' | 'ready' | 'submitting' | 'done' | 'error';
+/**
+ * Lifecycle phase of the widget. Mirrors the component's `WidgetPhase`.
+ *
+ * `welcome` sits between `loading` and `ready` and is where the separation of screens from
+ * intake actually lives: a welcome screen is not a page, not a question and not a step in the
+ * form — it is a phase the shell is in before the form exists to the respondent at all. The
+ * intake components are not even constructed while it is showing.
+ */
+export type WidgetPhase = 'loading' | 'welcome' | 'ready' | 'submitting' | 'done' | 'error';
+
+/**
+ * The phase a freshly-loaded definition starts in.
+ *
+ * A form with a welcome screen opens on it; every other form goes straight to the questions,
+ * which is what every form published before screens existed does.
+ */
+export function initialPhaseFor(definition: Pick<PublishedFormDefinition, 'welcomeScreen'>): WidgetPhase {
+  return definition.welcomeScreen ? 'welcome' : 'ready';
+}
 
 /**
  * Whether a submit attempt should be IGNORED as re-entrant. A submit is ignored while one is

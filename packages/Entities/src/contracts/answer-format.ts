@@ -23,7 +23,7 @@
  */
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
-import type { FormQuestionType } from './form-definition';
+import type { FormQuestionType } from './question-types';
 
 /**
  * Check an answered value against the format its question TYPE implies.
@@ -49,14 +49,108 @@ export function validateAnswerFormat(
     case 'Number':
     case 'Rating':
     case 'NPS':
+    case 'OpinionScale':
       return coerceAnswerToNumber(value) === undefined ? 'Enter a number.' : undefined;
     case 'Phone':
       return isPhone(String(value)) ? undefined : 'Enter a valid phone number.';
+    case 'Website':
+      return isWebUrl(String(value)) ? undefined : 'Enter a valid web address.';
     case 'Date':
       return isDate(value) ? undefined : 'Enter a valid date.';
+    case 'Checkbox':
+    case 'Legal':
+      // Distinct from `isRequired`: a REQUIRED consent box must be TICKED, which is the
+      // required check's job (an unticked box is `false`, and `false` is a supplied answer).
+      // All this asks is that the value is actually a boolean and not, say, the string
+      // "false" that a caller posting straight at the mutation would send.
+      return typeof value === 'boolean' ? undefined : 'Select yes or no.';
+    case 'Ranking':
+      return isStringArray(value) ? undefined : 'Rank the options in order.';
+    case 'Address':
+      return isStringRecord(value) ? undefined : 'Enter an address.';
+    case 'ContactInfo':
+      return validateContactInfo(value);
+    case 'Matrix':
+      return isMatrixAnswer(value) ? undefined : 'Answer each row.';
     default:
       return undefined;
   }
+}
+
+/**
+ * A web address a browser would actually navigate to.
+ *
+ * Requires an explicit `http`/`https` scheme rather than inferring one. Inferring is tempting
+ * — respondents type `example.com` — but the value is stored and later rendered as a link, and
+ * a scheme-less href resolves RELATIVE to whatever page renders it, so `example.com` becomes a
+ * dead link on the form owner's own domain. The widget prefills `https://` in the input so the
+ * respondent rarely meets this message; a caller posting at the mutation directly does.
+ *
+ * `new URL()` rather than a regex: it is the same parser the browser will use on the stored
+ * value, so anything it accepts here resolves there. Non-web schemes are excluded explicitly
+ * — `javascript:alert(1)` is a URL `new URL()` parses happily, and this value ends up in an
+ * `href`.
+ */
+function isWebUrl(text: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(text.trim());
+  } catch {
+    return false;
+  }
+  return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname.includes('.');
+}
+
+/** A plain string array — the stored shape of a `Ranking` answer (option values, best first). */
+function isStringArray(value: AnswerValue): boolean {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+/** A flat object whose every value is a string — the stored shape of `Address` / `ContactInfo`. */
+function isStringRecord(value: AnswerValue): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value).every((v) => typeof v === 'string');
+}
+
+/**
+ * A `ContactInfo` answer, with its email part held to the same standard a standalone `Email`
+ * question is.
+ *
+ * Without this the composite is a hole in the type floor: an author who replaces a pair of
+ * Email + Phone questions with one ContactInfo field would silently lose the format checks
+ * both had, and the whole point of {@link validateAnswerFormat} is that a type's guarantees
+ * hold wherever the type appears.
+ */
+function validateContactInfo(value: AnswerValue): string | undefined {
+  if (!isStringRecord(value)) {
+    return 'Enter your contact details.';
+  }
+  const parts = value as Record<string, string>;
+  if (parts.email?.trim() && !isEmail(parts.email)) {
+    return 'Enter a valid email address.';
+  }
+  if (parts.phone?.trim() && !isPhone(parts.phone)) {
+    return 'Enter a valid phone number.';
+  }
+  return undefined;
+}
+
+/**
+ * A `Matrix` answer: row value -> the column value(s) chosen for it.
+ *
+ * Both spellings are accepted because the row's own single/multi setting can change after
+ * responses exist, and a form that stops reading its old answers on a settings change is worse
+ * than one that accepts both.
+ */
+function isMatrixAnswer(value: AnswerValue): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value).every(
+    (v) => typeof v === 'string' || (Array.isArray(v) && v.every((c) => typeof c === 'string')),
+  );
 }
 
 /**

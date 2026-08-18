@@ -9,10 +9,14 @@
  *   -> server re-validation -> Save response+answers -> fire on-submit hooks.
  */
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import type {
-  FormAnswerInput,
-  FormSubmissionResult,
-  FieldError,
+import {
+  endingMessage,
+  endingRedirectUrl,
+  resolveEndingScreen,
+  type AnswerValue,
+  type FormAnswerInput,
+  type FormSubmissionResult,
+  type FieldError,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
@@ -132,12 +136,28 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-/** The post-submit confirmation/redirect lifted from the form settings. */
-function confirmationFields(resolved: ResolvedDefinition): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
-  const { settings } = resolved.definition;
+/**
+ * The post-submit confirmation/redirect for this response.
+ *
+ * `answers` is optional because the two IDEMPOTENT-RESUBMIT paths reach here without them: they
+ * short-circuit on finding an already-Complete row, and re-deriving that row's answers would
+ * cost a round trip to tell a client something it has already been told. Without answers there
+ * is no conditional ending to resolve, so those paths get the default ending or the form-wide
+ * settings — the same thing the respondent saw the first time unless a conditional ending was
+ * configured, and in that case the redirect they already followed is the one that mattered.
+ */
+function confirmationFields(
+  resolved: ResolvedDefinition,
+  answers?: ReadonlyMap<string, AnswerValue>,
+): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
+  const { settings, endScreens } = resolved.definition;
+  const ending = resolveEndingScreen(endScreens ?? [], answers ?? new Map());
+  const redirectUrl = endingRedirectUrl(ending, settings);
   return {
-    confirmationMessage: settings.redirectUrl ? undefined : settings.confirmationMessage,
-    redirectUrl: settings.redirectUrl,
+    // A redirect and a confirmation message are alternatives, not companions: sending both lets
+    // a client that ignores the redirect show a message meant for a page nobody lands on.
+    confirmationMessage: redirectUrl ? undefined : endingMessage(ending, settings),
+    redirectUrl,
   };
 }
 
@@ -267,7 +287,7 @@ export async function runSubmitPipeline(
     success: true,
     responseId: persisted.responseId,
     status: persisted.status,
-    ...confirmationFields(resolved),
+    ...confirmationFields(resolved, validation.answerMap),
   };
 }
 

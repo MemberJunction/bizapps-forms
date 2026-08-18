@@ -83,7 +83,7 @@ function tree(): FormTree {
     Save: async () => true,
     LatestResult: { CompleteMessage: '' },
   };
-  return { form, pages: [] } as unknown as FormTree;
+  return { form, pages: [], screens: [] } as unknown as FormTree;
 }
 
 function publishedSnapshot(): PublishedFormDefinition {

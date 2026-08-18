@@ -17,6 +17,7 @@ import type {
   PublishedFormQuestion,
   FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
+import { analysisKindFor, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
 import type {
   FormSummaryStats,
   QuestionBreakdown,
@@ -25,11 +26,7 @@ import type {
   NumericAggregate,
   FunnelStep,
 } from '../models/reporting.model';
-import {
-  CHOICE_TYPES,
-  NUMERIC_TYPES,
-  extractChoiceValues,
-} from '../../shared/answer-values';
+import { extractChoiceValues, renderAnswer } from '../../shared/answer-values';
 import { toDate } from '../../shared/runview-dates';
 
 type ResponseRow = mjBizAppsFormsFormResponseEntityType;
@@ -38,12 +35,25 @@ type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 /** Max free-text answers surfaced in a breakdown card before truncation. */
 const FREE_TEXT_CAP = 200;
 
-/** Maps a question type to the breakdown visualisation kind. */
+/**
+ * Maps a question type to the breakdown visualisation kind.
+ *
+ * Reads the contract's ANALYSIS kind rather than naming types, so a new type is summarised the
+ * way its behaviour row says without this function being edited. The mapping is one-way and
+ * lossy on purpose: `composite` has no card of its own yet and falls back to the free-text list,
+ * which reads the rendered one-line form — informative, if not aggregated.
+ */
 export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
-  if (type === 'YesNo') return 'boolean';
-  if (CHOICE_TYPES.has(type)) return 'distribution';
-  if (NUMERIC_TYPES.has(type)) return 'numeric';
-  return 'freeText';
+  switch (analysisKindFor(type)) {
+    case 'boolean':
+      return 'boolean';
+    case 'choice':
+      return 'distribution';
+    case 'numeric':
+      return 'numeric';
+    default:
+      return 'freeText';
+  }
 }
 
 /**
@@ -102,7 +112,7 @@ export function buildBreakdowns(
   const byQuestion = groupBy(answers, (a) => a.QuestionID);
 
   return questions
-    .filter((q) => q.type !== 'Statement') // display-only, nothing to aggregate
+    .filter((q) => isAnswerableQuestionType(q.type)) // display-only types collect no answer
     .map((q) => {
       const qAnswers = byQuestion.get(q.id) ?? [];
       const kind = breakdownKindFor(q.type);
@@ -127,8 +137,12 @@ export function buildBreakdowns(
           base.numeric = numericAggregate(q.type, qAnswers);
           break;
         case 'freeText':
+          // `renderAnswer`, not `a.TextValue`. The free-text bucket is now the fallback for
+          // Ranking, Matrix, Address and ContactInfo too, and none of those store anything in
+          // TextValue — reading the column directly would show an empty card for every one of
+          // them while the answers sat in JSONValue.
           base.textAnswers = qAnswers
-            .map((a) => (a.TextValue ?? '').trim())
+            .map((a) => renderAnswer(q, a).trim())
             .filter((t) => t.length > 0)
             .slice(0, FREE_TEXT_CAP);
           break;

@@ -9,7 +9,16 @@
   --mj-bg-surface: #ffffff;
   --mj-bg-surface-sunken: #f1f3f5;
   --mj-text-primary: #1a1d21;
+  /* Every --mj-* token the widget reads WITHOUT an inline fallback must be declared here.
+     Anything missing falls through to whatever page hosts the widget, and the widget's surface is
+     light while an Explorer in dark mode resolves the same token to near-white. Not theoretical:
+     the Legal question's terms rendered at roughly 1.2:1 against their own panel — present, and
+     completely unreadable — because --mj-text-secondary was read bare and never defined here.
+     (--mj-transition-base and --mj-status-success are read WITH fallbacks, which is why they are
+     safely absent; follow one convention or the other, never neither.) */
+  --mj-text-secondary: #3d4650;
   --mj-text-muted: #5c6670;
+  --mj-text-disabled: #9aa4ae;
   --mj-border-default: #d7dce1;
   --mj-border-strong: #b7bfc7;
   --mj-radius-sm: 6px;

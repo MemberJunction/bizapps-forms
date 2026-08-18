@@ -7,10 +7,23 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import type { ConditionalRule, ValidationRule } from '@mj-biz-apps/forms-entities';
+import {
+  questionTypeBehavior,
+  type ConditionalRule,
+  type JSONValue,
+  type mjBizAppsFormsFormQuestionOptionEntity,
+  type QuestionOptionMode,
+  type ValidationRule,
+} from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import type { QuestionNode } from './builder-models';
-import { questionTypeHasOptions, questionTypeMeta } from './question-type-catalog';
+import { questionTypeMeta } from './question-type-catalog';
+import {
+  settingsFor,
+  settingText,
+  withSetting,
+  type QuestionSettingField,
+} from './question-settings';
 import {
   ConditionalRuleEditorComponent,
   type ConditionalSourceQuestion,
@@ -18,8 +31,10 @@ import {
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 import {
   parseConditionalRule,
+  parseQuestionSettings,
   parseValidationRule,
   serializeConditionalRule,
+  serializeQuestionSettings,
   serializeValidationRule,
 } from './json-fields';
 
@@ -82,6 +97,13 @@ const QUESTION_EDITOR_CSS = /* css */ `
 .qe-opt-remove:hover { background: var(--mj-status-error-bg); color: var(--mj-status-error-text); }
 .qe-opt-remove:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 
+.qe-option-block { display: flex; flex-direction: column; gap: 4px; }
+/* Indented so the image URL reads as belonging to the label above it rather than as a
+   separate option in the list. */
+.qe-option-img { margin-left: 0; font-size: var(--mjf-label); }
+
+.qe-hint { margin: 2px 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
+
 /* Nothing selected. The panel is 340px of empty otherwise, and empty space with no
    explanation reads as a loading failure. */
 .qe-empty {
@@ -123,13 +145,66 @@ export class QuestionEditorComponent {
 
   /** Emitted whenever a field on the question entity changed (parent persists). */
   @Output() questionChanged = new EventEmitter<QuestionNode>();
-  /** Emitted when an option is added (parent persists via the state service). */
-  @Output() addOptionRequested = new EventEmitter<QuestionNode>();
+  /**
+   * Emitted when an option is added (parent persists via the state service).
+   *
+   * Carries the axis so a Matrix can add a ROW or a COLUMN — the two are the same table with a
+   * discriminator, and an "Add option" that could only make rows left the columns uneditable.
+   */
+  @Output() addOptionRequested = new EventEmitter<{
+    node: QuestionNode;
+    matrixAxis?: 'Row' | 'Column';
+  }>();
   /** Emitted when an option should be removed. */
   @Output() removeOptionRequested = new EventEmitter<{ node: QuestionNode; optionIndex: number }>();
 
+  /** How this type's options work: none, plain values, images, or a matrix's two axes. */
+  protected get optionMode(): QuestionOptionMode {
+    return this.node ? questionTypeBehavior(this.node.entity.QuestionType).optionMode : 'none';
+  }
+
   protected get hasOptions(): boolean {
-    return this.node ? questionTypeHasOptions(this.node.entity.QuestionType) : false;
+    return this.optionMode !== 'none';
+  }
+
+  /** Matrix rows. An option with no axis counts as a row — see the contract's `MatrixAxis`. */
+  protected get matrixRows(): mjBizAppsFormsFormQuestionOptionEntity[] {
+    return (this.node?.options ?? []).filter((o) => (o.MatrixAxis ?? 'Row') === 'Row');
+  }
+
+  protected get matrixColumns(): mjBizAppsFormsFormQuestionOptionEntity[] {
+    return (this.node?.options ?? []).filter((o) => o.MatrixAxis === 'Column');
+  }
+
+  /** The per-type settings this question offers. Empty for types with none. */
+  protected get settingFields(): readonly QuestionSettingField[] {
+    return this.node ? settingsFor(this.node.entity.QuestionType) : [];
+  }
+
+  protected settingValue(field: QuestionSettingField): string {
+    return this.node ? settingText(this.currentSettings(), field.key) : '';
+  }
+
+  protected setSetting(field: QuestionSettingField, raw: string): void {
+    if (!this.node) return;
+    const next = withSetting(this.currentSettings(), field, raw);
+    this.node.entity.Settings = serializeQuestionSettings(next);
+    this.questionChanged.emit(this.node);
+  }
+
+  private currentSettings(): Record<string, JSONValue> {
+    return this.node ? parseQuestionSettings(this.node.entity.Settings) : {};
+  }
+
+  /** Index of an option within `node.options`, which is what the mutation handlers key on. */
+  protected indexOfOption(option: mjBizAppsFormsFormQuestionOptionEntity): number {
+    return this.node ? this.node.options.indexOf(option) : -1;
+  }
+
+  protected setOptionImage(option: mjBizAppsFormsFormQuestionOptionEntity, url: string): void {
+    if (!this.node) return;
+    option.ImageURL = url.trim() === '' ? null : url;
+    this.questionChanged.emit(this.node);
   }
 
   protected get typeLabel(): string {
@@ -172,9 +247,9 @@ export class QuestionEditorComponent {
     this.questionChanged.emit(this.node);
   }
 
-  protected addOption(): void {
+  protected addOption(matrixAxis?: 'Row' | 'Column'): void {
     if (!this.node) return;
-    this.addOptionRequested.emit(this.node);
+    this.addOptionRequested.emit({ node: this.node, matrixAxis });
   }
 
   protected removeOption(index: number): void {

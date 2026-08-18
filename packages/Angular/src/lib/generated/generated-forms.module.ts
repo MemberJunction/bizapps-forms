@@ -26,6 +26,7 @@ import { mjBizAppsFormsFormQuestionOptionFormComponent } from "./Entities/mjBizA
 import { mjBizAppsFormsFormQuestionFormComponent } from "./Entities/mjBizAppsFormsFormQuestion/mjbizappsformsformquestion.form.component";
 import { mjBizAppsFormsFormResponseAnswerFormComponent } from "./Entities/mjBizAppsFormsFormResponseAnswer/mjbizappsformsformresponseanswer.form.component";
 import { mjBizAppsFormsFormResponseFormComponent } from "./Entities/mjBizAppsFormsFormResponse/mjbizappsformsformresponse.form.component";
+import { mjBizAppsFormsFormScreenFormComponent } from "./Entities/mjBizAppsFormsFormScreen/mjbizappsformsformscreen.form.component";
 import { mjBizAppsFormsFormStyleFormComponent } from "./Entities/mjBizAppsFormsFormStyle/mjbizappsformsformstyle.form.component";
 import { mjBizAppsFormsFormUploadFormComponent } from "./Entities/mjBizAppsFormsFormUpload/mjbizappsformsformupload.form.component";
 import { mjBizAppsFormsFormVersionFormComponent } from "./Entities/mjBizAppsFormsFormVersion/mjbizappsformsformversion.form.component";
@@ -45,6 +46,7 @@ declarations: [
     mjBizAppsFormsFormQuestionFormComponent,
     mjBizAppsFormsFormResponseAnswerFormComponent,
     mjBizAppsFormsFormResponseFormComponent,
+    mjBizAppsFormsFormScreenFormComponent,
     mjBizAppsFormsFormStyleFormComponent,
     mjBizAppsFormsFormUploadFormComponent,
     mjBizAppsFormsFormVersionFormComponent,

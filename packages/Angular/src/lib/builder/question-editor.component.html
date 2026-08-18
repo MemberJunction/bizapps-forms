@@ -49,28 +49,127 @@
       ></button>
     </div>
 
-    @if (hasOptions) {
+    @if (settingFields.length > 0) {
       <div class="qe-section">
-        <p class="qe-section-title">Options</p>
+        <p class="qe-section-title">Settings</p>
+        @for (field of settingFields; track field.key) {
+          <div class="mjf-field">
+            <label class="mjf-field-label" [attr.for]="'qe-set-' + field.key">{{ field.label }}</label>
+            @if (field.kind === 'multiline') {
+              <textarea
+                #setInput
+                class="mjf-textarea"
+                rows="5"
+                [id]="'qe-set-' + field.key"
+                [value]="settingValue(field)"
+                [attr.placeholder]="field.placeholder ?? null"
+                (change)="setSetting(field, setInput.value)"
+              ></textarea>
+            } @else {
+              <input
+                #setInput
+                class="mjf-input"
+                [id]="'qe-set-' + field.key"
+                [type]="field.kind === 'number' ? 'number' : 'text'"
+                [value]="settingValue(field)"
+                [attr.placeholder]="field.placeholder ?? null"
+                (change)="setSetting(field, setInput.value)"
+              />
+            }
+            @if (field.hint) {
+              <p class="qe-hint">{{ field.hint }}</p>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    @if (optionMode === 'matrix') {
+      <!-- Rows and columns are the same table with an axis discriminator, so they get two lists
+           rather than one: an author looking at a grid thinks in rows and columns, not in a flat
+           option list where the axis is a dropdown on each row. -->
+      <div class="qe-section">
+        <p class="qe-section-title">Rows</p>
         <div class="qe-options">
-          @for (opt of node.options; track opt.ID) {
+          @for (opt of matrixRows; track opt.ID) {
             <div class="qe-option">
               <input
-                #optInput
+                #rowInput
                 type="text"
                 class="mjf-input"
                 [value]="opt.Label"
-                (change)="setOptionLabel($index, optInput.value)"
-                [attr.aria-label]="'Option ' + ($index + 1)"
+                (change)="setOptionLabel(indexOfOption(opt), rowInput.value)"
+                [attr.aria-label]="'Row ' + ($index + 1)"
               />
-              <button
-                type="button"
-                class="qe-opt-remove"
-                (click)="removeOption($index)"
-                aria-label="Remove option"
-              >
+              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" aria-label="Remove row">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
               </button>
+            </div>
+          }
+        </div>
+        <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="addOption('Row')">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add row
+        </button>
+      </div>
+
+      <div class="qe-section">
+        <p class="qe-section-title">Columns</p>
+        <div class="qe-options">
+          @for (opt of matrixColumns; track opt.ID) {
+            <div class="qe-option">
+              <input
+                #colInput
+                type="text"
+                class="mjf-input"
+                [value]="opt.Label"
+                (change)="setOptionLabel(indexOfOption(opt), colInput.value)"
+                [attr.aria-label]="'Column ' + ($index + 1)"
+              />
+              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" aria-label="Remove column">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          }
+        </div>
+        <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="addOption('Column')">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add column
+        </button>
+      </div>
+    } @else if (hasOptions) {
+      <div class="qe-section">
+        <p class="qe-section-title">{{ optionMode === 'images' ? 'Choices' : 'Options' }}</p>
+        <div class="qe-options">
+          @for (opt of node.options; track opt.ID) {
+            <div class="qe-option-block">
+              <div class="qe-option">
+                <input
+                  #optInput
+                  type="text"
+                  class="mjf-input"
+                  [value]="opt.Label"
+                  (change)="setOptionLabel($index, optInput.value)"
+                  [attr.aria-label]="'Option ' + ($index + 1)"
+                />
+                <button
+                  type="button"
+                  class="qe-opt-remove"
+                  (click)="removeOption($index)"
+                  aria-label="Remove option"
+                >
+                  <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+              </div>
+              @if (optionMode === 'images') {
+                <input
+                  #imgInput
+                  type="url"
+                  class="mjf-input qe-option-img"
+                  [value]="opt.ImageURL ?? ''"
+                  placeholder="Image URL"
+                  [attr.aria-label]="'Image for option ' + ($index + 1)"
+                  (change)="setOptionImage(opt, imgInput.value)"
+                />
+              }
             </div>
           }
         </div>

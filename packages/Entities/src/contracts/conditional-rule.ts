@@ -12,6 +12,7 @@
  * { "show": { "all": [ { "questionId": "<id>", "op": "equals", "value": "Other" } ] } }
  * ```
  */
+import type { JSONObject } from './json-value';
 
 /** Comparison operators supported by a single condition (FORMS_BUILD_PLAN §6). */
 export type ConditionalOperator =
@@ -34,10 +35,27 @@ export type ConditionValue = string | number | boolean | string[] | number[];
 /**
  * The runtime value a respondent has supplied for a question, as held in the answer
  * map passed to the evaluator. Mirrors the spread of `FormResponseAnswer` typed
- * columns: text, numeric, boolean, date, and multi-select arrays. `undefined` /
- * `null` mean "not answered".
+ * columns: text, numeric, boolean, date, multi-select arrays — and, since composite
+ * question types landed, the object shapes that occupy the `JSONValue` column
+ * (`Address`, `ContactInfo`, `Matrix`). `undefined` / `null` mean "not answered".
+ *
+ * The object arm is what a composite answer looks like WHILE IT IS BEING FILLED IN, not only
+ * once stored: the widget holds one entry per question, so an Address must be in the map as a
+ * partially-typed object for the conditional evaluator to see it at all. Every comparison
+ * operator below already returns `false` for a value it cannot compare, so an object answer
+ * degrades to "no match" for `equals`/`greaterThan`/`in` rather than needing a branch in each
+ * — the one operator that genuinely had to learn about it is {@link isAnswerSupplied}, which
+ * decides whether the question counts as answered.
  */
-export type AnswerValue = string | number | boolean | string[] | number[] | null | undefined;
+export type AnswerValue =
+  | string
+  | number
+  | boolean
+  | string[]
+  | number[]
+  | JSONObject
+  | null
+  | undefined;
 
 /** A single leaf condition: "does `questionId`'s answer satisfy `op` vs `value`?". */
 export interface ConditionalCondition {
@@ -160,6 +178,13 @@ export function isAnswerSupplied(answer: AnswerValue): boolean {
   }
   if (Array.isArray(answer)) {
     return answer.length > 0;
+  }
+  if (typeof answer === 'object') {
+    // A composite (Address / ContactInfo / Matrix) is answered once ANY part carries a value.
+    // Recursing rather than testing key count is what makes a half-typed address count as
+    // answered while `{ line1: '', city: '' }` — which is what an untouched Address control
+    // emits on every keystroke elsewhere in the form — correctly does not.
+    return Object.values(answer).some((v) => isAnswerSupplied(v as AnswerValue));
   }
   return true;
 }

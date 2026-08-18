@@ -7,7 +7,9 @@
  */
 export * from './json-value';
 export * from './conditional-rule';
+export * from './question-types';
 export * from './form-definition';
+export * from './form-screens';
 export * from './published-automation-builder';
 export * from './answer-format';
 export * from './answer-canonical';

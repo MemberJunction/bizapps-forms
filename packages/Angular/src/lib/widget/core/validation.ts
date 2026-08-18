@@ -5,6 +5,7 @@
  */
 import {
   coerceAnswerToNumber,
+  isAnswerableQuestionType,
   isAnswerSupplied,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -43,7 +44,7 @@ export function validateQuestion(
   question: PublishedFormQuestion,
   value: AnswerValue,
 ): FieldValidationResult {
-  if (question.type === 'Statement') {
+  if (!isAnswerableQuestionType(question.type)) {
     return VALID;
   }
   const present = hasValue(value);

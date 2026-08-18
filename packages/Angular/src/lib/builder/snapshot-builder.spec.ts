@@ -91,6 +91,7 @@ describe('buildPublishedDefinition', () => {
         Settings: '{"anonymousAllowed":false,"captchaRequired":true,"quota":50}',
       }),
       pages: [],
+      screens: [],
     };
     const def = buildPublishedDefinition(tree, undefined, 'ver-9', []);
     expect(def.formId).toBe('form-1');
@@ -106,7 +107,7 @@ describe('buildPublishedDefinition', () => {
     const p1 = page('p1', 5);
     const p0 = page('p0', 1);
     p1.questions = [question('q-b', 9), question('q-a', 2)];
-    const tree: FormTree = { form: form({}), pages: [p1, p0] };
+    const tree: FormTree = { form: form({}), pages: [p1, p0], screens: [] };
 
     const def = buildPublishedDefinition(tree, undefined, 'v', []);
     expect(def.pages.map((p) => p.id)).toEqual(['p0', 'p1']);
@@ -124,7 +125,7 @@ describe('buildPublishedDefinition', () => {
     });
     const p = page('p', 0);
     p.questions = [q];
-    const tree: FormTree = { form: form({}), pages: [p] };
+    const tree: FormTree = { form: form({}), pages: [p], screens: [] };
 
     const def = buildPublishedDefinition(tree, undefined, 'v', []);
     const built = def.pages[0].questions[0];
@@ -138,7 +139,7 @@ describe('buildPublishedDefinition', () => {
     const q = question('q1', 0, { QuestionType: 'SingleChoice' }, opts);
     const p = page('p', 0);
     p.questions = [q];
-    const tree: FormTree = { form: form({}), pages: [p] };
+    const tree: FormTree = { form: form({}), pages: [p], screens: [] };
 
     const built = buildPublishedDefinition(tree, undefined, 'v', []).pages[0].questions[0];
     expect(built.options.map((o) => o.id)).toEqual(['o1', 'o2']);
@@ -154,7 +155,7 @@ describe('buildPublishedDefinition', () => {
       CustomCSS: '.x{}',
       LogoURL: 'https://logo',
     } as mjBizAppsFormsFormStyleEntity;
-    const def = buildPublishedDefinition({ form: form({}), pages: [] }, style, 'v', []);
+    const def = buildPublishedDefinition({ form: form({}), pages: [], screens: [] }, style, 'v', []);
     expect(def.styleTokens.cssVariables['--mj-brand-primary']).toBe('#123456');
     expect(def.styleTokens.customCSS).toBe('.x{}');
     expect(def.styleTokens.logoURL).toBe('https://logo');
@@ -167,7 +168,7 @@ describe('buildPublishedDefinition', () => {
       LogoURL: null,
     } as mjBizAppsFormsFormStyleEntity;
     const override = { cssVariables: { '--mjf-accent': '#ff8800' }, logoURL: 'https://preview-logo' };
-    const def = buildPublishedDefinition({ form: form({}), pages: [] }, style, 'v', [], override);
+    const def = buildPublishedDefinition({ form: form({}), pages: [], screens: [] }, style, 'v', [], override);
     // Override wins over the entity-derived tokens.
     expect(def.styleTokens.cssVariables['--mjf-accent']).toBe('#ff8800');
     expect(def.styleTokens.logoURL).toBe('https://preview-logo');
@@ -176,7 +177,7 @@ describe('buildPublishedDefinition', () => {
   it('produces JSON-serializable output (round-trips through JSON)', () => {
     const p = page('p', 0);
     p.questions = [question('q1', 0)];
-    const def = buildPublishedDefinition({ form: form({}), pages: [p] }, undefined, 'v', []);
+    const def = buildPublishedDefinition({ form: form({}), pages: [p], screens: [] }, undefined, 'v', []);
     const roundTripped = JSON.parse(JSON.stringify(def));
     expect(roundTripped).toEqual(def);
   });
@@ -184,7 +185,7 @@ describe('buildPublishedDefinition', () => {
   it('carries the automations it is given into the snapshot', () => {
     const automations = buildPublishedAutomations([automationRow({ ID: 'a1' })]);
 
-    const def = buildPublishedDefinition({ form: form({}), pages: [] }, undefined, 'v', automations);
+    const def = buildPublishedDefinition({ form: form({}), pages: [], screens: [] }, undefined, 'v', automations);
 
     expect(def.automations.map((a) => a.id)).toEqual(['a1']);
   });

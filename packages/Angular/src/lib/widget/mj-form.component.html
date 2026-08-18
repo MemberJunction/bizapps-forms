@@ -12,11 +12,23 @@
         <button type="button" class="mjf-retry" (click)="retry()">Try again</button>
       </div>
     }
+    @case ('welcome') {
+      <!-- Deliberately NOT inside the intake components: a welcome screen is a phase of the
+           shell, so while it shows there is no runtime rendered, no question in the DOM and
+           nothing for a respondent (or a scraper) to fill in. -->
+      @if (welcomeScreen(); as ws) {
+        <mjf-form-screen [screen]="ws" (activated)="startIntake()" />
+      }
+    }
     @case ('done') {
-      <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
-        <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
-        <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
-      </div>
+      @if (activeEndingScreen(); as es) {
+        <mjf-form-screen [screen]="es" />
+      } @else {
+        <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
+          <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
+          <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
+        </div>
+      }
     }
     @default {
       @if (definition(); as def) {

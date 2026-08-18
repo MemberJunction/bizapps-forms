@@ -13,12 +13,13 @@ import {
   parseConditionalRule,
   parseFormSettings,
   parseValidationRule,
+  isFormQuestionType,
   type ConditionalRule,
   type FormAutomationExecutionMode,
   type FormAutomationTargetType,
   type FormAutomationTrigger,
-  type FormQuestionType,
   type FormRenderMode,
+  type FormScreenType,
   type PublishedFormAutomation,
   type FormSettings,
   type FormStyleTokens,
@@ -28,13 +29,9 @@ import {
   type PublishedFormPage,
   type PublishedFormQuestion,
   type PublishedFormQuestionOption,
+  type PublishedFormScreen,
   type ValidationRule,
 } from '@mj-biz-apps/forms-entities';
-
-const QUESTION_TYPES: ReadonlySet<string> = new Set<FormQuestionType>([
-  'ShortText', 'LongText', 'Email', 'Phone', 'Number', 'SingleChoice', 'MultiChoice',
-  'Dropdown', 'Rating', 'NPS', 'YesNo', 'Date', 'Time', 'FileUpload', 'Statement',
-]);
 
 /** Narrow an unknown JSON value to a string-keyed object. */
 function asObject(value: JSONValue | undefined): JSONObject | undefined {
@@ -104,6 +101,65 @@ function buildDefinition(root: JSONObject): PublishedFormDefinition | undefined 
     styleTokens,
     pages,
     automations: parseAutomations(root.automations),
+    welcomeScreen: parseScreen(asObject(root.welcomeScreen), 'Welcome'),
+    endScreens: parseEndScreens(root.endScreens),
+  };
+}
+
+/**
+ * Parse the ending screens, dropping malformed entries.
+ *
+ * Lenient in the same way — and for the same reason — as {@link parseAutomations}, and
+ * deliberately NOT like `parsePage`: a corrupt page means we would render a form we only half
+ * understand, so the whole snapshot fails. A corrupt ending screen costs the respondent a
+ * thank-you page they never saw before, and `endingMessage` already has a fallback for exactly
+ * that. Taking the form offline to protect a confirmation screen is the wrong trade.
+ */
+function parseEndScreens(value: JSONValue | undefined): PublishedFormScreen[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const screens: PublishedFormScreen[] = [];
+  for (const raw of value) {
+    const screen = parseScreen(asObject(raw), 'Ending');
+    if (screen) {
+      screens.push(screen);
+    }
+  }
+  return screens;
+}
+
+/**
+ * Parse one screen, forcing its `screenType` to the slot it was found in.
+ *
+ * The slot is authoritative rather than the stored field: a screen sitting in `endScreens` IS
+ * an ending regardless of what its own `screenType` says, and honouring a mismatched field
+ * would produce an "Ending" the widget shows before intake, or a welcome screen with a
+ * redirect. There is no reading of that disagreement that helps a respondent.
+ */
+function parseScreen(
+  obj: JSONObject | undefined,
+  screenType: FormScreenType,
+): PublishedFormScreen | undefined {
+  if (!obj) {
+    return undefined;
+  }
+  const id = asString(obj.id);
+  const title = asString(obj.title);
+  if (!id || title === undefined) {
+    return undefined;
+  }
+  return {
+    id,
+    screenType,
+    title,
+    body: asString(obj.body),
+    buttonLabel: asString(obj.buttonLabel),
+    mediaURL: asString(obj.mediaURL),
+    redirectURL: asString(obj.redirectURL),
+    displayOrder: asNumber(obj.displayOrder) ?? 0,
+    conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    isDefault: asBoolean(obj.isDefault),
   };
 }
 
@@ -228,6 +284,7 @@ function parsePage(obj: JSONObject | undefined): PublishedFormPage | undefined {
     description: asString(obj.description),
     displayOrder,
     conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    isPartialSubmitPoint: asBoolean(obj.isPartialSubmitPoint),
     questions,
   };
 }
@@ -240,12 +297,16 @@ function parseQuestion(obj: JSONObject | undefined): PublishedFormQuestion | und
   const type = asString(obj.type);
   const prompt = asString(obj.prompt);
   const displayOrder = asNumber(obj.displayOrder);
-  if (!id || !type || !QUESTION_TYPES.has(type) || prompt === undefined || displayOrder === undefined) {
+  // `isFormQuestionType` replaces a 15-string set copied out of the contract by hand. The copy
+  // was already the bug waiting to happen: it had no way to learn that the contract grew, so a
+  // form published with a new type parsed as `undefined` and took the whole snapshot — and
+  // therefore the whole form — down with it.
+  if (!id || !isFormQuestionType(type) || prompt === undefined || displayOrder === undefined) {
     return undefined;
   }
   return {
     id,
-    type: type as FormQuestionType,
+    type,
     prompt,
     helpText: asString(obj.helpText),
     isRequired: asBoolean(obj.isRequired) ?? false,
@@ -269,7 +330,16 @@ function parseOptions(value: JSONValue | undefined): PublishedFormQuestionOption
     const optValue = asString(obj?.value);
     const displayOrder = asNumber(obj?.displayOrder);
     if (obj && id && label !== undefined && optValue !== undefined && displayOrder !== undefined) {
-      options.push({ id, label, value: optValue, displayOrder, isDefault: asBoolean(obj.isDefault) });
+      const axis = asString(obj.matrixAxis);
+      options.push({
+        id,
+        label,
+        value: optValue,
+        displayOrder,
+        isDefault: asBoolean(obj.isDefault),
+        imageURL: asString(obj.imageURL),
+        matrixAxis: axis === 'Row' || axis === 'Column' ? axis : undefined,
+      });
     }
   }
   return options;

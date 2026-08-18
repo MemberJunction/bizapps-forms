@@ -52,6 +52,7 @@ export function mockDefinition(): PublishedFormDefinition {
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
     automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'pg-1',

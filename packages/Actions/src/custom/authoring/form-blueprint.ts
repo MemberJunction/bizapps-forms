@@ -15,36 +15,39 @@
  * bottom of this file.
  */
 import { z } from 'zod';
-import type { FormQuestionType, FormRenderMode } from '@mj-biz-apps/forms-entities';
+import {
+  FORM_QUESTION_TYPES,
+  questionTypeBehavior,
+  type FormQuestionType,
+  type FormRenderMode,
+} from '@mj-biz-apps/forms-entities';
 
 /**
- * Phase-1 question taxonomy (FORMS_BUILD_PLAN §5.3). Identical set to the shared
- * contract's `FormQuestionType`; the guard at the bottom fails the build on drift.
+ * The question taxonomy the AI Designer may emit — the shared contract's `FormQuestionType`,
+ * derived rather than transcribed.
+ *
+ * It WAS transcribed, and the transcription went stale the moment the contract grew to 25 types:
+ * a blueprint naming `OpinionScale` would fail validation with "invalid enum value", so the
+ * Designer could not author any of the new types no matter what it was told. The compile-time
+ * guard below was supposed to catch exactly that and could not — see the note beside it.
+ *
+ * The cast is the one zod requires: `z.enum` wants a non-empty tuple and cannot see that a
+ * `readonly FormQuestionType[]` has at least one element. `FORM_QUESTION_TYPES` is built from the
+ * behaviour table's keys, so it is non-empty by construction.
  */
-export const formQuestionTypeSchema = z.enum([
-  'ShortText',
-  'LongText',
-  'Email',
-  'Phone',
-  'Number',
-  'SingleChoice',
-  'MultiChoice',
-  'Dropdown',
-  'Rating',
-  'NPS',
-  'YesNo',
-  'Date',
-  'Time',
-  'FileUpload',
-  'Statement',
-]);
+const QUESTION_TYPE_VALUES = FORM_QUESTION_TYPES as readonly [FormQuestionType, ...FormQuestionType[]];
 
-/** The choice-style question types that require (and are the only ones allowed) options. */
-export const CHOICE_QUESTION_TYPES: ReadonlySet<FormQuestionType> = new Set<FormQuestionType>([
-  'SingleChoice',
-  'MultiChoice',
-  'Dropdown',
-]);
+export const formQuestionTypeSchema = z.enum(QUESTION_TYPE_VALUES);
+
+/**
+ * The question types that require (and are the only ones allowed) options.
+ *
+ * Also derived: `Ranking` and `Matrix` carry options too, and the hand-listed set would have
+ * rejected a Designer-authored ranking for supplying the options it cannot work without.
+ */
+export const CHOICE_QUESTION_TYPES: ReadonlySet<FormQuestionType> = new Set(
+  FORM_QUESTION_TYPES.filter((t) => questionTypeBehavior(t).optionMode !== 'none'),
+);
 
 export const formRenderModeSchema = z.enum(['Scroll', 'OneQuestion']);
 
@@ -54,6 +57,21 @@ export const blueprintOptionSchema = z.object({
   /** Stored value; defaults to `label` when the Designer omits it. */
   value: z.string().min(1).optional(),
   isDefault: z.boolean().optional(),
+  /**
+   * `PictureChoice` only: the image shown above the label.
+   *
+   * The Designer cannot invent a working image URL, so it will rarely fill this in — but a
+   * blueprint that carries one (from a template, or a brief that named an asset) would otherwise
+   * have it silently dropped at the schema boundary.
+   */
+  imageURL: z.string().optional(),
+  /**
+   * `Matrix` only: which axis this option belongs to.
+   *
+   * Without this the Designer cannot author a matrix AT ALL — every option would land as a row,
+   * producing a grid with no columns, which renders as a table with nothing to click.
+   */
+  matrixAxis: z.enum(['Row', 'Column']).optional(),
 });
 
 /**
@@ -120,7 +138,14 @@ export function extractJSON(text: string): string {
 // --- Drift guard (compile-time) -------------------------------------------------
 // Fails `tsc` if the blueprint question-type union ever diverges from the shared
 // contract's `FormQuestionType` in either direction.
-type AssertExtends<A, B> = A extends B ? (B extends A ? true : never) : never;
+// `[A] extends [B]`, not `A extends B`. A naked type parameter on the left of a conditional
+// DISTRIBUTES over its union, so the bare form checked each member of A separately and collapsed
+// the result back to `true` — it could not fail in either direction, and had not been failing
+// while the blueprint's 15-type enum sat beside a 25-type contract. Wrapping both sides in
+// one-tuples suppresses distribution and makes the comparison the whole-union one it reads as.
+// Verified by construction: with the bare form neither a widened nor a narrowed union errors;
+// with this form both do, and identical unions still pass.
+type AssertExtends<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 const _questionTypeMatch: AssertExtends<z.infer<typeof formQuestionTypeSchema>, FormQuestionType> = true;
 const _renderModeMatch: AssertExtends<z.infer<typeof formRenderModeSchema>, FormRenderMode> = true;
 void _questionTypeMatch;

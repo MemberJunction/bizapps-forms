@@ -14,6 +14,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
   mjBizAppsFormsFormEntity,
+  mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
   FormQuestionType,
   FormRenderMode,
@@ -25,6 +26,9 @@ import { BuilderStateService } from './builder-state.service';
 import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
+import { ScreenEditorComponent } from './screen-editor.component';
+import { ImportQuestionsComponent } from './import-questions.component';
+import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { ResponsesTabComponent } from '../responses/responses-tab.component';
@@ -33,10 +37,12 @@ import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   QUESTION_PALETTE_GROUPS,
   questionTypeMeta,
   questionTypesInGroup,
+  searchQuestionTypes,
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
@@ -89,6 +95,8 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     CdkDragHandle,
     CdkDragPreview,
     QuestionEditorComponent,
+    ScreenEditorComponent,
+    ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
     FormPreviewModalComponent,
@@ -109,6 +117,16 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
   protected tree: FormTree | null = null;
   protected selectedQuestionId: string | null = null;
+  /**
+   * The selected screen, if any. Mutually exclusive with {@link selectedQuestionId} — the right
+   * pane shows one editor, and two independent selections would let it show a screen's fields
+   * while a question is highlighted on the canvas.
+   */
+  protected selectedScreenId: string | null = null;
+  /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
+  protected paletteQuery = '';
+  /** Whether the paste-to-import dialog is open. */
+  protected importOpen = false;
   protected activeTab: BuilderTab = 'build';
   protected busy = false;
   protected statusMessage = '';
@@ -158,6 +176,23 @@ export class FormBuilderComponent extends BaseFormComponent {
    *  - `current`  — live and in sync. Nothing to do, and the button says so instead of
    *                 pretending otherwise.
    */
+  /**
+   * Whether {@link publishState} has been resolved against the published snapshot yet.
+   *
+   * Both fingerprints start null, which reads as "not dirty" — so before the async read lands, a
+   * Published form claims to be in sync and then corrects itself. Gating the control on this is
+   * what stops the header changing its mind in front of the author (and what silenced NG0100).
+   */
+  protected publishStateReady = false;
+
+  /**
+   * Whether the loaded tree is safe for the view to read — see {@link announceReady}.
+   *
+   * Distinct from `!busy`: `busy` toggles for every edit, and hiding the canvas while a question
+   * saves would make the builder flicker on every keystroke.
+   */
+  protected builderReady = false;
+
   protected get publishState(): 'publish' | 'update' | 'current' {
     if (this.dirty) return 'update';
     return this.record.Status === 'Published' ? 'current' : 'publish';
@@ -198,6 +233,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.publishedFingerprint = storedSnapshotFingerprint(
       await this.publisher.latestPublishedSnapshot(this.record.ID),
     );
+    this.publishStateReady = true;
     this.markDirty();
   }
 
@@ -225,7 +261,26 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     await this.refreshPublishState();
     this.busy = false;
-    this.cdr.markForCheck();
+    this.announceReady();
+  }
+
+  /**
+   * Publish "the builder is loaded" to the view as a single transition, in its own task.
+   *
+   * `loadBuilder` awaits four different things, and Angular runs a change-detection pass at each
+   * await boundary. Any template expression reading `tree` therefore flipped mid-check and Angular
+   * reported NG0100 — first on the welcome-screen conditional, then, once that was gated, on the
+   * gate itself. Gating cannot fix it, because the gate is the thing that changes.
+   *
+   * So the view reads ONE flag that flips exactly once, from a `setTimeout` — a macrotask, which
+   * is the only scheduling primitive here guaranteed to run after the current cycle has finished
+   * checking rather than inside it.
+   */
+  private announceReady(): void {
+    setTimeout(() => {
+      this.builderReady = true;
+      this.cdr.markForCheck();
+    }, 0);
   }
 
   /**
@@ -246,7 +301,22 @@ export class FormBuilderComponent extends BaseFormComponent {
   // -- palette --------------------------------------------------------------
 
   protected typesInGroup(group: QuestionPaletteGroup): QuestionTypeMeta[] {
-    return questionTypesInGroup(group);
+    const inGroup = questionTypesInGroup(group);
+    if (this.paletteQuery.trim() === '') {
+      return inGroup;
+    }
+    const matches = new Set(searchQuestionTypes(this.paletteQuery).map((m) => m.type));
+    return inGroup.filter((m) => matches.has(m.type));
+  }
+
+  /** True when a filter is active and this group has nothing left, so the heading can hide. */
+  protected groupHasMatches(group: QuestionPaletteGroup): boolean {
+    return this.typesInGroup(group).length > 0;
+  }
+
+  protected setPaletteQuery(value: string): void {
+    this.paletteQuery = value;
+    this.cdr.markForCheck();
   }
 
   protected async addQuestion(type: FormQuestionType): Promise<void> {
@@ -294,9 +364,203 @@ export class FormBuilderComponent extends BaseFormComponent {
     return this.tree?.pages ?? [];
   }
 
+  protected async setPageTitle(page: PageNode, title: string): Promise<void> {
+    page.entity.Title = title.trim() === '' ? null : title;
+    await this.state.save(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /** Toggle whether leaving this page banks a Partial response immediately. */
+  protected async togglePartialSubmitPoint(page: PageNode): Promise<void> {
+    page.entity.IsPartialSubmitPoint = !page.entity.IsPartialSubmitPoint;
+    await this.state.save(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
   protected selectQuestion(node: QuestionNode): void {
     this.selectedQuestionId = node.entity.ID;
+    this.selectedScreenId = null;
     this.cdr.markForCheck();
+  }
+
+  // -- screens --------------------------------------------------------------
+  //
+  // Screens live beside the pages on the canvas rather than among the questions, because that is
+  // what they are: the welcome sits above the whole form and the endings below it. An author who
+  // can see the shape of the flow does not have to be told that a welcome screen is not question
+  // zero.
+
+  protected get welcomeScreen(): mjBizAppsFormsFormScreenEntity | undefined {
+    return this.tree ? welcomeScreenOf(this.tree) : undefined;
+  }
+
+  protected get endScreens(): mjBizAppsFormsFormScreenEntity[] {
+    return this.tree ? endScreensOf(this.tree) : [];
+  }
+
+  protected get selectedScreen(): mjBizAppsFormsFormScreenEntity | null {
+    if (!this.tree || !this.selectedScreenId) {
+      return null;
+    }
+    return this.tree.screens.find((s) => s.ID === this.selectedScreenId) ?? null;
+  }
+
+  protected selectScreen(screen: mjBizAppsFormsFormScreenEntity): void {
+    this.selectedScreenId = screen.ID;
+    this.selectedQuestionId = null;
+    this.cdr.markForCheck();
+  }
+
+  protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    const title = screenType === 'Welcome' ? this.record.Name || 'Welcome' : 'Thanks for your response';
+    const screen = await this.state.addScreen(this.tree, screenType, title);
+    if (screen) {
+      // `addScreen` returns the EXISTING welcome screen when one is already there, so guard
+      // against pushing a duplicate into the tree the database correctly refused to duplicate.
+      if (!this.tree.screens.some((s) => s.ID === screen.ID)) {
+        this.tree.screens.push(screen);
+      }
+      this.selectScreen(screen);
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  protected async deleteScreen(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    if (await this.state.deleteScreen(screen)) {
+      this.tree.screens = this.tree.screens.filter((s) => s.ID !== screen.ID);
+      if (this.selectedScreenId === screen.ID) {
+        this.selectedScreenId = null;
+      }
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  protected onScreenChanged(screen: mjBizAppsFormsFormScreenEntity): void {
+    // Same coalescing as a question edit — the screen editor has five sibling inputs, and it
+    // writes on every keystroke, so this is the busiest surface in the builder.
+    this.state.saveDebounced(screen);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Conditional sources for an ENDING: every question on the form.
+   *
+   * Deliberately not the "questions before this one" rule that governs a question's own
+   * condition. An ending is evaluated after the whole form is answered, so every answer is
+   * available to it — restricting it to a prefix would hide the last page from the branch that
+   * most wants to read it.
+   */
+  protected get endingConditionalSources(): ConditionalSourceQuestion[] {
+    if (!this.tree) {
+      return [];
+    }
+    return this.tree.pages.flatMap((page) =>
+      page.questions.map((q) => ({ id: q.entity.ID, prompt: q.entity.Prompt })),
+    );
+  }
+
+  // -- import ---------------------------------------------------------------
+
+  protected openImport(): void {
+    this.importOpen = true;
+    this.cdr.markForCheck();
+  }
+
+  protected closeImport(): void {
+    this.importOpen = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Create the pages and questions a paste described.
+   *
+   * Appends rather than replaces. Import is used to ADD a section far more often than to start
+   * over, and an import that silently wiped an existing form would be unrecoverable — there is
+   * no undo here.
+   */
+  protected async onImported(result: ImportResult): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.importOpen = false;
+    this.busy = true;
+    try {
+      for (const importedPage of result.pages) {
+        const page = await this.pageForImport(importedPage.title);
+        if (!page) {
+          continue;
+        }
+        for (const q of importedPage.questions) {
+          await this.createImportedQuestion(page, q);
+        }
+      }
+      this.markDirty();
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /**
+   * The page an imported block goes on: a new one when the paste named it, else the last
+   * existing page so an untitled paste extends the form the author is already looking at.
+   */
+  private async pageForImport(title: string | undefined): Promise<PageNode | undefined> {
+    if (!this.tree) {
+      return undefined;
+    }
+    if (title) {
+      const created = await this.state.addPage(this.tree, title);
+      if (created) {
+        this.tree.pages.push(created);
+      }
+      return created;
+    }
+    return this.tree.pages[this.tree.pages.length - 1];
+  }
+
+  private async createImportedQuestion(page: PageNode, imported: ImportedQuestion): Promise<void> {
+    if (!this.tree) {
+      return;
+    }
+    const node = await this.state.addQuestion(this.tree, page, imported.type, imported.prompt);
+    if (!node) {
+      return;
+    }
+    if (imported.isRequired) {
+      node.entity.IsRequired = true;
+      await this.state.save(node.entity);
+    }
+    if (imported.options.length > 0) {
+      // The seeded "Option 1 / Option 2" pair is a placeholder for an author who will edit it;
+      // a paste that named its options has already done that, so the placeholders go.
+      for (const seeded of [...node.options]) {
+        await this.state.deleteOption(seeded);
+      }
+      node.options = [];
+      for (const label of imported.options) {
+        const option = await this.state.addOption(node, label);
+        if (option) {
+          node.options.push(option);
+        }
+      }
+    }
+    page.questions.push(node);
   }
 
   protected get selectedNode(): QuestionNode | null {
@@ -350,13 +614,28 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   // -- editing handlers (persist on change) ---------------------------------
 
-  protected async onQuestionChanged(node: QuestionNode): Promise<void> {
-    await this.state.save(node.entity);
+  /**
+   * A field on the selected question changed.
+   *
+   * Coalesced rather than saved immediately: the properties panel has several sibling inputs, and
+   * two committing in the same tick used to race and lose the second edit outright — see
+   * `saveDebounced`. The in-memory tree is updated synchronously by the editor either way, so
+   * Preview and Publish always see the current state; only the write is deferred.
+   */
+  protected onQuestionChanged(node: QuestionNode): void {
+    this.state.saveDebounced(node.entity);
     this.markDirty();
   }
 
-  protected async onAddOption(node: QuestionNode): Promise<void> {
-    const option = await this.state.addOption(node, `Option ${node.options.length + 1}`);
+  protected async onAddOption(event: { node: QuestionNode; matrixAxis?: 'Row' | 'Column' }): Promise<void> {
+    const { node, matrixAxis } = event;
+    // Number within the AXIS, not within the whole option list: a matrix whose second column
+    // was labelled "Option 4" because two rows came first is just confusing.
+    const peers = matrixAxis
+      ? node.options.filter((o) => (o.MatrixAxis ?? 'Row') === matrixAxis).length
+      : node.options.length;
+    const label = matrixAxis ? `${matrixAxis} ${peers + 1}` : `Option ${peers + 1}`;
+    const option = await this.state.addOption(node, label, matrixAxis);
     if (option) {
       node.options.push(option);
       this.markDirty();
@@ -430,6 +709,11 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.busy = true;
     this.statusMessage = '';
+    // Land every coalesced edit before publishing. The snapshot is built from the in-memory tree
+    // so it would be correct either way, but a form whose published version contains an edit its
+    // own draft rows do not is a genuinely confusing thing to debug later.
+    await this.state.flushPendingSaves();
+    this.publishStateReady = false;
     const result: PublishResult = await this.publisher.publish(this.tree);
     this.busy = false;
     if (result.success) {
@@ -439,6 +723,9 @@ export class FormBuilderComponent extends BaseFormComponent {
       await this.refreshPublishState();
     } else {
       this.statusMessage = result.error ?? 'Publish failed.';
+      // A failed publish changed nothing, so the state we already had still holds. Without this
+      // the control would sit on "Checking…" forever and the author would have no way to retry.
+      this.publishStateReady = true;
     }
     this.cdr.markForCheck();
   }
