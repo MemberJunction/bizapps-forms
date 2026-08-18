@@ -38,3 +38,11 @@ onlyBuiltDependencies:
 
 packages:
   - 'packages/*'
+  # The MJAPI dev harness is a workspace member so its @memberjunction/* deps dedupe
+  # against packages/* through one lockfile. Outside the workspace it resolves its own
+  # copies of graphql/@memberjunction/server, and two instances split the type-graphql
+  # registry: schema generation then dies at boot (duplicate "RunViewByIDInput" /
+  # CannotDetermineGraphQLTypeError) — the 2026-08-18 estate failure. Deliberately NOT
+  # mirrored into package.json `workspaces`, which the publish workflow's jq steps and
+  # the OpenApp install engine enumerate; the harness is dev-only and must not publish.
+  - 'apps/MJAPI'

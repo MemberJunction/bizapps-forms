@@ -1,0 +1,30 @@
+{
+  "name": "mj-forms-api-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local dev harness hosting forms-server in MJAPI (MJ 6.1.0-edge era, rebuilt 2026-08-18). Dev-only workspace member — never published. Run from this directory: node server.mjs",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@memberjunction/actions": "6.1.0-edge.2",
+    "@memberjunction/actions-base": "6.1.0-edge.2",
+    "@memberjunction/ai-agents": "6.1.0-edge.2",
+    "@memberjunction/ai-core-plus": "6.1.0-edge.2",
+    "@memberjunction/core": "6.1.0-edge.2",
+    "@memberjunction/core-entities": "6.1.0-edge.2",
+    "@memberjunction/generic-database-provider": "6.1.0-edge.2",
+    "@memberjunction/global": "6.1.0-edge.2",
+    "@memberjunction/server": "6.1.0-edge.2",
+    "@memberjunction/server-bootstrap": "6.1.0-edge.2",
+    "@memberjunction/storage": "6.1.0-edge.2",
+    "@mj-biz-apps/common-entities": "5.33.2",
+    "@mj-biz-apps/forms-server": "workspace:*",
+    "@mj-biz-apps/tasks-entities": "1.2.1",
+    "class-validator": "0.14.4",
+    "dotenv": "^16.4.5",
+    "type-graphql": "2.0.0-beta.3"
+  }
+}
