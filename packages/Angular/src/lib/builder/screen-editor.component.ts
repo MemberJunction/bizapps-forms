@@ -95,7 +95,6 @@ const SCREEN_EDITOR_CSS = /* css */ `
             (input)="setButtonLabel($any($event.target).value)" />
 
           <mjf-image-field
-            inputId="se-media"
             label="Image"
             [value]="s.MediaURL ?? ''"
             [formId]="s.FormID"

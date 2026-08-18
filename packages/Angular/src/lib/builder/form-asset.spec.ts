@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { assetErrorMessage, buildAssetFormData, parseAssetResponse } from './form-asset.service';
+import { isAcceptedType } from './image-formats';
 
 /** A stand-in File; the browser type is not available under the node test environment. */
 function fileNamed(name: string): File {
@@ -69,5 +70,35 @@ describe('assetErrorMessage', () => {
 
   it('ignores a blank server message instead of showing an empty error', () => {
     expect(assetErrorMessage(403, { error: '   ' })).toMatch(/permission/i);
+  });
+});
+
+describe('isAcceptedType — the local screen before an upload', () => {
+  it('accepts the four formats the server accepts', () => {
+    for (const t of ['image/png', 'image/jpeg', 'image/gif', 'image/webp']) {
+      expect(isAcceptedType(t)).toBe(true);
+    }
+  });
+
+  it('rejects what the server would reject, saving the author a round trip', () => {
+    // The point of screening locally: refusing a 4 MB PDF is instant here and costs an upload
+    // plus a wait if left to the server.
+    for (const t of ['application/pdf', 'text/plain', 'video/mp4', 'image/tiff']) {
+      expect(isAcceptedType(t)).toBe(false);
+    }
+  });
+
+  it('rejects SVG, matching the server default rather than being friendlier than it', () => {
+    // A client that accepted SVG would upload it and then show a server rejection — worse than
+    // never offering it. The server can be configured to allow it; this hint follows the default.
+    expect(isAcceptedType('image/svg+xml')).toBe(false);
+  });
+
+  it('ignores a charset parameter and matches case-insensitively', () => {
+    expect(isAcceptedType('IMAGE/PNG; charset=binary')).toBe(true);
+  });
+
+  it('rejects a blank type rather than guessing', () => {
+    expect(isAcceptedType('')).toBe(false);
   });
 });

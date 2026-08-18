@@ -21,6 +21,13 @@ export {
 } from './style-tokens';
 export { ImageFieldComponent } from './image-field.component';
 export {
+  ACCEPTED_IMAGE_TYPES,
+  ACCEPT_ATTRIBUTE,
+  ACCEPTED_FORMATS_LABEL,
+  MAX_SIZE_LABEL,
+  isAcceptedType,
+} from './image-formats';
+export {
   FormAssetService,
   buildAssetFormData,
   parseAssetResponse,
@@ -31,6 +38,16 @@ export { resolveApiOrigin, resolveApiToken } from './mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';
+export {
+  NOTHING_SELECTED,
+  clearIfQuestion,
+  clearIfScreen,
+  questionId,
+  screenId,
+  selectQuestion,
+  selectScreen,
+  type BuilderSelection,
+} from './builder-selection';
 export { PublishService, type PublishResult } from './publish.service';
 export { DistributionService, type CreateDistributionInput, type DistributionChannel } from './distribution.service';
 export {
