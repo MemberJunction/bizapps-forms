@@ -26,12 +26,23 @@ export function hashSessionId(sessionId: string): string {
 /** Inputs available to the resolver for building source metadata. */
 export interface SourceMetadataInputs {
   /**
-   * Anonymous session correlator. NOTE (investigated 2026-07): this is
-   * `UserPayload.sessionId`, which MJ core populates from the `x-session-id` HTTP request
-   * header (`@memberjunction/server` context.js `extractAuthInputs`), NOT from a JWT
-   * `mj_sid` claim. The widget's plain-`fetch` transport does not send that header, so this
-   * is routinely blank for public submissions — which is exactly why the client-generated
-   * response id (below) is the authoritative dedupe/upsert key.
+   * Anonymous session correlator. This is `UserPayload.sessionId`, which MJ core populates
+   * from the `x-session-id` HTTP request header (`@memberjunction/server` context.js
+   * `extractAuthInputs`), NOT from a JWT `mj_sid` claim.
+   *
+   * CORRECTED 2026-08-18. This comment previously said "the widget's plain-`fetch` transport
+   * does not send that header, so this is routinely blank for public submissions". The
+   * widget DOES send it: `FormsGraphQLApiService.execute()` sets `x-session-id` to a
+   * per-widget-instance id on every request including the submit mutation, and that service
+   * is the wired-up transport (`widget/register-element.ts`). Confirmed against the dev DB —
+   * the response rows that came from the real widget carry DISTINCT session hashes.
+   *
+   * It is still blank for any client that does not send the header (curl, a bespoke
+   * integration, and — until they were fixed — this repo's own smoke scripts), so it remains
+   * unsafe to rely on for correctness. That is why the client-generated response id (below)
+   * is the authoritative dedupe/upsert key. The distinction matters: "the widget doesn't send
+   * it" and "some clients don't send it" imply very different threat models, and the first
+   * one was false.
    */
   sessionId: string;
   distributionId: string;
@@ -47,6 +58,13 @@ export interface SourceMetadataInputs {
 /**
  * The composite key used for per-(session, distribution) rate-limiting and dedupe.
  * Distinct distributions of the same form do not share a bucket.
+ *
+ * CONSEQUENCE OF A BLANK SESSION, worth knowing before you read a rate-limit result: an
+ * empty `sessionId` hashes to one fixed value, so EVERY headerless client submitting to a
+ * given distribution shares a single bucket. Real respondents are unaffected (the widget
+ * sends a per-instance id), but any script or integration that omits `x-session-id` will
+ * rate-limit itself and, worse, appear to be testing per-session behaviour while doing
+ * nothing of the kind. `smoke/lib/session.mjs` exists because of exactly that.
  */
 export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'distributionId'>): string {
   return `${inputs.distributionId}:${hashSessionId(inputs.sessionId)}`;

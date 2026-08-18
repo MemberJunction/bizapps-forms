@@ -23,6 +23,7 @@
  * Usage:  node smoke/respondent-path.mjs [distribution-slug]
  *         FORMS_SMOKE_URL=http://host:port node smoke/respondent-path.mjs my-slug
  */
+import { sessionIdFor } from './lib/session.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
 const SLUG = process.argv[2] || process.env.FORMS_SMOKE_SLUG || 'contact-us-e2e';
@@ -36,7 +37,13 @@ const check = (cond, m, detail) => (cond ? pass(m) : fail(m, detail));
 async function gql(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      // Mirrors the widget's per-instance correlator; without it every request shares one
+      // rate-limit bucket. See smoke/lib/session.mjs.
+      'x-session-id': sessionIdFor(token),
+    },
     body: JSON.stringify({ query, variables }),
   });
   const body = await res.json();
