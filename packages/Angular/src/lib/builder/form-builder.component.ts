@@ -9,6 +9,7 @@ import {
   moveItemInArray,
   type CdkDragDrop,
 } from '@angular/cdk/drag-drop';
+import { CompositeKey } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
@@ -25,6 +26,8 @@ import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
+import { ResponsesTabComponent } from '../responses/responses-tab.component';
+import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
@@ -40,8 +43,14 @@ import type { ConditionalSourceQuestion } from './conditional-rule-editor.compon
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import { isValidReorder } from './reorder';
 
-/** Which workspace tab is showing. */
-type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit';
+/**
+ * Which workspace tab is showing.
+ *
+ * `responses` sits last, after `onsubmit`: the tabs read left to right as the life of a
+ * form — build it, style it, distribute it, decide what happens on submit, then read what
+ * came back. Collection follows configuration.
+ */
+type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit' | 'responses';
 
 /**
  * The visual form builder — registered as the override for the
@@ -73,6 +82,7 @@ type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit';
     DesignPanelComponent,
     FormPreviewModalComponent,
     AutomationTabComponent,
+    ResponsesTabComponent,
   ],
   providers: [BuilderStateService, DesignStateService, PublishService],
   templateUrl: './form-builder.component.html',
@@ -350,6 +360,19 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected setTab(tab: BuilderTab): void {
     this.activeTab = tab;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Relays a deep link from the Responses tab (a stored file, an action log, an agent run,
+   * a bound business record) to the Explorer host via `BaseFormComponent.Navigate` — the
+   * same seam the generated forms use for foreign-key links.
+   */
+  protected openLinkedRecord(link: ResponseRecordLink): void {
+    this.Navigate.emit({
+      Kind: 'record',
+      EntityName: link.entityName,
+      PrimaryKey: CompositeKey.FromID(link.recordId),
+    });
   }
 
   /** The Design panel persisted `Form.StyleID`; the theme reaches the live link only on Publish. */

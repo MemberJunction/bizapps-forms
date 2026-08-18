@@ -80,6 +80,29 @@ export function answersForFormFilter(formId: string): string {
   return `ResponseID IN (SELECT ID FROM ${FORMS_SCHEMA}.vwFormResponses WHERE FormID='${formId}')`;
 }
 
+/**
+ * Build the responses `ExtraFilter` for a form. A named function rather than an inline
+ * template so invariant (2) — scope by FormID, never FormVersionID — is something a test
+ * can hold onto. Exported for unit testing.
+ */
+export function responsesForFormFilter(formId: string): string {
+  return `FormID='${formId}'`;
+}
+
+/**
+ * Build the uploads `ExtraFilter` for a set of answer `FileID`s. De-duplicates, because
+ * two answers can legitimately reference the same stored file. Returns null for an empty
+ * set — the caller must skip the query rather than emit `IN ()`, which is a syntax error.
+ * Exported for unit testing.
+ */
+export function uploadsForFileIdsFilter(fileIds: readonly string[]): string | null {
+  const unique = [...new Set(fileIds)];
+  if (unique.length === 0) {
+    return null;
+  }
+  return `FileID IN (${unique.map((id) => `'${id}'`).join(',')})`;
+}
+
 /** The responses + answers of one form, as fetched (aggregation happens in pure builders). */
 export interface FormResponseRows {
   responses: mjBizAppsFormsFormResponseEntityType[];
@@ -98,7 +121,7 @@ export class ResponsesDataService {
     const [responsesRes, answersRes] = (await this.rv.RunViews([
       {
         EntityName: FORMS_ENTITY.FormResponse,
-        ExtraFilter: `FormID='${formId}'`,
+        ExtraFilter: responsesForFormFilter(formId),
         ResultType: 'simple',
         Fields: [...RESPONSE_FIELDS],
         OrderBy: 'SubmittedAt DESC',
@@ -223,14 +246,15 @@ export class ResponsesDataService {
   private async loadUploadsForAnswers(
     answers: mjBizAppsFormsFormResponseAnswerEntityType[],
   ): Promise<mjBizAppsFormsFormUploadEntityType[]> {
-    const fileIds = [...new Set(answers.map((a) => a.FileID).filter((id): id is string => !!id))];
-    if (fileIds.length === 0) {
+    const filter = uploadsForFileIdsFilter(
+      answers.map((a) => a.FileID).filter((id): id is string => !!id),
+    );
+    if (filter === null) {
       return [];
     }
-    const inList = fileIds.map((id) => `'${id}'`).join(',');
     const res = (await this.rv.RunView({
       EntityName: FORMS_ENTITY.FormUpload,
-      ExtraFilter: `FileID IN (${inList})`,
+      ExtraFilter: filter,
       ResultType: 'simple',
       Fields: ['ID', 'FileID', 'FileName', 'ContentType', 'SizeBytes', 'Status'],
     })) as RunViewResult<mjBizAppsFormsFormUploadEntityType>;
