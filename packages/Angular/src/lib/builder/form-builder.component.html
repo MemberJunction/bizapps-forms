@@ -76,10 +76,23 @@
       [attr.aria-selected]="activeTab === 'onsubmit'"
       (click)="setTab('onsubmit')"
     >On Submit</button>
+    <button
+      type="button"
+      class="fb-tab"
+      role="tab"
+      [class.is-on]="activeTab === 'responses'"
+      [attr.aria-selected]="activeTab === 'responses'"
+      (click)="setTab('responses')"
+    >Responses</button>
   </nav>
 
   @if (activeTab === 'onsubmit' && tree) {
     <mjf-automation-tab [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
+  }
+
+  <!-- Created on activation, so the responses query never runs on builder open. -->
+  @if (activeTab === 'responses' && tree) {
+    <mjf-responses-tab [FormID]="tree.form.ID" (OpenRecord)="openLinkedRecord($event)" />
   }
 
   @if (activeTab === 'build') {
@@ -211,7 +224,7 @@
         (previewRequested)="previewWithTokens($event)"
       ></mjf-design-panel>
     </div>
-  } @else {
+  } @else if (activeTab === 'distribute') {
     <div class="fb-distribute">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>

@@ -2,6 +2,7 @@
  * Pure transforms for the Forms home grid — no I/O, fully unit-testable.
  */
 import type { ActionParam } from '@memberjunction/actions-base';
+import { toDate } from '../shared/runview-dates';
 import type {
   FormCategorySimpleRecord,
   FormResponseSimpleRecord,
@@ -29,15 +30,6 @@ export function responseCountMap(
     map.set(r.FormID, (map.get(r.FormID) ?? 0) + 1);
   }
   return map;
-}
-
-/** Coerces a RunView date cell (string or Date) into a Date, or null. */
-export function toDate(value: Date | string | null | undefined): Date | null {
-  if (value == null) {
-    return null;
-  }
-  const d = value instanceof Date ? value : new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /**

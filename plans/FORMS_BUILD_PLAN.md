@@ -1139,3 +1139,60 @@ native entities. This is the reporting differentiator no incumbent has.
   the one real §2 UX-bar shortfall). Anti-abuse caveats to note before declaring "closed": the rate-limiter
   is single-process (DB quota is the durable cap) and the session-hash is usually blank for the widget's
   plain-fetch transport, so per-session rate-limiting leans on the client response id.
+
+- **2026-08-18 — submission viewing: one rich detail view, three mounts (Phase 2).** Landed on
+  `feat/responses-ui` as four independently-reviewable commits following `plans/RESPONSES_UI_PLAN.md`.
+  A code audit of `next` found the reporting dashboard's Responses tab already first-class, with three
+  real gaps: no responses surface inside the builder; a detail view stale against the v0.8.x schema; and
+  no entity-form override, so a Form Response opened anywhere else fell back to the generated grid.
+    - **S0 (`286e2d7`, refactor only).** New `lib/shared/` (the `FORMS_ENTITY` table moved out of
+      `lib/builder/` and extended with the three satellite entities, plus the answer-value primitives, the
+      published-question flattener and the RunView date coercion) and new `lib/responses/` (the moved
+      list/detail components, their view-models, the pure response builders and `ResponsesDataService`,
+      which `FormsReportingService` now delegates to). Three accidental duplicates removed rather than
+      documented: two `FORMS_ENTITY`-shaped tables and **three** copies of `toDate`. Package public
+      surface unchanged.
+    - **S1 (`ec24662`).** The detail view now shows what the schema has been recording all along: AI
+      `Score`/`ScoreRationale` (the `Forms: Analyze Written Responses` output, previously invisible), the
+      real filename/size behind a file answer (joined from `FormUpload` **by `FileID`**, never
+      `ResponseDraftID`, so a replaced or abandoned upload cannot surface as this answer's file; revoked
+      uploads are badged), and a "What this submission did" section over `FormAutomationRun` +
+      `FormEntityBindingRecord` with deep links to the action log / agent run / bound record. `renderAnswer`
+      no longer emits `File: <guid>` — a raw id is the one thing it can produce that means nothing to a
+      reader. Two round trips, not five. **DG-B answered yes**: one `<prompt> — Score` column per question
+      the AI actually scored, discovered from data; rationale prose stays out of the sheet. **DG-A settled
+      at the safe default**: deep-link to the `MJ: Files` record — MJ's file-storage client services are not
+      a dependency of this package, and adding one to save a click was not worth it.
+    - **S2 (`fca68b7`).** Fifth builder tab (`build · design · distribute · onsubmit · responses` —
+      **DG-C** default kept; collection follows configuration), created on activation so opening the builder
+      to edit never pays for a responses query. Labels come from the latest **published** version, not the
+      draft, so an unpublished rename cannot relabel an answer already given.
+    - **S3 (`289cd74`).** `@RegisterClass(BaseFormComponent, FORMS_ENTITY.FormResponse, 10)` — same idiom
+      and priority the builder uses on Forms; the generated component is outranked, not deleted. Answers are
+      labelled from the version **the response pinned**, not the latest published one. A collapsed "Raw
+      record" keeps `SourceMetadata`/`AnonymousSessionID`/timestamps reachable.
+    - **§3 permissions gate cleared with NO migration.** Entity-level Read for normal admin users on all
+      three satellite entities already ships: `Form Uploads` (V202608081200), `Form Automation Runs` and
+      `Form Entity Binding Records` (V202608072330) each grant UI `CanRead=1` plus Developer/Integration
+      CRUD, exactly as `Form Responses` does in the baseline. The plan's one potential migration is not
+      needed. No schema, server, resolver, widget or Dashboard-record changes anywhere in this work.
+    - **Verified:** `npm test` green at **675** across the five packages (Angular 162 → **197**), full
+      `npm run build` green, `lint:ui` 0 violations, `lint:distribution` and `lint:generated` pass. The
+      registration guard for S3 is **structural, not runtime** — Angular component classes cannot be
+      instantiated in this suite (importing `@memberjunction/ng-base-forms` in the node environment fails on
+      the Angular Linker) — and its assertions were checked red-with-wiring-removed, green-restored; an
+      unanchored `toContain` passed against a commented-out import, which is the exact regression it exists
+      to catch.
+    - **Live-DB verification done (the half that was possible).** Read-only against `MJ_Forms_Dev`: every
+      column the new reads select exists on the live views — **including the denormalised
+      `vwFormAutomationRuns.FormAutomation` and `vwFormEntityBindingRecords.Binding`**, so no name
+      batch-load is needed — and the exact queries return the expected shapes on a real response (file
+      answer → `resume.pdf`; a `Succeeded` run "Smoke: create Person"; a `Created` ledger row with
+      `WrittenFields`). `TargetEntityID` resolves to `MJ_BizApps_Common: People` in `__mj.Entity`, which
+      is what `Metadata.EntityByID().Name` returns client-side. **One real finding:** every scored answer
+      in the dev DB has `Score = 0.0000`, so any truthiness check on the score path would hide all AI
+      output; all three paths already used explicit null checks, and three regression tests now pin it.
+    - **Still owed — the browser half of §6.** Dashboard Responses tab, builder Responses tab, and a Form
+      Response opened from Explorer search, rendered against a real host login. Not possible from this
+      worktree: `apps/` is untracked and absent, and the main checkout's `apps/MJExplorer/` holds only a
+      `dist`. Unit tests and live SQL both structurally cannot supply it.

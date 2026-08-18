@@ -81,9 +81,12 @@
         }
         @case ('responses') {
           @if (responseDetail; as d) {
-            <mj-forms-response-detail [detail]="d" (back)="closeResponse()"></mj-forms-response-detail>
+            <mj-forms-response-detail
+              [Detail]="d"
+              (Back)="closeResponse()"
+              (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
           } @else {
-            <mj-forms-response-list [rows]="r.responses" (open)="openResponse($event)"></mj-forms-response-list>
+            <mj-forms-response-list [Rows]="r.responses" (Open)="openResponse($event)"></mj-forms-response-list>
           }
         }
       }

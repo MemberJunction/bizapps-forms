@@ -4,7 +4,7 @@ import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import {
   shareUrl as buildShareUrl,
   embedSnippet as buildEmbedSnippet,

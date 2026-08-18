@@ -4,7 +4,7 @@ import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormStyleEntity,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import { withBrandToken, withRadiusPx } from './style-tokens';
 
 /** A field the theme editor can persist onto a style. */

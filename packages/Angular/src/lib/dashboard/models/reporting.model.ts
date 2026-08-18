@@ -10,6 +10,7 @@ import type {
   FormQuestionType,
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
+import type { ResponseListRow } from '../../responses/response-models';
 
 /** A form the user can pick to report on, plus its published-version pointer. */
 export interface ReportableForm {
@@ -91,35 +92,6 @@ export interface FunnelStep {
   retention: number;
   /** Drop relative to the previous step, 0..1. */
   dropOff: number;
-}
-
-/** A row in the individual-response list/grid. */
-export interface ResponseListRow {
-  responseId: string;
-  status: 'Complete' | 'Partial';
-  startedAt: Date | null;
-  submittedAt: Date | null;
-  respondent: string;
-  answeredCount: number;
-}
-
-/** One labelled answer in the individual-response detail view. */
-export interface ResponseAnswerView {
-  questionId: string;
-  prompt: string;
-  type: FormQuestionType;
-  /** Human-readable rendering of the answer. */
-  displayValue: string;
-}
-
-/** The full individual-response detail view-model. */
-export interface ResponseDetail {
-  responseId: string;
-  status: 'Complete' | 'Partial';
-  startedAt: Date | null;
-  submittedAt: Date | null;
-  respondent: string;
-  answers: ResponseAnswerView[];
 }
 
 /** The complete dashboard data bundle for one form version. */

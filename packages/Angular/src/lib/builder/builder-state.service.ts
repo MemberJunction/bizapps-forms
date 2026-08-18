@@ -12,7 +12,7 @@ import type {
   mjBizAppsFormsFormQuestionOptionEntity,
   FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { questionTypeHasOptions } from './question-type-catalog';
 

@@ -15,12 +15,24 @@ import './lib/generated/generated-forms.module';
 // Import class registrations manifest
 import { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 
+// Individual-response surface: the side-effect import fires
+// @RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Form Responses', 10), which overrides the
+// generated Form Response property grid with the rich detail view everywhere a response opens.
+import './lib/responses';
+
 // WP-F (reporting dashboard): side-effect import fires @RegisterClass(BaseDashboard, 'FormsReportingDashboard')
 import './lib/dashboard';
 
 // Re-export for consumers
 export { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 export { GeneratedFormsModule } from './lib/generated/generated-forms.module';
+
+// Cross-area primitives (entity-name table, answer-value helpers) — FORMS_ENTITY used to be
+// exported from './lib/builder'; it moved here when the responses surface began sharing it.
+export * from './lib/shared';
+
+// Individual-response surface (list + detail + data service), shared by all three mounts.
+export * from './lib/responses';
 
 // WP-F (reporting dashboard) public surface
 export * from './lib/dashboard';

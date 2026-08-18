@@ -14,13 +14,10 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntityType,
 } from '@mj-biz-apps/forms-entities';
 import type { FormReportData, ReportableForm } from '../models/reporting.model';
-import {
-  flattenQuestions,
-  buildSummary,
-  buildBreakdowns,
-  buildFunnel,
-  buildResponseRows,
-} from './reporting-aggregations';
+import type { ResponseDetail, ResponseListRow } from '../../responses/response-models';
+import { flattenQuestions } from '../../shared/published-questions';
+import { buildResponseRows } from '../../responses/response-aggregations';
+import { buildSummary, buildBreakdowns, buildFunnel } from './reporting-aggregations';
 
 const MOCK_FORM: ReportableForm = {
   formId: 'mock-form-0001',
@@ -89,6 +86,16 @@ export function mockDefinition(): PublishedFormDefinition {
   };
 }
 
+/**
+ * The raw mock answer rows, in the same shape `loadAnswersForForm` returns.
+ *
+ * Mock mode used to hand the export an empty array, so "export" in mock mode produced a
+ * sheet of empty cells — the one operation a preview most needs to show honestly.
+ */
+export function mockAnswerRows(): AnswerRow[] {
+  return mockAnswers(mockResponses());
+}
+
 /** Builds the full mock report bundle. */
 export function mockReport(): FormReportData {
   const definition = mockDefinition();
@@ -103,6 +110,101 @@ export function mockReport(): FormReportData {
     breakdowns: buildBreakdowns(questions, answers),
     funnel: buildFunnel(definition, answers),
     responses: buildResponseRows(responses, answers),
+  };
+}
+
+/**
+ * Builds the mock detail for one response — the `useMock` twin of
+ * `ResponsesDataService.loadResponseDetail`.
+ *
+ * It deliberately populates EVERY enriched branch (a scored free-text answer, a file
+ * answer, automation runs including a failure, and a binding-ledger row), because the
+ * point of mock mode is to render the UI before real data exists. A mock that only fills
+ * the fields the old detail view had is a mock that hides exactly the new UI you are
+ * trying to look at.
+ */
+export function mockResponseDetail(
+  responseId: string,
+  questions: PublishedFormQuestion[],
+  row?: Pick<ResponseListRow, 'status' | 'startedAt' | 'submittedAt' | 'respondent'>,
+): ResponseDetail {
+  const answerable = questions.filter((q) => q.type !== 'Statement').slice(0, 4);
+  return {
+    responseId,
+    status: row?.status ?? 'Complete',
+    startedAt: row?.startedAt ?? null,
+    submittedAt: row?.submittedAt ?? null,
+    respondent: row?.respondent ?? 'Anonymous',
+    unlabelledAnswerCount: 0,
+    unavailableSections: [],
+    answers: [
+      ...answerable.map((q) => ({
+        questionId: q.id,
+        prompt: q.prompt,
+        type: q.type,
+        displayValue: 'Sample answer',
+        // Only the free-text question is scored — that is what the AI automation does.
+        score: q.type === 'LongText' ? 7.5 : null,
+        scoreRationale:
+          q.type === 'LongText' ? 'Constructive feedback with a clear, specific suggestion.' : null,
+        file: null,
+      })),
+      {
+        questionId: 'mock-q-file',
+        prompt: 'Attach anything that helps us understand your answer',
+        type: 'FileUpload' as const,
+        displayValue: '',
+        score: null,
+        scoreRationale: null,
+        file: {
+          fileId: 'mock-file-0001',
+          fileName: 'screenshot.png',
+          contentType: 'image/png',
+          sizeBytes: 184_320,
+          isRevoked: false,
+          isResolved: true,
+        },
+      },
+    ],
+    automationRuns: [
+      {
+        runId: 'mock-run-1',
+        automationName: 'Send confirmation email',
+        status: 'Succeeded',
+        attemptCount: 1,
+        startedAt: new Date(Date.now() - 12_000),
+        completedAt: new Date(Date.now() - 10_600),
+        durationSeconds: 1.4,
+        errorMessage: null,
+        outputSummary: 'Sent to sample.person@example.com',
+        actionExecutionLogId: 'mock-log-1',
+        aiAgentRunId: null,
+      },
+      {
+        runId: 'mock-run-2',
+        automationName: 'Analyze written responses',
+        status: 'Failed',
+        attemptCount: 3,
+        startedAt: new Date(Date.now() - 10_000),
+        completedAt: new Date(Date.now() - 7_800),
+        durationSeconds: 2.2,
+        errorMessage: 'Model provider returned 429 after 3 attempts.',
+        outputSummary: null,
+        actionExecutionLogId: null,
+        aiAgentRunId: 'mock-agent-run-1',
+      },
+    ],
+    bindingRecords: [
+      {
+        bindingRecordId: 'mock-binding-rec-1',
+        bindingName: 'Send responses to People',
+        targetEntityId: 'mock-entity-people',
+        targetEntityName: 'MJ_BizApps_Common: People',
+        targetRecordId: 'mock-person-1',
+        outcome: 'Created',
+        writtenFields: ['FirstName', 'LastName', 'Email'],
+      },
+    ],
   };
 }
 
@@ -128,7 +230,7 @@ function mockResponses(): ResponseRow[] {
 
 function stubResponse(
   id: string,
-  status: 'Complete' | 'Partial',
+  status: ResponseRow['Status'],
   started: Date,
   submitted: Date | null,
   i: number,
@@ -158,7 +260,7 @@ function mockAnswers(responses: ResponseRow[]): AnswerRow[] {
     const r = responses[i];
     const push = (
       questionId: string,
-      vals: Partial<Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue'>>,
+      vals: MockAnswerValues,
     ) => out.push(stubAnswer(`a-${aid++}`, r.ID, questionId, vals));
 
     // Page 1 — everyone answers
@@ -171,18 +273,30 @@ function mockAnswers(responses: ResponseRow[]): AnswerRow[] {
       push('q-nps', { NumericValue: i % 11 });
       push('q-recommend', { BooleanValue: i % 3 !== 0 });
       if (i % 2 === 0) {
-        push('q-comments', { TextValue: `Sample comment from respondent ${i}.` });
+        // Scored, because `Forms: Analyze Written Responses` scores free text — and because
+        // an unscored mock makes DG-B's per-question score column unreachable in mock mode,
+        // which is precisely the part of the export a preview exists to show.
+        push('q-comments', {
+          TextValue: `Sample comment from respondent ${i}.`,
+          Score: 4 + (i % 7),
+          ScoreRationale: 'Specific, actionable feedback with a concrete example.',
+        });
       }
     }
   }
   return out;
 }
 
+/** The answer columns a mock row sets; everything else defaults to null. */
+type MockAnswerValues = Partial<
+  Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue' | 'Score' | 'ScoreRationale'>
+>;
+
 function stubAnswer(
   id: string,
   responseId: string,
   questionId: string,
-  vals: Partial<Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue'>>,
+  vals: MockAnswerValues,
 ): AnswerRow {
   const now = new Date();
   return {
@@ -195,8 +309,8 @@ function stubAnswer(
     BooleanValue: vals.BooleanValue ?? null,
     JSONValue: vals.JSONValue ?? null,
     FileID: null,
-    Score: null,
-    ScoreRationale: null,
+    Score: vals.Score ?? null,
+    ScoreRationale: vals.ScoreRationale ?? null,
     __mj_CreatedAt: now,
     __mj_UpdatedAt: now,
     File: null,

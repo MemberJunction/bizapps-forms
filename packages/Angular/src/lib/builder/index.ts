@@ -24,7 +24,6 @@ export { ValidationRuleEditorComponent } from './validation-rule-editor.componen
 export { BuilderStateService } from './builder-state.service';
 export { PublishService, type PublishResult } from './publish.service';
 export { DistributionService, type CreateDistributionInput, type DistributionChannel } from './distribution.service';
-export { FORMS_ENTITY } from './entity-names';
 export {
   QUESTION_TYPE_CATALOG,
   questionTypeMeta,
