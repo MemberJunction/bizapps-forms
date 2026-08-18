@@ -160,9 +160,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Automations','BindingID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automations','BindingID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automations')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormAutomations')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormAutomations', $event.totalRowCount)"
                 >
@@ -185,9 +185,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Entity Binding Records','BindingID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Binding Records','BindingID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Binding Records')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormEntityBindingRecords')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormEntityBindingRecords', $event.totalRowCount)"
                 >
