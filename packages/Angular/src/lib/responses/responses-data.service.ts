@@ -17,6 +17,7 @@
  */
 import { Injectable } from '@angular/core';
 import { Metadata, RunView, RunViewResult } from '@memberjunction/core';
+import type { RunViewParams } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormResponseAnswerEntityType,
@@ -103,6 +104,66 @@ export function uploadsForFileIdsFilter(fileIds: readonly string[]): string | nu
   return `FileID IN (${unique.map((id) => `'${id}'`).join(',')})`;
 }
 
+/**
+ * The four reads that make up a response's detail, batched into one `RunViews` call.
+ *
+ * A pure function returning the params rather than an inline literal, so a test can assert
+ * WHICH entities are read and WHICH columns are asked for — in particular that `Score` and
+ * `ScoreRationale` are selected, whose absence is exactly the bug this slice fixed and
+ * which nothing else would catch. Exported for unit testing.
+ */
+export function responseDetailQueries(responseId: string): RunViewParams[] {
+  return [
+    {
+      EntityName: FORMS_ENTITY.FormResponse,
+      ExtraFilter: `ID='${responseId}'`,
+      ResultType: 'simple',
+      Fields: [...RESPONSE_FIELDS],
+    },
+    {
+      EntityName: FORMS_ENTITY.FormResponseAnswer,
+      ExtraFilter: `ResponseID='${responseId}'`,
+      ResultType: 'simple',
+      Fields: [...DETAIL_ANSWER_FIELDS],
+    },
+    {
+      EntityName: FORMS_ENTITY.FormAutomationRun,
+      ExtraFilter: `FormResponseID='${responseId}'`,
+      ResultType: 'simple',
+      // FormAutomation is the base view's denormalised automation name — no second read.
+      Fields: [
+        'ID',
+        'FormAutomationID',
+        'FormAutomation',
+        'Status',
+        'AttemptCount',
+        'StartedAt',
+        'CompletedAt',
+        'ErrorMessage',
+        'OutputSummary',
+        'ActionExecutionLogID',
+        'AIAgentRunID',
+      ],
+      OrderBy: '__mj_CreatedAt',
+    },
+    {
+      EntityName: FORMS_ENTITY.FormEntityBindingRecord,
+      ExtraFilter: `FormResponseID='${responseId}'`,
+      ResultType: 'simple',
+      Fields: [
+        'ID',
+        'BindingID',
+        'Binding',
+        'TargetEntityID',
+        'TargetRecordID',
+        'Outcome',
+        'WrittenFields',
+      ],
+      OrderBy: '__mj_CreatedAt',
+    },
+  ];
+}
+
 /** The responses + answers of one form, as fetched (aggregation happens in pure builders). */
 export interface FormResponseRows {
   responses: mjBizAppsFormsFormResponseEntityType[];
@@ -158,55 +219,9 @@ export class ResponsesDataService {
     responseId: string,
     questions: PublishedFormQuestion[],
   ): Promise<ResponseDetail> {
-    const [responseRes, answersRes, runsRes, bindingRes] = (await this.rv.RunViews([
-      {
-        EntityName: FORMS_ENTITY.FormResponse,
-        ExtraFilter: `ID='${responseId}'`,
-        ResultType: 'simple',
-        Fields: [...RESPONSE_FIELDS],
-      },
-      {
-        EntityName: FORMS_ENTITY.FormResponseAnswer,
-        ExtraFilter: `ResponseID='${responseId}'`,
-        ResultType: 'simple',
-        Fields: [...DETAIL_ANSWER_FIELDS],
-      },
-      {
-        EntityName: FORMS_ENTITY.FormAutomationRun,
-        ExtraFilter: `FormResponseID='${responseId}'`,
-        ResultType: 'simple',
-        // FormAutomation is the base view's denormalised automation name — no second read.
-        Fields: [
-          'ID',
-          'FormAutomationID',
-          'FormAutomation',
-          'Status',
-          'AttemptCount',
-          'StartedAt',
-          'CompletedAt',
-          'ErrorMessage',
-          'OutputSummary',
-          'ActionExecutionLogID',
-          'AIAgentRunID',
-        ],
-        OrderBy: '__mj_CreatedAt',
-      },
-      {
-        EntityName: FORMS_ENTITY.FormEntityBindingRecord,
-        ExtraFilter: `FormResponseID='${responseId}'`,
-        ResultType: 'simple',
-        Fields: [
-          'ID',
-          'BindingID',
-          'Binding',
-          'TargetEntityID',
-          'TargetRecordID',
-          'Outcome',
-          'WrittenFields',
-        ],
-        OrderBy: '__mj_CreatedAt',
-      },
-    ])) as [
+    const [responseRes, answersRes, runsRes, bindingRes] = (await this.rv.RunViews(
+      responseDetailQueries(responseId),
+    )) as [
       RunViewResult<mjBizAppsFormsFormResponseEntityType>,
       RunViewResult<mjBizAppsFormsFormResponseAnswerEntityType>,
       RunViewResult<mjBizAppsFormsFormAutomationRunEntityType>,

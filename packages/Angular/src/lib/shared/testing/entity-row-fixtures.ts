@@ -2,11 +2,16 @@
  * Hand-rolled entity-row fixtures for unit tests.
  *
  * The pure aggregation functions take already-fetched rows, so every spec that exercises
- * them needs the same three builders. They live here rather than being re-typed per spec:
- * the row shapes are CodeGen output, so a drifting hand-copy is a spec that passes against
- * a schema the app no longer has.
+ * them needs the same builders. They live in one file so that a CodeGen schema change is
+ * one edit rather than one per spec.
  *
- * Excluded from the package build (`tsconfig.json` → `exclude`) — test-only, never shipped.
+ * Excluded from the package build (`tsconfig.json` → `exclude`) — test-only, never
+ * shipped. NOTE what that costs: like the `.spec.ts` files themselves (also excluded), and
+ * like every spec in this repo, nothing type-checks this file — `ngc` skips it and Vitest
+ * transpiles without checking. The `Partial<…EntityType>` annotations below are therefore
+ * documentation, not enforcement: if CodeGen changes a row shape, these fixtures go stale
+ * SILENTLY and the specs keep passing against a schema the app no longer has. Re-check them
+ * by hand after any migration + CodeGen run that touches these five entities.
  */
 import type {
   mjBizAppsFormsFormResponseEntityType,
@@ -33,7 +38,7 @@ export function q(
 /** A response row. Anonymous unless `overrides.RespondentPerson` says otherwise. */
 export function response(
   id: string,
-  status: 'Complete' | 'Partial',
+  status: mjBizAppsFormsFormResponseEntityType['Status'],
   started: Date | null,
   submitted: Date | null,
   overrides: Partial<ResponseRow> = {},

@@ -39,27 +39,27 @@ import { FormsResponseDetailComponent } from './response-detail.component';
       <header class="rt-head">
         <div>
           <h2 class="rt-title">Responses</h2>
-          @if (!loading() && questions() !== null) {
+          @if (!Loading() && Questions() !== null) {
             <p class="rt-hint">
-              {{ rows().length }} {{ rows().length === 1 ? 'response' : 'responses' }} across every
+              {{ Rows().length }} {{ Rows().length === 1 ? 'response' : 'responses' }} across every
               published version of this form.
             </p>
           }
         </div>
-        <button type="button" class="rt-refresh" [disabled]="loading()" (click)="refresh()">
+        <button type="button" class="rt-refresh" [disabled]="Loading()" (click)="Refresh()">
           <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Refresh
         </button>
       </header>
 
-      @if (error(); as e) {
+      @if (Error(); as e) {
         <p class="rt-error" role="alert">
           <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ e }}
         </p>
       }
 
-      @if (loading()) {
+      @if (Loading()) {
         <p class="rt-hint"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
-      } @else if (questions() === null) {
+      } @else if (Questions() === null) {
         <div class="rt-empty">
           <i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
           <p class="rt-empty-title">No responses yet — this form has never been published.</p>
@@ -68,7 +68,7 @@ import { FormsResponseDetailComponent } from './response-detail.component';
             creates the link people fill in.
           </p>
         </div>
-      } @else if (rows().length === 0) {
+      } @else if (Rows().length === 0) {
         <div class="rt-empty">
           <i class="fa-solid fa-inbox" aria-hidden="true"></i>
           <p class="rt-empty-title">No responses yet.</p>
@@ -76,13 +76,13 @@ import { FormsResponseDetailComponent } from './response-detail.component';
             This form is published; submissions will appear here as they come in.
           </p>
         </div>
-      } @else if (detail(); as d) {
+      } @else if (Detail(); as d) {
         <mj-forms-response-detail
-          [detail]="d"
-          (back)="closeDetail()"
-          (openRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
+          [Detail]="d"
+          (Back)="CloseDetail()"
+          (OpenRecord)="OpenRecord.emit($event)"></mj-forms-response-detail>
       } @else {
-        <mj-forms-response-list [rows]="rows()" (open)="openResponse($event)"></mj-forms-response-list>
+        <mj-forms-response-list [Rows]="Rows()" (Open)="OpenResponse($event)"></mj-forms-response-list>
       }
     </section>
   `,
@@ -169,69 +169,69 @@ export class ResponsesTabComponent implements OnInit {
 
   private readonly data = inject(ResponsesDataService);
 
-  public readonly loading = signal(true);
-  public readonly error = signal<string | null>(null);
-  public readonly rows = signal<ResponseListRow[]>([]);
-  public readonly detail = signal<ResponseDetail | null>(null);
+  public readonly Loading = signal(true);
+  public readonly Error = signal<string | null>(null);
+  public readonly Rows = signal<ResponseListRow[]>([]);
+  public readonly Detail = signal<ResponseDetail | null>(null);
 
   /**
    * The published questions used to label answers, or null when the form has never been
    * published — which is a distinct empty state from "published, no responses yet", and the
    * only one with an action attached.
    */
-  public readonly questions = signal<PublishedFormQuestion[] | null>(null);
+  public readonly Questions = signal<PublishedFormQuestion[] | null>(null);
 
   public async ngOnInit(): Promise<void> {
     await this.load();
   }
 
   /** Re-queries; the author may be watching submissions arrive. */
-  public async refresh(): Promise<void> {
-    this.detail.set(null);
+  public async Refresh(): Promise<void> {
+    this.Detail.set(null);
     await this.load();
   }
 
-  public async openResponse(responseId: string): Promise<void> {
-    const questions = this.questions();
+  public async OpenResponse(responseId: string): Promise<void> {
+    const questions = this.Questions();
     if (!questions) {
       return;
     }
-    this.loading.set(true);
-    this.error.set(null);
+    this.Loading.set(true);
+    this.Error.set(null);
     try {
-      this.detail.set(await this.data.loadResponseDetail(responseId, questions));
+      this.Detail.set(await this.data.loadResponseDetail(responseId, questions));
     } catch (err) {
       this.fail(err, 'Failed to load that response.');
     } finally {
-      this.loading.set(false);
+      this.Loading.set(false);
     }
   }
 
-  public closeDetail(): void {
-    this.detail.set(null);
+  public CloseDetail(): void {
+    this.Detail.set(null);
   }
 
   private async load(): Promise<void> {
-    this.loading.set(true);
-    this.error.set(null);
+    this.Loading.set(true);
+    this.Error.set(null);
     try {
       const questions = await this.data.loadLatestPublishedQuestions(this.FormID);
-      this.questions.set(questions);
+      this.Questions.set(questions);
       if (questions === null) {
         // Unpublished forms cannot have responses; skip the query entirely.
-        this.rows.set([]);
+        this.Rows.set([]);
         return;
       }
       const { responses, answers } = await this.data.loadResponsesForForm(this.FormID);
-      this.rows.set(buildResponseRows(responses, answers));
+      this.Rows.set(buildResponseRows(responses, answers));
     } catch (err) {
       this.fail(err, 'Failed to load this form’s responses.');
     } finally {
-      this.loading.set(false);
+      this.Loading.set(false);
     }
   }
 
   private fail(err: unknown, fallback: string): void {
-    this.error.set(err instanceof Error ? err.message : fallback);
+    this.Error.set(err instanceof Error ? err.message : fallback);
   }
 }

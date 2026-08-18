@@ -61,9 +61,9 @@ import { FormsResponseDetailComponent } from './response-detail.component';
         <p class="rf-hint"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</p>
       } @else if (detail; as d) {
         <mj-forms-response-detail
-          [detail]="d"
-          [showBack]="false"
-          (openRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
+          [Detail]="d"
+          [ShowBack]="false"
+          (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
       }
 
       <!--

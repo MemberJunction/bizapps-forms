@@ -71,6 +71,18 @@ describe('buildExportMatrix', () => {
     expect(matrix[0]['q-text::score']).toBeNull();
   });
 
+  it('exports a file answer as its file id — a joinable key, and the only evidence in the sheet', () => {
+    const matrix = buildExportMatrix(
+      [row('r1')],
+      [q('q-file', 'FileUpload')],
+      [answer('r1', 'q-file', { FileID: 'file-77' })],
+      new Set<string>(),
+    );
+    // renderAnswer blanks a file answer for the UI (a bare GUID means nothing on screen),
+    // but the sheet has no FormUpload join and the id is how an analyst rejoins MJ: Files.
+    expect(matrix[0]['q-file']).toBe('file-77');
+  });
+
   it('omits rationale text — it is prose, and would swamp a spreadsheet column', () => {
     const matrix = buildExportMatrix(
       [row('r1')],

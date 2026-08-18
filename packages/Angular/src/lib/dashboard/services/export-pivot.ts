@@ -67,6 +67,22 @@ export function buildExportColumns(
 }
 
 /**
+ * The value a question's answer contributes to the export.
+ *
+ * Everything routes through `renderAnswer` except a file answer, which `renderAnswer`
+ * deliberately blanks: in the UI a bare GUID means nothing, and the detail view has the
+ * `FormUpload` join that turns it into a filename. The export has no such join — and here
+ * the id is not noise but a JOINABLE KEY into `MJ: Files`, so blanking it would drop the
+ * only evidence in the sheet that a file was submitted at all.
+ */
+function exportAnswerValue(q: PublishedFormQuestion, a: AnswerRow): string {
+  if (q.type === 'FileUpload') {
+    return a.FileID ?? '';
+  }
+  return renderAnswer(q, a);
+}
+
+/**
  * One row per response, one cell per column.
  *
  * `ScoreRationale` is deliberately absent: it is a paragraph of model prose, and a column
@@ -101,7 +117,7 @@ export function buildExportMatrix(
     };
     for (const q of questions) {
       const a = answerByQuestion.get(q.id);
-      row[q.id] = a ? renderAnswer(q, a) : '';
+      row[q.id] = a ? exportAnswerValue(q, a) : '';
       if (scored.has(q.id)) {
         row[`${q.id}${SCORE_SUFFIX}`] = a?.Score ?? null;
       }

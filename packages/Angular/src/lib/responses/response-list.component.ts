@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { ResponseListRow } from './response-models';
+import type { ResponseListRow, ResponseStatus } from './response-models';
 
-/** Status filter values for the response list. */
-type StatusFilter = 'all' | 'Complete' | 'Partial';
+/** Status filter values for the response list: any status, or one specific one. */
+type StatusFilter = 'all' | ResponseStatus;
 
 /**
  * Individual-response list with text search + status filter (simple cross-tab).
@@ -53,8 +53,8 @@ type StatusFilter = 'all' | 'Complete' | 'Partial';
           </thead>
           <tbody>
             @for (r of filtered(); track r.responseId) {
-              <tr (click)="open.emit(r.responseId)" tabindex="0"
-                  (keydown.enter)="open.emit(r.responseId)">
+              <tr (click)="Open.emit(r.responseId)" tabindex="0"
+                  (keydown.enter)="Open.emit(r.responseId)">
                 <td>
                   <span class="status" [class.status--complete]="r.status === 'Complete'">
                     {{ r.status }}
@@ -166,7 +166,7 @@ type StatusFilter = 'all' | 'Complete' | 'Partial';
   ],
 })
 export class FormsResponseListComponent {
-  @Output() open = new EventEmitter<string>();
+  @Output() Open = new EventEmitter<string>();
 
   public readonly search = signal('');
   public readonly statusFilter = signal<StatusFilter>('all');
@@ -179,7 +179,7 @@ export class FormsResponseListComponent {
 
   private readonly _rows = signal<ResponseListRow[]>([]);
   @Input({ required: true })
-  set rows(value: ResponseListRow[]) {
+  set Rows(value: ResponseListRow[]) {
     this._rows.set(value ?? []);
   }
 

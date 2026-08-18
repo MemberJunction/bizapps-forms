@@ -113,6 +113,7 @@ describe('buildResponseDetail — file answers', () => {
       fileName: 'resume.pdf',
       sizeBytes: 1024,
       isRevoked: false,
+      isResolved: true,
     });
     // The GUID must not leak into the display value — that was the old rendering.
     expect(detail.answers[0].displayValue).not.toContain('file-1');
@@ -134,7 +135,32 @@ describe('buildResponseDetail — file answers', () => {
       detailInput({
         answers: [answer('r1', 'qf', { FileID: 'file-1' })],
         questions: [q('qf', 'FileUpload')],
-        uploads: [upload('file-2')],
+        uploads: [upload('file-2', { FileName: 'someone-elses.pdf', SizeBytes: 99 })],
+      }),
+    );
+    // The foreign upload contributes NOTHING — not its name, not its size.
+    expect(detail.answers[0].file?.fileName).not.toBe('someone-elses.pdf');
+    expect(detail.answers[0].file?.sizeBytes).toBeNull();
+  });
+
+  it('still shows that a file was submitted when its provenance row did not come back', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        answers: [answer('r1', 'qf', { FileID: 'file-1' })],
+        questions: [q('qf', 'FileUpload')],
+        uploads: [],
+      }),
+    );
+    // Blanking this would read as "they attached nothing", which is the opposite of true.
+    // The file id is still known, so the deep link stays usable.
+    expect(detail.answers[0].file).toMatchObject({ fileId: 'file-1', isResolved: false });
+  });
+
+  it('reports no file at all when the answer holds no FileID', () => {
+    const detail = buildResponseDetail(
+      detailInput({
+        answers: [answer('r1', 'qt', { TextValue: 'just text' })],
+        questions: [q('qt', 'ShortText')],
       }),
     );
     expect(detail.answers[0].file).toBeNull();

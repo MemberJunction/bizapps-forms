@@ -14,6 +14,7 @@ import type {
   mjBizAppsFormsFormEntityBindingRecordEntityType,
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
+import { LogError } from '@memberjunction/core';
 import { renderAnswer, respondentLabel } from '../shared/answer-values';
 import { toDate } from '../shared/runview-dates';
 import type {
@@ -33,6 +34,9 @@ type BindingRecordRow = mjBizAppsFormsFormEntityBindingRecordEntityType;
 
 /** Shown when a `FormUpload` row exists but carries no `FileName`. */
 const UNNAMED_FILE = 'Unnamed file';
+
+/** Shown when no `FormUpload` row matched the answer's `FileID` at all. */
+const UNRESOLVED_FILE = 'File (details unavailable)';
 
 /** Everything one response's detail view is built from. */
 export interface ResponseDetailInput {
@@ -131,6 +135,10 @@ function buildAnswerViews(
  * `FileID` and NOT `ResponseDraftID` is the join key on purpose: a draft can accumulate
  * uploads the respondent replaced or abandoned, and those revoked/orphaned rows must never
  * surface as though they were this answer's file.
+ *
+ * Null means "this answer has no file". A `FileID` whose provenance row did not come back
+ * returns an UNRESOLVED view, not null: the respondent did attach something, and rendering
+ * that as an empty answer would be a lie the reader has no way to detect.
  */
 function toFileView(
   a: AnswerRow,
@@ -141,7 +149,14 @@ function toFileView(
   }
   const upload = uploadByFileId.get(a.FileID);
   if (!upload) {
-    return null;
+    return {
+      fileId: a.FileID,
+      fileName: UNRESOLVED_FILE,
+      contentType: null,
+      sizeBytes: null,
+      isRevoked: false,
+      isResolved: false,
+    };
   }
   return {
     fileId: upload.FileID,
@@ -149,6 +164,7 @@ function toFileView(
     contentType: upload.ContentType,
     sizeBytes: upload.SizeBytes,
     isRevoked: upload.Status === 'Revoked',
+    isResolved: true,
   };
 }
 
@@ -188,22 +204,37 @@ function toBindingRecordView(
     targetEntityName: entityNameById.get(record.TargetEntityID) ?? null,
     targetRecordId: record.TargetRecordID,
     outcome: record.Outcome,
-    writtenFields: parseWrittenFields(record.WrittenFields),
+    writtenFields: parseWrittenFields(record.WrittenFields, record.ID),
   };
 }
 
 /**
- * Parses the ledger's `WrittenFields` JSON list. Malformed or non-array content yields an
- * empty list: this column is diagnostic, and a display view must not fail on it.
+ * Parses the ledger's `WrittenFields` JSON list.
+ *
+ * Malformed content yields an empty list rather than throwing — this column is diagnostic
+ * and a display view must not fail on it — but it is LOGGED with the row id, because a
+ * ledger that cannot say what it wrote is a real defect upstream, and silently returning
+ * `[]` would make it look like the execution simply wrote nothing.
  */
-function parseWrittenFields(json: string | null): string[] {
+function parseWrittenFields(json: string | null, bindingRecordId: string): string[] {
   if (!json) {
     return [];
   }
   try {
     const parsed: unknown = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
-  } catch {
+    if (Array.isArray(parsed)) {
+      return parsed.map((v) => String(v));
+    }
+    LogError(
+      `Form Entity Binding Record ${bindingRecordId}: WrittenFields is valid JSON but not ` +
+        `an array; treating as no fields written.`,
+    );
+    return [];
+  } catch (err) {
+    LogError(
+      `Form Entity Binding Record ${bindingRecordId}: WrittenFields is not parseable JSON ` +
+        `(${err instanceof Error ? err.message : 'unknown error'}); treating as no fields written.`,
+    );
     return [];
   }
 }

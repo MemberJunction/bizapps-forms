@@ -6,16 +6,26 @@
  * nothing outside `lib/dashboard/` has to depend on the dashboard to render a response.
  * Nothing here is persisted; it is purely a read-model.
  */
-import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 import type {
+  FormQuestionType,
   mjBizAppsFormsFormAutomationRunEntityType,
   mjBizAppsFormsFormEntityBindingRecordEntityType,
+  mjBizAppsFormsFormResponseEntityType,
 } from '@mj-biz-apps/forms-entities';
+
+/**
+ * A response's status, derived from the entity rather than re-typed.
+ *
+ * The union is CodeGen output from the column's CHECK constraint, so a hand-copied
+ * `'Complete' | 'Partial'` silently stops tracking it the moment a migration widens the
+ * constraint (`.claude/rules/typescript-style.md`).
+ */
+export type ResponseStatus = mjBizAppsFormsFormResponseEntityType['Status'];
 
 /** A row in the individual-response list/grid. */
 export interface ResponseListRow {
   responseId: string;
-  status: 'Complete' | 'Partial';
+  status: ResponseStatus;
   startedAt: Date | null;
   submittedAt: Date | null;
   respondent: string;
@@ -36,6 +46,15 @@ export interface ResponseFileView {
   sizeBytes: number | null;
   /** True when the provenance row is `Revoked`; the file is no longer retrievable. */
   isRevoked: boolean;
+  /**
+   * False when no `FormUpload` row matched the answer's `FileID` — the name, type and size
+   * are unknown, but the file id still is, so the deep link remains valid.
+   *
+   * This state must stay VISIBLE. An answer that blanks to `—` because its provenance row
+   * was garbage-collected (or is unreadable for this user) reads as "they attached
+   * nothing", which is the opposite of the truth.
+   */
+  isResolved: boolean;
 }
 
 /** One labelled answer in the individual-response detail view. */
@@ -93,7 +112,7 @@ export interface ResponseBindingRecordView {
 /** The full individual-response detail view-model. */
 export interface ResponseDetail {
   responseId: string;
-  status: 'Complete' | 'Partial';
+  status: ResponseStatus;
   startedAt: Date | null;
   submittedAt: Date | null;
   respondent: string;

@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   answersForFormFilter,
+  responseDetailQueries,
   responsesForFormFilter,
   uploadsForFileIdsFilter,
 } from './responses-data.service';
+import { FORMS_ENTITY } from '../shared/entity-names';
 
 describe('answersForFormFilter', () => {
   it('schema-qualifies the vwFormResponses view (regression: "Invalid object name")', () => {
@@ -39,5 +41,51 @@ describe('uploadsForFileIdsFilter', () => {
 
   it('returns null for no ids so the caller skips the query rather than emitting IN ()', () => {
     expect(uploadsForFileIdsFilter([])).toBeNull();
+  });
+});
+
+describe('responseDetailQueries', () => {
+  const queries = responseDetailQueries('resp-1');
+
+  it('batches the four reads a detail view needs into one RunViews call', () => {
+    expect(queries.map((q) => q.EntityName)).toEqual([
+      FORMS_ENTITY.FormResponse,
+      FORMS_ENTITY.FormResponseAnswer,
+      FORMS_ENTITY.FormAutomationRun,
+      FORMS_ENTITY.FormEntityBindingRecord,
+    ]);
+  });
+
+  it('selects Score and ScoreRationale — their absence is what made AI output invisible', () => {
+    const answers = queries.find((q) => q.EntityName === FORMS_ENTITY.FormResponseAnswer);
+    expect(answers?.Fields).toContain('Score');
+    expect(answers?.Fields).toContain('ScoreRationale');
+  });
+
+  it('reads the automation name off the base view rather than a second query', () => {
+    const runs = queries.find((q) => q.EntityName === FORMS_ENTITY.FormAutomationRun);
+    expect(runs?.Fields).toContain('FormAutomation');
+    expect(runs?.Fields).toContain('ActionExecutionLogID');
+    expect(runs?.Fields).toContain('AIAgentRunID');
+  });
+
+  it('carries the binding ledger fields the "what this did" section renders', () => {
+    const binding = queries.find((q) => q.EntityName === FORMS_ENTITY.FormEntityBindingRecord);
+    expect(binding?.Fields).toEqual(
+      expect.arrayContaining(['TargetEntityID', 'TargetRecordID', 'Outcome', 'WrittenFields']),
+    );
+  });
+
+  it('scopes every read to the one response', () => {
+    expect(queries.map((q) => q.ExtraFilter)).toEqual([
+      "ID='resp-1'",
+      "ResponseID='resp-1'",
+      "FormResponseID='resp-1'",
+      "FormResponseID='resp-1'",
+    ]);
+  });
+
+  it('reads simple rows, never entity objects — nothing here is mutated', () => {
+    expect(queries.every((q) => q.ResultType === 'simple')).toBe(true);
   });
 });

@@ -14,7 +14,7 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntityType,
 } from '@mj-biz-apps/forms-entities';
 import type { FormReportData, ReportableForm } from '../models/reporting.model';
-import type { ResponseDetail } from '../../responses/response-models';
+import type { ResponseDetail, ResponseListRow } from '../../responses/response-models';
 import { flattenQuestions } from '../../shared/published-questions';
 import { buildResponseRows } from '../../responses/response-aggregations';
 import { buildSummary, buildBreakdowns, buildFunnel } from './reporting-aggregations';
@@ -86,6 +86,16 @@ export function mockDefinition(): PublishedFormDefinition {
   };
 }
 
+/**
+ * The raw mock answer rows, in the same shape `loadAnswersForForm` returns.
+ *
+ * Mock mode used to hand the export an empty array, so "export" in mock mode produced a
+ * sheet of empty cells — the one operation a preview most needs to show honestly.
+ */
+export function mockAnswerRows(): AnswerRow[] {
+  return mockAnswers(mockResponses());
+}
+
 /** Builds the full mock report bundle. */
 export function mockReport(): FormReportData {
   const definition = mockDefinition();
@@ -116,12 +126,7 @@ export function mockReport(): FormReportData {
 export function mockResponseDetail(
   responseId: string,
   questions: PublishedFormQuestion[],
-  row?: {
-    status: 'Complete' | 'Partial';
-    startedAt: Date | null;
-    submittedAt: Date | null;
-    respondent: string;
-  },
+  row?: Pick<ResponseListRow, 'status' | 'startedAt' | 'submittedAt' | 'respondent'>,
 ): ResponseDetail {
   const answerable = questions.filter((q) => q.type !== 'Statement').slice(0, 4);
   return {
@@ -155,6 +160,7 @@ export function mockResponseDetail(
           contentType: 'image/png',
           sizeBytes: 184_320,
           isRevoked: false,
+          isResolved: true,
         },
       },
     ],
@@ -222,7 +228,7 @@ function mockResponses(): ResponseRow[] {
 
 function stubResponse(
   id: string,
-  status: 'Complete' | 'Partial',
+  status: ResponseRow['Status'],
   started: Date,
   submitted: Date | null,
   i: number,
@@ -252,7 +258,7 @@ function mockAnswers(responses: ResponseRow[]): AnswerRow[] {
     const r = responses[i];
     const push = (
       questionId: string,
-      vals: Partial<Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue'>>,
+      vals: MockAnswerValues,
     ) => out.push(stubAnswer(`a-${aid++}`, r.ID, questionId, vals));
 
     // Page 1 — everyone answers
@@ -265,18 +271,30 @@ function mockAnswers(responses: ResponseRow[]): AnswerRow[] {
       push('q-nps', { NumericValue: i % 11 });
       push('q-recommend', { BooleanValue: i % 3 !== 0 });
       if (i % 2 === 0) {
-        push('q-comments', { TextValue: `Sample comment from respondent ${i}.` });
+        // Scored, because `Forms: Analyze Written Responses` scores free text — and because
+        // an unscored mock makes DG-B's per-question score column unreachable in mock mode,
+        // which is precisely the part of the export a preview exists to show.
+        push('q-comments', {
+          TextValue: `Sample comment from respondent ${i}.`,
+          Score: 4 + (i % 7),
+          ScoreRationale: 'Specific, actionable feedback with a concrete example.',
+        });
       }
     }
   }
   return out;
 }
 
+/** The answer columns a mock row sets; everything else defaults to null. */
+type MockAnswerValues = Partial<
+  Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue' | 'Score' | 'ScoreRationale'>
+>;
+
 function stubAnswer(
   id: string,
   responseId: string,
   questionId: string,
-  vals: Partial<Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue'>>,
+  vals: MockAnswerValues,
 ): AnswerRow {
   const now = new Date();
   return {
@@ -289,8 +307,8 @@ function stubAnswer(
     BooleanValue: vals.BooleanValue ?? null,
     JSONValue: vals.JSONValue ?? null,
     FileID: null,
-    Score: null,
-    ScoreRationale: null,
+    Score: vals.Score ?? null,
+    ScoreRationale: vals.ScoreRationale ?? null,
     __mj_CreatedAt: now,
     __mj_UpdatedAt: now,
     File: null,

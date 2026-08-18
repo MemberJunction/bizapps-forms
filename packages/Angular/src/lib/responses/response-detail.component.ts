@@ -26,38 +26,43 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
   template: `
     <div class="detail">
       <header class="detail-head">
-        @if (showBack) {
-          <button type="button" class="back" (click)="back.emit()">
+        @if (ShowBack) {
+          <button type="button" class="back" (click)="Back.emit()">
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to responses
           </button>
         }
         <div class="meta">
-          <span class="status" [class.status--complete]="detail.status === 'Complete'">{{ detail.status }}</span>
-          <span class="respondent">{{ detail.respondent }}</span>
-          @if (detail.submittedAt) {
-            <span class="ts">Submitted {{ detail.submittedAt.toLocaleString() }}</span>
+          <span class="status" [class.status--complete]="Detail.status === 'Complete'">{{ Detail.status }}</span>
+          <span class="respondent">{{ Detail.respondent }}</span>
+          @if (Detail.submittedAt) {
+            <span class="ts">Submitted {{ Detail.submittedAt.toLocaleString() }}</span>
           }
         </div>
       </header>
 
-      @if (detail.answers.length === 0) {
+      @if (Detail.answers.length === 0) {
         <p class="empty">This response has no answers.</p>
       } @else {
         <dl class="answers">
-          @for (a of detail.answers; track a.questionId) {
+          @for (a of Detail.answers; track a.questionId) {
             <div class="answer">
               <dt>{{ a.prompt }}</dt>
               <dd>
                 @if (a.file; as f) {
-                  <button type="button" class="file" (click)="openFile(f.fileId)">
+                  <button type="button" class="file" (click)="OpenFile(f.fileId)">
                     <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
-                    <span class="file-name">{{ f.fileName }}</span>
+                    <span class="file-name" [class.file-name--unresolved]="!f.isResolved">{{ f.fileName }}</span>
                     @if (f.sizeBytes !== null) {
-                      <span class="file-size">{{ fileSize(f.sizeBytes) }}</span>
+                      <span class="file-size">{{ FileSize(f.sizeBytes) }}</span>
                     }
                   </button>
                   @if (f.isRevoked) {
                     <span class="badge badge--revoked" title="This file has been revoked and is no longer retrievable">Revoked</span>
+                  }
+                  @if (!f.isResolved) {
+                    <span
+                      class="badge badge--unresolved"
+                      title="A file was submitted, but its upload record could not be read. The link still opens the file record.">Details unavailable</span>
                   }
                 } @else {
                   {{ a.displayValue || '—' }}
@@ -72,13 +77,13 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
                       <button
                         type="button"
                         class="score-toggle"
-                        [attr.aria-expanded]="isRationaleOpen(a)"
-                        (click)="toggleRationale(a)">
-                        {{ isRationaleOpen(a) ? 'Hide' : 'Why?' }}
+                        [attr.aria-expanded]="IsRationaleOpen(a)"
+                        (click)="ToggleRationale(a)">
+                        {{ IsRationaleOpen(a) ? 'Hide' : 'Why?' }}
                       </button>
                     }
                   </div>
-                  @if (a.scoreRationale && isRationaleOpen(a)) {
+                  @if (a.scoreRationale && IsRationaleOpen(a)) {
                     <p class="rationale">{{ a.scoreRationale }}</p>
                   }
                 }
@@ -88,27 +93,25 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
         </dl>
       }
 
-      @if (detail.automationRuns.length > 0 || detail.bindingRecords.length > 0) {
+      @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0) {
         <section class="did">
           <h3 class="did-title">What this submission did</h3>
 
-          @for (r of detail.automationRuns; track r.runId) {
+          @for (r of Detail.automationRuns; track r.runId) {
             <div class="run">
               <span class="pill" [class]="'pill--' + r.status.toLowerCase()">{{ r.status }}</span>
               <span class="run-name">{{ r.automationName }}</span>
               <span class="run-meta">
                 @if (r.durationSeconds !== null) {
-                  {{ r.durationSeconds }}s
+                  {{ r.durationSeconds }}s ·
                 }
-                @if (r.attemptCount > 1) {
-                  · {{ r.attemptCount }} attempts
-                }
+                {{ r.attemptCount }} {{ r.attemptCount === 1 ? 'attempt' : 'attempts' }}
               </span>
               @if (r.actionExecutionLogId) {
-                <button type="button" class="link" (click)="openActionLog(r)">Action log</button>
+                <button type="button" class="link" (click)="OpenActionLog(r)">Action log</button>
               }
               @if (r.aiAgentRunId) {
-                <button type="button" class="link" (click)="openAgentRun(r)">Agent run</button>
+                <button type="button" class="link" (click)="OpenAgentRun(r)">Agent run</button>
               }
               @if (r.errorMessage) {
                 <p class="run-error">{{ r.errorMessage }}</p>
@@ -119,12 +122,12 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
             </div>
           }
 
-          @for (b of detail.bindingRecords; track b.bindingRecordId) {
+          @for (b of Detail.bindingRecords; track b.bindingRecordId) {
             <div class="bind">
               <span class="pill" [class]="'pill--' + b.outcome.toLowerCase()">{{ b.outcome }}</span>
               <span class="bind-entity">{{ b.targetEntityName ?? b.targetEntityId }}</span>
               @if (b.targetEntityName && b.targetRecordId) {
-                <button type="button" class="link" (click)="openBoundRecord(b.targetEntityName, b.targetRecordId)">
+                <button type="button" class="link" (click)="OpenBoundRecord(b.targetEntityName, b.targetRecordId)">
                   Open record
                 </button>
               }
@@ -224,6 +227,10 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
       .file-name {
         overflow-wrap: anywhere;
       }
+      .file-name--unresolved {
+        font-style: italic;
+        color: var(--mj-text-muted);
+      }
       .file-size {
         color: var(--mj-text-muted);
         font-size: 12px;
@@ -235,6 +242,11 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
         padding: 2px var(--mj-space-2);
         border-radius: var(--mj-radius-full);
         font-size: 11px;
+      }
+      .badge--unresolved {
+        background: var(--mj-bg-surface-sunken);
+        color: var(--mj-text-muted);
+        border: 1px solid var(--mj-border-default);
       }
       .badge--revoked {
         background: var(--mj-status-warning-bg, var(--mj-bg-surface-sunken));
@@ -377,61 +389,61 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
   ],
 })
 export class FormsResponseDetailComponent {
-  @Input({ required: true }) detail!: ResponseDetail;
+  @Input({ required: true }) Detail!: ResponseDetail;
 
   /**
    * Whether to offer "Back to responses". True inside the list-and-detail mounts (the
    * dashboard and builder tabs); false when the detail IS the page, as in the Form Response
    * entity-form override, where there is no list to go back to.
    */
-  @Input() showBack = true;
+  @Input() ShowBack = true;
 
-  @Output() back = new EventEmitter<void>();
+  @Output() Back = new EventEmitter<void>();
 
   /**
    * A record the user asked to open. The host maps it to its own navigation:
    * `OpenEntityRecord` on a dashboard, `Navigate` on a form component.
    */
-  @Output() openRecord = new EventEmitter<ResponseRecordLink>();
+  @Output() OpenRecord = new EventEmitter<ResponseRecordLink>();
 
   /** Question ids whose score rationale is expanded. */
   private readonly openRationales = new Set<string>();
 
-  public isRationaleOpen(a: ResponseAnswerView): boolean {
+  public IsRationaleOpen(a: ResponseAnswerView): boolean {
     return this.openRationales.has(a.questionId);
   }
 
-  public toggleRationale(a: ResponseAnswerView): void {
+  public ToggleRationale(a: ResponseAnswerView): void {
     if (!this.openRationales.delete(a.questionId)) {
       this.openRationales.add(a.questionId);
     }
   }
 
-  public openFile(fileId: string): void {
-    this.openRecord.emit({ entityName: MJ_CORE_ENTITY.File, recordId: fileId });
+  public OpenFile(fileId: string): void {
+    this.OpenRecord.emit({ entityName: MJ_CORE_ENTITY.File, recordId: fileId });
   }
 
-  public openActionLog(r: ResponseAutomationRunView): void {
+  public OpenActionLog(r: ResponseAutomationRunView): void {
     if (r.actionExecutionLogId) {
-      this.openRecord.emit({
+      this.OpenRecord.emit({
         entityName: MJ_CORE_ENTITY.ActionExecutionLog,
         recordId: r.actionExecutionLogId,
       });
     }
   }
 
-  public openAgentRun(r: ResponseAutomationRunView): void {
+  public OpenAgentRun(r: ResponseAutomationRunView): void {
     if (r.aiAgentRunId) {
-      this.openRecord.emit({ entityName: MJ_CORE_ENTITY.AIAgentRun, recordId: r.aiAgentRunId });
+      this.OpenRecord.emit({ entityName: MJ_CORE_ENTITY.AIAgentRun, recordId: r.aiAgentRunId });
     }
   }
 
-  public openBoundRecord(entityName: string, recordId: string): void {
-    this.openRecord.emit({ entityName, recordId });
+  public OpenBoundRecord(entityName: string, recordId: string): void {
+    this.OpenRecord.emit({ entityName, recordId });
   }
 
   /** Human-readable byte size, e.g. `180 KB`. */
-  public fileSize(bytes: number): string {
+  public FileSize(bytes: number): string {
     let value = bytes;
     let unit = 0;
     while (value >= 1024 && unit < SIZE_UNITS.length - 1) {

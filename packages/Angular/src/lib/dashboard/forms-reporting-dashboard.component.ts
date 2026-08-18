@@ -10,6 +10,7 @@ import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/fo
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
 import {
+  mockAnswerRows,
   mockReport,
   mockReportableForms,
   mockResponseDetail,
@@ -54,6 +55,7 @@ type DashboardTab = 'summary' | 'questions' | 'funnel' | 'responses';
 })
 export class FormsReportingDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsReportingService);
+  private readonly responses = inject(ResponsesDataService);
   private readonly exporter = inject(FormsReportingExportService);
   private readonly cdr = inject(ChangeDetectorRef);
 
@@ -123,10 +125,10 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     try {
       if (this.useMock) {
         this.report = mockReport();
-        this.rawAnswers = [];
+        this.rawAnswers = mockAnswerRows();
       } else {
         this.report = await this.data.loadReport(form);
-        this.rawAnswers = await this.loadRawAnswers(form.formId);
+        this.rawAnswers = await this.responses.loadAnswersForForm(form.formId);
       }
     } catch (err) {
       this.fail(err, 'Failed to load the report.');
@@ -153,7 +155,7 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     try {
       this.responseDetail = this.useMock
         ? this.mockDetail(responseId)
-        : await this.data.loadResponseDetail(responseId, this.report.questions);
+        : await this.responses.loadResponseDetail(responseId, this.report.questions);
     } catch (err) {
       this.fail(err, 'Failed to load the response.');
     } finally {
@@ -186,13 +188,6 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
     } finally {
       this.endLoad();
     }
-  }
-
-  /** Loads the raw answers separately so export can pivot to a wide matrix. */
-  private async loadRawAnswers(
-    formId: string,
-  ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
-    return this.data.loadAnswersForForm(formId);
   }
 
   /** Builds a detail view from the mock report (no extra fetch). */

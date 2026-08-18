@@ -7,24 +7,22 @@
  * `FormReportData` read-model. Stateless and injectable; the dashboard owns selection
  * state.
  *
- * Everything response-shaped — the response/answer reads, the single-response detail, the
- * export pivot's answer rows — is delegated to {@link ResponsesDataService}, which the
- * builder's Responses tab and the Form Response entity-form override consume directly.
- * This service adds the dashboard-only concerns on top: the form picker and the
- * summary/breakdown/funnel aggregations.
+ * Everything response-shaped lives in {@link ResponsesDataService}, which the builder's
+ * Responses tab and the Form Response entity-form override consume directly. This service
+ * adds only the dashboard-only concerns: the form picker and the summary/breakdown/funnel
+ * aggregations. It does NOT re-expose the response reads — callers that want a single
+ * response's detail or the export's answer rows inject `ResponsesDataService` themselves,
+ * rather than reaching them through a pass-through method here.
  */
 import { Injectable, inject } from '@angular/core';
 import { RunView, RunViewResult } from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormResponseEntityType,
-  mjBizAppsFormsFormResponseAnswerEntityType,
   mjBizAppsFormsFormVersionEntityType,
   mjBizAppsFormsFormEntityType,
-  PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../../shared/entity-names';
 import { flattenQuestions } from '../../shared/published-questions';
-import type { ResponseDetail } from '../../responses/response-models';
 import { buildResponseRows } from '../../responses/response-aggregations';
 import { ResponsesDataService } from '../../responses/responses-data.service';
 import type { FormReportData, ReportableForm } from '../models/reporting.model';
@@ -135,23 +133,5 @@ export class FormsReportingService {
       funnel: buildFunnel(definition, answers),
       responses: buildResponseRows(responses, answers),
     };
-  }
-
-  /** Loads one response's labelled answers for the detail view. */
-  public async loadResponseDetail(
-    responseId: string,
-    questions: PublishedFormQuestion[],
-  ): Promise<ResponseDetail> {
-    return this.responses.loadResponseDetail(responseId, questions);
-  }
-
-  /**
-   * Loads all answer rows for a form (across ALL its versions' responses). Used by the
-   * export service to pivot responses into a wide matrix.
-   */
-  public async loadAnswersForForm(
-    formId: string,
-  ): Promise<mjBizAppsFormsFormResponseAnswerEntityType[]> {
-    return this.responses.loadAnswersForForm(formId);
   }
 }

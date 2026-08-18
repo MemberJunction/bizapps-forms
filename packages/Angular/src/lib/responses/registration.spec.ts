@@ -20,6 +20,7 @@ import { join } from 'node:path';
  */
 const AREA = join(__dirname);
 const SRC = join(__dirname, '..', '..');
+const BUILDER = join(__dirname, '..', 'builder');
 
 function read(...parts: string[]): string {
   return readFileSync(join(...parts), 'utf8');
@@ -52,5 +53,40 @@ describe('Form Response entity-form override registration', () => {
     // is elidable by a bundler that sees no value imported from it. Anchored to line start
     // so commenting the import out fails this test rather than still matching inside `//`.
     expect(read(SRC, 'public-api.ts')).toMatch(/^import '\.\/lib\/responses';$/m);
+  });
+});
+
+/**
+ * Guards the builder's Responses tab WIRING — the same structural technique and the same
+ * reason as above: activating a tab is template behaviour, and an Angular component cannot
+ * be instantiated in this suite to click it. What is checkable is that the tab exists, is
+ * scoped to the loaded form, and is mounted behind its own `@if` (which is what makes the
+ * responses query lazy rather than something every builder open pays for).
+ */
+describe('builder Responses tab wiring', () => {
+  const component = () => readFileSync(join(BUILDER, 'form-builder.component.ts'), 'utf8');
+  const template = () => readFileSync(join(BUILDER, 'form-builder.component.html'), 'utf8');
+
+  it("adds 'responses' to BuilderTab, last, after 'onsubmit'", () => {
+    expect(component()).toMatch(
+      /type BuilderTab = 'build' \| 'design' \| 'distribute' \| 'onsubmit' \| 'responses';/,
+    );
+  });
+
+  it('offers a tab button that activates it', () => {
+    expect(template()).toContain(`(click)="setTab('responses')"`);
+  });
+
+  it('scopes the tab to the loaded form, not to every response in the database', () => {
+    expect(template()).toMatch(/<mjf-responses-tab\s+\[FormID\]="tree\.form\.ID"/);
+  });
+
+  it('mounts it behind its own @if, so opening the builder to edit runs no responses query', () => {
+    expect(template()).toContain("@if (activeTab === 'responses' && tree) {");
+  });
+
+  it('relays the tab\'s deep links to the Explorer host', () => {
+    expect(template()).toContain('(OpenRecord)="openLinkedRecord($event)"');
+    expect(component()).toMatch(/this\.Navigate\.emit\(\{\s*Kind: 'record'/);
   });
 });
