@@ -116,6 +116,60 @@ cd ~/Projects && pnpm --filter @mj-biz-apps/forms-ng run build   # after editing
 Build from the **parent**, not from this repo. Consumers see the change immediately through the
 workspace link — no repack, no restart.
 
+## Recovery: "it worked yesterday and now the API won't boot"
+
+The failure mode that will actually bite you. Symptom: a wall of
+
+```
+TypeError: newObject.InitializeEmbeddedRecords is not a function
+Error: Entity MJ: <Something> could not be instantiated via MJGlobal Class Factory.
+```
+
+**on MJ's own core entities** (`MJ: Dashboards`, `MJ: Queries`, `MJ: Permission Domains` …), and the
+API never binds a port. The Explorer builds fine and even reports its client packages wired, which
+makes it look like a server bug. It is not.
+
+**Cause: a member repo got its own standalone `node_modules`.** Anything that runs `pnpm install`
+*inside* a member repo — an IDE, a stray terminal, a `pnpm install` in a git worktree under
+`.claude/worktrees/` — recreates that repo's own store with the **published** `@memberjunction/*`
+packages. That repo's entity subclasses then extend a different `BaseEntity` than MJAPI's, and
+because a linked app's registrations land last they win in the ClassFactory. So one repo's stale
+install breaks entities that have nothing to do with that repo.
+
+Find it:
+
+```bash
+for r in MJ bizapps-ats bizapps-caliber bizapps-forms bizapps-common; do
+  printf "%-16s " "$r"; [ -d ~/Projects/$r/node_modules/.pnpm ] && echo STANDALONE || echo clean
+done
+```
+
+Any `STANDALONE` is the culprit — members are supposed to resolve through the parent store and have
+no `.pnpm` of their own. Confirm with:
+
+```bash
+node -e "console.log(require.resolve('@memberjunction/core/package.json',{paths:['<repo>/packages/Entities']}))"
+# healthy -> .../MJ/packages/MJCore/package.json
+```
+
+Fix — remove that repo's trees and reinstall from the parent:
+
+```bash
+cd ~/Projects/<offending-repo>
+find . -name node_modules -type d -prune -not -path "*/node_modules/*" -not -path "./.claude/*" -exec rm -rf {} +
+cd ~/Projects && CI=true pnpm install
+```
+
+⚠️ **Do not reach for the documented `dev workspace --force --clean-members` here.** `--force`
+rewrites the generated parent files, which resets `.npmrc` to the generator's defaults and **silently
+undoes the `strict-peer-dependencies` and `public-hoist-pattern` deviations above** — so you fix the
+standalone install and immediately reintroduce two different failures. If you do run it, re-apply
+those `.npmrc` lines and `CI=true pnpm install` again before starting the host.
+
+`.claude/worktrees/*` are excluded from the `find` above on purpose: those are separate checkouts
+with their own installs, they are not on the host's resolution path, and blowing them away just
+costs whoever is working in them a reinstall.
+
 ## Verifying it worked
 
 | Check | Healthy |
