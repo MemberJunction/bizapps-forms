@@ -152,7 +152,20 @@ INSERT INTO @Entities VALUES
   ('MJ_BizApps_Forms: Form Automations', 0, 1, 0),
   ('MJ_BizApps_Forms: Form Entity Bindings', 0, 1, 0),
   ('MJ_BizApps_Forms: Form Automation Runs', 1, 1, 1),
-  ('MJ_BizApps_Forms: Form Entity Binding Records', 1, 1, 1);
+  ('MJ_BizApps_Forms: Form Entity Binding Records', 1, 1, 1),
+  -- Read-only: bind-time provenance verification (filesAreVerified → loadUploadLedger) runs a
+  -- RunView over the upload ledger under this principal. Without it the lookup throws, the check
+  -- fails closed, and every file-answer binding reports "provenance cannot be verified" (#49).
+  -- Never grant create here: a runner that can mint ledger rows can vouch for arbitrary files.
+  --
+  -- ⚠️ THIS ROW MASKS THE MIGRATION THAT SHIPS IT (V202608181030). Because the MERGE below
+  -- upserts it, no smoke run can detect the shipped grant being absent or regressed — the fixture
+  -- supplies what is under test. It stays because this file's stated job is to establish its own
+  -- preconditions rather than hope they hold (see the note further down), and a fixture that
+  -- depends on migration order fails for the wrong reason on a dev database. The consequence is
+  -- worth naming: the evidence that the SHIPPED grant works is the migration's own postconditions,
+  -- not this smoke.
+  ('MJ_BizApps_Forms: Form Uploads', 0, 1, 0);
 
 -- UPSERT, not insert-if-missing. Most of these grants now SHIP in the metadata seed, so a
 -- plain "insert what is absent" silently no-ops against the shipped row and leaves whatever

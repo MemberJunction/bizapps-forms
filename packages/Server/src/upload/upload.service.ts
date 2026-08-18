@@ -153,8 +153,23 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
     return distCheck;
   }
 
+  // 3b. The question must be a real FileUpload question on the published definition. Checked
+  // BEFORE any byte is stored: the definition is already in hand from step 3, and validating
+  // after storage is how the first live run of this path ended — bytes and an `MJ: Files` row
+  // orphaned on disk while the respondent saw a 500 from the ledger insert rejecting a
+  // non-GUID question id (found 2026-08-18 driving the full résumé arc, issue #49).
+  const questionCheck = validateQuestion(distCheck.resolved, req.questionId);
+  if (!questionCheck.ok) {
+    return questionCheck;
+  }
+
   // 4. Store bytes + create the MJ: Files record via the canonical MJ storage path.
-  return storeFile(ctx, file, req, distCheck.resolved);
+  //    The ledger records the DEFINITION's spelling of the question id, not the client's: the
+  //    match above is case-folded, so writing back what the caller sent would let
+  //    `FormUpload.QuestionID` disagree with the published definition about which question an
+  //    upload answered — and multipart field values are not trimmed (see multipart.ts), so the
+  //    raw string can also carry surrounding whitespace into a uniqueidentifier column.
+  return storeFile(ctx, file, req, distCheck.resolved, questionCheck.questionId);
 }
 
 /** Enforce presence, size cap, and content-type allowlist. */
@@ -218,6 +233,14 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
   }
 }
 
+/** What step 3 hands to the question check and the store step. */
+interface ResolvedUploadTarget {
+  distributionId: string;
+  formId: string;
+  /** Every question on the published definition, flattened across pages. */
+  questions: ReadonlyArray<{ id: string; type: string }>;
+}
+
 /**
  * Resolve the distribution slug to an open published form (rejects closed/unknown).
  *
@@ -227,7 +250,7 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
 async function resolveOpenDistribution(
   ctx: UploadContext,
   req: UploadRequest,
-): Promise<UploadResult & { resolved?: { distributionId: string; formId: string } }> {
+): Promise<UploadResult & { resolved?: ResolvedUploadTarget }> {
   const slug = req.distributionSlug ?? req.distributionId;
   if (!slug) {
     return fail(400, 'Missing required field "distributionSlug" (or "distributionId").');
@@ -238,8 +261,38 @@ async function resolveOpenDistribution(
   }
   return {
     ok: true,
-    resolved: { distributionId: loaded.value.distribution.ID, formId: loaded.value.definition.formId },
+    resolved: {
+      distributionId: loaded.value.distribution.ID,
+      formId: loaded.value.definition.formId,
+      questions: loaded.value.definition.pages.flatMap((p) => p.questions.map((q) => ({ id: q.id, type: q.type }))),
+    },
   };
+}
+
+/**
+ * The uploaded-against question must exist on the published definition and be a FileUpload
+ * question. Fail-closed on both: an unknown id would otherwise travel all the way to the
+ * provenance insert (where a non-GUID surfaces as a raw SQL conversion error), and a non-file
+ * question id would mint a ledger row the submit path can never match to a file answer.
+ *
+ * GUIDs are compared case-folded — minted lowercase on the client, returned uppercase by
+ * SQL Server — the same boundary every other identifier in this codebase crosses.
+ */
+function validateQuestion(
+  target: ResolvedUploadTarget | undefined,
+  questionId: string,
+): UploadResult & { questionId?: string } {
+  const wanted = questionId.trim().toLowerCase();
+  const question = target?.questions.find((q) => q.id.trim().toLowerCase() === wanted);
+  if (!question) {
+    return fail(400, 'Unknown "questionId" for this form.');
+  }
+  if (question.type !== 'FileUpload') {
+    return fail(400, `Question is not a FileUpload question (got "${question.type}").`);
+  }
+  // Return the DEFINITION's id, not the caller's — the one place that decides which question this
+  // upload answered, so the ledger cannot record a spelling the definition disagrees with.
+  return { ok: true, questionId: question.id };
 }
 
 /** Store the file via FileStorageEngine.UploadFile and shape the success body. */
@@ -248,6 +301,8 @@ async function storeFile(
   file: ParsedFile,
   req: UploadRequest,
   resolved: { distributionId: string; formId: string } | undefined,
+  /** The published definition's spelling of the question id, from {@link validateQuestion}. */
+  questionId: string | undefined,
 ): Promise<UploadResult> {
   const cfg = getUploadConfig();
   // The File row and the provenance row are both written under an ELEVATED principal, not the
@@ -276,7 +331,7 @@ async function storeFile(
         providerKey: result.StoragePath,
         distributionId: resolved.distributionId,
         formId: resolved.formId,
-        questionId: req.questionId,
+        questionId,
         responseId: req.responseId,
         sessionId: ctx.sessionId,
         uploadedByUserId: ctx.contextUser?.ID,

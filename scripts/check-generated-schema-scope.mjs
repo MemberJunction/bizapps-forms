@@ -86,16 +86,21 @@ const GENERATED_ROOTS = [
 /**
  * Generated artifacts that do NOT live under a `generated/` directory.
  *
- * Empty since the MJAPI/MJExplorer dev harness was removed in the pnpm migration.
- * The one entry was `apps/MJAPI/schema.graphql` — the emitted GraphQL SDL for
+ * Empty. The one entry was `apps/MJAPI/schema.graphql` — the emitted GraphQL SDL for
  * whatever resolvers the host loaded, as much CodeGen output as `generated.ts`, and
  * the artifact that shipped 392 foreign-schema references through the entire #10 fix
  * while this gate reported PASS.
  *
- * That SDL is no longer emitted anywhere in this repo, so the coverage is GONE, not
- * relocated: resolver scoping is now checked only through the three package
- * `generated/` roots above. To restore it, link this repo into an MJ checkout, emit
- * the SDL there, and point this list at it.
+ * UPDATED 2026-08-18 (#49): the MJAPI harness is back and committed, so that SDL IS
+ * emitted in this repo again — the previous note here said it was not, and stayed
+ * behind when the harness returned. It is still not scanned, and this is a deliberate
+ * choice rather than an oversight: the file is a machine-specific by-product of
+ * whatever a developer's local host happened to load (it is gitignored for that
+ * reason), so hashing one developer's copy would make the gate's verdict depend on
+ * who ran it last. The coverage remains GONE, not relocated — resolver scoping is
+ * checked only through the three package `generated/` roots above. Restoring it
+ * properly means emitting the SDL deterministically in CI and pointing this list at
+ * that artifact, not at the local file.
  *
  * Like GENERATED_ROOTS, a missing entry is a hard error rather than a skip — so an
  * entry added back must exist.
