@@ -50,6 +50,16 @@ import type { ConditionalSourceQuestion } from './conditional-rule-editor.compon
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import { definitionFingerprint, storedSnapshotFingerprint } from './publish-fingerprint';
 import { isValidReorder } from './reorder';
+import {
+  NOTHING_SELECTED,
+  clearIfQuestion,
+  clearIfScreen,
+  questionId,
+  screenId,
+  selectQuestion as questionSelection,
+  selectScreen as screenSelection,
+  type BuilderSelection,
+} from './builder-selection';
 
 /**
  * Which workspace tab is showing.
@@ -116,13 +126,20 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
   protected tree: FormTree | null = null;
-  protected selectedQuestionId: string | null = null;
   /**
-   * The selected screen, if any. Mutually exclusive with {@link selectedQuestionId} — the right
-   * pane shows one editor, and two independent selections would let it show a screen's fields
-   * while a question is highlighted on the canvas.
+   * What the right-hand pane is showing. ONE value, not a question id beside a screen id: the
+   * pane shows a single editor, and two independent fields let it show a screen's properties
+   * while a freshly-added question sat highlighted and unreachable on the canvas.
    */
-  protected selectedScreenId: string | null = null;
+  protected selection: BuilderSelection = NOTHING_SELECTED;
+  protected get selectedQuestionId(): string | null {
+    return questionId(this.selection);
+  }
+
+  protected get selectedScreenId(): string | null {
+    return screenId(this.selection);
+  }
+
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
   /** Whether the paste-to-import dialog is open. */
@@ -331,7 +348,9 @@ export class FormBuilderComponent extends BaseFormComponent {
     const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type));
     if (node) {
       page.questions.push(node);
-      this.selectedQuestionId = node.entity.ID;
+      // Selecting the new question is what clears any screen selection. The author asked for a
+      // question; the pane has to show them the question they just got.
+      this.selection = questionSelection(node.entity.ID);
       this.markDirty();
     }
     this.busy = false;
@@ -380,8 +399,7 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   protected selectQuestion(node: QuestionNode): void {
-    this.selectedQuestionId = node.entity.ID;
-    this.selectedScreenId = null;
+    this.selection = questionSelection(node.entity.ID);
     this.cdr.markForCheck();
   }
 
@@ -408,8 +426,7 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   protected selectScreen(screen: mjBizAppsFormsFormScreenEntity): void {
-    this.selectedScreenId = screen.ID;
-    this.selectedQuestionId = null;
+    this.selection = screenSelection(screen.ID);
     this.cdr.markForCheck();
   }
 
@@ -440,9 +457,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = true;
     if (await this.state.deleteScreen(screen)) {
       this.tree.screens = this.tree.screens.filter((s) => s.ID !== screen.ID);
-      if (this.selectedScreenId === screen.ID) {
-        this.selectedScreenId = null;
-      }
+      this.selection = clearIfScreen(this.selection, screen.ID);
       this.markDirty();
     }
     this.busy = false;
@@ -658,9 +673,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     page.questions = page.questions.filter((q) => q !== node);
     await this.state.persistQuestionOrder(page);
-    if (this.selectedQuestionId === node.entity.ID) {
-      this.selectedQuestionId = null;
-    }
+    this.selection = clearIfQuestion(this.selection, node.entity.ID);
     this.markDirty();
   }
 
