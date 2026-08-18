@@ -13,7 +13,13 @@
  *  - `FORMS_UPLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID to force a specific
  *                                   account; when unset the engine uses the first active one.
  *  - `FORMS_UPLOAD_PATH_PREFIX`     Optional storage path prefix. Default `forms-uploads/<date>`.
+ *                                   REFUSED if it lands under the authoring-asset prefix — see
+ *                                   {@link assertUploadPrefixIsPrivate}.
  */
+
+import { LogError } from '@memberjunction/core';
+
+import { assertUploadPrefixIsPrivate } from '../asset/config.js';
 
 /** Route the public upload endpoint is served from (the frozen widget contract). */
 export const UPLOAD_ROUTE = '/forms/upload';
@@ -78,7 +84,7 @@ export function getUploadConfig(): UploadConfig {
     maxBytes: numberFromEnv('FORMS_UPLOAD_MAX_BYTES', DEFAULT_MAX_BYTES),
     allowedTypes: allowedTypesFromEnv(),
     storageAccountId: process.env.FORMS_UPLOAD_STORAGE_ACCOUNT?.trim() || undefined,
-    pathPrefix: process.env.FORMS_UPLOAD_PATH_PREFIX?.trim() || undefined,
+    pathPrefix: privatePathPrefix(),
   });
   return cached;
 }
@@ -101,6 +107,20 @@ export function contentTypeAllowed(contentType: string | undefined, allowed: rea
     }
     return entry === bare;
   });
+}
+
+/**
+ * The configured respondent-upload prefix, refusing one that would land these files under the
+ * world-readable authoring-asset prefix. A misconfiguration here would publish every file a
+ * respondent ever uploaded, so it fails loudly to the log and falls back rather than obeying.
+ */
+function privatePathPrefix(): string | undefined {
+  const requested = process.env.FORMS_UPLOAD_PATH_PREFIX?.trim() || undefined;
+  const verdict = assertUploadPrefixIsPrivate(requested);
+  if (verdict.refused) {
+    LogError(`[Forms] ${verdict.refused}`);
+  }
+  return verdict.prefix;
 }
 
 /** Test-only: clear the memoized config so env changes take effect. */

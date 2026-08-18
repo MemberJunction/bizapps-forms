@@ -45,6 +45,7 @@ import {
 } from './style-tokens';
 import { FORMS_UI_CSS } from '../shared';
 import { DESIGN_PANEL_STYLES } from './design-panel.styles';
+import { ImageFieldComponent } from './image-field.component';
 
 /**
  * The builder "Design" tab: edit this form's look directly, with a live preview beside it.
@@ -66,7 +67,7 @@ const SAVE_DEBOUNCE_MS = 600;
   selector: 'mjf-design-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, MjFormComponent],
+  imports: [CommonModule, FormsModule, MjFormComponent, ImageFieldComponent],
   // The sample IS the widget, so it needs the widget's providers. An empty graphqlUrl
   // selects the mock transport, which is what keeps a trial answer from writing anything.
   providers: [DesignStateService, ...formsWidgetProviders(normalizeApiConfig({ graphqlUrl: '' }))],

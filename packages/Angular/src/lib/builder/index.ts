@@ -19,6 +19,15 @@ export {
   readBrandToken,
   withBrandToken,
 } from './style-tokens';
+export { ImageFieldComponent } from './image-field.component';
+export {
+  FormAssetService,
+  buildAssetFormData,
+  parseAssetResponse,
+  assetErrorMessage,
+  type UploadedAsset,
+} from './form-asset.service';
+export { resolveApiOrigin, resolveApiToken } from './mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';

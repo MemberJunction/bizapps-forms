@@ -27,26 +27,14 @@
           @case ('logo') {
             <section class="dp-group" aria-label="Logo">
               <p class="dp-group-title">Logo</p>
-              <div class="mjf-field">
-                <label class="mjf-field-label" for="dp-logo">Image URL</label>
-                <input
-                  id="dp-logo"
-                  type="url"
-                  class="mjf-input"
-                  placeholder="https://example.com/logo.svg"
-                  [ngModel]="logoUrl"
-                  (ngModelChange)="logoUrl = $event; onEdit()"
-                />
-                <span class="mjf-field-hint">Shown above the form. Leave empty for no logo.</span>
-              </div>
-              @if (logoUrl.trim()) {
-                <div class="dp-logo-preview">
-                  <img [src]="logoUrl" alt="Logo preview" />
-                  <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="logoUrl = ''; onEdit()">
-                    <i class="fa-solid fa-xmark" aria-hidden="true"></i> Remove
-                  </button>
-                </div>
-              }
+              <mjf-image-field
+                ariaLabel="Logo image URL"
+                placeholder="https://example.com/logo.png"
+                hint="Shown above the form. Leave empty for no logo."
+                [value]="logoUrl"
+                [formId]="form.ID"
+                (valueChange)="logoUrl = $event; onEdit()"
+              />
             </section>
           }
 
@@ -179,23 +167,14 @@
 
             <section class="dp-group" aria-label="Background image">
               <p class="dp-group-title">Background image</p>
-              <div class="mjf-field">
-                <label class="mjf-field-label" for="dp-bg-image">Image URL</label>
-                <input
-                  id="dp-bg-image"
-                  type="url"
-                  class="mjf-input"
-                  placeholder="https://example.com/backdrop.jpg"
-                  [ngModel]="bgImageUrl"
-                  (ngModelChange)="bgImageUrl = $event; onEdit()"
-                />
-                <span class="mjf-field-hint">Covers the page behind the form. Leave empty for none.</span>
-              </div>
-              @if (bgImageUrl.trim()) {
-                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="bgImageUrl = ''; onEdit()">
-                  <i class="fa-solid fa-xmark" aria-hidden="true"></i> Remove image
-                </button>
-              }
+              <mjf-image-field
+                ariaLabel="Background image URL"
+                placeholder="https://example.com/backdrop.jpg"
+                hint="Covers the page behind the form. Leave empty for none."
+                [value]="bgImageUrl"
+                [formId]="form.ID"
+                (valueChange)="bgImageUrl = $event; onEdit()"
+              />
             </section>
           }
         }

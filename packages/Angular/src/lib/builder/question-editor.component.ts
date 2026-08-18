@@ -29,6 +29,7 @@ import {
   type ConditionalSourceQuestion,
 } from './conditional-rule-editor.component';
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
+import { ImageFieldComponent } from './image-field.component';
 import {
   parseConditionalRule,
   parseQuestionSettings,
@@ -98,9 +99,9 @@ const QUESTION_EDITOR_CSS = /* css */ `
 .qe-opt-remove:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 
 .qe-option-block { display: flex; flex-direction: column; gap: 4px; }
-/* Indented so the image URL reads as belonging to the label above it rather than as a
+/* Indented so the image control reads as belonging to the choice above it rather than as a
    separate option in the list. */
-.qe-option-img { margin-left: 0; font-size: var(--mjf-label); }
+.qe-option-img { display: block; margin-left: 12px; font-size: var(--mjf-label); }
 
 .qe-hint { margin: 2px 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
@@ -134,12 +135,19 @@ const QUESTION_EDITOR_CSS = /* css */ `
     FormsModule,
     ConditionalRuleEditorComponent,
     ValidationRuleEditorComponent,
+    ImageFieldComponent,
   ],
   templateUrl: './question-editor.component.html',
   styles: [FORMS_UI_CSS, QUESTION_EDITOR_CSS],
 })
 export class QuestionEditorComponent {
   @Input() node: QuestionNode | null = null;
+  /**
+   * The form being edited. A question only knows its page, not its form, so the id is threaded
+   * in from the builder — the image uploader scopes an asset to a form and has nothing else to
+   * derive it from.
+   */
+  @Input() formId = '';
   /** Questions preceding the selected one — valid sources for a conditional rule. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 

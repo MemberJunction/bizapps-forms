@@ -84,17 +84,6 @@ export const DESIGN_PANEL_STYLES = /* css */ `
 .dp-radius--soft { border-top-left-radius: 5px; }
 .dp-radius--round { border-top-left-radius: 12px; }
 
-.dp-logo-preview {
-  display: flex;
-  align-items: center;
-  gap: var(--mjf-gap-sm);
-  padding: var(--mjf-gap-sm);
-  border: 1px solid var(--mj-border-subtle);
-  border-radius: var(--mjf-radius-sm);
-  background: var(--mj-bg-surface-sunken);
-}
-.dp-logo-preview img { max-height: 40px; max-width: 140px; }
-
 .dp-actions {
   flex: none;
   display: flex;

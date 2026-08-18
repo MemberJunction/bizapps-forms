@@ -382,6 +382,7 @@
         } @else {
           <mjf-question-editor
             [node]="selectedNode"
+            [formId]="record.ID"
             [conditionalSources]="conditionalSources"
             (questionChanged)="onQuestionChanged($event)"
             (addOptionRequested)="onAddOption($event)"

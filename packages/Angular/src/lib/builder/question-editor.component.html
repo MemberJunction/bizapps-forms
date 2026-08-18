@@ -160,14 +160,13 @@
                 </button>
               </div>
               @if (optionMode === 'images') {
-                <input
-                  #imgInput
-                  type="url"
-                  class="mjf-input qe-option-img"
+                <mjf-image-field
+                  class="qe-option-img"
                   [value]="opt.ImageURL ?? ''"
+                  [formId]="formId"
+                  [ariaLabel]="'Image for option ' + ($index + 1)"
                   placeholder="Image URL"
-                  [attr.aria-label]="'Image for option ' + ($index + 1)"
-                  (change)="setOptionImage(opt, imgInput.value)"
+                  (valueChange)="setOptionImage(opt, $event)"
                 />
               }
             </div>

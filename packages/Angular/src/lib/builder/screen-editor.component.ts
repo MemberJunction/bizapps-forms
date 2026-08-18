@@ -25,6 +25,7 @@ import {
   ConditionalRuleEditorComponent,
   type ConditionalSourceQuestion,
 } from './conditional-rule-editor.component';
+import { ImageFieldComponent } from './image-field.component';
 import { parseConditionalRule, serializeConditionalRule } from './json-fields';
 
 const SCREEN_EDITOR_CSS = /* css */ `
@@ -69,7 +70,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
   selector: 'mjf-screen-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, ConditionalRuleEditorComponent],
+  imports: [CommonModule, FormsModule, ConditionalRuleEditorComponent, ImageFieldComponent],
   styles: [FORMS_UI_CSS, SCREEN_EDITOR_CSS],
   template: `
     @if (screen; as s) {
@@ -93,9 +94,14 @@ const SCREEN_EDITOR_CSS = /* css */ `
             [placeholder]="s.ScreenType === 'Welcome' ? 'Start' : 'Leave blank for no button'"
             (input)="setButtonLabel($any($event.target).value)" />
 
-          <label class="mjf-field-label" for="se-media">Image URL</label>
-          <input id="se-media" class="mjf-input" type="url" [value]="s.MediaURL ?? ''"
-            placeholder="https://…" (input)="setMediaURL($any($event.target).value)" />
+          <mjf-image-field
+            inputId="se-media"
+            label="Image"
+            [value]="s.MediaURL ?? ''"
+            [formId]="s.FormID"
+            [hint]="s.ScreenType === 'Welcome' ? 'Shown above the title, before the form starts.' : 'Shown above the title on this ending.'"
+            (valueChange)="setMediaURL($event)"
+          />
         </div>
 
         @if (s.ScreenType === 'Ending') {

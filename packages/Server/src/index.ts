@@ -45,6 +45,12 @@ import './widget-bundle/WidgetBundleMiddleware.js';
 // so it reads the verified anonymous session; missing storage config yields a 5xx, never a crash.
 import './upload/UploadMiddleware.js';
 
+// Import the authoring-asset middleware so its @RegisterClass fires and MJ server bootstrap
+// discovers BOTH its routes: POST /forms/asset (authenticated authors uploading form artwork)
+// and GET /forms/asset/:id (anonymous, so a published form's images render for a respondent
+// with no session). The read route serves ONLY objects stored under the public asset prefix.
+import './asset/AssetMiddleware.js';
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
