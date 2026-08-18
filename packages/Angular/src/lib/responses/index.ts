@@ -15,3 +15,4 @@ export * from './responses-data.service';
 export * from './response-list.component';
 export * from './response-detail.component';
 export * from './responses-tab.component';
+export * from './response-form.component';
