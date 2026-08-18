@@ -152,7 +152,12 @@ INSERT INTO @Entities VALUES
   ('MJ_BizApps_Forms: Form Automations', 0, 1, 0),
   ('MJ_BizApps_Forms: Form Entity Bindings', 0, 1, 0),
   ('MJ_BizApps_Forms: Form Automation Runs', 1, 1, 1),
-  ('MJ_BizApps_Forms: Form Entity Binding Records', 1, 1, 1);
+  ('MJ_BizApps_Forms: Form Entity Binding Records', 1, 1, 1),
+  -- Read-only: bind-time provenance verification (filesAreVerified → loadUploadLedger) runs a
+  -- RunView over the upload ledger under this principal. Without it the lookup throws, the check
+  -- fails closed, and every file-answer binding reports "provenance cannot be verified" (#49).
+  -- Never grant create here: a runner that can mint ledger rows can vouch for arbitrary files.
+  ('MJ_BizApps_Forms: Form Uploads', 0, 1, 0);
 
 -- UPSERT, not insert-if-missing. Most of these grants now SHIP in the metadata seed, so a
 -- plain "insert what is absent" silently no-ops against the shipped row and leaves whatever
