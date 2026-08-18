@@ -13,6 +13,11 @@
  *                                     (default Cloudflare production URL).
  *  - `FORMS_RATELIMIT_MAX`            Max submissions per window per (session,distribution)
  *                                     key. Default 5.
+ *  - `FORMS_RATELIMIT_GLOBAL_MAX`     Max submissions per window per DISTRIBUTION, across all
+ *                                     sessions. This cap is keyed only on the server-resolved
+ *                                     distribution id — never on the client-supplied session id —
+ *                                     so it is the abuse ceiling an attacker cannot escape by
+ *                                     rotating the `x-session-id` header. Default 60.
  *  - `FORMS_RATELIMIT_WINDOW_MS`      Sliding-window length in ms. Default 60000 (1 min).
  *
  * Note: the repo `.env` has a known typo on an unrelated key
@@ -34,6 +39,12 @@ export interface PublicSubmitConfig {
   turnstileSecret: string | undefined;
   turnstileVerifyUrl: string;
   rateLimitMax: number;
+  /**
+   * Per-distribution global cap, applied to a key derived solely from the server-resolved
+   * distribution id. Bounds total volume per form per window regardless of the client-supplied
+   * session id, closing the `x-session-id` header-rotation bypass of the per-session limit.
+   */
+  globalRateLimitMax: number;
   rateLimitWindowMs: number;
 }
 
@@ -50,6 +61,7 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
     turnstileSecret: process.env.FORMS_TURNSTILE_SECRET?.trim() || undefined,
     turnstileVerifyUrl: process.env.FORMS_TURNSTILE_VERIFY_URL?.trim() || DEFAULT_TURNSTILE_VERIFY_URL,
     rateLimitMax: numberFromEnv('FORMS_RATELIMIT_MAX', 5),
+    globalRateLimitMax: numberFromEnv('FORMS_RATELIMIT_GLOBAL_MAX', 60),
     rateLimitWindowMs: numberFromEnv('FORMS_RATELIMIT_WINDOW_MS', 60_000),
   });
   return cached;

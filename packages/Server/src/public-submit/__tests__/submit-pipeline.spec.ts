@@ -233,4 +233,32 @@ describe('runSubmitPipeline', () => {
     expect(third.errors?.[0].message).toMatch(/too many/i);
     delete process.env.FORMS_RATELIMIT_MAX;
   });
+
+  // Security regression (client-header bypass): the per-session limit keys on the CLIENT-SETTABLE
+  // `x-session-id` header (ctx.sessionId), so a caller rotating it per request lands in a fresh
+  // per-session bucket every time and never trips the per-session cap. The per-distribution GLOBAL
+  // cap — keyed only on the server-resolved distribution id — must still bound total volume. Here
+  // the per-session max stays at its generous default while the global max is 2, and each request
+  // uses a DISTINCT session id, so only the global cap can (and does) reject the third.
+  it('enforces the per-distribution global cap even when the session id is rotated per request', async () => {
+    process.env.FORMS_RATELIMIT_GLOBAL_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks });
+
+    ctx.sessionId = 'attacker-session-1';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'attacker-session-2';
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'attacker-session-3';
+    const third = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    // The header-rotating caller never tripped the per-session cap; the global cap stopped them.
+    expect(fireHooks).toHaveBeenCalledTimes(2);
+    delete process.env.FORMS_RATELIMIT_GLOBAL_MAX;
+  });
 });
