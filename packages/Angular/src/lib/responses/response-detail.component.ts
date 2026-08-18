@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
-import type { ResponseDetail } from '../models/reporting.model';
+import type { ResponseDetail } from './response-models';
 
 /** Single-response detail: each answer labelled by its question from the snapshot. */
 @Component({

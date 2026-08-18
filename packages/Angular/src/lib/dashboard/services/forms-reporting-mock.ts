@@ -14,13 +14,9 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntityType,
 } from '@mj-biz-apps/forms-entities';
 import type { FormReportData, ReportableForm } from '../models/reporting.model';
-import {
-  flattenQuestions,
-  buildSummary,
-  buildBreakdowns,
-  buildFunnel,
-  buildResponseRows,
-} from './reporting-aggregations';
+import { flattenQuestions } from '../../shared/published-questions';
+import { buildResponseRows } from '../../responses/response-aggregations';
+import { buildSummary, buildBreakdowns, buildFunnel } from './reporting-aggregations';
 
 const MOCK_FORM: ReportableForm = {
   formId: 'mock-form-0001',

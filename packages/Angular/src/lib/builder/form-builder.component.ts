@@ -18,7 +18,7 @@ import type {
   FormStyleTokens,
   PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import { BuilderStateService } from './builder-state.service';
 import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';

@@ -9,7 +9,7 @@ import {
   type mjBizAppsFormsFormVersionEntity,
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_ENTITY } from './entity-names';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import type { FormTree } from './builder-models';
 import { buildPublishedDefinition } from './snapshot-builder';
 

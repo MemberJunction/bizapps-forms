@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { ResponseListRow } from '../models/reporting.model';
+import type { ResponseListRow } from './response-models';
 
 /** Status filter values for the response list. */
 type StatusFilter = 'all' | 'Complete' | 'Partial';

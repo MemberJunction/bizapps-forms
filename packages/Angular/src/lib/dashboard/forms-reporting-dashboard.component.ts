@@ -13,17 +13,15 @@ import type {
 import { FormsReportingService } from './services/forms-reporting.service';
 import { FormsReportingExportService } from './services/forms-reporting-export.service';
 import { mockReport, mockReportableForms } from './services/forms-reporting-mock';
-import type {
-  FormReportData,
-  ReportableForm,
-  ResponseDetail,
-} from './models/reporting.model';
+import type { FormReportData, ReportableForm } from './models/reporting.model';
+import type { ResponseDetail } from '../responses/response-models';
+import { ResponsesDataService } from '../responses/responses-data.service';
 
 import { FormsSummaryStatsComponent } from './components/summary-stats.component';
 import { FormsQuestionBreakdownComponent } from './components/question-breakdown.component';
 import { FormsFunnelChartComponent } from './components/funnel-chart.component';
-import { FormsResponseListComponent } from './components/response-list.component';
-import { FormsResponseDetailComponent } from './components/response-detail.component';
+import { FormsResponseListComponent } from '../responses/response-list.component';
+import { FormsResponseDetailComponent } from '../responses/response-detail.component';
 
 type DashboardTab = 'summary' | 'questions' | 'funnel' | 'responses';
 
@@ -41,7 +39,7 @@ type DashboardTab = 'summary' | 'questions' | 'funnel' | 'responses';
   selector: 'mj-forms-reporting-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsReportingService, FormsReportingExportService],
+  providers: [ResponsesDataService, FormsReportingService, FormsReportingExportService],
   imports: [
     FormsModule,
     FormsSummaryStatsComponent,

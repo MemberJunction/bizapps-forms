@@ -13,6 +13,4 @@ export * from './components/summary-stats.component';
 export * from './components/question-breakdown.component';
 export * from './components/distribution-chart.component';
 export * from './components/funnel-chart.component';
-export * from './components/response-list.component';
-export * from './components/response-detail.component';
 export * from './forms-reporting-dashboard.component';

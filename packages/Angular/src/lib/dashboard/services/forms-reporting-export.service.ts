@@ -13,7 +13,7 @@ import type {
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import type { FormReportData } from '../models/reporting.model';
-import { renderAnswer } from './reporting-aggregations';
+import { renderAnswer } from '../../shared/answer-values';
 
 type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 

@@ -1,71 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import type {
-  PublishedFormDefinition,
-  PublishedFormQuestion,
-  mjBizAppsFormsFormResponseEntityType,
-  mjBizAppsFormsFormResponseAnswerEntityType,
-} from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import {
-  flattenQuestions,
   breakdownKindFor,
   buildSummary,
   buildBreakdowns,
   buildFunnel,
-  buildResponseRows,
-  buildResponseDetail,
-  renderAnswer,
 } from './reporting-aggregations';
-
-type ResponseRow = mjBizAppsFormsFormResponseEntityType;
-type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
-
-function q(
-  id: string,
-  type: PublishedFormQuestion['type'],
-  displayOrder = 0,
-  options: { id: string; label: string; value: string; displayOrder: number }[] = [],
-): PublishedFormQuestion {
-  return { id, type, prompt: `Prompt ${id}`, isRequired: false, displayOrder, options };
-}
-
-function response(id: string, status: 'Complete' | 'Partial', started: Date | null, submitted: Date | null): ResponseRow {
-  return {
-    ID: id,
-    FormID: 'f1',
-    FormVersionID: 'v1',
-    Status: status,
-    AnonymousSessionID: `s-${id}`,
-    RespondentPersonID: null,
-    StartedAt: started,
-    SubmittedAt: submitted,
-    SourceMetadata: null,
-    __mj_CreatedAt: started ?? new Date(),
-    __mj_UpdatedAt: submitted ?? new Date(),
-    Form: 'Test Form',
-    RespondentPerson: null,
-  };
-}
-
-function answer(responseId: string, questionId: string, vals: Partial<AnswerRow>): AnswerRow {
-  const now = new Date();
-  return {
-    ID: `${responseId}-${questionId}`,
-    ResponseID: responseId,
-    QuestionID: questionId,
-    TextValue: null,
-    NumericValue: null,
-    DateValue: null,
-    BooleanValue: null,
-    JSONValue: null,
-    FileID: null,
-    Score: null,
-    ScoreRationale: null,
-    __mj_CreatedAt: now,
-    __mj_UpdatedAt: now,
-    File: null,
-    ...vals,
-  };
-}
+import { flattenQuestions } from '../../shared/published-questions';
+import { q, response, answer } from '../../shared/testing/entity-row-fixtures';
 
 describe('breakdownKindFor', () => {
   it('maps types to kinds', () => {
@@ -226,44 +168,5 @@ describe('buildFunnel', () => {
     expect(funnel[1].reached).toBe(1);
     expect(funnel[1].retention).toBe(0.5);
     expect(funnel[1].dropOff).toBe(0.5);
-  });
-});
-
-describe('buildResponseRows', () => {
-  it('counts answers per response', () => {
-    const rows = buildResponseRows(
-      [response('r1', 'Complete', new Date(), new Date())],
-      [answer('r1', 'q1', { TextValue: 'x' }), answer('r1', 'q2', { TextValue: 'y' })],
-    );
-    expect(rows[0].answeredCount).toBe(2);
-    expect(rows[0].respondent).toBe('Anonymous');
-  });
-
-  it('lists COMPLETE responses only — in-progress partials are excluded from the list', () => {
-    const rows = buildResponseRows(
-      [
-        response('r1', 'Complete', new Date(), new Date()),
-        response('r2', 'Partial', new Date(), null),
-      ],
-      [answer('r1', 'q1', { TextValue: 'x' })],
-    );
-    expect(rows.map((r) => r.responseId)).toEqual(['r1']);
-  });
-});
-
-describe('renderAnswer / buildResponseDetail', () => {
-  it('maps choice values to labels and renders booleans', () => {
-    const choice = q('qc', 'SingleChoice', 0, [{ id: 'o1', label: 'Red', value: 'red', displayOrder: 0 }]);
-    const yn = q('qy', 'YesNo', 1);
-    expect(renderAnswer(choice, answer('r1', 'qc', { TextValue: 'red' }))).toBe('Red');
-    expect(renderAnswer(yn, answer('r1', 'qy', { BooleanValue: false }))).toBe('No');
-
-    const detail = buildResponseDetail(
-      response('r1', 'Complete', new Date(), new Date()),
-      [answer('r1', 'qc', { TextValue: 'red' })],
-      [choice, yn],
-    );
-    expect(detail.answers).toHaveLength(1);
-    expect(detail.answers[0]).toMatchObject({ prompt: 'Prompt qc', displayValue: 'Red' });
   });
 });
