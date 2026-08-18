@@ -23,6 +23,12 @@ describe('scoredQuestionIds', () => {
     expect([...ids]).toEqual(['q-text']);
   });
 
+  it('counts a ZERO score as scored — the dev DB is full of 0.0000 scores', () => {
+    expect([...scoredQuestionIds([answer('r1', 'q-text', { TextValue: 'junk', Score: 0 })])]).toEqual([
+      'q-text',
+    ]);
+  });
+
   it('treats a form with no AI scoring as having no score columns', () => {
     expect(scoredQuestionIds([answer('r1', 'q1', { TextValue: 'a' })]).size).toBe(0);
   });
@@ -81,6 +87,16 @@ describe('buildExportMatrix', () => {
     // renderAnswer blanks a file answer for the UI (a bare GUID means nothing on screen),
     // but the sheet has no FormUpload join and the id is how an analyst rejoins MJ: Files.
     expect(matrix[0]['q-file']).toBe('file-77');
+  });
+
+  it('exports a zero score as 0, not as a blank cell', () => {
+    const matrix = buildExportMatrix(
+      [row('r1')],
+      [q('q-text', 'LongText')],
+      [answer('r1', 'q-text', { TextValue: 'junk', Score: 0 })],
+      new Set(['q-text']),
+    );
+    expect(matrix[0]['q-text::score']).toBe(0);
   });
 
   it('omits rationale text — it is prose, and would swamp a spreadsheet column', () => {

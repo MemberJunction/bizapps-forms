@@ -24,6 +24,7 @@ type StatusFilter = 'all' | ResponseStatus;
         [ngModel]="search()"
         (ngModelChange)="search.set($event)"
         aria-label="Search responses by respondent" />
+      @if (StatusFiltersApply()) {
       <div class="filters" role="group" aria-label="Filter by status">
         @for (f of statusFilters; track f.value) {
           <button
@@ -35,6 +36,7 @@ type StatusFilter = 'all' | ResponseStatus;
           </button>
         }
       </div>
+      }
     </div>
 
     @if (filtered().length === 0) {
@@ -182,6 +184,19 @@ export class FormsResponseListComponent {
   set Rows(value: ResponseListRow[]) {
     this._rows.set(value ?? []);
   }
+
+  /**
+   * Whether the status filter is worth offering.
+   *
+   * All three callers build their rows with `buildResponseRows`, which lists COMPLETE
+   * responses only — so against them the Partial chip can never match and the filter is
+   * dead controls. The component still takes arbitrary `Rows`, so rather than delete a
+   * working capability we show the filter only when the rows actually span more than one
+   * status. Today that means it is hidden; a caller that passes Partials gets it back.
+   */
+  public readonly StatusFiltersApply = computed(
+    () => new Set(this._rows().map((r) => r.status)).size > 1,
+  );
 
   public readonly filtered = computed(() => {
     const term = this.search().trim().toLowerCase();

@@ -87,6 +87,20 @@ describe('buildResponseDetail — AI scoring', () => {
     expect(detail.answers[0].scoreRationale).toBe('Positive sentiment');
   });
 
+  it('treats a score of ZERO as scored — every scored answer in the dev DB is 0.0000', () => {
+    // Not hypothetical: `Forms: Analyze Written Responses` scores junk text 0, and a
+    // truthiness check anywhere on this path would hide the AI output completely.
+    const detail = buildResponseDetail(
+      detailInput({
+        answers: [answer('r1', 'qt', { TextValue: 'test string', Score: 0, ScoreRationale: 'Not a genuine inquiry.' })],
+        questions: [q('qt', 'LongText')],
+      }),
+    );
+    expect(detail.answers[0].score).toBe(0);
+    expect(detail.answers[0].score).not.toBeNull();
+    expect(detail.answers[0].scoreRationale).toBe('Not a genuine inquiry.');
+  });
+
   it('leaves score null on an unscored answer rather than defaulting it to zero', () => {
     const detail = buildResponseDetail(
       detailInput({

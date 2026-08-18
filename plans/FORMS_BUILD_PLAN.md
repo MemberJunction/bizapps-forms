@@ -1183,7 +1183,16 @@ native entities. This is the reporting differentiator no incumbent has.
       the Angular Linker) — and its assertions were checked red-with-wiring-removed, green-restored; an
       unanchored `toContain` passed against a commented-out import, which is the exact regression it exists
       to catch.
-    - **Still owed (per §6 of the responses plan, and unit tests cannot supply it):** the human-in-the-loop
-      pass against a real host login — dashboard Responses tab, builder Responses tab, and a Form Response
-      opened from Explorer search — on a submission from `npm run smoke:respondent` carrying a score, an
-      upload, an automation run and a binding record.
+    - **Live-DB verification done (the half that was possible).** Read-only against `MJ_Forms_Dev`: every
+      column the new reads select exists on the live views — **including the denormalised
+      `vwFormAutomationRuns.FormAutomation` and `vwFormEntityBindingRecords.Binding`**, so no name
+      batch-load is needed — and the exact queries return the expected shapes on a real response (file
+      answer → `resume.pdf`; a `Succeeded` run "Smoke: create Person"; a `Created` ledger row with
+      `WrittenFields`). `TargetEntityID` resolves to `MJ_BizApps_Common: People` in `__mj.Entity`, which
+      is what `Metadata.EntityByID().Name` returns client-side. **One real finding:** every scored answer
+      in the dev DB has `Score = 0.0000`, so any truthiness check on the score path would hide all AI
+      output; all three paths already used explicit null checks, and three regression tests now pin it.
+    - **Still owed — the browser half of §6.** Dashboard Responses tab, builder Responses tab, and a Form
+      Response opened from Explorer search, rendered against a real host login. Not possible from this
+      worktree: `apps/` is untracked and absent, and the main checkout's `apps/MJExplorer/` holds only a
+      `dist`. Unit tests and live SQL both structurally cannot supply it.

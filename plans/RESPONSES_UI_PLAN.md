@@ -272,5 +272,30 @@ Responses tab (S1), builder → responses tab (S2), and a Form Response opened f
 Explorer search (S3), on a submission produced by `npm run smoke:respondent` so scores,
 uploads, automation runs, and binding records are all present.
 
-**[as built] Still owed.** Everything above is verified by `ngc` (strictTemplates), the
-675-test suite, and the three lint gates; none of that can substitute for this pass.
+**[as built] Partially done — the SQL half is verified; the browser half is still owed.**
+
+What was verified, against the live `MJ_Forms_Dev` (localhost:1456) on 2026-08-18, read-only:
+
+- **Every column the new reads select exists on the live views** — including the two
+  denormalised virtual fields this plan was unsure about (`vwFormAutomationRuns.FormAutomation`,
+  `vwFormEntityBindingRecords.Binding`), so the "else batch-load names" fallback in §2/S1 is
+  not needed. This is the check `ngc` structurally cannot do: a mistyped column name is a
+  runtime failure, not a type error.
+- **The exact queries `responseDetailQueries` emits return the expected shapes** on response
+  `DF11CE1C-…`: a file answer joining to `resume.pdf` (`application/pdf`, 32 bytes, Active),
+  one `Succeeded` automation run named "Smoke: create Person", and one `Created` binding-ledger
+  row with `WrittenFields = ["Email","FirstName","LastName","PhotoURL"]`.
+- **`TargetEntityID` resolves**: the ledger's target maps to `MJ_BizApps_Common: People` in
+  `__mj.Entity`, which is exactly what `Metadata.EntityByID(...).Name` returns client-side.
+- **Live status coverage** exercises the pills: runs are `Succeeded` ×82 / `Failed` ×13;
+  outcomes are `Created` ×39 / `Merged` ×12 / `Unchanged` ×29.
+- **One real finding, now guarded by tests.** Every scored answer in the dev DB has
+  `Score = 0.0000` (the analyzer scores junk text zero). A truthiness check anywhere on the
+  score path would therefore hide *all* AI output. All three paths use explicit null checks
+  and were confirmed correct; three regression tests now pin that.
+
+What is **still owed**: the browser half — dashboard Responses tab, builder Responses tab, and
+a Form Response opened from Explorer search, rendered against a real host login. It could not be
+done here: `apps/` is untracked and absent from this worktree, and the main checkout's
+`apps/MJExplorer/` holds only a `dist`. No amount of green SQL or unit tests substitutes for
+seeing the three surfaces render.
