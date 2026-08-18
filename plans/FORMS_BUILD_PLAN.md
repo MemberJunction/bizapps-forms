@@ -155,7 +155,7 @@ resume in the §9 dependency order.
 
 ## 0. What this is
 
-**MJ Forms** is a free, open-source MemberJunction **Open App** for **forms, surveys, and
+**MJ Forms** is a source-available MemberJunction **Open App** for **forms, surveys, and
 intake** that:
 
 - works for **anonymous internet users** (no account, public links / embeds),
@@ -187,7 +187,7 @@ adopt MJ beyond the "AI data platform" story.** Everyone needs forms; few people
 for an agent framework. A first-class, beautiful, free forms app is a tangible, universally
 understood capability that makes an MJ instance immediately more useful.
 
-It is deliberately **free and open source (ISC, like bizapps-common)**, with a special focus
+It is deliberately **source-available under the Business Source License 1.1 (like bizapps-common)**, with a special focus
 on the audiences MJ already serves well — **nonprofits and associations** — for whom
 per-response metered survey tools (Typeform-style) are a real, recurring budget pain.
 

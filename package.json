@@ -1,7 +1,7 @@
 {
   "name": "bizapps-forms",
   "version": "0.1.0",
-  "license": "ISC",
+  "license": "BUSL-1.1",
   "description": "MJ Forms - free, open-source forms, surveys & intake for MemberJunction (anonymous-friendly, mobile-first, responses as first-class records)",
   "workspaces": [
     "packages/*"

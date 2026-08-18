@@ -3,7 +3,7 @@ Don't say "You're absolutely right" each time I correct you. Mix it up, that's s
 
 # MJ Forms Development Guide
 
-**MJ Forms** is a free, open-source [MemberJunction](https://github.com/MemberJunction/MJ) **Open App** for **forms, surveys, and intake**. It works for **anonymous internet users** (public links / embeds), is **mobile-first** (published as an Angular custom-element widget, not the Explorer shell), is **easy to set up** (visual builder or AI-authored), and makes responses **first-class records in your MemberJunction database** — optionally projected into real, query-able, Skip-accessible entities.
+**MJ Forms** is a source-available [MemberJunction](https://github.com/MemberJunction/MJ) **Open App** for **forms, surveys, and intake**. It works for **anonymous internet users** (public links / embeds), is **mobile-first** (published as an Angular custom-element widget, not the Explorer shell), is **easy to set up** (visual builder or AI-authored), and makes responses **first-class records in your MemberJunction database** — optionally projected into real, query-able, Skip-accessible entities.
 
 **The single source of truth for building MJ Forms is [`plans/FORMS_BUILD_PLAN.md`](plans/FORMS_BUILD_PLAN.md).** Read its Status Snapshot + Progress Log at the start of every session, pick up the first unfinished task in dependency order, and update task state there as you work.
 
