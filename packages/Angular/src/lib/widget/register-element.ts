@@ -24,11 +24,8 @@
 import { ApplicationRef, ComponentRef, createComponent } from '@angular/core';
 import { createApplication } from '@angular/platform-browser';
 
-import { FORMS_API_SERVICE } from './api/forms-api.interface';
-import { FORMS_API_CONFIG, normalizeApiConfig, type FormsApiConfig } from './api/forms-api.config';
-import { FormsGraphQLApiService } from './api/forms-api.graphql.service';
-import { FormsMockApiService } from './api/forms-api.mock.service';
-import { FormUploadService } from './api/form-upload.service';
+import { normalizeApiConfig, type FormsApiConfig } from './api/forms-api.config';
+import { formsWidgetProviders } from './widget-providers';
 import { MjFormComponent } from './mj-form.component';
 
 /** Element tag the widget registers under. */
@@ -69,19 +66,7 @@ class MjFormElement extends HTMLElement {
       token: this.getAttribute('token') ?? undefined,
       turnstileSiteKey: this.getAttribute('turnstile-site-key') ?? undefined,
     });
-    const apiServiceProvider = config.graphqlUrl
-      ? { provide: FORMS_API_SERVICE, useClass: FormsGraphQLApiService }
-      : { provide: FORMS_API_SERVICE, useClass: FormsMockApiService };
-
-    const app = await createApplication({
-      providers: [
-        { provide: FORMS_API_CONFIG, useValue: config },
-        apiServiceProvider,
-        FormsGraphQLApiService,
-        FormsMockApiService,
-        FormUploadService,
-      ],
-    });
+    const app = await createApplication({ providers: formsWidgetProviders(config) });
     this.appRef = app;
 
     const componentRef = createComponent(MjFormComponent, {

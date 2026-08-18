@@ -6,6 +6,8 @@
  */
 export { MjFormComponent } from './mj-form.component';
 export { registerMjFormElement, MJ_FORM_TAG } from './register-element';
+// Every provider a <mj-form> host must supply; used by the custom element and the builder preview.
+export { formsWidgetProviders } from './widget-providers';
 
 // S1 API seam
 export { FORMS_API_SERVICE, type IFormsApiService } from './api/forms-api.interface';
