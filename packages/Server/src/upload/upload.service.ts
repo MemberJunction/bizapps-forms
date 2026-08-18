@@ -164,7 +164,12 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
   }
 
   // 4. Store bytes + create the MJ: Files record via the canonical MJ storage path.
-  return storeFile(ctx, file, req, distCheck.resolved);
+  //    The ledger records the DEFINITION's spelling of the question id, not the client's: the
+  //    match above is case-folded, so writing back what the caller sent would let
+  //    `FormUpload.QuestionID` disagree with the published definition about which question an
+  //    upload answered — and multipart field values are not trimmed (see multipart.ts), so the
+  //    raw string can also carry surrounding whitespace into a uniqueidentifier column.
+  return storeFile(ctx, file, req, distCheck.resolved, questionCheck.questionId);
 }
 
 /** Enforce presence, size cap, and content-type allowlist. */
@@ -273,7 +278,10 @@ async function resolveOpenDistribution(
  * GUIDs are compared case-folded — minted lowercase on the client, returned uppercase by
  * SQL Server — the same boundary every other identifier in this codebase crosses.
  */
-function validateQuestion(target: ResolvedUploadTarget | undefined, questionId: string): UploadResult {
+function validateQuestion(
+  target: ResolvedUploadTarget | undefined,
+  questionId: string,
+): UploadResult & { questionId?: string } {
   const wanted = questionId.trim().toLowerCase();
   const question = target?.questions.find((q) => q.id.trim().toLowerCase() === wanted);
   if (!question) {
@@ -282,7 +290,9 @@ function validateQuestion(target: ResolvedUploadTarget | undefined, questionId: 
   if (question.type !== 'FileUpload') {
     return fail(400, `Question is not a FileUpload question (got "${question.type}").`);
   }
-  return { ok: true };
+  // Return the DEFINITION's id, not the caller's — the one place that decides which question this
+  // upload answered, so the ledger cannot record a spelling the definition disagrees with.
+  return { ok: true, questionId: question.id };
 }
 
 /** Store the file via FileStorageEngine.UploadFile and shape the success body. */
@@ -291,6 +301,8 @@ async function storeFile(
   file: ParsedFile,
   req: UploadRequest,
   resolved: { distributionId: string; formId: string } | undefined,
+  /** The published definition's spelling of the question id, from {@link validateQuestion}. */
+  questionId: string | undefined,
 ): Promise<UploadResult> {
   const cfg = getUploadConfig();
   // The File row and the provenance row are both written under an ELEVATED principal, not the
@@ -319,7 +331,7 @@ async function storeFile(
         providerKey: result.StoragePath,
         distributionId: resolved.distributionId,
         formId: resolved.formId,
-        questionId: req.questionId,
+        questionId,
         responseId: req.responseId,
         sessionId: ctx.sessionId,
         uploadedByUserId: ctx.contextUser?.ID,

@@ -7,6 +7,11 @@ on:
     paths:
       - 'pnpm-lock.yaml'
       - 'packages/**'
+      # The MJAPI dev harness is a workspace member, so its package.json participates in the
+      # lockfile and its code is what a developer's live verification actually runs. Without
+      # this, a PR editing only apps/** runs no workflow at all and reports green — the same
+      # silently-not-running failure class the note below describes.
+      - 'apps/**'
       - 'scripts/**'
       - 'smoke/**'
       - 'turbo.json'
@@ -22,6 +27,11 @@ on:
     paths:
       - 'pnpm-lock.yaml'
       - 'packages/**'
+      # The MJAPI dev harness is a workspace member, so its package.json participates in the
+      # lockfile and its code is what a developer's live verification actually runs. Without
+      # this, a PR editing only apps/** runs no workflow at all and reports green — the same
+      # silently-not-running failure class the note below describes.
+      - 'apps/**'
       - 'scripts/**'
       - 'smoke/**'
       - 'turbo.json'

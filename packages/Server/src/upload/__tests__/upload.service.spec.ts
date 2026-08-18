@@ -97,7 +97,7 @@ function request(overrides?: Partial<UploadRequest>): UploadRequest {
 }
 
 /** Provenance rows recorded by the stub, so tests can assert what the endpoint wrote. */
-const recordedProvenance: { fileId: string; responseId?: string; distributionId: string }[] = [];
+const recordedProvenance: { fileId: string; responseId?: string; distributionId: string; questionId?: string }[] = [];
 
 function context(opts: {
   perms?: Record<string, boolean>;
@@ -120,6 +120,7 @@ function context(opts: {
         fileId: input.fileId,
         responseId: input.responseId,
         distributionId: input.distributionId,
+        questionId: input.questionId,
       });
       return true;
     },
@@ -211,9 +212,19 @@ describe('runUpload', () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  it('accepts a questionId differing only by GUID case (client-lowercase vs SQL-uppercase)', async () => {
-    const result = await runUpload(context({}), request({ questionId: 'Q-FILE' }));
+  it('accepts a questionId differing only by GUID case, and records the definition spelling', async () => {
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'Q-FILE' }));
+
     expect(result.ok).toBe(true);
+    // Reached storage — an accepted upload must actually store, not merely avoid rejection.
+    expect(upload).toHaveBeenCalledOnce();
+    // The LEDGER carries the definition's spelling, not whatever case the client sent. The id is
+    // matched case-folded (client mints lowercase, SQL Server returns uppercase) but written
+    // canonically, so `FormUpload.QuestionID` cannot disagree with the published definition about
+    // which question an upload answered.
+    expect(recordedProvenance).toHaveLength(1);
+    expect(recordedProvenance[0].questionId).toBe('q-file');
   });
 
   it('rejects (404) when the distribution does not resolve to an open form', async () => {

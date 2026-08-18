@@ -24,7 +24,7 @@
     "@mj-biz-apps/forms-server": "workspace:*",
     "@mj-biz-apps/tasks-entities": "1.2.1",
     "class-validator": "0.14.4",
-    "dotenv": "^16.4.5",
+    "dotenv": "16.6.1",
     "type-graphql": "2.0.0-beta.3"
   }
 }

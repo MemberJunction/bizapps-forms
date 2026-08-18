@@ -180,6 +180,21 @@ class ThrowawayLocalFileStorage extends FileStorageBase {
     }
   }
 
+  /**
+   * Abstract on the base class. Plain JS gives no compile error for omitting it, and the omission
+   * is silent rather than loud: consumers read `driver.IsConfigured` as `undefined` and skip the
+   * driver (storage-backed search returns zero results, autotagging rejects it) with no exception
+   * to trace. The upload path never reads it, which is why the résumé arc worked regardless.
+   */
+  get IsConfigured() {
+    return Boolean(this._baseDir);
+  }
+
+  /** Abstract on the base class; unsupported here rather than absent, so callers get a real error. */
+  async SearchFiles(_options) {
+    this.throwUnsupportedOperationError('SearchFiles');
+  }
+
   async CreatePreAuthUploadUrl(_objectName) {
     this.throwUnsupportedOperationError('CreatePreAuthUploadUrl');
   }

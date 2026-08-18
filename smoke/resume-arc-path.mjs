@@ -10,9 +10,12 @@
  *
  * First live run (2026-08-18) found both shipped bugs this file now pins:
  *   - `Forms Automation Runner` had no read grant on the upload ledger, so bind-time
- *     verification always failed closed (V202608181030 adds the grant);
+ *     verification always failed closed (V202608181030 adds the grant). Pinned by the
+ *     binding assertions below: without the grant the automation run fails and the bound
+ *     record never receives the file id.
  *   - the upload endpoint accepted a questionId that was not on the published definition and
- *     only failed deep in the ledger insert, orphaning the stored bytes.
+ *     only failed deep in the ledger insert, orphaning the stored bytes. Pinned by the
+ *     unknown-questionId POST, which asserts a 400 AND that no `MJ: Files` row appeared.
  *
  * Seeds (idempotently, dev DB only): a FileUpload question on the form (row + published-
  * snapshot splice) and a binding FieldMap for it. Requires a running MJAPI with a working
@@ -48,14 +51,32 @@ function sql(q) {
 }
 
 async function gql(token, query, variables) {
+  const body = await gqlRaw(token, query, variables);
+  if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 300));
+  return body.data;
+}
+
+/**
+ * The un-throwing form, for the adversarial check.
+ *
+ * That check asserts a REJECTION, so routing it through `gql` made it unfalsifiable: `gql` throws
+ * on a GraphQL error, on a non-JSON body (a 502 or an auth redirect), and on a dead connection,
+ * and the caller's `catch` reported every one of those as "rejected — ok". A regression that let a
+ * stranger claim the file, occurring alongside any unrelated 500, would have been reported as a
+ * pass. The caller now inspects the body itself and matches on WHY it was rejected.
+ */
+async function gqlRaw(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
     body: JSON.stringify({ query, variables }),
   });
-  const body = await res.json();
-  if (body.errors) throw new Error(JSON.stringify(body.errors).slice(0, 300));
-  return body.data;
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { transportError: `HTTP ${res.status}: ${text.slice(0, 120)}` };
+  }
 }
 
 async function session() {
@@ -97,7 +118,17 @@ const fieldMappings = JSON.stringify({
   ],
 }).replace(/'/g, "''");
 sql(`UPDATE __mj_BizAppsForms.FormEntityBinding SET FieldMappings='${fieldMappings}' WHERE ID='${BINDING_ID}';`);
-pass('question row + snapshot splice + binding field map');
+// Assert the seeding actually landed rather than announcing it. Each statement above exits 0 when
+// it affects zero rows — a missing distribution, or seed-binding-smoke.mjs never having run — so an
+// unconditional pass() here reported "ok" for a fixture that had established nothing.
+check(
+  sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormQuestion WHERE ID='${Q_RESUME}';`) === '1',
+  'FileUpload question row exists',
+);
+check(
+  sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormEntityBinding WHERE ID='${BINDING_ID}' AND FieldMappings LIKE '%${Q_RESUME}%';`) === '1',
+  'binding field map references the résumé question (seed-binding-smoke.mjs has run)',
+);
 
 // ---------- 2. drive the public path ----------
 console.log('--- driving the public path ---');
@@ -115,6 +146,22 @@ const up = await fetch(`${BASE}/forms/upload`, { method: 'POST', headers: { Auth
 const upBody = await up.json().catch(() => ({}));
 check(up.status === 200 && upBody.fileId, `upload accepted (HTTP ${up.status})`, JSON.stringify(upBody));
 const fileId = upBody.fileId;
+
+// The Bug 2 rejection path, driven for real. Without this the file only ever sent a VALID
+// questionId, which the pre-fix code also accepted — so the whole smoke passed unchanged against
+// the buggy build and the header's claim to pin this bug was false.
+const filesBefore = sql('SELECT COUNT(*) FROM __mj.[File];');
+const bogus = new FormData();
+bogus.append('file', new Blob([new TextEncoder().encode('%PDF-1.4 should never be stored')], { type: 'application/pdf' }), 'bogus.pdf');
+bogus.append('distributionSlug', SLUG);
+bogus.append('questionId', randomUUID());
+bogus.append('responseId', randomUUID());
+const bogusRes = await fetch(`${BASE}/forms/upload`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: bogus });
+const bogusBody = await bogusRes.json().catch(() => ({}));
+check(bogusRes.status === 400, `unknown questionId is rejected 400 (got ${bogusRes.status})`, JSON.stringify(bogusBody));
+check(/unknown "questionid"/i.test(bogusBody.error ?? ''), 'rejected for the right reason', JSON.stringify(bogusBody));
+// The load-bearing half: rejected BEFORE storage, so no orphaned bytes or MJ: Files row.
+check(sql(`SELECT COUNT(*) FROM __mj.[File];`) === filesBefore, 'no MJ: Files row was created by the rejected upload');
 
 const published = await gql(token,
   'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
@@ -167,28 +214,42 @@ check(person.toLowerCase() === fileId.toLowerCase(), 'Person.PhotoURL carries th
 console.log('--- adversarial: second session submits the same fileId ---');
 const token2 = await session();
 const rid2 = randomUUID();
-let stolen;
-try {
-  stolen = await gql(token2, `
-    mutation S($input: FormSubmissionInputType!) {
-      SubmitFormResponse(input: $input) { success errors { message } }
-    }`, {
-    input: {
-      distributionSlug: SLUG, formVersionId, responseId: rid2, partial: false,
-      startedAt: new Date().toISOString(), clientMeta: { referrer: '', userAgent: 'resume-arc-smoke' },
-      answers: [
-        { questionId: Q_NAME, textValue: 'Thief' },
-        { questionId: Q_EMAIL, textValue: `thief+${Date.now()}@example.invalid` },
-        { questionId: Q_MSG, textValue: 'stealing a file' },
-        { questionId: Q_PHONE, numericValue: 1 },
-        { questionId: Q_RESUME, fileId },
-      ],
-    },
-  });
-  check(stolen?.SubmitFormResponse?.success !== true, 'stranger submission with stolen fileId is REJECTED',
-    JSON.stringify(stolen?.SubmitFormResponse));
-} catch (e) {
-  pass(`stranger submission rejected (${e.message.slice(0, 80)})`);
+const stolen = await gqlRaw(token2, `
+  mutation S($input: FormSubmissionInputType!) {
+    SubmitFormResponse(input: $input) { success errors { message } }
+  }`, {
+  input: {
+    distributionSlug: SLUG, formVersionId, responseId: rid2, partial: false,
+    startedAt: new Date().toISOString(), clientMeta: { referrer: '', userAgent: 'resume-arc-smoke' },
+    answers: [
+      { questionId: Q_NAME, textValue: 'Thief' },
+      { questionId: Q_EMAIL, textValue: `thief+${Date.now()}@example.invalid` },
+      { questionId: Q_MSG, textValue: 'stealing a file' },
+      { questionId: Q_PHONE, numericValue: 1 },
+      { questionId: Q_RESUME, fileId },
+    ],
+  },
+});
+
+// Assert POSITIVELY on the reason. A transport failure or an unrelated server error is a FAILED
+// run, not a pass — the whole point of this check is that the file was refused *for provenance*.
+const stolenResult = stolen.data?.SubmitFormResponse;
+const rejectionText = JSON.stringify(stolen.errors ?? stolenResult?.errors ?? '');
+if (stolen.transportError) {
+  fail('stranger submission with stolen fileId is REJECTED', `transport failure, not a rejection: ${stolen.transportError}`);
+} else if (stolenResult?.success === true) {
+  fail('stranger submission with stolen fileId is REJECTED', 'the submission SUCCEEDED — provenance did not hold');
+} else {
+  // Anchored on the message the submit pipeline actually emits for a file it cannot attribute
+  // (`submit-pipeline.ts` — "That file could not be verified as your upload."), plus the
+  // provenance vocabulary a future rewording would plausibly use. Matching the real string is the
+  // point: the first version of this check guessed at the wording and reported a correct rejection
+  // as a failure, which is the honest direction to fail in but still a false alarm.
+  check(
+    /could not be verified as your upload|provenance|unattributable|unknown-file|wrong-distribution|revoked/i.test(rejectionText),
+    'stranger submission with stolen fileId is REJECTED for provenance',
+    `rejected, but not for a provenance reason: ${rejectionText.slice(0, 200)}`,
+  );
 }
 
 console.log(failures === 0 ? '\nPASS — the full résumé arc works end to end.' : `\nFAIL — ${failures} check(s) failed.`);

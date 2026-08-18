@@ -18,7 +18,22 @@
 --
 -- Role matched by NAME, not GUID: `Role.Name` is UNIQUE and a host where a sibling app minted the
 -- role first carries it under a different ID (the same lesson the 0.8.0 seed and #39 hardening
--- already record). Set-based and idempotent; asserts its own postcondition and nothing role-wide.
+-- already record). Set-based and idempotent; asserts its own postconditions and nothing role-wide.
+--
+-- WHY HAND-WRITTEN SQL RATHER THAN A REGENERATED SEED. This role's other eight grants are authored
+-- in `metadata/entity-permissions/.entity-permissions.json` and ship through
+-- `V202608081700__v0.8.x__Metadata_Sync.sql`, and that remains the source of truth — the record for
+-- THIS grant is declared there too, under the SAME id this file inserts
+-- (7A49C1D4-8E02-4F5B-9C63-D18B52E7A930), so `metadata/` describes the deployed state and a future
+-- full regeneration reproduces exactly this row instead of minting a duplicate under a fresh GUID
+-- (`__mj.EntityPermission` has no unique constraint on (EntityID, RoleID), so a duplicate is
+-- silently additive — the state #39 had to clean up).
+--
+-- This file is the SHIPPING VEHICLE for that record, for the same reason
+-- `V202608131600__…Respondent_Grant_Hardening` is hand-written: hosts already installed at 0.8.x
+-- have the role and its eight grants, and they need the ninth applied without replaying a 4,600-line
+-- seed. A repair migration reaches both a fresh install and an existing one; regenerating the seed
+-- reaches only the fresh one.
 
 DECLARE @RunnerRoleID UNIQUEIDENTIFIER = (
     SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner');
@@ -40,9 +55,16 @@ IF EXISTS (
     SELECT 1 FROM [${mjSchema}].[EntityPermission]
     WHERE RoleID = @RunnerRoleID AND EntityID = @FormUploadsEntityID)
 BEGIN
+    -- Sets CanCreate = 0 as well, and is deliberately NOT guarded on `CanRead = 0`. The guard
+    -- would skip any row that already reads, including one an operator hand-inserted while
+    -- diagnosing "provenance cannot be verified" — the nearest row to copy is the Developer grant
+    -- three lines away in V202608081200, which is full CRUD (1,1,1,1). This file would then have
+    -- blessed a runner that can mint its own ledger rows and exited 0 while its header claims
+    -- read-only. A migration must enforce the state it documents, not assume it.
     UPDATE [${mjSchema}].[EntityPermission]
-    SET CanRead = 1
-    WHERE RoleID = @RunnerRoleID AND EntityID = @FormUploadsEntityID AND CanRead = 0;
+    SET CanRead = 1, CanCreate = 0
+    WHERE RoleID = @RunnerRoleID AND EntityID = @FormUploadsEntityID
+      AND (CanRead = 0 OR CanCreate = 1);
 END
 ELSE
 BEGIN
@@ -52,8 +74,17 @@ BEGIN
         ('7A49C1D4-8E02-4F5B-9C63-D18B52E7A930', @FormUploadsEntityID, @RunnerRoleID, 0, 1, 0, 0);
 END
 
--- Postcondition: the runner can read the ledger. (No role-wide counts — shared-role discipline.)
+-- Postconditions. TWO checks, because neither implies the other and this file asserts BOTH halves
+-- of what its header promises. (No role-wide counts — shared-role discipline, per #39.)
 IF NOT EXISTS (
     SELECT 1 FROM [${mjSchema}].[EntityPermission]
     WHERE RoleID = @RunnerRoleID AND EntityID = @FormUploadsEntityID AND CanRead = 1)
     THROW 51122, 'MJ Forms v0.10.x: postcondition failed — "Forms Automation Runner" still cannot read "MJ_BizApps_Forms: Form Uploads".', 1;
+
+-- The read half being satisfied says nothing about create: `__mj.EntityPermission` has no unique
+-- constraint on (EntityID, RoleID), so a second, wider row can sit beside a correct one and
+-- `GetUserPermisions` unions them. Asserting absence is the only check that catches that.
+IF EXISTS (
+    SELECT 1 FROM [${mjSchema}].[EntityPermission]
+    WHERE RoleID = @RunnerRoleID AND EntityID = @FormUploadsEntityID AND CanCreate = 1)
+    THROW 51123, 'MJ Forms v0.10.x: postcondition failed — "Forms Automation Runner" holds CanCreate on "MJ_BizApps_Forms: Form Uploads"; a runner that can write the ledger can vouch for arbitrary files (DG-12a).', 1;
