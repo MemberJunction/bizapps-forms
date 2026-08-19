@@ -1,9 +1,30 @@
+/* Progress pinned to the top, the question centred in whatever is left.
+   The card used to sit at the top of a 60vh box, which was wrong twice over: one question on a
+   tall screen read as a page that had failed to finish loading, and `vh` is a VIEWPORT unit in a
+   widget that is embedded inside other people's layouts — in a preview frame, or in a sidebar,
+   60vh is 60% of a window this element does not own, so the box was routinely taller than the
+   space it was given. Flex fills the actual container and ignores the question entirely. */
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .mjf-oneq {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 1.5rem;
-  min-height: 60vh;
 }
+
+.mjf-oneq__progress { flex: none; }
+
+/* auto margins eat the free space above AND below, which is what centres it — and collapses to
+   nothing when the question is taller than the container, so a long question still scrolls
+   from the top instead of having its head cut off. */
+.mjf-oneq__card { margin: auto 0; }
 
 .mjf-oneq__progress {
   display: flex;
