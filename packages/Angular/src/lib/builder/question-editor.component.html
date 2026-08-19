@@ -36,9 +36,9 @@
       />
     </div>
 
-    <div class="qe-required">
-      <span>Required</span>
+    <mjf-setting-row label="Required" hint="The respondent cannot continue without answering.">
       <button
+        slot="control"
         type="button"
         class="mjf-switch"
         [class.is-on]="node.entity.IsRequired"
@@ -47,12 +47,84 @@
         aria-label="Required"
         (click)="toggleRequired()"
       ></button>
-    </div>
+    </mjf-setting-row>
 
-    @if (settingFields.length > 0) {
+    @if (hasPlaceholder) {
+      <mjf-setting-row
+        label="Custom placeholder text"
+        hint="Grey text shown inside the empty field. It is a hint, not an answer."
+        [open]="placeholderOpen"
+      >
+        <button
+          slot="control"
+          type="button"
+          class="mjf-switch"
+          [class.is-on]="placeholderOpen"
+          role="switch"
+          [attr.aria-checked]="placeholderOpen"
+          aria-label="Custom placeholder text"
+          (click)="togglePlaceholder()"
+        ></button>
+        <input
+          #phInput
+          class="mjf-input"
+          type="text"
+          [value]="settingValue(placeholderField)"
+          [attr.placeholder]="placeholderField.placeholder ?? null"
+          aria-label="Placeholder text"
+          (change)="setSetting(placeholderField, phInput.value)"
+        />
+      </mjf-setting-row>
+    }
+
+    <mjf-setting-row
+      label="Answer validation"
+      hint="Reject an answer that does not match, and tell the respondent why."
+      [open]="validationOpen"
+    >
+      <button
+        slot="control"
+        type="button"
+        class="mjf-switch"
+        [class.is-on]="validationOpen"
+        role="switch"
+        [attr.aria-checked]="validationOpen"
+        aria-label="Answer validation"
+        (click)="toggleValidation()"
+      ></button>
+      <mjf-validation-rule-editor
+        [questionType]="node.entity.QuestionType"
+        [rule]="validationRule"
+        (ruleChange)="onValidationChange($event)"
+      ></mjf-validation-rule-editor>
+    </mjf-setting-row>
+
+    <mjf-setting-row
+      label="Show only if"
+      hint="Hide this question unless an earlier answer matches."
+      [open]="conditionalOpen"
+    >
+      <button
+        slot="control"
+        type="button"
+        class="mjf-switch"
+        [class.is-on]="conditionalOpen"
+        role="switch"
+        [attr.aria-checked]="conditionalOpen"
+        aria-label="Show only if"
+        (click)="toggleConditional()"
+      ></button>
+      <mjf-conditional-rule-editor
+        [sources]="conditionalSources"
+        [rule]="conditionalRule"
+        (ruleChange)="onConditionalChange($event)"
+      ></mjf-conditional-rule-editor>
+    </mjf-setting-row>
+
+    @if (otherSettingFields.length > 0) {
       <div class="qe-section">
         <p class="qe-section-title">Settings</p>
-        @for (field of settingFields; track field.key) {
+        @for (field of otherSettingFields; track field.key) {
           <div class="mjf-field">
             <label class="mjf-field-label" [attr.for]="'qe-set-' + field.key">{{ field.label }}</label>
             @if (field.kind === 'multiline') {
@@ -177,23 +249,5 @@
         </button>
       </div>
     }
-
-    <div class="qe-section">
-      <p class="qe-section-title">Validation</p>
-      <mjf-validation-rule-editor
-        [questionType]="node.entity.QuestionType"
-        [rule]="validationRule"
-        (ruleChange)="onValidationChange($event)"
-      ></mjf-validation-rule-editor>
-    </div>
-
-    <div class="qe-section">
-      <p class="qe-section-title">Conditional logic</p>
-      <mjf-conditional-rule-editor
-        [sources]="conditionalSources"
-        [rule]="conditionalRule"
-        (ruleChange)="onConditionalChange($event)"
-      ></mjf-conditional-rule-editor>
-    </div>
   </div>
 }

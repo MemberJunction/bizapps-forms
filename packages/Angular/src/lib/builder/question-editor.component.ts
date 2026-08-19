@@ -30,6 +30,8 @@ import {
 } from './conditional-rule-editor.component';
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 import { ImageFieldComponent } from './image-field.component';
+import { SettingRowComponent } from './setting-row.component';
+import { isOptionalOpen, toggleOptional } from './optional-setting';
 import {
   parseConditionalRule,
   parseQuestionSettings,
@@ -65,18 +67,6 @@ const QUESTION_EDITOR_CSS = /* css */ `
   text-transform: uppercase;
   color: var(--mj-text-muted);
 }
-
-.qe-required {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mjf-gap-sm);
-  padding: 10px 12px;
-  border: 1px solid var(--mj-border-subtle);
-  border-radius: var(--mjf-radius-sm);
-  background: var(--mj-bg-surface-sunken);
-}
-.qe-required span { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 
 .qe-options { display: flex; flex-direction: column; gap: 6px; }
 .qe-option { display: flex; align-items: center; gap: 6px; }
@@ -136,6 +126,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
     ConditionalRuleEditorComponent,
     ValidationRuleEditorComponent,
     ImageFieldComponent,
+    SettingRowComponent,
   ],
   templateUrl: './question-editor.component.html',
   styles: [FORMS_UI_CSS, QUESTION_EDITOR_CSS],
@@ -165,6 +156,82 @@ export class QuestionEditorComponent {
   }>();
   /** Emitted when an option should be removed. */
   @Output() removeOptionRequested = new EventEmitter<{ node: QuestionNode; optionIndex: number }>();
+
+  /**
+   * Rows the author has switched on but not yet filled in.
+   *
+   * None of these three settings has a boolean column — a question either holds a validation
+   * rule or it does not — so "on" is derived from the value, and this covers the gap between
+   * switching a row on and typing into it. Reset when the selected question changes, since the
+   * next question's emptiness is not this question's.
+   */
+  private requested = { validation: false, placeholder: false, conditional: false };
+
+  @Input()
+  public set selectedId(id: string) {
+    if (id !== this.lastSelectedId) {
+      this.lastSelectedId = id;
+      this.requested = { validation: false, placeholder: false, conditional: false };
+    }
+  }
+  private lastSelectedId = '';
+
+  protected get validationOpen(): boolean {
+    return isOptionalOpen(!!this.validationRule, this.requested.validation);
+  }
+
+  protected get placeholderOpen(): boolean {
+    return isOptionalOpen(this.settingValue(this.placeholderField).trim() !== '', this.requested.placeholder);
+  }
+
+  protected get conditionalOpen(): boolean {
+    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
+  }
+
+  protected toggleValidation(): void {
+    const next = toggleOptional(!!this.validationRule, this.requested.validation);
+    this.requested.validation = next.requested;
+    if (next.clear) {
+      this.onValidationChange(undefined);
+    }
+  }
+
+  protected togglePlaceholder(): void {
+    const field = this.placeholderField;
+    const next = toggleOptional(this.settingValue(field).trim() !== '', this.requested.placeholder);
+    this.requested.placeholder = next.requested;
+    if (next.clear) {
+      this.setSetting(field, '');
+    }
+  }
+
+  protected toggleConditional(): void {
+    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
+    this.requested.conditional = next.requested;
+    if (next.clear) {
+      this.onConditionalChange(undefined);
+    }
+  }
+
+  /** The placeholder setting for this type, or a blank stand-in when the type has none. */
+  protected get placeholderField(): QuestionSettingField {
+    return (
+      this.settingFields.find((f) => f.key === 'placeholder') ?? {
+        key: 'placeholder',
+        label: 'Placeholder',
+        kind: 'text',
+      }
+    );
+  }
+
+  protected get hasPlaceholder(): boolean {
+    return this.settingFields.some((f) => f.key === 'placeholder');
+  }
+
+  /** Every setting EXCEPT the placeholder, which has its own row. */
+  protected get otherSettingFields(): readonly QuestionSettingField[] {
+    return this.settingFields.filter((f) => f.key !== 'placeholder');
+  }
 
   /** How this type's options work: none, plain values, images, or a matrix's two axes. */
   protected get optionMode(): QuestionOptionMode {

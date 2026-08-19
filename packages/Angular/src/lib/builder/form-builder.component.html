@@ -395,6 +395,7 @@
         } @else {
           <mjf-question-editor
             [node]="selectedNode"
+            [selectedId]="selectedNode?.entity?.ID ?? ''"
             [formId]="record.ID"
             [conditionalSources]="conditionalSources"
             (questionChanged)="onQuestionChanged($event)"

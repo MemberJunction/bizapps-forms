@@ -26,6 +26,8 @@ import {
   type ConditionalSourceQuestion,
 } from './conditional-rule-editor.component';
 import { ImageFieldComponent } from './image-field.component';
+import { SettingRowComponent } from './setting-row.component';
+import { isOptionalOpen, toggleOptional } from './optional-setting';
 import { parseConditionalRule, serializeConditionalRule } from './json-fields';
 
 const SCREEN_EDITOR_CSS = /* css */ `
@@ -42,35 +44,20 @@ const SCREEN_EDITOR_CSS = /* css */ `
 .se-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 
 .se-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
-.se-section-title {
-  margin: 0;
-  font-size: var(--mjf-label);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--mj-text-muted);
-}
 
-.se-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mjf-gap-sm);
-  padding: 10px 12px;
-  border: 1px solid var(--mj-border-subtle);
-  border-radius: var(--mjf-radius-sm);
-  background: var(--mj-bg-surface-sunken);
-}
-.se-toggle span { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
-
-.se-hint { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 `;
 
 @Component({
   selector: 'mjf-screen-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, ConditionalRuleEditorComponent, ImageFieldComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ConditionalRuleEditorComponent,
+    ImageFieldComponent,
+    SettingRowComponent,
+  ],
   styles: [FORMS_UI_CSS, SCREEN_EDITOR_CSS],
   template: `
     @if (screen; as s) {
@@ -94,57 +81,151 @@ const SCREEN_EDITOR_CSS = /* css */ `
             [placeholder]="s.ScreenType === 'Welcome' ? 'Start' : 'Leave blank for no button'"
             (input)="setButtonLabel($any($event.target).value)" />
 
-          <mjf-image-field
-            label="Image"
-            [value]="s.MediaURL ?? ''"
-            [formId]="s.FormID"
-            [hint]="s.ScreenType === 'Welcome' ? 'Shown above the title, before the form starts.' : 'Shown above the title on this ending.'"
-            (valueChange)="setMediaURL($event)"
-          />
         </div>
 
+        <mjf-setting-row
+          label="Image"
+          [hint]="s.ScreenType === 'Welcome' ? 'Shown above the title, before the form starts.' : 'Shown above the title on this ending.'"
+          [open]="imageOpen"
+        >
+          <button
+            slot="control"
+            type="button"
+            class="mjf-switch"
+            [class.is-on]="imageOpen"
+            role="switch"
+            [attr.aria-checked]="imageOpen"
+            aria-label="Image"
+            (click)="toggleImage()"
+          ></button>
+          <mjf-image-field
+            [value]="s.MediaURL ?? ''"
+            [formId]="s.FormID"
+            ariaLabel="Screen image"
+            (valueChange)="setMediaURL($event)"
+          />
+        </mjf-setting-row>
+
         @if (s.ScreenType === 'Ending') {
-          <div class="se-section">
-            <p class="se-section-title">After submit</p>
-            <label class="mjf-field-label" for="se-redirect">Redirect to</label>
-            <input id="se-redirect" class="mjf-input" type="url" [value]="s.RedirectURL ?? ''"
-              placeholder="https://…" (input)="setRedirectURL($any($event.target).value)" />
-            <p class="se-hint">When set, the respondent goes here instead of seeing this screen.</p>
+          <mjf-setting-row
+            label="Default ending"
+            hint="Shown when no other ending's condition matches. Every form needs exactly one."
+          >
+            <button
+              slot="control"
+              type="button"
+              class="mjf-switch"
+              role="switch"
+              [attr.aria-checked]="s.IsDefault"
+              [class.is-on]="s.IsDefault"
+              aria-label="Default ending"
+              (click)="toggleDefault()"
+            ></button>
+          </mjf-setting-row>
 
-            <div class="se-toggle">
-              <span>Use as the default ending</span>
-              <button type="button" class="mjf-switch" role="switch"
-                [attr.aria-checked]="s.IsDefault"
-                [class.is-on]="s.IsDefault"
-                (click)="toggleDefault()"></button>
-            </div>
-            <p class="se-hint">Shown when no other ending's condition matches.</p>
-          </div>
+          <mjf-setting-row
+            label="Redirect after submit"
+            hint="Send the respondent to another page instead of showing this screen."
+            [open]="redirectOpen"
+          >
+            <button
+              slot="control"
+              type="button"
+              class="mjf-switch"
+              [class.is-on]="redirectOpen"
+              role="switch"
+              [attr.aria-checked]="redirectOpen"
+              aria-label="Redirect after submit"
+              (click)="toggleRedirect()"
+            ></button>
+            <input class="mjf-input" type="url" [value]="s.RedirectURL ?? ''"
+              placeholder="https://…" aria-label="Redirect URL"
+              (input)="setRedirectURL($any($event.target).value)" />
+          </mjf-setting-row>
 
-          <div class="se-section">
-            <p class="se-section-title">Show this ending when</p>
+          <mjf-setting-row
+            label="Show only if"
+            hint="Endings are checked in order and the first match wins. One with no condition is only reachable as the default."
+            [open]="conditionalOpen"
+          >
+            <button
+              slot="control"
+              type="button"
+              class="mjf-switch"
+              [class.is-on]="conditionalOpen"
+              role="switch"
+              [attr.aria-checked]="conditionalOpen"
+              aria-label="Show only if"
+              (click)="toggleConditional()"
+            ></button>
             <mjf-conditional-rule-editor
               [rule]="conditionalRule"
               [sources]="conditionalSources"
               (ruleChange)="onConditionalChange($event)"
             />
-            <p class="se-hint">
-              Endings are checked in order; the first match wins. An ending with no condition is
-              only reachable as the default.
-            </p>
-          </div>
+          </mjf-setting-row>
         }
       </div>
     }
   `,
 })
 export class ScreenEditorComponent {
-  @Input() screen: mjBizAppsFormsFormScreenEntity | null = null;
+  @Input()
+  public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
+    if (value?.ID !== this.current?.ID) {
+      // A new screen's emptiness is not the previous screen's — start its rows closed.
+      this.requested = { image: false, redirect: false, conditional: false };
+    }
+    this.current = value;
+  }
+  public get screen(): mjBizAppsFormsFormScreenEntity | null {
+    return this.current;
+  }
+  private current: mjBizAppsFormsFormScreenEntity | null = null;
+
+  /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
+  private requested = { image: false, redirect: false, conditional: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 
   /** Emitted whenever a field on the screen entity changed (parent persists). */
   @Output() screenChanged = new EventEmitter<mjBizAppsFormsFormScreenEntity>();
+
+  protected get imageOpen(): boolean {
+    return isOptionalOpen(!!this.screen?.MediaURL, this.requested.image);
+  }
+
+  protected get redirectOpen(): boolean {
+    return isOptionalOpen(!!this.screen?.RedirectURL, this.requested.redirect);
+  }
+
+  protected get conditionalOpen(): boolean {
+    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
+  }
+
+  protected toggleImage(): void {
+    const next = toggleOptional(!!this.screen?.MediaURL, this.requested.image);
+    this.requested.image = next.requested;
+    if (next.clear) {
+      this.setMediaURL('');
+    }
+  }
+
+  protected toggleRedirect(): void {
+    const next = toggleOptional(!!this.screen?.RedirectURL, this.requested.redirect);
+    this.requested.redirect = next.requested;
+    if (next.clear) {
+      this.setRedirectURL('');
+    }
+  }
+
+  protected toggleConditional(): void {
+    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
+    this.requested.conditional = next.requested;
+    if (next.clear) {
+      this.onConditionalChange(undefined);
+    }
+  }
 
   protected get conditionalRule(): ConditionalRule | undefined {
     return this.screen ? parseConditionalRule(this.screen.ConditionalRule) : undefined;
