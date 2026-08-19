@@ -38,6 +38,7 @@ import {
   evaluateConditionalRule,
   isAnswerableQuestionType,
   isAnswerSupplied,
+  isRequiredSatisfied,
   coerceAnswerToNumber,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -178,10 +179,16 @@ function collectVisibleQuestion(
   const value = input ? answerValueOf(input) : undefined;
   const answered = isAnswerSupplied(value);
 
+  // Required is asked SEPARATELY from answered, because the two disagree on consent: an
+  // unticked box is `false`, which is a supplied answer, so a required "I agree to the terms"
+  // used to pass here as well as in the widget. A rule enforced only in the browser is not
+  // enforced at all — this mutation is reachable without it.
+  if (question.isRequired && !partial && !isRequiredSatisfied(question.type, value)) {
+    errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
+    return;
+  }
+
   if (!answered) {
-    if (question.isRequired && !partial) {
-      errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
-    }
     return; // nothing to persist / validate for an unanswered, optional question
   }
 

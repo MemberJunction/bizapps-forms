@@ -166,12 +166,18 @@ export class FormRuntime {
 
   /** Fraction 0–1 of visible answerable questions that have a value. */
   public readonly progress = computed(() => {
-    const qs = this.visibleAnswerableQuestions();
-    if (qs.length === 0) {
+    const visible = this.visibleAnswerableQuestions();
+    if (visible.length === 0) {
       return 1;
     }
-    const answered = qs.filter((q) => isAnswerSupplied(this.valueFor(q.id))).length;
-    return answered / qs.length;
+    const required = visible.filter((q) => q.isRequired);
+    // With nothing required, "how close am I to being able to submit" has no answer — the
+    // respondent could submit on arrival — so the bar measures how much they have filled in
+    // instead. Falling back rather than returning 1 keeps it a progress bar rather than a
+    // decoration that starts full, and rather than the NaN a bare division produced.
+    const counted = required.length > 0 ? required : visible;
+    const answered = counted.filter((q) => isAnswerSupplied(this.valueFor(q.id))).length;
+    return answered / counted.length;
   });
 
   // --- Submission ----------------------------------------------------------

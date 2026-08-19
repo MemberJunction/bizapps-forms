@@ -132,6 +132,30 @@ function validateContactInfo(value: AnswerValue): string | undefined {
 }
 
 /**
+ * Whether a REQUIRED question is actually satisfied by `value`.
+ *
+ * For nearly every type this is just "is there an answer", but consent is the exception that
+ * makes the function necessary: an unticked box is `false`, `false` is a supplied answer, and so
+ * the plain required check waved it straight through. A form could carry a required "I agree to
+ * the terms" and be submitted — client AND server, which used the same test — without anyone
+ * ever agreeing to anything. The comment on the `Checkbox` / `Legal` branch of
+ * {@link validateAnswerFormat} asserted that the required check was handling this. It was not.
+ *
+ * Deliberately narrow: only `Checkbox` and `Legal` demand `true`. `YesNo` is a genuine choice
+ * where "No" is an answer, and a `Rating` or `NPS` of 0 is a real score — treating either as
+ * unanswered would force respondents to give a reading they do not mean.
+ *
+ * Shared, because a rule enforced only in the browser is not enforced: the public submit
+ * mutation is reachable without the widget.
+ */
+export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue): boolean {
+  if (type === 'Checkbox' || type === 'Legal') {
+    return value === true;
+  }
+  return isAnswerSupplied(value);
+}
+
+/**
  * Per-SUB-FIELD verdicts for a composite answer: `{ email: '…', phone: '…' }`, empty when the
  * whole thing is fine.
  *

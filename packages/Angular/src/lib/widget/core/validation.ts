@@ -7,6 +7,7 @@ import {
   coerceAnswerToNumber,
   isAnswerableQuestionType,
   isAnswerSupplied,
+  isRequiredSatisfied,
   matchesValidationPattern,
   validateAnswerFormat,
   validateCompositeParts,
@@ -58,8 +59,16 @@ export function validateQuestion(
     return VALID;
   }
   const present = hasValue(value);
-  if (question.isRequired && !present) {
-    return { valid: false, message: 'This question is required.' };
+  // Not `present`: a required consent box is only satisfied by a TICK, and an unticked one is
+  // `false`, which counts as supplied. See isRequiredSatisfied.
+  if (question.isRequired && !isRequiredSatisfied(question.type, value)) {
+    return {
+      valid: false,
+      message:
+        question.type === 'Checkbox' || question.type === 'Legal'
+          ? 'Please tick this box to continue.'
+          : 'This question is required.',
+    };
   }
   if (!present) {
     return VALID;

@@ -174,3 +174,119 @@ describe('FormRuntime composite part errors', () => {
     });
   });
 });
+
+// --- Progress ---------------------------------------------------------------
+
+/** A form whose questions are described inline, so each progress case reads as its own shape. */
+function formOf(
+  questions: Array<Partial<PublishedFormQuestion> & { id: string }>,
+): PublishedFormDefinition {
+  const def = makeDefinition();
+  def.pages[0].questions = questions.map((q, i) => ({
+    type: 'ShortText',
+    prompt: q.id,
+    isRequired: false,
+    displayOrder: i + 1,
+    options: [],
+    ...q,
+  })) as PublishedFormQuestion[];
+  return def;
+}
+
+describe('FormRuntime progress', () => {
+  it('does not let optional questions dilute the bar', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'req', isRequired: true },
+        { id: 'opt-a' },
+        { id: 'opt-b' },
+        { id: 'opt-c' },
+      ]),
+    );
+
+    rt.setValue('req', 'answered');
+
+    // Everything that could stop a submit is done, so the bar is done.
+    expect(rt.progress()).toBe(1);
+  });
+});
+
+describe('FormRuntime progress with nothing required', () => {
+  it('still moves as an all-optional form is filled in, rather than dividing by zero', () => {
+    const rt = new FormRuntime(formOf([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]));
+
+    expect(rt.progress()).toBe(0);
+
+    rt.setValue('a', 'x');
+    expect(rt.progress()).toBe(0.25);
+  });
+});
+
+describe('FormRuntime progress and conditional questions', () => {
+  /** A required follow-up that only exists once the trigger says 'yes'. */
+  function conditionalForm(): PublishedFormDefinition {
+    return formOf([
+      { id: 'trigger', isRequired: true },
+      {
+        id: 'followup',
+        isRequired: true,
+        conditionalRule: { show: { all: [{ questionId: 'trigger', op: 'equals', value: 'yes' }] } },
+      },
+    ]);
+  }
+
+  it('ignores a required question the respondent cannot see', () => {
+    const rt = new FormRuntime(conditionalForm());
+
+    rt.setValue('trigger', 'no');
+
+    // Only `trigger` is on the path, and it is answered.
+    expect(rt.progress()).toBe(1);
+  });
+
+  it('drops back when an answer reveals more required work', () => {
+    const rt = new FormRuntime(conditionalForm());
+
+    rt.setValue('trigger', 'yes');
+
+    // The follow-up now exists and is unanswered: 1 of 2.
+    expect(rt.progress()).toBe(0.5);
+
+    rt.setValue('followup', 'done');
+    expect(rt.progress()).toBe(1);
+  });
+});
+
+describe('FormRuntime progress edge cases', () => {
+  it('reports complete for a form with nothing to answer', () => {
+    expect(new FormRuntime(formOf([{ id: 's', type: 'Statement' }])).progress()).toBe(1);
+  });
+
+  it('goes back down when an answer is cleared', () => {
+    const rt = new FormRuntime(formOf([{ id: 'a', isRequired: true }, { id: 'b', isRequired: true }]));
+
+    rt.setValue('a', 'x');
+    expect(rt.progress()).toBe(0.5);
+
+    rt.setValue('a', '');
+    expect(rt.progress()).toBe(0);
+  });
+
+  it('counts a supplied answer even while it is still invalid, so the bar does not flicker as you type', () => {
+    const rt = new FormRuntime(formOf([{ id: 'e', type: 'Email', isRequired: true }]));
+
+    rt.setValue('e', 'not-an-email-yet');
+
+    expect(rt.progress()).toBe(1);
+  });
+
+  it('never leaves the 0..1 range it is rendered as a percentage from', () => {
+    const rt = new FormRuntime(formOf([{ id: 'a', isRequired: true }, { id: 'b' }]));
+    for (const v of ['', 'x']) {
+      rt.setValue('a', v);
+      rt.setValue('b', v);
+      expect(rt.progress()).toBeGreaterThanOrEqual(0);
+      expect(rt.progress()).toBeLessThanOrEqual(1);
+    }
+  });
+});

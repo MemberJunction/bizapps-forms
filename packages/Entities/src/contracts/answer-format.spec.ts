@@ -3,6 +3,7 @@ import {
   matchesValidationPattern,
   validateAnswerFormat,
   validateCompositeParts,
+  isRequiredSatisfied,
 } from './answer-format';
 
 describe('matchesValidationPattern', () => {
@@ -163,5 +164,28 @@ describe('validateAnswerFormat for ContactInfo', () => {
     expect(
       validateAnswerFormat('ContactInfo', { email: 'a@b.com', phone: '5512161548' }),
     ).toBeUndefined();
+  });
+});
+
+describe('isRequiredSatisfied', () => {
+  it('demands a TICK from a required consent box, not merely a value', () => {
+    expect(isRequiredSatisfied('Legal', false)).toBe(false);
+    expect(isRequiredSatisfied('Checkbox', false)).toBe(false);
+    expect(isRequiredSatisfied('Legal', true)).toBe(true);
+  });
+
+  it('does not confuse a legitimate falsy answer with an absent one', () => {
+    // A zero rating and an explicit "No" are real answers, and a required question is
+    // satisfied by them.
+    expect(isRequiredSatisfied('NPS', 0)).toBe(true);
+    expect(isRequiredSatisfied('Rating', 0)).toBe(true);
+    expect(isRequiredSatisfied('YesNo', false)).toBe(true);
+  });
+
+  it('falls back to the ordinary answered test for everything else', () => {
+    expect(isRequiredSatisfied('ShortText', '')).toBe(false);
+    expect(isRequiredSatisfied('ShortText', '  ')).toBe(false);
+    expect(isRequiredSatisfied('ShortText', 'hi')).toBe(true);
+    expect(isRequiredSatisfied('Ranking', [])).toBe(false);
   });
 });
