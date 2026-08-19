@@ -120,7 +120,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
 export class FormBuilderComponent extends BaseFormComponent {
   declare public record: mjBizAppsFormsFormEntity;
 
-  private readonly state = inject(BuilderStateService);
+  protected readonly state = inject(BuilderStateService);
   private readonly design = inject(DesignStateService);
   private readonly publisher = inject(PublishService);
 

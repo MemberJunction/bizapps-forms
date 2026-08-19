@@ -78,6 +78,19 @@
     }
   </header>
 
+  <!-- A refused save or delete. Rendered here rather than logged and forgotten: BaseEntity
+       refuses by returning false, so without this the author's only signal was a control that
+       appeared to do nothing — or, for an autosave, no signal at all and a lost edit. -->
+  @if (state.lastFailure(); as failure) {
+    <div class="fb-failure" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span class="fb-failure-text">{{ failure }}</span>
+      <button type="button" class="fb-failure-close" (click)="state.dismissFailure()" aria-label="Dismiss">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+      </button>
+    </div>
+  }
+
   <!-- Tabs -->
   <nav class="fb-tabs" role="tablist" aria-label="Builder workspace">
     <button

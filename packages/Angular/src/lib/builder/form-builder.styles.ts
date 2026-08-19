@@ -13,6 +13,30 @@ const LAYOUT_CSS = /* css */ `
 
 /* ------------------------------------------------------------------- topbar */
 
+.fb-failure {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--mjf-gap-sm);
+  padding: 10px var(--mjf-gutter);
+  font-size: var(--mjf-meta);
+  color: var(--mj-status-error-text);
+  background: var(--mj-status-error-bg);
+  border-bottom: 1px solid var(--mj-status-error-border);
+}
+.fb-failure-text { flex: 1 1 auto; min-width: 0; }
+.fb-failure-close {
+  flex: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: var(--mjf-radius-sm);
+}
+.fb-failure-close:hover { background: var(--mj-bg-surface-hover); }
+.fb-failure-close:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
+
 .fb-top {
   flex: none;
   display: flex;

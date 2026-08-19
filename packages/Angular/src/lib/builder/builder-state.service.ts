@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import {
   Metadata,
   RunView,
@@ -406,6 +406,20 @@ export class BuilderStateService {
     return next;
   }
 
+  /**
+   * The most recent mutation the database refused, phrased for the author, or null when there is
+   * nothing outstanding. One signal for every path — direct save, debounced autosave, delete —
+   * because they all funnel through the same two checked helpers, and a second place to publish
+   * from is a second place to forget.
+   */
+  private readonly _lastFailure = signal<string | null>(null);
+  public readonly lastFailure = this._lastFailure.asReadonly();
+
+  /** Clear the reported failure — the author has read it. */
+  public dismissFailure(): void {
+    this._lastFailure.set(null);
+  }
+
   /** Persist an entity that the UI has mutated in place. */
   public async save(entity: SaveableEntity): Promise<boolean> {
     return this.saveChecked(entity, 'save');
@@ -472,7 +486,7 @@ export class BuilderStateService {
   ): Promise<boolean> {
     const ok = await entity.Save();
     if (!ok) {
-      LogError(`Forms builder failed to ${action}: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+      this.reportFailure(action, entity);
     }
     return ok;
   }
@@ -483,8 +497,24 @@ export class BuilderStateService {
   ): Promise<boolean> {
     const ok = await entity.Delete();
     if (!ok) {
-      LogError(`Forms builder failed to ${action}: ${entity.LatestResult?.CompleteMessage ?? 'unknown error'}`);
+      this.reportFailure(action, entity);
     }
     return ok;
+  }
+
+  /**
+   * Record a refusal where the AUTHOR can see it, as well as in the log.
+   *
+   * `BaseEntity` refuses by returning false, never by throwing, so nothing upstream notices
+   * unless it is told — and until this existed, nothing told it. A delete looked like a button
+   * that did nothing; an autosave looked like nothing at all, and the edit the author had just
+   * typed was simply gone. The reason is included verbatim rather than softened: this surface is
+   * for people who build forms, and "conflicted with a FOREIGN KEY constraint" is the difference
+   * between fixing it and filing a bug.
+   */
+  private reportFailure(action: string, entity: Parameters<BuilderStateService['save']>[0]): void {
+    const reason = entity.LatestResult?.CompleteMessage ?? 'unknown error';
+    LogError(`Forms builder failed to ${action}: ${reason}`);
+    this._lastFailure.set(`Could not ${action}. ${reason}`);
   }
 }
