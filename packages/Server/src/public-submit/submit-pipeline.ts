@@ -8,7 +8,11 @@
  *   scope check -> resolve definition -> Turnstile -> rate-limit -> quota
  *   -> server re-validation -> Save response+answers -> fire on-submit hooks.
  */
+import { LogError, LogStatus } from '@memberjunction/core';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
+
+import { getPublicSubmitConfig } from './config';
+import { createStageTimer, formatTimings } from './stage-timer';
 import {
   endingMessage,
   endingRedirectUrl,
@@ -22,7 +26,7 @@ import { resolvePublishedDefinition, type ResolvedDefinition } from './definitio
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
 import { persistSubmission } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
-import { FormsRateLimiter } from './rate-limit.service';
+import { FormsRateLimiter, rateLimitedMessage } from './rate-limit.service';
 import {
   findAdoptableResponseById,
   findOwnedResponseById,
@@ -166,44 +170,63 @@ export async function runSubmitPipeline(
   ctx: PipelineContext,
   submission: PipelineSubmission,
 ): Promise<FormSubmissionResult> {
+  // Timed end to end. "The submit is slow" is a report nobody can act on across eleven
+  // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
+  // trip or a dedupe query can each outweigh the write. `report` is called on EVERY exit,
+  // including refusals, because a slow rejection is still a slow request.
+  const timer = createStageTimer();
+  const report = <T>(result: T): T => {
+    LogStatus(`[Forms] submit ${formatTimings(timer.finish())}`);
+    return result;
+  };
+
   // 0. Shape guard: the required transport fields must be present and well-formed. A drift or a
   //    malformed client payload fails LOUDLY here with a clear result — never a throw that would
   //    yield a blank screen, and never a silent partial write.
   const shape = validateSubmissionShape(submission);
   if (shape) {
-    return shape;
+    return report(shape);
   }
+  timer.mark('shape');
 
   // 1. Anonymous scope: CanCreate on responses only (no privilege accretion).
   const scope = checkRespondentScope(ctx.provider, ctx.contextUser);
   if (!scope.allowed) {
-    return fail(scope.reason ?? 'Not authorized.');
+    return report(fail(scope.reason ?? 'Not authorized.'));
   }
+
+  timer.mark('scope');
 
   // 2. Resolve slug -> distribution -> published version -> definition.
   const loaded = await resolvePublishedDefinition(ctx.provider, submission.distributionSlug, ctx.contextUser, {
     expectedVersionId: submission.formVersionId,
   });
   if (!loaded.ok || !loaded.value) {
-    return fail(`Form unavailable (${loaded.failure}).`);
+    return report(fail(`Form unavailable (${loaded.failure}).`));
   }
   const resolved = loaded.value;
   const complete = submission.partial !== true;
+
+  timer.mark('resolve-form');
 
   // 3. Turnstile (per form/distribution toggle).
   const needCaptcha = captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
   if (!turnstile.success) {
-    return fail(`Captcha verification failed (${turnstile.errorCode}).`);
+    return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
   }
+
+  timer.mark('captcha');
 
   // 4. Rate-limit (per session + distribution).
   const limit = FormsRateLimiter.Instance.check(
     rateLimitKey({ sessionId: ctx.sessionId, distributionId: resolved.distribution.ID }),
   );
   if (!limit.allowed) {
-    return fail('Too many submissions; please retry shortly.');
+    return report(fail(rateLimitedMessage(limit.retryAfterMs)));
   }
+
+  timer.mark('rate-limit');
 
   // 5. Dedupe (Task 1) — only on completion. If this session (or this client response id)
   //    already Completed this form, short-circuit rather than writing a second row.
@@ -211,22 +234,26 @@ export async function runSubmitPipeline(
   if (complete) {
     const dedupe = await checkDuplicate(ctx, resolved, submission);
     if (dedupe) {
-      return dedupe;
+      return report(dedupe);
     }
   }
+
+  timer.mark('dedupe');
 
   // 6. Quota (distribution cap + optional form cap) — only enforced on completion.
   if (complete) {
     const quotaResult = await checkQuotas(ctx, resolved);
     if (quotaResult) {
-      return quotaResult;
+      return report(quotaResult);
     }
   }
+
+  timer.mark('quota');
 
   // 7. Server-side re-validation (conditional visibility + required + format).
   const validation = validateSubmission(resolved.definition, submission.answers, !complete);
   if (validation.errors.length > 0) {
-    return { success: false, errors: validation.errors };
+    return report({ success: false, errors: validation.errors });
   }
 
   // 7b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
@@ -236,8 +263,10 @@ export async function runSubmitPipeline(
   //     first sight rather than at promotion.
   const provenance = await checkFileProvenance(ctx, resolved, submission);
   if (provenance.errors.length > 0) {
-    return { success: false, errors: provenance.errors };
+    return report({ success: false, errors: provenance.errors });
   }
+
+  timer.mark('validate');
 
   // 8. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
   //    (idempotent — no duplicate Partial rows) and a final submit PROMOTES it to Complete
@@ -249,6 +278,8 @@ export async function runSubmitPipeline(
   //    AnonymousSessionID and never adopt another session's row. We DO return the responseId
   //    so a same-session widget can continue editing its partial.
   const existingPartial = await resolveExistingPartial(ctx, resolved, submission);
+
+  timer.mark('find-partial');
 
   // 9. Persist response + answers (CREATE, UPDATE partial, or PROMOTE partial→complete).
   const persisted = await persistSubmission(
@@ -273,22 +304,48 @@ export async function runSubmitPipeline(
     ctx.elevatedUser,
   );
   if (!persisted.ok) {
-    return fail(persisted.message);
+    return report(fail(persisted.message));
   }
+
+  timer.mark('persist');
 
   // 10. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
   //     persistence reports a `deduped` no-op — a concurrent request already Completed this row
   //     and fired its hooks, so re-firing here would double-run on-submit automations.
   if (complete && !persisted.deduped) {
-    await fireHooksSafely(ctx, resolved, persisted.responseId);
+    // DETACHED, deliberately. The response row and its answers are already written by the
+    // time we get here, and nothing the respondent is shown comes from a hook — the
+    // confirmation is built from the definition. Awaiting the automation chain made every
+    // respondent wait for work that is not theirs: measured on a real form, hooks were
+    // 8070ms of an 8348ms submit, with persistence at 239ms. That is not a slow database,
+    // it is a respondent paying for someone else's integration.
+    //
+    // The trade is real and worth naming: a hook now runs AFTER the response is sent, so a
+    // process killed in that window loses it. That was already true of any hook that failed
+    // — the catch has always swallowed them as best-effort — so the change is to when they
+    // run, not to whether they are guaranteed. Anything needing an at-least-once guarantee
+    // wants a queue, not an awaited call inside a request.
+    const hooks = fireHooksSafely(ctx, resolved, persisted.responseId);
+    if (getPublicSubmitConfig().hooksBlocking) {
+      await hooks;
+    } else {
+      void hooks.then(
+        () => LogStatus(`[Forms] hooks finished for response ${persisted.responseId}`),
+        // fireHooksSafely already catches; this is the belt to its braces, because an
+        // unhandled rejection on a detached promise takes the API process down with it.
+        (err: unknown) => LogError(`[Forms] detached hooks threw for ${persisted.responseId}: ${String(err)}`),
+      );
+    }
   }
 
-  return {
+  timer.mark('hooks');
+
+  return report({
     success: true,
     responseId: persisted.responseId,
     status: persisted.status,
     ...confirmationFields(resolved, validation.answerMap),
-  };
+  });
 }
 
 /**

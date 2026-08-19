@@ -51,3 +51,23 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
     this.hits.clear();
   }
 }
+
+/**
+ * What to tell a respondent who has been rate-limited.
+ *
+ * The limiter computes exactly how long the wait is, and the pipeline used to throw that
+ * away in favour of "please retry shortly" — the one thing a person cannot act on. They
+ * cannot tell whether shortly means two seconds or an hour, so they either abandon a form
+ * they have already filled in or sit there retrying, which is precisely the traffic the
+ * limit exists to suppress.
+ *
+ * Rounded UP: naming twelve seconds when twelve and a half remain sends them straight back
+ * into the same refusal, which reads as the message being a lie.
+ */
+export function rateLimitedMessage(retryAfterMs: number | undefined): string {
+  if (!retryAfterMs || retryAfterMs <= 0) {
+    return 'Too many submissions. Please wait a moment and try again.';
+  }
+  const seconds = Math.ceil(retryAfterMs / 1000);
+  return `Too many submissions. Please wait ${seconds} second${seconds === 1 ? '' : 's'} and try again.`;
+}

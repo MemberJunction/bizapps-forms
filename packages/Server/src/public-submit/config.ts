@@ -33,6 +33,16 @@ function numberFromEnv(key: string, fallback: number): number {
 export interface PublicSubmitConfig {
   turnstileSecret: string | undefined;
   turnstileVerifyUrl: string;
+  /**
+   * Wait for on-submit hooks before answering the respondent.
+   *
+   * OFF by default, which is the change that took submit from ~8.3s to ~0.3s: the response
+   * is already persisted before hooks run, so nothing the respondent is told depends on
+   * them, and awaiting an automation chain made every respondent pay for work that is not
+   * theirs. The switch exists because this is the PUBLIC submit path and an operator whose
+   * automation turns out to matter for the confirmation needs a way back without a deploy.
+   */
+  hooksBlocking: boolean;
   rateLimitMax: number;
   rateLimitWindowMs: number;
 }
@@ -49,6 +59,7 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
   cached = Object.freeze({
     turnstileSecret: process.env.FORMS_TURNSTILE_SECRET?.trim() || undefined,
     turnstileVerifyUrl: process.env.FORMS_TURNSTILE_VERIFY_URL?.trim() || DEFAULT_TURNSTILE_VERIFY_URL,
+    hooksBlocking: (process.env.FORMS_HOOKS_BLOCKING ?? '').trim().toLowerCase() === 'true',
     rateLimitMax: numberFromEnv('FORMS_RATELIMIT_MAX', 5),
     rateLimitWindowMs: numberFromEnv('FORMS_RATELIMIT_WINDOW_MS', 60_000),
   });
