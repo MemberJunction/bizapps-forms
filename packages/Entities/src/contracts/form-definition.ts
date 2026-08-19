@@ -9,6 +9,7 @@
  * (WP-C) and server (WP-B) consume it.
  */
 import type { ConditionalRule, ValidationRule } from './conditional-rule';
+import type { SocialLink } from './social-links';
 import type { JSONValue } from './json-value';
 import type { FormQuestionType, MatrixAxis } from './question-types';
 
@@ -187,6 +188,8 @@ export interface PublishedFormScreen {
    * remains the form-wide fallback for forms with no ending screens at all.
    */
   redirectURL?: string;
+  /** `Ending` only: social links rendered as icons under the message. Absent means none. */
+  socialLinks?: SocialLink[];
   displayOrder: number;
   /**
    * `Ending` only: show this ending when the response matches. Absent => matches nothing on

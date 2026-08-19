@@ -133,9 +133,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Forms','CategoryID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Forms')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Forms','CategoryID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsForms')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsForms', $event.totalRowCount)"
                 >
@@ -158,9 +158,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Categories','ParentID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Categories')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Categories','ParentID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormCategories')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormCategories', $event.totalRowCount)"
                 >

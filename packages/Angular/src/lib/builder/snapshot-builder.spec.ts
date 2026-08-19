@@ -208,3 +208,47 @@ function automationRow(overrides: Partial<AuthoredAutomationRow> = {}): Authored
     ...overrides,
   };
 }
+
+describe('buildPublishedDefinition social links', () => {
+  /** Minimal stand-in for the screen entity: the builder only reads these fields. */
+  function endingWith(socialLinks: string | null) {
+    return {
+      ID: 'e1',
+      ScreenType: 'Ending',
+      Title: 'Thanks',
+      Body: null,
+      ButtonLabel: null,
+      MediaURL: null,
+      RedirectURL: null,
+      DisplayOrder: 0,
+      ConditionalRule: null,
+      IsDefault: true,
+      SocialLinks: socialLinks,
+    } as unknown as Parameters<typeof buildPublishedDefinition>[0]['screens'][number];
+  }
+
+  it('carries an ending screen social links into the snapshot', () => {
+    const raw = JSON.stringify([{ platform: 'linkedin', url: 'https://linkedin.com/company/x' }]);
+    const def = buildPublishedDefinition(
+      { form: form({}), pages: [], screens: [endingWith(raw)] },
+      undefined,
+      'v',
+      [],
+    );
+
+    expect(def.endScreens?.[0]?.socialLinks).toEqual([
+      { platform: 'linkedin', url: 'https://linkedin.com/company/x' },
+    ]);
+  });
+
+  it('omits the field entirely when there are none', () => {
+    const def = buildPublishedDefinition(
+      { form: form({}), pages: [], screens: [endingWith(null)] },
+      undefined,
+      'v',
+      [],
+    );
+
+    expect(def.endScreens?.[0]?.socialLinks).toBeUndefined();
+  });
+});

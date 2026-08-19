@@ -11,7 +11,7 @@
  * reach a respondent's answers.
  */
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
-import type { PublishedFormScreen } from '@mj-biz-apps/forms-entities';
+import { socialPlatform, type PublishedFormScreen } from '@mj-biz-apps/forms-entities';
 
 const FORM_SCREEN_CSS = /* css */ `
 /* A welcome or ending screen is a HERO, not a paragraph: it owns the whole surface and centres
@@ -88,6 +88,48 @@ const FORM_SCREEN_CSS = /* css */ `
   font-size: 2.5rem;
   color: var(--mjf-accent);
 }
+
+/* Icon only, no labels. This sits under a message that has already said everything; a row of
+   wordmarks would compete with the ending copy for the one moment the form has nothing left to
+   ask. Sized to the 44px tap target rather than to the glyph, because the ending screen is
+   where a respondent is most likely to be on a phone and least likely to try twice. */
+.mjf-screen__social {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.mjf-screen__social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  font-size: 1.125rem;
+  color: var(--mjf-page-ink-muted);
+  text-decoration: none;
+  border: 1px solid var(--mjf-page-edge);
+  border-radius: 50%;
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.mjf-screen__social-link:hover {
+  color: var(--mjf-accent);
+  border-color: var(--mjf-accent);
+  transform: translateY(-2px);
+}
+
+.mjf-screen__social-link:focus-visible {
+  outline: none;
+  box-shadow: var(--mjf-focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mjf-screen__social-link { transition: none; }
+  .mjf-screen__social-link:hover { transform: none; }
+}
 `;
 
 @Component({
@@ -113,6 +155,21 @@ const FORM_SCREEN_CSS = /* css */ `
       @if (buttonLabel(); as label) {
         <button type="button" class="mjf-screen__cta" (click)="activated.emit()">{{ label }}</button>
       }
+
+      @if (socialLinks().length > 0) {
+        <nav class="mjf-screen__social" aria-label="Follow us">
+          @for (link of socialLinks(); track link.platform) {
+            <a
+              class="mjf-screen__social-link"
+              [href]="link.url"
+              target="_blank"
+              rel="noopener noreferrer external"
+              [attr.aria-label]="link.label"
+              [attr.title]="link.label"
+            ><i [class]="link.icon" aria-hidden="true"></i></a>
+          }
+        </nav>
+      }
     </div>
   `,
 })
@@ -123,6 +180,19 @@ export class FormScreenComponent {
   public readonly activated = output<void>();
 
   protected readonly isWelcome = computed(() => this.screen().screenType === 'Welcome');
+
+  /**
+   * The links to draw, each already paired with the icon and label for its platform.
+   *
+   * Resolved here rather than in the template so an unknown platform simply does not render —
+   * the alternative is an empty circle on a published form, which is worse than an absent one.
+   */
+  protected readonly socialLinks = computed(() =>
+    (this.screen().socialLinks ?? []).flatMap((link) => {
+      const platform = socialPlatform(link.platform);
+      return platform ? [{ ...link, icon: platform.icon, label: platform.label }] : [];
+    }),
+  );
 
   /**
    * The button's label, or '' to render no button.

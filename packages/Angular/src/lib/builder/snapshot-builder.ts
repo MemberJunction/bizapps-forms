@@ -20,6 +20,7 @@ import {
   parseFormSettings,
   buildStyleTokens,
 } from './json-fields';
+import { parseSocialLinks } from '@mj-biz-apps/forms-entities';
 
 /**
  * Pure transform from the live builder tree to the immutable
@@ -118,6 +119,13 @@ function buildScreen(
   const conditional = parseConditionalRule(screen.ConditionalRule);
   if (conditional) {
     built.conditionalRule = conditional;
+  }
+  // Parsed rather than copied: the snapshot is what a public page renders, so a link that could
+  // not be drawn — unknown platform, blank, or a non-web scheme — is dropped at publish time
+  // rather than shipped to every respondent for the widget to re-litigate.
+  const social = parseSocialLinks(screen.SocialLinks);
+  if (social.length > 0) {
+    built.socialLinks = social;
   }
   return built;
 }

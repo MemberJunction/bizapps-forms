@@ -16,9 +16,14 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import type {
-  ConditionalRule,
-  mjBizAppsFormsFormScreenEntity,
+import {
+  SOCIAL_PLATFORMS,
+  parseSocialLinks,
+  serializeSocialLinks,
+  type ConditionalRule,
+  type SocialLink,
+  type SocialPlatformId,
+  type mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import {
@@ -44,6 +49,17 @@ const SCREEN_EDITOR_CSS = /* css */ `
 .se-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 
 .se-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
+
+.se-social { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); }
+.se-social-row { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
+/* Fixed width so every field starts at the same place: the icon column IS the label here, and a
+   ragged left edge would make seven near-identical rows harder to scan than they need to be. */
+.se-social-icon {
+  flex: none;
+  width: 22px;
+  text-align: center;
+  color: var(--mj-text-secondary);
+}
 
 `;
 
@@ -130,6 +146,38 @@ const SCREEN_EDITOR_CSS = /* css */ `
           </mjf-setting-row>
 
           <mjf-setting-row
+            label="Social links"
+            hint="Shown as icons under the ending message. Leave a platform blank to hide it."
+            [open]="socialOpen"
+          >
+            <button
+              slot="control"
+              type="button"
+              class="mjf-switch"
+              [class.is-on]="socialOpen"
+              role="switch"
+              [attr.aria-checked]="socialOpen"
+              aria-label="Social links"
+              (click)="toggleSocial()"
+            ></button>
+            <div class="se-social">
+              @for (p of platforms; track p.id) {
+                <label class="se-social-row">
+                  <span class="se-social-icon"><i [class]="p.icon" aria-hidden="true"></i></span>
+                  <input
+                    class="mjf-input"
+                    type="url"
+                    [value]="socialUrl(p.id)"
+                    [attr.placeholder]="'https://' + p.label.toLowerCase() + '.com/…'"
+                    [attr.aria-label]="p.label + ' link'"
+                    (change)="setSocialUrl(p.id, $any($event.target).value)"
+                  />
+                </label>
+              }
+            </div>
+          </mjf-setting-row>
+
+          <mjf-setting-row
             label="Show only if"
             hint="Endings are checked in order and the first match wins. One with no condition is only reachable as the default."
             [open]="conditionalOpen"
@@ -160,7 +208,7 @@ export class ScreenEditorComponent {
   public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
     if (value?.ID !== this.current?.ID) {
       // A new screen's emptiness is not the previous screen's — start its rows closed.
-      this.requested = { redirect: false, conditional: false };
+      this.requested = { redirect: false, conditional: false, social: false };
     }
     this.current = value;
   }
@@ -170,7 +218,7 @@ export class ScreenEditorComponent {
   private current: mjBizAppsFormsFormScreenEntity | null = null;
 
   /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
-  private requested = { redirect: false, conditional: false };
+  private requested = { redirect: false, conditional: false, social: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 
@@ -199,6 +247,56 @@ export class ScreenEditorComponent {
     if (next.clear) {
       this.onConditionalChange(undefined);
     }
+  }
+
+  // --- Social links ---------------------------------------------------------
+
+  protected readonly platforms = SOCIAL_PLATFORMS;
+
+  protected get socialLinks(): SocialLink[] {
+    return parseSocialLinks(this.screen?.SocialLinks);
+  }
+
+  protected get socialOpen(): boolean {
+    return isOptionalOpen(this.socialLinks.length > 0, this.requested.social);
+  }
+
+  protected toggleSocial(): void {
+    const next = toggleOptional(this.socialLinks.length > 0, this.requested.social);
+    this.requested.social = next.requested;
+    if (next.clear) {
+      this.apply((s) => {
+        s.SocialLinks = null;
+      });
+    }
+  }
+
+  protected socialUrl(platform: SocialPlatformId): string {
+    return this.socialLinks.find((l) => l.platform === platform)?.url ?? '';
+  }
+
+  /**
+   * Set (or clear) one platform's link.
+   *
+   * Rewrites the whole list in {@link SOCIAL_PLATFORMS} order rather than appending, so the icons
+   * a respondent sees are in a stable order the author can predict from the panel they are
+   * looking at, not in whichever order the fields happened to be filled.
+   */
+  protected setSocialUrl(platform: SocialPlatformId, url: string): void {
+    const current = new Map(this.socialLinks.map((l) => [l.platform, l.url]));
+    const trimmed = url.trim();
+    if (trimmed === '') {
+      current.delete(platform);
+    } else {
+      current.set(platform, trimmed);
+    }
+    const ordered = SOCIAL_PLATFORMS.flatMap((p) => {
+      const value = current.get(p.id);
+      return value ? [{ platform: p.id, url: value }] : [];
+    });
+    this.apply((s) => {
+      s.SocialLinks = serializeSocialLinks(ordered);
+    });
   }
 
   protected get conditionalRule(): ConditionalRule | undefined {

@@ -320,6 +320,15 @@ const LAYOUT_CSS = /* css */ `
 .fb-page-desc::placeholder { color: var(--mj-text-muted); }
 
 .fb-endings { margin-top: var(--mjf-stack); padding-top: var(--mjf-stack); border-top: 1px solid var(--mjf-rule); }
+
+/* An ending no respondent can reach is an authoring mistake, not a variant, so it is marked
+   rather than merely labelled. */
+.fb-screen-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--mj-status-warning, var(--mj-status-error));
+}
 .fb-endings-title {
   margin: 0 0 8px;
   font-size: var(--mjf-label);

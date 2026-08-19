@@ -42,6 +42,14 @@
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="IsPartialSubmitPoint"
+            Type="checkbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -117,9 +125,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Questions','PageID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Questions')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Questions','PageID')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormQuestions')"
-                [ShowToolbar]="false"
+                [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormQuestions', $event.totalRowCount)"
                 >

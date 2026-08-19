@@ -2717,6 +2717,9 @@ export class mjBizAppsFormsFormScreen_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true, description: `Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`}) 
+    SocialLinks?: string;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -2761,6 +2764,9 @@ export class CreatemjBizAppsFormsFormScreenInput {
     @Field(() => Boolean, { nullable: true })
     IsDefault?: boolean;
 
+    @Field({ nullable: true })
+    SocialLinks: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2803,6 +2809,9 @@ export class UpdatemjBizAppsFormsFormScreenInput {
 
     @Field(() => Boolean, { nullable: true })
     IsDefault?: boolean;
+
+    @Field({ nullable: true })
+    SocialLinks?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

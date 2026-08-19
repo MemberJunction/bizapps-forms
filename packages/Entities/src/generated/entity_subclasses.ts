@@ -958,7 +958,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form
+        * * Display Name: Form ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     ScreenType: z.union([z.literal('Ending'), z.literal('Welcome')]).describe(`
@@ -1022,9 +1022,14 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    SocialLinks: z.string().nullable().describe(`
+        * * Field Name: SocialLinks
+        * * Display Name: Social Links
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -3756,7 +3761,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form
+    * * Display Name: Form ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -3911,8 +3916,21 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
     }
 
     /**
+    * * Field Name: SocialLinks
+    * * Display Name: Social Links
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag
+    */
+    get SocialLinks(): string | null {
+        return this.Get('SocialLinks');
+    }
+    set SocialLinks(value: string | null) {
+        this.Set('SocialLinks', value);
+    }
+
+    /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {

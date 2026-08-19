@@ -384,7 +384,19 @@
                 <span class="fb-screen-icon"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
                 <div class="fb-screen-main">
                   <div class="fb-screen-kind">
-                    @if (es.IsDefault) { Default ending } @else if (es.ConditionalRule) { Conditional ending } @else { Ending }
+                    @if (es.IsDefault) {
+                      Default ending
+                    } @else if (es.ConditionalRule) {
+                      Conditional ending
+                    } @else {
+                      <!-- Endings are checked in order and the first match wins, so one with no
+                           condition is only ever reachable as the default — and there already is
+                           one. Saying "Ending" here made a dead screen look like a normal screen. -->
+                      <span class="fb-screen-warn">
+                        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                        Never shown — add a condition
+                      </span>
+                    }
                   </div>
                   <div class="fb-screen-title">{{ es.Title }}</div>
                 </div>
@@ -402,9 +414,16 @@
                 ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </article>
             }
+            <!-- The label changes once a default exists, because what a SECOND ending is for is
+                 different from what the first one is for: the first is where everyone lands, and
+                 every one after it earns its place by matching a condition. Offering "Add an
+                 ending" a second time invited authors to write a screen no respondent could
+                 reach. Not capped at one — routing different respondents to different endings is
+                 the feature, and the schema supports it deliberately (Welcome is capped by a
+                 unique index; Ending is not). -->
             <button type="button" class="fb-screen-add" [disabled]="busy" (click)="addScreen('Ending')">
               <i class="fa-solid fa-plus" aria-hidden="true"></i>
-              Add an ending
+              @if (endScreens.length === 0) { Add an ending } @else { Add a conditional ending }
             </button>
           </div>
         </div>
