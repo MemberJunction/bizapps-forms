@@ -56,3 +56,6 @@ metadata/sql_logging
 .playwright-mcp/
 .dev-file-storage/
 apps/MJAPI/schema.graphql
+
+# Playwright MCP screenshots
+.playwright-mcp/

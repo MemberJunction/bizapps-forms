@@ -32,12 +32,22 @@
     }
     @default {
       @if (definition(); as def) {
-        <header class="mjf-header">
-          <h1 class="mjf-header__title">{{ def.name }}</h1>
-          @if (def.description) {
-            <p class="mjf-header__desc">{{ def.description }}</p>
-          }
-        </header>
+        <!-- Only when there is no welcome screen. A form WITH one has already introduced itself
+             by name and description on the screen the respondent just dismissed; repeating both
+             above the first question is the same copy twice, and the description in particular
+             is authoring metadata ("Collects the five fields the demo screen maps") that reads
+             like a leaked internal note to whoever is filling the thing in.
+
+             Not deleted outright: a form with no welcome screen has nothing else that says what
+             it is, and an unlabelled page of inputs is worse than a repeated title. -->
+        @if (!welcomeScreen()) {
+          <header class="mjf-header">
+            <h1 class="mjf-header__title">{{ def.name }}</h1>
+            @if (def.description) {
+              <p class="mjf-header__desc">{{ def.description }}</p>
+            }
+          </header>
+        }
 
         @if (errorText()) {
           <p class="mjf-banner-error" role="alert">{{ errorText() }}</p>

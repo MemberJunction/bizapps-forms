@@ -1,7 +1,21 @@
 /* Host is the themable surface: style tokens are set on the element by applyStyleTokens.
    Fallbacks keep the widget legible before any FormStyle is applied. */
 :host {
-  display: block;
+  /* A flex column so a welcome or ending screen can grow into whatever height the host gives
+     the widget. Where the host gives none — an ordinary embed — this measures identically to
+     the block it replaced, because a flex column with no spare room is just a stack. */
+  display: flex;
+  flex-direction: column;
+  /* The widget's responsive rules ask THIS element how wide it is, not the window — see the
+     @container rules in form-scroll / form-one-question / form-question.
+
+     A viewport media query is the wrong instrument for an embeddable custom element. This thing
+     is dropped into other people's pages, and a 380px sidebar on a 1920px desktop was getting
+     the full desktop layout: 2rem page padding and an eleven-across NPS scale, in a column too
+     narrow for either. The element's own width is the only thing that was ever being asked
+     about. It also makes the builder's device preview truthful without an iframe. */
+  container-type: inline-size;
+  container-name: mjf;
   /* --mjf-* fallbacks (mirror docs/app/design-system.css :root) so the widget renders
      standalone; a published FormStyle overrides these via host inline custom props. */
   --mj-font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -40,24 +54,57 @@
   --mjf-accent: var(--mj-brand-primary);
   --mjf-accent-strong: var(--mj-brand-primary-hover);
   --mjf-on-accent: var(--mj-brand-on-primary);
-  --mjf-accent-soft: color-mix(in srgb, var(--mjf-accent) 12%, var(--mj-bg-surface));
-  --mjf-card-bg: var(--mj-bg-surface);
-  --mjf-card-border: var(--mj-border-default);
+  /* ---- Derived from the two colours the author actually picks ----
+     Everything below is mixed from --mjf-page-bg and --mjf-page-ink rather than read from the
+     fixed light-theme --mj-* palette.
+
+     This is the bug an author hit the moment they chose a colour: setting the page background to
+     deep red produced a WHITE card floating on it, grey-on-red help text, and a white-on-red
+     progress track, because those surfaces were pinned to --mj-bg-surface and --mj-text-muted
+     and no theme control could reach them. The Design tab looked like it themed the form; it
+     themed the area around the form.
+
+     On the default white page these mixes land within a few points of the constants they
+     replace, so an untouched form looks the same as before. On a coloured page every surface
+     now follows the page. */
+  /* Measured, not eyeballed. The first pass mixed muted at 68% and the help text under a choice
+     list landed at 4.24:1 against a deep red page — close enough to look deliberate and still
+     below the 4.5:1 body-text bar. Muting is a hierarchy device and it is not worth a respondent
+     squinting, so the mixes stop where AA does. On a white page this reads a shade darker than
+     the constant it replaced, which costs nothing. `faint` is disabled-state only, where the
+     contrast requirement does not apply. */
+  --mjf-page-ink-soft: color-mix(in srgb, var(--mjf-page-ink) 88%, var(--mjf-page-bg));
+  --mjf-page-ink-muted: color-mix(in srgb, var(--mjf-page-ink) 78%, var(--mjf-page-bg));
+  --mjf-page-ink-faint: color-mix(in srgb, var(--mjf-page-ink) 52%, var(--mjf-page-bg));
+  --mjf-page-edge: color-mix(in srgb, var(--mjf-page-ink) 20%, var(--mjf-page-bg));
+  --mjf-page-edge-strong: color-mix(in srgb, var(--mjf-page-ink) 32%, var(--mjf-page-bg));
+  --mjf-page-sunken: color-mix(in srgb, var(--mjf-page-ink) 10%, var(--mjf-page-bg));
+
+  --mjf-accent-soft: color-mix(in srgb, var(--mjf-accent) 12%, var(--mjf-page-bg));
+  /* One background for the whole form. The card is told apart by its border and shadow, which
+     is exactly how it already read on a white page — nothing changes there — and on a coloured
+     page it stops being a white rectangle someone forgot to theme. */
+  --mjf-card-bg: var(--mjf-page-bg);
+  --mjf-card-border: var(--mjf-page-edge);
   --mjf-card-radius: var(--mj-radius-lg);
   --mjf-card-shadow: var(--mj-shadow-sm);
-  --mjf-input-bg: var(--mj-bg-surface);
-  --mjf-input-border: var(--mj-border-strong);
+  --mjf-input-bg: var(--mjf-page-bg);
+  --mjf-input-border: var(--mjf-page-edge-strong);
   --mjf-input-radius: var(--mj-radius-md);
-  --mjf-choice-bg: var(--mj-bg-surface);
-  --mjf-choice-border: var(--mj-border-default);
+  --mjf-choice-bg: var(--mjf-page-bg);
+  --mjf-choice-border: var(--mjf-page-edge);
   --mjf-choice-radius: var(--mj-radius-md);
   --mjf-choice-selected-bg: var(--mjf-accent-soft);
   --mjf-choice-selected-border: var(--mjf-accent);
-  --mjf-choice-selected-text: var(--mj-text-primary);
-  --mjf-progress-track: var(--mj-bg-surface-sunken);
+  --mjf-choice-selected-text: var(--mjf-page-ink);
+  --mjf-progress-track: var(--mjf-page-sunken);
+  /* Deliberately NOT mixed toward the page: an error is a signal and it has to survive the
+     theme. Exposed as an --mjf-* token anyway so an author whose page is already red can move
+     it somewhere visible, which the fixed --mj-status-error gave them no way to do. */
+  --mjf-status-error: var(--mj-status-error);
   --mjf-progress-fill: var(--mjf-accent);
   --mjf-rating-active: var(--mjf-accent);
-  --mjf-rating-inactive: var(--mj-border-strong);
+  --mjf-rating-inactive: var(--mjf-page-edge-strong);
   --mjf-btn-radius: var(--mj-radius-md);
 
   /* Design-tab controls. Every one is authored in the builder's Design tab and travels
@@ -82,11 +129,34 @@
   background-attachment: fixed;
 }
 
+/* One fixed 680px column at every size meant a tablet wasted ~70px of margin either side and a
+   desktop wasted most of the window, while a phone got the same padding as a monitor. The cap
+   still exists — a text input the width of a 2400px display is unusable, and long lines are hard
+   to read — but it now grows in steps with the space actually available. */
 .mjf-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
   max-width: 680px;
   margin: 0 auto;
   padding: 1.25rem;
   box-sizing: border-box;
+}
+
+@container mjf (min-width: 640px) {
+  .mjf-shell {
+    max-width: 800px;
+    padding: 1.5rem;
+  }
+}
+
+@container mjf (min-width: 1024px) {
+  .mjf-shell {
+    max-width: 980px;
+    padding: 2rem;
+  }
 }
 
 .mjf-header {
@@ -105,14 +175,14 @@
 .mjf-header__desc {
   margin: 0;
   text-align: var(--mjf-title-align);
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-banner-error {
   margin: 0 0 1rem;
   padding: 0.75rem 1rem;
-  color: var(--mj-status-error);
-  background: color-mix(in srgb, var(--mj-status-error) 10%, transparent);
+  color: var(--mjf-status-error);
+  background: color-mix(in srgb, var(--mjf-status-error) 10%, transparent);
   border-radius: var(--mjf-input-radius);
 }
 
@@ -122,8 +192,8 @@
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
-  color: var(--mj-status-error);
-  background: color-mix(in srgb, var(--mj-status-error) 10%, transparent);
+  color: var(--mjf-status-error);
+  background: color-mix(in srgb, var(--mjf-status-error) 10%, transparent);
   border-radius: var(--mjf-input-radius);
   font-size: 0.9375rem;
 }
@@ -134,7 +204,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-state {
@@ -148,7 +218,7 @@
 }
 
 .mjf-state--error .mjf-state__msg {
-  color: var(--mj-status-error);
+  color: var(--mjf-status-error);
 }
 
 .mjf-spinner {

@@ -18,7 +18,7 @@
 .mjf-oneq__step {
   font-family: var(--mjf-font-body);
   font-size: 0.875rem;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
   white-space: nowrap;
 }
 
@@ -82,10 +82,10 @@
 }
 
 .mjf-oneq__empty {
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
-@media (min-width: 640px) {
+@container mjf (min-width: 640px) {
   .mjf-oneq__card {
     padding: 3rem;
   }

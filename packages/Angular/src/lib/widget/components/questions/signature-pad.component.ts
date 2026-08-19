@@ -53,7 +53,7 @@ const SIGNATURE_PAD_CSS = /* css */ `
   aspect-ratio: 3 / 1;
   touch-action: none;
   cursor: crosshair;
-  border: 1px dashed var(--mj-border-default);
+  border: 1px dashed var(--mjf-page-edge);
   border-radius: var(--mjf-input-radius, 8px);
   background: var(--mjf-sig-paper);
   color: var(--mjf-sig-ink);
@@ -61,7 +61,7 @@ const SIGNATURE_PAD_CSS = /* css */ `
 .mjf-sig__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
 
 .mjf-sig__bar { display: flex; align-items: center; gap: var(--mjf-gap-sm, 8px); }
-.mjf-sig__hint { flex: 1; margin: 0; font-size: var(--mjf-label, 0.8125rem); color: var(--mj-text-muted); }
+.mjf-sig__hint { flex: 1; margin: 0; font-size: var(--mjf-label, 0.8125rem); color: var(--mjf-page-ink-muted); }
 .mjf-sig__clear {
   flex: none;
   display: inline-flex;
@@ -71,12 +71,12 @@ const SIGNATURE_PAD_CSS = /* css */ `
   cursor: pointer;
   font: inherit;
   font-size: var(--mjf-label, 0.8125rem);
-  border: 1px solid var(--mj-border-default);
+  border: 1px solid var(--mjf-page-edge);
   border-radius: var(--mjf-input-radius, 8px);
-  background: var(--mj-bg-surface);
-  color: var(--mj-text-secondary);
+  background: var(--mjf-page-bg);
+  color: var(--mjf-page-ink-soft);
 }
-.mjf-sig__clear:hover:not(:disabled) { background: var(--mj-bg-surface-sunken); }
+.mjf-sig__clear:hover:not(:disabled) { background: var(--mjf-page-sunken); }
 .mjf-sig__clear:disabled { opacity: 0.5; cursor: default; }
 `;
 

@@ -14,12 +14,27 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import type { PublishedFormScreen } from '@mj-biz-apps/forms-entities';
 
 const FORM_SCREEN_CSS = /* css */ `
-:host { display: block; }
+/* A welcome or ending screen is a HERO, not a paragraph: it owns the whole surface and centres
+   in it. It used to be a short content-height block pinned to the top, which on a full-window
+   preview (and on a phone) left most of the screen empty below it and read as a page that had
+   failed to load rather than a deliberate opening.
+
+   flex all the way down, never a percentage height: a percentage would resolve against an auto
+   parent as zero, and this element also runs embedded on pages that give it no height at all.
+   Growing to fill is something flex does when there IS room and ignores when there is not. */
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
 
 .mjf-screen {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 1rem;
   padding: 2.5rem 1.25rem;
   text-align: center;
@@ -34,8 +49,11 @@ const FORM_SCREEN_CSS = /* css */ `
 .mjf-screen__title {
   margin: 0;
   font-family: var(--mjf-font-display);
-  font-size: clamp(1.5rem, 4vw, 2rem);
-  line-height: 1.25;
+  /* cqi, not vw: this is the opening line of the form and it should scale with the space the
+     WIDGET has, not the browser window. On vw a phone-width embed in a desktop page sized its
+     title off the desktop, which is the same mistake the layout media queries were making. */
+  font-size: clamp(1.75rem, 6cqi, 2.75rem);
+  line-height: 1.2;
   color: var(--mjf-page-ink);
 }
 
@@ -45,16 +63,16 @@ const FORM_SCREEN_CSS = /* css */ `
   white-space: pre-wrap;
   font-size: 1.0625rem;
   line-height: 1.6;
-  color: var(--mj-text-secondary);
+  color: var(--mjf-page-ink-soft);
 }
 
 .mjf-screen__cta {
-  margin-top: 0.5rem;
-  min-height: 2.75rem;
-  padding: 0.75rem 2rem;
+  margin-top: 0.75rem;
+  min-height: 3.25rem;
+  padding: 0.9375rem 2.75rem;
   cursor: pointer;
   font: inherit;
-  font-size: 1rem;
+  font-size: 1.0625rem;
   font-weight: 600;
   color: var(--mjf-on-accent);
   background: var(--mjf-accent);
