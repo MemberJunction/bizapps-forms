@@ -256,13 +256,21 @@
                reorder, so neither can drift from the other. -->
           <p class="mjf-rank__hint">Drag to rank them, or use the arrows.</p>
           <ol
+            #rankList
             class="mjf-rank"
             cdkDropList
             [attr.aria-describedby]="describedBy()"
             (cdkDropListDropped)="onRankDrop($event.previousIndex, $event.currentIndex)"
           >
             @for (opt of rankedOptions(); track opt.id; let i = $index, first = $first, last = $last) {
-              <li class="mjf-rank__item" cdkDrag cdkDragPreviewContainer="parent" cdkDragBoundary=".mjf-rank">
+              <li
+                class="mjf-rank__item"
+                [class.mjf-rank__item--moved]="movedRankId() === opt.id"
+                [attr.data-rank-key]="opt.id"
+                cdkDrag
+                cdkDragPreviewContainer="parent"
+                cdkDragBoundary=".mjf-rank"
+              >
                 <!-- The gap left behind while dragging. Without one the list collapses under the
                      pointer and there is nothing showing where the item would land. -->
                 <div class="mjf-rank__ghost" *cdkDragPlaceholder></div>
@@ -285,6 +293,8 @@
               </li>
             }
           </ol>
+          <!-- The travel and the mark say "it moved" to an eye and to nothing else. -->
+          <p class="mjf-visually-hidden" aria-live="polite">{{ rankLiveMessage() }}</p>
         }
         @case ('Matrix') {
           <div class="mjf-matrix-wrap">

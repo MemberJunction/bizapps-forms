@@ -534,10 +534,45 @@
   transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* ---- Arrow reorder ----
+   A drag explains itself: you carried the row. The arrows did not — the list simply re-rendered
+   with two rows swapped, and the eye cannot track an object it never saw move. The travel is
+   done in script (see rank-motion.ts, Web Animations) because only script knows where the rows
+   used to be. What is left for CSS is the other half: WHICH row was yours.
+
+   Both rows in a swap travel, so motion alone is ambiguous. The mark answers that, then leaves.
+
+   It borrows the accent border the drag lift already uses, because it means the same thing in a
+   later moment: this is the row in play. Deliberately NOT a fill (that is what a selected choice
+   looks like — nothing was selected here) and deliberately weaker than the focus ring at 35%,
+   so "you moved this" and "you are focused here" stay legible as two different signals on the
+   same row at the same time, which is exactly what a keyboard respondent sees. The fade in and
+   out comes free from the border-color / box-shadow transition already on .mjf-rank__item. */
+.mjf-rank__item--moved {
+  border-color: var(--mjf-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mjf-accent) 18%, transparent);
+}
+
+/* The position badge is the thing that actually CHANGED — it is the number they were reading.
+   A brief scale draws the eye to it after the row lands, so the new rank is read rather than
+   assumed. */
+.mjf-rank__item--moved .mjf-rank__pos {
+  animation: mjf-rank-pos-pop 0.42s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes mjf-rank-pos-pop {
+  0%   { transform: scale(1); }
+  38%  { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mjf-rank__item:has(.mjf-rank__grip:active) { transform: none; }
   .cdk-drag-animating,
   .cdk-drop-list-dragging .mjf-rank__item:not(.cdk-drag-placeholder) { transition: none; }
+  /* The mark stays — it is the non-motion half of the feedback, and the half this setting
+     makes load-bearing. Only the movement goes. */
+  .mjf-rank__item--moved .mjf-rank__pos { animation: none; }
 }
 
 .mjf-rank__pos {

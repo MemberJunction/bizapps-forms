@@ -11,13 +11,18 @@
  * path a `FileUpload` answer does — it is a file answer whose file came from a canvas.
  */
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
+  ElementRef,
+  Injector,
   inject,
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { CdkDrag, CdkDragHandle, CdkDragPlaceholder, CdkDropList } from '@angular/cdk/drag-drop';
 
@@ -44,6 +49,27 @@ import {
   inputTypeFor,
 } from './input-mode';
 import { SignaturePadComponent } from './signature-pad.component';
+import { flipDeltas, rankAnnouncement } from './rank-motion';
+
+/** How long a reordered row takes to travel to its new place. */
+const RANK_TRAVEL_MS = 220;
+
+/**
+ * How long the moved row stays marked.
+ *
+ * Long enough to find after the motion ends, short enough that it is gone before the next
+ * decision — a mark that outstays the action stops meaning "this one" and becomes decoration.
+ */
+const MOVED_MARK_MS = 900;
+
+/** Respect the OS setting; vestibular disorders make travelling rows genuinely unpleasant. */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
 
 /** UI state of a FileUpload control. */
 type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
@@ -314,18 +340,130 @@ export class FormQuestionComponent {
    * neighbour, a drag LIFTS an item out and puts it down, shifting everything in between.
    */
   protected onRankDrop(from: number, to: number): void {
-    const order = moveItem(this.rankedOptions().map((o) => o.value), from, to);
-    this.valueChange.emit(order);
+    const options = this.rankedOptions();
+    this.valueChange.emit(moveItem(options.map((o) => o.value), from, to));
+    // No FLIP here: CDK has already animated the rows out of the way and the item into place.
+    // Re-animating from the pre-drop layout would drag everything back and replay the move.
+    this.announceRank(options[from], to, options.length);
   }
 
   protected moveRank(index: number, delta: number): void {
-    const order = this.rankedOptions().map((o) => o.value);
+    const options = this.rankedOptions();
     const target = index + delta;
-    if (target < 0 || target >= order.length) {
+    if (target < 0 || target >= options.length) {
       return;
     }
+    // Everything below is derived from `options`, read ONCE before the emit. Reading the signal
+    // again afterwards would be a coin flip: the value travels out to the parent and back as an
+    // input, so whether it has landed depends on change detection, and the two readers here
+    // wanted opposite answers — the mark wants the row at the OLD index, the announcement wants
+    // it at the NEW one. Same object, named once, no timing question.
+    const moved = options[index];
+
+    // Measure BEFORE emitting: once the list re-renders the old layout is gone, and knowing
+    // where each row used to be is the whole of FLIP.
+    const before = this.rankPositions();
+
+    const order = options.map((o) => o.value);
     [order[index], order[target]] = [order[target], order[index]];
     this.valueChange.emit(order);
+
+    this.movedRankId.set(moved.id);
+    this.announceRank(moved, target, options.length);
+    afterNextRender(() => this.playRankMotion(before, target), { injector: this.injector });
+  }
+
+  // --- Making a reorder visible --------------------------------------------
+  //
+  // See rank-motion.ts for why an instant swap reads as "the arrows do not work".
+
+  private readonly rankList = viewChild<ElementRef<HTMLOListElement>>('rankList');
+  private readonly injector = inject(Injector);
+  private readonly destroyRef = inject(DestroyRef);
+
+  /** The row the respondent just moved, marked so they can find it among the two that move. */
+  protected readonly movedRankId = signal<string | null>(null);
+  /** Spoken after a reorder; motion says nothing to a screen reader. */
+  protected readonly rankLiveMessage = signal<string>('');
+  private movedRankTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Current top of every row, keyed by option id. Empty before the list exists. */
+  private rankPositions(): Map<string, number> {
+    const positions = new Map<string, number>();
+    for (const row of this.rankRows()) {
+      const key = row.dataset['rankKey'];
+      if (key) {
+        positions.set(key, row.getBoundingClientRect().top);
+      }
+    }
+    return positions;
+  }
+
+  private rankRows(): HTMLElement[] {
+    const list = this.rankList()?.nativeElement;
+    return list ? (Array.from(list.children) as HTMLElement[]) : [];
+  }
+
+  /**
+   * Start each moved row at its old position and let it travel to the new one.
+   *
+   * Uses the Web Animations API rather than a transition on an inline transform: the element
+   * already carries a `transform` transition for the drag states, and driving both from the
+   * same property is how the two gestures would start fighting. `animate()` runs on its own
+   * timeline, touches no inline style, and needs no cleanup.
+   */
+  private playRankMotion(before: ReadonlyMap<string, number>, landedAt: number): void {
+    if (!prefersReducedMotion()) {
+      const deltas = flipDeltas(before, this.rankPositions());
+      for (const row of this.rankRows()) {
+        const offset = deltas.get(row.dataset['rankKey'] ?? '');
+        if (offset !== undefined) {
+          row.animate(
+            [{ transform: `translateY(${offset}px)` }, { transform: 'translateY(0)' }],
+            { duration: RANK_TRAVEL_MS, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+          );
+        }
+      }
+    }
+    this.clearMovedRankAfterPause();
+    this.keepFocusOnMovedRow(landedAt);
+  }
+
+  /**
+   * Hold focus on the row the respondent is moving.
+   *
+   * Angular moves the existing DOM node, so focus normally travels with it — except at the ends
+   * of the list, where the button just pressed becomes `disabled` and the browser drops focus to
+   * the body. A respondent pressing Up repeatedly would lose the keyboard at exactly the moment
+   * they arrived at the top, which is the most likely thing for them to be doing.
+   */
+  private keepFocusOnMovedRow(landedAt: number): void {
+    const row = this.rankRows()[landedAt];
+    const active = typeof document === 'undefined' ? null : document.activeElement;
+    if (!row || (active && active !== document.body)) {
+      return;
+    }
+    const usable = Array.from(row.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => !b.disabled,
+    );
+    usable?.focus();
+  }
+
+  /** Drop the "you moved this" mark once it has been seen. Replaces any pending clear. */
+  private clearMovedRankAfterPause(): void {
+    clearTimeout(this.movedRankTimer);
+    this.movedRankTimer = setTimeout(() => this.movedRankId.set(null), MOVED_MARK_MS);
+    this.destroyRef.onDestroy(() => clearTimeout(this.movedRankTimer));
+  }
+
+  private announceRank(
+    option: PublishedFormQuestionOption | undefined,
+    index: number,
+    total: number,
+  ): void {
+    if (option) {
+      this.rankLiveMessage.set(rankAnnouncement(option.label, index, total));
+    }
   }
 
   // --- Matrix --------------------------------------------------------------
