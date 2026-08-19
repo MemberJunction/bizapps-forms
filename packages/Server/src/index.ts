@@ -51,6 +51,12 @@ import './upload/UploadMiddleware.js';
 // with no session). The read route serves ONLY objects stored under the public asset prefix.
 import './asset/AssetMiddleware.js';
 
+// Registers the development-only local-disk storage driver. Importing it is enough — the
+// @RegisterClass decorator does the work — and the driver stays inert unless both
+// FORMS_LOCAL_STORAGE_ROOT is set AND a FileStorageAccount points at its driver key, so a
+// deployment that configures neither behaves exactly as it does without this import.
+import './storage/LocalDiskFileStorage.js';
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
