@@ -398,7 +398,7 @@
       }
     </div>
 
-    @if (errorMessage()) {
+    @if (errorMessage() && !hasPartErrors()) {
       <p class="mjf-question__error" [id]="errorId()" role="alert">{{ errorMessage() }}</p>
     }
   }
@@ -411,6 +411,7 @@
   @let cq = question();
   <div class="mjf-composite">
     @for (field of compositeFields(); track field) {
+      @let fieldError = partError(field);
       <div class="mjf-composite__field" [class.mjf-composite__field--wide]="field === 'line1' || field === 'line2'">
         <label class="mjf-composite__label" [attr.for]="inputId() + '-' + field">{{ compositeLabel(field) }}</label>
         <input
@@ -420,10 +421,20 @@
           [attr.autocomplete]="compositeAutocomplete(field)"
           [value]="compositePart(field)"
           [attr.aria-required]="cq.isRequired"
-          [attr.aria-invalid]="!!errorMessage()"
+          [attr.aria-invalid]="compositeInvalid(field)"
+          [attr.aria-describedby]="fieldError ? partErrorId(field) : null"
           (input)="onComposite(field, $any($event.target).value)"
         />
+        @if (fieldError) {
+          <p class="mjf-composite__error" [id]="partErrorId(field)">{{ fieldError }}</p>
+        }
       </div>
     }
   </div>
+  @if (hasPartErrors()) {
+    <!-- The visible messages sit beside their own inputs, which is right for sighted users but
+         announces nothing when validation fires on pressing Next. One hidden alert carries the
+         summary (the same messages joined) so the announcement survives the split. -->
+    <p class="mjf-visually-hidden" role="alert">{{ errorMessage() }}</p>
+  }
 </ng-template>

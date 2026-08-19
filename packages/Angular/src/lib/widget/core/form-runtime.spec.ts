@@ -150,3 +150,27 @@ describe('FormRuntime — a value being typed is not yet a wrong answer', () => 
     expect(runtime.visibleErrorFor(q())).toBeNull();
   });
 });
+
+describe('FormRuntime composite part errors', () => {
+  function contactForm(): PublishedFormDefinition {
+    const def = makeDefinition();
+    def.pages[0].questions = [
+      { id: 'q-contact', type: 'ContactInfo', prompt: 'Your details', isRequired: false, displayOrder: 1, options: [] },
+    ];
+    return def;
+  }
+
+  it('stays silent until the question is touched, like the group message does', () => {
+    const rt = new FormRuntime(contactForm());
+    rt.setValue('q-contact', { email: 'fsa', phone: '12' });
+    const question = rt.visiblePages()[0].questions[0];
+
+    expect(rt.visiblePartErrorsFor(question)).toEqual({});
+
+    rt.touchAll([question]);
+    expect(rt.visiblePartErrorsFor(question)).toEqual({
+      email: 'Enter a valid email address.',
+      phone: 'Enter a valid phone number.',
+    });
+  });
+});

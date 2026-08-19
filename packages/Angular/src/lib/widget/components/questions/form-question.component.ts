@@ -63,6 +63,14 @@ export class FormQuestionComponent {
   public readonly value = input<AnswerValue>(undefined);
   /** Validation message to show, or `null` when valid / untouched. */
   public readonly errorMessage = input<string | null>(null);
+  /**
+   * Per-sub-field messages for a composite (Address / ContactInfo), keyed by field name.
+   *
+   * Empty for every other question type, and empty for a composite whose failure belongs to
+   * the group (required, or a value that is not a record) — that case still shows one message
+   * under the whole control. See {@link FormRuntime.visiblePartErrorsFor}.
+   */
+  public readonly partErrors = input<Record<string, string>>({});
   /** Distribution slug — needed to scope a FileUpload's upload to the current form. */
   public readonly distributionSlug = input<string>('');
   /**
@@ -104,6 +112,30 @@ export class FormQuestionComponent {
     return optionLetter(index);
   }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
+
+  /** True when the failure is field-level, which is what decides where messages are rendered. */
+  protected readonly hasPartErrors = computed(() => Object.keys(this.partErrors()).length > 0);
+
+  protected partError(field: string): string | null {
+    return this.partErrors()[field] ?? null;
+  }
+
+  protected partErrorId(field: string): string {
+    return `${this.inputId()}-${field}-error`;
+  }
+
+  /**
+   * Whether to mark ONE sub-field as invalid.
+   *
+   * Red is the signal that says "look here", and it only works while it is scarce: a composite
+   * that reddens all five inputs because the email is malformed makes the respondent hunt for
+   * the one that matters. So a sub-field is marked when it has its own error — and when the
+   * failure is group-level (no per-field errors) the whole group is marked, because then every
+   * field really is implicated.
+   */
+  protected compositeInvalid(field: string): boolean {
+    return this.hasPartErrors() ? !!this.partErrors()[field] : !!this.errorMessage();
+  }
   protected readonly helpId = computed(() => `${this.inputId()}-help`);
   protected readonly describedBy = computed(() => {
     const ids: string[] = [];

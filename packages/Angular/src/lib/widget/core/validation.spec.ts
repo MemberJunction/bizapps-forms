@@ -64,3 +64,24 @@ describe('validateQuestion', () => {
     expect(validateQuestion(t, 'anything').valid).toBe(true);
   });
 });
+
+describe('validateQuestion on composites', () => {
+  const contact = q({ type: 'ContactInfo' });
+
+  it('names the sub-fields that are wrong so each message can sit under its own input', () => {
+    const result = validateQuestion(contact, { email: 'fsa', phone: '12' });
+
+    expect(result.valid).toBe(false);
+    expect(result.parts).toEqual({
+      email: 'Enter a valid email address.',
+      phone: 'Enter a valid phone number.',
+    });
+  });
+
+  it('leaves parts empty for a group-level failure, which belongs to the whole question', () => {
+    const result = validateQuestion(q({ type: 'ContactInfo', isRequired: true }), null);
+
+    expect(result.message).toBe('This question is required.');
+    expect(result.parts).toBeUndefined();
+  });
+});

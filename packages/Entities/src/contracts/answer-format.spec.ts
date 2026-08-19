@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { matchesValidationPattern, validateAnswerFormat } from './answer-format';
+import {
+  matchesValidationPattern,
+  validateAnswerFormat,
+  validateCompositeParts,
+} from './answer-format';
 
 describe('matchesValidationPattern', () => {
   it('anchors the author pattern to the whole value', () => {
@@ -127,5 +131,37 @@ describe('validateAnswerFormat — types that imply no format', () => {
     for (const type of ['ShortText', 'LongText', 'SingleChoice', 'Dropdown', 'YesNo'] as const) {
       expect(validateAnswerFormat(type, 'anything at all')).toBeUndefined();
     }
+  });
+});
+
+describe('validateCompositeParts', () => {
+  it('reports every wrong part, not just the first', () => {
+    const parts = validateCompositeParts('ContactInfo', { email: 'fsa', phone: '12' });
+
+    expect(parts).toEqual({
+      email: 'Enter a valid email address.',
+      phone: 'Enter a valid phone number.',
+    });
+  });
+});
+
+describe('validateAnswerFormat for ContactInfo', () => {
+  it('keeps the single message unchanged when only one part is wrong', () => {
+    expect(validateAnswerFormat('ContactInfo', { email: 'fsa', phone: '5512161548' })).toBe(
+      'Enter a valid email address.',
+    );
+  });
+
+  it('mentions both problems when both parts are wrong', () => {
+    const message = validateAnswerFormat('ContactInfo', { email: 'fsa', phone: '12' });
+
+    expect(message).toContain('email');
+    expect(message).toContain('phone');
+  });
+
+  it('stays valid when the parts are fine', () => {
+    expect(
+      validateAnswerFormat('ContactInfo', { email: 'a@b.com', phone: '5512161548' }),
+    ).toBeUndefined();
   });
 });

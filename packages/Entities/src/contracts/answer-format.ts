@@ -127,14 +127,42 @@ function validateContactInfo(value: AnswerValue): string | undefined {
   if (!isStringRecord(value)) {
     return 'Enter your contact details.';
   }
+  const messages = Object.values(validateCompositeParts('ContactInfo', value));
+  return messages.length > 0 ? messages.join(' ') : undefined;
+}
+
+/**
+ * Per-SUB-FIELD verdicts for a composite answer: `{ email: '…', phone: '…' }`, empty when the
+ * whole thing is fine.
+ *
+ * Exists because a composite is several fields wearing one question's clothes, and a single
+ * `string | null` cannot say WHICH of them is wrong. The widget used to render that one string
+ * beneath the whole group and mark every input invalid, so a bad email lit up all five boxes
+ * and parked its message under `Phone` — respondents read it as a phone error. It also stopped
+ * at the first failure, so fixing the email revealed a phone error that had been there all
+ * along: one round trip per mistake.
+ *
+ * {@link validateAnswerFormat} derives its single message from this, so the two can never
+ * disagree about whether a composite is valid — the summary is literally these messages joined.
+ * Returns `{}` for non-composite types and for `Address`, which has no per-part format rules
+ * (its parts are free text); callers can treat "no parts" as "fall back to the summary".
+ */
+export function validateCompositeParts(
+  type: FormQuestionType,
+  value: AnswerValue,
+): Record<string, string> {
+  if (type !== 'ContactInfo' || !isStringRecord(value)) {
+    return {};
+  }
   const parts = value as Record<string, string>;
+  const errors: Record<string, string> = {};
   if (parts.email?.trim() && !isEmail(parts.email)) {
-    return 'Enter a valid email address.';
+    errors.email = 'Enter a valid email address.';
   }
   if (parts.phone?.trim() && !isPhone(parts.phone)) {
-    return 'Enter a valid phone number.';
+    errors.phone = 'Enter a valid phone number.';
   }
-  return undefined;
+  return errors;
 }
 
 /**

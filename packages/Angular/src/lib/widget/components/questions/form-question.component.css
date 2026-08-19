@@ -72,6 +72,19 @@
   border-color: var(--mj-status-error);
 }
 
+/* A composite is several fields wearing one question's clothes, so the question-wide rule above
+   reddened all five inputs because the email was malformed. Red only works while it is scarce:
+   it says "look HERE", and five of them says "hunt". Sub-fields opt out and are marked one at a
+   time from aria-invalid, which the template already sets per field — so the visual state and
+   the state screen readers get cannot drift apart. When the failure is group-level (required),
+   every sub-field carries aria-invalid and the group lights up as before, correctly. */
+.mjf-question--error .mjf-composite .mjf-input {
+  border-color: var(--mjf-input-border);
+}
+.mjf-question--error .mjf-composite .mjf-input[aria-invalid='true'] {
+  border-color: var(--mj-status-error);
+}
+
 .mjf-question__error {
   margin: 0;
   font-size: 0.875rem;
@@ -630,6 +643,17 @@
 .mjf-composite__field--wide { grid-column: 1 / -1; }
 
 .mjf-composite__field { display: flex; flex-direction: column; gap: 0.25rem; }
+
+/* Sits directly beneath the input it belongs to: proximity is what makes a respondent read it
+   as "this field", which the old bottom-of-the-group placement actively defeated — a bad email
+   put its message under Phone. `grid-column` inheritance is not a concern; the field is a
+   flex column, so the message simply follows its input. */
+.mjf-composite__error {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--mj-status-error);
+}
 
 .mjf-composite__label {
   font-size: 0.8125rem;

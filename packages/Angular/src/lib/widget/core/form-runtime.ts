@@ -127,6 +127,20 @@ export class FormRuntime {
     return this.isTouched(question.id) ? this.errorFor(question) : null;
   }
 
+  /**
+   * Per-sub-field errors for a composite, on the SAME touched gate as {@link visibleErrorFor} —
+   * the two are one verdict shown two ways, so they must appear and clear together.
+   *
+   * `{}` when the question has no per-field problems, which includes every group-level failure;
+   * the renderer reads that as "show the one message under the group instead".
+   */
+  public visiblePartErrorsFor(question: PublishedFormQuestion): Record<string, string> {
+    if (!this.isTouched(question.id)) {
+      return {};
+    }
+    return validateQuestion(question, this.valueFor(question.id)).parts ?? {};
+  }
+
   /** True when every supplied list of questions currently validates. */
   public areValid(questions: PublishedFormQuestion[]): boolean {
     return questions.every((q) => validateQuestion(q, this.valueFor(q.id)).valid);
