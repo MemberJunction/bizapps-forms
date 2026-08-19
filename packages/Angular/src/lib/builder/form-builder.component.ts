@@ -50,6 +50,7 @@ import type { ConditionalSourceQuestion } from './conditional-rule-editor.compon
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import { definitionFingerprint, storedSnapshotFingerprint } from './publish-fingerprint';
 import { isValidReorder } from './reorder';
+import { nextOptionLabel } from './option-labels';
 import {
   NOTHING_SELECTED,
   clearIfQuestion,
@@ -646,10 +647,12 @@ export class FormBuilderComponent extends BaseFormComponent {
     const { node, matrixAxis } = event;
     // Number within the AXIS, not within the whole option list: a matrix whose second column
     // was labelled "Option 4" because two rows came first is just confusing.
+    // Named from the labels that EXIST, not from how many there are: a list that had lost
+    // "Option 1" used to mint a second "Option 2", and two options with one name are one answer.
     const peers = matrixAxis
-      ? node.options.filter((o) => (o.MatrixAxis ?? 'Row') === matrixAxis).length
-      : node.options.length;
-    const label = matrixAxis ? `${matrixAxis} ${peers + 1}` : `Option ${peers + 1}`;
+      ? node.options.filter((o) => (o.MatrixAxis ?? 'Row') === matrixAxis)
+      : node.options;
+    const label = nextOptionLabel(peers.map((o) => o.Label), matrixAxis ?? 'Option');
     const option = await this.state.addOption(node, label, matrixAxis);
     if (option) {
       node.options.push(option);

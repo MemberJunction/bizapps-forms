@@ -32,6 +32,7 @@ import { ValidationRuleEditorComponent } from './validation-rule-editor.componen
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
+import { optionLetter } from './option-labels';
 import {
   parseConditionalRule,
   parseQuestionSettings,
@@ -70,6 +71,24 @@ const QUESTION_EDITOR_CSS = /* css */ `
 
 .qe-options { display: flex; flex-direction: column; gap: 6px; }
 .qe-option { display: flex; align-items: center; gap: 6px; }
+
+/* The A/B/C badge. Its job is to give an option a name that is stable while the author is
+   renaming things and reordering them, so it is keyed to POSITION and never to the label. */
+.qe-opt-letter {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  font-size: var(--mjf-label);
+  font-weight: 600;
+  color: var(--mj-brand-primary);
+  background: var(--mj-bg-surface-sunken);
+  border: 1px solid var(--mjf-rule);
+  border-radius: var(--mjf-radius-sm);
+}
 .qe-option .mjf-input { flex: 1; }
 .qe-opt-remove {
   flex: none;
@@ -231,6 +250,42 @@ export class QuestionEditorComponent {
   /** Every setting EXCEPT the placeholder, which has its own row. */
   protected get otherSettingFields(): readonly QuestionSettingField[] {
     return this.settingFields.filter((f) => f.key !== 'placeholder');
+  }
+
+  /** The badge beside an option in the list: A, B, C … */
+  protected letterFor(index: number): string {
+    return optionLetter(index);
+  }
+
+  /**
+   * Whether "multiple answers" is a meaningful question about this type.
+   *
+   * Only the two types that are the same control with a different arity: a Dropdown is a
+   * different control and a Ranking already takes every option, so offering the switch there
+   * would be offering to turn one type into another.
+   */
+  protected get canBeMultiAnswer(): boolean {
+    const type = this.node?.entity.QuestionType;
+    return type === 'SingleChoice' || type === 'MultiChoice';
+  }
+
+  protected get isMultiAnswer(): boolean {
+    return this.node?.entity.QuestionType === 'MultiChoice';
+  }
+
+  /**
+   * Flip between one answer and several.
+   *
+   * This changes the question's TYPE, which is also where the answer is stored — a single choice
+   * lands in the text column, several land in JSON. Harmless while the form is being built and
+   * disruptive afterwards, which is what the row's hint says.
+   */
+  protected toggleMultiAnswer(): void {
+    if (!this.node || !this.canBeMultiAnswer) {
+      return;
+    }
+    this.node.entity.QuestionType = this.isMultiAnswer ? 'SingleChoice' : 'MultiChoice';
+    this.questionChanged.emit(this.node);
   }
 
   /** How this type's options work: none, plain values, images, or a matrix's two axes. */

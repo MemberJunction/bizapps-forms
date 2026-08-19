@@ -11,6 +11,7 @@ import type {
   mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { withUniqueValues } from './option-labels';
 import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   parseConditionalRule,
@@ -173,7 +174,20 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
   return result;
 }
 
+/**
+ * Publish a question's options in display order, with unique values.
+ *
+ * The uniqueness pass is not cosmetic. An option's value IS the respondent's answer, so two
+ * options sharing a value are one answer wearing two labels: the widget highlighted both when
+ * either was picked, and the response was indistinguishable afterwards. Deduping here rather
+ * than in the widget is deliberate — the widget would only be papering over a definition that
+ * was already ambiguous, and the ambiguity would survive into the stored response.
+ */
 function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
+  return withUniqueValues(buildRawOptions(node));
+}
+
+function buildRawOptions(node: QuestionNode): PublishedFormQuestionOption[] {
   return [...node.options]
     .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
     .map((opt, index) => {

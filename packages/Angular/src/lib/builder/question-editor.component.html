@@ -77,6 +77,24 @@
       </mjf-setting-row>
     }
 
+    @if (canBeMultiAnswer) {
+      <mjf-setting-row
+        label="Multiple answers"
+        hint="Let the respondent pick more than one. Changes how the answer is stored, so set it before collecting responses."
+      >
+        <button
+          slot="control"
+          type="button"
+          class="mjf-switch"
+          [class.is-on]="isMultiAnswer"
+          role="switch"
+          [attr.aria-checked]="isMultiAnswer"
+          aria-label="Multiple answers"
+          (click)="toggleMultiAnswer()"
+        ></button>
+      </mjf-setting-row>
+    }
+
     <mjf-setting-row
       label="Answer validation"
       hint="Reject an answer that does not match, and tell the respondent why."
@@ -214,13 +232,14 @@
           @for (opt of node.options; track opt.ID) {
             <div class="qe-option-block">
               <div class="qe-option">
+                <span class="qe-opt-letter" aria-hidden="true">{{ letterFor($index) }}</span>
                 <input
                   #optInput
                   type="text"
                   class="mjf-input"
                   [value]="opt.Label"
                   (change)="setOptionLabel($index, optInput.value)"
-                  [attr.aria-label]="'Option ' + ($index + 1)"
+                  [attr.aria-label]="'Option ' + letterFor($index)"
                 />
                 <button
                   type="button"
