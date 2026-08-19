@@ -1,151 +1,362 @@
 <div class="dm">
-  <section class="dm-create-panel" aria-label="Create a distribution">
-    <p class="dm-lede">
-      A <strong>distribution</strong> is one way of sharing this form — its own link, its own
-      response cap, and its own open/closed switch. Create one to get the link, embed snippet
-      or QR code.
-    </p>
-
-    <div class="dm-create">
-      <div class="mjf-field">
-        <label class="mjf-field-label" for="dm-name">Name</label>
-        <input
-          id="dm-name"
-          type="text"
-          class="mjf-input"
-          [(ngModel)]="newName"
-          placeholder="e.g. Homepage link"
-        />
-      </div>
-      <div class="mjf-field">
-        <label class="mjf-field-label" for="dm-channel">Channel</label>
-        <select id="dm-channel" class="mjf-select" [(ngModel)]="newChannel">
-          @for (ch of channels; track ch) {
-            <option [value]="ch">{{ ch }}</option>
-          }
-        </select>
-      </div>
-      <button
-        type="button"
-        class="mjf-btn mjf-btn--primary"
-        [disabled]="createBlockedReason !== null"
-        [attr.title]="createBlockedReason"
-        (click)="create()"
-      >
-        <i class="fa-solid fa-plus" aria-hidden="true"></i> Create
+  @if (loadError) {
+    <div class="dm-pad">
+    <div class="mjf-alert" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span>Could not load this form's share links. {{ loadError }}</span>
+    </div>
+    <div>
+      <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="loading" (click)="reload()">
+        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Try again
       </button>
     </div>
-
-    <p class="dm-hint">
-      <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-      <span>{{ createBlockedReason ?? channelHint }}</span>
+    </div>
+  } @else if (loading) {
+    <p class="mjf-state dm-pad">
+      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading share links&hellip;
     </p>
-  </section>
-
-  @if (loading) {
-    <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading distributions&hellip;</p>
-  } @else if (distributions.length === 0) {
+  } @else if (links.length === 0) {
+    <!-- First run. One button, no fields: the person is here for a URL, and every box
+         between them and it is a chance to give up. -->
+    <div class="dm-pad">
     <div class="mjf-empty">
-      <span class="mjf-empty-icon"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i></span>
-      <span class="mjf-empty-title">Not shared anywhere yet</span>
+      <span class="mjf-empty-icon"><i class="fa-solid fa-link" aria-hidden="true"></i></span>
+      <span class="mjf-empty-title">Share this form</span>
       <p class="mjf-empty-body">
-        Create a distribution above to get a public link, an embed snippet or a QR code for
-        this form.
+        Create a link and anyone can open this form — no sign-in needed. You also get a QR code
+        and a snippet to embed the form in your own site.
       </p>
+      <button type="button" class="mjf-btn mjf-btn--primary" [disabled]="busy" (click)="create()">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i>
+        {{ busy ? 'Creating…' : 'Create a share link' }}
+      </button>
+      @if (actionError) {
+        <p class="mjf-alert" role="alert">{{ actionError }}</p>
+      }
+    </div>
     </div>
   } @else {
-    <div class="dm-list">
-      @for (dist of distributions; track dist.ID) {
-        <div class="dm-card">
-          <div class="dm-card-head">
-            <span class="dm-card-name">{{ dist.Name }}</span>
-            <span class="mjf-badge">{{ dist.ChannelType }}</span>
-            <span [class]="statusClass(dist)">{{ dist.Status }}</span>
-          </div>
+    <div class="dm-shell">
+      <!-- LEFT: every link for this form. -->
+      <aside class="dm-rail" aria-label="Share links">
+        <div class="dm-rail-head">
+          <p class="dm-rail-title">Share links</p>
+          <button
+            type="button"
+            class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+            [disabled]="busy"
+            title="Create another link with its own settings and its own response count"
+            (click)="create()"
+          >
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> New
+          </button>
+        </div>
 
-          <div class="dm-card-body">
-            <div class="dm-artifact">
-              <span class="mjf-field-label">Public link</span>
-              <div class="dm-code">
-                <code>{{ publicUrl(dist) }}</code>
+        <ul class="dm-rail-list" role="list">
+          @for (link of links; track link.ID) {
+            @let state = stateOf(link);
+            <li>
+              <button
+                type="button"
+                class="dm-rail-item"
+                [class.is-on]="link.ID === selectedId"
+                [attr.aria-current]="link.ID === selectedId"
+                (click)="select(link)"
+              >
+                <span [class]="dotClass(state)" aria-hidden="true"></span>
+                <span class="dm-rail-text">
+                  <span class="dm-rail-name mjf-truncate">{{ link.Name }}</span>
+                  <!-- The state in words, not only as a coloured dot. -->
+                  <span class="dm-rail-meta">
+                    {{ state.label }} ·
+                    {{ link.ResponseCount }} {{ link.ResponseCount === 1 ? 'response' : 'responses' }}
+                  </span>
+                </span>
+              </button>
+            </li>
+          }
+        </ul>
+      </aside>
+
+      <!-- RIGHT: the selected link, and everything you can do with it. -->
+      <div class="dm-main">
+      @if (selected; as link) {
+        @let state = stateOf(link);
+        <section class="dm-detail" aria-label="Selected share link">
+          <header class="dm-head">
+            <div class="dm-head-row">
+              @if (renaming) {
+                <input
+                  #nameBox
+                  type="text"
+                  class="mjf-input dm-name-input"
+                  aria-label="Share link name"
+                  [(ngModel)]="nameDraft"
+                  (blur)="commitName()"
+                  (keydown.enter)="nameBox.blur()"
+                  (keydown.escape)="cancelRename()"
+                />
+              } @else {
+                <button type="button" class="dm-name" title="Rename" (click)="startRename()">
+                  <span class="mjf-truncate">{{ link.Name }}</span>
+                  <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                </button>
+              }
+              <span [class]="badgeClass(state)">{{ state.label }}</span>
+              <!-- The remedy sits next to the diagnosis. A status that says something is
+                   wrong and leaves you to hunt for the cure is only half a message. -->
+              @if (state.fix) {
                 <button
                   type="button"
-                  class="mjf-btn mjf-btn--ghost dm-copy"
-                  (click)="copy(publicUrl(dist))"
-                  aria-label="Copy public link"
+                  class="mjf-btn mjf-btn--primary mjf-btn--sm"
+                  [disabled]="busy"
+                  (click)="applyFix()"
                 >
-                  <i class="fa-regular fa-copy" aria-hidden="true"></i>
+                  <i class="fa-solid fa-bolt" aria-hidden="true"></i> {{ state.fix }}
                 </button>
-              </div>
-
-              @if (dist.ChannelType === 'Embed') {
-                <span class="mjf-field-label" style="margin-top:8px">Embed snippet</span>
-                <div class="dm-code">
-                  <code>{{ embedSnippet(dist) }}</code>
-                  <button
-                    type="button"
-                    class="mjf-btn mjf-btn--ghost dm-copy"
-                    (click)="copy(embedSnippet(dist))"
-                    aria-label="Copy embed snippet"
-                  >
-                    <i class="fa-regular fa-copy" aria-hidden="true"></i>
-                  </button>
-                </div>
               }
             </div>
 
-            @if (dist.ChannelType === 'QR') {
-              @if (qrSvg(dist); as svg) {
-                <figure class="dm-qr">
-                  <div class="dm-qr-plate" [innerHTML]="svg"></div>
-                  <button
-                    type="button"
-                    class="mjf-btn mjf-btn--ghost mjf-btn--sm dm-qr-download"
-                    title="Download a vector SVG — prints crisply at any size"
-                    (click)="downloadQr(dist)"
-                  >
-                    <i class="fa-solid fa-download" aria-hidden="true"></i> Download
+            <p class="dm-detail-text">
+              {{ state.detail }}
+              @if (state.kind === 'scheduled' && link.OpenAt) {
+                <span>It opens on {{ link.OpenAt | date: 'medium' }}.</span>
+              } @else if (state.kind === 'ended' && link.CloseAt) {
+                <span>It expired on {{ link.CloseAt | date: 'medium' }}.</span>
+              } @else if (state.kind === 'live' && link.CloseAt) {
+                <span>It expires on {{ link.CloseAt | date: 'medium' }}.</span>
+              }
+            </p>
+          </header>
+
+          @if (actionError) {
+            <div class="mjf-alert" role="alert">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <span>{{ actionError }}</span>
+            </div>
+          }
+
+          <!-- Three renderings of ONE link. Every link has all three; picking between them
+               is a view, not a property of the link, and never has to be decided up front. -->
+          <div class="mjf-seg dm-views" role="group" aria-label="Ways to share this link">
+            <button type="button" [class.is-on]="view === 'link'" [attr.aria-pressed]="view === 'link'" (click)="view = 'link'">
+              <i class="fa-solid fa-link" aria-hidden="true"></i> Link
+            </button>
+            <button type="button" [class.is-on]="view === 'qr'" [attr.aria-pressed]="view === 'qr'" (click)="view = 'qr'">
+              <i class="fa-solid fa-qrcode" aria-hidden="true"></i> QR code
+            </button>
+            <button type="button" [class.is-on]="view === 'embed'" [attr.aria-pressed]="view === 'embed'" (click)="view = 'embed'">
+              <i class="fa-solid fa-code" aria-hidden="true"></i> Embed
+            </button>
+          </div>
+
+          <div class="dm-panel">
+            @switch (view) {
+              @case ('link') {
+                <div class="dm-linkbar">
+                  <input
+                    type="text"
+                    class="mjf-input dm-linkfield"
+                    readonly
+                    aria-label="Public link"
+                    [value]="publicUrl(link)"
+                    (focus)="selectAll($event)"
+                  />
+                  <button type="button" class="mjf-btn mjf-btn--primary dm-copy" (click)="copy('link', publicUrl(link))">
+                    @if (copied === 'link') {
+                      <i class="fa-solid fa-check" aria-hidden="true"></i> Copied
+                    } @else {
+                      <i class="fa-regular fa-copy" aria-hidden="true"></i> Copy link
+                    }
                   </button>
-                </figure>
-              } @else {
-                <p class="dm-qr-missing">The QR code renders once this distribution has a public link.</p>
+                </div>
+                <p class="dm-note">Send this to anyone. They open the form without signing in.</p>
+                <div class="dm-sub">
+                  <a
+                    class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+                    [href]="publicUrl(link)"
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                    Open it yourself
+                  </a>
+                </div>
+              }
+
+              @case ('qr') {
+                <div class="dm-qr-wrap">
+                  @if (qrSvg(link); as svg) {
+                    <figure class="dm-qr">
+                      <div class="dm-qr-plate" [innerHTML]="svg"></div>
+                    </figure>
+                    <div class="dm-qr-side">
+                      <p class="dm-note">
+                        Point a phone camera at this to open the form. It downloads as a vector
+                        file, so it stays sharp at any print size.
+                      </p>
+                      <button type="button" class="mjf-btn mjf-btn--primary" (click)="downloadQr(link)">
+                        <i class="fa-solid fa-download" aria-hidden="true"></i> Download the QR code
+                      </button>
+                      @if (isLocalOnly(link)) {
+                        <p class="dm-warn" role="note">
+                          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+                          <span>
+                            This link points at <code>localhost</code>, which to a phone means the
+                            phone itself — so scanning this now will not open the form. The code is
+                            fine; the address is only reachable on this computer. It will work once
+                            the form is on a real server.
+                          </span>
+                        </p>
+                      }
+                    </div>
+                  } @else {
+                    <p class="dm-note">
+                      This link is too long to fit in a QR code. Share the link itself instead.
+                    </p>
+                  }
+                </div>
+              }
+
+              @case ('embed') {
+                <textarea
+                  class="mjf-textarea dm-embed"
+                  readonly
+                  rows="3"
+                  aria-label="Embed snippet"
+                  [value]="embedSnippet(link)"
+                  (focus)="selectAll($event)"
+                ></textarea>
+                <div class="dm-sub">
+                  <button type="button" class="mjf-btn mjf-btn--primary dm-copy" (click)="copy('embed', embedSnippet(link))">
+                    @if (copied === 'embed') {
+                      <i class="fa-solid fa-check" aria-hidden="true"></i> Copied
+                    } @else {
+                      <i class="fa-regular fa-copy" aria-hidden="true"></i> Copy snippet
+                    }
+                  </button>
+                </div>
+                <p class="dm-note">
+                  Paste this into your own page's HTML to show the form inside your site.
+                </p>
               }
             }
           </div>
 
-          <div class="dm-meta">
-            <label>
-              Max responses
-              <input
-                #maxInput
-                type="number"
-                min="0"
-                class="mjf-input dm-num"
-                [value]="dist.MaxResponses ?? ''"
-                (change)="setMax(dist, maxInput.value)"
-                placeholder="∞"
-              />
-            </label>
-            <span>{{ dist.ResponseCount }} received</span>
-          </div>
+          <!-- Settings. Below the share surface because they are the rarer visit, and each
+               one says what it does rather than naming its column. -->
+          <section class="dm-settings" aria-label="Settings for this share link">
+            <p class="dm-settings-title">Settings</p>
 
-          <div class="dm-actions">
-            <button
-              type="button"
-              class="mjf-btn"
-              [class.mjf-btn--primary]="dist.Status !== 'Active'"
-              [class.mjf-btn--ghost]="dist.Status === 'Active'"
-              (click)="toggleOpen(dist)"
-            >
-              @if (dist.Status === 'Active') {
-                <i class="fa-solid fa-lock" aria-hidden="true"></i> Close
+            <div class="dm-setting">
+              <span class="dm-setting-text">
+                <span class="dm-setting-label" id="dm-open-label">Open to responses</span>
+                <span class="dm-setting-hint">
+                  Turn off to stop taking responses. The link keeps working, so anything already
+                  printed still works when you turn it back on.
+                </span>
+              </span>
+              <span class="dm-setting-control">
+                <button
+                  type="button"
+                  class="mjf-switch"
+                  role="switch"
+                  [class.is-on]="link.Status === 'Active'"
+                  [attr.aria-checked]="link.Status === 'Active'"
+                  aria-labelledby="dm-open-label"
+                  [disabled]="busy"
+                  (click)="toggleOpen()"
+                ></button>
+              </span>
+            </div>
+
+            <div class="dm-setting">
+              <span class="dm-setting-text">
+                <span class="dm-setting-label" id="dm-cap-label">Response limit</span>
+                <span class="dm-setting-hint">Stop after this many responses. Empty means no limit.</span>
+              </span>
+              <span class="dm-setting-control">
+                @if (link.MaxResponses !== null) {
+                  <span class="dm-count">{{ link.ResponseCount }} of {{ link.MaxResponses }}</span>
+                  <span
+                    class="dm-meter"
+                    role="img"
+                    [attr.aria-label]="link.ResponseCount + ' of ' + link.MaxResponses + ' responses used'"
+                  >
+                    <span
+                      class="dm-meter-fill"
+                      [class.is-full]="!state.accepting && state.kind === 'full'"
+                      [style.width.%]="capPercent(link)"
+                    ></span>
+                  </span>
+                }
+                <input
+                  #capBox
+                  type="number"
+                  min="0"
+                  step="1"
+                  class="mjf-input dm-num"
+                  aria-labelledby="dm-cap-label"
+                  placeholder="No limit"
+                  [disabled]="busy"
+                  [value]="link.MaxResponses ?? ''"
+                  (change)="setMax(capBox)"
+                />
+              </span>
+            </div>
+
+            <!-- One date, not two. A start date is a real column the server enforces, but
+                 nobody sets one: you create a link when you want it working. An expiry is the
+                 case people actually have (a deadline), so that is the control. A start date
+                 arriving from elsewhere still shows as Scheduled, with "Open it now" to clear
+                 it — the state machine keeps handling what the server keeps enforcing. -->
+            <div class="dm-setting">
+              <span class="dm-setting-text">
+                <span class="dm-setting-label" id="dm-exp-label">Expires</span>
+                <span class="dm-setting-hint">
+                  Stop taking responses after this date. Empty means it never expires.
+                </span>
+              </span>
+              <span class="dm-setting-control">
+                <input
+                  #closeBox
+                  type="datetime-local"
+                  class="mjf-input dm-date"
+                  aria-labelledby="dm-exp-label"
+                  [disabled]="busy"
+                  [value]="asInputValue(link.CloseAt)"
+                  (change)="setCloseAt(closeBox.value)"
+                />
+              </span>
+            </div>
+
+            <div class="dm-danger">
+              @if (canDelete) {
+                @if (confirmingDelete) {
+                  <!-- Confirm LEFT, cancel RIGHT, per the house rule. -->
+                  <button type="button" class="mjf-btn mjf-btn--danger" [disabled]="busy" (click)="confirmDelete()">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete it
+                  </button>
+                  <button type="button" class="mjf-btn mjf-btn--quiet" [disabled]="busy" (click)="confirmingDelete = false">
+                    Keep it
+                  </button>
+                  <span class="dm-setting-hint">The link stops working for anyone who has it.</span>
+                } @else {
+                  <button type="button" class="mjf-btn mjf-btn--quiet" [disabled]="busy" (click)="confirmingDelete = true">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i> Delete this share link
+                  </button>
+                }
               } @else {
-                <i class="fa-solid fa-lock-open" aria-hidden="true"></i> Open
+                <span class="dm-setting-hint">
+                  This link has responses, so it cannot be deleted — it records where they came
+                  from. Turn off "Open to responses" to retire it.
+                </span>
               }
-            </button>
-          </div>
-        </div>
+            </div>
+          </section>
+        </section>
       }
+      </div>
     </div>
   }
 </div>

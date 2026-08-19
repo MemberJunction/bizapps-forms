@@ -61,7 +61,22 @@ export {
   type BuilderSelection,
 } from './builder-selection';
 export { PublishService, type PublishResult } from './publish.service';
-export { DistributionService, type CreateDistributionInput, type DistributionChannel } from './distribution.service';
+export {
+  DistributionService,
+  type CreateDistributionInput,
+  type DistributionChannel,
+  type DistributionListResult,
+  type MutationOutcome,
+} from './distribution.service';
+export {
+  autoShareName,
+  shareState,
+  type ShareLinkFacts,
+  type ShareState,
+  type ShareStateKind,
+  type ShareStateTone,
+} from './share-state';
+export { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 export {
   QUESTION_TYPE_CATALOG,
   questionTypeMeta,

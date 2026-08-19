@@ -540,7 +540,13 @@ const LAYOUT_CSS = /* css */ `
 
 /* ------------------------------------------------------- non-Build tab panes */
 
-.fb-distribute { padding: var(--mjf-stack) var(--mjf-gutter); max-width: 920px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+/* Full-bleed, like the Build pane and unlike the other centred ones. This tab is two-pane,
+   and a centred max-width box pushed BOTH panes into the middle of the screen — a rail
+   floating in open space with a wall of empty page either side of it. The rail belongs
+   against the edge, the way every rail in this builder sits; the padding and the readable
+   measure move inside, onto the content that actually needs them. */
+.fb-distribute { flex: 1; min-height: 0; overflow: hidden; }
+.fb-distribute mjf-distribution-manager { display: block; height: 100%; }
 .fb-design { flex: 1; min-height: 0; padding: var(--mjf-stack) var(--mjf-gutter); overflow: hidden; }
 .fb-design mjf-design-panel { display: block; height: 100%; }
 
