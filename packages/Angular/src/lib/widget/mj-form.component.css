@@ -328,3 +328,56 @@
     animation-duration: 2s;
   }
 }
+
+/* ------------------------------------------------------------------ sending */
+
+/* The submit wait. Previously the button relabelled itself "Submitting…" and nothing else
+   changed — on a long form that button sits below whatever the respondent was last reading,
+   so the click produced no visible feedback where their eyes were, and an unacknowledged
+   click gets clicked again. */
+.mjf-sending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mjf-gap, 16px);
+  min-height: 40vh;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+/* A ring that turns. Deliberately NOT a progress bar: we do not know how long this takes, and
+   a bar that creeps to 90% and stalls is a lie the respondent can see. */
+.mjf-sending__spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--mjf-page-ink) 15%, transparent);
+  border-top-color: var(--mjf-accent);
+  animation: mjf-spin 900ms linear infinite;
+}
+
+.mjf-sending__msg {
+  margin: 0;
+  max-width: 28ch;
+  font-size: var(--mjf-body-size, 1rem);
+  line-height: 1.5;
+  color: var(--mjf-page-ink);
+}
+
+@keyframes mjf-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Reduced motion still needs to signal "working", so the ring pulses instead of spinning
+   rather than going completely inert. */
+@media (prefers-reduced-motion: reduce) {
+  .mjf-sending__spinner {
+    animation: mjf-pulse 1.4s ease-in-out infinite;
+    border-top-color: var(--mjf-accent);
+  }
+  @keyframes mjf-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+}

@@ -32,6 +32,7 @@ import {
 
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
+import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
@@ -151,6 +152,19 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.styleOverride.set(tokens);
     applyStyleTokens(this.hostRef.nativeElement, tokens);
   }
+
+  /**
+   * How long the in-flight submit has been running, in ms. Zero when nothing is submitting.
+   *
+   * Ticked rather than derived because the message has to change while nothing else does —
+   * the whole point is that the respondent sees the page acknowledge a wait it cannot
+   * shorten. The interval is cleared on every exit path, including failure.
+   */
+  private readonly submitElapsed = signal(0);
+  private submitTicker: ReturnType<typeof setInterval> | null = null;
+
+  /** The reassurance shown under the spinner, escalating if the wait drags on. */
+  protected readonly waitMessage = computed(() => submitWaitMessage(this.submitElapsed()));
 
   /** The resolved ending screen for the template. */
   protected readonly activeEndingScreen = computed(() => this.endingScreen());
@@ -370,16 +384,60 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.errorText.set('');
     await this.autosave?.settle();
     const input = this.buildSubmission(def, rt, false);
+    const startedAt = Date.now();
+    this.startSubmitTicker();
     try {
       const res = await this.api.submitResponse(input, this.responseTarget());
+      this.logSubmitTiming(startedAt, true);
       this.applySubmitResult(res);
     } catch (err) {
+      this.logSubmitTiming(startedAt, false);
       this.result.set(null);
       this.phase.set('ready');
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
+    } finally {
+      this.stopSubmitTicker();
     }
+  }
+
+  /**
+   * Drive the escalating wait message.
+   *
+   * A plain interval rather than anything cleverer because the only requirement is that the
+   * text changes while the page is otherwise frozen; the cost is one timer for the length of
+   * one request, cleared in a `finally` so a thrown submit cannot leave it running.
+   */
+  private startSubmitTicker(): void {
+    this.submitElapsed.set(0);
+    const startedAt = Date.now();
+    this.stopSubmitTicker();
+    this.submitTicker = setInterval(() => this.submitElapsed.set(Date.now() - startedAt), 250);
+  }
+
+  private stopSubmitTicker(): void {
+    if (this.submitTicker !== null) {
+      clearInterval(this.submitTicker);
+      this.submitTicker = null;
+    }
+    this.submitElapsed.set(0);
+  }
+
+  /**
+   * Report where a submit spent its time, in the respondent's own console.
+   *
+   * Round-trip measured from the client, because that is the number the respondent actually
+   * experiences — a server that finishes in 40ms is still a four-second submit if the request
+   * spent the rest of it in flight, and only the client can see the difference. The server
+   * logs its own per-stage breakdown under the same heading, so the two read together.
+   */
+  private logSubmitTiming(startedAt: number, ok: boolean): void {
+    const ms = Date.now() - startedAt;
+    // eslint-disable-next-line no-console -- diagnostic output is the entire purpose here
+    console.info(
+      `[mj-form] submit ${ok ? 'completed' : 'failed'} in ${ms}ms (client round trip; see the API log for the server-side stage breakdown)`,
+    );
   }
 
   /**

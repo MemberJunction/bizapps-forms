@@ -39,6 +39,16 @@
         <mjf-form-screen [screen]="ws" (activated)="startIntake()" />
       }
     }
+    @case ('submitting') {
+      <!-- A scrim over the form rather than a blank screen: the respondent's answers stay
+           visible underneath, so the wait reads as "this is being sent" rather than "the page
+           went away". aria-live announces it to a screen reader, which otherwise gets no hint
+           that anything is happening at all. -->
+      <div class="mjf-sending" role="status" aria-live="polite">
+        <span class="mjf-sending__spinner" aria-hidden="true"></span>
+        <p class="mjf-sending__msg">{{ waitMessage() }}</p>
+      </div>
+    }
     @case ('done') {
       @if (activeEndingScreen(); as es) {
         <mjf-form-screen [screen]="es" />
