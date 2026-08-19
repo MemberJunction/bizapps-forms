@@ -23,6 +23,7 @@
  */
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
+import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS } from './question-types';
 import type { FormQuestionType } from './question-types';
 
 /**
@@ -153,6 +154,39 @@ export function isRequiredSatisfied(type: FormQuestionType, value: AnswerValue):
     return value === true;
   }
   return isAnswerSupplied(value);
+}
+
+/**
+ * How much of one question is filled in, 0..1.
+ *
+ * All-or-nothing for a scalar question, and PER SUB-FIELD for a composite. That distinction is
+ * the whole reason this exists: `isAnswerSupplied` calls a ContactInfo answered as soon as any
+ * one of its five parts has a value, so a respondent typing first name, last name, email, phone
+ * and company watched the progress bar move once and then sit still through four more fields —
+ * three consecutive actions with no feedback, which teaches them their input is not registering.
+ *
+ * Progress is the only caller. Validation deliberately keeps the coarser test: a partly-filled
+ * ContactInfo IS an answer, and the form is submittable on it.
+ */
+export function answerCompleteness(type: FormQuestionType, value: AnswerValue): number {
+  const fields = compositeFieldsFor(type);
+  if (fields && isStringRecord(value)) {
+    const parts = value as Record<string, string>;
+    const filled = fields.filter((f) => isAnswerSupplied(parts[f])).length;
+    return filled / fields.length;
+  }
+  return isRequiredSatisfied(type, value) ? 1 : 0;
+}
+
+/** The fixed sub-field list of a composite type, or undefined for everything else. */
+function compositeFieldsFor(type: FormQuestionType): readonly string[] | undefined {
+  if (type === 'Address') {
+    return ADDRESS_FIELDS;
+  }
+  if (type === 'ContactInfo') {
+    return CONTACT_INFO_FIELDS;
+  }
+  return undefined;
 }
 
 /**

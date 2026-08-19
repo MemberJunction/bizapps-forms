@@ -4,6 +4,7 @@ import {
   validateAnswerFormat,
   validateCompositeParts,
   isRequiredSatisfied,
+  answerCompleteness,
 } from './answer-format';
 
 describe('matchesValidationPattern', () => {
@@ -187,5 +188,37 @@ describe('isRequiredSatisfied', () => {
     expect(isRequiredSatisfied('ShortText', '  ')).toBe(false);
     expect(isRequiredSatisfied('ShortText', 'hi')).toBe(true);
     expect(isRequiredSatisfied('Ranking', [])).toBe(false);
+  });
+});
+
+describe('answerCompleteness', () => {
+  it('gives a composite credit per sub-field, so filling one of five is not the whole question', () => {
+    expect(answerCompleteness('ContactInfo', { firstName: 'Ada' })).toBeCloseTo(0.2);
+    expect(answerCompleteness('ContactInfo', { firstName: 'Ada', lastName: 'L' })).toBeCloseTo(0.4);
+    expect(
+      answerCompleteness('ContactInfo', {
+        firstName: 'Ada', lastName: 'L', email: 'a@b.co', phone: '5551234567', company: 'X',
+      }),
+    ).toBe(1);
+  });
+
+  it('counts address parts the same way', () => {
+    expect(answerCompleteness('Address', { line1: '1 High St' })).toBeCloseTo(1 / 6);
+  });
+
+  it('is all-or-nothing for a scalar question', () => {
+    expect(answerCompleteness('ShortText', 'hi')).toBe(1);
+    expect(answerCompleteness('ShortText', '')).toBe(0);
+    expect(answerCompleteness('ShortText', undefined)).toBe(0);
+  });
+
+  it('gives an unticked consent box no credit, matching what required demands of it', () => {
+    expect(answerCompleteness('Legal', false)).toBe(0);
+    expect(answerCompleteness('Legal', true)).toBe(1);
+  });
+
+  it('still credits a legitimate falsy answer', () => {
+    expect(answerCompleteness('YesNo', false)).toBe(1);
+    expect(answerCompleteness('NPS', 0)).toBe(1);
   });
 });

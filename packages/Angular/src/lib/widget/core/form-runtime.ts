@@ -8,6 +8,7 @@ import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
   isAnswerableQuestionType,
+  answerCompleteness,
   isAnswerSupplied,
   type AnswerValue,
   type FormAnswerInput,
@@ -17,6 +18,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 
 import { toAnswerInputs } from './answer-value';
+import { computeProgress } from './progress';
 import { validateQuestion } from './validation';
 
 export class FormRuntime {
@@ -165,20 +167,15 @@ export class FormRuntime {
   // --- Progress ------------------------------------------------------------
 
   /** Fraction 0–1 of visible answerable questions that have a value. */
-  public readonly progress = computed(() => {
-    const visible = this.visibleAnswerableQuestions();
-    if (visible.length === 0) {
-      return 1;
-    }
-    const required = visible.filter((q) => q.isRequired);
-    // With nothing required, "how close am I to being able to submit" has no answer — the
-    // respondent could submit on arrival — so the bar measures how much they have filled in
-    // instead. Falling back rather than returning 1 keeps it a progress bar rather than a
-    // decoration that starts full, and rather than the NaN a bare division produced.
-    const counted = required.length > 0 ? required : visible;
-    const answered = counted.filter((q) => isAnswerSupplied(this.valueFor(q.id))).length;
-    return answered / counted.length;
-  });
+  /** How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`. */
+  public readonly progress = computed(() =>
+    computeProgress(
+      this.visibleAnswerableQuestions().map((q) => ({
+        required: q.isRequired,
+        completeness: answerCompleteness(q.type, this.valueFor(q.id)),
+      })),
+    ),
+  );
 
   // --- Submission ----------------------------------------------------------
 
