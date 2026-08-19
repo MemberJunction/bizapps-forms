@@ -1,4 +1,23 @@
 <div class="mjf-shell">
+  <!--
+    The form's logo, above every phase.
+    A logo is the form's IDENTITY, not decoration on one screen, so it stays put while the
+    respondent moves welcome -> questions -> thank-you. It used to render nowhere at all:
+    applyStyleTokens set a --mjf-logo-url custom property that no rule and no template ever
+    read, so an author could upload a logo, save it, publish it, and never see it.
+
+    An <img> rather than a background-image, which is what the dead token implied: a real
+    element can carry alt text, and — the reason it matters here — it can tell us when the URL
+    is dead. A background-image that 404s leaves a silent empty gap; this hides itself instead.
+    alt is empty on purpose: the form's name sits right beneath it, and a screen reader
+    announcing the brand twice is worse than not announcing the picture.
+  -->
+  @if (logoUrl(); as logo) {
+    <div class="mjf-logo-bar">
+      <img class="mjf-logo" [src]="logo" alt="" decoding="async" (error)="onLogoError()" />
+    </div>
+  }
+
   @switch (phase()) {
     @case ('loading') {
       <div class="mjf-state" role="status" aria-live="polite">

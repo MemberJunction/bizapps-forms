@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   BRAND_TOKENS,
+  typeAlignChoice,
   BUTTON_RADIUS_TOKEN,
   serializeCssVariables,
   cssColorToHex,
@@ -123,5 +124,22 @@ describe('cssColorToHex', () => {
     expect(cssColorToHex('var(--mjf-accent-soft)')).toBe('');
     expect(cssColorToHex('')).toBe('');
     expect(cssColorToHex('transparent')).toBe('');
+  });
+});
+
+describe('typeAlignChoice defaults', () => {
+  it('reads an explicitly stored alignment for either target', () => {
+    expect(typeAlignChoice('title', 'left')).toBe('left');
+    expect(typeAlignChoice('title', 'center')).toBe('center');
+    expect(typeAlignChoice('question', 'flex-start')).toBe('left');
+    expect(typeAlignChoice('question', 'center')).toBe('center');
+  });
+
+  it('defaults a title to centre and a question to left when nothing is stored', () => {
+    // The control has to agree with what the form actually renders. Welcome and ending screens
+    // are heroes and have always centred; questions have always been left. Defaulting both to
+    // left showed "left" selected on a brand-new form whose screens were plainly centred.
+    expect(typeAlignChoice('title', '')).toBe('center');
+    expect(typeAlignChoice('question', '')).toBe('left');
   });
 });

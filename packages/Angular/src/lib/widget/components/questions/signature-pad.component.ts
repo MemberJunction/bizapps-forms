@@ -39,14 +39,20 @@ const SIGNATURE_PAD_CSS = /* css */ `
   gap: var(--mjf-gap-sm, 8px);
 }
 
-/* The pad is a piece of PAPER, not a themed surface, and these two tokens are why the ink is
-   readable in the exported PNG. A signature drawn with the page's --mj-text-primary would be
-   near-white in dark mode, and the stored image would then be invisible to whoever opens the
-   response later on a white background. Defining them here also lets the canvas read them back
-   with getComputedStyle instead of the component hardcoding a colour. */
+/* The pad is a FIELD, and looks like the other fields. It used to be a hardcoded white
+   rectangle on the theory that a signature is paper — which read as a hole punched through any
+   themed form, most obviously a dark one, where it was the single brightest thing on the page.
+
+   The export is what that white was really protecting, and it does not need it: toPNG composites
+   an OPAQUE fill of whatever the canvas resolves to, so the stored image carries its own
+   background and is legible wherever it is later opened. Following the page instead is therefore
+   safe AND self-correcting on contrast — --mjf-page-ink is the one colour the widget already
+   guarantees is readable on --mjf-page-bg, so ink-on-paper here inherits that guarantee rather
+   than restating it. Defined as tokens, not literals, so the canvas can read them back with
+   getComputedStyle instead of the component hardcoding a colour. */
 .mjf-sig__pad {
-  --mjf-sig-paper: #ffffff;
-  --mjf-sig-ink: #101828;
+  --mjf-sig-paper: var(--mjf-input-bg);
+  --mjf-sig-ink: var(--mjf-page-ink);
   width: 100%;
   max-width: 100%;
   height: auto;

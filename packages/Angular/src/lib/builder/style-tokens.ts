@@ -85,10 +85,27 @@ export function typeAlignValue(target: 'title' | 'question', align: TypeAlign): 
   return target === 'title' ? TITLE_ALIGN_VALUES[align] : QUESTION_ALIGN_VALUES[align];
 }
 
-/** Read back which alignment a stored value corresponds to; defaults to `left`. */
+/**
+ * Which alignment a stored value corresponds to.
+ *
+ * The fallback differs by target because the two surfaces have always LOOKED different: a
+ * welcome or ending screen is a hero and has centred since it was written, questions are a
+ * form and read left. Defaulting both to left put "left" in the control on a brand-new form
+ * whose screens were visibly centred — the control disagreeing with the form is how an author
+ * stops trusting it.
+ */
+const DEFAULT_ALIGN: Record<'title' | 'question', TypeAlign> = { title: 'center', question: 'left' };
+
 export function typeAlignChoice(target: 'title' | 'question', value: string): TypeAlign {
   const table = target === 'title' ? TITLE_ALIGN_VALUES : QUESTION_ALIGN_VALUES;
-  return table.center === value.trim() ? 'center' : 'left';
+  const trimmed = value.trim();
+  if (trimmed === table.center) {
+    return 'center';
+  }
+  if (trimmed === table.left) {
+    return 'left';
+  }
+  return DEFAULT_ALIGN[target];
 }
 
 /** The three corner-radius steps the Buttons tab offers, in px. */

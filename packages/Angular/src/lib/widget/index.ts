@@ -49,6 +49,13 @@ export {
 } from './core/autosave-controller';
 export { clampCursor } from './core/one-question-stepper';
 export { applyStyleTokens } from './core/theming';
+export {
+  availableScreens,
+  resolveShownScreen,
+  sameScreen,
+  shownScreenFor,
+  type ShownScreen,
+} from './core/shown-screen';
 export { validateQuestion, hasValue, type FieldValidationResult } from './core/validation';
 export { toAnswerInputs, type AnswerMap } from './core/answer-value';
 export {

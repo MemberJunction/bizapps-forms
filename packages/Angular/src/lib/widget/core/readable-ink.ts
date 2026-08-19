@@ -84,6 +84,29 @@ export function readableInk(background: Rgb, preferred: Rgb): Rgb {
   return contrastRatio(background, light) >= contrastRatio(background, dark) ? light : dark;
 }
 
+/**
+ * The ink to write instead of `ink`, or `null` to leave it exactly as it is.
+ *
+ * `authored` is the whole decision. A colour the author picked in the Design tab is a
+ * DELIBERATE choice, and a tool that silently substitutes another one for it is not protecting
+ * anybody — it is lying about what it will publish, which is exactly how this was reported:
+ * "colours don't pick up sometimes". (Sometimes, because the substitution only happens below
+ * 4.5:1: blue on white passed and applied, red, green and yellow did not.) Deliberate choices
+ * are honoured here and WARNED about in the panel, where the author can see the number and
+ * decide.
+ *
+ * What the guard is actually for survives untouched: an author themes the BACKGROUND, leaves
+ * the ink at the widget default, and the pair collides. Nobody chose that, so repairing it
+ * overrides no one.
+ */
+export function inkRepair(background: Rgb, ink: Rgb, authored: boolean): Rgb | null {
+  if (authored) {
+    return null;
+  }
+  const readable = readableInk(background, ink);
+  return readable === ink ? null : readable;
+}
+
 /** Format for assignment to a CSS custom property. */
 export function toCssRgb([r, g, b]: Rgb): string {
   return `rgb(${r}, ${g}, ${b})`;

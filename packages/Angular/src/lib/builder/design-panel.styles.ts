@@ -1,10 +1,12 @@
 /**
  * Design panel styles — plain-CSS string (the package builds with `ngc` only, no SCSS).
  *
- * The controls use `--mj-*` builder tokens. The PREVIEW surface (`.dp-preview-frame`
- * and its children) styles itself with `--mjf-*` form tokens that `applyStyleTokens`
- * sets on the host at runtime, each falling back to a `--mj-*` token — so the preview
- * re-themes exactly like the published widget and carries no hardcoded colors.
+ * Only the CONTROLS are styled here, with `--mj-*` builder tokens. The preview is
+ * `mjf-form-preview-stage`, which brings its own layout and is deliberately left alone: this
+ * pane once styled the widget directly and its `display: block` beat the widget's own
+ * `:host { display: flex }` on specificity, collapsing the flex chain that centres welcome and
+ * ending screens. `.dp-preview` is now a frame around the stage and says nothing about what is
+ * inside it — see `form-preview-stage.spec.ts`.
  */
 export const DESIGN_PANEL_STYLES = /* css */ `
 .dp {
@@ -55,20 +57,6 @@ export const DESIGN_PANEL_STYLES = /* css */ `
 .dp-row-label { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 .dp-row--controls { justify-content: flex-start; gap: var(--mjf-gap-sm); flex-wrap: wrap; }
 
-/* A native colour input, restyled to read as a swatch rather than an OS control. */
-.dp-swatch {
-  flex: none;
-  width: 52px;
-  height: 32px;
-  padding: 2px;
-  cursor: pointer;
-  background: var(--mj-bg-surface);
-  border: 1px solid var(--mj-border-default);
-  border-radius: var(--mjf-radius-sm);
-}
-.dp-swatch::-webkit-color-swatch-wrapper { padding: 0; }
-.dp-swatch::-webkit-color-swatch { border: none; border-radius: 4px; }
-.dp-swatch:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
 /* The corner-radius picker draws its options rather than naming them: three corner
    glyphs, matching what the control actually changes. */
@@ -98,23 +86,30 @@ export const DESIGN_PANEL_STYLES = /* css */ `
 
 /* ---------------------------------------------------------------- preview */
 
+/* A frame around the stage, nothing more. overflow:hidden so the stage's own scrolling
+   happens inside the rounded corners rather than the pane scrolling as a whole — a preview
+   that scrolls at two levels is a preview that cannot show you where the fold is. */
 .dp-preview {
+  display: flex;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   border-radius: var(--mjf-radius);
   border: 1px solid var(--mj-border-subtle);
 }
 
+.dp-preview > mjf-form-preview-stage { flex: 1 1 auto; min-width: 0; }
+/* The empty state is the only other thing this pane holds; auto margins centre it in the
+   flex box rather than leaving it stranded in the top-left corner. */
+.dp-preview > .mjf-state { margin: auto; }
+
+/* Stacked, the stage needs a stated height: it is a flex column that scrolls internally, and
+   \`height: 100%\` against an auto-height row resolves to auto — which is how a device frame
+   turns back into a ribbon as long as its contents. */
 @media (max-width: 1000px) {
   .dp { grid-template-columns: 1fr; height: auto; }
   .dp-editor { max-height: 60vh; }
+  .dp-preview { height: 70vh; }
 }
 
-/* ------- Live preview surface (form tokens; each falls back to a --mj-* token) ------- */
-.dp-preview > mj-form { display: block; min-height: 100%; }
-
-/* Colour row: swatch plus the hex box beside it. */
-.dp-color { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
-.dp-hex { width: 96px; font-family: var(--mj-font-family-mono, monospace); text-transform: lowercase; }
 `;

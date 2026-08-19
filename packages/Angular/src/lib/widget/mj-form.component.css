@@ -52,7 +52,13 @@
   --mjf-page-bg: var(--mj-bg-page);
   --mjf-page-ink: var(--mj-text-primary);
   --mjf-accent: var(--mj-brand-primary);
-  --mjf-accent-strong: var(--mj-brand-primary-hover);
+  /* DERIVED from the accent, never bound to the Explorer's hover token as it once was: the
+     Design tab writes --mjf-accent and nothing else, so a form whose author set a maroon button
+     kept MJ's blue on hover — the button changed colour and then flashed blue under the pointer.
+     Mixed toward the BUTTON TEXT rather than toward black or the page, because on-accent is the
+     one colour guaranteed to contrast with the accent (or the picker is already warning about
+     it), so the shift is visible on a black button and a white one alike. */
+  --mjf-accent-strong: color-mix(in srgb, var(--mjf-accent) 88%, var(--mjf-on-accent));
   --mjf-on-accent: var(--mj-brand-on-primary);
   /* ---- Derived from the two colours the author actually picks ----
      Everything below is mixed from --mjf-page-bg and --mjf-page-ink rather than read from the
@@ -101,7 +107,17 @@
   /* Deliberately NOT mixed toward the page: an error is a signal and it has to survive the
      theme. Exposed as an --mjf-* token anyway so an author whose page is already red can move
      it somewhere visible, which the fixed --mj-status-error gave them no way to do. */
-  --mjf-status-error: var(--mj-status-error);
+  /* Pulled toward the page ink rather than bound straight to the Explorer's red, which on a
+     deep-red form measured 1.72:1 — a red error message on a red background, invisible exactly
+     when it matters most. Mixing toward --mjf-page-ink (the one colour already guaranteed to
+     read on this page) gives a light tint on dark forms and a deep red on light ones, which is
+     also just what an error looks like on a dark surface.
+
+     Measured, on the two themes to hand: deep-red form 1.72 -> 4.93, white page 3.76 -> 9.99.
+     The white-page figure is the one worth noticing — the raw token was failing AA there too,
+     so this was never only a themed-form problem. Every use is text or a border, or a 10% tint
+     of this same token, so the pairings move together. */
+  --mjf-status-error: color-mix(in srgb, var(--mj-status-error) 40%, var(--mjf-page-ink));
   --mjf-progress-fill: var(--mjf-accent);
   --mjf-rating-active: var(--mjf-accent);
   --mjf-rating-inactive: var(--mjf-page-edge-strong);
@@ -112,7 +128,11 @@
      form — not just the sample. */
   --mjf-page-bg-image: none;
   --mjf-title-size: 1.75rem;
-  --mjf-title-align: left;
+  /* Deliberately NOT seeded here. var() falls back only when a property is UNSET, so a :host
+     default would defeat every consumer's own fallback — and the two consumers genuinely differ:
+     a welcome/ending screen is a hero that has always centred, while the plain header above a
+     question list reads left. Seeded, screens would have snapped to left the moment this token
+     started driving them. Each consumer states its own default instead. */
   --mjf-question-size: 1.0625rem;
   --mjf-question-align: left;
   --mjf-pill-radius: 999px;
@@ -159,6 +179,34 @@
   }
 }
 
+/* A wrapper carries the alignment because .mjf-shell is a flex COLUMN, where text-align does
+   nothing to its items and align-self cannot branch on a token value. Inside a plain block,
+   text-align moves an inline-block image exactly as it moves the titles — one token, one
+   behaviour, so the logo and the headline never disagree about where the form starts. */
+.mjf-logo-bar {
+  flex: none;
+  margin-bottom: 1.25rem;
+  text-align: var(--mjf-title-align, left);
+}
+
+/* Capped in BOTH directions with object-fit: contain, so the widget cannot be wrecked by
+   whatever the author uploads — a 4000px banner and a tall square crest both land inside the
+   same box, and a wide one is bounded by the shell rather than forcing a horizontal scroll.
+   max-width is 100%, not a fixed rem, because the shell already knows how wide the form is
+   on this device. */
+.mjf-logo {
+  display: inline-block;
+  max-height: 3rem;
+  max-width: 100%;
+  width: auto;
+  object-fit: contain;
+  vertical-align: top;
+}
+
+@container mjf (min-width: 640px) {
+  .mjf-logo { max-height: 3.5rem; }
+}
+
 .mjf-header {
   margin-bottom: 1.5rem;
 }
@@ -167,14 +215,14 @@
   margin: 0 0 0.25rem;
   font-family: var(--mjf-font-display);
   font-size: var(--mjf-title-size);
-  text-align: var(--mjf-title-align);
+  text-align: var(--mjf-title-align, left);
   line-height: 1.2;
   color: var(--mjf-page-ink);
 }
 
 .mjf-header__desc {
   margin: 0;
-  text-align: var(--mjf-title-align);
+  text-align: var(--mjf-title-align, left);
   color: var(--mjf-page-ink-muted);
 }
 
@@ -236,7 +284,19 @@
   }
 }
 
+/* The built-in confirmation is an ENDING — the one a form gets when the author configured no
+   ending screen — so it follows the same alignment as the authored ones. Block flow rather than
+   the shared flex centring, because align-items would keep centring the boxes whatever the text
+   did. Loading and error keep .mjf-state's centring untouched: those are the widget's own voice,
+   not the author's content, and an author's left-aligned brand should not move a spinner. */
+.mjf-state--done {
+  display: block;
+  text-align: var(--mjf-title-align, center);
+}
+
 .mjf-done__icon {
+  display: inline-block;
+  margin-bottom: 1rem;
   font-size: 2.5rem;
   color: var(--mjf-accent);
 }

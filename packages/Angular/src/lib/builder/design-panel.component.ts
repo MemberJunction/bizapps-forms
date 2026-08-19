@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
-  ElementRef,
   EventEmitter,
   Input,
   OnDestroy,
@@ -19,11 +18,6 @@ import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormStyleEntity,
 } from '@mj-biz-apps/forms-entities';
-// Import directly from the widget source modules (no cross-package re-export — CLAUDE.md rule 5).
-import { applyStyleTokens } from '../widget/core/theming';
-import { MjFormComponent } from '../widget/mj-form.component';
-import { formsWidgetProviders } from '../widget/widget-providers';
-import { normalizeApiConfig } from '../widget/api/forms-api.config';
 import { DesignStateService } from './design-state.service';
 import {
   BRAND_TOKENS,
@@ -45,6 +39,8 @@ import {
 } from './style-tokens';
 import { FORMS_UI_CSS } from '../shared';
 import { DESIGN_PANEL_STYLES } from './design-panel.styles';
+import { ColorPickerComponent } from './color-picker.component';
+import { FormPreviewStageComponent } from './form-preview-stage.component';
 import { ImageFieldComponent } from './image-field.component';
 
 /**
@@ -67,10 +63,16 @@ const SAVE_DEBOUNCE_MS = 600;
   selector: 'mjf-design-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, MjFormComponent, ImageFieldComponent],
-  // The sample IS the widget, so it needs the widget's providers. An empty graphqlUrl
-  // selects the mock transport, which is what keeps a trial answer from writing anything.
-  providers: [DesignStateService, ...formsWidgetProviders(normalizeApiConfig({ graphqlUrl: '' }))],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ColorPickerComponent,
+    FormPreviewStageComponent,
+    ImageFieldComponent,
+  ],
+  // The widget's own providers (and the empty graphqlUrl that selects the mock transports, so a
+  // trial answer writes nothing) belong to the stage, not to this panel.
+  providers: [DesignStateService],
   templateUrl: './design-panel.component.html',
   styles: [FORMS_UI_CSS, DESIGN_PANEL_STYLES],
 })
@@ -94,9 +96,12 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
    */
   @Input() definition: PublishedFormDefinition | null = null;
 
-  /** The `<mj-form>` element. Style tokens are set on it directly, the way the widget's
-   *  own host is themed at load. */
-  @ViewChild('previewHost', { read: ElementRef }) private previewHost?: ElementRef<HTMLElement>;
+  /**
+   * The shared preview stage — the SAME one the Preview modal opens, so the form an author
+   * styles here and the form they check before publishing cannot diverge. Style tokens are set
+   * on the `<mj-form>` element inside it, the way the widget's own host is themed at load.
+   */
+  @ViewChild('preview') private preview?: FormPreviewStageComponent;
 
   /** Token names written to the sample last time, so a cleared one can be removed. */
   private appliedTokenNames: string[] = [];
@@ -142,6 +147,25 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
    * rather than written per frame.
    */
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * An edit that arrived while a save was already in flight, and must not be lost.
+   *
+   * The debounce used to simply RETURN when `busy` — so an author who kept editing during the
+   * round trip (which every colour drag does) had that write silently dropped, the status stuck
+   * on "Saving…" forever, and the change gone on reload. A dropped write with no error is the
+   * worst possible failure for an editor: it looks like it worked.
+   */
+  private saveAgain = false;
+
+  /**
+   * The save mutex, deliberately NOT the `busy` flag the load path uses.
+   *
+   * One flag for both meant a save was refused while the panel was merely loading, and a load
+   * could not tell whether the write it was blocking had been re-queued. Two states that answer
+   * different questions want two flags.
+   */
+  private saving = false;
 
   /** The form's own style, created or forked on load. All edits land here. */
   private style: mjBizAppsFormsFormStyleEntity | null = null;
@@ -241,7 +265,7 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
    * the caller keeps its own empty state rather than being handed a guess.
    */
   private renderedColor(token: string): string {
-    const host = this.previewHost?.nativeElement;
+    const host = this.preview?.formElement();
     if (!host) {
       return '';
     }
@@ -280,22 +304,6 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Commit a hex code typed into the box beside a swatch.
-   *
-   * Only complete, well-formed values are applied. An author typing a six-digit code passes
-   * through every incomplete prefix on the way, and treating those as edits would repaint
-   * the sample mid-keystroke and persist the noise.
-   */
-  protected setHex(field: 'ink' | 'accent' | 'onAccent' | 'answer' | 'pageBg', value: string): void {
-    const hex = cssColorToHex(value);
-    if (!hex) {
-      return;
-    }
-    this[field] = hex;
-    this.onEdit();
-  }
-
-  /**
    * The picker offers one font, which sets BOTH stacks.
    *
    * Splitting body and display was an option nobody exercised and every author had to
@@ -314,16 +322,35 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
   /** Persist every control onto this form's style. Driven by the debounce, not a button. */
   private async save(): Promise<void> {
     this.saveTimer = null;
-    if (!this.style || this.busy) {
+    if (!this.style) {
       return;
     }
-    this.busy = true;
-    const ok = await this.design.saveBranding(this.style, {
-      logoURL: this.logoUrl,
-      tokens: this.editedTokenMap(),
-      radiusPx: this.radiusPx(),
-    });
-    this.busy = false;
+    if (this.saving) {
+      // Coalesce rather than drop: whoever is mid-flight will run one more pass afterwards,
+      // and `editedTokenMap()` always reads the CURRENT controls, so a single re-run captures
+      // however many edits piled up behind it.
+      this.saveAgain = true;
+      return;
+    }
+
+    this.saving = true;
+    let ok = false;
+    try {
+      ok = await this.design.saveBranding(this.style, {
+        logoURL: this.logoUrl,
+        tokens: this.editedTokenMap(),
+        radiusPx: this.radiusPx(),
+      });
+    } finally {
+      this.saving = false;
+    }
+
+    if (this.saveAgain) {
+      this.saveAgain = false;
+      await this.save();
+      return;
+    }
+
     this.saveState = ok ? 'Saved · publish to put it live' : 'Could not save — see logs';
     this.cdr.markForCheck();
     if (ok) {
@@ -377,9 +404,14 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
    * Tokens are cleared before being re-applied: `applyStyleTokens` only ever SETS inline
    * properties, so a value the author removed would otherwise stay on the element and the
    * sample would keep showing a colour the form no longer has.
+   *
+   * Handed to the WIDGET rather than written onto its element from out here. Styling from
+   * outside could only ever move CSS custom properties, so the one part of a style that is not
+   * a custom property — the logo — silently never previewed: an author picked one, watched
+   * every colour update live, and saw nothing appear.
    */
   private applyPreview(): void {
-    const host = this.previewHost?.nativeElement;
+    const host = this.preview?.formElement();
     if (!host) {
       return;
     }
@@ -387,7 +419,7 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
       host.style.removeProperty(name);
     }
     const tokens = this.buildPreviewTokens();
-    applyStyleTokens(host, tokens);
+    this.preview?.applyPreviewStyle(tokens);
     this.appliedTokenNames = Object.keys(tokens.cssVariables ?? {});
   }
 }

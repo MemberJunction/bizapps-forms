@@ -25,6 +25,7 @@ import {
   resolveEndingScreen,
   type FormSubmissionInput,
   type FormSubmissionResult,
+  type FormStyleTokens,
   type PublishedFormDefinition,
   type PublishedFormScreen,
 } from '@mj-biz-apps/forms-entities';
@@ -37,6 +38,7 @@ import { AutosaveController, type AutosaveStatus } from './core/autosave-control
 import { generateClientResponseId } from './core/client-id';
 import { passedSubmitPoints } from './core/partial-submit-point';
 import { initialPhaseFor, outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
+import { resolveShownScreen, shownScreenFor, type ShownScreen } from './core/shown-screen';
 import {
   canRenderChallenge,
   canSubmit,
@@ -104,8 +106,66 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** The welcome screen, when the form has one. */
   protected readonly welcomeScreen = computed(() => this.definition()?.welcomeScreen);
 
+  /**
+   * Set once the logo's URL fails to load, so a dead link leaves NOTHING rather than a broken
+   * image icon. An author who deletes the asset should get a form that looks un-branded, not
+   * one that looks broken — and they cannot see the difference from a respondent's browser.
+   */
+  private readonly logoBroken = signal(false);
+
+  /**
+   * A design host's live, unsaved style. Null for a real respondent, always.
+   *
+   * The builder previews colour by writing custom properties onto this element, which works
+   * because colour IS a custom property. A logo is not — it is an <img> the widget renders from
+   * its definition, and the definition is read once at load — so an author could pick a logo,
+   * watch every colour update live beside it, and see no logo at all until they left the tab and
+   * came back. This is the channel for the part of a style that is content rather than CSS.
+   */
+  private readonly styleOverride = signal<FormStyleTokens | null>(null);
+
+  /** The form's logo, or undefined when there is none (or the one there is will not load). */
+  protected readonly logoUrl = computed(() => {
+    if (this.logoBroken()) {
+      return undefined;
+    }
+    const tokens = this.styleOverride() ?? this.definition()?.styleTokens;
+    return tokens?.logoURL?.trim() || undefined;
+  });
+
+  protected onLogoError(): void {
+    this.logoBroken.set(true);
+  }
+
+  /**
+   * Re-style this form from a design host's working values.
+   *
+   * A command, like {@link showScreen}, and for the same reason: the host owns a draft that
+   * changes on every keystroke, and an input holding it would be one more thing to keep in step.
+   * It replaces the host reaching into this element and calling the widget's own theming
+   * function on it from outside — the widget applies its own style, which is the only way the
+   * non-CSS parts of one (the logo) can be applied at all.
+   */
+  public applyPreviewStyle(tokens: FormStyleTokens): void {
+    this.logoBroken.set(false);
+    this.styleOverride.set(tokens);
+    applyStyleTokens(this.hostRef.nativeElement, tokens);
+  }
+
   /** The resolved ending screen for the template. */
   protected readonly activeEndingScreen = computed(() => this.endingScreen());
+
+  /**
+   * The surface currently on display, for a host that reflects it in its own chrome.
+   *
+   * Read-only and derived, so it reports where the widget ACTUALLY is — including after the
+   * respondent pressed Start or a submit landed — rather than wherever a host last pointed it.
+   * The builder's preview strip highlights from this, which is why it needs no state of its own
+   * and cannot drift out of step with the form.
+   */
+  public readonly shownScreen = computed<ShownScreen | null>(() =>
+    shownScreenFor(this.phase(), this.endingScreen()),
+  );
 
   /** Public Cloudflare Turnstile site key (global; from widget config). May be undefined. */
   protected readonly siteKey = this.config.turnstileSiteKey;
@@ -193,11 +253,44 @@ export class MjFormComponent implements OnInit, OnDestroy {
         (status) => this.autosaveStatus.set(status),
       );
       this.endingScreen.set(undefined);
+      this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
       this.phase.set(initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
     }
+  }
+
+  /**
+   * Jump straight to a screen, without traversing the form to reach it.
+   *
+   * A COMMAND rather than an input, deliberately. As an input it would carry the host's last
+   * request as state, and the two would desynchronise the moment the widget moved on its own:
+   * a respondent pressing Start leaves the request saying `welcome`, so asking for `welcome`
+   * again would set the input to a value it already held, change nothing, and look broken.
+   * Having nothing to keep in step is the only reliable way to keep it in step — the host
+   * commands through here and reads {@link shownScreen} back.
+   *
+   * This exists for the builder's preview, where an author styles all of these surfaces and a
+   * CONDITIONAL ending is otherwise unreachable without answering the way its rule demands.
+   * It sets phase directly and never submits, so no response is written and no automation runs.
+   *
+   * Answers survive the jump: the runtime is untouched, so an author can look at their ending
+   * screen and come back to a half-filled form. An unsatisfiable request (a welcome screen the
+   * form has not got) is refused rather than honoured into a blank preview, and a request
+   * arriving mid-submit is ignored — the in-flight result would overwrite it a moment later.
+   */
+  public showScreen(selection: ShownScreen): void {
+    const def = this.definition();
+    if (!def || this.phase() === 'submitting') {
+      return;
+    }
+    const target = resolveShownScreen(def, selection);
+    if (!target) {
+      return;
+    }
+    this.endingScreen.set(target.ending);
+    this.phase.set(target.phase);
   }
 
   /**

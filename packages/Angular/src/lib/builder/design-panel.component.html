@@ -51,13 +51,12 @@
               <p class="dp-group-title">Color</p>
               <div class="dp-row">
                 <span class="dp-row-label">Titles and questions</span>
-                <div class="dp-color">
-                  <input type="color" class="dp-swatch" aria-label="Titles and questions colour"
-                    [ngModel]="ink" (ngModelChange)="ink = $event; onEdit()" />
-                  <input type="text" class="mjf-input dp-hex" spellcheck="false" maxlength="7"
-                    aria-label="Titles and questions colour hex code" placeholder="#RRGGBB"
-                    [ngModel]="ink" (ngModelChange)="setHex('ink', $event)" />
-                </div>
+                <mjf-color-picker
+                  label="Titles and questions"
+                  [value]="ink"
+                [against]="pageBg"
+                  (valueChange)="ink = $event; onEdit()"
+                />
               </div>
             </section>
 
@@ -107,33 +106,28 @@
               <p class="dp-group-title">Color</p>
               <div class="dp-row">
                 <span class="dp-row-label">Buttons</span>
-                <div class="dp-color">
-                  <input type="color" class="dp-swatch" aria-label="Button colour"
-                    [ngModel]="accent" (ngModelChange)="accent = $event; onEdit()" />
-                  <input type="text" class="mjf-input dp-hex" spellcheck="false" maxlength="7"
-                    aria-label="Button colour hex code" placeholder="#RRGGBB"
-                    [ngModel]="accent" (ngModelChange)="setHex('accent', $event)" />
-                </div>
+                <mjf-color-picker
+                  label="Buttons"
+                  [value]="accent"
+                  (valueChange)="accent = $event; onEdit()"
+                />
               </div>
               <div class="dp-row">
                 <span class="dp-row-label">Button text</span>
-                <div class="dp-color">
-                  <input type="color" class="dp-swatch" aria-label="Button text colour"
-                    [ngModel]="onAccent" (ngModelChange)="onAccent = $event; onEdit()" />
-                  <input type="text" class="mjf-input dp-hex" spellcheck="false" maxlength="7"
-                    aria-label="Button text colour hex code" placeholder="#RRGGBB"
-                    [ngModel]="onAccent" (ngModelChange)="setHex('onAccent', $event)" />
-                </div>
+                <mjf-color-picker
+                  label="Button text"
+                  [value]="onAccent"
+                [against]="accent"
+                  (valueChange)="onAccent = $event; onEdit()"
+                />
               </div>
               <div class="dp-row">
                 <span class="dp-row-label">Answers</span>
-                <div class="dp-color">
-                  <input type="color" class="dp-swatch" aria-label="Selected answer colour"
-                    [ngModel]="answer" (ngModelChange)="answer = $event; onEdit()" />
-                  <input type="text" class="mjf-input dp-hex" spellcheck="false" maxlength="7"
-                    aria-label="Selected answer colour hex code" placeholder="#RRGGBB"
-                    [ngModel]="answer" (ngModelChange)="setHex('answer', $event)" />
-                </div>
+                <mjf-color-picker
+                  label="Answers"
+                  [value]="answer"
+                  (valueChange)="answer = $event; onEdit()"
+                />
               </div>
             </section>
 
@@ -154,13 +148,11 @@
               <p class="dp-group-title">Color</p>
               <div class="dp-row">
                 <span class="dp-row-label">Background</span>
-                <div class="dp-color">
-                  <input type="color" class="dp-swatch" aria-label="Background colour"
-                    [ngModel]="pageBg" (ngModelChange)="pageBg = $event; onEdit()" />
-                  <input type="text" class="mjf-input dp-hex" spellcheck="false" maxlength="7"
-                    aria-label="Background colour hex code" placeholder="#RRGGBB"
-                    [ngModel]="pageBg" (ngModelChange)="setHex('pageBg', $event)" />
-                </div>
+                <mjf-color-picker
+                  label="Background"
+                  [value]="pageBg"
+                  (valueChange)="pageBg = $event; onEdit()"
+                />
               </div>
             </section>
 
@@ -185,10 +177,10 @@
     }
   </div>
 
-  <!-- RIGHT: the real form, themed live -->
+  <!-- RIGHT: the real form, in the same stage the Preview modal uses -->
   <div class="dp-preview">
     @if (definition) {
-      <mj-form #previewHost [definition]="definition"></mj-form>
+      <mjf-form-preview-stage #preview [definition]="definition" />
     } @else {
       <p class="mjf-state">Add a question to see this form.</p>
     }

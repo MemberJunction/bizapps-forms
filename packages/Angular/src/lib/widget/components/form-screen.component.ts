@@ -33,16 +33,28 @@ const FORM_SCREEN_CSS = /* css */ `
   flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
-  gap: 1rem;
   padding: 2.5rem 1.25rem;
-  text-align: center;
 }
 
+/* Horizontal placement for the whole screen, from the author's "Welcome screen and endings"
+   alignment. That control used to change nothing here: it writes --mjf-title-align, which only
+   .mjf-header read — and .mjf-header renders exclusively when the form has NO welcome screen,
+   so the one setting labelled for screens applied everywhere except them.
+
+   The fallback is centre, not the token's old :host default of left, because these screens
+   have centred since they were written and an unset form must keep looking the way it looks. */
+.mjf-screen__inner {
+  text-align: var(--mjf-title-align, center);
+}
+
+/* Each child is inline-level so text-align positions the BOX, not just the text inside it —
+   otherwise a left-aligned screen would still show a centred image and a centred button. */
 .mjf-screen__media {
+  display: inline-block;
   max-width: min(100%, 22rem);
   height: auto;
+  margin-bottom: 1rem;
   border-radius: var(--mjf-card-radius);
 }
 
@@ -51,14 +63,24 @@ const FORM_SCREEN_CSS = /* css */ `
   font-family: var(--mjf-font-display);
   /* cqi, not vw: this is the opening line of the form and it should scale with the space the
      WIDGET has, not the browser window. On vw a phone-width embed in a desktop page sized its
-     title off the desktop, which is the same mistake the layout media queries were making. */
-  font-size: clamp(1.75rem, 6cqi, 2.75rem);
+     title off the desktop, which is the same mistake the layout media queries were making.
+
+     The author's Sm/Md/Lg sets the FLOOR and scales the ceiling with it, rather than replacing
+     the clamp with a fixed size: a hero that stops responding to the width it is given is worse
+     than one that ignores the setting. Md reproduces the previous 1.75-2.75rem almost exactly,
+     so an existing form does not move. */
+  font-size: clamp(
+    var(--mjf-title-size, 1.75rem),
+    6cqi,
+    calc(var(--mjf-title-size, 1.75rem) * 1.6)
+  );
   line-height: 1.2;
   color: var(--mjf-page-ink);
 }
 
 .mjf-screen__body {
-  margin: 0;
+  display: inline-block;
+  margin: 1rem 0 0;
   max-width: 46ch;
   white-space: pre-wrap;
   font-size: 1.0625rem;
@@ -67,7 +89,10 @@ const FORM_SCREEN_CSS = /* css */ `
 }
 
 .mjf-screen__cta {
-  margin-top: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.75rem;
   min-height: 3.25rem;
   padding: 0.9375rem 2.75rem;
   cursor: pointer;
@@ -85,6 +110,8 @@ const FORM_SCREEN_CSS = /* css */ `
 .mjf-screen__cta:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
 
 .mjf-screen__done-icon {
+  display: inline-block;
+  margin-bottom: 1rem;
   font-size: 2.5rem;
   color: var(--mjf-accent);
 }
@@ -94,11 +121,11 @@ const FORM_SCREEN_CSS = /* css */ `
    ask. Sized to the 44px tap target rather than to the glyph, because the ending screen is
    where a respondent is most likely to be on a phone and least likely to try twice. */
 .mjf-screen__social {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 1rem;
+  margin-top: 1.5rem;
 }
 
 /* Rounded squares, not circles: a squircle is the shape every one of these logos already ships in
@@ -172,6 +199,15 @@ const FORM_SCREEN_CSS = /* css */ `
   template: `
     @let s = screen();
     <div class="mjf-screen" [attr.role]="isWelcome() ? null : 'status'" [attr.aria-live]="isWelcome() ? null : 'polite'">
+      <!--
+        The wrapper exists so ONE token can place everything. .mjf-screen stays a flex column
+        because that is what centres the block vertically in whatever height the widget gets;
+        inside it, ordinary flow plus text-align places the image, the headline, the body, the
+        button and the social row together. Aligning flex ITEMS instead would need a second,
+        flex-flavoured copy of the same author choice (flex-start beside left), and two
+        spellings of one decision is how they end up disagreeing.
+      -->
+      <div class="mjf-screen__inner">
       @if (s.mediaURL) {
         <img class="mjf-screen__media" [src]="s.mediaURL" alt="" />
       } @else if (!isWelcome()) {
@@ -203,6 +239,7 @@ const FORM_SCREEN_CSS = /* css */ `
           }
         </nav>
       }
+      </div>
     </div>
   `,
 })

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { contrastRatio, parseCssColor, readableInk } from './readable-ink';
+import { contrastRatio, inkRepair, parseCssColor, readableInk } from './readable-ink';
 
 describe('parseCssColor', () => {
   it('reads the two shapes getComputedStyle actually returns', () => {
@@ -26,5 +26,33 @@ describe('readableInk', () => {
     const fixed = readableInk([160, 39, 39], [60, 137, 226]);
 
     expect(contrastRatio([160, 39, 39], fixed)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe('inkRepair', () => {
+  const white = [255, 255, 255] as const;
+  const red = [255, 0, 0] as const;
+
+  it('never touches a colour the author chose, however unreadable', () => {
+    // Red on white is 4.0:1 — under AA, and exactly what an author picking a brand red gets.
+    // Silently swapping it for near-black is indistinguishable from the control being broken,
+    // which is precisely how it was reported. A deliberate choice is honoured and flagged, not
+    // overridden; see the contrast warning in the Design panel.
+    expect(contrastRatio(white, red)).toBeLessThan(4.5);
+    expect(inkRepair(white, red, true)).toBeNull();
+  });
+
+  it('repairs an unreadable ink the author never set', () => {
+    // The case the guard exists for: the author themed the BACKGROUND — the deep red from the
+    // real form — the ink is still the widget's near-black default, and the pair collides at
+    // 1.9:1. Nobody chose that, so repairing it overrides no one.
+    const maroon = [139, 26, 26] as const;
+    const defaultInk = [26, 29, 33] as const;
+    expect(contrastRatio(maroon, defaultInk)).toBeLessThan(4.5);
+    expect(inkRepair(maroon, defaultInk, false)).toEqual([255, 255, 255]);
+  });
+
+  it('leaves a default ink alone when it already passes', () => {
+    expect(inkRepair(white, [26, 29, 33], false)).toBeNull();
   });
 });

@@ -11,6 +11,17 @@ export { FormBuilderComponent } from './form-builder.component';
 export { QuestionEditorComponent } from './question-editor.component';
 export { DistributionManagerComponent } from './distribution-manager.component';
 export { DesignPanelComponent } from './design-panel.component';
+export { FormPreviewStageComponent } from './form-preview-stage.component';
+export { screenChips, type ScreenChip } from './screen-strip';
+export { ColorPickerComponent } from './color-picker.component';
+export {
+  PRESET_SWATCHES,
+  hexToHsv,
+  hsvToHex,
+  isCompleteHex,
+  normalizeHexInput,
+  type Hsv,
+} from './color-model';
 export { DesignStateService, type BrandEdit } from './design-state.service';
 export {
   BRAND_TOKENS,
