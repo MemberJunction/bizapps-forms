@@ -65,7 +65,12 @@ export function deriveUploadUrl(graphqlUrl: string): string {
   }
   try {
     const url = new URL(graphqlUrl);
-    url.pathname = url.pathname.replace(/\/graphql\/?$/i, '') + '/forms/upload';
+    // Strip the trailing slash BEFORE appending. Without it an origin-only URL — which is
+    // how MJAPI is ordinarily configured, `http://localhost:4000/` — has pathname '/', the
+    // /graphql replace matches nothing, and the join yields '//forms/upload'. That address
+    // is not the route, so every file and signature upload came back 400.
+    const base = url.pathname.replace(/\/graphql\/?$/i, '').replace(/\/+$/, '');
+    url.pathname = `${base}/forms/upload`;
     return url.toString();
   } catch {
     // Not an absolute URL — fall back to a plain string swap.

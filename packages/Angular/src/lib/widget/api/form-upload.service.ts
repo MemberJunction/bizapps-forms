@@ -44,6 +44,64 @@ export function buildUploadFormData(
 }
 
 /**
+ * The sentence a respondent should read when an upload fails.
+ *
+ * The server already writes a usable explanation for every refusal it makes — the file is
+ * too big, the content type is not allowed — and the widget used to discard it and show
+ * `Upload failed (HTTP 415). Please try again.` instead. That is two failures in one
+ * line: it names a number that means nothing outside a spec, and it prescribes an action
+ * that cannot possibly work. A 413 and a 415 are verdicts on the FILE; retrying the same
+ * one produces the same answer forever, and the respondent has no way to guess that what
+ * they actually need is a different file.
+ *
+ * So the server's message wins whenever there is one, and the fallbacks distinguish the
+ * two situations that matter: something wrong with the file (pick another) and something
+ * wrong at the moment (try again).
+ */
+export function uploadErrorMessage(status: number, body: unknown): string {
+  const fromServer = serverErrorText(body);
+  if (fromServer) {
+    return fromServer;
+  }
+  // 4xx here is always a judgement about this file — the endpoint's own failures are
+  // size, content type, an unknown question, or a closed form. None improve on a retry.
+  if (status >= 400 && status < 500) {
+    return 'That file was not accepted. Try a different file.';
+  }
+  return 'The upload did not go through. Please try again.';
+}
+
+/**
+ * The `error` string from the endpoint's response body, or null if there is not one.
+ *
+ * Takes `unknown` because the two callers hand it different things and neither should have
+ * to care: the XHR is configured with `responseType = 'json'`, so `xhr.response` is an
+ * already-parsed object, while tests and any text-mode caller pass the raw string.
+ * Accepting only a string is what produced the InvalidStateError below.
+ */
+function serverErrorText(body: unknown): string | null {
+  const parsed = typeof body === 'string' ? tryParse(body) : body;
+  if (typeof parsed === 'object' && parsed !== null) {
+    const error = (parsed as Record<string, unknown>)['error'];
+    // A blank string is not a message; falling through to the fallback beats showing the
+    // respondent an empty error.
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return error.trim();
+    }
+  }
+  return null;
+}
+
+/** JSON.parse that answers with null instead of throwing — a proxy's HTML page is not JSON. */
+function tryParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Parse the raw `POST /forms/upload` JSON response into an {@link UploadedFile},
  * throwing a respondent-friendly error when the shape is wrong. Pure + testable.
  */
@@ -116,7 +174,11 @@ export class FormUploadService implements IFormsUploadService {
             reject(err instanceof Error ? err : new Error('Upload failed.'));
           }
         } else {
-          reject(new Error(`Upload failed (HTTP ${xhr.status}). Please try again.`));
+          // `xhr.response`, never `xhr.responseText`: reading responseText while
+          // responseType is 'json' throws InvalidStateError, and it throws INSIDE onload —
+          // so the promise never settles, the widget sits at "Uploading … 100%" forever,
+          // and Submit stays blocked behind an upload the server already answered.
+          reject(new Error(uploadErrorMessage(xhr.status, xhr.response)));
         }
       };
       xhr.onerror = (): void => reject(new Error('Upload failed. Check your connection and try again.'));
