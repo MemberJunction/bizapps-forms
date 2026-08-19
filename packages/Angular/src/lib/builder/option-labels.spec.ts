@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { nextOptionLabel, optionLetter, withUniqueValues } from './option-labels';
+import { nextOptionLabel, withUniqueValues } from './option-labels';
+import { optionLetter } from '../shared/option-letter';
 
 describe('nextOptionLabel', () => {
   it('numbers the first option 1', () => {

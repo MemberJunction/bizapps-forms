@@ -60,6 +60,7 @@
                 [attr.aria-checked]="textValue() === opt.value"
                 (click)="onSingleChoice(opt.value)"
               >
+                <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
                 <span class="mjf-choice__mark" aria-hidden="true"></span>
                 <span class="mjf-choice__label">{{ opt.label }}</span>
               </button>
@@ -77,6 +78,7 @@
                 [attr.aria-checked]="isSelected(opt.value)"
                 (click)="onMultiToggle(opt.value)"
               >
+                <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
                 <span class="mjf-choice__mark mjf-choice__mark--box" aria-hidden="true"></span>
                 <span class="mjf-choice__label">{{ opt.label }}</span>
               </button>
@@ -217,7 +219,10 @@
                     <i class="fa-regular fa-image"></i>
                   </span>
                 }
-                <span class="mjf-pic__label">{{ opt.label }}</span>
+                <span class="mjf-pic__label">
+                  <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
+                  {{ opt.label }}
+                </span>
               </button>
             }
           </div>

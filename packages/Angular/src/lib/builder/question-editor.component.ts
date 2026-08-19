@@ -32,7 +32,7 @@ import { ValidationRuleEditorComponent } from './validation-rule-editor.componen
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
-import { optionLetter } from './option-labels';
+import { optionLetter } from '../shared/option-letter';
 import {
   parseConditionalRule,
   parseQuestionSettings,

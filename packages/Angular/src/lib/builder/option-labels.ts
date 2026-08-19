@@ -71,22 +71,3 @@ export function withUniqueValues<T extends LabelledOption>(options: readonly T[]
   });
 }
 
-/**
- * The badge shown beside an option: A, B, C … then AA, AB for a list longer than the alphabet.
- *
- * Spreadsheet-style rather than stopping at Z or falling back to numbers, so the badge never
- * repeats however many options an author adds — a second "A" in the same list would undo the
- * only thing the badge is for.
- */
-export function optionLetter(index: number): string {
-  if (index < 0) {
-    return '';
-  }
-  let n = index;
-  let out = '';
-  do {
-    out = String.fromCharCode(65 + (n % 26)) + out;
-    n = Math.floor(n / 26) - 1;
-  } while (n >= 0);
-  return out;
-}

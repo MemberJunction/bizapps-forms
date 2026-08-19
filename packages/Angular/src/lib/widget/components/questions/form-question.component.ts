@@ -19,6 +19,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { optionLetter } from '../../../shared/option-letter';
 import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
@@ -88,6 +89,17 @@ export class FormQuestionComponent {
   });
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
+
+  /**
+   * The A/B/C badge for the option at this position.
+   *
+   * Position, never the label or the value: the badge is a way to refer to a choice out loud
+   * ("pick C"), so it has to agree with what the author sees in the builder, and both sides read
+   * the options in the same published order.
+   */
+  protected letterAt(index: number): string {
+    return optionLetter(index);
+  }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
   protected readonly helpId = computed(() => `${this.inputId()}-help`);
   protected readonly describedBy = computed(() => {
