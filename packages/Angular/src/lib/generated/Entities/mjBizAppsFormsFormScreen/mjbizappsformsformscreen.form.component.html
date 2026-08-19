@@ -33,7 +33,7 @@
     <mj-collapsible-panel
         SectionKey="screenConfiguration"
         SectionName="Screen Configuration"
-        Icon="fa fa-sliders-h"
+        Icon="fa fa-cog"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
@@ -47,10 +47,10 @@
 
     </mj-collapsible-panel>
 
-    <!-- Screen Content Section -->
+    <!-- Content Section -->
     <mj-collapsible-panel
-        SectionKey="screenContent"
-        SectionName="Screen Content"
+        SectionKey="content"
+        SectionName="Content"
         Icon="fa fa-align-left"
         [Form]="this"
         [FormContext]="formContext">
@@ -87,14 +87,6 @@
             [FormContext]="formContext"
             LinkType="URL"
         ></mj-form-field>
-        <mj-form-field 
-            [Record]="record"
-            [ShowLabel]="true"
-            FieldName="SocialLinks"
-            Type="textarea"
-            [EditMode]="EditMode"
-            [FormContext]="formContext"
-        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -102,7 +94,7 @@
     <mj-collapsible-panel
         SectionKey="behavioralRules"
         SectionName="Behavioral Rules"
-        Icon="fa fa-code-branch"
+        Icon="fa fa-project-diagram"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
@@ -138,6 +130,14 @@
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="SocialLinks"
+            Type="code"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -145,7 +145,7 @@
     <mj-collapsible-panel
         SectionKey="systemMetadata"
         SectionName="System Metadata"
-        Icon="fa fa-cog"
+        Icon="fa fa-database"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 

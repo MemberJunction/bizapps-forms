@@ -115,10 +115,40 @@ const FORM_SCREEN_CSS = /* css */ `
   transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
+/* Brand colour on hover, not at rest.
+   At rest the row stays in the form's own palette so seven saturated logos do not shout over the
+   ending message the author wrote — the icons are a footer, not the point of the screen. On hover
+   the real brand appears, which is also the moment it does its job: confirming to the respondent
+   which service they are about to open before they commit to the click. */
 .mjf-screen__social-link:hover {
-  color: var(--mjf-accent);
-  border-color: var(--mjf-accent);
+  color: var(--mjf-brand, var(--mjf-accent));
+  border-color: var(--mjf-brand, var(--mjf-accent));
+  background: color-mix(in srgb, var(--mjf-brand, var(--mjf-accent)) 10%, transparent);
   transform: translateY(-2px);
+}
+
+/* Each platform's own colour, from its published brand guidelines. X is deliberately near-black
+   rather than the old Twitter blue. */
+.mjf-screen__social-link.is-linkedin {
+  --mjf-brand: #0a66c2;
+}
+.mjf-screen__social-link.is-x {
+  --mjf-brand: #14171a;
+}
+.mjf-screen__social-link.is-facebook {
+  --mjf-brand: #1877f2;
+}
+.mjf-screen__social-link.is-instagram {
+  --mjf-brand: #e1306c;
+}
+.mjf-screen__social-link.is-youtube {
+  --mjf-brand: #ff0000;
+}
+.mjf-screen__social-link.is-tiktok {
+  --mjf-brand: #00f2ea;
+}
+.mjf-screen__social-link.is-github {
+  --mjf-brand: #24292f;
 }
 
 .mjf-screen__social-link:focus-visible {
@@ -161,6 +191,7 @@ const FORM_SCREEN_CSS = /* css */ `
           @for (link of socialLinks(); track link.platform) {
             <a
               class="mjf-screen__social-link"
+              [class]="'mjf-screen__social-link is-' + link.platform"
               [href]="link.url"
               target="_blank"
               rel="noopener noreferrer external"
