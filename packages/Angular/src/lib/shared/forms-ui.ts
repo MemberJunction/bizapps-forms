@@ -80,6 +80,20 @@ export const FORMS_UI_TOKENS = /* css */ `
      OUTLINE, where the contrast comes from the page behind it. Use --mjf-rule for
      anything drawn on the card itself. */
   --mjf-rule: var(--mj-border-default);
+
+  /* The boundary of an EMPTY, INTERACTIVE region — a dropzone, a placeholder slot.
+
+     Deliberately not --mjf-rule and not any --mj-border-*: those are hairlines drawn
+     BETWEEN surfaces, where low contrast is the point. This one carries an affordance
+     ("you may drop a file here"), so WCAG 1.4.11 asks for 3:1 against what it sits on,
+     and every border token misses badly — measured against the live theme on the sunken
+     fill these regions use: border-default 1.12 light / 1.96 dark, border-strong 1.35 /
+     2.68. The dropzone read as a plain filled rectangle with no edge at all.
+
+     --mj-text-muted gives 4.31 light / 7.90 dark, and pairs sensibly: the boundary
+     matches the weight of the muted hint text inside it. Brand is reserved for the
+     drag-over state, so that the page does not shout before anything is happening. */
+  --mjf-dropzone-edge: var(--mj-text-muted);
 }
 
 @media (max-width: 720px) {

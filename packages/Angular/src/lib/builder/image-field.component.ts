@@ -66,7 +66,7 @@ const IMAGE_FIELD_CSS = /* css */ `
   text-align: center;
   cursor: pointer;
   background: var(--mj-bg-surface-sunken);
-  border: 1px dashed var(--mj-border-default);
+  border: 1px dashed var(--mjf-dropzone-edge);
   border-radius: var(--mjf-radius-sm);
   transition: border-color var(--mjf-ease), background var(--mjf-ease), color var(--mjf-ease);
 }
@@ -98,14 +98,16 @@ const IMAGE_FIELD_CSS = /* css */ `
 .imf-drop--compact .imf-drop-icon { font-size: 14px; }
 
 /* ── Filled: the image itself is the control ──────────────────────────────────── */
+/* No box. A container here would need a visible edge, and in the properties panel there is
+   nothing behind it to get that edge from: the panel is --mj-bg-surface, so a sunken fill sits
+   at 1.10 against it and --mj-border-subtle resolves to the SAME colour as that fill in light
+   mode — 1.00, an outline that is not merely faint but arithmetically absent. The image is a
+   perfectly good anchor on its own, so the box goes rather than being given a fourth card
+   treatment nobody asked for. */
 .imf-filled {
   display: flex;
   align-items: center;
   gap: var(--mjf-gap-sm);
-  padding: var(--mjf-gap-sm);
-  border: 1px solid var(--mj-border-subtle);
-  border-radius: var(--mjf-radius-sm);
-  background: var(--mj-bg-surface-sunken);
 }
 .imf-thumb {
   flex: none;
@@ -113,6 +115,10 @@ const IMAGE_FIELD_CSS = /* css */ `
   height: 44px;
   object-fit: contain;
   border-radius: 4px;
+  /* Decoration, not an affordance: it keeps a pale logo on a pale panel from having no edge at
+     all. Held to --mjf-rule rather than the dropzone edge so a thumbnail is not framed more
+     heavily than the control it replaced. */
+  border: 1px solid var(--mjf-rule);
   background: var(--mj-bg-surface);
 }
 .imf-meta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

@@ -451,12 +451,28 @@ const LAYOUT_CSS = /* css */ `
   border-radius: var(--mjf-radius-sm);
   background: var(--mj-bg-surface);
   box-shadow: var(--mj-shadow-sm);
+}
+
+/* Row controls that stay out of the way until the row is engaged.
+
+   One definition rather than one per card type: a screen card wore the same delete button as a
+   question card but sat outside this rule, so its trash icon was on permanently while every
+   question's hid — the canvas looked like the screens were the only things you could destroy.
+
+   All three parts are load-bearing. Fading rather than un-displaying keeps the button in the tab
+   order, which is what lets the focus-within rule bring it back for a keyboard user. And a touch
+   device has no hover at all, so without the last rule the control would be unreachable on a
+   phone — the builder is not mobile-first, but "invisible forever" is not a trade-off worth
+   making by accident. */
+.fb-reveal {
   opacity: 0;
   transition: opacity var(--mjf-ease);
 }
-.fb-q:hover .fb-q-side,
-.fb-q:focus-within .fb-q-side { opacity: 1; }
-@media (hover: none) { .fb-q-side { opacity: 1; } }
+.fb-q:hover .fb-reveal,
+.fb-q:focus-within .fb-reveal,
+.fb-screen:hover .fb-reveal,
+.fb-screen:focus-within .fb-reveal { opacity: 1; }
+@media (hover: none) { .fb-reveal { opacity: 1; } }
 
 .fb-q-btn {
   display: flex;

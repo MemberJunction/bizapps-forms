@@ -222,7 +222,7 @@
               </div>
               <button
                 type="button"
-                class="fb-q-btn fb-q-btn--danger"
+                class="fb-q-btn fb-q-btn--danger fb-reveal"
                 [disabled]="busy"
                 aria-label="Delete welcome screen"
                 (click)="deleteScreen(ws); $event.stopPropagation()"
@@ -316,7 +316,7 @@
                     }
                   </div>
                 </div>
-                <div class="fb-q-side">
+                <div class="fb-q-side fb-reveal">
                   <button
                     type="button"
                     class="fb-q-btn"
@@ -369,7 +369,7 @@
                 }
                 <button
                   type="button"
-                  class="fb-q-btn fb-q-btn--danger"
+                  class="fb-q-btn fb-q-btn--danger fb-reveal"
                   [disabled]="busy"
                   aria-label="Delete ending"
                   (click)="deleteScreen(es); $event.stopPropagation()"
