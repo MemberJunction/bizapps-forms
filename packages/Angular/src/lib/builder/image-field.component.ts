@@ -54,9 +54,13 @@ const IMAGE_FIELD_CSS = /* css */ `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
+  gap: 6px;
+  min-width: 32px;
   height: 32px;
   padding: 0;
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
   cursor: pointer;
   color: var(--mj-text-secondary);
   background: var(--mj-bg-surface);
@@ -65,6 +69,11 @@ const IMAGE_FIELD_CSS = /* css */ `
   transition: border-color var(--mjf-ease), color var(--mjf-ease);
 }
 .imf-add:hover { color: var(--mj-brand-primary); border-color: var(--mj-brand-primary); }
+
+/* With text it is a labelled button rather than an icon, so it needs room to breathe. A bare
+   plus is only self-explanatory when something beside it already says what is being added —
+   in a list of choices nothing does, and the author is left guessing what the button adds. */
+.imf-add--labelled { padding: 0 10px; }
 .imf-add:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
 .imf-filled { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
@@ -123,11 +132,15 @@ const IMAGE_FIELD_CSS = /* css */ `
           <button
             type="button"
             class="imf-add"
+            [class.imf-add--labelled]="!label"
             [attr.aria-haspopup]="'dialog'"
             [attr.aria-label]="'Add ' + accessibleName"
             (click)="openPicker()"
           >
             <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            @if (!label) {
+              <span>{{ addLabel }}</span>
+            }
           </button>
         </div>
       }
@@ -163,6 +176,13 @@ export class ImageFieldComponent {
   @Input() hint = '';
   /** Accessible name when there is no visible label (e.g. inside an option row). */
   @Input() ariaLabel = 'an image';
+  /**
+   * Text shown inside the plus when there is no `label` beside it.
+   *
+   * A bare plus only reads as self-explanatory when something adjacent says what it adds. In a
+   * list of choices nothing does, so the button says it itself.
+   */
+  @Input() addLabel = 'Image';
   /** Kept for hosts that place this in a dense list; the resting state is compact either way. */
   @Input({ transform: booleanAttribute }) compact = false;
 
