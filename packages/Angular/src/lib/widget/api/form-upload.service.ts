@@ -14,17 +14,7 @@
 import { Injectable, inject } from '@angular/core';
 
 import { FORMS_API_CONFIG, deriveUploadUrl } from './forms-api.config';
-
-/** Metadata the server returns for a successfully-stored upload. */
-export interface UploadedFile {
-  fileId: string;
-  name: string;
-  size: number;
-  contentType: string;
-}
-
-/** Progress callback: fraction 0–1 of bytes sent, or `null` when indeterminate. */
-export type UploadProgress = (fraction: number | null) => void;
+import type { IFormsUploadService, UploadedFile, UploadProgress } from './form-upload.interface';
 
 /**
  * Build the multipart body for an upload. Pure + framework-free so the field wiring
@@ -75,13 +65,8 @@ export function parseUploadResponse(raw: unknown): UploadedFile {
 }
 
 @Injectable()
-export class FormUploadService {
+export class FormUploadService implements IFormsUploadService {
   private readonly config = inject(FORMS_API_CONFIG);
-
-  /** True when the widget has an endpoint + token to upload with. */
-  public get canUpload(): boolean {
-    return !!this.endpoint() && !!this.config.token;
-  }
 
   /**
    * Upload one file for a FileUpload question. Resolves with the stored file's

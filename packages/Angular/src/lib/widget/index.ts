@@ -1,7 +1,7 @@
 /**
  * Public surface of the respondent widget (WP-C). Exposes the `<mj-form>` root
- * component, the custom-element registration, the S1 API seam (interface + token +
- * real/mock implementations + config), and the headless runtime — so host apps can
+ * component, the custom-element registration, the S1 API + upload seams (interface +
+ * token + real/mock implementations + config), and the headless runtime — so host apps can
  * embed the element OR mount the component directly with their own provider wiring.
  */
 export { MjFormComponent } from './mj-form.component';
@@ -20,12 +20,17 @@ export {
 export { FormsGraphQLApiService } from './api/forms-api.graphql.service';
 export { FormsMockApiService } from './api/forms-api.mock.service';
 export {
+  FORMS_UPLOAD_SERVICE,
+  type IFormsUploadService,
+  type UploadedFile,
+  type UploadProgress,
+} from './api/form-upload.interface';
+export {
   FormUploadService,
   buildUploadFormData,
   parseUploadResponse,
-  type UploadedFile,
-  type UploadProgress,
 } from './api/form-upload.service';
+export { FormsMockUploadService } from './api/form-upload.mock.service';
 
 // Render-mode + question components (for direct embedding / testing)
 export { FormScrollComponent } from './components/form-scroll.component';

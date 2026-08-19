@@ -18,10 +18,10 @@ import { formsWidgetProviders } from '../widget/widget-providers';
  * An inert connection config for the preview.
  *
  * The empty `graphqlUrl` is the whole point, not a placeholder: `formsWidgetProviders`
- * reads it to pick the mock transport, so a trial submission writes nothing, and
- * `FormUploadService.canUpload` stays false so a FileUpload question offers no upload it
- * could not honour. Omitting `turnstileSiteKey` likewise keeps a captcha-required form
- * from rendering a live Cloudflare challenge at an author who is only previewing.
+ * reads it to pick BOTH mocks, so a trial submission writes nothing and a FileUpload or
+ * Signature answer is accepted in-memory rather than shipped anywhere. Omitting
+ * `turnstileSiteKey` likewise keeps a captcha-required form from rendering a live
+ * Cloudflare challenge at an author who is only previewing.
  */
 const PREVIEW_API_CONFIG = normalizeApiConfig({ graphqlUrl: '' });
 

@@ -34,7 +34,7 @@ import {
 
 import { NgTemplateOutlet } from '@angular/common';
 
-import { FormUploadService } from '../../api/form-upload.service';
+import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -75,7 +75,7 @@ export class FormQuestionComponent {
   /** Emits whenever the respondent changes the answer. */
   public readonly valueChange = output<AnswerValue>();
 
-  private readonly uploader = inject(FormUploadService);
+  private readonly uploader = inject(FORMS_UPLOAD_SERVICE);
 
   /** FileUpload UI state (upload lifecycle for the current file). */
   protected readonly uploadStatus = signal<UploadStatus>('idle');
