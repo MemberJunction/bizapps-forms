@@ -391,6 +391,70 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.cdr.markForCheck();
   }
 
+  protected async setPageDescription(page: PageNode, description: string): Promise<void> {
+    page.entity.Description = description.trim() === '' ? null : description;
+    await this.state.save(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Start a new section.
+   *
+   * Pages shipped end to end — entity, published contract, page header on the canvas, the widget
+   * rendering a title and description per section — with no way for an author to CREATE one.
+   * `addPage` had exactly two callers: the implicit first page, and the import/paste path when a
+   * pasted block named a section. So a multi-page form was reachable only by pasting one, and
+   * the page header hides itself below two pages, which meant an author who had never pasted
+   * never saw page controls at all and had no way to discover they existed.
+   */
+  protected async addPage(): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    // Untitled, not "Page N": the title is a heading respondents READ, and a real one ("Contact
+    // details") is the whole reason to split a form. A default that looks deliberate is a
+    // default that ships.
+    const page = await this.state.addPage(this.tree, '');
+    if (page) {
+      this.tree.pages.push(page);
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Delete a page AND every question on it.
+   *
+   * Hover-revealed like every other delete on the canvas, but unlike them it asks first, because
+   * the blast radius is not what the button is attached to: the page header shows a title and a
+   * toggle, with no hint of how many questions go down with it. The last page is never deletable
+   * — a form with no page has nowhere to put a question, and the builder would immediately
+   * recreate one underneath the author.
+   */
+  protected async deletePage(page: PageNode): Promise<void> {
+    if (!this.tree || this.busy || this.tree.pages.length <= 1) {
+      return;
+    }
+    const count = page.questions.length;
+    const what = count === 1 ? '1 question' : `${count} questions`;
+    if (count > 0 && !confirm(`Delete this section and its ${what}? This cannot be undone.`)) {
+      return;
+    }
+    this.busy = true;
+    if (await this.state.deletePage(page)) {
+      this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
+      for (const q of page.questions) {
+        this.selection = clearIfQuestion(this.selection, q.entity.ID);
+      }
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
   /** Toggle whether leaving this page banks a Partial response immediately. */
   protected async togglePartialSubmitPoint(page: PageNode): Promise<void> {
     page.entity.IsPartialSubmitPoint = !page.entity.IsPartialSubmitPoint;

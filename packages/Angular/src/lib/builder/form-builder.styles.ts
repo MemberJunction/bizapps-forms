@@ -299,6 +299,26 @@ const LAYOUT_CSS = /* css */ `
 .fb-page-flag { flex: none; display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .fb-page-flag span { font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
+/* Sub-heading to the title above it, and quieter, so a section reads as one thing rather than
+   two fields. Borrows the title's invisible-until-touched treatment: an optional field that
+   draws a box before anyone wants it turns an empty form into a grid of empty boxes. */
+.fb-page-desc {
+  display: block;
+  width: 100%;
+  margin: 0 0 10px 32px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--mjf-label);
+  color: var(--mj-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--mjf-radius-sm);
+  box-sizing: border-box;
+}
+.fb-page-desc:hover { border-color: var(--mj-border-subtle); }
+.fb-page-desc:focus { outline: none; border-color: var(--mj-brand-primary); background: var(--mj-bg-surface); }
+.fb-page-desc::placeholder { color: var(--mj-text-muted); }
+
 .fb-endings { margin-top: var(--mjf-stack); padding-top: var(--mjf-stack); border-top: 1px solid var(--mjf-rule); }
 .fb-endings-title {
   margin: 0 0 8px;
@@ -471,7 +491,9 @@ const LAYOUT_CSS = /* css */ `
 .fb-q:hover .fb-reveal,
 .fb-q:focus-within .fb-reveal,
 .fb-screen:hover .fb-reveal,
-.fb-screen:focus-within .fb-reveal { opacity: 1; }
+.fb-screen:focus-within .fb-reveal,
+.fb-page-head:hover .fb-reveal,
+.fb-page-head:focus-within .fb-reveal { opacity: 1; }
 @media (hover: none) { .fb-reveal { opacity: 1; } }
 
 .fb-q-btn {

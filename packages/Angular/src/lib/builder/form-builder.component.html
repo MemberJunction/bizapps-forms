@@ -266,7 +266,25 @@
                     Save progress here
                   </span>
                 </label>
+                <button
+                  type="button"
+                  class="fb-q-btn fb-q-btn--danger fb-reveal"
+                  [disabled]="busy"
+                  [attr.aria-label]="'Delete section ' + ($index + 1)"
+                  (click)="deletePage(page)"
+                ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </div>
+              <!-- The widget has always rendered this under the section heading; nothing in the
+                   builder ever wrote it. -->
+              <input
+                #pageDesc
+                class="fb-page-desc"
+                type="text"
+                [value]="page.entity.Description ?? ''"
+                placeholder="Add a short description for this section (optional)"
+                [attr.aria-label]="'Description for page ' + ($index + 1)"
+                (change)="setPageDescription(page, pageDesc.value)"
+              />
             }
             @if (page.questions.length === 0) {
               <div class="fb-canvas-empty">
@@ -343,6 +361,14 @@
             }
             </div>
           }
+
+          <!-- Always shown, including on a one-page form: this is the ONLY way to reach a second
+               page, and the page header above hides itself below two pages. Putting it behind
+               that header would have been a door locked from the inside. -->
+          <button type="button" class="fb-screen-add" [disabled]="busy" (click)="addPage()">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            Add a section
+          </button>
 
           <div class="fb-endings">
             <p class="fb-endings-title">Endings</p>
