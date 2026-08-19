@@ -94,7 +94,7 @@ regeneration recipe — it is not a plain re-push.
 | API | Location (MJ repo) | Verified |
 |---|---|---|
 | `PubSubManager.Instance.Publish(topic, payload)` | `packages/MJServer/src/generic/PubSubManager.ts:39` (BaseSingleton) | ✅ at v5.51.0 |
-| `statusUpdates` subscription, topic `PUSH_STATUS_UPDATES` | `packages/MJServer/src/generic/PushStatusResolver.ts` — filter is **`payload.sessionId === args.sessionId` only** at 5.51.0 (a stricter owner filter exists in 6.x) | ✅ at v5.51.0 |
+| `statusUpdates` subscription, topic `PUSH_STATUS_UPDATES` | `packages/MJServer/src/generic/PushStatusResolver.ts` — filter is **`payload.sessionId === args.sessionId` only** at 5.51.0. **6.x adds a fail-closed owner check** (see §6 — the publisher seam MUST handle this, since the dev workspace resolves 6.1-edge) | ✅ at v5.51.0 (changed in 6.x) |
 | `GraphQLDataProvider.PushStatusUpdates(sessionId): Observable<string>` | `packages/GraphQLDataProvider/src/graphQLDataProvider.ts:3123`; client's own id via `public get sessionId()` (line 384) | ✅ at v5.51.0 |
 | Client progress-filter template | `graphQLVersionHistoryClient.ts:117-140` (`CreateLabelProgress` pattern: subscribe before mutation, `JSON.parse`, filter on discriminator fields) | ✅ at v5.51.0 |
 | `Generate Image` core Action | `packages/Actions/CoreActions/src/custom/ai/generate-image.action.ts` — params `Prompt`, `Model?`, `Size?`, `Quality?`, `Style?`, `NegativePrompt?`, `OutputFormat` (`'base64'` default); outputs `Images` (`MediaOutput[]` with base64 `data`), `RevisedPrompt`, `ModelUsed`. Resolves any active `AIModelType='Image Generator'` model + vendor `DriverClass` from metadata. | ✅ at v5.51.0 |
@@ -147,10 +147,17 @@ plain spinner and then the finished form.
 `packages/Server` does). Do not add them. Instead follow the repo's existing seam precedent
 (`setFormDesignerModel()` in `llm-form-designer.ts`):
 
-1. **`FormsProgressPublisher`** — interface in `packages/Actions` (`publish(event: GenerateFormProgressEvent): void`),
-   default no-op. `packages/Server` registers the real implementation in `LoadBizAppsFormsServer()`
-   (`packages/Server/src/index.ts:84`) wrapping
-   `PubSubManager.Instance.Publish('PUSH_STATUS_UPDATES', { sessionId, message: JSON.stringify(event) })`.
+1. **`FormsProgressPublisher`** — interface in `packages/Actions`
+   (`publish(event: GenerateFormProgressEvent): void`), default no-op. `packages/Server` registers the real
+   implementation in `LoadBizAppsFormsServer()` (`packages/Server/src/index.ts:84`). The published payload
+   MUST carry **both** `sessionId` and `ownerUserId` (= the generating author's `ContextUser.ID`): at 5.51.0
+   `ownerUserId` is ignored, but MJ 6.x's `statusUpdates` filter additionally requires
+   `payload.ownerUserId === <ws connection's authenticated user>` and **fails closed** (MJ PR #3244; helper
+   `publishStatusUpdate()` in `packages/MJServer/src/generic/PushStatusResolver.ts`). Prefer that helper when
+   the resolved MJ version exports it; otherwise include `ownerUserId` in the raw
+   `PubSubManager.Instance.Publish('PUSH_STATUS_UPDATES', …)` payload. Omitting it "works" on a 5.51.0 host
+   and silently delivers nothing on 6.x — the worst failure mode. The §3 resilience principle is the
+   backstop either way.
 2. **`GeneratedImageStore`** — interface in `packages/Actions`
    (`store(formId, bytes: Buffer, contentType, fileName, contextUser): Promise<{ url: string }>`), no
    default (image stage skips with a logged notice if unregistered). `packages/Server` registers an
@@ -272,6 +279,12 @@ contract identical (same name, params superset, same output params).
   the run. Only outline failure fails the action (`DESIGN_FAILED`).
 - Every stage call goes through the existing `FormDesignerModel`-style seam so the whole pipeline is
   unit-testable offline; per-stage LLM retry stays at `MAX_DESIGNER_ATTEMPTS = 3` *per stage call*.
+- **Stage timeout via the runner's own cancellation support** (verified at v5.51.0):
+  `AIPromptParams.cancellationToken?: AbortSignal` (`packages/AI/CorePlus/src/prompt.types.ts:418`) — pass
+  `AbortSignal.timeout(STAGE_TIMEOUT_MS)` per stage call instead of wrapping in a bare `Promise.race` that
+  would leak the in-flight model call. `AIPromptParams.onProgress` / `onStreaming` (lines 439/445) also
+  exist at 5.51.0; not used in this phase (our progress granularity is per-stage, not per-token) but they
+  are the sanctioned hook if a later phase wants token-level streaming of the outline.
 
 **Acceptance (B):** stubbed-model test drives the full staged pipeline and asserts the exact event
 sequence of §6 against a stub publisher; a page-detail stub that always fails yields a completed run with
@@ -303,9 +316,16 @@ Published through the `FormsProgressPublisher` seam; each event is one `statusUp
 Size guard: events carry entity-shaped fragments, never base64 image bytes (images travel as URLs — the
 same reason MJ's `Generate Image` action keeps base64 out of its `Message`).
 
-Privacy note (5.51.0 semantics): the subscription filter is sessionId equality only, and the sessionId is a
-client-generated UUID passed by the same authenticated author — do not put anything in events beyond what
-that author's own form contains.
+Delivery contract (version-dependent — the publisher seam in §3 handles both):
+
+- **5.51.0:** filter is sessionId equality only; the sessionId is a client-generated UUID passed by the
+  same authenticated author. Do not put anything in events beyond what that author's own form contains.
+- **6.x (MJ PR #3244):** every publish must also carry `ownerUserId`, and delivery additionally requires it
+  to equal the subscribing websocket connection's server-authenticated user — failing closed. Builder
+  authors are authenticated in Explorer, so this is transparent for our flow, but it is why the seam always
+  publishes `ownerUserId` and why a silent no-events run on a 6.x host means a publisher bug, not a network
+  problem. (Anonymous magic-link sessions cannot subscribe on 6.x; irrelevant here — generation is an
+  authenticated author feature.)
 
 ---
 
@@ -412,7 +432,9 @@ keeps working between commits because no-`SessionID` behavior is unchanged.
 **Phase 3 (later, out of this spec's scope):** brand-URL extraction with SSRF hardening; People-field
 context injection (curated `bizapps-common` People block in the outline prompt, preferring
 `RespondentPersonID` capture over redundant free-text identity questions); iterative refine turn
-(entity→blueprint reverse mapping + delta prompts).
+(entity→blueprint reverse mapping + delta prompts). If Phase 3 lands after the repo has committed to
+MJ 6.x, evaluate porting the stage pipeline onto **TaskGraph** first — §11 records the assessment and the
+concrete triggers that would flip that decision.
 
 Every phase: build the touched packages, run their `.spec.ts` suites (vitest — this repo uses `.spec.ts`,
 no `test-utils`), and keep refactors in separate commits from behavior. No commits without explicit
@@ -435,3 +457,100 @@ correctness on a host DB (prompt/template rows present — the `AIEngine` lookup
 websocket behavior through real proxies, image model availability/cost, and the end feel of the streaming
 UX. These are covered by the manual smoke in D's acceptance plus the degraded-path design (every optional
 stage fails soft). Say so in the PR body rather than implying test coverage proves them.
+
+---
+
+## 11. MJ 6.x capabilities assessed — and why this spec doesn't build on them yet
+
+Full survey of the MJ repo (`~/Projects/MJ`, 6.1.0-edge.2) performed 2026-08-19, diffed against the
+`v5.51.0` tag. Governing fact for everything below: **MJ 6.x is relicensed to BUSL-1.1** (commit
+`19937deb8b`; 5.51.0 is ISC) and there is no 6.0 stable — the 6.x line is `6.1.0-edge.*` and requires 6.1
+core `__mj` migrations on the host. Adopting any 6.x-only capability is therefore a *repo-level* platform
+decision (license + host-migration + edge-channel), not a feature-level one, and this spec stays
+implementable on both sides of it.
+
+### 11.1 TaskGraph (`@memberjunction/task-graph`) — the big one. Assessed: **not now; strong Phase-3+ candidate.**
+
+What it is (verified): a durable, DB-backed, dependency-ordered task-graph engine over the `MJ: Tasks` /
+`MJ: Task Dependencies` entities. A `TaskGraphSpec` declares nodes of kind
+`Agent | Action | Prompt | Human | ForEach | While | External` with `dependsOn` edges, conditions,
+XOR `exclusiveGroup`s, and graph-level `failureSemantics` (`packages/AI/CorePlus/src/task-graph/task-graph-spec.ts`;
+`MAX_TASKS_PER_GRAPH = 50`). `TaskGraphService.Submit` (`packages/TaskGraph/src/TaskGraphService.ts:511`)
+persists the graph and returns immediately; `TaskGraphDispatcher` (poll default 5 s, claim-based
+exactly-once across instances, `MaxConcurrentTasks` 5/instance, `ForEach` parallel mode with
+`maxConcurrency` 10) executes it durably — graphs survive server restarts. Progress eventing is built in:
+14 typed `TaskGraphFrame` kinds including `NodeProgress` (message + percent) broadcast over a dedicated
+graphql-ws subscription `taskGraphFrames(parentTaskId)` with a fail-closed graph-owner filter, consumed
+via `GraphQLDataProvider.TaskGraphFrames()` (`graphQLDataProvider.ts:3393`). First landed 2026-08-07;
+absent at v5.51.0; npm `6.1.0-edge.*` only.
+
+Our pipeline maps onto it almost 1:1 — outline `Prompt` node → N page nodes (`dependsOn: outline`, auto-
+parallel) → image `Action` nodes (`actionName: 'Generate Image'`) → theme node — which is exactly why the
+stage decomposition in §3/§5 was kept clean: **a future port is a re-plumbing, not a redesign.**
+
+Why not now (each verified, none stylistic):
+
+1. **Availability/license:** 6.1-edge + BUSL + 6.1 core migrations on every host (see above). The staged
+   Action works on both 5.51.0 and 6.1-edge hosts today.
+2. **Interactive latency:** the dispatcher *polls* (default 5 s) and claims per pass. Our graph has 3–4
+   sequential dependency levels, so orchestration alone can add ~10–20 s of dead time to a build whose
+   whole point is a fast, watch-it-cook UX with a ~2 s time-to-first-paint. TaskGraph is engineered for
+   durable multi-minute workflows, not sub-second interactive streaming.
+3. **Retry semantics don't cover our loop:** node `policy.retryCount/timeoutSeconds` are persisted but
+   **not enforced by the dispatcher** (retry is a manual `TaskGraph.RetryTask` op). And a `Prompt` node
+   wraps `AIPromptRunner.ExecutePrompt` directly (`TaskGraphPromptRunner`), which bypasses our
+   zod-validate-and-feed-back-the-error Designer retry (§2). We'd have to wrap every stage in an Action
+   node anyway to keep it — at which point TaskGraph is contributing scheduling we don't need yet and
+   latency we don't want.
+4. **Progress channel duplication:** `taskGraphFrames` would replace our §6 events for graph stages, but
+   image/theme sub-progress and the entity-fragment payloads the client patches from would still need our
+   protocol on top.
+
+Revisit triggers — port the stages onto TaskGraph when **any** of these becomes true: (a) the repo commits
+to MJ 6.x anyway (license + migrations accepted); (b) generation grows past ~2 minutes or authors need to
+close the tab and come back (durability/resume is TaskGraph's core strength and is where our
+"cosmetic-events + reconcile" model stops being enough); (c) Phase-3 iterative refine becomes multi-turn
+and long-running; (d) MJ starts enforcing node retry/timeout policies. Also noteworthy for Phase 3:
+`Workflow.Draft` (`packages/TaskGraph/src/operations/WorkflowDraftOperation.ts`) has an LLM draft a
+validated `TaskGraphSpec` from prose — the closest in-tree analog to our brief→outline stage, worth
+studying when refine lands.
+
+### 11.2 `SaveEntityGraph` / `DeclareRelatedRecords` composite saves — adopt when on 6.x
+
+`BaseEntity.DeclareRelatedRecords`/`LoadRelatedRecords` + the `MJ.SaveEntityGraph` op (6.x commits
+`d1fcf17b69`/`edff6b594f`; `packages/MJCore/src/generic/baseEntity.ts:1428,1688`) persist a parent + its
+children (Form → Pages → Questions → Options) as **one transactional unit from one `Save()`**. This would
+replace Workstream A2's row-by-row persist loop, its bounded repair-retry, and the `PARTIAL` result-code
+story with a single atomic save. Not at v5.51.0, so A2 ships as specified; when the repo lands on 6.x,
+migrating the Builder to a declared entity graph is a self-contained deepening refactor (own commit, no
+behavior change other than `PARTIAL` disappearing because partial writes become impossible).
+
+### 11.3 Push-channel `ownerUserId` change — **already folded into this spec** (§3/§6)
+
+MJ PR #3244 (post-5.51.0): `statusUpdates` delivery on 6.x requires `payload.ownerUserId` to match the
+subscriber's authenticated user, failing closed. This is the one 6.x change that affects Phase B *now*,
+because the dev workspace resolves 6.1-edge: a publisher that omits `ownerUserId` works on a 5.51.0 host
+and silently delivers nothing in dev. §3's seam and §6's delivery contract are written against both
+behaviors.
+
+### 11.4 Confirmed non-changes that keep this spec stable
+
+- **`AIPromptRunner`:** effectively unchanged since 5.51.0 for our purposes (a `$`-expansion prefill fix;
+  a fix so all-Inactive `AIPromptModel` bindings error instead of silently falling back to the global
+  model pool — an ops note for whoever pins the Designer's model rows; new optional
+  `AIPromptParams.agentId`). Everything we rely on — `cancellationToken`, `onProgress`, `onStreaming`,
+  `attemptJSONRepair` — is already at 5.51.0. Still no formal JSON-Schema validation (OutputExample
+  remains the mechanism), so the zod layer stays load-bearing.
+- **Image generation:** `baseImage.ts` and the `Generate Image` action are byte-identical to 5.51.0. No
+  new models, no generated-media→storage helper — the `GeneratedImageStore` seam (§3) remains necessary.
+- **No brand-extraction or generative-theming infra** appeared anywhere in 6.x — §7's theme design stands.
+
+### 11.5 Adjacent 6.x additions noted, not needed by this spec
+
+`@memberjunction/ai-agent-harness` (external CLI agents as reasoning substrate), `packages/Materialization`
+(materialized query snapshots — adjacent to Forms' promote-responses-to-entities story, not to authoring),
+`RSUProgressBridge` + `@memberjunction/integration-progress-artifacts` (durable file-based progress
+manifests; the artifacts package itself *does* exist at 5.51.0 and is the fallback progress mechanism if a
+future long-running build ever needs progress that survives a server restart — our websocket + reconcile
+model deliberately does not), agent `MaxCostPerRun`/`MaxTokensPerRun` enforcement (BaseAgent-only; our
+caps table in §9 is the equivalent at the Action level).
