@@ -101,6 +101,8 @@ const FORM_SCREEN_CSS = /* css */ `
   margin-top: 1rem;
 }
 
+/* Rounded squares, not circles: a squircle is the shape every one of these logos already ships in
+   on a phone home screen, so it is the shape a respondent recognises them by. */
 .mjf-screen__social-link {
   display: inline-flex;
   align-items: center;
@@ -108,27 +110,27 @@ const FORM_SCREEN_CSS = /* css */ `
   width: 2.75rem;
   height: 2.75rem;
   font-size: 1.125rem;
-  color: var(--mjf-page-ink-muted);
+  color: var(--mjf-brand, var(--mjf-page-ink-muted));
   text-decoration: none;
-  border: 1px solid var(--mjf-page-edge);
-  border-radius: 50%;
-  transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  background: color-mix(in srgb, var(--mjf-brand, var(--mjf-page-ink)) 10%, var(--mjf-page-bg));
+  border: 1px solid color-mix(in srgb, var(--mjf-brand, var(--mjf-page-ink)) 30%, var(--mjf-page-bg));
+  border-radius: var(--mj-radius-md, 10px);
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
-/* Brand colour on hover, not at rest.
-   At rest the row stays in the form's own palette so seven saturated logos do not shout over the
-   ending message the author wrote — the icons are a footer, not the point of the screen. On hover
-   the real brand appears, which is also the moment it does its job: confirming to the respondent
-   which service they are about to open before they commit to the click. */
+/* Hover deepens the tint the icon already carries rather than introducing a new colour, so the
+   feedback reads as the same object responding instead of a different state being swapped in. */
 .mjf-screen__social-link:hover {
-  color: var(--mjf-brand, var(--mjf-accent));
+  background: color-mix(in srgb, var(--mjf-brand, var(--mjf-accent)) 22%, var(--mjf-page-bg));
   border-color: var(--mjf-brand, var(--mjf-accent));
-  background: color-mix(in srgb, var(--mjf-brand, var(--mjf-accent)) 10%, transparent);
   transform: translateY(-2px);
 }
 
-/* Each platform's own colour, from its published brand guidelines. X is deliberately near-black
-   rather than the old Twitter blue. */
+/* Each platform's own colour, from its published brand guidelines, applied AT REST — these are
+   meant to be recognised at a glance, and a row of grey glyphs makes a respondent read seven
+   shapes instead of seeing seven logos. X is deliberately near-black, not the old Twitter blue.
+   These are fixed brand values, so on a heavily themed page a dark mark (X, GitHub) sits quieter
+   than a bright one; that is the cost of using the real colours instead of the form's. */
 .mjf-screen__social-link.is-linkedin {
   --mjf-brand: #0a66c2;
 }
