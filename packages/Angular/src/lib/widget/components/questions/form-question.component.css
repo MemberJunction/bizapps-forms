@@ -119,12 +119,12 @@
   color: var(--mjf-choice-selected-text);
 }
 
-/* The A/B/C badge.
+/* The A/B/C badge, which IS the choice indicator — there is no separate radio or checkbox.
 
-   It sits BESIDE the radio/checkbox mark rather than replacing it. The badge says which choice
-   this is; the mark says how many you may pick, and dropping it would leave a multi-select
-   looking exactly like a single-select — a respondent would have no way to know they can choose
-   more than one until they tried.
+   Both together read as two boxes on one row, which is how it shipped for about ten minutes and
+   how it was rightly reported. What the mark was carrying — whether you may pick more than one —
+   is now said in words above the list, which is clearer than a shape a respondent has to already
+   know how to read.
 
    Every colour here is a --mjf-* token the widget itself declares. The widget is a standalone
    custom element on someone else's page: a bare --mj-* would resolve to nothing there, and the
@@ -157,6 +157,15 @@
 /* Inside a picture choice the badge shares a line with the label, so it needs the gap the
    flex row gives it in a plain choice. */
 .mjf-pic__label { display: flex; align-items: center; gap: 0.5rem; }
+
+/* Says the thing the checkbox shape used to imply. Above the options rather than below, because
+   it changes how the respondent reads the list they are about to look at. */
+.mjf-choices__hint {
+  margin: 0 0 0.5rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.875rem;
+  color: var(--mj-text-muted);
+}
 
 .mjf-choice__mark {
   flex: 0 0 auto;
@@ -171,46 +180,7 @@
   border-radius: var(--mj-radius-sm, 0.25rem);
 }
 
-.mjf-choice--selected /* The A/B/C badge.
-
-   It sits BESIDE the radio/checkbox mark rather than replacing it. The badge says which choice
-   this is; the mark says how many you may pick, and dropping it would leave a multi-select
-   looking exactly like a single-select — a respondent would have no way to know they can choose
-   more than one until they tried.
-
-   Every colour here is a --mjf-* token the widget itself declares. The widget is a standalone
-   custom element on someone else's page: a bare --mj-* would resolve to nothing there, and the
-   badge would render as invisible text on no background. */
-.mjf-choice__letter {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
-  padding: 0 0.3rem;
-  font-family: var(--mjf-font-body);
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--mjf-accent);
-  background: var(--mjf-choice-bg);
-  border: 1px solid var(--mjf-choice-border);
-  border-radius: var(--mj-radius-sm, 0.25rem);
-}
-
-.mjf-choice--selected .mjf-choice__letter,
-.mjf-pic--selected .mjf-choice__letter {
-  color: var(--mjf-on-accent);
-  background: var(--mjf-accent);
-  border-color: var(--mjf-accent);
-}
-
-/* Inside a picture choice the badge shares a line with the label, so it needs the gap the
-   flex row gives it in a plain choice. */
-.mjf-pic__label { display: flex; align-items: center; gap: 0.5rem; }
-
-.mjf-choice__mark {
+.mjf-choice--selected .mjf-choice__mark {
   border-color: var(--mjf-accent);
   background: var(--mjf-accent);
   box-shadow: inset 0 0 0 3px var(--mjf-choice-selected-bg);
@@ -549,46 +519,7 @@
 
 .mjf-matrix__pick:hover { background: var(--mjf-accent-soft); }
 .mjf-matrix__pick:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
-.mjf-matrix__pick--selected /* The A/B/C badge.
-
-   It sits BESIDE the radio/checkbox mark rather than replacing it. The badge says which choice
-   this is; the mark says how many you may pick, and dropping it would leave a multi-select
-   looking exactly like a single-select — a respondent would have no way to know they can choose
-   more than one until they tried.
-
-   Every colour here is a --mjf-* token the widget itself declares. The widget is a standalone
-   custom element on someone else's page: a bare --mj-* would resolve to nothing there, and the
-   badge would render as invisible text on no background. */
-.mjf-choice__letter {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
-  padding: 0 0.3rem;
-  font-family: var(--mjf-font-body);
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--mjf-accent);
-  background: var(--mjf-choice-bg);
-  border: 1px solid var(--mjf-choice-border);
-  border-radius: var(--mj-radius-sm, 0.25rem);
-}
-
-.mjf-choice--selected .mjf-choice__letter,
-.mjf-pic--selected .mjf-choice__letter {
-  color: var(--mjf-on-accent);
-  background: var(--mjf-accent);
-  border-color: var(--mjf-accent);
-}
-
-/* Inside a picture choice the badge shares a line with the label, so it needs the gap the
-   flex row gives it in a plain choice. */
-.mjf-pic__label { display: flex; align-items: center; gap: 0.5rem; }
-
-.mjf-choice__mark { border-color: var(--mjf-accent); background: var(--mjf-accent); }
+.mjf-matrix__pick--selected .mjf-choice__mark { border-color: var(--mjf-accent); background: var(--mjf-accent); }
 
 /* ---- Checkbox (single consent) / Legal ---- */
 .mjf-consent { width: 100%; }

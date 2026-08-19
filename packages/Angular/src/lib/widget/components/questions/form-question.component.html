@@ -61,13 +61,13 @@
                 (click)="onSingleChoice(opt.value)"
               >
                 <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
-                <span class="mjf-choice__mark" aria-hidden="true"></span>
                 <span class="mjf-choice__label">{{ opt.label }}</span>
               </button>
             }
           </div>
         }
         @case ('MultiChoice') {
+          <p class="mjf-choices__hint">Choose as many as you like.</p>
           <div class="mjf-choices" role="group" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
@@ -79,7 +79,6 @@
                 (click)="onMultiToggle(opt.value)"
               >
                 <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
-                <span class="mjf-choice__mark mjf-choice__mark--box" aria-hidden="true"></span>
                 <span class="mjf-choice__label">{{ opt.label }}</span>
               </button>
             }

@@ -256,7 +256,7 @@
                   compact
                   [value]="opt.ImageURL ?? ''"
                   [formId]="formId"
-                  [ariaLabel]="'Image for option ' + ($index + 1)"
+                  [ariaLabel]="'image for option ' + letterFor($index)"
                   (valueChange)="setOptionImage(opt, $event)"
                 />
               }

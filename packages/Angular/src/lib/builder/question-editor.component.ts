@@ -109,8 +109,9 @@ const QUESTION_EDITOR_CSS = /* css */ `
 
 .qe-option-block { display: flex; flex-direction: column; gap: 4px; }
 /* Indented so the image control reads as belonging to the choice above it rather than as a
-   separate option in the list. */
-.qe-option-img { display: block; margin-left: 12px; font-size: var(--mjf-label); }
+   separate option in the list. Its resting state is a single plus, so a list of ten choices is
+   ten rows and ten pluses rather than ten stacked upload panels. */
+.qe-option-img { display: block; margin-left: 34px; font-size: var(--mjf-label); }
 
 .qe-hint { margin: 2px 0 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 

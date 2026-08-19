@@ -83,28 +83,14 @@ const SCREEN_EDITOR_CSS = /* css */ `
 
         </div>
 
-        <mjf-setting-row
+        <mjf-image-field
           label="Image"
           [hint]="s.ScreenType === 'Welcome' ? 'Shown above the title, before the form starts.' : 'Shown above the title on this ending.'"
-          [open]="imageOpen"
-        >
-          <button
-            slot="control"
-            type="button"
-            class="mjf-switch"
-            [class.is-on]="imageOpen"
-            role="switch"
-            [attr.aria-checked]="imageOpen"
-            aria-label="Image"
-            (click)="toggleImage()"
-          ></button>
-          <mjf-image-field
-            [value]="s.MediaURL ?? ''"
-            [formId]="s.FormID"
-            ariaLabel="Screen image"
-            (valueChange)="setMediaURL($event)"
-          />
-        </mjf-setting-row>
+          [value]="s.MediaURL ?? ''"
+          [formId]="s.FormID"
+          ariaLabel="screen image"
+          (valueChange)="setMediaURL($event)"
+        />
 
         @if (s.ScreenType === 'Ending') {
           <mjf-setting-row
@@ -174,7 +160,7 @@ export class ScreenEditorComponent {
   public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
     if (value?.ID !== this.current?.ID) {
       // A new screen's emptiness is not the previous screen's — start its rows closed.
-      this.requested = { image: false, redirect: false, conditional: false };
+      this.requested = { redirect: false, conditional: false };
     }
     this.current = value;
   }
@@ -184,16 +170,12 @@ export class ScreenEditorComponent {
   private current: mjBizAppsFormsFormScreenEntity | null = null;
 
   /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
-  private requested = { image: false, redirect: false, conditional: false };
+  private requested = { redirect: false, conditional: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 
   /** Emitted whenever a field on the screen entity changed (parent persists). */
   @Output() screenChanged = new EventEmitter<mjBizAppsFormsFormScreenEntity>();
-
-  protected get imageOpen(): boolean {
-    return isOptionalOpen(!!this.screen?.MediaURL, this.requested.image);
-  }
 
   protected get redirectOpen(): boolean {
     return isOptionalOpen(!!this.screen?.RedirectURL, this.requested.redirect);
@@ -201,14 +183,6 @@ export class ScreenEditorComponent {
 
   protected get conditionalOpen(): boolean {
     return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
-  }
-
-  protected toggleImage(): void {
-    const next = toggleOptional(!!this.screen?.MediaURL, this.requested.image);
-    this.requested.image = next.requested;
-    if (next.clear) {
-      this.setMediaURL('');
-    }
   }
 
   protected toggleRedirect(): void {

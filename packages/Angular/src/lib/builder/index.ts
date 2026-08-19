@@ -20,6 +20,7 @@ export {
   withBrandToken,
 } from './style-tokens';
 export { ImageFieldComponent } from './image-field.component';
+export { ImagePickerDialogComponent } from './image-picker-dialog.component';
 export {
   ACCEPTED_IMAGE_TYPES,
   ACCEPT_ATTRIBUTE,
