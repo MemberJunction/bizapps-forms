@@ -138,8 +138,14 @@ export function assetTooLargeMessage(): string {
   return `Image exceeds the maximum size of ${formatBytes(getAssetConfig().maxBytes)}.`;
 }
 
-/** Byte cap rendered for a person: authors read "5 MB", not "5242880 bytes". */
-function formatBytes(bytes: number): string {
+/**
+ * Byte cap rendered for a person: authors read "5 MB", not "5242880 bytes".
+ *
+ * Exported so the public upload endpoint shares it rather than growing a second copy —
+ * both routes refuse oversized files, and a respondent deserves the same sentence an
+ * author gets.
+ */
+export function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return mb >= 1 ? `${Number(mb.toFixed(mb % 1 === 0 ? 0 : 1))} MB` : `${Math.round(bytes / 1024)} KB`;
 }

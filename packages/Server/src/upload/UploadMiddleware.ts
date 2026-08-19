@@ -31,7 +31,7 @@ import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
-import { getUploadConfig, UPLOAD_ROUTE } from './config.js';
+import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
 
@@ -80,7 +80,7 @@ export class UploadMiddleware extends BaseServerMiddleware {
       return;
     }
 
-    const bodyResult = await readCappedBody(req, getUploadConfig().maxBytes);
+    const bodyResult = await readCappedBody(req, uploadBodyCap(), uploadTooLargeMessage());
     if (!bodyResult.ok || !bodyResult.body) {
       sendJsonError(res, bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
       return;
