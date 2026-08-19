@@ -25,6 +25,9 @@
   --mj-radius-md: 10px;
   --mj-radius-lg: 14px;
   --mj-shadow-sm: 0 1px 3px rgba(20, 24, 31, 0.08);
+  /* A dragged item, picked up off the page. Declared here with the widget's other shadow because
+     this element runs on someone else's page, where a bare --mj-* resolves to nothing. */
+  --mjf-lift-shadow: 0 12px 28px rgba(20, 24, 31, 0.22);
   --mj-status-error: #c1392b;
   --mj-brand-primary: #2f5bea;
   --mj-brand-primary-hover: #2348c4;

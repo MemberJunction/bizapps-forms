@@ -250,11 +250,26 @@
           </div>
         }
         @case ('Ranking') {
-          <!-- Up/down buttons rather than drag-and-drop: a drag target is unreachable by
-               keyboard and awkward on a phone, and this control has to work on both. -->
-          <ol class="mjf-rank" [attr.aria-describedby]="describedBy()">
+          <!-- Draggable, AND up/down buttons. The buttons are not a legacy path: a drag is
+               unreachable by keyboard and by a screen reader, so removing them would take the
+               question away from anyone not using a pointer. Both write through the same
+               reorder, so neither can drift from the other. -->
+          <p class="mjf-rank__hint">Drag to rank them, or use the arrows.</p>
+          <ol
+            class="mjf-rank"
+            cdkDropList
+            [attr.aria-describedby]="describedBy()"
+            (cdkDropListDropped)="onRankDrop($event.previousIndex, $event.currentIndex)"
+          >
             @for (opt of rankedOptions(); track opt.id; let i = $index, first = $first, last = $last) {
-              <li class="mjf-rank__item">
+              <li class="mjf-rank__item" cdkDrag cdkDragPreviewContainer="parent" cdkDragBoundary=".mjf-rank">
+                <!-- The gap left behind while dragging. Without one the list collapses under the
+                     pointer and there is nothing showing where the item would land. -->
+                <div class="mjf-rank__ghost" *cdkDragPlaceholder></div>
+
+                <span class="mjf-rank__grip" cdkDragHandle aria-hidden="true">
+                  <i class="fa-solid fa-grip-vertical"></i>
+                </span>
                 <span class="mjf-rank__pos" aria-hidden="true">{{ i + 1 }}</span>
                 <span class="mjf-rank__label">{{ opt.label }}</span>
                 <span class="mjf-rank__moves">

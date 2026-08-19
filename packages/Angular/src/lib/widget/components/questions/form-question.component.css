@@ -439,7 +439,15 @@
 /* ---- Ranking ---- */
 .mjf-rank { display: flex; flex-direction: column; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
 
+.mjf-rank__hint {
+  margin: 0 0 0.5rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.875rem;
+  color: var(--mj-text-muted);
+}
+
 .mjf-rank__item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -447,6 +455,76 @@
   background: var(--mjf-choice-bg);
   border: 1px solid var(--mjf-choice-border);
   border-radius: var(--mjf-choice-radius);
+  transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* ---- Dragging ----
+   The buttons remain the accessible path; this is the pointer one. Everything below is CDK's
+   own class contract, styled here so the gesture reads: the item lifts, the list opens a gap
+   where it will land, and the rest slide rather than jump. */
+
+.mjf-rank__grip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.75rem;
+  color: var(--mj-text-muted);
+  cursor: grab;
+  /* Stops a drag on touch from scrolling the page instead — without it the gesture is simply
+     unavailable on a phone, which is where this widget mostly runs. */
+  touch-action: none;
+}
+.mjf-rank__grip:active { cursor: grabbing; }
+.mjf-rank__item:hover .mjf-rank__grip { color: var(--mjf-page-ink); }
+
+/* THE GRAB. The instant the handle is pressed — before the pointer has travelled far enough for
+   a drag to begin — the row pops: it grows a little and lifts off the page. This is the moment
+   that makes the control feel physical, and it is the one CDK gives no class for, so it hangs
+   off :active on the handle.
+
+   Scaling is safe HERE and nowhere later: from drag start onwards CDK writes an inline transform
+   to position the element, and an inline style beats a stylesheet, so a transform declared for
+   the dragging state would simply be discarded — or worse, fight the positioning. */
+.mjf-rank__item:has(.mjf-rank__grip:active) {
+  transform: scale(1.015);
+  box-shadow: var(--mjf-lift-shadow, 0 12px 28px rgba(20, 24, 31, 0.22));
+  border-color: var(--mjf-accent);
+  cursor: grabbing;
+}
+
+/* THE CARRY. Held above the list while it moves. The lift is drawn with shadow, border and a
+   trace of transparency rather than scale, for the inline-transform reason above — CDK owns
+   this element's transform for as long as the drag lasts. */
+.cdk-drag-preview.mjf-rank__item {
+  box-shadow: var(--mjf-lift-shadow, 0 12px 28px rgba(20, 24, 31, 0.22));
+  border-color: var(--mjf-accent);
+  background: var(--mjf-choice-bg);
+  opacity: 0.96;
+  cursor: grabbing;
+}
+
+/* The hole it came out of. An outline rather than a blank, so the list keeps its shape and the
+   landing place is obvious. */
+.mjf-rank__ghost {
+  height: 3rem;
+  border: 1px dashed var(--mjf-accent);
+  border-radius: var(--mjf-choice-radius);
+  background: var(--mjf-choice-selected-bg);
+  opacity: 0.6;
+}
+
+/* Items sliding out of the way, and the item settling after release. */
+.cdk-drag-animating,
+.cdk-drop-list-dragging .mjf-rank__item:not(.cdk-drag-placeholder) {
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mjf-rank__item:has(.mjf-rank__grip:active) { transform: none; }
+  .cdk-drag-animating,
+  .cdk-drop-list-dragging .mjf-rank__item:not(.cdk-drag-placeholder) { transition: none; }
 }
 
 .mjf-rank__pos {

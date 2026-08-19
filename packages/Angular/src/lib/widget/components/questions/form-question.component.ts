@@ -19,7 +19,10 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { CdkDrag, CdkDragHandle, CdkDragPlaceholder, CdkDropList } from '@angular/cdk/drag-drop';
+
 import { optionLetter } from '../../../shared/option-letter';
+import { moveItem } from '../../../shared/move-item';
 import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
@@ -49,7 +52,7 @@ type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
   selector: 'mjf-form-question',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, SignaturePadComponent],
+  imports: [NgTemplateOutlet, SignaturePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
   templateUrl: './form-question.component.html',
   styleUrls: ['./form-question.component.css'],
 })
@@ -274,6 +277,15 @@ export class FormQuestionComponent {
   });
 
   /** Move one option up (-1) or down (+1) the ranking, emitting the full new order. */
+  /**
+   * A dragged item was dropped. Distinct from {@link moveRank}: a button SWAPS with its
+   * neighbour, a drag LIFTS an item out and puts it down, shifting everything in between.
+   */
+  protected onRankDrop(from: number, to: number): void {
+    const order = moveItem(this.rankedOptions().map((o) => o.value), from, to);
+    this.valueChange.emit(order);
+  }
+
   protected moveRank(index: number, delta: number): void {
     const order = this.rankedOptions().map((o) => o.value);
     const target = index + delta;
