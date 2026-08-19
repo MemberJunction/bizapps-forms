@@ -29,6 +29,8 @@ import {
   type PublishedFormPage,
   type PublishedFormQuestion,
   type PublishedFormQuestionOption,
+  parseSocialLinks,
+  type SocialLink,
   type PublishedFormScreen,
   type ValidationRule,
 } from '@mj-biz-apps/forms-entities';
@@ -160,7 +162,30 @@ function parseScreen(
     displayOrder: asNumber(obj.displayOrder) ?? 0,
     conditionalRule: parseOptionalConditional(obj.conditionalRule),
     isDefault: asBoolean(obj.isDefault),
+    socialLinks: parseScreenSocialLinks(obj.socialLinks),
   };
+}
+
+/**
+ * The screen's social links, revalidated on the way out.
+ *
+ * This parser copies field by field, and `socialLinks` was added to the PUBLISH side without
+ * being added here — so the builder saved them, publish captured them, the database held
+ * them, and the API silently served a screen without them. The author saw their links and
+ * respondents never did, with nothing reporting a fault anywhere along the way.
+ *
+ * Revalidated rather than copied because `parseSocialLinks` takes the stored JSON string and
+ * this is already-parsed JSON, and because these values become an `href` on a page shown to
+ * anonymous members of the public: a snapshot published by an older build, or edited by hand,
+ * must not be able to put `javascript:` in front of a respondent. Sharing the publish side's
+ * function is what keeps the two ends from drifting apart again.
+ */
+function parseScreenSocialLinks(value: JSONValue | undefined): SocialLink[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const links = parseSocialLinks(JSON.stringify(value));
+  return links.length > 0 ? links : undefined;
 }
 
 /**

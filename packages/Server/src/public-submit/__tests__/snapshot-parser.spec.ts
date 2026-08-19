@@ -125,6 +125,47 @@ describe('screens', () => {
     expect(parsed.endScreens[1].redirectURL).toBe('https://book.example.com');
   });
 
+  it('carries an ending screen\'s social links through to the respondent', () => {
+    // The parser enumerates every field it copies, and socialLinks was added to the publish
+    // side without being added here — so the builder saved them, publish captured them, the
+    // snapshot in the database held them, and this function silently dropped them on the way
+    // out. The author saw their links in the builder and respondents never saw them at all,
+    // with nothing anywhere reporting a problem.
+    const def = JSON.parse(JSON.stringify(makeDefinition()));
+    def.endScreens = [{
+      id: 'e1', screenType: 'Ending', title: 'Thanks', displayOrder: 0, isDefault: true,
+      socialLinks: [
+        { platform: 'linkedin', url: 'https://linkedin.com/' },
+        { platform: 'instagram', url: 'https://www.instagram.com/' },
+      ],
+    }];
+    const parsed = parsePublishedDefinition(JSON.stringify(def))!;
+    expect(parsed.endScreens[0].socialLinks).toEqual([
+      { platform: 'linkedin', url: 'https://linkedin.com/' },
+      { platform: 'instagram', url: 'https://www.instagram.com/' },
+    ]);
+  });
+
+  it('drops a social link the widget could not draw, rather than shipping a blank icon', () => {
+    const def = JSON.parse(JSON.stringify(makeDefinition()));
+    def.endScreens = [{
+      id: 'e1', screenType: 'Ending', title: 'Thanks', displayOrder: 0,
+      socialLinks: [
+        { platform: 'linkedin', url: 'https://linkedin.com/' },
+        { platform: 'myspace', url: 'https://myspace.com/' },
+        { platform: 'instagram', url: 'javascript:alert(1)' },
+      ],
+    }];
+    const links = parsePublishedDefinition(JSON.stringify(def))!.endScreens[0].socialLinks ?? [];
+    expect(links.map((l) => l.platform)).toEqual(['linkedin']);
+  });
+
+  it('leaves socialLinks absent when the screen has none', () => {
+    const def = JSON.parse(JSON.stringify(makeDefinition()));
+    def.endScreens = [{ id: 'e1', screenType: 'Ending', title: 'Thanks', displayOrder: 0 }];
+    expect(parsePublishedDefinition(JSON.stringify(def))!.endScreens[0].socialLinks).toBeUndefined();
+  });
+
   it('forces the screen type to the slot it was found in', () => {
     // A screen sitting in `endScreens` IS an ending whatever its own field claims. Honouring the
     // mismatch would produce an "Ending" the widget shows BEFORE intake.

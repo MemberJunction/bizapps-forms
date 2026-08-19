@@ -180,6 +180,14 @@ const FORM_SCREEN_CSS = /* css */ `
   --mjf-brand: #24292f;
 }
 
+/* Inherits currentColor so the per-platform brand tints above keep working unchanged. */
+.mjf-screen__social-glyph {
+  width: 1.125rem;
+  height: 1.125rem;
+  fill: currentColor;
+  display: block;
+}
+
 .mjf-screen__social-link:focus-visible {
   outline: none;
   box-shadow: var(--mjf-focus-ring);
@@ -235,7 +243,7 @@ const FORM_SCREEN_CSS = /* css */ `
               rel="noopener noreferrer external"
               [attr.aria-label]="link.label"
               [attr.title]="link.label"
-            ><i [class]="link.icon" aria-hidden="true"></i></a>
+            ><svg class="mjf-screen__social-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path [attr.d]="link.svgPath" /></svg></a>
           }
         </nav>
       }
@@ -260,7 +268,11 @@ export class FormScreenComponent {
   protected readonly socialLinks = computed(() =>
     (this.screen().socialLinks ?? []).flatMap((link) => {
       const platform = socialPlatform(link.platform);
-      return platform ? [{ ...link, icon: platform.icon, label: platform.label }] : [];
+      // svgPath, not the icon class: the respondent host page loads no stylesheet, so an icon
+      // font renders as an empty square there while looking perfect in the builder.
+      return platform
+        ? [{ ...link, svgPath: platform.svgPath, label: platform.label }]
+        : [];
     }),
   );
 
