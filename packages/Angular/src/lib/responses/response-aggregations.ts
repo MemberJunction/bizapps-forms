@@ -61,6 +61,29 @@ export interface ResponseDetailInput {
  * autosave, not a submitted response, so it must not appear in the headline response list
  * (it is still reflected in the funnel/drop-off metric, which reads all answers).
  */
+/**
+ * Whether an answer row actually holds an answer.
+ *
+ * Every answerable question a respondent reaches can leave a row behind, blank ones
+ * included, so counting rows reports questions SEEN rather than questions answered — and
+ * the column it feeds is headed "Answered", the only per-response completeness signal the
+ * list gives a reader.
+ *
+ * Tests each typed column for EMPTINESS, never for falsiness. A numeric `0`, a `false`
+ * boolean and an empty-string-but-present text answer are not the same thing: the first two
+ * are real answers a respondent chose, and reading them as blank would under-count exactly
+ * the responses that answered "no" or "none".
+ */
+function storedSomething(a: AnswerRow): boolean {
+  if (a.TextValue !== null && a.TextValue !== undefined && a.TextValue.trim() !== '') return true;
+  if (a.NumericValue !== null && a.NumericValue !== undefined) return true;
+  if (a.BooleanValue !== null && a.BooleanValue !== undefined) return true;
+  if (a.DateValue !== null && a.DateValue !== undefined) return true;
+  if (a.FileID !== null && a.FileID !== undefined && a.FileID !== '') return true;
+  if (a.JSONValue !== null && a.JSONValue !== undefined && a.JSONValue.trim() !== '') return true;
+  return false;
+}
+
 export function buildResponseRows(
   responses: ResponseRow[],
   answers: AnswerRow[],
@@ -84,7 +107,7 @@ export function buildResponseRows(
         // `questions` defaults to empty so a caller with no snapshot still gets rows —
         // it just falls back to the Person name, or to "Anonymous", as before.
         respondent: deriveRespondent(r, own, questions),
-        answeredCount: own.length,
+        answeredCount: own.filter(storedSomething).length,
       };
     });
 }

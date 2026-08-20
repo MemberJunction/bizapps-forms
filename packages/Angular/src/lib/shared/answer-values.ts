@@ -55,7 +55,18 @@ export function extractChoiceValues(a: AnswerRow): string[] {
     try {
       const parsed: unknown = JSON.parse(a.JSONValue);
       if (Array.isArray(parsed)) {
-        return parsed.map((v) => String(v));
+        // Null and undefined entries are dropped rather than stringified. `String(null)` is
+        // `"null"`, and a value the option list does not contain becomes a bucket labelled
+        // by that value — so one null in a stored array put a chart row reading "null" in
+        // front of the reader, counted and coloured exactly like a real option. Blank and
+        // whitespace-only entries go the same way, for the same reason.
+        //
+        // `0` and `false` survive: they stringify to something meaningful and are real
+        // option values, which is why this tests for null/undefined rather than falsiness.
+        return parsed
+          .filter((v) => v !== null && v !== undefined)
+          .map((v) => String(v).trim())
+          .filter((v) => v !== '');
       }
     } catch {
       // fall through to TextValue

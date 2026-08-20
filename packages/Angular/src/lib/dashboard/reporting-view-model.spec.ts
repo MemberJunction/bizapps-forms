@@ -90,6 +90,21 @@ describe('formatDuration', () => {
     expect(formatDuration(3600)).toBe('1h');
   });
 
+  it('never renders a remainder of sixty', () => {
+    // The median of two durations is routinely fractional, and rounding the leftover
+    // seconds independently of the whole minutes let both land at the top: 119.6s printed
+    // "1m 60s", and 3599.6s printed "59m 60s". Nonsense in the one field on the hero band
+    // that a form owner reads as a fact about their form.
+    expect(formatDuration(119.6)).toBe('2m');
+    expect(formatDuration(3599.6)).toBe('1h');
+    expect(formatDuration(59.6)).toBe('1m');
+  });
+
+  it('rounds to the nearest second before splitting into units', () => {
+    expect(formatDuration(119.4)).toBe('1m 59s');
+    expect(formatDuration(3659.5)).toBe('1h 1m');
+  });
+
   it('renders nothing measurable as a dash, not as zero', () => {
     // "0s to complete" is a claim about how fast the form is. It is never true; it means
     // no response had both timestamps.
@@ -172,6 +187,13 @@ describe('consent questions', () => {
 
   it('reads as an acceptance rate rather than an opinion split', () => {
     expect(consentRate([bucket('Yes', 47, 0.94), bucket('No', 3, 0.06)])).toBeCloseTo(0.94);
+  });
+
+  it('reports no rate rather than 0% when the buckets are not a yes/no split', () => {
+    // A silent 0% is the dangerous failure here. This figure is read as compliance — "nobody
+    // accepted the terms" is an alarming and actionable claim, and it must never be produced
+    // by a label the function simply did not recognise.
+    expect(consentRate([bucket('Accepted', 5, 1)])).toBeNull();
   });
 
   it('has no rate when nobody answered, rather than reporting zero agreement', () => {

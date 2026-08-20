@@ -175,6 +175,23 @@ describe('buildBreakdowns', () => {
     expect(b.buckets[1]).toMatchObject({ label: 'Blue', count: 1 });
   });
 
+  it('does not count a multi-select that selected nothing as an answer', () => {
+    // A stored `[]` means the respondent reached the question and picked nothing, which is a
+    // skip in substance. Counting the row as an answer inflated `answeredCount` and so
+    // understated the "% skipped" figure printed on every card header — and left the card
+    // claiming two answers above bars totalling one selection.
+    const mc = q('qz', 'MultiChoice', 0, [{ id: 'o1', label: 'A', value: 'a', displayOrder: 0 }]);
+    const b = buildBreakdowns(
+      [mc],
+      [
+        answer('r1', 'qz', { JSONValue: JSON.stringify([]) }),
+        answer('r2', 'qz', { JSONValue: JSON.stringify(['a']) }),
+      ],
+    )[0];
+    expect(b.answeredCount).toBe(1);
+    expect(b.buckets.find((x) => x.label === 'A')!.count).toBe(1);
+  });
+
   it('counts multi-select selections from JSON', () => {
     const b = breakdowns.find((x) => x.questionId === 'qm')!;
     const a = b.buckets.find((x) => x.label === 'A')!;
@@ -189,6 +206,37 @@ describe('buildBreakdowns', () => {
     expect(b.numeric!.npsSegments).toEqual({ detractors: 1, passives: 1, promoters: 1 });
     // (1 promoter - 1 detractor) / 3 * 100 = 0
     expect(b.numeric!.npsScore).toBe(0);
+  });
+
+  it('scores NPS only from ratings that are on the NPS scale', () => {
+    // NPS is defined on 0–10. A value outside it is not a rating that came from an NPS
+    // control — a widened question, an import, a bad payload — and bucketing it anyway lets
+    // `50` count as a promoter and `-20` as a detractor, producing a confident score from
+    // data that is not NPS data at all. Out-of-range values are excluded from the score and
+    // its segments; min/max/average still report them, because those describe the numbers
+    // that are actually stored.
+    const npsQ = q('qx', 'NPS', 0);
+    const b = buildBreakdowns(
+      [npsQ],
+      [
+        answer('r1', 'qx', { NumericValue: 50 }),
+        answer('r2', 'qx', { NumericValue: -20 }),
+        answer('r3', 'qx', { NumericValue: 9 }),
+        answer('r4', 'qx', { NumericValue: 3 }),
+      ],
+    )[0];
+    expect(b.numeric!.npsSegments).toEqual({ detractors: 1, passives: 0, promoters: 1 });
+    // One promoter, one detractor, over the two ratings that were on the scale.
+    expect(b.numeric!.npsScore).toBe(0);
+    expect(b.numeric!.answered).toBe(4);
+    expect(b.numeric!.max).toBe(50);
+  });
+
+  it('reports no NPS score at all when nothing was on the scale', () => {
+    // Better than a score computed from an empty numerator, which renders as a confident 0.
+    const npsQ = q('qy', 'NPS', 0);
+    const b = buildBreakdowns([npsQ], [answer('r1', 'qy', { NumericValue: 99 })])[0];
+    expect(b.numeric!.npsScore).toBeNull();
   });
 
   it('builds boolean buckets for YesNo', () => {
@@ -210,6 +258,60 @@ describe('buildBreakdowns', () => {
     // The regression guard for the whole change: an Email question must never produce a
     // card, because the only thing a card could show is the addresses themselves.
     expect(breakdowns.find((x) => x.questionId === 'qe')).toBeUndefined();
+  });
+});
+
+describe('buildFunnel: pages that cannot be "reached"', () => {
+  const page = (id: string, order: number, questions: ReturnType<typeof q>[]) => ({
+    id,
+    title: `Page ${order + 1}`,
+    displayOrder: order,
+    questions,
+  });
+  const def = (pages: ReturnType<typeof page>[]): PublishedFormDefinition =>
+    ({ formId: 'f', formVersionId: 'v', name: 'F', renderMode: 'Scroll', pages }) as PublishedFormDefinition;
+
+  it('does not let a welcome page zero out the whole funnel', () => {
+    // Reach is measured by whether a response ANSWERED something on the page, so a page of
+    // display-only content can never be reached — it collects no answers by definition.
+    // As the first page that made `firstReached` zero, and every retention after it divides
+    // by that: a form opening with a welcome statement showed 0% retention on every step
+    // while the reached counts beside them were non-zero. An intro page is the single most
+    // common first page there is.
+    const steps = buildFunnel(
+      def([page('p1', 0, [q('s1', 'Statement', 0)]), page('p2', 1, [q('a1', 'ShortText', 0)])]),
+      [answer('resp1', 'a1', { TextValue: 'x' }), answer('resp2', 'a1', { TextValue: 'y' })],
+    );
+    const real = steps.find((s) => s.pageId === 'p2')!;
+    expect(real.reached).toBe(2);
+    expect(real.retention).toBe(1);
+  });
+
+  it('does not invent a total drop-off at a page nobody could answer', () => {
+    // A statement page BETWEEN two question pages reported reached 0, which the step before
+    // it read as a 100% loss — the severe-warning treatment, on a page that is working
+    // exactly as designed — and then the next page showed everyone back again.
+    const steps = buildFunnel(
+      def([
+        page('p1', 0, [q('a1', 'ShortText', 0)]),
+        page('p2', 1, [q('s1', 'Statement', 0)]),
+        page('p3', 2, [q('a2', 'ShortText', 0)]),
+      ]),
+      [answer('r1', 'a1', { TextValue: 'x' }), answer('r1', 'a2', { TextValue: 'y' })],
+    );
+    expect(steps.map((s) => s.pageId)).toEqual(['p1', 'p3']);
+    expect(steps.every((s) => s.dropOff === 0)).toBe(true);
+  });
+
+  it('still reports a real zero on a page that asks questions nobody answered', () => {
+    // The distinction that matters: a page with answerable questions and no answers IS a
+    // total drop-off, and must keep saying so.
+    const steps = buildFunnel(
+      def([page('p1', 0, [q('a1', 'ShortText', 0)]), page('p2', 1, [q('a2', 'ShortText', 0)])]),
+      [answer('r1', 'a1', { TextValue: 'x' })],
+    );
+    expect(steps[1].reached).toBe(0);
+    expect(steps[1].dropOff).toBe(1);
   });
 });
 

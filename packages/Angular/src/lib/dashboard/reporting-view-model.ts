@@ -83,10 +83,17 @@ export function relativeTime(when: Date | null, now: Date): string {
  */
 export function formatDuration(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return '—';
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const totalMinutes = Math.floor(seconds / 60);
+  // Round ONCE, up front, then divide the whole number into units.
+  //
+  // Rounding the leftover independently of the units above it is what produced "1m 60s" and
+  // "59m 60s": 119.6s floors to 1 minute, and its 59.6s remainder rounds to 60 — a remainder
+  // that has already been counted. The median of two durations is fractional whenever they
+  // differ by an odd number of seconds, so this was not a rare input.
+  const total = Math.round(seconds);
+  if (total < 60) return `${total}s`;
+  const totalMinutes = Math.floor(total / 60);
   if (totalMinutes < 60) {
-    const rest = Math.round(seconds % 60);
+    const rest = total % 60;
     return rest > 0 ? `${totalMinutes}m ${rest}s` : `${totalMinutes}m`;
   }
   const hours = Math.floor(totalMinutes / 60);
@@ -179,11 +186,23 @@ export function booleanSegments(buckets: readonly DistributionBucket[]): Proport
 export function consentRate(buckets: readonly DistributionBucket[]): number | null {
   let accepted = 0;
   let total = 0;
+  // Whether these buckets are a yes/no split at all, rather than assuming it. `booleanBuckets`
+  // is the only producer today and always labels them Yes and No — but if that ever changes,
+  // an unrecognised label would silently make `accepted` zero and publish "0% accepted",
+  // which reads as "nobody agreed to the terms". That is an alarming, actionable claim to
+  // manufacture out of a label mismatch, so an unrecognised shape reports NO rate instead.
+  let recognised = false;
   for (const b of buckets) {
     total += b.count;
-    if (b.label.trim().toLowerCase() === 'yes') accepted += b.count;
+    const label = b.label.trim().toLowerCase();
+    if (label === 'yes') {
+      recognised = true;
+      accepted += b.count;
+    } else if (label === 'no') {
+      recognised = true;
+    }
   }
-  return total > 0 ? accepted / total : null;
+  return recognised && total > 0 ? accepted / total : null;
 }
 
 /**

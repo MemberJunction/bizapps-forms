@@ -117,8 +117,12 @@ function foldedBuckets(counts: Map<string, number>, limit = PROFILE_BUCKET_LIMIT
   const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
   if (total === 0) return [];
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const head = sorted.slice(0, limit);
-  const tail = sorted.slice(limit);
+  // Fold only when it actually saves a row. Folding a single leftover produces the same
+  // number of rows with one of them anonymised, which costs the reader a real name and
+  // buys nothing.
+  const shouldFold = sorted.length > limit + 1;
+  const head = shouldFold ? sorted.slice(0, limit) : sorted;
+  const tail = shouldFold ? sorted.slice(limit) : [];
   const buckets: DistributionBucket[] = head.map(([label, count]) => ({
     label,
     count,

@@ -25,6 +25,49 @@ function detailInput(overrides: Partial<ResponseDetailInput> = {}): ResponseDeta
   };
 }
 
+describe('answeredCount counts answers, not rows', () => {
+  it('ignores a row that stored nothing', () => {
+    // Every answerable question a respondent reaches can leave a row behind, including the
+    // ones they left blank, so counting rows reports questions SEEN rather than questions
+    // answered. The list column is headed "Answered" and is the only completeness signal a
+    // reader gets per response.
+    const rows = buildResponseRows(
+      [response('r1', 'Complete', new Date(), new Date())],
+      [
+        answer('r1', 'qa', { TextValue: '' }),
+        answer('r1', 'qb', { TextValue: '   ' }),
+        answer('r1', 'qc', { TextValue: 'real' }),
+      ],
+      [q('qa', 'ShortText', 0), q('qb', 'ShortText', 1), q('qc', 'ShortText', 2)],
+    );
+    expect(rows[0].answeredCount).toBe(1);
+  });
+
+  it('counts answers that are falsy but real', () => {
+    // The trap in the fix: `0`, `false` and a stored file are all answers. Testing for
+    // emptiness rather than falsiness is what keeps them counted.
+    const rows = buildResponseRows(
+      [response('r1', 'Complete', new Date(), new Date())],
+      [
+        answer('r1', 'qn', { NumericValue: 0 }),
+        answer('r1', 'qb', { BooleanValue: false }),
+        answer('r1', 'qf', { FileID: 'file-1' }),
+      ],
+      [q('qn', 'Number', 0), q('qb', 'YesNo', 1), q('qf', 'FileUpload', 2)],
+    );
+    expect(rows[0].answeredCount).toBe(3);
+  });
+
+  it('counts a composite answer stored as JSON', () => {
+    const rows = buildResponseRows(
+      [response('r1', 'Complete', new Date(), new Date())],
+      [answer('r1', 'qa', { JSONValue: JSON.stringify({ city: 'Leeds' }) })],
+      [q('qa', 'Address', 0)],
+    );
+    expect(rows[0].answeredCount).toBe(1);
+  });
+});
+
 describe('buildResponseRows', () => {
   it('counts answers per response', () => {
     const rows = buildResponseRows(

@@ -22,6 +22,8 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntityType,
 } from '@mj-biz-apps/forms-entities';
 
+import { median } from './statistics';
+
 type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 
 /** Terms shown per question. Enough to see a pattern, few enough to read at a glance. */
@@ -105,14 +107,6 @@ export function termsIn(text: string): Set<string> {
   return terms;
 }
 
-/** The middle value, or null for an empty sample. */
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
-}
-
 /**
  * Themes across a set of answers.
  *
@@ -160,6 +154,11 @@ function yieldsThemes(question: PublishedFormQuestion): boolean {
   return question.type === 'LongText';
 }
 
+/** Rounds a median that must read as a whole count, preserving "no sample". */
+function roundedOrNull(value: number | null): number | null {
+  return value === null ? null : Math.round(value);
+}
+
 export function buildOpenTextInsights(
   questions: readonly PublishedFormQuestion[],
   answers: readonly AnswerRow[],
@@ -195,7 +194,9 @@ export function buildOpenTextInsights(
       // latest, so a long-lived question can out-count the responses being divided by.
       skipped: Math.max(0, totalResponses - answered),
       responseRate: totalResponses > 0 ? Math.min(1, answered / totalResponses) : null,
-      medianLength: median(texts.map((t) => t.length)),
+      // Rounded here rather than inside `median`: a character count is a whole number, but
+      // a duration is not, and the shared helper must not decide that for both.
+      medianLength: roundedOrNull(median(texts.map((t) => t.length))),
       themes: yieldsThemes(q) ? buildThemes(texts) : [],
       /** False for short-answer fields, so the panel explains the gap rather than looking broken. */
       themesApply: yieldsThemes(q),

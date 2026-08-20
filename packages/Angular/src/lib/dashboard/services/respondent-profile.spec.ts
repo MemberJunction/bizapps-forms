@@ -150,6 +150,17 @@ describe('groupings', () => {
     expect(buckets[6].count).toBe(3);
   });
 
+  it('does not fold a single leftover into "Other", which hides it for no gain', () => {
+    // Seven domains folded into six plus "Other (1 more)" — the same number of rows, one of
+    // them now anonymous. The fold has to earn its place by actually saving space.
+    const answers = Array.from({ length: 7 }, (_, i) =>
+      answer(`r${i}`, 'qe', { TextValue: `p${i}@d${i}.com` }),
+    );
+    const buckets = buildRespondentProfile([email], answers, 7).distributions[0].buckets;
+    expect(buckets).toHaveLength(7);
+    expect(buckets.some((b) => b.label.startsWith('Other'))).toBe(false);
+  });
+
   it('reads country from the address question and company from contact info', () => {
     const profile = buildRespondentProfile(
       [address, contact],

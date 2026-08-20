@@ -15,6 +15,7 @@ export * from './services/question-insight-roles';
 export * from './services/respondent-profile';
 export * from './services/open-text-insights';
 export * from './services/temporal-buckets';
+export * from './services/statistics';
 export * from './components/proportion-bar.component';
 export * from './components/respondent-profile.component';
 export * from './components/open-text-panel.component';
