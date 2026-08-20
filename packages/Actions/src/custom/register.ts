@@ -12,6 +12,7 @@
  *   - 'Forms: Send Confirmation Email'
  *   - 'Forms: Create Followup Task'
  *   - 'Forms: Analyze Written Responses'
+ *   - 'Forms: Chat'
  *   - 'Forms: Generate Form From Brief'
  *   - 'Forms: Create Form From Template'
  *   - 'Forms: Bind Response To Entity'
@@ -23,6 +24,7 @@ import { CreateFollowupTaskAction } from './on-submit/create-followup-task.actio
 import { AnalyzeWrittenResponsesAction } from './on-submit/analyze-written-responses.action';
 import { GenerateFormFromBriefAction } from './authoring/generate-form.action';
 import { CreateFormFromTemplateAction } from './templates/create-form-from-template.action';
+import { FormsChatAction } from './authoring/chat.action';
 
 // Re-export the action classes + the seams/helpers consumers may want.
 export {
@@ -32,6 +34,7 @@ export {
   AnalyzeWrittenResponsesAction,
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
+  FormsChatAction,
 };
 export {
   setResponseAnalyzerModel,
@@ -56,6 +59,9 @@ export * from './authoring/staged-authoring-model';
 // The progress seam forms-server fills in. Exported from here so the server package imports it
 // from the package's public surface rather than reaching into a deep path.
 export * from './authoring/progress-events';
+export * from './authoring/chat-assistant';
+export * from './authoring/chat-assistant-model';
+export * from './authoring/chat.action';
 export * from './authoring/generated-image-store';
 export * from './authoring/image-stage';
 export * from './authoring/generate-image-model';
@@ -93,6 +99,7 @@ const FORMS_ACTION_CLASSES = [
   AnalyzeWrittenResponsesAction,
   GenerateFormFromBriefAction,
   CreateFormFromTemplateAction,
+  FormsChatAction,
   BindResponseToEntityAction,
 ] as const;
 

@@ -1,0 +1,9 @@
+{
+  "reply": "For a **#152A63** background, a white button with **#152A63** text gives the strongest contrast. I've applied it.",
+  "action": "restyle",
+  "brief?": "A five-question event RSVP with dietary needs and a guest count.",
+  "cssVariables?": {
+    "--mjf-accent": "#ffffff",
+    "--mjf-on-accent": "#152a63"
+  }
+}

@@ -24,6 +24,7 @@ import {
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
 import { FormCloneService } from '../templates/form-clone.service';
 import { FormGenerationService } from '../builder/form-generation.service';
+import { FormChatComponent, FormChatService } from '../chat';
 import type { GenerationProgress } from '@mj-biz-apps/forms-entities';
 
 /**
@@ -88,8 +89,8 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService, FormCloneService, FormGenerationService],
-  imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
+  providers: [FormsHomeService, FormCloneService, FormGenerationService, FormChatService],
+  imports: [FormsModule, DatePipe, TemplatesGalleryComponent, FormChatComponent],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
@@ -330,6 +331,20 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       this.busy = false;
       this.cdr.markForCheck();
     }
+  }
+
+  /**
+   * A chat turn created a form — open it, exactly as the old Generate button did.
+   *
+   * The list is refreshed too: the author is leaving it, but they come back to it, and a list that
+   * is missing the form they just made is the same bug the old path shipped with.
+   */
+  protected async onChatCreatedForm(formId: string): Promise<void> {
+    this.OpenEntityRecord.emit({
+      EntityName: HOME_ENTITY.forms,
+      RecordPKey: CompositeKey.FromID(formId),
+    });
+    await this.loadForms();
   }
 
   /** Live build progress for the panel's bar, or null when nothing is generating. */

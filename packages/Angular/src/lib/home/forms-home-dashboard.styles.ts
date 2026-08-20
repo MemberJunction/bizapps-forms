@@ -40,6 +40,17 @@ export const FORMS_HOME_CSS = /* css */ `
 /* --- Authoring panels --- */
 
 .home-panel { display: flex; flex-direction: column; gap: var(--mjf-gap); }
+
+/* The chat sits at the bottom of the page, centred and always present. Sticky rather than fixed so
+   it stays reachable while the list scrolls without covering the last row of it. */
+.home-chat {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: var(--mjf-gap) 0 var(--mjf-gap-sm);
+  margin-top: var(--mjf-gap);
+  background: linear-gradient(to top, var(--mj-bg-page, var(--mj-bg-surface)) 72%, transparent);
+}
 .home-panel-actions { display: flex; gap: var(--mjf-gap-sm); }
 
 /* Live build progress. Every colour is a token — a hardcoded one here breaks dark mode, which

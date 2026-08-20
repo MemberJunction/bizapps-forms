@@ -32,7 +32,7 @@ import { Metadata, RunView } from '@memberjunction/core';
 import '@memberjunction/server-bootstrap/mj-class-registrations';
 import { LoadGeneratedEntities as LoadFormsEntities } from '@mj-biz-apps/forms-entities';
 import { LoadGeneratedEntities as LoadCommonEntities } from '@mj-biz-apps/common-entities';
-import { LoadFormsActions, runAuthoring, setFormsProgressPublisher } from '@mj-biz-apps/forms-actions';
+import { LoadFormsActions, runAuthoring, runChatTurn, setFormsProgressPublisher } from '@mj-biz-apps/forms-actions';
 
 let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
@@ -221,6 +221,62 @@ async function main() {
   check(events.length === before, 'emitted zero progress events (no channel)');
   const f2 = p2.Params.find((p) => p.Name === 'FormID')?.Value;
   check(!!f2, 'single-shot produced a form');
+
+  // ---- 7. The chat, against the real assistant ------------------------------------
+  section('7. Authoring chat — real model, real thread');
+
+  /** One chat turn. Returns the params bag so outputs can be read. */
+  const chat = async (message, inputs = {}) => {
+    const p = { Params: Object.entries(inputs).map(([Name, Value]) => ({ Name, Value, Type: 'Input' })), ContextUser: user };
+    const r = await runChatTurn(message, p, user);
+    const get = (n) => p.Params.find((x) => x.Name === n)?.Value;
+    return { r, get };
+  };
+
+  // (a) A question. Nothing should change.
+  const asked = await chat('What text colour works well on a dark navy background? Keep it short.');
+  console.log(`  Q: what text colour on navy?`);
+  console.log(`  A: ${String(asked.get('Reply')).slice(0, 160).replace(/\n/g, ' ')}…`);
+  check(asked.r.Success, 'a question is answered');
+  check(asked.get('Action') === 'none', `a question changes nothing (action=${asked.get('Action')})`);
+  check(String(asked.get('Reply')).length > 10, 'the answer has substance');
+  const threadId = asked.get('ConversationID');
+  check(!!threadId, 'a conversation thread was created');
+
+  // (b) The thread persists and the assistant can see it.
+  const followUp = await chat('And what about the buttons?', { ConversationID: threadId });
+  check(followUp.get('ConversationID') === threadId, 'a follow-up stays in the same thread');
+  console.log(`  Q: and the buttons?`);
+  console.log(`  A: ${String(followUp.get('Reply')).slice(0, 160).replace(/\n/g, ' ')}…`);
+
+  const stored = await q('MJ: Conversation Details', `ConversationID='${threadId}'`, ['Role', 'Message']);
+  check(stored.length >= 4, `every turn is persisted (${stored.length} rows for 2 exchanges)`);
+  check(stored.filter((t) => t.Role === 'User').length === 2, 'both questions were recorded');
+  check(stored.filter((t) => t.Role === 'AI').length >= 2, 'both answers were recorded');
+
+  // (c) Asking for a form actually builds one.
+  const built = await chat('Build me a short volunteer sign-up form: name, email, and which shift they want.');
+  console.log(`  Q: build me a volunteer sign-up`);
+  console.log(`  A: ${String(built.get('Reply')).slice(0, 160).replace(/\n/g, ' ')}…  [action=${built.get('Action')}]`);
+  check(built.get('Action') === 'create', `asking for a form creates one (action=${built.get('Action')})`);
+  check(!!built.get('FormID'), 'the new form id comes back so the client can open it');
+
+  // (d) Restyling the form we just made.
+  const chatFormId = built.get('FormID');
+  if (chatFormId) {
+    const styled = await chat('Make the buttons a deep forest green.', { FormID: chatFormId });
+    console.log(`  Q: make the buttons forest green   [action=${styled.get('Action')}]`);
+    const after = await q('MJ_BizApps_Forms: Form Styles',
+      `ID IN (SELECT StyleID FROM __mj_BizAppsForms.Form WHERE ID='${chatFormId}')`,
+      ['ID', 'CSSVariables']);
+    const tokens = JSON.parse(after[0]?.CSSVariables || '{}');
+    console.log(`     accent is now ${tokens['--mjf-accent']}`);
+    check(styled.get('Action') === 'restyle', `asking to restyle restyles (action=${styled.get('Action')})`);
+    check(tokens['--mjf-accent'] !== '#1b7fa8', 'the accent actually changed');
+    // The house layout survives a chat restyle, exactly as it survives a generated theme.
+    check(tokens['--mjf-btn-radius'] === '999px', 'the house corner radius survived the restyle');
+    check(tokens['--mjf-title-align'] === 'center', 'the house title alignment survived the restyle');
+  }
 
   section(failures === 0 ? '✅ ALL CHECKS PASSED' : `❌ ${failures} CHECK(S) FAILED`);
   console.log(`generated forms: ${formId} , ${f2}`);

@@ -42,6 +42,7 @@ import { DESIGN_PANEL_STYLES } from './design-panel.styles';
 import { ColorPickerComponent } from './color-picker.component';
 import { FormPreviewStageComponent } from './form-preview-stage.component';
 import { ImageFieldComponent } from './image-field.component';
+import { FormChatComponent, FormChatService } from '../chat';
 
 /**
  * The builder "Design" tab: edit this form's look directly, with a live preview beside it.
@@ -69,10 +70,11 @@ const SAVE_DEBOUNCE_MS = 600;
     ColorPickerComponent,
     FormPreviewStageComponent,
     ImageFieldComponent,
+    FormChatComponent,
   ],
   // The widget's own providers (and the empty graphqlUrl that selects the mock transports, so a
   // trial answer writes nothing) belong to the stage, not to this panel.
-  providers: [DesignStateService],
+  providers: [DesignStateService, FormChatService],
   templateUrl: './design-panel.component.html',
   styles: [FORMS_UI_CSS, DESIGN_PANEL_STYLES],
 })
@@ -232,6 +234,29 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
     }
     this.syncFromStyle();
     this.saveState = '';
+    this.cdr.markForCheck();
+    this.applyPreview();
+  }
+
+  /**
+   * A chat turn restyled this form — re-read the style and refresh every control.
+   *
+   * The chat wrote straight to the row, so the panel's in-memory copy is now stale and its swatches
+   * would keep showing the colours the author just replaced. Reloading is the same reconcile the
+   * rest of this feature uses: the database is the truth.
+   */
+  protected async onChatRestyled(): Promise<void> {
+    if (!this.style) {
+      return;
+    }
+    const reloaded = await this.design.loadStyleById(this.style.ID);
+    if (!reloaded) {
+      this.loadError = 'The theme changed but could not be re-read. Reopen the Design tab to see it.';
+      this.cdr.markForCheck();
+      return;
+    }
+    this.style = reloaded;
+    this.syncFromStyle();
     this.cdr.markForCheck();
     this.applyPreview();
   }

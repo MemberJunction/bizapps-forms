@@ -112,4 +112,11 @@ export const DESIGN_PANEL_STYLES = /* css */ `
   .dp-preview { height: 70vh; }
 }
 
+/* The AI surface at the foot of the Design rail, beside the controls it can drive. */
+.dp-chat {
+  flex: none;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--mj-border-default);
+  background: var(--mj-bg-surface);
+}
 `;

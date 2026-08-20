@@ -175,6 +175,12 @@
         <span class="dp-status" role="status">{{ saveState }}</span>
       </div>
     }
+
+    <!-- The AI surface, in the rail beside the controls it can drive. An author who has just been
+         told an accent is a bit low-contrast can ask for a better one without leaving the panel. -->
+    <div class="dp-chat">
+      <mjf-form-chat [formId]="form.ID" (formRestyled)="onChatRestyled()" />
+    </div>
   </div>
 
   <!-- RIGHT: the real form, in the same stage the Preview modal uses -->

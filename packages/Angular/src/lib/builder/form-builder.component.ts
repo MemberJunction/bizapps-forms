@@ -58,6 +58,7 @@ import {
   type QuestionTypeMeta,
 } from './question-type-catalog';
 import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
+import { FormChatComponent, FormChatService } from '../chat';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
   definitionFingerprint,
@@ -136,8 +137,9 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     AutomationTabComponent,
     ResponsesTabComponent,
     SaveAsTemplateDialogComponent,
+    FormChatComponent,
   ],
-  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
+  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService, FormChatService],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
@@ -1129,6 +1131,18 @@ export class FormBuilderComponent extends BaseFormComponent {
       : undefined;
     // No automations: Preview renders the form, it never runs a submission's side effects.
     this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * A chat turn restyled this form — re-read what we are showing.
+   *
+   * The chat wrote straight to the style row, so nothing in this component knows yet. Reloading is
+   * cheap and is the same reconcile the streaming build does: the database is the truth, and the
+   * alternative is patching a style we did not write.
+   */
+  protected async onChatRestyled(): Promise<void> {
+    await this.refreshPublishState();
     this.cdr.markForCheck();
   }
 

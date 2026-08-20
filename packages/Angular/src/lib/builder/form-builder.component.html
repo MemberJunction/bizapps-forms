@@ -467,6 +467,13 @@
             </button>
           </div>
         </div>
+
+        <!-- The AI surface, under the canvas the author is looking at. Same component as the forms
+             list; only the placement differs, and it is scoped to THIS form so the assistant can
+             answer about it and the thread is this form's. -->
+        <div class="fb-chat">
+          <mjf-form-chat [formId]="record.ID" (formRestyled)="onChatRestyled()" />
+        </div>
       </section>
 
       <!-- RIGHT: properties -->

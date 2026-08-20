@@ -22,4 +22,5 @@ export * from './starter-templates';
 export * from './generation-progress';
 export * from './readable-ink';
 export * from './default-theme';
+export * from './form-chat';
 export * from './schemas';

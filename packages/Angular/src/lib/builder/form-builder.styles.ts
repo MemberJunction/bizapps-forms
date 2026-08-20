@@ -636,4 +636,16 @@ const LAYOUT_CSS = /* css */ `
 // FORMS_VIZ_CSS carries the question-type palette: the group colours the rail's glyphs and
 // the canvas type pills read from. Included here rather than in the components because both
 // of those live in this component's template.
-export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${FORMS_VIZ_CSS}\n${LAYOUT_CSS}`;
+export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${FORMS_VIZ_CSS}\n${LAYOUT_CSS}
+
+/* The AI surface under the canvas. Sticky so it stays reachable while a long form scrolls, and
+   gradient-backed so the last question does not appear to run into it. */
+.fb-chat {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  padding: 16px 0 12px;
+  margin-top: 8px;
+  background: linear-gradient(to top, var(--mj-bg-page, var(--mj-bg-surface)) 72%, transparent);
+}
+`;
