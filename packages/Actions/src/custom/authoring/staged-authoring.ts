@@ -37,6 +37,7 @@ import {
   type ImageTarget,
 } from './image-stage';
 import { themeResponseSchema, validateTheme, type ThemeOutcome } from './theme-tokens';
+import { themeWithOverrides } from '@mj-biz-apps/forms-entities';
 import {
   declaredKeys,
   extractJSON,
@@ -572,17 +573,32 @@ async function runThemeStage(
     return ['theme:no style row to write onto'];
   }
 
+  // THE DEFAULT IS THE ANSWER UNLESS THE BRIEF ASKED FOR SOMETHING ELSE.
+  //
+  // The style row already carries the house palette — the Builder seeded it. So a brief that says
+  // nothing about how the form should look gets that, with no model call at all: no cost, no
+  // latency, and every form from every route looking like the same product. The outline emits
+  // `brandAdjectives` only when the request actually describes a look, which is what makes this a
+  // signal rather than a guess.
+  const adjectives = outline.theme?.brandAdjectives ?? [];
+  if (adjectives.length === 0) {
+    publishTheme('Using the standard look', built.styleId);
+    return [];
+  }
+
   publishTheme('Painting the theme');
   try {
     const outcome = validateTheme(await requestTheme(brief, model, outline, contextUser));
-    await applyThemeTokens(built.formId, built.styleId, outcome.cssVariables, contextUser);
+    // Merged OVER the default rather than replacing it, so a palette the model chose keeps the
+    // house sizing, alignment and corner radius. Those are decisions made by looking at a form.
+    await applyThemeTokens(built.formId, built.styleId, themeWithOverrides(outcome.cssVariables), contextUser);
     publishTheme('Theme applied', built.styleId);
     return reportThemeOutcome(outcome, built.formId);
   } catch (error) {
     LogError(
-      `[Forms authoring] Could not theme form ${built.formId}; it will use the widget defaults. ${errorText(error)}`,
+      `[Forms authoring] Could not theme form ${built.formId}; it will use the standard look. ${errorText(error)}`,
     );
-    publishTheme('Kept the default look');
+    publishTheme('Kept the standard look');
     return ['theme:could not be generated'];
   }
 }

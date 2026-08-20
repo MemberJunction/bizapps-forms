@@ -32,6 +32,7 @@ import {
   mjBizAppsFormsFormQuestionOptionEntity,
   mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
+  defaultThemeJSON,
 } from '@mj-biz-apps/forms-entities';
 import {
   CHOICE_QUESTION_TYPES,
@@ -497,7 +498,9 @@ async function createStyle(
   const wanted = `${formName} theme`;
   style.Name = clampText(wanted, COLUMN_LIMITS.styleName, "The generated style's name");
   style.Description = 'Design for this form.';
-  style.CSSVariables = JSON.stringify({});
+  // Seeded with the house default rather than an empty map, so a generated form and a
+  // hand-built one start from the same look. See `default-theme.ts`.
+  style.CSSVariables = defaultThemeJSON();
   style.DisplayRank = 0;
   style.IsActive = true;
   try {

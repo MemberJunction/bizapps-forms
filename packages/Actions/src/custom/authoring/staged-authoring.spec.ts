@@ -185,6 +185,14 @@ const OUTLINE = {
   ],
 };
 
+/**
+ * The same outline, but asking for a look — which is what now makes the theme stage run at all.
+ *
+ * Without `brandAdjectives` a form keeps the deterministic house palette and no model is called,
+ * so every test about the theme PROMPT has to opt in explicitly.
+ */
+const OUTLINE_WITH_LOOK = { ...OUTLINE, theme: { brandAdjectives: ['warm', 'professional'] } };
+
 /** A detail response for one page — richer than the stub it replaces. */
 const detailFor = (title: string): string =>
   JSON.stringify({
@@ -247,13 +255,14 @@ describe('runStagedAuthoring', () => {
   it('publishes outline, one per page, media, theme, then complete', async () => {
     const events = recordingPublisher();
     await runStagedAuthoring('an RSVP', stubModel(), user, options);
+    // One theme event, not two: a brief that says nothing about how the form should look keeps
+    // the house palette with no model call, so there is no "painting" then "applied" pair.
     expect(events.map((e) => e.stage)).toEqual([
       'outline',
       'page',
       'page',
       'page',
       'image',
-      'theme',
       'theme',
       'complete',
     ]);
@@ -271,7 +280,7 @@ describe('runStagedAuthoring', () => {
     expect(events.every((e) => e.total === events[0].total)).toBe(true);
     // Media is ONE step however many pictures it makes, and the theme's two events share a step —
     // the second only updates the label. That is what keeps the total knowable at step 1.
-    expect(events.map((e) => e.step)).toEqual([1, 2, 3, 4, 5, 6, 6, 6]);
+    expect(events.map((e) => e.step)).toEqual([1, 2, 3, 4, 5, 6, 6]);
   });
 
   it('names the form on every event, from the outline onward', async () => {
@@ -812,6 +821,7 @@ describe('runStagedAuthoring — theme', () => {
 
   it('writes the validated tokens onto the style the builder already linked', async () => {
     const model = stubModel({
+      outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_LOOK)),
       theme: vi.fn(async () =>
         JSON.stringify({ cssVariables: { '--mjf-accent': '#0055aa', '--mjf-page-bg': '#ffffff' } }),
       ),
@@ -839,6 +849,7 @@ describe('runStagedAuthoring — theme', () => {
 
   it('strips a token the widget does not read before persisting it', async () => {
     const model = stubModel({
+      outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_LOOK)),
       theme: vi.fn(async () =>
         JSON.stringify({ cssVariables: { '--mjf-accent': '#0055aa', '--mjf-invented': 'cosy' } }),
       ),
@@ -855,6 +866,7 @@ describe('runStagedAuthoring — theme', () => {
     // Fixed by arithmetic where it can be, and NAMED where it cannot — a background nobody can
     // read on is a decision the author has to make, not one to make for them.
     const model = stubModel({
+      outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_LOOK)),
       theme: vi.fn(async () =>
         JSON.stringify({ cssVariables: { '--mjf-page-bg': '#777777', '--mjf-page-ink': '#7a7a7a' } }),
       ),
@@ -867,7 +879,10 @@ describe('runStagedAuthoring — theme', () => {
     const theme = vi.fn(async () => 'not a token map');
     const result = await runStagedAuthoring(
       'an RSVP',
-      stubModel({ theme } as Partial<StagedAuthoringModel>),
+      stubModel({
+        outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_LOOK)),
+        theme,
+      } as Partial<StagedAuthoringModel>),
       user,
       options,
     );
