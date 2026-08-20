@@ -1,16 +1,16 @@
 [
   {
     "fields": {
-      "Name": "Forms: Form Designer",
-      "Description": "AI form-authoring Designer for the MJ Forms Open App. Turns a natural-language brief into a structured FormBlueprint JSON object (validated downstream against the Phase-1 §5.3 question taxonomy). The model/vendor is metadata-driven: SelectionStrategy=Specific pins the related AI Prompt Model below, so installers swap the model here (in metadata) rather than in code.",
-      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Form Designer",
+      "Name": "Forms: Form Outline",
+      "Description": "First pass of a staged AI form build. Sketches the SHAPE of a form — pages, question stubs, screens and a theme brief — from a brief or a pasted question list. Kept small and fast because it gates how quickly the author sees a real form; the 'Forms: Page Detail' prompt fills each page in afterwards. Model selection is metadata-driven (SelectionStrategy=Specific pins the AI Prompt Model row below), so this stage can be pointed at a faster model than the detail stage without a code change.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Form Outline",
       "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
       "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
       "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
       "Status": "Active",
       "ResponseFormat": "JSON",
       "OutputType": "object",
-      "OutputExample": "@file:forms-form-designer.output-example.json",
+      "OutputExample": "@file:forms-form-outline.output-example.json",
       "SelectionStrategy": "Specific",
       "PowerPreference": "Highest",
       "PromptRole": "System",
@@ -31,21 +31,21 @@
             "Status": "Active"
           },
           "primaryKey": {
-            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718293"
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718294"
           },
           "sync": {
-            "lastModified": "2026-08-08T18:25:26.922Z",
+            "lastModified": "2026-08-20T20:23:55.275Z",
             "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
           }
         }
       ]
     },
     "primaryKey": {
-      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829304"
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829305"
     },
     "sync": {
-      "lastModified": "2026-08-20T20:23:55.181Z",
-      "checksum": "0bbd7728810521c8d5cded2285d1caa6ac439f6d03531cd1cfd17eae09ec13eb"
+      "lastModified": "2026-08-20T20:23:55.245Z",
+      "checksum": "a6362e39f6d7b2ec957ec38e6d4cc77ea012ddc2368611c15ed88322aadc77e9"
     }
   }
 ]

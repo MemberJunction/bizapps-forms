@@ -1,0 +1,101 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Form Outline",
+    "Description": "First pass of a staged AI form build: turns a brief (or a pasted question list) into the SHAPE of a form — pages, question stubs, screens and a theme brief — fast enough that the author sees a real form within seconds. A second pass details each page.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-form-outline.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F61"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.660Z",
+          "checksum": "d4ecb5118f302029941d603ae78c7bc21c3d997f3859ecced46aa22e07ef1f7b"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Brief",
+          "Description": "The natural-language description of the form, or the author's own list of questions.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E60"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:49.061Z",
+          "checksum": "192aa23317ca218ca42e37974017b2dc65d3565e6713b4a53af8c58a06c30e6b"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "InputMode",
+          "Description": "Optional: 'brief' (default) or 'questions' when Brief is a list the author wrote and whose wording must be preserved verbatim.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E61"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:49.075Z",
+          "checksum": "7c6abb1d6fdbdc1e64131b64d8dcb9be63ccdac69cf849b40417e0f35d76f2ef"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PreviousAttempt",
+          "Description": "Optional: the model's prior invalid output, fed back on a retry attempt.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E62"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:49.088Z",
+          "checksum": "2259a506b20e9b54c7288be1a7771384fa27dcb9656709e603013ef0cc90a774"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "ValidationError",
+          "Description": "Optional: the validation error from the prior attempt, fed back on a retry.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E63"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:49.100Z",
+          "checksum": "382fc98a342f07fb937897c825f4a2f478e8ebcc059cc147123970ac6fdce463"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F62"
+  },
+  "sync": {
+    "lastModified": "2026-08-20T20:23:49.027Z",
+    "checksum": "51203dc2608777f7751a02eafb1d25a81c7d714f3d4a571918765d3afb8dabd2"
+  }
+}

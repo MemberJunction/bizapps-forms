@@ -1,16 +1,16 @@
 [
   {
     "fields": {
-      "Name": "Forms: Form Designer",
-      "Description": "AI form-authoring Designer for the MJ Forms Open App. Turns a natural-language brief into a structured FormBlueprint JSON object (validated downstream against the Phase-1 §5.3 question taxonomy). The model/vendor is metadata-driven: SelectionStrategy=Specific pins the related AI Prompt Model below, so installers swap the model here (in metadata) rather than in code.",
-      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Form Designer",
+      "Name": "Forms: Page Detail",
+      "Description": "Second pass of a staged AI form build. Given the brief, the whole outline for coherence, and one page's sketched questions, writes that page's questions in full — options, help text, settings, validation and show/hide logic. Run once per page with bounded concurrency. Model selection is metadata-driven, so this stage can be pointed at a more careful model than the outline stage without a code change.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Page Detail",
       "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
       "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
       "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
       "Status": "Active",
       "ResponseFormat": "JSON",
       "OutputType": "object",
-      "OutputExample": "@file:forms-form-designer.output-example.json",
+      "OutputExample": "@file:forms-page-detail.output-example.json",
       "SelectionStrategy": "Specific",
       "PowerPreference": "Highest",
       "PromptRole": "System",
@@ -31,21 +31,21 @@
             "Status": "Active"
           },
           "primaryKey": {
-            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718293"
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718295"
           },
           "sync": {
-            "lastModified": "2026-08-08T18:25:26.922Z",
+            "lastModified": "2026-08-20T20:23:55.321Z",
             "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
           }
         }
       ]
     },
     "primaryKey": {
-      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829304"
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829306"
     },
     "sync": {
-      "lastModified": "2026-08-20T20:23:55.181Z",
-      "checksum": "0bbd7728810521c8d5cded2285d1caa6ac439f6d03531cd1cfd17eae09ec13eb"
+      "lastModified": "2026-08-20T20:23:55.305Z",
+      "checksum": "70007b61bdff51745132113beaee6c65a39ca63f4e10856150fbee7da2b3e29e"
     }
   }
 ]

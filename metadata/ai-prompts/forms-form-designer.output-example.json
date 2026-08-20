@@ -9,17 +9,13 @@
       "description": "A few quick questions.",
       "questions": [
         {
-          "type": "ShortText",
-          "prompt": "Your name",
-          "helpText": "First and last name.",
+          "type": "ContactInfo",
+          "prompt": "How can we reach you?",
+          "helpText": "Name and email are enough.",
           "isRequired": true
         },
         {
-          "type": "Email",
-          "prompt": "Email address",
-          "isRequired": true
-        },
-        {
+          "key": "attending",
           "type": "SingleChoice",
           "prompt": "Will you attend?",
           "isRequired": true,
@@ -31,9 +27,46 @@
         {
           "type": "Number",
           "prompt": "How many guests are you bringing?",
-          "settings": { "min": 0, "max": 5 }
+          "settings": { "min": 0, "max": 5 },
+          "validationRule": { "min": 0, "max": 5 },
+          "conditionalRule": {
+            "show": { "all": [{ "questionKey": "attending", "op": "equals", "value": "yes" }] }
+          }
+        },
+        {
+          "type": "ShortText",
+          "prompt": "Anything we should know about dietary needs?",
+          "validationRule": { "maxLength": 200 },
+          "conditionalRule": {
+            "show": { "all": [{ "questionKey": "attending", "op": "equals", "value": "yes" }] }
+          }
         }
       ]
     }
-  ]
+  ],
+  "screens": {
+    "welcome": {
+      "title": "You're invited",
+      "body": "Two minutes, and we'll have everything we need.",
+      "buttonLabel": "RSVP",
+      "imagePrompt": "a long table set for dinner in a bright hall, warm evening light"
+    },
+    "endings": [
+      {
+        "title": "See you there",
+        "body": "We'll email the details closer to the date.",
+        "conditionalRule": {
+          "show": { "all": [{ "questionKey": "attending", "op": "equals", "value": "yes" }] }
+        }
+      },
+      {
+        "title": "Thanks for letting us know",
+        "body": "We'll catch you next time.",
+        "isDefault": true
+      }
+    ]
+  },
+  "theme": {
+    "brandAdjectives": ["warm", "welcoming"]
+  }
 }

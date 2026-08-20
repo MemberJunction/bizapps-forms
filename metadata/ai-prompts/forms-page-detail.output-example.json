@@ -1,0 +1,50 @@
+{
+  "questions": [
+    {
+      "type": "ContactInfo",
+      "prompt": "How can we reach you?",
+      "helpText": "Name and email are enough.",
+      "isRequired": true
+    },
+    {
+      "key": "attending",
+      "type": "SingleChoice",
+      "prompt": "Will you attend?",
+      "isRequired": true,
+      "options": [
+        {
+          "label": "Yes, I'll be there",
+          "value": "yes",
+          "isDefault": true
+        },
+        {
+          "label": "Sorry, I can't make it",
+          "value": "no"
+        }
+      ]
+    },
+    {
+      "type": "Number",
+      "prompt": "How many guests are you bringing?",
+      "settings": {
+        "min": 0,
+        "max": 5
+      },
+      "validationRule": {
+        "min": 0,
+        "max": 5
+      },
+      "conditionalRule": {
+        "show": {
+          "all": [
+            {
+              "questionKey": "attending",
+              "op": "equals",
+              "value": "yes"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

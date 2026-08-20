@@ -1,0 +1,82 @@
+{
+  "name": "Conference RSVP",
+  "description": "Let us know if you can make it.",
+  "renderMode": "Scroll",
+  "confirmationMessage": "Thanks — your RSVP has been recorded.",
+  "pages": [
+    {
+      "title": "Your details",
+      "questions": [
+        {
+          "type": "ContactInfo",
+          "prompt": "How can we reach you?"
+        },
+        {
+          "key": "attending",
+          "type": "SingleChoice",
+          "prompt": "Will you attend?"
+        }
+      ]
+    },
+    {
+      "title": "Travel",
+      "conditionalRule": {
+        "show": {
+          "all": [
+            {
+              "questionKey": "attending",
+              "op": "equals",
+              "value": "yes"
+            }
+          ]
+        }
+      },
+      "questions": [
+        {
+          "type": "Date",
+          "prompt": "When do you arrive?"
+        },
+        {
+          "type": "YesNo",
+          "prompt": "Do you need a hotel room?"
+        }
+      ]
+    }
+  ],
+  "screens": {
+    "welcome": {
+      "title": "You're invited",
+      "body": "Two minutes, and we'll have everything we need.",
+      "buttonLabel": "RSVP",
+      "imagePrompt": "a long table set for dinner in a bright hall, warm evening light"
+    },
+    "endings": [
+      {
+        "title": "See you there",
+        "body": "We'll email the details closer to the date.",
+        "conditionalRule": {
+          "show": {
+            "all": [
+              {
+                "questionKey": "attending",
+                "op": "equals",
+                "value": "yes"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "title": "Thanks for letting us know",
+        "body": "We'll catch you next time.",
+        "isDefault": true
+      }
+    ]
+  },
+  "theme": {
+    "brandAdjectives": [
+      "warm",
+      "welcoming"
+    ]
+  }
+}

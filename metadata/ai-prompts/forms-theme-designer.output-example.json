@@ -1,0 +1,13 @@
+{
+  "cssVariables": {
+    "--mjf-page-bg": "#fdf8f3",
+    "--mjf-card-bg": "#ffffff",
+    "--mjf-page-ink": "#2b2118",
+    "--mjf-accent": "#a8542a",
+    "--mjf-accent-strong": "#8a4321",
+    "--mjf-on-accent": "#ffffff",
+    "--mjf-choice-selected-bg": "#f6e7db",
+    "--mjf-font-body": "'Nunito', system-ui, sans-serif",
+    "--mjf-font-display": "'Fraunces', Georgia, serif"
+  }
+}

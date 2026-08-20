@@ -1,0 +1,133 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Theme Designer",
+    "Description": "Final pass of a staged AI form build: picks the form's --mjf-* colours and type from the brief and the outline's brand adjectives. The token vocabulary is supplied to the prompt rather than hardcoded in it, so the two cannot drift; unknown tokens are stripped and unreadable pairs are corrected by arithmetic before anything is persisted.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-theme-designer.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F63"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:55.094Z",
+          "checksum": "b7f3aeae36f0a91380edf4d90842760238fde6a5c1042e09739bdaf624317c4b"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Brief",
+          "Description": "The original natural-language request, so the theme is about the form the author asked for.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E80"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:53.087Z",
+          "checksum": "32dd0e123711a8b81579021aa68183e012ff96271a7ca20a2106fe104e3b24a1"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "FormName",
+          "Description": "The form's name.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E81"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:53.101Z",
+          "checksum": "2ae73179aa667d5063a2f6548b3af12af4ca392f9db7fcd53200992f195f6d2d"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "BrandAdjectives",
+          "Description": "Comma-separated adjectives from the outline, e.g. 'warm, welcoming'. Blank when the outline offered none.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E82"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:53.115Z",
+          "checksum": "eac2bd3d90b474158a5c072f4995b153e5d2a82a7419b3db64c53db6670390ae"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Tokens",
+          "Description": "The newline-separated --mjf-* token vocabulary, supplied by the code that owns it so the prompt and the validator cannot disagree about what is allowed.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E83"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:53.129Z",
+          "checksum": "6e9e686bfcbdd57cb0a25f8b684a34961a0a8a94b6ec537e7bdcfb655a650a44"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PreviousAttempt",
+          "Description": "Optional: the model's prior invalid output, fed back on a retry attempt.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E84"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:53.143Z",
+          "checksum": "2259a506b20e9b54c7288be1a7771384fa27dcb9656709e603013ef0cc90a774"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "ValidationError",
+          "Description": "Optional: the validation error from the prior attempt, fed back on a retry.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E85"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:53.157Z",
+          "checksum": "382fc98a342f07fb937897c825f4a2f478e8ebcc059cc147123970ac6fdce463"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F64"
+  },
+  "sync": {
+    "lastModified": "2026-08-20T20:23:53.045Z",
+    "checksum": "8af11c35a6d7b9ea18c1e3695c70bf4c0e88403042989deb027ff8dc8bd2b667"
+  }
+}

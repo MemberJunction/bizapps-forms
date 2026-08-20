@@ -1,0 +1,165 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Page Detail",
+    "Description": "Second pass of a staged AI form build: given the brief, the whole outline for context, and one page's sketched questions, writes that page's questions in full — options, help text, settings, validation and show/hide logic.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-page-detail.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F62"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:52.994Z",
+          "checksum": "f2d400197ed81d3bb2656fc32afdbf6949012f692a4f31ee112ca337357f67c0"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Brief",
+          "Description": "The original natural-language request, so the page is written for the form the author asked for.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E70"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.723Z",
+          "checksum": "7a6e92920c426ab3626a65e517066860d4579cf762eac145b0025f15702ee605"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "InputMode",
+          "Description": "Optional: 'brief' (default) or 'questions' when the author's own wording must be preserved verbatim.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E71"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.737Z",
+          "checksum": "4b293b73f28210697d37657c78343f0d510253350fc401811c4c60a53f8d5ec0"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Outline",
+          "Description": "The whole outline as JSON, so this page does not repeat or contradict another page.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E72"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.751Z",
+          "checksum": "68c5e527960e8eac08ee8df30abfa7bcae639096dcebece53e919f1f75ba9158"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PageIndex",
+          "Description": "0-based index of the page being detailed, within the outline's pages.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E73"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.765Z",
+          "checksum": "e3f116588f4d89b1e37382fc985f39b6dbcd12bee84a1ce2802e1dc5983f016f"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PageTitle",
+          "Description": "Title of the page being detailed.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E74"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.778Z",
+          "checksum": "5816d9e68024ff23d6d600f9e43050e5c30f31dbc9aea30c159a8490cd93579f"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PageStubs",
+          "Description": "That page's sketched questions as JSON — matched back by position, so order matters.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E75"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.791Z",
+          "checksum": "76e5c38006c2db400f0c613ce5d4f584212c14df8ad194e7f87774cb3c3965af"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "PreviousAttempt",
+          "Description": "Optional: the model's prior invalid output, fed back on a retry attempt.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E76"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.809Z",
+          "checksum": "2259a506b20e9b54c7288be1a7771384fa27dcb9656709e603013ef0cc90a774"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "ValidationError",
+          "Description": "Optional: the validation error from the prior attempt, fed back on a retry.",
+          "Type": "Scalar",
+          "IsRequired": false
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E77"
+        },
+        "sync": {
+          "lastModified": "2026-08-20T20:23:50.823Z",
+          "checksum": "382fc98a342f07fb937897c825f4a2f478e8ebcc059cc147123970ac6fdce463"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F63"
+  },
+  "sync": {
+    "lastModified": "2026-08-20T20:23:50.676Z",
+    "checksum": "ef1a46db305c96c1afebf5bb73fe0cd6de404c33570f469a5911bf57fb7be662"
+  }
+}
