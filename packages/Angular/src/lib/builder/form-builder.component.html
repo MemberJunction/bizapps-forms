@@ -215,7 +215,7 @@
               (keydown.enter)="selectScreen(ws)"
               [attr.aria-label]="'Edit welcome screen ' + ws.Title"
             >
-              <span class="fb-screen-icon"><i class="fa-solid fa-door-open" aria-hidden="true"></i></span>
+              <span class="fb-screen-icon mjf-viz-4"><i class="fa-solid fa-flag" aria-hidden="true"></i></span>
               <div class="fb-screen-main">
                 <div class="fb-screen-kind">Welcome screen</div>
                 <div class="fb-screen-title">{{ ws.Title }}</div>
@@ -230,7 +230,7 @@
             </article>
           } @else {
             <button type="button" class="fb-screen-add" [disabled]="busy" (click)="addScreen('Welcome')">
-              <i class="fa-solid fa-door-open" aria-hidden="true"></i>
+              <i class="fa-solid fa-flag" aria-hidden="true"></i>
               Add a welcome screen
             </button>
           }
@@ -381,7 +381,7 @@
                 (keydown.enter)="selectScreen(es)"
                 [attr.aria-label]="'Edit ending ' + es.Title"
               >
-                <span class="fb-screen-icon"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
+                <span class="fb-screen-icon mjf-viz-2"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
                 <div class="fb-screen-main">
                   <div class="fb-screen-kind">
                     @if (es.IsDefault) {

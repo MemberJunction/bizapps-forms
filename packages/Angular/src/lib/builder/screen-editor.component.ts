@@ -25,7 +25,7 @@ import {
   type SocialPlatformId,
   type mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 import {
   ConditionalRuleEditorComponent,
   type ConditionalSourceQuestion,
@@ -46,6 +46,9 @@ const SCREEN_EDITOR_CSS = /* css */ `
   padding-bottom: var(--mjf-gap);
   border-bottom: 1px solid var(--mjf-rule);
 }
+/* The glyph takes its screen's hue; the title stays on a token. Same split as the type
+   pills — the palette is measured for graphics, not for text. */
+.se-head > i { color: var(--mjf-viz-fill); font-size: 1rem; }
 .se-head-title { font-size: var(--mjf-meta); font-weight: 600; color: var(--mj-text-secondary); }
 
 .se-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
@@ -74,12 +77,20 @@ const SCREEN_EDITOR_CSS = /* css */ `
     ImageFieldComponent,
     SettingRowComponent,
   ],
-  styles: [FORMS_UI_CSS, SCREEN_EDITOR_CSS],
+  styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, SCREEN_EDITOR_CSS],
   template: `
     @if (screen; as s) {
       <div class="se">
         <div class="se-head">
-          <i [class]="s.ScreenType === 'Welcome' ? 'fa-solid fa-door-open' : 'fa-solid fa-flag-checkered'" aria-hidden="true"></i>
+          <!-- The same start/finish pairing the canvas uses, in the same two colours: a plain
+               flag for the screen the respondent starts on, a chequered one for where they
+               finish. Kept in step with form-builder.component.html deliberately — an editor
+               header that disagrees with the row that opened it reads as the wrong screen. -->
+          <i
+            [class]="
+              (s.ScreenType === 'Welcome' ? 'mjf-viz-4 fa-solid fa-flag' : 'mjf-viz-2 fa-solid fa-flag-checkered')
+            "
+            aria-hidden="true"></i>
           <span class="se-head-title">{{ s.ScreenType === 'Welcome' ? 'Welcome screen' : 'Ending' }}</span>
         </div>
 

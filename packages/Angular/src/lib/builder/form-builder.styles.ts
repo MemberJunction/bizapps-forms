@@ -212,16 +212,38 @@ const LAYOUT_CSS = /* css */ `
 .fb-screen:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 .fb-screen.is-selected { border-color: var(--mj-brand-primary); background: var(--mj-bg-surface-hover); }
 
+/* The form's two bookends, and they no longer share a colour.
+
+   Both were brand-primary, so the door you come in by and the finish line you leave by were
+   the same blue — the two ends of the journey rendered identically, which is the one
+   distinction this strip exists to draw. The template picks the hue per screen:
+
+     Welcome  amber (mjf-viz-4)  — warmth and invitation, the open door
+     Ending   green (mjf-viz-2)  — completion; "Thanks for your response" IS the success state
+
+   Read down the canvas it now says: warm start, coloured questions, green finish.
+
+   These two hues are also carried by the Scale and Choice question groups, and that overlap
+   is deliberate rather than overlooked. Only one palette entry was unspent and two were
+   needed, and inventing colours outside the palette would break the single-source rule that
+   makes the rest of this coherent. The reuse is safe because the roles never collide
+   visually: a screen wears its hue as a round plate at the edge of a full-width bar, a
+   question type wears it as a pill inside a card. Nothing shows both idioms at once.
+
+   A bare glyph, like everywhere else. The round tinted plate this replaced was the last
+   filled icon container left in the builder, and it made the two screen rows heavier than
+   the questions between them — reading as headers rather than as the bookends of the same
+   list. What separates a screen from a question is already doing its job without it: the
+   full-width bar, the eyebrow label, and now the hue. The width is kept only so the titles
+   beside it line up with the question prompts. */
 .fb-screen-icon {
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  color: var(--mj-brand-primary);
-  background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface));
+  width: 24px;
+  font-size: 1rem;
+  color: var(--mjf-viz-fill);
 }
 
 .fb-screen-main { flex: 1; min-width: 0; }
