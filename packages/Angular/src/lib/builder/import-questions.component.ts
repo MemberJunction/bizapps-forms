@@ -14,8 +14,8 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FORMS_UI_CSS } from '../shared';
-import { questionTypeMeta } from './question-type-catalog';
+import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
+import { questionTypeMeta, questionTypeColorClass } from './question-type-catalog';
 import {
   MAX_IMPORTED_QUESTIONS,
   parseImportedQuestions,
@@ -96,7 +96,7 @@ const IMPORT_CSS = /* css */ `
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule],
-  styles: [FORMS_UI_CSS, IMPORT_CSS],
+  styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, IMPORT_CSS],
   template: `
     <div class="iq-backdrop" role="dialog" aria-modal="true" aria-labelledby="iq-title" (keydown.escape)="cancelled.emit()">
       <div class="iq-modal">
@@ -137,7 +137,7 @@ const IMPORT_CSS = /* css */ `
                   }
                   @for (q of page.questions; track $index) {
                     <div class="iq-row">
-                      <i [class]="iconFor(q.type)" aria-hidden="true"></i>
+                      <i [class]="'mjf-type-glyph ' + colorClassFor(q.type) + ' ' + iconFor(q.type)" aria-hidden="true"></i>
                       <span class="iq-row-prompt">{{ q.prompt }}</span>
                       @if (q.isRequired) { <span class="iq-req" aria-label="required">*</span> }
                       <span class="iq-row-type">{{ labelFor(q.type) }}</span>
@@ -188,6 +188,10 @@ export class ImportQuestionsComponent {
     if (parsed.count > 0) {
       this.imported.emit(parsed);
     }
+  }
+
+  protected colorClassFor(type: Parameters<typeof questionTypeMeta>[0]): string {
+    return questionTypeColorClass(type);
   }
 
   protected iconFor(type: Parameters<typeof questionTypeMeta>[0]): string {

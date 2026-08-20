@@ -111,6 +111,60 @@ export const QUESTION_PALETTE_GROUPS: ReadonlyArray<QuestionPaletteGroup> = [
   'Structure',
 ];
 
+/**
+ * The colour each palette GROUP wears, as a `mjf-viz-*` class from the Forms viz palette.
+ *
+ * BY GROUP, NOT BY TYPE. Colouring all 25 types individually would make the palette a
+ * confetti of hues with no information in any of them. One hue per group turns colour into a
+ * real signal: every Contact field is the same blue, so "which of these is a contact field"
+ * is answered preattentively, before reading a single label. Inside a group the ICON does the
+ * telling apart — that is what icons are for.
+ *
+ * WHY THIS PALETTE. These are the same eight hues the Insights charts use
+ * (`shared/forms-viz.ts`), so a question type looks the same wherever it appears in the
+ * product. A separate set of authoring colours would be a second visual language to learn
+ * and to keep in sync.
+ *
+ * THE ASSIGNMENTS ARE SEMANTIC, not a rotation:
+ *   - Contact   blue    — communication and identity, the conventional hue for both
+ *   - Text      purple  — free written expression
+ *   - Choice    green   — selection; the tick is already green everywhere else
+ *   - Scale     amber   — ratings; stars are gold by every convention there is
+ *   - Date      pink    — no strong convention, so it takes a hue that stays distinct
+ *   - Upload    orange  — attaching something, an action rather than a value
+ *   - Structure grey    — `Statement` collects no answer, and grey is the honest colour for
+ *                         a type that is display-only. This is the one assignment where the
+ *                         muted choice is the MEANING rather than a leftover.
+ *
+ * ⚠️ THESE ARE FILL COLOURS FOR GLYPHS, NEVER FOR TEXT. `forms-viz.ts` records the
+ * measurement: every entry clears the 3:1 that WCAG 1.4.11 asks of a non-text graphic on
+ * every MJ surface, and none reaches the 4.5:1 that TEXT needs on a light one. So an icon may
+ * take the hue; a label beside it must stay on `--mj-text-*`.
+ */
+const GROUP_COLOR: Record<QuestionPaletteGroup, string> = {
+  Contact: 'mjf-viz-1',
+  Text: 'mjf-viz-5',
+  Choice: 'mjf-viz-2',
+  Scale: 'mjf-viz-4',
+  Date: 'mjf-viz-6',
+  Upload: 'mjf-viz-3',
+  Structure: 'mjf-viz-8',
+};
+
+/** The `mjf-viz-*` class for a palette group. */
+export function questionGroupColorClass(group: QuestionPaletteGroup): string {
+  const cls = GROUP_COLOR[group];
+  if (!cls) {
+    throw new Error(`Unknown QuestionPaletteGroup: ${String(group)}`);
+  }
+  return cls;
+}
+
+/** The `mjf-viz-*` class for a question type, via its group. */
+export function questionTypeColorClass(type: FormQuestionType): string {
+  return questionGroupColorClass(questionTypeMeta(type).group);
+}
+
 /** Look up the presentation metadata for a question type. */
 export function questionTypeMeta(type: FormQuestionType): QuestionTypeMeta {
   const meta = CATALOG_BY_TYPE.get(type);

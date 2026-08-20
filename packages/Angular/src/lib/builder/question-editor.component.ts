@@ -15,9 +15,9 @@ import {
   type QuestionOptionMode,
   type ValidationRule,
 } from '@mj-biz-apps/forms-entities';
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 import type { QuestionNode } from './builder-models';
-import { questionTypeMeta } from './question-type-catalog';
+import { questionTypeMeta, questionTypeColorClass } from './question-type-catalog';
 import {
   settingsFor,
   settingText,
@@ -149,7 +149,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
     SettingRowComponent,
   ],
   templateUrl: './question-editor.component.html',
-  styles: [FORMS_UI_CSS, QUESTION_EDITOR_CSS],
+  styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, QUESTION_EDITOR_CSS],
 })
 export class QuestionEditorComponent {
   @Input() node: QuestionNode | null = null;
@@ -354,6 +354,11 @@ export class QuestionEditorComponent {
 
   protected get typeIcon(): string {
     return this.node ? questionTypeMeta(this.node.entity.QuestionType).icon : '';
+  }
+
+  /** The group colour for the edited question's type; empty when nothing is selected. */
+  protected get typeColorClass(): string {
+    return this.node ? questionTypeColorClass(this.node.entity.QuestionType) : '';
   }
 
   protected get conditionalRule(): ConditionalRule | undefined {

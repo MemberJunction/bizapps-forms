@@ -42,6 +42,7 @@ import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   QUESTION_PALETTE_GROUPS,
   questionTypeMeta,
+  questionTypeColorClass,
   questionTypesInGroup,
   searchQuestionTypes,
   type QuestionPaletteGroup,
@@ -694,6 +695,11 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected metaFor(node: QuestionNode): QuestionTypeMeta {
     return questionTypeMeta(node.entity.QuestionType);
+  }
+
+  /** The `mjf-viz-*` class carrying this type's group colour. */
+  protected colorClassFor(type: FormQuestionType): string {
+    return questionTypeColorClass(type);
   }
 
   protected displayIndex(page: PageNode, node: QuestionNode): string {

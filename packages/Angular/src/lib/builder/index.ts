@@ -80,6 +80,8 @@ export { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 export {
   QUESTION_TYPE_CATALOG,
   questionTypeMeta,
+  questionGroupColorClass,
+  questionTypeColorClass,
   questionTypesInGroup,
   type QuestionTypeMeta,
   type QuestionPaletteGroup,

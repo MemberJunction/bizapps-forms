@@ -6,7 +6,10 @@ import {
   questionTypeHasOptions,
   questionTypesInGroup,
   searchQuestionTypes,
+  questionGroupColorClass,
+  questionTypeColorClass,
 } from './question-type-catalog';
+import { FORMS_VIZ_CSS } from '../shared';
 import { FORM_QUESTION_TYPES, type FormQuestionType } from '@mj-biz-apps/forms-entities';
 
 /**
@@ -16,6 +19,46 @@ import { FORM_QUESTION_TYPES, type FormQuestionType } from '@mj-biz-apps/forms-e
  * guard, it is a hope. Everything below now derives from `FORM_QUESTION_TYPES`, so the catalog is
  * checked against the contract rather than against a third transcription of it.
  */
+describe('palette group colours', () => {
+  it('gives every group a colour, so a new group cannot render uncoloured', () => {
+    // A total Record over QuestionPaletteGroup: adding a group without deciding its hue is a
+    // compile error, and this asserts the runtime accessor agrees.
+    for (const group of QUESTION_PALETTE_GROUPS) {
+      expect(questionGroupColorClass(group)).toMatch(/^mjf-viz-[1-8]$/);
+    }
+  });
+
+  it('gives every group a DIFFERENT colour', () => {
+    // The whole point of colouring by group: two groups sharing a hue would make the colour
+    // say nothing while looking like it says something.
+    const classes = QUESTION_PALETTE_GROUPS.map(questionGroupColorClass);
+    expect(new Set(classes).size).toBe(QUESTION_PALETTE_GROUPS.length);
+  });
+
+  it('colours a type by its group, not by itself', () => {
+    // Inside a group the ICON tells types apart; the hue belongs to the group. Every Contact
+    // type must therefore land on the same class.
+    const contact = questionTypesInGroup('Contact');
+    expect(contact.length).toBeGreaterThan(1);
+    const classes = new Set(contact.map((m) => questionTypeColorClass(m.type)));
+    expect(classes.size).toBe(1);
+    expect([...classes][0]).toBe(questionGroupColorClass('Contact'));
+  });
+
+  it('names classes the shipped viz CSS actually defines', () => {
+    // A class with no rule renders as the default grey and reads as a data bug rather than a
+    // styling one.
+    for (const group of QUESTION_PALETTE_GROUPS) {
+      expect(FORMS_VIZ_CSS).toContain(`.${questionGroupColorClass(group)} {`);
+    }
+  });
+
+  it('keeps display-only content grey, which is the one assignment that is a statement', () => {
+    // Statement collects no answer. Grey is not a leftover here — it is the meaning.
+    expect(questionTypeColorClass('Statement')).toBe('mjf-viz-8');
+  });
+});
+
 describe('question type catalog', () => {
   it('covers every contract type exactly once', () => {
     expect(QUESTION_TYPE_CATALOG).toHaveLength(FORM_QUESTION_TYPES.length);

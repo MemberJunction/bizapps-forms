@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, Input, computed, signal } from '@angular/core';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../../shared';
-import { questionTypeMeta } from '../../builder/question-type-catalog';
+import { questionTypeMeta, questionTypeColorClass } from '../../builder/question-type-catalog';
 import {
   answerRate,
   booleanSegments,
@@ -43,7 +43,7 @@ const VERBATIM_PREVIEW = 3;
   template: `
     <article class="qb mjf-card">
       <header class="qb-head">
-        <span class="mjf-tile qb-tile" aria-hidden="true"><i [class]="typeIcon"></i></span>
+        <i [class]="'qb-glyph mjf-type-glyph ' + typeColorClass + ' ' + typeIcon" aria-hidden="true"></i>
         <div class="qb-headings">
           <h3 class="qb-prompt">{{ breakdown.prompt }}</h3>
           <p class="qb-meta">
@@ -148,7 +148,11 @@ const VERBATIM_PREVIEW = 3;
         border-bottom: 1px solid var(--mjf-rule);
         background: var(--mj-bg-surface-sunken);
       }
-      .qb-tile { width: 32px; height: 32px; font-size: 0.8125rem; }
+      /* A bare glyph, not a filled plate. The square tile this replaced put a heavy
+         coloured block at the top-left of every card in the grid, which read as a row of
+         buttons; the hue alone identifies the question's group and lets the prompt be the
+         thing the eye lands on. */
+      .qb-glyph { flex: none; width: 18px; margin-top: 2px; text-align: center; font-size: 0.9375rem; }
       .qb-headings { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
       .qb-prompt {
         margin: 0;
@@ -270,6 +274,11 @@ export class FormsQuestionBreakdownComponent {
 
   public get typeIcon(): string {
     return questionTypeMeta(this.breakdown.type).icon;
+  }
+
+  /** The question group's colour, shared with the builder's palette and type pills. */
+  public get typeColorClass(): string {
+    return questionTypeColorClass(this.breakdown.type);
   }
 
   public get answeredLabel(): string {

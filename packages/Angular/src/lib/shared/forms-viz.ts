@@ -94,6 +94,41 @@ export const FORMS_VIZ_PRIMITIVES = /* css */ `
 .mjf-viz-caution  { --mjf-viz-fill: var(--mjf-viz-caution); }
 .mjf-viz-neutral  { --mjf-viz-fill: var(--mjf-viz-neutral); }
 
+/* A question-type pill: tinted ground, coloured glyph, TOKEN text.
+
+   The text colour is the whole design of this class. The pill carries a hue so a type is
+   recognisable at a glance, but the label inside it stays on --mj-text-primary, because the
+   palette is measured for GRAPHICS (3:1) and not for text (4.5:1) — putting the hue on the
+   words would fail AA on every light surface. So the glyph takes the colour and the label
+   takes a token, and both are legible.
+
+   The tint is mixed against the SURFACE rather than being a fixed light shade: a fixed one
+   would be a pale wash on a dark card and invisible. Mixing keeps it a constant 14% of
+   whatever it sits on, in both themes. */
+.mjf-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: var(--mjf-label);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  border-radius: var(--mjf-radius-pill);
+  color: var(--mj-text-primary);
+  background: color-mix(in srgb, var(--mjf-viz-fill) 14%, var(--mj-bg-surface));
+  border: 1px solid color-mix(in srgb, var(--mjf-viz-fill) 28%, transparent);
+}
+.mjf-type-pill > i { color: var(--mjf-viz-fill); font-size: 0.875em; }
+
+/* A bare coloured glyph — no plate, no tint, no border.
+
+   The palette rail needs colour WITHOUT weight: 25 icons each in its own filled square turns
+   a scannable list into a grid of buttons and buries the labels that actually name the
+   types. The hue alone is enough to group them, because the group headings are already
+   doing the structural work. */
+.mjf-type-glyph { color: var(--mjf-viz-fill); }
+
 /* A legend dot. Small marks lose hue fast, so this is the floor size at which these
    eight stay tellable apart; anything smaller wants a label doing the work instead. */
 .mjf-viz-dot {

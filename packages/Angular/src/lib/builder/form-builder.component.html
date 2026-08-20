@@ -184,7 +184,7 @@
                     [title]="meta.hint"
                     (click)="addQuestion(meta.type)"
                   >
-                    <i [class]="meta.icon" aria-hidden="true"></i> {{ meta.label }}
+                    <i [class]="'mjf-type-glyph ' + colorClassFor(meta.type) + ' ' + meta.icon" aria-hidden="true"></i> {{ meta.label }}
                   </button>
                 }
               </div>
@@ -328,7 +328,7 @@
                     <div class="fb-q-help">{{ node.entity.HelpText }}</div>
                   }
                   <div class="fb-q-tags">
-                    <span class="mjf-badge"><i [class]="metaFor(node).icon" aria-hidden="true"></i> {{ metaFor(node).label }}</span>
+                    <span [class]="'mjf-type-pill ' + colorClassFor(node.entity.QuestionType)"><i [class]="metaFor(node).icon" aria-hidden="true"></i> {{ metaFor(node).label }}</span>
                     @if (node.entity.IsRequired) {
                       <span class="mjf-badge">Required</span>
                     }

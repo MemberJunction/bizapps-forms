@@ -1,4 +1,4 @@
-import { FORMS_UI_CSS } from '../shared';
+import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 
 /**
  * The builder shell: header, tab strip, and the three-pane Build workspace.
@@ -370,10 +370,14 @@ const LAYOUT_CSS = /* css */ `
   transition: background var(--mjf-ease), color var(--mjf-ease);
 }
 .fb-palette-item:hover:not(:disabled) { background: var(--mj-bg-surface-hover); }
-.fb-palette-item:hover:not(:disabled) i { color: var(--mj-brand-primary); }
 .fb-palette-item:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -2px; }
 .fb-palette-item:disabled { opacity: 0.45; cursor: not-allowed; }
-.fb-palette-item i { flex: none; width: 16px; text-align: center; font-size: var(--mjf-meta); color: var(--mj-text-muted); transition: color var(--mjf-ease); }
+/* Geometry only — no colour. The glyph's colour is its GROUP's, set by the mjf-type-glyph
+   class the template adds, and a color declaration here would out-specify that single class
+   and mute every icon in the rail. The hover rule that recoloured icons to brand-primary is
+   gone for the same reason: once the hue carries meaning, swapping it on hover throws the
+   meaning away exactly when the user is pointing at it. */
+.fb-palette-item i { flex: none; width: 16px; text-align: center; font-size: var(--mjf-meta); }
 
 /* -------------------------------------------------------------------- canvas */
 
@@ -577,4 +581,7 @@ const LAYOUT_CSS = /* css */ `
 `;
 
 /** Combined styles for the form builder shell (shared design layer + layout). */
-export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${LAYOUT_CSS}`;
+// FORMS_VIZ_CSS carries the question-type palette: the group colours the rail's glyphs and
+// the canvas type pills read from. Included here rather than in the components because both
+// of those live in this component's template.
+export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${FORMS_VIZ_CSS}\n${LAYOUT_CSS}`;
