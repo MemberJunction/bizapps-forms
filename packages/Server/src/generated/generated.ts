@@ -3621,6 +3621,13 @@ export class mjBizAppsFormsForm_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field(() => Boolean, {description: `When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response`}) 
+    IsTemplate: boolean;
+        
+    @Field({nullable: true, description: `On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source`}) 
+    @MaxLength(36)
+    TemplateSourceFormID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(255)
     Category?: string;
@@ -3632,6 +3639,14 @@ export class mjBizAppsFormsForm_ {
     @Field({nullable: true}) 
     @MaxLength(100)
     OwnerUser?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    TemplateSourceForm?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(36)
+    RootTemplateSourceFormID?: string;
         
     @Field(() => [mjBizAppsFormsFormDistribution_])
     mjBizAppsFormsFormDistributions_FormIDArray: mjBizAppsFormsFormDistribution_[]; // Link to mjBizAppsFormsFormDistributions
@@ -3659,6 +3674,9 @@ export class mjBizAppsFormsForm_ {
     
     @Field(() => [mjBizAppsFormsFormScreen_])
     mjBizAppsFormsFormScreens_FormIDArray: mjBizAppsFormsFormScreen_[]; // Link to mjBizAppsFormsFormScreens
+    
+    @Field(() => [mjBizAppsFormsForm_])
+    mjBizAppsFormsForms_TemplateSourceFormIDArray: mjBizAppsFormsForm_[]; // Link to mjBizAppsFormsForms
     
 }
 
@@ -3693,6 +3711,12 @@ export class CreatemjBizAppsFormsFormInput {
 
     @Field({ nullable: true })
     Settings: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsTemplate?: boolean;
+
+    @Field({ nullable: true })
+    TemplateSourceFormID: string | null;
 
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
@@ -3730,6 +3754,12 @@ export class UpdatemjBizAppsFormsFormInput {
 
     @Field({ nullable: true })
     Settings?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsTemplate?: boolean;
+
+    @Field({ nullable: true })
+    TemplateSourceFormID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -3882,6 +3912,16 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormScreens')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Screens', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Screens', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsForm_])
+    async mjBizAppsFormsForms_TemplateSourceFormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Forms', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwForms')} WHERE ${provider.QuoteIdentifier('TemplateSourceFormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Forms', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Forms', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         

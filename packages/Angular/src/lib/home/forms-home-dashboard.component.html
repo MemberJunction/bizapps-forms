@@ -6,7 +6,7 @@
     </div>
     <div class="mjf-page-actions">
       <button type="button" class="mjf-btn mjf-btn--ghost" (click)="openPanel('template')" [disabled]="busy">
-        <i class="fa-solid fa-layer-group" aria-hidden="true"></i> From template
+        <i class="fa-solid fa-layer-group" aria-hidden="true"></i> Templates
       </button>
       <button type="button" class="mjf-btn mjf-btn--ghost" (click)="openPanel('ai')" [disabled]="busy">
         <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Author with AI
@@ -48,31 +48,19 @@
       </section>
     }
     @case ('template') {
-      <section class="mjf-card mjf-card--pad home-panel" aria-label="From template">
-        <div class="mjf-field">
-          <span class="mjf-field-label">Start from a curated template</span>
-          <div class="home-templates">
-            @for (t of templates; track t.key) {
-              <button
-                type="button"
-                class="home-template"
-                [class.is-selected]="selectedTemplateKey === t.key"
-                [attr.aria-pressed]="selectedTemplateKey === t.key"
-                (click)="selectedTemplateKey = t.key"
-                [disabled]="busy"
-              >
-                <i [class]="t.icon" aria-hidden="true"></i>
-                <span>{{ t.label }}</span>
-              </button>
-            }
-          </div>
-        </div>
-        <div class="home-panel-actions">
-          <button type="button" class="mjf-btn mjf-btn--primary" (click)="createFromTemplate()" [disabled]="busy">
-            <i class="fa-solid fa-layer-group" aria-hidden="true"></i> Create
+      <section class="mjf-card mjf-card--pad home-panel" aria-label="Start from a template">
+        <div class="home-panel-head">
+          <span class="mjf-field-label">Start from a template</span>
+          <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="closePanel()" [disabled]="busy">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i> Close
           </button>
-          <button type="button" class="mjf-btn mjf-btn--quiet" (click)="closePanel()" [disabled]="busy">Cancel</button>
         </div>
+        <mjf-templates-gallery
+          [Busy]="busy"
+          (Chosen)="useTemplate($event)"
+          (Deleted)="onTemplateDeleted()"
+          (Failed)="onTemplateFailure($event)"
+        />
       </section>
     }
   }

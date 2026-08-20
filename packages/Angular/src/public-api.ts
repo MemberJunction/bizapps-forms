@@ -49,6 +49,8 @@ export function LoadBizAppsFormsClient(): void {
 export * from './lib/widget/index';
 // WP-D builder — registers the Forms form-component override (visual builder) + re-exports.
 export * from './lib/builder';
+// Reusable form templates — gallery + deep copy, mounted by both home and the builder.
+export * from './lib/templates';
 // Forms home/studio dashboard — the first-class "Forms" Explorer surface (plan §3.2).
 import './lib/home';
 export * from './lib/home';

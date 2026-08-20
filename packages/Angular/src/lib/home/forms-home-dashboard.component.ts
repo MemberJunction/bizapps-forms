@@ -8,8 +8,8 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BaseDashboard } from '@memberjunction/ng-shared';
 import type { ResourceData } from '@memberjunction/core-entities';
-import { CompositeKey, LogError } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
+import { MJGlobal, MJEventType, RegisterClass } from '@memberjunction/global';
 import type { ActionParam } from '@memberjunction/actions-base';
 
 import { FORMS_UI_CSS } from '../shared';
@@ -18,11 +18,11 @@ import { FORMS_HOME_CSS } from './forms-home-dashboard.styles';
 import {
   HOME_ACTION,
   HOME_ENTITY,
-  STARTER_TEMPLATES,
   type FormStatus,
   type FormSummaryRow,
-  type StarterTemplateChoice,
 } from './home-models';
+import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
+import { FormCloneService } from '../templates/form-clone.service';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -44,6 +44,15 @@ const STATUS_TONE: Record<FormStatus, string> = {
  * archive semantics are one constant rather than a string repeated in four predicates.
  */
 const ARCHIVED_STATUS: FormStatus = 'Closed';
+
+/**
+ * The handle returned by subscribing to MJGlobal's event stream.
+ *
+ * Derived from the API rather than imported as `rxjs`'s `Subscription`: rxjs is not a dependency
+ * of this package (it arrives through Angular in the host), so naming the type directly fails the
+ * package's own typecheck. Deriving it keeps the shape correct without inventing a dependency.
+ */
+type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
 
 /** "1 form" / "12 forms" — the list page says both numbers out loud a lot. */
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -77,13 +86,14 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService],
-  imports: [FormsModule, DatePipe],
+  providers: [FormsHomeService, FormCloneService],
+  imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
+  private readonly clone = inject(FormCloneService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   public loading = false;
@@ -96,11 +106,11 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   public query = '';
   /** Archived forms are hidden by default; the toolbar toggles them back in. */
   public showArchived = false;
-  public readonly templates: readonly StarterTemplateChoice[] = STARTER_TEMPLATES;
-
   public panel: AuthoringPanel = 'none';
   public brief = '';
-  public selectedTemplateKey: string = STARTER_TEMPLATES[0]?.key ?? '';
+
+  /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
+  private formChanges?: EventSubscription;
 
   public async GetResourceDisplayName(_data: ResourceData): Promise<string> {
     return 'Forms';
@@ -116,6 +126,47 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
 
   protected loadData(): void {
     void this.loadForms();
+    this.watchForFormChanges();
+  }
+
+  public ngOnDestroy(): void {
+    this.formChanges?.unsubscribe();
+    this.formChanges = undefined;
+  }
+
+  /**
+   * Keep the list honest while it is sitting behind a builder tab.
+   *
+   * The list used to load once. Rename a form in the builder, come back, and the old name was
+   * still there — the row had not changed, the page had simply never asked again. Polling would
+   * have papered over it; MJ already broadcasts the fact. Every `BaseEntity.Save()` and
+   * `.Delete()` raises an MJGlobal `ComponentEvent` tagged `BaseEntity.BaseEventCode`, so the
+   * list listens for the ones that concern Forms rows and re-reads.
+   *
+   * Deliberately narrow. It reacts to the Forms entity only — a save anywhere else in the
+   * Explorer must not trigger a reload here — and it skips reloads while this surface is itself
+   * mid-write, because `loadForms` already runs at the end of those.
+   */
+  private watchForFormChanges(): void {
+    if (this.formChanges) {
+      return;
+    }
+    this.formChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+        return;
+      }
+      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
+      if (args?.type !== 'save' && args?.type !== 'delete') {
+        return;
+      }
+      if (args.baseEntity?.EntityInfo?.Name !== HOME_ENTITY.forms) {
+        return;
+      }
+      if (this.busy || this.loading) {
+        return;
+      }
+      void this.loadForms();
+    });
   }
 
   public async loadForms(): Promise<void> {
@@ -250,16 +301,62 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     ]);
   }
 
-  /** Runs the template action for the selected starter key. */
-  public async createFromTemplate(): Promise<void> {
-    if (!this.selectedTemplateKey) {
-      this.errorMessage = 'Pick a template to start from.';
-      this.cdr.markForCheck();
+  /**
+   * Start a form from whichever kind of template the gallery offered.
+   *
+   * The two kinds take different roads and the author must not be able to tell: a starter is a
+   * blueprint that lives in code, so the server action expands it; a saved template is a Form
+   * row, so it is deep-copied here. Both end with the same thing on screen — the new draft open
+   * in the builder.
+   */
+  public async useTemplate(choice: TemplateChoice): Promise<void> {
+    if (choice.kind === 'starter') {
+      await this.runAuthoring(HOME_ACTION.createFromTemplate, [
+        { Name: 'TemplateKey', Value: choice.key, Type: 'Input' },
+      ]);
       return;
     }
-    await this.runAuthoring(HOME_ACTION.createFromTemplate, [
-      { Name: 'TemplateKey', Value: this.selectedTemplateKey, Type: 'Input' },
-    ]);
+    await this.createFromSavedTemplate(choice);
+  }
+
+  private async createFromSavedTemplate(choice: TemplateChoice & { kind: 'saved' }): Promise<void> {
+    this.busy = true;
+    this.errorMessage = null;
+    this.cdr.markForCheck();
+    try {
+      const result = await this.clone.cloneForm(choice.templateId, {
+        name: choice.name,
+        isTemplate: false,
+      });
+      // Warnings describe references the copy could not carry over. They are shown rather than
+      // logged and forgotten, because the author is the only person who can fix a dropped rule.
+      if (result.warnings.length > 0) {
+        this.errorMessage = result.warnings.join(' ');
+      }
+      this.closePanel();
+      this.OpenEntityRecord.emit({
+        EntityName: HOME_ENTITY.forms,
+        RecordPKey: CompositeKey.FromID(result.formId),
+      });
+      await this.loadForms();
+    } catch (err) {
+      this.fail(err, `Could not create a form from "${choice.name}".`);
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /** The gallery deleted a template; nothing in the forms list changes, but say so cleanly. */
+  public onTemplateDeleted(): void {
+    this.errorMessage = null;
+    this.cdr.markForCheck();
+  }
+
+  /** The gallery hit a problem; the host owns the one alert bar on this page. */
+  public onTemplateFailure(message: string): void {
+    this.errorMessage = message;
+    this.cdr.markForCheck();
   }
 
   /** Shared authoring runner: run, open the new form, refresh the grid. */

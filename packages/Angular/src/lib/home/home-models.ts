@@ -62,23 +62,3 @@ export interface FormCategorySimpleRecord {
 export interface FormResponseSimpleRecord {
   FormID: string;
 }
-
-/** A starter template the user can scaffold from. */
-export interface StarterTemplateChoice {
-  key: string;
-  label: string;
-  icon: string;
-}
-
-/**
- * Curated starter gallery shown in the "From template" picker. Keys MUST match
- * the keys the `Forms: Create Form From Template` action knows (WP-C
- * starter-templates.ts: contact, rsvp, nps, lead-capture, application).
- */
-export const STARTER_TEMPLATES: readonly StarterTemplateChoice[] = [
-  { key: 'contact', label: 'Contact form', icon: 'fa-solid fa-envelope' },
-  { key: 'rsvp', label: 'Event RSVP', icon: 'fa-solid fa-calendar-check' },
-  { key: 'nps', label: 'NPS / feedback', icon: 'fa-solid fa-gauge-high' },
-  { key: 'lead-capture', label: 'Lead capture', icon: 'fa-solid fa-magnet' },
-  { key: 'application', label: 'Application', icon: 'fa-solid fa-file-signature' },
-] as const;

@@ -37,6 +37,36 @@ const LAYOUT_CSS = /* css */ `
 .fb-failure-close:hover { background: var(--mj-bg-surface-hover); }
 .fb-failure-close:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 
+/* "Saved as template" — the resting state of a control that has already been used. Success-toned
+   rather than muted: it reports an accomplished fact, and it uses the same token as the
+   neighbouring "Published" state so the two read as the same kind of statement.
+
+   THE ICON INHERITS, deliberately. It was briefly given --mj-status-success, the brighter,
+   "pure" green — which measured 2.28:1 against the light-theme topbar, under the 3:1 WCAG 1.4.11
+   floor for non-text graphics. --mj-status-success-text is the token that exists to be legible
+   as a foreground and clears it in both themes (5.02:1 light, 6.4:1+ dark). Green either way; the
+   difference is only that this green can be seen. */
+/* A quiet "there is more here than last time" marker on the drifted state. A dot rather than a
+   word: the button already says what it does, and the tooltip carries the detail — this only has
+   to make the difference from the plain state noticeable. */
+.fb-drift-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--mjf-radius-pill);
+  background: var(--mj-status-warning-text);
+}
+
+.fb-saved-template {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--mj-status-success-text);
+}
+
 .fb-top {
   flex: none;
   display: flex;

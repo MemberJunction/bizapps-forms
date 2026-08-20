@@ -24,7 +24,7 @@ import {
   type FormSimpleRecord,
   type FormSummaryRow,
 } from './home-models';
-import { buildFormRows, readFormIdFromParams } from './home-aggregations';
+import { buildFormRows, readFormIdFromResult } from './home-aggregations';
 
 /** Outcome of running an authoring/template action. */
 export interface AuthoringResult {
@@ -42,6 +42,10 @@ export class FormsHomeService {
     const [formsRes, catsRes, responsesRes] = (await this.rv.RunViews([
       {
         EntityName: HOME_ENTITY.forms,
+        // Templates are Form rows too (see form-clone.service.ts for why). They are offered in
+        // the gallery, never listed here — a template in the forms list reads as a form somebody
+        // forgot to finish, and its response count would always be zero.
+        ExtraFilter: 'IsTemplate = 0',
         ResultType: 'simple',
         Fields: ['ID', 'Name', 'Status', 'CategoryID', '__mj_UpdatedAt'],
         OrderBy: 'Name',
@@ -129,7 +133,7 @@ export class FormsHomeService {
     }
     return {
       success: true,
-      formId: readFormIdFromParams(result.Params),
+      formId: readFormIdFromResult(result),
       message: result.Message || 'Form created.',
     };
   }

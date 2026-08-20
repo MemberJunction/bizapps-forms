@@ -41,34 +41,7 @@ export const FORMS_HOME_CSS = /* css */ `
 
 .home-panel { display: flex; flex-direction: column; gap: var(--mjf-gap); }
 .home-panel-actions { display: flex; gap: var(--mjf-gap-sm); }
-
-.home-templates {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: var(--mjf-gap-sm);
-}
-.home-template {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--mjf-gap-sm);
-  padding: var(--mjf-card-pad-sm);
-  font: inherit;
-  font-size: var(--mjf-meta);
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-  color: var(--mj-text-primary);
-  background: var(--mj-bg-surface);
-  border: 1px solid var(--mj-border-subtle);
-  border-radius: var(--mjf-radius-sm);
-  transition: border-color var(--mjf-ease), background var(--mjf-ease);
-}
-.home-template i { font-size: 1.125rem; color: var(--mj-text-muted); transition: color var(--mjf-ease); }
-.home-template:hover:not(:disabled) { border-color: var(--mj-border-strong); background: var(--mj-bg-surface-hover); }
-.home-template:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
-.home-template.is-selected { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
-.home-template.is-selected i { color: var(--mj-brand-primary); }
+.home-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--mjf-gap-sm); }
 
 /* --- Small screens ---
    The row collapses from one line to two: identity on top, status and metrics

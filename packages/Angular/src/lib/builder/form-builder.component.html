@@ -29,6 +29,46 @@
     @if (statusMessage) {
       <span class="fb-status" role="status">{{ statusMessage }}</span>
     }
+    <!-- ORDER IS THE DESIGN: reuse → check → commit, left to right.
+         Each step is a larger commitment than the one before it, and the terminal, hardest-to-undo
+         action sits last where the eye finishes and the primary style claims it. Save-as-template
+         is the quietest because it is a once-per-form decision, unlike Preview and Publish which an
+         author reaches for constantly — but it is a real control on the bar now rather than hidden
+         behind an overflow, because an action nobody can find is an action nobody uses. -->
+    @switch (templateState) {
+      @case ('current') {
+        <!-- Confirmation, not an invitation: a second identical copy is not what a click should
+             produce. Derived by comparing content, so deleting the template in the gallery or
+             editing the form here both take this away again. -->
+        <span class="fb-saved-template" role="status" title="This form is already in your template gallery, unchanged.">
+          <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Saved as template
+        </span>
+      }
+      @case ('drifted') {
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--ghost"
+          [disabled]="busy || !tree"
+          [attr.title]="'This form has changed since “' + savedTemplateName + '” was saved. Save the newer version as its own template.'"
+          (click)="openTemplateDialog()"
+        >
+          <i class="fa-solid fa-bookmark" aria-hidden="true"></i> Save as template
+          <span class="fb-drift-dot" aria-hidden="true"></span>
+        </button>
+      }
+      @default {
+        <button
+          type="button"
+          class="mjf-btn mjf-btn--ghost"
+          [disabled]="busy || !tree"
+          title="Save this form to your template gallery so you can start from it again."
+          (click)="openTemplateDialog()"
+        >
+          <i class="fa-solid fa-bookmark" aria-hidden="true"></i> Save as template
+        </button>
+      }
+    }
+
     <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="busy || !tree" (click)="openPreview()">
       <i class="fa-solid fa-eye" aria-hidden="true"></i> Preview
     </button>
@@ -471,5 +511,16 @@
 
   @if (previewDef) {
     <mjf-form-preview-modal [definition]="previewDef" (closed)="closePreview()"></mjf-form-preview-modal>
+  }
+
+  @if (templateDialogOpen && tree) {
+    <mjf-save-as-template
+      [FormName]="record.Name"
+      [FormDescription]="record.Description"
+      [Busy]="busy"
+      [ErrorMessage]="templateDialogError"
+      (Confirmed)="saveAsTemplate($event)"
+      (Cancelled)="closeTemplateDialog()"
+    />
   }
 </div>

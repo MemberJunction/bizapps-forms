@@ -958,7 +958,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form ID
+        * * Display Name: Form
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     ScreenType: z.union([z.literal('Ending'), z.literal('Welcome')]).describe(`
@@ -1029,7 +1029,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Description: Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form
+        * * Display Name: Form Name
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -1283,12 +1283,12 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: Detailed description / purpose of the form`),
     CategoryID: z.string().nullable().describe(`
         * * Field Name: CategoryID
-        * * Display Name: Category ID
+        * * Display Name: Category
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Categories (vwFormCategories.ID)`),
     StyleID: z.string().nullable().describe(`
         * * Field Name: StyleID
-        * * Display Name: Style ID
+        * * Display Name: Style
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Styles (vwFormStyles.ID)`),
     Status: z.union([z.literal('Closed'), z.literal('Draft'), z.literal('Published')]).describe(`
@@ -1304,7 +1304,7 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: Lifecycle status: Draft, Published, or Closed`),
     OwnerUserID: z.string().nullable().describe(`
         * * Field Name: OwnerUserID
-        * * Display Name: Owner User ID
+        * * Display Name: Owner
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)`),
     RenderMode: z.union([z.literal('OneQuestion'), z.literal('Scroll')]).describe(`
@@ -1332,18 +1332,38 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    IsTemplate: z.boolean().describe(`
+        * * Field Name: IsTemplate
+        * * Display Name: Is Template
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response`),
+    TemplateSourceFormID: z.string().nullable().describe(`
+        * * Field Name: TemplateSourceFormID
+        * * Display Name: Template Source Form
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+        * * Description: On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source`),
     Category: z.string().nullable().describe(`
         * * Field Name: Category
-        * * Display Name: Category
+        * * Display Name: Category Name
         * * SQL Data Type: nvarchar(255)`),
     Style: z.string().nullable().describe(`
         * * Field Name: Style
-        * * Display Name: Style
+        * * Display Name: Style Name
         * * SQL Data Type: nvarchar(255)`),
     OwnerUser: z.string().nullable().describe(`
         * * Field Name: OwnerUser
-        * * Display Name: Owner
+        * * Display Name: Owner Name
         * * SQL Data Type: nvarchar(100)`),
+    TemplateSourceForm: z.string().nullable().describe(`
+        * * Field Name: TemplateSourceForm
+        * * Display Name: Template Source Name
+        * * SQL Data Type: nvarchar(255)`),
+    RootTemplateSourceFormID: z.string().nullable().describe(`
+        * * Field Name: RootTemplateSourceFormID
+        * * Display Name: Root Template Source
+        * * SQL Data Type: uniqueidentifier`),
 });
 
 export type mjBizAppsFormsFormEntityType = z.infer<typeof mjBizAppsFormsFormSchema>;
@@ -3761,7 +3781,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form ID
+    * * Display Name: Form
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -3930,7 +3950,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: Form
-    * * Display Name: Form
+    * * Display Name: Form Name
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -4540,6 +4560,38 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
     }
 
     /**
+    * Validate() method override for MJ_BizApps_Forms: Forms entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
+    * * Table-Level: Templates cannot be published, and published items cannot be marked as templates.
+    * @public
+    * @method
+    * @override
+    */
+    public override Validate(): ValidationResult {
+        const result = super.Validate();
+        this.ValidateTemplateStatus(result);
+        result.Success = result.Success && (result.Errors.length === 0);
+
+        return result;
+    }
+
+    /**
+    * Templates cannot be published, and published items cannot be marked as templates.
+    * @param result - the ValidationResult object to add any errors or warnings to
+    * @public
+    * @method
+    */
+    public ValidateTemplateStatus(result: ValidationResult) {
+    	if (this.IsTemplate && this.Status === "Published") {
+    		result.Errors.push(new ValidationErrorInfo(
+    			"Status",
+    			"An item cannot be marked as a template and have a status of Published at the same time.",
+    			this.Status,
+    			ValidationErrorType.Failure
+    		));
+    	}
+    }
+
+    /**
     * * Field Name: ID
     * * Display Name: ID
     * * SQL Data Type: uniqueidentifier
@@ -4580,7 +4632,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: CategoryID
-    * * Display Name: Category ID
+    * * Display Name: Category
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Categories (vwFormCategories.ID)
     */
@@ -4593,7 +4645,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: StyleID
-    * * Display Name: Style ID
+    * * Display Name: Style
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Styles (vwFormStyles.ID)
     */
@@ -4625,7 +4677,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: OwnerUserID
-    * * Display Name: Owner User ID
+    * * Display Name: Owner
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
     */
@@ -4688,8 +4740,36 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
     }
 
     /**
+    * * Field Name: IsTemplate
+    * * Display Name: Is Template
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response
+    */
+    get IsTemplate(): boolean {
+        return this.Get('IsTemplate');
+    }
+    set IsTemplate(value: boolean) {
+        this.Set('IsTemplate', value);
+    }
+
+    /**
+    * * Field Name: TemplateSourceFormID
+    * * Display Name: Template Source Form
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    * * Description: On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source
+    */
+    get TemplateSourceFormID(): string | null {
+        return this.Get('TemplateSourceFormID');
+    }
+    set TemplateSourceFormID(value: string | null) {
+        this.Set('TemplateSourceFormID', value);
+    }
+
+    /**
     * * Field Name: Category
-    * * Display Name: Category
+    * * Display Name: Category Name
     * * SQL Data Type: nvarchar(255)
     */
     get Category(): string | null {
@@ -4698,7 +4778,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: Style
-    * * Display Name: Style
+    * * Display Name: Style Name
     * * SQL Data Type: nvarchar(255)
     */
     get Style(): string | null {
@@ -4707,10 +4787,28 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: OwnerUser
-    * * Display Name: Owner
+    * * Display Name: Owner Name
     * * SQL Data Type: nvarchar(100)
     */
     get OwnerUser(): string | null {
         return this.Get('OwnerUser');
+    }
+
+    /**
+    * * Field Name: TemplateSourceForm
+    * * Display Name: Template Source Name
+    * * SQL Data Type: nvarchar(255)
+    */
+    get TemplateSourceForm(): string | null {
+        return this.Get('TemplateSourceForm');
+    }
+
+    /**
+    * * Field Name: RootTemplateSourceFormID
+    * * Display Name: Root Template Source
+    * * SQL Data Type: uniqueidentifier
+    */
+    get RootTemplateSourceFormID(): string | null {
+        return this.Get('RootTemplateSourceFormID');
     }
 }

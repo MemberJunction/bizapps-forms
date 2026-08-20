@@ -9,8 +9,8 @@ import {
   moveItemInArray,
   type CdkDragDrop,
 } from '@angular/cdk/drag-drop';
-import { CompositeKey } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
+import { MJEventType, MJGlobal, RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
   mjBizAppsFormsFormEntity,
@@ -32,6 +32,14 @@ import { ImportQuestionsComponent } from './import-questions.component';
 import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
+import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
+import { FormCloneService } from '../templates/form-clone.service';
+import { FormTemplatesService } from '../templates/form-templates.service';
+import {
+  templateFingerprint,
+  templateControlState,
+  type TemplateControlState,
+} from '../templates/template-fingerprint';
 import { ResponsesTabComponent } from '../responses/responses-tab.component';
 import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
@@ -76,6 +84,12 @@ import {
  * form — build it, style it, distribute it, decide what happens on submit, then read what
  * came back. Collection follows configuration.
  */
+/**
+ * The handle returned by subscribing to MJGlobal's event stream. Derived from the API because
+ * rxjs is not a dependency of this package (it arrives through Angular in the host).
+ */
+type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
+
 type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
 
 /**
@@ -120,8 +134,9 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     FormPreviewModalComponent,
     AutomationTabComponent,
     ResponsesTabComponent,
+    SaveAsTemplateDialogComponent,
   ],
-  providers: [BuilderStateService, DesignStateService, PublishService],
+  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
@@ -131,6 +146,8 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected readonly state = inject(BuilderStateService);
   private readonly design = inject(DesignStateService);
   private readonly publisher = inject(PublishService);
+  private readonly clone = inject(FormCloneService);
+  private readonly templates = inject(FormTemplatesService);
 
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
   protected tree: FormTree | null = null;
@@ -155,6 +172,41 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected activeTab: BuilderTab = 'build';
   protected busy = false;
   protected statusMessage = '';
+
+  /** Whether the "Save as template" dialog is up. */
+  protected templateDialogOpen = false;
+  /** The template saved from this form, if one still exists. */
+  protected savedTemplateId: string | null = null;
+  /** Its name, for the tooltip that explains what the form has drifted away from. */
+  protected savedTemplateName: string | null = null;
+  /** Content fingerprint of that template; null when there is none to compare against. */
+  private savedTemplateFingerprint: string | null = null;
+  /** Any problem with the save the dialog needs to show (a name already in use). */
+  protected templateDialogError: string | null = null;
+  /** MJGlobal subscription behind {@link watchForTemplateChanges}; released on destroy. */
+  private templateChanges?: EventSubscription;
+
+  /**
+   * Whether to offer saving, confirm one exists, or offer again because the form has changed.
+   *
+   * Derived on every read from the two fingerprints, never latched — see
+   * `template-fingerprint.ts` for why the latch version was wrong in both directions.
+   */
+  protected get templateState(): TemplateControlState {
+    return templateControlState({
+      savedFingerprint: this.savedTemplateFingerprint,
+      draftFingerprint: this.templateDraftFingerprint,
+    });
+  }
+
+  /** This form's own content fingerprint, in the same terms the template was measured in. */
+  private get templateDraftFingerprint(): string | null {
+    return this.tree
+      ? templateFingerprint(
+          buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, []),
+        )
+      : null;
+  }
 
   /**
    * Fingerprint of the snapshot currently on the public link; null when never published.
@@ -288,6 +340,8 @@ export class FormBuilderComponent extends BaseFormComponent {
       }
     }
     await this.refreshPublishState();
+    await this.refreshSavedTemplate(this.record.ID);
+    this.watchForTemplateChanges();
     this.busy = false;
     this.announceReady();
   }
@@ -809,6 +863,132 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   // -- publish --------------------------------------------------------------
+
+  // --- Templates -------------------------------------------------------------
+
+  /**
+   * Notice when the template saved from this form is deleted somewhere else.
+   *
+   * The builder stays mounted while its tab is open, so without this, deleting a template in the
+   * gallery left the form still announcing "Saved as template" — the inconsistency that prompted
+   * this whole control being derived rather than latched. Same MJGlobal entity-event mechanism the
+   * forms list and the gallery use.
+   */
+  /**
+   * Release the template listener. Overrides rather than shadows: `BaseFormComponent` does real
+   * teardown of its own, and a subscription that outlives its component keeps reloading trees for
+   * a form nobody is looking at.
+   */
+  public override ngOnDestroy(): void {
+    this.templateChanges?.unsubscribe();
+    this.templateChanges = undefined;
+    super.ngOnDestroy();
+  }
+
+  private watchForTemplateChanges(): void {
+    if (this.templateChanges) {
+      return;
+    }
+    this.templateChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+        return;
+      }
+      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
+      // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
+      // and re-reading the template on each one would load a tree per keystroke.
+      if (args?.type !== 'delete' || args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.Form) {
+        return;
+      }
+      if (!this.tree) {
+        return;
+      }
+      void this.refreshSavedTemplate(this.tree.form.ID);
+    });
+  }
+
+  protected openTemplateDialog(): void {
+    this.templateDialogOpen = true;
+    this.templateDialogError = null;
+    this.cdr.markForCheck();
+  }
+
+  protected closeTemplateDialog(): void {
+    this.templateDialogOpen = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Re-read the template saved from this form and fingerprint its content.
+   *
+   * Both halves matter: the id answers "does one exist" (a deleted template must stop the form
+   * claiming to be saved), and the fingerprint answers "is it still the same form", which is the
+   * question an author actually has once they have kept editing.
+   */
+  private async refreshSavedTemplate(formId: string): Promise<void> {
+    this.savedTemplateId = await this.templates.findTemplateSavedFrom(formId);
+    this.savedTemplateName = null;
+    this.savedTemplateFingerprint = null;
+    if (this.savedTemplateId) {
+      const templateForm = await this.templates.loadTemplateForm(this.savedTemplateId);
+      if (templateForm) {
+        this.savedTemplateName = templateForm.Name;
+        const templateTree = await this.state.loadTree(templateForm);
+        const style = templateForm.StyleID
+          ? await this.design.loadStyleById(templateForm.StyleID)
+          : undefined;
+        this.savedTemplateFingerprint = templateFingerprint(
+          buildPublishedDefinition(templateTree, style ?? undefined, FINGERPRINT_VERSION_ID, []),
+        );
+      }
+    }
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Copy this form into the template gallery.
+   *
+   * Pending edits are flushed first for the same reason publish flushes them: the copy is made
+   * from the database rows, so an edit still sitting in the debounce would be missing from a
+   * template that looks like it was taken from what is on screen.
+   */
+  protected async saveAsTemplate(request: SaveAsTemplateRequest): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    const formId = this.tree.form.ID;
+    this.busy = true;
+    this.statusMessage = '';
+    this.templateDialogError = null;
+    this.cdr.markForCheck();
+    try {
+      // Refuse a duplicate name BEFORE writing anything: two cards reading "Client intake" are
+      // indistinguishable, and the copy is already made by the time a later check could fire.
+      if ((await this.templates.templateNameTaken(request.name)) === true) {
+        this.templateDialogError = `A template called “${request.name}” already exists. Give this one a name that tells them apart.`;
+        return;
+      }
+      await this.state.flushPendingSaves();
+      const result = await this.clone.cloneForm(formId, {
+        name: request.name,
+        description: request.description,
+        isTemplate: true,
+        sourceFormId: formId,
+      });
+      this.templateDialogOpen = false;
+      await this.refreshSavedTemplate(formId);
+      this.statusMessage =
+        result.warnings.length > 0
+          ? `Saved as a template, with notes: ${result.warnings.join(' ')}`
+          : `Saved "${request.name}" to your templates.`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save this form as a template.';
+      LogError(message);
+      this.statusMessage = message;
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
 
   protected async publish(): Promise<void> {
     if (!this.tree || this.busy) {

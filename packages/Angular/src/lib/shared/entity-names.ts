@@ -24,6 +24,7 @@ export const FORMS_ENTITY = {
   FormDistribution: 'MJ_BizApps_Forms: Form Distributions',
   FormAutomation: 'MJ_BizApps_Forms: Form Automations',
   FormAutomationRun: 'MJ_BizApps_Forms: Form Automation Runs',
+  FormEntityBinding: 'MJ_BizApps_Forms: Form Entity Bindings',
   FormEntityBindingRecord: 'MJ_BizApps_Forms: Form Entity Binding Records',
   FormUpload: 'MJ_BizApps_Forms: Form Uploads',
 } as const;
