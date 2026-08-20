@@ -224,6 +224,41 @@ describe('Forms: Analyze Written Responses', () => {
     expect(model.analyze).not.toHaveBeenCalled();
   });
 
+  it('reports FAILURE when it could not save a single score', async () => {
+    // OBSERVED IN PRODUCTION. The `Forms Automation Runner` role holds CanRead but not
+    // CanUpdate on Form Response Answers, so every `answer.Save()` was refused with a
+    // permission error — and the action still returned Success, so the automation run was
+    // recorded as "Succeeded" while every score it had just paid an AI call to produce was
+    // thrown away. A step whose entire output was discarded has not succeeded.
+    //
+    // Deliberately distinct from the partial case below, which stays best-effort: one answer
+    // refusing to save is a per-record problem, while NONE of them saving is the step failing.
+    state.answerRows = [
+      { ID: 'a1', QuestionID: 'q1', TextValue: 'first', NumericValue: null, BooleanValue: null, JSONValue: null },
+      { ID: 'a2', QuestionID: 'q2', TextValue: 'second', NumericValue: null, BooleanValue: null, JSONValue: null },
+    ];
+    state.questionRows = [
+      { ID: 'q1', QuestionType: 'LongText', Prompt: 'Q1' },
+      { ID: 'q2', QuestionType: 'LongText', Prompt: 'Q2' },
+    ];
+    state.answerSaveResult = () => false; // nothing can be written
+    setResponseAnalyzerModel(
+      stubModel([
+        { score: 70, rationale: 'ok' },
+        { score: 80, rationale: 'good' },
+      ]),
+    );
+
+    const params = makeParams();
+    const result = await new AnalyzeWrittenResponsesAction().Run(params);
+
+    expect(result.Success).toBe(false);
+    // The message has to say the scores were not stored — "analyzed 0" reads like there was
+    // nothing to analyze, which is the opposite of what happened.
+    expect(result.Message).toMatch(/could not be saved|not stored|none/i);
+    expect(outValue(params, 'AnalyzedCount')).toBe(0);
+  });
+
   it('best-effort: a failed answer Save is skipped, others still count', async () => {
     state.answerRows = [
       { ID: 'a1', QuestionID: 'q1', TextValue: 'first', NumericValue: null, BooleanValue: null, JSONValue: null },

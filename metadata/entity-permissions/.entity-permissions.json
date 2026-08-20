@@ -120,7 +120,7 @@
       "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
       "CanRead": true,
       "CanCreate": false,
-      "CanUpdate": false,
+      "CanUpdate": true,
       "CanDelete": false
     },
     "primaryKey": {

@@ -104,6 +104,27 @@ export interface PipelineContext {
 }
 
 /** Convenience for a single-error failure result. */
+/**
+ * What to append to the submit log line when the pipeline refused.
+ *
+ * Without this a refusal logged its stage breakdown and nothing else, so the only way to learn
+ * WHY was to notice which stage came last and read this file to see which gate returns before
+ * its own `timer.mark`. That is a diagnosis the operator should never have to perform: five
+ * refusals in one real session were indistinguishable from each other in the log, and the
+ * respondent — who cannot fix anything — was the only party actually told what happened.
+ *
+ * The respondent's own message is reused verbatim rather than paraphrased, so the line an
+ * operator reads and the sentence the respondent saw are the same text, and neither can drift
+ * into describing a different refusal from the other.
+ */
+function refusalSuffix(result: FormSubmissionResult): string {
+  if (result.success) {
+    return '';
+  }
+  const reason = result.errors?.[0]?.message?.trim();
+  return ` — REFUSED: ${reason || 'no reason given'}`;
+}
+
 function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
   return { success: false, status: undefined, errors: errors ?? [{ message }] };
 }
@@ -175,8 +196,8 @@ export async function runSubmitPipeline(
   // trip or a dedupe query can each outweigh the write. `report` is called on EVERY exit,
   // including refusals, because a slow rejection is still a slow request.
   const timer = createStageTimer();
-  const report = <T>(result: T): T => {
-    LogStatus(`[Forms] submit ${formatTimings(timer.finish())}`);
+  const report = <T extends FormSubmissionResult>(result: T): T => {
+    LogStatus(`[Forms] submit ${formatTimings(timer.finish())}${refusalSuffix(result)}`);
     return result;
   };
 
