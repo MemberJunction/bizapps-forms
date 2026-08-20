@@ -69,11 +69,11 @@ describe('the sending state is a scrim, and its message stays in view', () => {
     // exists to prevent.
     //
     // A review argued `fixed` cannot work because `:host` sets `container-type: inline-size` and
-    // layout containment is specified to make an element a containing block for fixed
-    // descendants. Measured in Chrome with this file's real `:host`/`.mjf-shell` rules and a
-    // 4000px form: the scrim's box IS the viewport at scroll 0, 2000 and 3500, and
-    // `getComputedStyle(host).contain` is `none`. The measurement is recorded in the CSS so the
-    // next reader does not re-litigate it from the spec.
+    // layout containment makes an element a containing block for fixed descendants. That holds
+    // for `contain: layout`, but `container-type` no longer applies layout containment (CSS
+    // Conditional Rules 5 — style + inline-size containment and an independent formatting
+    // context only). Confirmed by measuring the real rules against a 4000px form. The reasoning
+    // is recorded in the CSS so the next reader does not re-litigate it.
     expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*position:\s*fixed/);
     expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*inset:\s*0/);
   });

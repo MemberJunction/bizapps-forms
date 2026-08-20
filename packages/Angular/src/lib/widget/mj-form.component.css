@@ -343,12 +343,20 @@
      feedback where their eyes were" failure this state exists to prevent.
 
      `container-type: inline-size` on `:host` does NOT break this, which is worth recording
-     because it looks like it should: layout containment is specified to make an element a
-     containing block for fixed-position descendants, and a review flagged it on that basis.
-     Measured instead of argued, with this file's real `:host` and `.mjf-shell` rules and a
-     4000px form: the scrim's box is the viewport (top 0, height = innerHeight) and the message
-     centres at the same point at scroll 0, 2000 and 3500. `getComputedStyle(host).contain` is
-     `none`. So the containing block here is the viewport, and it stays that way. */
+     because it looks like it should — a review flagged it on the grounds that layout containment
+     makes an element a containing block for fixed-position descendants. That is true of
+     `contain: layout`, and it is no longer true of `container-type`: the property moved to CSS
+     Conditional Rules 5, which applies style containment, inline-size containment and an
+     independent formatting context, but NOT layout containment (the CSSWG dropped it precisely
+     because it trapped fixed descendants). Early implementations did trap them, which is where
+     the folklore comes from. Confirmed by measuring this file's real `:host` and `.mjf-shell`
+     rules against a 4000px form: the scrim's box is the viewport at scroll 0, 2000 and 3500,
+     identical to a no-containment control, while a `contain: layout` control reproduces the
+     4040px box and the off-screen message.
+
+     So the thing to guard against here is `contain: layout` (or `contain: strict`/`content`) on
+     `:host`, not the container query. Adding one would silently re-anchor this scrim to the form
+     and put the message back out of sight. */
   position: fixed;
   inset: 0;
   /* Above the sticky progress bar (z-index 2 in form-scroll), which is opaque and would otherwise
