@@ -146,6 +146,15 @@ export class BuilderStateService {
       this.user,
     );
     if (!result.Success) {
+      // A failed read is NOT "this form has no screens", and the difference bites: `addScreen`
+      // guards against a second Welcome by looking for an existing one in this list, and computes
+      // a new Ending's `IsDefault` as "no Ending exists yet". An empty list defeats both.
+      //
+      // Reported rather than thrown, deliberately. `loadPages`, `loadQuestions` and `loadOptions`
+      // all answer a failed read the same way, and `loadTree`'s caller does not catch — so
+      // throwing only here would take the whole builder down over the least important of the
+      // four, while a failed QUESTIONS read still loaded fine. Making all four fail loudly is the
+      // right fix and is bigger than this change; tracked rather than half-done here.
       LogError(`Failed to load form screens: ${result.ErrorMessage}`);
       return [];
     }

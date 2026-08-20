@@ -148,10 +148,17 @@ export class PublishService {
   }
 
   /**
-   * The snapshot currently serving the public link, or null when nothing is published.
+   * The snapshot currently serving the public link, or null when there is not one to read.
    *
    * The builder compares this against the draft to decide whether there is anything to
    * publish — see `publish-fingerprint.ts` for why that is a comparison and not a flag.
+   *
+   * Null does NOT mean "nothing is published". It means no baseline was obtained, which covers a
+   * form that has never been published AND a read that failed, and the caller cannot tell them
+   * apart. That is deliberate but it is also a trap: treating null as "up to date" is what made
+   * the builder show a static "Published" badge, with no publish control, over a draft full of
+   * edits that were never going live. `publishControlState` is where that is handled — anything
+   * else consuming this must fail in the same direction.
    */
   public async latestPublishedSnapshot(formId: string): Promise<string | null> {
     const rv = new RunView();

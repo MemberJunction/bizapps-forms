@@ -8,7 +8,8 @@
  */
 
 /** Base path of MJAPI's response-file download route. Mirrors `Server/src/download/config.ts`. */
-export const DOWNLOAD_PATH = '/forms/files';
+
+import { serverErrorText } from '../shared/server-error-text';export const DOWNLOAD_PATH = '/forms/files';
 
 /**
  * The URL to fetch one response file from.
@@ -48,25 +49,4 @@ export function downloadErrorMessage(status: number, body: unknown): string {
     return 'That file is no longer available.';
   }
   return 'The download did not go through. Please try again.';
-}
-
-/** The `error` string from the route's JSON body, or null when there is not one. */
-function serverErrorText(body: unknown): string | null {
-  const parsed = typeof body === 'string' ? tryParse(body) : body;
-  if (typeof parsed === 'object' && parsed !== null) {
-    const error = (parsed as Record<string, unknown>)['error'];
-    if (typeof error === 'string' && error.trim().length > 0) {
-      return error.trim();
-    }
-  }
-  return null;
-}
-
-/** JSON.parse that answers null instead of throwing — a proxy's HTML error page is not JSON. */
-function tryParse(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }

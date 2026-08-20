@@ -65,7 +65,15 @@ describe('assetErrorMessage', () => {
     expect(assetErrorMessage(403, null)).toMatch(/permission/i);
     expect(assetErrorMessage(413, null)).toMatch(/too large/i);
     expect(assetErrorMessage(415, null)).toMatch(/not an image/i);
-    expect(assetErrorMessage(500, null)).toMatch(/HTTP 500/);
+    // A server-side failure IS worth retrying, so it says so — but without naming a status
+    // code. "HTTP 500" is a number that means nothing outside a spec, and the author can act on
+    // "try again" without it.
+    expect(assetErrorMessage(500, null)).toMatch(/try again/i);
+    expect(assetErrorMessage(500, null)).not.toMatch(/HTTP|500/);
+    // A 4xx the list above does not name is still a verdict on the file, so it must NOT invite a
+    // retry of the same one — that was the shipped copy's mistake.
+    expect(assetErrorMessage(422, null)).toMatch(/different file/i);
+    expect(assetErrorMessage(422, null)).not.toMatch(/HTTP|422/);
   });
 
   it('ignores a blank server message instead of showing an empty error', () => {

@@ -49,7 +49,12 @@ import {
 } from './question-type-catalog';
 import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
-import { definitionFingerprint, storedSnapshotFingerprint } from './publish-fingerprint';
+import {
+  definitionFingerprint,
+  storedSnapshotFingerprint,
+  publishControlState,
+  type PublishControlState,
+} from './publish-fingerprint';
 import { isValidReorder } from './reorder';
 import { nextOptionLabel } from './option-labels';
 import {
@@ -212,9 +217,12 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   protected builderReady = false;
 
-  protected get publishState(): 'publish' | 'update' | 'current' {
-    if (this.dirty) return 'update';
-    return this.record.Status === 'Published' ? 'current' : 'publish';
+  protected get publishState(): PublishControlState {
+    return publishControlState({
+      dirty: this.dirty,
+      hasPublishedBaseline: this.publishedFingerprint !== null,
+      status: this.record.Status,
+    });
   }
 
   /**

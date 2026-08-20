@@ -21,6 +21,7 @@
 import { Injectable } from '@angular/core';
 
 import { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
+import { serverErrorText } from '../shared/server-error-text';
 
 /** Route MJAPI serves the authoring-asset endpoints from. */
 const ASSET_PATH = '/forms/asset';
@@ -82,10 +83,9 @@ export function parseAssetResponse(raw: unknown): UploadedAsset {
  * proxy or a crash can produce a bare status with no body.
  */
 export function assetErrorMessage(status: number, body: unknown): string {
-  const serverMessage =
-    typeof body === 'object' && body !== null ? (body as Record<string, unknown>)['error'] : undefined;
-  if (typeof serverMessage === 'string' && serverMessage.trim()) {
-    return serverMessage;
+  const fromServer = serverErrorText(body);
+  if (fromServer) {
+    return fromServer;
   }
   if (status === 401 || status === 403) {
     return 'You do not have permission to upload images for this form.';
@@ -96,7 +96,12 @@ export function assetErrorMessage(status: number, body: unknown): string {
   if (status === 415) {
     return 'That file is not an image we can use.';
   }
-  return `Upload failed (HTTP ${status}). Please try again.`;
+  // Deliberately names neither a status code nor a retry for the remaining 4xx: those are
+  // verdicts on the FILE, and retrying the same one produces the same answer forever.
+  if (status >= 400 && status < 500) {
+    return 'That image was not accepted. Try a different file.';
+  }
+  return 'The upload did not go through. Please try again.';
 }
 
 @Injectable({ providedIn: 'root' })

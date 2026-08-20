@@ -117,3 +117,47 @@ export function storedSnapshotFingerprint(snapshotJson: string | null | undefine
     return null;
   }
 }
+
+/** What the publish control should offer the author. */
+export type PublishControlState = 'publish' | 'update' | 'current';
+
+/** What {@link publishControlState} needs to decide. */
+export interface PublishControlInputs {
+  /** The draft differs from the published baseline. Requires both fingerprints to be known. */
+  dirty: boolean;
+  /**
+   * Whether a published baseline was actually READ.
+   *
+   * False covers three different situations that used to be indistinguishable: the form has
+   * never been published, the `FormVersion` read failed, and the stored snapshot would not
+   * parse. Only the first is benign.
+   */
+  hasPublishedBaseline: boolean;
+  /** `Form.Status` — what the record claims about itself. */
+  status: string | null | undefined;
+}
+
+/**
+ * Which publish control to show.
+ *
+ * `'current'` renders as a static "Published" badge with NO BUTTON, so it is the one answer the
+ * builder cannot afford to get wrong: it tells the author their edits are live and removes the
+ * only control that would make them live.
+ *
+ * Claiming it requires a baseline. Without one there is nothing to compare the draft against, so
+ * `dirty` is false for lack of evidence rather than because the form is up to date — and a
+ * Published form whose version row could not be read therefore rendered "Published" over a draft
+ * full of unpublished edits, with no way to publish them. `storedSnapshotFingerprint` already
+ * documents the intended safe direction ("makes the builder offer Publish… the worst case is
+ * republishing something already live, versus hiding changes that never reach a respondent");
+ * this is where that intent has to be honoured, because the status check was overriding it.
+ */
+export function publishControlState(inputs: PublishControlInputs): PublishControlState {
+  if (inputs.dirty) {
+    return 'update';
+  }
+  if (!inputs.hasPublishedBaseline) {
+    return 'publish';
+  }
+  return inputs.status === 'Published' ? 'current' : 'publish';
+}

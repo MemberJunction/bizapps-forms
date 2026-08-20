@@ -3,6 +3,7 @@ import {
   canonicalJson,
   definitionFingerprint,
   storedSnapshotFingerprint,
+  publishControlState,
 } from './publish-fingerprint';
 
 /** A minimal snapshot shaped like `buildPublishedDefinition` output. */
@@ -127,5 +128,40 @@ describe('storedSnapshotFingerprint', () => {
     // No baseline means the builder offers Publish — republishing something already live
     // is recoverable; hiding real changes from respondents is not.
     expect(storedSnapshotFingerprint('{not json')).toBeNull();
+  });
+});
+
+describe('publishControlState', () => {
+  it('offers Publish when there is no baseline, even on a form marked Published', () => {
+    // THE DEFECT. A Published form whose FormVersion read failed (or whose snapshot would not
+    // parse) has no baseline, so `dirty` is false for lack of evidence. The old rule then read
+    // the status and returned 'current' — a static "Published" badge with no button. The author
+    // edits ten questions, the header assures them everything is live, and there is no control
+    // that would make it so. `storedSnapshotFingerprint` says the safe direction is to offer
+    // Publish; this is where that has to actually happen.
+    expect(publishControlState({ dirty: false, hasPublishedBaseline: false, status: 'Published' })).toBe(
+      'publish',
+    );
+  });
+
+  it('still says current for a published form that genuinely matches its baseline', () => {
+    expect(publishControlState({ dirty: false, hasPublishedBaseline: true, status: 'Published' })).toBe(
+      'current',
+    );
+  });
+
+  it('offers Publish for a draft that has never been published', () => {
+    expect(publishControlState({ dirty: false, hasPublishedBaseline: false, status: 'Draft' })).toBe(
+      'publish',
+    );
+  });
+
+  it('offers Update whenever the draft differs, whatever the status says', () => {
+    expect(publishControlState({ dirty: true, hasPublishedBaseline: true, status: 'Published' })).toBe(
+      'update',
+    );
+    expect(publishControlState({ dirty: true, hasPublishedBaseline: true, status: 'Draft' })).toBe(
+      'update',
+    );
   });
 });

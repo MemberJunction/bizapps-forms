@@ -14,6 +14,7 @@
 import { Injectable, inject } from '@angular/core';
 
 import { FORMS_API_CONFIG, deriveUploadUrl } from './forms-api.config';
+import { serverErrorText } from '../../shared/server-error-text';
 import type { IFormsUploadService, UploadedFile, UploadProgress } from './form-upload.interface';
 
 /**
@@ -69,36 +70,6 @@ export function uploadErrorMessage(status: number, body: unknown): string {
     return 'That file was not accepted. Try a different file.';
   }
   return 'The upload did not go through. Please try again.';
-}
-
-/**
- * The `error` string from the endpoint's response body, or null if there is not one.
- *
- * Takes `unknown` because the two callers hand it different things and neither should have
- * to care: the XHR is configured with `responseType = 'json'`, so `xhr.response` is an
- * already-parsed object, while tests and any text-mode caller pass the raw string.
- * Accepting only a string is what produced the InvalidStateError below.
- */
-function serverErrorText(body: unknown): string | null {
-  const parsed = typeof body === 'string' ? tryParse(body) : body;
-  if (typeof parsed === 'object' && parsed !== null) {
-    const error = (parsed as Record<string, unknown>)['error'];
-    // A blank string is not a message; falling through to the fallback beats showing the
-    // respondent an empty error.
-    if (typeof error === 'string' && error.trim().length > 0) {
-      return error.trim();
-    }
-  }
-  return null;
-}
-
-/** JSON.parse that answers with null instead of throwing — a proxy's HTML page is not JSON. */
-function tryParse(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
 }
 
 /**
