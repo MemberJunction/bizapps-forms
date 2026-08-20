@@ -352,10 +352,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     for (const pageId of fresh) {
       this.bankedSubmitPoints.add(pageId);
     }
-    // `settle()` rather than a direct save: it cancels the pending debounce and awaits any save
-    // already in flight, so this cannot put a second write carrying the same clientResponseId on
-    // the wire — the PK-collision source the submit path guards against the same way.
-    await this.autosave?.settle();
+    // `flushNow()` rather than `settle()`: settle CANCELS the pending debounce without firing it,
+    // so banking a checkpoint with it discarded the very answers the checkpoint promised to keep —
+    // and left the page marked banked, so nothing retried. flushNow writes now and awaits the
+    // write, still never overlapping two requests on the same clientResponseId.
+    await this.autosave?.flushNow();
   }
 
   protected async onSubmit(): Promise<void> {

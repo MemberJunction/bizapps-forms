@@ -30,6 +30,31 @@ function snapshot(overrides: Record<string, unknown> = {}): Record<string, unkno
 }
 
 describe('definitionFingerprint', () => {
+  it('sees an automation-only edit', () => {
+    // Automations are publishable content: `fireHooksSafely` dispatches from the SNAPSHOT's
+    // `automations` array, so an automation the author added but could never publish never runs.
+    // While this key was ignored, adding one left the header on a static "Published" badge with
+    // no publish control at all.
+    const before = definitionFingerprint(snapshot());
+    const after = definitionFingerprint(
+      snapshot({
+        automations: [
+          { id: 'a1', name: 'Send confirmation', targetType: 'Action', trigger: 'OnComplete', executionMode: 'Sync', displayOrder: 1, continueOnError: true, isActive: true },
+        ],
+      }),
+    );
+
+    expect(after).not.toBe(before);
+  });
+
+  it('sees an automation being turned off', () => {
+    const active = { id: 'a1', name: 'Send confirmation', targetType: 'Action', trigger: 'OnComplete', executionMode: 'Sync', displayOrder: 1, continueOnError: true, isActive: true };
+    const on = definitionFingerprint(snapshot({ automations: [active] }));
+    const off = definitionFingerprint(snapshot({ automations: [{ ...active, isActive: false }] }));
+
+    expect(off).not.toBe(on);
+  });
+
   it('reports no difference for an unchanged draft', () => {
     expect(definitionFingerprint(snapshot())).toBe(definitionFingerprint(snapshot()));
   });

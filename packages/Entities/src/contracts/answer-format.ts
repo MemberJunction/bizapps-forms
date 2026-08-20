@@ -25,18 +25,67 @@ import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
 import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS } from './question-types';
 import type { FormQuestionType } from './question-types';
+import type { JSONValue } from './json-value';
+
+/**
+ * What a question must tell this module about itself.
+ *
+ * Structurally a subset of `PublishedFormQuestion`, so both callers pass their question straight
+ * in — deliberately NOT importing that type, because `form-definition.ts` imports this module's
+ * sibling and a cycle here would be a hard one to unpick.
+ *
+ * The signature takes the QUESTION rather than its `type` for one reason: an option-based answer
+ * cannot be validated without the options, and a parameter you can omit is a parameter that gets
+ * omitted. Passing the type alone was the whole defect below.
+ */
+export interface AnswerFormatQuestion {
+  type: FormQuestionType;
+  /** Authored options. Absent or empty means membership cannot be checked, so it is not. */
+  options?: readonly AnswerFormatOption[];
+  /** Per-type open settings — `min`/`max` for `OpinionScale`. */
+  settings?: Record<string, JSONValue>;
+}
+
+/** The parts of an authored option this module reads. */
+export interface AnswerFormatOption {
+  value: string;
+  matrixAxis?: 'Row' | 'Column';
+}
+
+/** Default `OpinionScale` bounds when the author set none. Must match what the widget renders. */
+const OPINION_SCALE_DEFAULT_MIN = 1;
+const OPINION_SCALE_DEFAULT_MAX = 10;
+
+/**
+ * The discrete points an `OpinionScale` offers, from its authored settings.
+ *
+ * Exported and shared because the widget renders the scale from these bounds and the server
+ * validates against them: derived twice, they drift, and the respondent gets told that the number
+ * they were just shown and allowed to click is out of range.
+ *
+ * A `max` at or below `min` would render an empty scale — nothing to click, and no way to answer a
+ * required question — so it is widened to `min + 1` rather than left unanswerable.
+ */
+export function opinionScaleBounds(settings?: Record<string, JSONValue>): { min: number; max: number } {
+  const rawMin = settings?.['min'];
+  const min = typeof rawMin === 'number' ? Math.trunc(rawMin) : OPINION_SCALE_DEFAULT_MIN;
+  const rawMax = settings?.['max'];
+  const parsedMax = typeof rawMax === 'number' ? Math.trunc(rawMax) : OPINION_SCALE_DEFAULT_MAX;
+  return { min, max: parsedMax > min ? parsedMax : min + 1 };
+}
 
 /**
  * Check an answered value against the format its question TYPE implies.
  *
- * @param type  the question's type
- * @param value the answered value
+ * @param question the question as authored — its type, its options and its settings
+ * @param value    the answered value
  * @returns a human-readable message when the value does not fit the type, else `undefined`
  */
 export function validateAnswerFormat(
-  type: FormQuestionType,
+  question: AnswerFormatQuestion,
   value: AnswerValue,
 ): string | undefined {
+  const { type } = question;
   // An unanswered question has no format to be wrong about — that is the `isRequired` check's
   // business. Enforced here rather than left as a precondition on callers, because getting it
   // wrong is silent and plausible: `String(null)` is `'null'`, a non-empty string that fails
@@ -50,8 +99,15 @@ export function validateAnswerFormat(
     case 'Number':
     case 'Rating':
     case 'NPS':
-    case 'OpinionScale':
       return coerceAnswerToNumber(value) === undefined ? 'Enter a number.' : undefined;
+    case 'OpinionScale':
+      return validateOpinionScale(question, value);
+    case 'SingleChoice':
+    case 'Dropdown':
+    case 'PictureChoice':
+      return validateSingleChoice(question, value);
+    case 'MultiChoice':
+      return validateMultiChoice(question, value);
     case 'Phone':
       return isPhone(String(value)) ? undefined : 'Enter a valid phone number.';
     case 'Website':
@@ -66,13 +122,13 @@ export function validateAnswerFormat(
       // "false" that a caller posting straight at the mutation would send.
       return typeof value === 'boolean' ? undefined : 'Select yes or no.';
     case 'Ranking':
-      return isStringArray(value) ? undefined : 'Rank the options in order.';
+      return validateRanking(question, value);
     case 'Address':
       return isStringRecord(value) ? undefined : 'Enter an address.';
     case 'ContactInfo':
       return validateContactInfo(value);
     case 'Matrix':
-      return isMatrixAnswer(value) ? undefined : 'Answer each row.';
+      return validateMatrix(question, value);
     default:
       return undefined;
   }
@@ -103,7 +159,7 @@ function isWebUrl(text: string): boolean {
 }
 
 /** A plain string array — the stored shape of a `Ranking` answer (option values, best first). */
-function isStringArray(value: AnswerValue): boolean {
+function isStringArray(value: AnswerValue): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === 'string');
 }
 
@@ -230,6 +286,102 @@ export function validateCompositeParts(
  * responses exist, and a form that stops reading its old answers on a settings change is worse
  * than one that accepts both.
  */
+/**
+ * The values the author actually offered on an axis, or null when there are none to check against.
+ *
+ * Null and empty set are the same thing here and both mean "do not check": a question authored
+ * without options yet, or imported from a source that did not carry them, must not have every
+ * answer rejected. Membership checking is a floor on top of a populated option list, never a
+ * requirement that one exists.
+ */
+function offeredValues(
+  question: AnswerFormatQuestion,
+  axis?: 'Row' | 'Column',
+): ReadonlySet<string> | null {
+  const options = question.options ?? [];
+  const matching = axis
+    ? options.filter((o) => (o.matrixAxis ?? 'Row') === axis)
+    : options;
+  return matching.length > 0 ? new Set(matching.map((o) => o.value)) : null;
+}
+
+/** One value, and it has to be one the author offered. */
+function validateSingleChoice(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
+  if (typeof value !== 'string') {
+    return 'Choose one of the offered options.';
+  }
+  const offered = offeredValues(question);
+  return !offered || offered.has(value) ? undefined : 'Choose one of the offered options.';
+}
+
+/** Any number of values, each offered, none repeated. */
+function validateMultiChoice(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
+  if (!isStringArray(value)) {
+    return 'Choose only from the offered options.';
+  }
+  const offered = offeredValues(question);
+  if (offered && value.some((v) => !offered.has(v))) {
+    return 'Choose only from the offered options.';
+  }
+  return new Set(value).size === value.length ? undefined : 'Each option may be chosen only once.';
+}
+
+/**
+ * An ordering of offered options, each appearing at most once.
+ *
+ * Deliberately does NOT require every option to be ranked: a partial ranking is a real answer
+ * shape, and inventing a completeness rule here would reject respondents the widget let through.
+ * A duplicate is different — it makes the ordering self-contradictory, since one option cannot be
+ * both first and second.
+ */
+function validateRanking(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
+  if (!isStringArray(value)) {
+    return 'Rank the options in order.';
+  }
+  const offered = offeredValues(question);
+  if (offered && value.some((v) => !offered.has(v))) {
+    return 'Rank only the offered options.';
+  }
+  return new Set(value).size === value.length ? undefined : 'Each option may be ranked only once.';
+}
+
+/**
+ * A row-keyed map whose keys are authored rows and whose cells are authored columns.
+ *
+ * Array cells are tolerated for the same reason `form-question.component.ts` tolerates them: a
+ * form switched between multi- and single-select after collecting answers must still be able to
+ * read what those respondents chose.
+ */
+function validateMatrix(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
+  if (!isMatrixAnswer(value)) {
+    return 'Answer each row.';
+  }
+  const rows = offeredValues(question, 'Row');
+  const columns = offeredValues(question, 'Column');
+  const answered = value as Record<string, string | string[]>;
+  for (const [row, picked] of Object.entries(answered)) {
+    if (rows && !rows.has(row)) {
+      return 'Answer only the rows shown.';
+    }
+    const cells = Array.isArray(picked) ? picked : [picked];
+    if (columns && cells.some((cell) => !columns.has(cell))) {
+      return 'Choose one of the offered answers for each row.';
+    }
+  }
+  return undefined;
+}
+
+/** A whole number on the scale the author configured — the same points the widget renders. */
+function validateOpinionScale(question: AnswerFormatQuestion, value: AnswerValue): string | undefined {
+  const numeric = coerceAnswerToNumber(value);
+  if (numeric === undefined) {
+    return 'Enter a number.';
+  }
+  const { min, max } = opinionScaleBounds(question.settings);
+  const outOfRange = !Number.isInteger(numeric) || numeric < min || numeric > max;
+  return outOfRange ? `Choose a value between ${min} and ${max}.` : undefined;
+}
+
 function isMatrixAnswer(value: AnswerValue): boolean {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return false;

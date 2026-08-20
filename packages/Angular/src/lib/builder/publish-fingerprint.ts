@@ -39,13 +39,17 @@ import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
  * `formVersionId` identifies the snapshot, not its content — a fresh GUID every publish, so
  * including it would make every form permanently dirty.
  *
- * `automations` is excluded for a different and less satisfying reason: it is real
- * publishable content, but it is edited in the Automate tab, which does not report changes
- * to the builder shell. The latch did not track it either, so excluding it holds the
- * existing behaviour rather than quietly regressing — but it IS a gap, and the fix is to
- * have the automation tab feed its state up, not to add it here where nothing refreshes it.
+ * `automations` USED TO BE excluded here, on the reasoning that the Automate tab did not report
+ * its changes to the builder shell so there was nothing to refresh the value. That reasoning
+ * inverted the risk. Automations are real publishable content — `fireHooksSafely` dispatches
+ * from the snapshot's `automations` array, never from the live `FormAutomation` rows — so
+ * ignoring them meant an author could add, reorder or disable an automation on a Published form
+ * and get a static "Published" badge with NO publish control, leaving the change permanently
+ * unable to reach a respondent. The missing refresh was the thing to fix, and the builder now
+ * does it: it reads the authored automations into the draft definition and re-reads them on
+ * `BaseEntity` save/delete events for the automation entity.
  */
-const IGNORED_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(['formVersionId', 'automations']);
+const IGNORED_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(['formVersionId']);
 
 /**
  * Deterministic JSON: object keys sorted at every depth, array order preserved.

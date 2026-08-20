@@ -123,12 +123,17 @@ export class PublishService {
   /**
    * Read the form's authored automations, or null when the read itself failed.
    *
+   * Public because the BUILDER needs the same list publish uses: automations are part of the
+   * published snapshot, so they are part of the draft the publish fingerprint compares. Reading
+   * them through the same method is what keeps the "is there anything to publish?" answer and the
+   * thing publish actually writes from drifting apart.
+   *
    * Null and empty are deliberately different. Empty means "this form configures no automations",
    * which is a normal, publishable state that keeps the form on the legacy hook list. Null means
    * we do not know — and publishing an empty array on a failed read would silently disable
    * automations the form actually has, for every response until someone republished.
    */
-  private async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
+  public async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
     const rv = new RunView();
     const result = await rv.RunView<AuthoredAutomationRow>(
       {

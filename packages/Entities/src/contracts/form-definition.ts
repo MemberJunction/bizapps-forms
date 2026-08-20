@@ -119,7 +119,27 @@ export type FormAutomationTargetType = 'Action' | 'Agent' | 'EntityBinding';
 /** Which save fires an automation. `OnComplete` is the default — partial saves fire nothing. */
 export type FormAutomationTrigger = 'OnComplete' | 'OnPartial' | 'OnCompleteOrPartial';
 
-/** `Sync` is awaited before the respondent's confirmation; `Async` is dispatched and not awaited. */
+/**
+ * How an automation is sequenced against the OTHER automations on the same response.
+ *
+ * `Sync` runs in order, one at a time, each awaited before the next starts — so a later step can
+ * rely on what an earlier one produced, and `continueOnError: false` can meaningfully halt the
+ * rest. `Async` is dispatched without being awaited and is ordered against nothing.
+ *
+ * NOT a promise about the respondent's confirmation. The whole automation chain — Sync steps
+ * included — is dispatched detached from the submit request, because awaiting it made every
+ * respondent wait for someone else's integration (measured on a real form: 8070ms of an 8348ms
+ * submit). Confirmation is built from the published definition and never from an automation's
+ * result, so nothing the respondent is shown depends on the chain having finished. This line
+ * previously claimed Sync was "awaited before the respondent's confirmation"; that stopped being
+ * true when the dispatch was detached, and a contract nobody honours is worse than a narrower one
+ * that everybody does.
+ *
+ * The gap this leaves is real and deliberate: there is no per-automation way to say "hold the
+ * confirmation until this finishes", only the process-wide `FORMS_HOOKS_BLOCKING` switch. Adding
+ * one is a product decision, not a doc fix — every automation the builder creates defaults to
+ * `Sync`, so making Sync block would put existing forms' respondents back behind the full chain.
+ */
 export type FormAutomationExecutionMode = 'Sync' | 'Async';
 
 /**

@@ -32,6 +32,7 @@ import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
   isAnswerableQuestionType,
+  opinionScaleBounds,
   type AnswerValue,
   type PublishedFormQuestion,
   type PublishedFormQuestionOption,
@@ -232,17 +233,11 @@ export class FormQuestionComponent {
   // can start at 0, and it carries a word at each end so "7" means something. Both are settings
   // rather than new columns, which is what `PublishedFormQuestion.settings` is for.
 
-  protected readonly scaleMin = computed(() => {
-    const raw = this.question().settings?.['min'];
-    return typeof raw === 'number' ? Math.trunc(raw) : 1;
-  });
-  protected readonly scaleMax = computed(() => {
-    const raw = this.question().settings?.['max'];
-    const max = typeof raw === 'number' ? Math.trunc(raw) : 10;
-    // A max at or below min would render an empty scale — nothing to click, no way to answer a
-    // required question, and no error explaining why.
-    return max > this.scaleMin() ? max : this.scaleMin() + 1;
-  });
+  // Bounds come from the shared contract, not from a second copy here: the server now REJECTS an
+  // OpinionScale answer outside them, so a local default that disagreed would render a point the
+  // respondent can click and the submit then refuses.
+  protected readonly scaleMin = computed(() => opinionScaleBounds(this.question().settings).min);
+  protected readonly scaleMax = computed(() => opinionScaleBounds(this.question().settings).max);
   protected readonly scalePoints = computed(() => {
     const min = this.scaleMin();
     return Array.from({ length: this.scaleMax() - min + 1 }, (_, i) => min + i);

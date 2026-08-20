@@ -14,7 +14,14 @@
  * trusting the invariant, because the cost of being wrong is destroying someone's data.
  */
 import { Injectable } from '@angular/core';
-import { LogError, Metadata, RunView, type RunViewResult, type UserInfo } from '@memberjunction/core';
+import {
+  LogError,
+  Metadata,
+  RunView,
+  type RunViewResult,
+  type TransactionGroupBase,
+  type UserInfo,
+} from '@memberjunction/core';
 import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormPageEntity,
@@ -195,12 +202,25 @@ export class FormTemplatesService {
   }
 
   /**
-   * Permanently delete a template and everything under it.
+   * Permanently delete a template and everything under it, as ONE database transaction.
    *
    * Children first, in FK order, because nothing cascades. Refuses outright — before deleting
    * anything — if the row is not a template or has any response, version or distribution
    * attached: those are the things that make a form undeletable, and a guard that runs after
    * the first child is gone is not a guard.
+   *
+   * WHY A TRANSACTION GROUP. This used to delete row by row, awaiting each `Delete()` in turn.
+   * Every one of those commits on its own, so a failure partway through — an FK the guard does
+   * not cover, a permission denial, a dropped connection between the questions and the pages —
+   * left the earlier children permanently gone while the template row itself survived. The
+   * gallery then still listed it, and opening it showed a form whose questions had silently
+   * evaporated: worse than either outcome the author was choosing between, and unrecoverable,
+   * because a delete has no undo. `Metadata.CreateTransactionGroup()` bundles the whole walk into
+   * a single provider-side transaction, so the outcomes are exactly "gone" or "untouched".
+   *
+   * `Delete()` on an entity holding a `TransactionGroup` QUEUES the delete and returns without
+   * writing; `Submit()` is what executes them, in the order they were queued. That ordering is
+   * why the FK sequence below still matters inside the group.
    *
    * Returns null on success, or a message explaining the refusal or failure.
    */
@@ -220,23 +240,29 @@ export class FormTemplatesService {
       return attached;
     }
 
+    const group = await this.md.CreateTransactionGroup();
     try {
-      await this.deleteOptionsFor(templateId);
-      await this.deleteChildren<mjBizAppsFormsFormQuestionEntity>(FORMS_ENTITY.FormQuestion, templateId, 'question');
-      await this.deleteChildren<mjBizAppsFormsFormAutomationEntity>(FORMS_ENTITY.FormAutomation, templateId, 'automation');
-      await this.deleteChildren<mjBizAppsFormsFormEntityBindingEntity>(FORMS_ENTITY.FormEntityBinding, templateId, 'entity binding');
-      await this.deleteChildren<mjBizAppsFormsFormScreenEntity>(FORMS_ENTITY.FormScreen, templateId, 'screen');
-      await this.deleteChildren<mjBizAppsFormsFormPageEntity>(FORMS_ENTITY.FormPage, templateId, 'page');
+      // Queued in FK order: options before their questions, every FormID-owned child before the
+      // pages and the form itself. Nothing is written until Submit().
+      await this.queueOptionDeletes(group, templateId);
+      await this.queueChildDeletes<mjBizAppsFormsFormQuestionEntity>(group, FORMS_ENTITY.FormQuestion, templateId);
+      await this.queueChildDeletes<mjBizAppsFormsFormAutomationEntity>(group, FORMS_ENTITY.FormAutomation, templateId);
+      await this.queueChildDeletes<mjBizAppsFormsFormEntityBindingEntity>(group, FORMS_ENTITY.FormEntityBinding, templateId);
+      await this.queueChildDeletes<mjBizAppsFormsFormScreenEntity>(group, FORMS_ENTITY.FormScreen, templateId);
+      await this.queueChildDeletes<mjBizAppsFormsFormPageEntity>(group, FORMS_ENTITY.FormPage, templateId);
+      form.TransactionGroup = group;
+      await form.Delete();
     } catch (err) {
+      // Nothing has been written — the group is abandoned unsubmitted, so the template is intact.
       const message = err instanceof Error ? err.message : String(err);
-      LogError(`deleteTemplate(${templateId}) failed while removing children: ${message}`);
+      LogError(`deleteTemplate(${templateId}) failed while preparing the delete: ${message}`);
       return `Could not delete "${form.Name}": ${message}`;
     }
 
-    if (!(await form.Delete())) {
-      const detail = form.LatestResult?.CompleteMessage ?? 'unknown error';
-      LogError(`deleteTemplate(${templateId}) failed on the form row: ${detail}`);
-      return `Could not delete "${form.Name}": ${detail}`;
+    if (!(await group.Submit())) {
+      const detail = form.LatestResult?.CompleteMessage ?? 'the transaction was rolled back';
+      LogError(`deleteTemplate(${templateId}) failed on submit: ${detail}`);
+      return `Could not delete "${form.Name}": ${detail}. Nothing was removed.`;
     }
     return null;
   }
@@ -270,7 +296,7 @@ export class FormTemplatesService {
   }
 
   /** Options hang off questions, not the form, so they are found through the questions. */
-  private async deleteOptionsFor(templateId: string): Promise<void> {
+  private async queueOptionDeletes(group: TransactionGroupBase, templateId: string): Promise<void> {
     const questions = await this.loadChildren<mjBizAppsFormsFormQuestionEntity>(
       FORMS_ENTITY.FormQuestion,
       `FormID='${templateId}'`,
@@ -283,19 +309,27 @@ export class FormTemplatesService {
       FORMS_ENTITY.FormQuestionOption,
       `QuestionID IN (${inList})`,
     );
-    for (const option of options) {
-      await this.deleteChecked(option, `option "${option.Label}"`);
-    }
+    await this.queueDeletes(group, options);
   }
 
-  private async deleteChildren<T extends DeletableRow>(
+  private async queueChildDeletes<T extends DeletableRow>(
+    group: TransactionGroupBase,
     entityName: string,
     templateId: string,
-    label: string,
   ): Promise<void> {
-    const rows = await this.loadChildren<T>(entityName, `FormID='${templateId}'`);
+    await this.queueDeletes(group, await this.loadChildren<T>(entityName, `FormID='${templateId}'`));
+  }
+
+  /**
+   * Enlist rows in the group and queue their deletes, in the order given.
+   *
+   * Sequential rather than `Promise.all`: the group executes in the order transactions were
+   * added, and that order is the FK order the caller established.
+   */
+  private async queueDeletes(group: TransactionGroupBase, rows: readonly DeletableRow[]): Promise<void> {
     for (const row of rows) {
-      await this.deleteChecked(row, label);
+      row.TransactionGroup = group;
+      await row.Delete();
     }
   }
 
@@ -310,11 +344,6 @@ export class FormTemplatesService {
     return result.Results ?? [];
   }
 
-  private async deleteChecked(row: DeletableRow, label: string): Promise<void> {
-    if (!(await row.Delete())) {
-      throw new Error(`${label} could not be removed (${row.LatestResult?.CompleteMessage ?? 'unknown error'})`);
-    }
-  }
 }
 
 /** Anything the delete walk removes. */

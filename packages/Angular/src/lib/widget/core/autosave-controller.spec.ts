@@ -141,4 +141,65 @@ describe('AutosaveController', () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(save).not.toHaveBeenCalled();
   });
+  it('flushNow() writes the pending progress instead of cancelling it', async () => {
+    const save = vi.fn().mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 1000);
+
+    // A submit-point checkpoint: progress was just registered, and the checkpoint promises to
+    // bank it NOW rather than at the end of the debounce window.
+    c.ping();
+    await c.flushNow();
+
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+  it('flushNow() leaves no debounce behind to fire a second write', async () => {
+    const save = vi.fn().mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 1000);
+
+    c.ping();
+    await c.flushNow();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushNow() supersedes an in-flight save rather than reporting it as the checkpoint', async () => {
+    // The in-flight save captured its payload before this progress existed, so awaiting it alone
+    // would bank a checkpoint that does not contain the answers the checkpoint was crossed for.
+    let resolveFirst!: (id: string) => void;
+    const save = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<string>((res) => (resolveFirst = res)))
+      .mockResolvedValue('r2');
+    const c = new AutosaveController(save, () => {}, 100);
+
+    c.ping();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    const flushed = c.flushNow();
+    resolveFirst('r1');
+    await flushed;
+
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it('flushNow() is fail-soft: a rejected save does not reject the checkpoint', async () => {
+    const c = new AutosaveController(() => Promise.reject(new Error('network')), () => {}, 100);
+
+    c.ping();
+    await expect(c.flushNow()).resolves.toBeUndefined();
+    expect(c.status).toBe('error');
+  });
+
+  it('flushNow() after dispose() writes nothing', async () => {
+    const save = vi.fn().mockResolvedValue('r1');
+    const c = new AutosaveController(save, () => {}, 100);
+
+    c.ping();
+    c.dispose();
+    await c.flushNow();
+
+    expect(save).not.toHaveBeenCalled();
+  });
 });

@@ -229,7 +229,9 @@ function validateValue(
   if (partial) {
     return rule ? validateUpperBounds(value, rule) : undefined;
   }
-  const formatError = validateAnswerFormat(question.type, value);
+  // The whole question, not just its type: an option-based answer cannot be checked against
+  // options it was never given. See `AnswerFormatQuestion`.
+  const formatError = validateAnswerFormat(question, value);
   if (formatError) {
     return formatError;
   }

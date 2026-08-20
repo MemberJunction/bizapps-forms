@@ -91,7 +91,7 @@ function validateByType(
   question: PublishedFormQuestion,
   value: AnswerValue,
 ): FieldValidationResult {
-  const message = validateAnswerFormat(question.type, value);
+  const message = validateAnswerFormat(question, value);
   if (!message) {
     return VALID;
   }

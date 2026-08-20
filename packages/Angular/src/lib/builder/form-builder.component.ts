@@ -21,6 +21,7 @@ import type {
   FormRenderMode,
   FormStyleTokens,
   PublishedFormDefinition,
+  PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { BuilderStateService } from './builder-state.service';
@@ -218,6 +219,30 @@ export class FormBuilderComponent extends BaseFormComponent {
   private draftFingerprint: string | null = null;
 
   /**
+   * The form's authored automations, as the published snapshot would carry them.
+   *
+   * Cached so {@link markDirty} stays synchronous, and refreshed from `BaseEntity` events rather
+   * than from a callback the Automate tab has to remember to fire — the tab mutates automations
+   * from a dozen places (add, delete, reorder, toggle active, switch execution mode, seed the
+   * legacy defaults), and a notification that has to be added at each one is a notification that
+   * will be missed at the next one.
+   */
+  private draftAutomations: readonly PublishedFormAutomation[] = [];
+
+  /**
+   * The automation read failed, so we cannot say whether the draft matches what is published.
+   *
+   * Deliberately NOT the same as "no automations". Treating a failed read as an empty list would
+   * make a form with automations report identical to its published snapshot and hide the publish
+   * control — the exact failure `publishControlState` documents for a failed baseline read. This
+   * routes through the same safe direction: no provable baseline, so offer Publish.
+   */
+  private automationsUnknown = false;
+
+  /** MJGlobal subscription behind {@link watchForAutomationChanges}; released on destroy. */
+  private automationChanges?: EventSubscription;
+
+  /**
    * The style the draft currently resolves to, cached so the fingerprint stays synchronous.
    * A style change is publishable, so this is refreshed whenever one is applied.
    */
@@ -273,7 +298,9 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected get publishState(): PublishControlState {
     return publishControlState({
       dirty: this.dirty,
-      hasPublishedBaseline: this.publishedFingerprint !== null,
+      // An unreadable automation list is an unusable baseline: we cannot prove the draft matches
+      // what is live, so the control must stay available rather than claim "Published".
+      hasPublishedBaseline: this.publishedFingerprint !== null && !this.automationsUnknown,
       status: this.record.Status,
     });
   }
@@ -287,7 +314,12 @@ export class FormBuilderComponent extends BaseFormComponent {
   private markDirty(): void {
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
-          buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, []),
+          buildPublishedDefinition(
+            this.tree,
+            this.appliedStyle,
+            FINGERPRINT_VERSION_ID,
+            this.draftAutomations,
+          ),
         )
       : null;
     this.cdr.markForCheck();
@@ -313,6 +345,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.publishedFingerprint = storedSnapshotFingerprint(
       await this.publisher.latestPublishedSnapshot(this.record.ID),
     );
+    await this.refreshDraftAutomations();
     this.publishStateReady = true;
     this.markDirty();
   }
@@ -342,6 +375,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     await this.refreshPublishState();
     await this.refreshSavedTemplate(this.record.ID);
     this.watchForTemplateChanges();
+    this.watchForAutomationChanges();
     this.busy = false;
     this.announceReady();
   }
@@ -882,7 +916,48 @@ export class FormBuilderComponent extends BaseFormComponent {
   public override ngOnDestroy(): void {
     this.templateChanges?.unsubscribe();
     this.templateChanges = undefined;
+    this.automationChanges?.unsubscribe();
+    this.automationChanges = undefined;
     super.ngOnDestroy();
+  }
+
+  /**
+   * Re-read the authored automations into the draft, then re-fingerprint.
+   *
+   * A failed read sets {@link automationsUnknown} rather than emptying the list, because an empty
+   * list is a real and publishable state that would otherwise be indistinguishable from "we could
+   * not ask".
+   */
+  private async refreshDraftAutomations(): Promise<void> {
+    const automations = await this.publisher.loadAutomations(this.record.ID);
+    this.automationsUnknown = automations === null;
+    this.draftAutomations = automations ?? [];
+  }
+
+  /**
+   * Keep the publish state honest about automation edits made in the Automate tab.
+   *
+   * Both save AND delete, unlike {@link watchForTemplateChanges}: this builder never writes
+   * `FormAutomation` rows itself, so — unlike the `Form` rows it autosaves constantly — an
+   * automation save can only have come from the Automate tab and is always worth re-reading.
+   */
+  private watchForAutomationChanges(): void {
+    if (this.automationChanges) {
+      return;
+    }
+    this.automationChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+        return;
+      }
+      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
+      if (args?.type !== 'save' && args?.type !== 'delete') {
+        return;
+      }
+      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.FormAutomation) {
+        return;
+      }
+      void this.refreshDraftAutomations().then(() => this.markDirty());
+    });
   }
 
   private watchForTemplateChanges(): void {

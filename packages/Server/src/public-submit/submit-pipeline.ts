@@ -36,7 +36,7 @@ import {
 import { checkRespondentScope } from './scope-check.service';
 import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
-import { validateSubmission } from './validation.service';
+import { buildAnswerMap, validateSubmission } from './validation.service';
 import {
   evaluateProvenance,
   loadUploadLedger,
@@ -164,12 +164,15 @@ function isNonEmptyString(value: unknown): value is string {
 /**
  * The post-submit confirmation/redirect for this response.
  *
- * `answers` is optional because the two IDEMPOTENT-RESUBMIT paths reach here without them: they
- * short-circuit on finding an already-Complete row, and re-deriving that row's answers would
- * cost a round trip to tell a client something it has already been told. Without answers there
- * is no conditional ending to resolve, so those paths get the default ending or the form-wide
- * settings — the same thing the respondent saw the first time unless a conditional ending was
- * configured, and in that case the redirect they already followed is the one that mattered.
+ * `answers` is optional only for callers that genuinely have none. The IDEMPOTENT-RESUBMIT paths
+ * used to be such callers, on the reasoning that re-deriving the stored row's answers would cost
+ * a round trip — but the retry carries those answers in its own payload, so the round trip was
+ * never needed and the ending was simply being resolved against an empty map. That silently
+ * downgraded every conditionally-routed form: a retry (the first submit succeeded, its network
+ * response was lost) returned the DEFAULT ending's message and redirect, which is the one screen
+ * the author decided this respondent should not see. Since the retry is the only thing the
+ * respondent ever sees in that scenario, "they already followed the right redirect" is exactly
+ * what did not happen.
  */
 function confirmationFields(
   resolved: ResolvedDefinition,
@@ -230,8 +233,20 @@ export async function runSubmitPipeline(
 
   timer.mark('resolve-form');
 
-  // 3. Turnstile (per form/distribution toggle).
-  const needCaptcha = captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
+  // 3. Turnstile (per form/distribution toggle) — FINAL submits only.
+  //
+  //     A partial is exempt because a Turnstile token is single-use. The widget therefore
+  //     withholds it from autosaves (see `buildSubmission`), keeping it for the submit that
+  //     actually needs it — and verifying anyway meant every autosave and every submit-point
+  //     checkpoint on a captcha-enabled form was rejected. Autosave is fail-soft, so nothing
+  //     surfaced: the respondent simply had no saved progress, on exactly the forms whose authors
+  //     cared enough to turn a captcha on.
+  //
+  //     This is not a bypass. A partial can only ever write a `Partial` row; promoting one to
+  //     `Complete` runs this pipeline again with `partial` unset, and that pass is gated here. The
+  //     rate limiter below is what bounds partial writes, and it runs for every save either way.
+  const needCaptcha =
+    complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
   if (!turnstile.success) {
     return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
@@ -455,7 +470,7 @@ async function checkDuplicate(
         success: true,
         responseId: byId.response.ID,
         status: 'Complete',
-        ...confirmationFields(resolved),
+        ...confirmationFields(resolved, buildAnswerMap(submission.answers)),
       };
     }
   }
@@ -480,7 +495,7 @@ async function checkDuplicate(
       success: true,
       responseId: existing.response.ID,
       status: 'Complete',
-      ...confirmationFields(resolved),
+      ...confirmationFields(resolved, buildAnswerMap(submission.answers)),
     };
   }
   return undefined;

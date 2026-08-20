@@ -29,37 +29,37 @@ describe('matchesValidationPattern', () => {
 
 describe('validateAnswerFormat — Email', () => {
   it('rejects a value that is not an email address for an Email question', () => {
-    expect(validateAnswerFormat('Email', 'not-an-email')).toBe('Enter a valid email address.');
+    expect(validateAnswerFormat({ type: 'Email' }, 'not-an-email')).toBe('Enter a valid email address.');
   });
 
   it('accepts ordinary addresses, including the plus-tag and subdomain shapes real people use', () => {
     for (const ok of ['a@b.co', 'first.last@example.com', 'user+tag@mail.example.co.uk']) {
-      expect(validateAnswerFormat('Email', ok)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Email' }, ok)).toBeUndefined();
     }
   });
 
   it('ignores surrounding whitespace rather than failing on it', () => {
-    expect(validateAnswerFormat('Email', '  someone@example.com  ')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Email' }, '  someone@example.com  ')).toBeUndefined();
   });
 });
 
 describe('validateAnswerFormat — numeric types', () => {
   it('rejects a non-numeric answer to Number, Rating and NPS', () => {
     for (const type of ['Number', 'Rating', 'NPS'] as const) {
-      expect(validateAnswerFormat(type, 'seven')).toBe('Enter a number.');
+      expect(validateAnswerFormat({ type }, 'seven')).toBe('Enter a number.');
     }
   });
 
   it('accepts numbers, numeric strings, and zero', () => {
-    expect(validateAnswerFormat('Number', 42)).toBeUndefined();
-    expect(validateAnswerFormat('Number', '42')).toBeUndefined();
-    expect(validateAnswerFormat('Number', '-3.5')).toBeUndefined();
-    expect(validateAnswerFormat('Number', 0)).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Number' }, 42)).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Number' }, '42')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Number' }, '-3.5')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Number' }, 0)).toBeUndefined();
   });
 
   it('rejects the non-finite values Number() happily produces', () => {
-    expect(validateAnswerFormat('Number', Number.NaN)).toBe('Enter a number.');
-    expect(validateAnswerFormat('Number', Number.POSITIVE_INFINITY)).toBe('Enter a number.');
+    expect(validateAnswerFormat({ type: 'Number' }, Number.NaN)).toBe('Enter a number.');
+    expect(validateAnswerFormat({ type: 'Number' }, Number.POSITIVE_INFINITY)).toBe('Enter a number.');
   });
 
   // `Number('0x10')` is 16, so a bare `Number.isFinite` check called these valid. The value is
@@ -68,13 +68,13 @@ describe('validateAnswerFormat — numeric types', () => {
   // store as that number is worse than rejecting it.
   it('rejects non-decimal numeric literals that Number() would silently convert', () => {
     for (const literal of ['0x10', '0b101', '0o17']) {
-      expect(validateAnswerFormat('Number', literal)).toBe('Enter a number.');
+      expect(validateAnswerFormat({ type: 'Number' }, literal)).toBe('Enter a number.');
     }
   });
 
   it('still accepts every decimal spelling a respondent might reasonably type', () => {
     for (const ok of ['1e5', '1E-5', '+7', '.5', '12.', '  42  ', '-3.5', '0']) {
-      expect(validateAnswerFormat('Number', ok)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Number' }, ok)).toBeUndefined();
     }
   });
 });
@@ -82,24 +82,24 @@ describe('validateAnswerFormat — numeric types', () => {
 describe('validateAnswerFormat — Phone', () => {
   it('accepts the punctuation-and-spacing shapes real respondents type', () => {
     for (const ok of ['+1 (555) 123-4567', '555-1234', '+44 20 7946 0958', '5551234567']) {
-      expect(validateAnswerFormat('Phone', ok)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Phone' }, ok)).toBeUndefined();
     }
   });
 
   it('rejects a value carrying no plausible number of digits', () => {
-    expect(validateAnswerFormat('Phone', 'call me maybe')).toBe('Enter a valid phone number.');
-    expect(validateAnswerFormat('Phone', '12345')).toBe('Enter a valid phone number.');
+    expect(validateAnswerFormat({ type: 'Phone' }, 'call me maybe')).toBe('Enter a valid phone number.');
+    expect(validateAnswerFormat({ type: 'Phone' }, '12345')).toBe('Enter a valid phone number.');
   });
 });
 
 describe('validateAnswerFormat — Date', () => {
   it('accepts an ISO date, which is how the widget spells one', () => {
-    expect(validateAnswerFormat('Date', '2026-08-01')).toBeUndefined();
-    expect(validateAnswerFormat('Date', '2026-08-01T12:30:00.000Z')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Date' }, '2026-08-01')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Date' }, '2026-08-01T12:30:00.000Z')).toBeUndefined();
   });
 
   it('rejects a string that is not a date at all', () => {
-    expect(validateAnswerFormat('Date', 'sometime next week')).toBe('Enter a valid date.');
+    expect(validateAnswerFormat({ type: 'Date' }, 'sometime next week')).toBe('Enter a valid date.');
   });
 
   // `dateValue` is a plain nullable GraphQL String (`FormAnswerInputType`), so nothing upstream
@@ -108,9 +108,9 @@ describe('validateAnswerFormat — Date', () => {
   // waving those through is the same "posted straight at the mutation" bypass this module was
   // written to close for Email.
   it('rejects a non-string smuggled in through another typed column', () => {
-    expect(validateAnswerFormat('Date', 1754006400000)).toBe('Enter a valid date.');
-    expect(validateAnswerFormat('Date', true)).toBe('Enter a valid date.');
-    expect(validateAnswerFormat('Date', ['2026-08-01'])).toBe('Enter a valid date.');
+    expect(validateAnswerFormat({ type: 'Date' }, 1754006400000)).toBe('Enter a valid date.');
+    expect(validateAnswerFormat({ type: 'Date' }, true)).toBe('Enter a valid date.');
+    expect(validateAnswerFormat({ type: 'Date' }, ['2026-08-01'])).toBe('Enter a valid date.');
   });
 });
 
@@ -120,10 +120,10 @@ describe('validateAnswerFormat — unanswered values', () => {
   // blank — and `String(null)` is `'null'`, which is exactly the shape that trips an email test.
   it('never reports a format error for a value that was not answered', () => {
     for (const empty of [null, undefined, '', '   ']) {
-      expect(validateAnswerFormat('Email', empty)).toBeUndefined();
-      expect(validateAnswerFormat('Number', empty)).toBeUndefined();
-      expect(validateAnswerFormat('Phone', empty)).toBeUndefined();
-      expect(validateAnswerFormat('Date', empty)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Email' }, empty)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Number' }, empty)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Phone' }, empty)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Date' }, empty)).toBeUndefined();
     }
   });
 });
@@ -131,7 +131,7 @@ describe('validateAnswerFormat — unanswered values', () => {
 describe('validateAnswerFormat — types that imply no format', () => {
   it('never constrains free-text or choice questions', () => {
     for (const type of ['ShortText', 'LongText', 'SingleChoice', 'Dropdown', 'YesNo'] as const) {
-      expect(validateAnswerFormat(type, 'anything at all')).toBeUndefined();
+      expect(validateAnswerFormat({ type }, 'anything at all')).toBeUndefined();
     }
   });
 });
@@ -149,13 +149,13 @@ describe('validateCompositeParts', () => {
 
 describe('validateAnswerFormat for ContactInfo', () => {
   it('keeps the single message unchanged when only one part is wrong', () => {
-    expect(validateAnswerFormat('ContactInfo', { email: 'fsa', phone: '5512161548' })).toBe(
+    expect(validateAnswerFormat({ type: 'ContactInfo' }, { email: 'fsa', phone: '5512161548' })).toBe(
       'Enter a valid email address.',
     );
   });
 
   it('mentions both problems when both parts are wrong', () => {
-    const message = validateAnswerFormat('ContactInfo', { email: 'fsa', phone: '12' });
+    const message = validateAnswerFormat({ type: 'ContactInfo' }, { email: 'fsa', phone: '12' });
 
     expect(message).toContain('email');
     expect(message).toContain('phone');
@@ -163,7 +163,7 @@ describe('validateAnswerFormat for ContactInfo', () => {
 
   it('stays valid when the parts are fine', () => {
     expect(
-      validateAnswerFormat('ContactInfo', { email: 'a@b.com', phone: '5512161548' }),
+      validateAnswerFormat({ type: 'ContactInfo' }, { email: 'a@b.com', phone: '5512161548' }),
     ).toBeUndefined();
   });
 });
@@ -220,5 +220,135 @@ describe('answerCompleteness', () => {
   it('still credits a legitimate falsy answer', () => {
     expect(answerCompleteness('YesNo', false)).toBe(1);
     expect(answerCompleteness('NPS', 0)).toBe(1);
+  });
+});
+
+describe('validateAnswerFormat — answers checked against the authored options', () => {
+  // A value is only a valid answer if the author actually offered it. Checking the SHAPE alone
+  // ("is it a string?", "is it an array of strings?") let a caller posting straight at the
+  // GraphQL mutation store a `PictureChoice` of "banana", a `Ranking` that repeats one option
+  // five times, a `Matrix` keyed on rows that do not exist, and an `OpinionScale` of 4000. Each
+  // then flows into the reporting aggregations as a real answer, so the chart shows a bucket
+  // nobody could have picked.
+  const choices = [
+    { value: 'red', displayOrder: 0 },
+    { value: 'green', displayOrder: 1 },
+  ];
+
+  it('rejects a PictureChoice value the author never offered', () => {
+    expect(validateAnswerFormat({ type: 'PictureChoice', options: choices }, 'banana')).toBe(
+      'Choose one of the offered options.',
+    );
+  });
+
+  it('accepts a PictureChoice value that was offered', () => {
+    expect(validateAnswerFormat({ type: 'PictureChoice', options: choices }, 'red')).toBeUndefined();
+  });
+
+  it('rejects a SingleChoice / Dropdown value the author never offered', () => {
+    expect(validateAnswerFormat({ type: 'SingleChoice', options: choices }, 'blue')).toBe(
+      'Choose one of the offered options.',
+    );
+    expect(validateAnswerFormat({ type: 'Dropdown', options: choices }, 'blue')).toBe(
+      'Choose one of the offered options.',
+    );
+  });
+
+  it('rejects a MultiChoice selection containing an option the author never offered', () => {
+    expect(validateAnswerFormat({ type: 'MultiChoice', options: choices }, ['red', 'blue'])).toBe(
+      'Choose only from the offered options.',
+    );
+  });
+
+  it('rejects a MultiChoice selection that repeats an option', () => {
+    expect(validateAnswerFormat({ type: 'MultiChoice', options: choices }, ['red', 'red'])).toBe(
+      'Each option may be chosen only once.',
+    );
+  });
+
+  it('rejects a Ranking containing an unknown option', () => {
+    expect(validateAnswerFormat({ type: 'Ranking', options: choices }, ['red', 'purple'])).toBe(
+      'Rank only the offered options.',
+    );
+  });
+
+  it('rejects a Ranking that lists the same option twice', () => {
+    // A duplicate makes the ordering meaningless — position 1 and position 2 are the same thing.
+    expect(validateAnswerFormat({ type: 'Ranking', options: choices }, ['red', 'red'])).toBe(
+      'Each option may be ranked only once.',
+    );
+  });
+
+  it('accepts a Ranking of the offered options', () => {
+    expect(
+      validateAnswerFormat({ type: 'Ranking', options: choices }, ['green', 'red']),
+    ).toBeUndefined();
+  });
+
+  it('rejects a Matrix keyed on a row the author never authored', () => {
+    const matrix = {
+      type: 'Matrix' as const,
+      options: [
+        { value: 'speed', matrixAxis: 'Row' as const, displayOrder: 0 },
+        { value: 'good', matrixAxis: 'Column' as const, displayOrder: 1 },
+      ],
+    };
+    expect(validateAnswerFormat(matrix, { price: 'good' })).toBe('Answer only the rows shown.');
+  });
+
+  it('rejects a Matrix cell that is not one of the authored columns', () => {
+    const matrix = {
+      type: 'Matrix' as const,
+      options: [
+        { value: 'speed', matrixAxis: 'Row' as const, displayOrder: 0 },
+        { value: 'good', matrixAxis: 'Column' as const, displayOrder: 1 },
+      ],
+    };
+    expect(validateAnswerFormat(matrix, { speed: 'excellent' })).toBe(
+      'Choose one of the offered answers for each row.',
+    );
+  });
+
+  it('accepts a Matrix answered within its authored rows and columns', () => {
+    const matrix = {
+      type: 'Matrix' as const,
+      options: [
+        { value: 'speed', matrixAxis: 'Row' as const, displayOrder: 0 },
+        { value: 'good', matrixAxis: 'Column' as const, displayOrder: 1 },
+      ],
+    };
+    expect(validateAnswerFormat(matrix, { speed: 'good' })).toBeUndefined();
+  });
+
+  it('rejects an OpinionScale outside its authored bounds', () => {
+    const q = { type: 'OpinionScale' as const, settings: { min: 0, max: 5 } };
+    expect(validateAnswerFormat(q, 9)).toBe('Choose a value between 0 and 5.');
+    expect(validateAnswerFormat(q, -1)).toBe('Choose a value between 0 and 5.');
+  });
+
+  it('rejects a fractional OpinionScale value', () => {
+    // The scale renders as discrete points; 3.5 is not one of them.
+    const q = { type: 'OpinionScale' as const, settings: { min: 1, max: 10 } };
+    expect(validateAnswerFormat(q, 3.5)).toBe('Choose a value between 1 and 10.');
+  });
+
+  it('accepts an OpinionScale inside its authored bounds', () => {
+    const q = { type: 'OpinionScale' as const, settings: { min: 0, max: 5 } };
+    expect(validateAnswerFormat(q, 0)).toBeUndefined();
+    expect(validateAnswerFormat(q, 5)).toBeUndefined();
+  });
+
+  it('applies the same default bounds the widget renders when settings are absent', () => {
+    // 1..10, matching `opinionScaleBounds`. A server that defaulted differently from the widget
+    // would reject answers the respondent was shown and allowed to click.
+    expect(validateAnswerFormat({ type: 'OpinionScale' }, 10)).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'OpinionScale' }, 11)).toBe('Choose a value between 1 and 10.');
+  });
+
+  it('does not invent constraints for a question authored with no options', () => {
+    // An importer, or a question mid-authoring, can legitimately have none yet. There is nothing
+    // to check membership against, so the shape check is all that is left.
+    expect(validateAnswerFormat({ type: 'SingleChoice', options: [] }, 'anything')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Ranking', options: [] }, ['a', 'b'])).toBeUndefined();
   });
 });

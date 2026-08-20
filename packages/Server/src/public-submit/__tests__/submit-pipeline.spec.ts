@@ -135,6 +135,44 @@ describe('runSubmitPipeline', () => {
     expect(result.errors?.[0].message).toMatch(/no longer accepting/i);
   });
 
+  it('lets a PARTIAL save through on a captcha-required form', async () => {
+    // The widget deliberately withholds the token from autosaves: a Turnstile token is
+    // single-use, so spending it on a background save leaves the real submit with nothing. The
+    // pipeline verified unconditionally anyway, so on any captcha-enabled form every autosave and
+    // every submit-point checkpoint failed — silently, because autosave is fail-soft. The
+    // respondent's in-progress answers were never actually being saved.
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch;
+
+    const { ctx, saved } = makeContext(respondentPermissions(), { captcha: true, fetchImpl });
+
+    const result = await runSubmitPipeline(ctx, validSubmission({ partial: true }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Partial');
+    expect(saved().map((r) => r.entityName)).toContain(FORM_RESPONSE_ENTITY);
+    // Never even asked Cloudflare: there is no token to verify and nothing to spend.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('still requires the captcha for the FINAL submit', async () => {
+    // The partial exemption must not become a bypass: `partial: false` is the state that counts.
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    resetPublicSubmitConfigForTests();
+    const failingFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ success: false, 'error-codes': ['missing-input-response'] }), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+    const { ctx, saved } = makeContext(respondentPermissions(), { captcha: true, fetchImpl: failingFetch });
+
+    const result = await runSubmitPipeline(ctx, validSubmission({ partial: false }));
+
+    expect(result.success).toBe(false);
+    expect(result.errors?.[0].message).toMatch(/captcha/i);
+    expect(saved()).toHaveLength(0);
+  });
+
   it('rejects when captcha is required but verification fails (turnstile fail)', async () => {
     process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
     resetPublicSubmitConfigForTests();
