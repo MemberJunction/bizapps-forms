@@ -25,7 +25,7 @@
         {
           "fields": {
             "PromptID": "@parent:ID",
-            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.1 Pro",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.6 Flash",
             "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
             "Priority": 100,
             "Status": "Active"
@@ -34,8 +34,8 @@
             "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718293"
           },
           "sync": {
-            "lastModified": "2026-08-08T18:25:26.922Z",
-            "checksum": "b8b394c0fbe530001c1d592298e2db1e1fb693530bc81f054b3f20ee09441a03"
+            "lastModified": "2026-08-20T22:45:12.530Z",
+            "checksum": "e5db75362dab2734b7237909bdcb8efb0b21cce10f7fd4b599194df951e12c88"
           }
         }
       ]
