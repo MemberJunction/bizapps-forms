@@ -21,7 +21,10 @@ import {
   MJConversationEntity,
 } from '@memberjunction/core-entities';
 import {
+  assertGuid,
   describeFormForChat,
+  guidOrUndefined,
+  isGuid,
   parseFormChatResponse,
   type FormChatContext,
   type FormChatResponse,
@@ -81,6 +84,11 @@ export async function loadChatHistory(
   conversationId: string,
   contextUser: UserInfo,
 ): Promise<FormChatTurn[]> {
+  // Interpolated into a filter. This id comes from a row we just loaded, so the guard is defence
+  // in depth rather than the primary control — but it is the primary control the moment somebody
+  // wires a caller-supplied conversation id straight through, which is exactly how the sibling
+  // sink below got missed.
+  assertGuid(conversationId, 'conversation id');
   const view = await new RunView().RunView<MJConversationDetailEntity>(
     {
       EntityName: ENTITY.ConversationDetail,
@@ -118,17 +126,24 @@ export async function ensureConversation(
   contextUser: UserInfo,
 ): Promise<MJConversationEntity> {
   const md = new Metadata();
-  if (scope.conversationId) {
+  // BOTH ids arrive from client-supplied action params, so both are validated before either
+  // reaches a filter string. A malformed one is treated as absent rather than as an error: it
+  // means the same thing as an id naming something that does not exist, and the author gets a
+  // fresh thread instead of a failure they cannot act on.
+  const requestedConversation = guidOrUndefined(scope.conversationId);
+  const formId = guidOrUndefined(scope.formId);
+
+  if (requestedConversation) {
     const existing = await md.GetEntityObject<MJConversationEntity>(ENTITY.Conversation, contextUser);
-    if (await existing.Load(scope.conversationId)) {
+    if (await existing.Load(requestedConversation)) {
       return existing;
     }
     // A conversation id that no longer resolves is not an error worth failing a message over —
     // the author's thread was deleted or belongs elsewhere. Start a fresh one.
-    LogError(`[Forms chat] Conversation ${scope.conversationId} did not load; starting a new thread.`);
+    LogError(`[Forms chat] Conversation ${requestedConversation} did not load; starting a new thread.`);
   }
 
-  const externalId = chatExternalId(scope.formId);
+  const externalId = chatExternalId(formId);
   const found = await new RunView().RunView<MJConversationEntity>(
     {
       EntityName: ENTITY.Conversation,
@@ -147,16 +162,23 @@ export async function ensureConversation(
   created.NewRecord();
   created.UserID = contextUser.ID;
   created.ExternalID = externalId;
-  created.Name = scope.formId ? 'Form authoring' : 'New form';
+  created.Name = formId ? 'Form authoring' : 'New form';
   created.Type = 'Forms Authoring';
   created.IsArchived = false;
   await saveRow(created, 'Conversation');
   return created;
 }
 
-/** The `ExternalID` a thread is filed under. One per form, plus one for the forms list. */
+/**
+ * The `ExternalID` a thread is filed under. One per form, plus one for the forms list.
+ *
+ * A non-GUID `formId` collapses to the forms-list thread rather than being embedded. This function
+ * is the one that builds the string that lands in a filter, so it refuses to build a dangerous one
+ * even if a caller forgot to validate — the guard is here as well as at the call site because this
+ * is the last place that can hold the line.
+ */
 export function chatExternalId(formId: string | undefined): string {
-  return formId ? `mj-forms:form:${formId}` : 'mj-forms:home';
+  return isGuid(formId) ? `mj-forms:form:${formId}` : 'mj-forms:home';
 }
 
 /** Append one turn to a thread. */

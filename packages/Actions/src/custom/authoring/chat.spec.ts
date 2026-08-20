@@ -104,6 +104,16 @@ import { setStagedAuthoringModel, setFormDesignerModel } from './generate-form.a
 import { chatExternalId, MAX_CHAT_HISTORY_TURNS } from './chat-assistant';
 import type { FormChatResponse } from '@mj-biz-apps/forms-entities';
 
+/**
+ * GUID-shaped fixture ids.
+ *
+ * Not decoration: every id here reaches a `RunView.ExtraFilter` and is validated before it does, so
+ * a fixture like `FORM_ID` is now correctly REJECTED. A fake that mints ids production would
+ * refuse cannot exercise the path it stands in for — the same lesson the builder's fake taught.
+ */
+const FORM_ID = '11111111-2222-4333-8444-555555555555';
+const STYLE_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+
 const CONVERSATION = 'MJ: Conversations';
 const DETAIL = 'MJ: Conversation Details';
 const STYLE = 'MJ_BizApps_Forms: Form Styles';
@@ -156,19 +166,19 @@ describe('a reply-only turn', () => {
   });
 
   it('starts a thread scoped to the form, and reuses it next time', async () => {
-    await turn('hello', { FormID: 'form-9' });
+    await turn('hello', { FormID: FORM_ID });
     const conversations = saved.filter((r) => r.entity === CONVERSATION);
     expect(conversations).toHaveLength(1);
-    expect(conversations[0].fields.ExternalID).toBe(chatExternalId('form-9'));
+    expect(conversations[0].fields.ExternalID).toBe(chatExternalId(FORM_ID));
 
     saved.length = 0;
-    await turn('hello again', { FormID: 'form-9' });
+    await turn('hello again', { FormID: FORM_ID });
     // No second conversation row: the existing thread was found by its ExternalID.
     expect(saved.filter((r) => r.entity === CONVERSATION)).toHaveLength(0);
   });
 
   it('keeps a form thread separate from the forms-list thread', async () => {
-    await turn('about this form', { FormID: 'form-9' });
+    await turn('about this form', { FormID: FORM_ID });
     await turn('about nothing in particular');
     const ids = saved.filter((r) => r.entity === CONVERSATION).map((r) => r.fields.ExternalID);
     expect(new Set(ids).size).toBe(2);
@@ -219,7 +229,7 @@ describe('a turn the assistant cannot honour', () => {
 
   it('says so plainly when asked for something not built yet', async () => {
     assistant({ reply: 'I cannot add questions yet — you can add one in the builder.', action: 'unsupported' });
-    const { out } = await turn('add a phone number field', { FormID: 'form-9' });
+    const { out } = await turn('add a phone number field', { FormID: FORM_ID });
     expect(out('Action')).toBe('unsupported');
     expect(String(out('Reply'))).toMatch(/cannot add questions yet/);
   });
@@ -257,8 +267,8 @@ describe('a create turn', () => {
 describe('a restyle turn', () => {
   beforeEach(() => {
     // A form with a style to edit, as the builder would have left it.
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: 'form-9', Name: 'RSVP', StyleID: 'style-9' }]);
-    rows.set(STYLE, [{ ID: 'style-9', Name: 'RSVP theme', CSSVariables: '{}' }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: STYLE_ID }]);
+    rows.set(STYLE, [{ ID: STYLE_ID, Name: 'RSVP theme', CSSVariables: '{}' }]);
     rows.set('MJ_BizApps_Forms: Form Questions', []);
   });
 
@@ -269,10 +279,10 @@ describe('a restyle turn', () => {
       cssVariables: { '--mjf-accent': '#0a7d3f', '--mjf-invented': 'nope' },
     });
 
-    const { out } = await turn('make the buttons green', { FormID: 'form-9' });
+    const { out } = await turn('make the buttons green', { FormID: FORM_ID });
 
     expect(out('Action')).toBe('restyle');
-    expect(out('StyleID')).toBe('style-9');
+    expect(out('StyleID')).toBe(STYLE_ID);
     const written = JSON.parse(String(saved.filter((r) => r.entity === STYLE).at(-1)?.fields.CSSVariables));
     expect(written['--mjf-accent']).toBe('#0a7d3f');
     // Unknown token stripped, and the house layout tokens survived the merge.
@@ -287,7 +297,7 @@ describe('a restyle turn', () => {
       action: 'restyle',
       cssVariables: { '--mjf-page-bg': '#777777', '--mjf-page-ink': '#7a7a7a' },
     });
-    const { out } = await turn('make it grey', { FormID: 'form-9' });
+    const { out } = await turn('make it grey', { FormID: FORM_ID });
     expect(String(out('Reply'))).toMatch(/hard to read/i);
   });
 
@@ -300,12 +310,97 @@ describe('a restyle turn', () => {
 
   it('gives the assistant the form on screen to talk about', async () => {
     rows.set('MJ_BizApps_Forms: Form Questions', [
-      { ID: 'q1', FormID: 'form-9', QuestionType: 'Email', Prompt: 'Your email' },
+      { ID: 'q1', FormID: FORM_ID, QuestionType: 'Email', Prompt: 'Your email' },
     ]);
     const respond = assistant({ reply: 'ok', action: 'none' });
-    await turn('what do you think?', { FormID: 'form-9' });
+    await turn('what do you think?', { FormID: FORM_ID });
     const context = respond.mock.calls.at(-1)?.[0].context;
     expect(context?.name).toBe('RSVP');
     expect(context?.questions).toContain('[Email] Your email');
+  });
+});
+
+describe('ids that reach a SQL filter', () => {
+  /**
+   * THE BUG THIS GUARDS, which a security review caught after it was already written twice
+   * elsewhere and fixed twice.
+   *
+   * `FormID` arrives from a client-supplied action param and was interpolated straight into a
+   * `RunView.ExtraFilter`. A value of `x' OR '1'='1` produced
+   *
+   *     UserID='<caller>' AND ExternalID='mj-forms:form:x' OR '1'='1' AND IsArchived = 0
+   *
+   * and SQL binds AND tighter than OR, so that reads as "(mine) OR (every unarchived
+   * conversation)". The caller's own user id — the thing that looked like the access control —
+   * was bypassed, and the chat would then have loaded another user's thread and handed it to the
+   * assistant. Cross-user disclosure from one query parameter.
+   */
+  const INJECTION = "x' OR '1'='1";
+
+  it('never lets an injected form id reach the filter', async () => {
+    await turn('hello', { FormID: INJECTION });
+    const conversation = saved.find((r) => r.entity === CONVERSATION);
+    // Collapsed to the forms-list thread rather than embedded. The quote is nowhere.
+    expect(conversation?.fields.ExternalID).toBe('mj-forms:home');
+    expect(String(conversation?.fields.ExternalID)).not.toContain("'");
+  });
+
+  it('never lets an injected conversation id reach the filter', async () => {
+    await turn('hello', { ConversationID: INJECTION });
+    // A fresh thread, not a lookup built from the injected value.
+    expect(saved.filter((r) => r.entity === CONVERSATION)).toHaveLength(1);
+    expect(String(saved[0].fields.ExternalID)).not.toContain("'");
+  });
+
+  it('treats a malformed id as absent rather than failing the message', async () => {
+    // The author still gets an answer. A bad id means the same thing as an id naming something
+    // that does not exist, and erroring would be a failure they cannot act on.
+    assistant({ reply: 'Sure.', action: 'none' });
+    const { result, out } = await turn('what goes with navy?', { FormID: INJECTION });
+    expect(result.Success).toBe(true);
+    expect(out('Reply')).toBe('Sure.');
+  });
+
+  it('does not describe a form for an injected id', async () => {
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null }]);
+    const respond = assistant({ reply: 'ok', action: 'none' });
+    await turn('tell me about this form', { FormID: INJECTION });
+    // No context at all — the lookup never ran.
+    expect(respond.mock.calls.at(-1)?.[0].context).toBeUndefined();
+  });
+
+  it('still works normally for a real GUID', async () => {
+    // The guard must not break the happy path it is protecting.
+    const realId = '11111111-2222-4333-8444-555555555555';
+    await turn('hello', { FormID: realId });
+    expect(saved.find((r) => r.entity === CONVERSATION)?.fields.ExternalID).toBe(
+      `mj-forms:form:${realId}`,
+    );
+  });
+});
+
+describe('chatExternalId — the last line, tested on its own', () => {
+  /**
+   * Tested DIRECTLY because three layers guard this value, so removing any one of them leaves the
+   * end-to-end test still passing. That is defence in depth working, and it is also how a layer
+   * quietly stops being load-bearing without anything noticing. This one builds the string that
+   * lands in the filter, so it gets its own assertion.
+   */
+  it('embeds a real GUID', () => {
+    expect(chatExternalId(FORM_ID)).toBe(`mj-forms:form:${FORM_ID}`);
+  });
+
+  it('collapses anything that is not a GUID to the forms-list thread', () => {
+    for (const attempt of ["x' OR '1'='1", "'; DROP TABLE x;--", 'not-a-guid', '']) {
+      expect(chatExternalId(attempt), attempt).toBe('mj-forms:home');
+    }
+    expect(chatExternalId(undefined)).toBe('mj-forms:home');
+  });
+
+  it('never returns a string containing a quote', () => {
+    // The property the surrounding SQL literal depends on.
+    for (const attempt of [FORM_ID, "x' OR '1'='1", "''", undefined]) {
+      expect(chatExternalId(attempt)).not.toContain("'");
+    }
   });
 });

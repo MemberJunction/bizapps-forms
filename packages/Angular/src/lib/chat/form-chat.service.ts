@@ -2,7 +2,7 @@ import { Injectable, signal } from '@angular/core';
 import { Metadata, RunView, LogError } from '@memberjunction/core';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import type { ActionParam } from '@memberjunction/actions-base';
-import type { FormChatTurn } from '@mj-biz-apps/forms-entities';
+import { guidOrUndefined, isGuid, type FormChatTurn } from '@mj-biz-apps/forms-entities';
 import { readActionOutputString } from '../shared/action-output';
 
 /**
@@ -39,9 +39,15 @@ const ENTITY = {
   action: 'MJ: Actions',
 } as const;
 
-/** Mirrors the server's `chatExternalId`. One thread per form, plus one for the forms list. */
+/**
+ * Mirrors the server's `chatExternalId`, INCLUDING its guard.
+ *
+ * This string is interpolated into a `RunView` filter, so a non-GUID collapses to the forms-list
+ * thread rather than being embedded. The two implementations have to agree on this or the client
+ * would look for a thread under a key the server never files one under.
+ */
 export function chatExternalId(formId: string | undefined | null): string {
-  return formId ? `mj-forms:form:${formId}` : 'mj-forms:home';
+  return isGuid(formId) ? `mj-forms:form:${formId}` : 'mj-forms:home';
 }
 
 @Injectable()
@@ -65,7 +71,7 @@ export class FormChatService {
    */
   public async load(formId: string | null): Promise<void> {
     try {
-      const conversationId = await this.findConversation(formId);
+      const conversationId = guidOrUndefined(await this.findConversation(formId));
       if (!conversationId) {
         this._turns.set([]);
         return;

@@ -31,6 +31,8 @@ import {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormStyleEntity,
+  guidOrUndefined,
+  isGuid,
   themeWithOverrides,
   type FormChatContext,
   type FormChatResponse,
@@ -81,9 +83,12 @@ export async function runChatTurn(
   params: RunActionParams,
   contextUser: UserInfo,
 ): Promise<ActionResultSimple> {
-  const formId = getStringParam(params, 'FormID');
+  // Validated ONCE, here, and the validated value is what every downstream call receives. Both of
+  // these are client-supplied and both reach `ExtraFilter` strings; a malformed one is treated as
+  // absent, which means the same thing as an id naming a form that does not exist.
+  const formId = guidOrUndefined(getStringParam(params, 'FormID'));
   const conversation = await ensureConversation(
-    { formId, conversationId: getStringParam(params, 'ConversationID') },
+    { formId, conversationId: guidOrUndefined(getStringParam(params, 'ConversationID')) },
     contextUser,
   );
   const history = await loadChatHistory(conversation.ID, contextUser);
@@ -198,7 +203,10 @@ async function describeOpenForm(
   formId: string | undefined,
   contextUser: UserInfo,
 ): Promise<FormChatContext | undefined> {
-  if (!formId) {
+  // Belt and braces: the caller already validated, and this is the function that interpolates.
+  // `isGuid` is a type predicate, so this narrows `formId` too — the guard and the narrowing are
+  // the same statement, which is what stops a later edit from using the unvalidated value.
+  if (!isGuid(formId)) {
     return undefined;
   }
   try {
