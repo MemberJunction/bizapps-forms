@@ -32,10 +32,17 @@ export interface FormSummaryStats {
   /** completeResponses / totalResponses, 0..1. 0 when no responses. */
   completionRate: number;
   /**
-   * Average seconds between StartedAt and SubmittedAt across complete responses
-   * that have both timestamps. Null when not computable.
+   * MEDIAN seconds between StartedAt and SubmittedAt across complete responses that have
+   * both timestamps and a plausible gap between them. Null when not computable.
+   *
+   * The median, not the mean, and the rename is the point: this figure is presented as the
+   * TYPICAL time to fill the form in, and a mean is the one statistic that cannot survive
+   * the data this column actually holds. A single response whose `StartedAt` is the Unix
+   * epoch — which live data has — drags a mean of forty real submissions to "212759h 19m",
+   * roughly twenty-four years, shown to a form owner as how long their form takes. The
+   * median ignores it, and `PLAUSIBLE_SESSION_SECONDS` drops it from the sample entirely.
    */
-  averageCompletionSeconds: number | null;
+  typicalCompletionSeconds: number | null;
   /** Most recent SubmittedAt across complete responses, or null. */
   lastSubmittedAt: Date | null;
 }
@@ -62,8 +69,16 @@ export interface NumericAggregate {
   npsSegments?: { detractors: number; passives: number; promoters: number };
 }
 
-/** How a given question's answers should be visualised. */
-export type BreakdownKind = 'distribution' | 'numeric' | 'freeText' | 'boolean';
+/**
+ * How a given question's answers should be visualised.
+ *
+ * `files` is not a chart. A FileUpload or Signature answer holds a `FileID` and nothing
+ * renderable — there is no text to list and no category to bucket — so the card states how
+ * many were attached and sends the reader to the response detail, which can actually open
+ * them. It exists because the alternative was the free-text fallback, which printed "No
+ * answers yet" directly beneath a header reading "19 answers".
+ */
+export type BreakdownKind = 'distribution' | 'numeric' | 'freeText' | 'boolean' | 'files';
 
 /** Per-question breakdown view-model. */
 export interface QuestionBreakdown {

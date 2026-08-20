@@ -6,10 +6,12 @@
  * resolvable by the MJ ClassFactory from the Dashboard metadata's DriverClass.
  */
 export * from './models/reporting.model';
+export * from './reporting-view-model';
 export * from './services/reporting-aggregations';
 export * from './services/forms-reporting.service';
 export * from './services/export-pivot';
 export * from './services/forms-reporting-export.service';
+export * from './components/proportion-bar.component';
 export * from './components/summary-stats.component';
 export * from './components/question-breakdown.component';
 export * from './components/distribution-chart.component';

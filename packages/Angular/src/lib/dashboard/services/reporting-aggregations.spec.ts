@@ -21,6 +21,22 @@ describe('breakdownKindFor', () => {
     expect(breakdownKindFor('LongText')).toBe('freeText');
     expect(breakdownKindFor('Email')).toBe('freeText');
   });
+
+  it('gives file-backed answers their own kind instead of the free-text fallback', () => {
+    // The live defect: these landed in 'freeText', whose list reads `renderAnswer`, which
+    // has nothing to return for an answer that stores only a FileID. The card printed "No
+    // answers yet" underneath its own header saying "19 answers".
+    expect(breakdownKindFor('FileUpload')).toBe('files');
+    expect(breakdownKindFor('Signature')).toBe('files');
+  });
+
+  it('still lists dates as text, though the contract calls them unanalysable too', () => {
+    // Date and Time are `analysis: 'none'` like the file types are, so keying the fix on
+    // the analysis kind would have swept them up and lost a readable list of real dates.
+    // The discriminator is the answer COLUMN, which is what decides if anything renders.
+    expect(breakdownKindFor('Date')).toBe('freeText');
+    expect(breakdownKindFor('Time')).toBe('freeText');
+  });
 });
 
 describe('flattenQuestions', () => {
@@ -56,14 +72,47 @@ describe('buildSummary', () => {
     expect(s.partialResponses).toBe(1);
     // completionRate keeps the started (complete + partial) denominator as the drop-off signal.
     expect(s.completionRate).toBeCloseTo(2 / 3);
-    expect(s.averageCompletionSeconds).toBe(90); // (60 + 120) / 2
+    expect(s.typicalCompletionSeconds).toBe(90); // median of [60, 120]
+  });
+
+  it('is the MEDIAN, so one absurd session cannot define "typical"', () => {
+    // Fill times are right-skewed even in clean data: most people take two minutes and one
+    // leaves the tab open over lunch. A mean of [60, 90, 120, 20000] is 5067s — over an
+    // hour — which is not what any of these four people experienced.
+    const start = new Date('2026-01-01T00:00:00Z');
+    const at = (secs: number) => new Date(start.getTime() + secs * 1000);
+    const rows: ResponseRow[] = [
+      response('r1', 'Complete', start, at(60)),
+      response('r2', 'Complete', start, at(90)),
+      response('r3', 'Complete', start, at(120)),
+      response('r4', 'Complete', start, at(20_000)),
+    ];
+    expect(buildSummary(rows).typicalCompletionSeconds).toBe(105); // median of [60,90,120,20000]
+  });
+
+  it('discards a gap too long to have been one sitting', () => {
+    // The live defect: a response whose StartedAt is the Unix epoch reported the form's
+    // typical completion time as "212759h 19m" — about twenty-four years — to its owner.
+    // The broken pair leaves the sample entirely rather than merely being out-voted.
+    const rows: ResponseRow[] = [
+      response('good', 'Complete', new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:02:00Z')),
+      response('epoch', 'Complete', new Date('1970-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z')),
+    ];
+    expect(buildSummary(rows).typicalCompletionSeconds).toBe(120);
+  });
+
+  it('reports nothing rather than a wrong number when every pair is implausible', () => {
+    const rows: ResponseRow[] = [
+      response('epoch', 'Complete', new Date('1970-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z')),
+    ];
+    expect(buildSummary(rows).typicalCompletionSeconds).toBeNull();
   });
 
   it('handles zero responses', () => {
     const s = buildSummary([]);
     expect(s.totalResponses).toBe(0);
     expect(s.completionRate).toBe(0);
-    expect(s.averageCompletionSeconds).toBeNull();
+    expect(s.typicalCompletionSeconds).toBeNull();
     expect(s.lastSubmittedAt).toBeNull();
   });
 

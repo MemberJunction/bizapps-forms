@@ -17,7 +17,7 @@ import type {
   PublishedFormQuestion,
   FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
-import { analysisKindFor, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
+import { analysisKindFor, answerColumnFor, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
 import type {
   FormSummaryStats,
   QuestionBreakdown,
@@ -36,6 +36,19 @@ type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 const FREE_TEXT_CAP = 200;
 
 /**
+ * The longest gap between StartedAt and SubmittedAt that is credible as one sitting.
+ *
+ * Beyond this the pair is not a duration, it is a broken `StartedAt` — an epoch default, a
+ * resumed draft, a row migrated without its start time. Including such a pair does not make
+ * the figure slightly wrong; it makes it wrong by orders of magnitude, and it is reported
+ * under a label claiming to say how long the form takes to fill in.
+ *
+ * A day is deliberately generous. Nobody spends eight hours on a form, so anything this
+ * check discards was never a real session, and a genuine long-but-plausible fill is kept.
+ */
+const PLAUSIBLE_SESSION_SECONDS = 24 * 60 * 60;
+
+/**
  * Maps a question type to the breakdown visualisation kind.
  *
  * Reads the contract's ANALYSIS kind rather than naming types, so a new type is summarised the
@@ -44,6 +57,15 @@ const FREE_TEXT_CAP = 200;
  * which reads the rendered one-line form — informative, if not aggregated.
  */
 export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
+  // Asked BEFORE the analysis kind, because the answer COLUMN is what decides whether there
+  // is anything to render. File and Signature answers store a `FileID` and leave every
+  // renderable column null, so the free-text fallback below produced an empty list under a
+  // header counting the answers it could not show. Deliberately not keyed on
+  // `analysisKindFor(type) === 'none'`, which would catch Date and Time too — those DO
+  // render, as a readable list of dates, and pulling them in would lose that.
+  if (answerColumnFor(type) === 'file') {
+    return 'files';
+  }
   switch (analysisKindFor(type)) {
     case 'boolean':
       return 'boolean';
@@ -67,8 +89,7 @@ export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
 export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
   let complete = 0;
   let partial = 0;
-  let durationSum = 0;
-  let durationCount = 0;
+  const durations: number[] = [];
   let lastSubmitted: Date | null = null;
 
   for (const r of responses) {
@@ -81,9 +102,8 @@ export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
     const started = toDate(r.StartedAt);
     if (submitted && started) {
       const secs = (submitted.getTime() - started.getTime()) / 1000;
-      if (secs >= 0) {
-        durationSum += secs;
-        durationCount++;
+      if (secs >= 0 && secs <= PLAUSIBLE_SESSION_SECONDS) {
+        durations.push(secs);
       }
     }
     if (submitted && (!lastSubmitted || submitted > lastSubmitted)) {
@@ -99,9 +119,23 @@ export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
     partialResponses: partial,
     // Completion rate keeps the started (complete + partial) denominator as the drop-off signal.
     completionRate: started > 0 ? complete / started : 0,
-    averageCompletionSeconds: durationCount > 0 ? durationSum / durationCount : null,
+    typicalCompletionSeconds: median(durations),
     lastSubmittedAt: lastSubmitted,
   };
+}
+
+/**
+ * The middle value of a sample, or null when there is no sample.
+ *
+ * Averaging is what this replaces. Fill times are heavily right-skewed even in clean data —
+ * most people take two minutes and one leaves the tab open over lunch — so the mean answers
+ * a question nobody asked. The median is what "typical" means.
+ */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /** Builds per-question breakdowns. */
@@ -135,6 +169,9 @@ export function buildBreakdowns(
           break;
         case 'numeric':
           base.numeric = numericAggregate(q.type, qAnswers);
+          break;
+        case 'files':
+          // Nothing to build: `answeredCount` above is the whole card.
           break;
         case 'freeText':
           // `renderAnswer`, not `a.TextValue`. The free-text bucket is now the fallback for

@@ -1,105 +1,196 @@
-<div class="mjf-page reporting">
-  <header class="mjf-page-head">
-    <div class="mjf-page-headings">
-      <div class="title-row">
-        <h2 class="mjf-page-title">Forms Reporting</h2>
-        @if (useMock) {
-          <span class="mjf-badge mjf-badge--info" title="Showing seeded sample data until live responses exist">Sample data</span>
-        }
+<div class="rp">
+  <!-- ================================================================== the rail
+       Every form that has ever been published, busiest first. This is the only
+       part of the surface that answers "which form?", so it stays mounted through
+       every load below it. -->
+  <aside class="rp-rail" aria-label="Forms">
+    <div class="rp-rail-head">
+      <h2 class="rp-rail-title">Responses &amp; Analytics</h2>
+      <p class="rp-rail-sub">{{ portfolioLine }}</p>
+    </div>
+
+    @if (forms.length > 0) {
+      <div class="mjf-search rp-rail-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input
+          class="mjf-input"
+          type="search"
+          placeholder="Find a form"
+          aria-label="Find a form by name"
+          [ngModel]="railQuery"
+          (ngModelChange)="railQuery = $event; applyRailFilter()" />
       </div>
-      @if (selectedForm) {
-        <p class="mjf-page-sub">{{ selectedForm.name }}</p>
-      }
-    </div>
 
-    <div class="mjf-page-actions">
-      @if (forms.length > 0) {
-        <label class="form-picker">
-          <span class="sr-only">Select a form</span>
-          <select
-            class="mjf-select"
-            [ngModel]="selectedForm?.formId"
-            (ngModelChange)="onFormChange($event)"
-            aria-label="Select a form to report on">
-            @for (f of forms; track f.formId) {
-              <option [value]="f.formId">{{ f.name }} ({{ f.responseCount }})</option>
-            }
-          </select>
-        </label>
-      }
-      <div class="export-group" role="group" aria-label="Export responses">
-        <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="!report || loading" (click)="export('csv')">
-          <i class="fa-solid fa-file-csv" aria-hidden="true"></i> CSV
-        </button>
-        <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="!report || loading" (click)="export('excel')">
-          <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Excel
-        </button>
-      </div>
-    </div>
-  </header>
-
-  @if (errorMessage) {
-    <div class="mjf-alert" role="alert">
-      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-      <span>{{ errorMessage }}</span>
-    </div>
-  }
-
-  @if (loading) {
-    <div class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading…</div>
-  }
-
-  @if (!loading && forms.length === 0) {
-    <div class="mjf-empty">
-      <span class="mjf-empty-icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></span>
-      <span class="mjf-empty-title">Nothing to report on yet</span>
-      <p class="mjf-empty-body">
-        Analytics appear once a form is published and starts collecting responses.
-      </p>
-    </div>
-  }
-
-  @if (report; as r) {
-    <nav class="mjf-tabs" role="tablist" aria-label="Report sections">
-      @for (t of tabs; track t.key) {
-        <button
-          type="button"
-          role="tab"
-          class="mjf-tab"
-          [class.is-on]="activeTab === t.key"
-          [attr.aria-selected]="activeTab === t.key"
-          (click)="setTab(t.key)">
-          <i [class]="t.icon" aria-hidden="true"></i> {{ t.label }}
-        </button>
-      }
-    </nav>
-
-    <section class="tab-body">
-      @switch (activeTab) {
-        @case ('summary') {
-          <mj-forms-summary-stats [stats]="r.summary"></mj-forms-summary-stats>
-        }
-        @case ('questions') {
-          <div class="breakdowns">
-            @for (b of r.breakdowns; track b.questionId) {
-              <mj-forms-question-breakdown [breakdown]="b"></mj-forms-question-breakdown>
-            }
-          </div>
-        }
-        @case ('funnel') {
-          <mj-forms-funnel-chart [steps]="r.funnel"></mj-forms-funnel-chart>
-        }
-        @case ('responses') {
-          @if (responseDetail; as d) {
-            <mj-forms-response-detail
-              [Detail]="d"
-              (Back)="closeResponse()"
-              (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
-          } @else {
-            <mj-forms-response-list [Rows]="r.responses" (Open)="openResponse($event)"></mj-forms-response-list>
+      @if (visibleForms.length === 0) {
+        <p class="rp-rail-none">No form matches “{{ railQuery }}”.</p>
+      } @else {
+        <ul class="rp-rail-list">
+          @for (f of visibleForms; track f.formId) {
+            <li>
+              <button
+                type="button"
+                class="rp-form"
+                [class.is-on]="isSelected(f)"
+                [attr.aria-current]="isSelected(f) ? 'true' : null"
+                [disabled]="loadingReport"
+                (click)="selectForm(f)">
+                <span class="rp-form-name">{{ f.name }}</span>
+                <span class="rp-form-count" [class.is-none]="f.responseCount === 0">{{ f.responseCount }}</span>
+              </button>
+            </li>
           }
-        }
+        </ul>
+        <p class="rp-rail-count">{{ railCountLine }}</p>
       }
-    </section>
-  }
+    }
+  </aside>
+
+  <!-- ================================================================== the report -->
+  <section class="rp-main">
+    @if (loadingForms) {
+      <div class="rp-pad">
+        <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading forms…</p>
+      </div>
+    } @else if (forms.length === 0) {
+      <div class="rp-pad">
+        <div class="mjf-empty">
+          <span class="mjf-empty-icon"><i class="fa-solid fa-chart-column" aria-hidden="true"></i></span>
+          <span class="mjf-empty-title">Nothing to report on yet</span>
+          <p class="mjf-empty-body">
+            Analytics appear here once a form is published and starts collecting responses.
+            Publish a form from its Distribute tab to open its public link.
+          </p>
+        </div>
+      </div>
+    } @else {
+      <!-- Sticky, because the form's name and the mode switch are the two things you
+           need to still be able to see when you are forty question cards down. -->
+      <header class="rp-head">
+        <div class="rp-head-titles">
+          <h3 class="rp-head-name">{{ selectedForm?.name }}</h3>
+          @if (report && hasResponses) {
+            <p class="rp-head-sub">{{ reportLine }}</p>
+          }
+        </div>
+
+        <div class="rp-head-actions">
+          @if (report) {
+            <div class="mjf-seg" role="group" aria-label="What to show">
+              @for (m of modes; track m.key) {
+                <button
+                  type="button"
+                  [class.is-on]="mode === m.key"
+                  [attr.aria-pressed]="mode === m.key"
+                  (click)="setMode(m.key)">
+                  <i [class]="m.icon" aria-hidden="true"></i> {{ m.label }}
+                </button>
+              }
+            </div>
+          }
+
+          <button
+            type="button"
+            class="mjf-btn mjf-btn--quiet mjf-btn--icon"
+            title="Re-read this form’s responses"
+            aria-label="Refresh"
+            [disabled]="loadingReport || busy"
+            (click)="refresh()">
+            <i class="fa-solid fa-rotate-right" [class.fa-spin]="loadingReport" aria-hidden="true"></i>
+          </button>
+
+          <div class="rp-export" role="group" aria-label="Export responses">
+            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="!report || busy" (click)="export('csv')">
+              <i class="fa-solid fa-file-csv" aria-hidden="true"></i> CSV
+            </button>
+            <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" [disabled]="!report || busy" (click)="export('excel')">
+              <i class="fa-solid fa-file-excel" aria-hidden="true"></i> Excel
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div class="rp-scroll">
+        <div class="rp-scroll-inner">
+          @if (useMock) {
+            <p class="mjf-badge mjf-badge--info rp-mock" title="Showing seeded sample data until live responses exist">
+              <i class="fa-solid fa-flask" aria-hidden="true"></i> Sample data
+            </p>
+          }
+
+          @if (errorMessage) {
+            <div class="mjf-alert rp-alert" role="alert">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <span class="mjf-spacer">{{ errorMessage }}</span>
+              <button type="button" class="rp-alert-close" (click)="dismissError()" aria-label="Dismiss">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          }
+
+          @if (loadingReport) {
+            <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading this form’s responses…</p>
+          } @else if (report; as r) {
+            @if (!hasResponses) {
+              <!-- A published form with nothing in it. Charts of nothing are noise; the
+                   one useful thing to say is how to get the first response. -->
+              <div class="mjf-empty">
+                <span class="mjf-empty-icon"><i class="fa-solid fa-inbox" aria-hidden="true"></i></span>
+                <span class="mjf-empty-title">No responses yet</span>
+                <p class="mjf-empty-body">
+                  “{{ r.form.name }}” is published and waiting. Share its link from the
+                  Distribute tab and the first submission will appear here.
+                </p>
+              </div>
+            } @else {
+              @switch (mode) {
+                @case ('insights') {
+                  <!-- Ordered the way the question is asked: how many, where they
+                       stopped, what they said. -->
+                  <mj-forms-summary-stats [stats]="r.summary" [now]="loadedAt"></mj-forms-summary-stats>
+
+                  @if (hasFunnel) {
+                    <section class="mjf-section">
+                      <div class="mjf-section-head">
+                        <h4 class="mjf-section-title">Where people stop</h4>
+                        <p class="mjf-section-sub">{{ completionLabel }} of everyone who started reached the end.</p>
+                      </div>
+                      <div class="mjf-card mjf-card--pad">
+                        <mj-forms-funnel-chart [steps]="r.funnel"></mj-forms-funnel-chart>
+                      </div>
+                    </section>
+                  }
+
+                  @if (r.breakdowns.length > 0) {
+                    <section class="mjf-section">
+                      <div class="mjf-section-head">
+                        <h4 class="mjf-section-title">What they said</h4>
+                        <p class="mjf-section-sub">Every question, in the order it is asked.</p>
+                      </div>
+                      <div class="rp-breakdowns">
+                        @for (b of r.breakdowns; track b.questionId) {
+                          <mj-forms-question-breakdown
+                            [breakdown]="b"
+                            [totalResponses]="r.summary.totalResponses"></mj-forms-question-breakdown>
+                        }
+                      </div>
+                    </section>
+                  }
+                }
+                @case ('responses') {
+                  @if (responseDetail; as d) {
+                    <mj-forms-response-detail
+                      [Detail]="d"
+                      (Back)="closeResponse()"
+                      (OpenRecord)="openLinkedRecord($event)"></mj-forms-response-detail>
+                  } @else {
+                    <mj-forms-response-list [Rows]="r.responses" (Open)="openResponse($event)"></mj-forms-response-list>
+                  }
+                }
+              }
+            }
+          }
+        </div>
+      </div>
+    }
+  </section>
 </div>
