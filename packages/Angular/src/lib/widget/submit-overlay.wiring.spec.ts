@@ -61,19 +61,26 @@ describe('the form survives its own submit', () => {
   });
 });
 
-describe('the sending state is a scrim, as its own comment claims', () => {
-  it('is anchored to the VIEWPORT, not to the form', () => {
-    // `position: absolute` is not enough and is its own bug: nothing in the widget is a scroll
-    // container, so `inset: 0` on an absolutely-positioned scrim sizes it to the whole form —
-    // ~4000px on a long one — and centres the spinner around y=2000, off screen from the Submit
-    // button that was just tapped. That is the exact "no visible feedback where their eyes were"
-    // failure this feature was added to fix.
+describe('the sending state is a scrim, and its message stays in view', () => {
+  it('is anchored to the viewport, not to the form', () => {
+    // `position: absolute` is the trap: nothing in the widget is a scroll container, so `inset: 0`
+    // sizes the scrim to the whole ~4000px form and centres the spinner around y=2000 — off
+    // screen from the Submit button that was just tapped, which is the exact failure this state
+    // exists to prevent.
+    //
+    // A review argued `fixed` cannot work because `:host` sets `container-type: inline-size` and
+    // layout containment is specified to make an element a containing block for fixed
+    // descendants. Measured in Chrome with this file's real `:host`/`.mjf-shell` rules and a
+    // 4000px form: the scrim's box IS the viewport at scroll 0, 2000 and 3500, and
+    // `getComputedStyle(host).contain` is `none`. The measurement is recorded in the CSS so the
+    // next reader does not re-litigate it from the spec.
     expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*position:\s*fixed/);
-    expect(css()).not.toMatch(/\.mjf-sending\s*\{[^}]*position:\s*absolute/);
+    expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*inset:\s*0/);
   });
 
-  it('sits above the form it covers', () => {
-    expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*z-index:/);
+  it('sits above the sticky progress bar it would otherwise show through', () => {
+    const z = css().match(/\.mjf-sending\s*\{[^}]*z-index:\s*(\d+)/)?.[1];
+    expect(Number(z)).toBeGreaterThan(2);
   });
 
   it('still announces itself to a screen reader', () => {

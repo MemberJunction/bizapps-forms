@@ -961,20 +961,25 @@ export class AutomationTabComponent implements OnInit {
     this.resetAddState();
   }
 
-  /**
-   * Write the built-in defaults as steps, if this form has none yet. Returns how many, so the
-   * caller can order itself after them.
-   *
-   * A default whose Action is not registered in this deployment is skipped rather than failing the
-   * save — it was not running before either, since the legacy runner also resolves by name and
-   * skips what it cannot find, so skipping preserves the behaviour instead of inventing a failure.
-   */
   /** The highest DisplayOrder among the steps currently loaded, or 0 when there are none. */
   private highestDisplayOrder(): number {
     const orders = this.automations().map((a) => a.DisplayOrder ?? 0);
     return orders.length === 0 ? 0 : Math.max(...orders);
   }
 
+  /**
+   * Write the built-in defaults as steps, if this form has none yet.
+   *
+   * Returns the highest DisplayOrder it actually WROTE, not how many rows it wrote. The two
+   * differ, and the difference is a bug: a default whose Action is not registered here is skipped
+   * while the rest keep their own displayOrder, so three seeded rows can occupy 1, 3 and 4 while
+   * the count says 3 — and a caller deriving the next order from a count lands on 4, on top of a
+   * row that is already there. Returns 0 when nothing was seeded.
+   *
+   * A default whose Action is not registered in this deployment is skipped rather than failing the
+   * save — it was not running before either, since the legacy runner also resolves by name and
+   * skips what it cannot find, so skipping preserves the behaviour instead of inventing a failure.
+   */
   private async seedLegacyDefaultsIfFirst(): Promise<number> {
     if (this.automations().length > 0) {
       return 0;

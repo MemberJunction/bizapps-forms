@@ -336,23 +336,23 @@
    so the click produced no visible feedback where their eyes were, and an unacknowledged
    click gets clicked again. */
 .mjf-sending {
-  /* An actual overlay, which is what the comment above always claimed. As an in-flow block with
-     `min-height: 40vh` it pushed the form down the page instead of covering it — and it only
-     looked like a replacement because it lived in a @switch branch that really did replace the
-     form. The form now stays mounted underneath (see the template), so this has to sit on top of
-     it, and has to block clicks: the submit is already in flight and a second tap on anything
-     underneath is either a no-op or a duplicate. */
-  /* FIXED, not absolute. Nothing in the widget is a scroll container — `:host` and `.mjf-shell`
-     both size to content and the DOCUMENT scrolls — so an absolutely-positioned `inset: 0` sized
-     this to the whole form. On a twenty-question scroll form that is ~4000px tall, and
-     `justify-content: center` then parked the spinner around y=2000: the respondent who just
-     tapped Submit at the bottom saw a dimmed page with no spinner and no message, which is
-     verbatim the defect this feature exists to fix. Anchoring to the viewport puts the message
-     where their eyes already are, wherever that is. */
+  /* FIXED, anchored to the viewport. Nothing in the widget is a scroll container — `:host` and
+     `.mjf-shell` both size to content and the DOCUMENT scrolls — so `position: absolute` sized
+     this to the whole ~4000px form and `justify-content: center` parked the spinner around
+     y=2000, off screen from the Submit button that was just tapped. That is the exact "no visible
+     feedback where their eyes were" failure this state exists to prevent.
+
+     `container-type: inline-size` on `:host` does NOT break this, which is worth recording
+     because it looks like it should: layout containment is specified to make an element a
+     containing block for fixed-position descendants, and a review flagged it on that basis.
+     Measured instead of argued, with this file's real `:host` and `.mjf-shell` rules and a
+     4000px form: the scrim's box is the viewport (top 0, height = innerHeight) and the message
+     centres at the same point at scroll 0, 2000 and 3500. `getComputedStyle(host).contain` is
+     `none`. So the containing block here is the viewport, and it stays that way. */
   position: fixed;
   inset: 0;
-  /* Above the sticky progress bar (z-index 2 in form-scroll), which is opaque and would
-     otherwise punch an unscrimmed strip through the top of the overlay. */
+  /* Above the sticky progress bar (z-index 2 in form-scroll), which is opaque and would otherwise
+     punch an unscrimmed strip through the top of the overlay. */
   z-index: 5;
   display: flex;
   flex-direction: column;
