@@ -5,9 +5,14 @@
  * purely by the `cssVariables` map the builder captured at publish time. No hardcoded
  * colors anywhere downstream.
  */
-import type { FormStyleTokens } from '@mj-biz-apps/forms-entities';
-
-import { contrastRatio, inkRepair, parseCssColor, readableInk, toCssRgb } from './readable-ink';
+import {
+  contrastRatio,
+  inkRepair,
+  parseCssColor,
+  readableInk,
+  toCssRgb,
+  type FormStyleTokens,
+} from '@mj-biz-apps/forms-entities';
 
 /**
  * Set each `--token: value` from `styleTokens.cssVariables` on `host.style`, inject

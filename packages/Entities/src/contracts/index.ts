@@ -20,4 +20,5 @@ export * from './legacy-automations';
 export * from './submission';
 export * from './starter-templates';
 export * from './generation-progress';
+export * from './readable-ink';
 export * from './schemas';

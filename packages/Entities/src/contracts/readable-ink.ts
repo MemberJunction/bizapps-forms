@@ -11,6 +11,13 @@
  * So the ink is checked, and replaced when it fails. Not overridden as a matter of taste — an ink
  * that clears the bar is used exactly as authored — but a form nobody can read is not a style,
  * and the respondent, who chose none of this, is the one who pays for it.
+ *
+ * WHY IT LIVES IN THE CONTRACT PACKAGE. It started in the widget, which was right while the widget
+ * was the only thing that judged colour. AI theme generation judges the same pairs on the SERVER,
+ * before the tokens are ever persisted, and a second implementation of "is this readable" is a
+ * second answer to it — one of which would eventually let through a palette the other rejects.
+ * The maths is pure sRGB arithmetic with no Angular and no DOM in it, so moving it costs nothing
+ * and the widget imports it from here exactly as it did from next door.
  */
 
 /** An sRGB colour, 0–255 per channel. */

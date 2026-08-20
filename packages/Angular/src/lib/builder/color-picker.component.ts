@@ -10,7 +10,7 @@ import {
   viewChild,
 } from '@angular/core';
 
-import { contrastRatio, parseCssColor } from '../widget/core/readable-ink';
+import { contrastRatio, parseCssColor } from '@mj-biz-apps/forms-entities';
 import {
   PRESET_SWATCHES,
   hexToHsv,
