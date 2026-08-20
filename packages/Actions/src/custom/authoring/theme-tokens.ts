@@ -176,9 +176,16 @@ function enforceReadability(tokens: Record<string, string>): {
     // The off-black or off-white that reads best on this background — the same two values the
     // widget's defaults use, so a repaired theme still looks like a theme rather than a failure.
     const repaired = readableInk(background, ink);
-    cssVariables[pair.ink] = toCssRgb(repaired);
-    if (!repairedTokens.includes(pair.ink)) {
-      repairedTokens.push(pair.ink);
+    // Only counted as a repair when the value ACTUALLY changed. `readableInk` returns the best of
+    // near-black and near-white, which on a mid-tone background is sometimes the colour already
+    // there — reporting that as "corrected 1 token" claims work that did not happen, and the log
+    // line exists precisely so somebody can trust the count.
+    const changed = repaired[0] !== ink[0] || repaired[1] !== ink[1] || repaired[2] !== ink[2];
+    if (changed) {
+      cssVariables[pair.ink] = toCssRgb(repaired);
+      if (!repairedTokens.includes(pair.ink)) {
+        repairedTokens.push(pair.ink);
+      }
     }
     if (contrastRatio(background, repaired) < pair.min) {
       unreadablePairs.push(`${pair.ink} on ${pair.on}`);

@@ -132,3 +132,25 @@ describe('validateTheme — readability', () => {
     expect(result.repairedTokens).toEqual([]);
   });
 });
+
+describe('validateTheme — "repaired" means the value actually changed', () => {
+  it('does not claim a repair when the best available ink is the one already there', () => {
+    // A real generation hit this: white on a mid-tone terracotta fails AA, and the best available
+    // ink IS white — so the pair is unreadable but nothing was corrected. Counting it as a repair
+    // made the log say "corrected 1 token" when it corrected none.
+    const result = validateTheme({
+      cssVariables: { '--mjf-accent': '#C85A43', '--mjf-on-accent': 'rgb(255, 255, 255)' },
+    });
+    expect(result.unreadablePairs).toEqual(['--mjf-on-accent on --mjf-accent']);
+    expect(result.repairedTokens).toEqual([]);
+    // And the authored value is left exactly as it was, rather than rewritten to an equal colour.
+    expect(result.cssVariables['--mjf-on-accent']).toBe('rgb(255, 255, 255)');
+  });
+
+  it('still reports a genuine repair', () => {
+    const result = validateTheme({
+      cssVariables: { '--mjf-page-bg': '#1c1c1c', '--mjf-page-ink': '#2a2a2a' },
+    });
+    expect(result.repairedTokens).toEqual(['--mjf-page-ink']);
+  });
+});
