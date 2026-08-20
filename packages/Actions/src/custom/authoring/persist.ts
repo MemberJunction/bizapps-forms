@@ -22,6 +22,7 @@
 import { LogStatus } from '@memberjunction/core';
 import type { BaseEntity } from '@memberjunction/core';
 import { MAX_PERSIST_ATTEMPTS } from './limits';
+import { errorText } from '../shared/error-text';
 
 /** Raised with a clear message when a row could not be saved. */
 export class FormPersistError extends Error {
@@ -101,7 +102,7 @@ async function attemptSave(
       return { ok: true };
     }
   } catch (error) {
-    return { ok: false, detail: asText(error), cause: error };
+    return { ok: false, detail: errorText(error), cause: error };
   }
   const result = entity.LatestResult;
   return { ok: false, detail: result?.CompleteMessage ?? result?.Message ?? 'no detail reported by the provider' };
@@ -145,6 +146,3 @@ export function clampText(value: string, max: number, what: string): string {
   return `${value.slice(0, max - 1)}…`;
 }
 
-function asText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

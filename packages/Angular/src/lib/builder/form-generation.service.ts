@@ -22,6 +22,12 @@ import { readActionOutputString, readActionOutputStrings } from '../shared/actio
  * stage as it completes, so the database is already correct at every instant and the client's job
  * is to reload, not to reconstruct.
  *
+ * WHERE THE RECONCILE ACTUALLY HAPPENS, since it is deliberately not in here: the caller opens the
+ * form record once the action returns, and opening it loads the tree from the database. So the
+ * author always lands on the persisted truth rather than on anything assembled from events — this
+ * service never needs to hold, patch or reconcile a form. A caller that instead kept a form open
+ * across a generation WOULD have to reload it itself; nothing here does that for them.
+ *
  * ── SUBSCRIBE BEFORE MUTATING. ───────────────────────────────────────────────────────────────
  * The outline event fires seconds into the run, so a subscription opened after the mutation misses
  * the one event that supplies the form id and the total. Subscribing first is the pattern MJ's own

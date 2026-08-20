@@ -34,8 +34,9 @@ import {
   collectImageRequests,
   runImageStage,
   type ImageGenerationModel,
+  type ImageTarget,
 } from './image-stage';
-import { themeResponseSchema, validateTheme } from './theme-tokens';
+import { themeResponseSchema, validateTheme, type ThemeOutcome } from './theme-tokens';
 import {
   declaredKeys,
   extractJSON,
@@ -51,6 +52,7 @@ import {
   publishProgress,
   type ProgressChannel,
 } from './progress-events';
+import { errorText } from '../shared/error-text';
 
 /**
  * How a stage's model call is made.
@@ -219,11 +221,11 @@ async function requestOutline(
       return parseFormBlueprint(raw);
     } catch (error) {
       lastError = error;
-      input = { ...input, previousAttempt: raw, validationError: asText(error) };
+      input = { ...input, previousAttempt: raw, validationError: errorText(error) };
     }
   }
   throw new Error(
-    `Outline was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${asText(lastError)}`,
+    `Outline was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${errorText(lastError)}`,
   );
 }
 
@@ -303,8 +305,15 @@ async function detailEveryPage(
   return { degraded, optionImages };
 }
 
-/** One page: prompt, validate, persist. Reports its degradation marker and its image requests. */
-async function detailOnePage(ctx: {
+/**
+ * Everything one page's detail pass works from.
+ *
+ * A named type because the same nine fields were being written out inline in two adjacent
+ * signatures — the second a subset of the first — which is two places to keep in step and no
+ * statement anywhere that they are the same thing. They ARE the same thing: the context of
+ * detailing one page.
+ */
+interface PageDetailContext {
   brief: string;
   model: StagedAuthoringModel;
   contextUser: UserInfo;
@@ -313,8 +322,14 @@ async function detailOnePage(ctx: {
   built: BuiltFormResult;
   pageIndex: number;
   pageId: string;
+  /** Every key the outline declared, for validating the rules this page's detail writes. */
   keys: ReadonlySet<string>;
-}): Promise<{ degraded?: string; optionImages: ImageTargets['options'] }> {
+}
+
+/** One page: prompt, validate, persist. Reports its degradation marker and its image requests. */
+async function detailOnePage(
+  ctx: PageDetailContext,
+): Promise<{ degraded?: string; optionImages: ImageTargets['options'] }> {
   const marker = `page:${ctx.pageIndex + 1}`;
   let detail: BlueprintPage;
   try {
@@ -324,7 +339,7 @@ async function detailOnePage(ctx: {
     // the reason is logged in full, and the marker reaches the author in the completion event.
     LogError(
       `[Forms authoring] Could not detail page ${ctx.pageIndex + 1} of form ${ctx.built.formId}; ` +
-        `keeping its outline questions. ${asText(error)}`,
+        `keeping its outline questions. ${errorText(error)}`,
     );
     return { degraded: marker, optionImages: [] };
   }
@@ -347,7 +362,7 @@ async function detailOnePage(ctx: {
     // already exists with usable questions. Fatal would mean discarding a form over one page.
     LogError(
       `[Forms authoring] Could not persist page ${ctx.pageIndex + 1} of form ${ctx.built.formId}; ` +
-        `keeping its outline questions. ${asText(error)}`,
+        `keeping its outline questions. ${errorText(error)}`,
     );
     return { degraded: marker, optionImages: [] };
   }
@@ -359,15 +374,7 @@ async function detailOnePage(ctx: {
  * The retry is per-stage and uses the same cap, so a page that keeps producing invalid JSON costs
  * three calls and then degrades — it does not consume the whole run's budget or fail the form.
  */
-async function requestPageDetail(ctx: {
-  brief: string;
-  model: StagedAuthoringModel;
-  contextUser: UserInfo;
-  options: StagedAuthoringOptions;
-  outline: FormBlueprint;
-  pageIndex: number;
-  keys: ReadonlySet<string>;
-}): Promise<BlueprintPage> {
+async function requestPageDetail(ctx: PageDetailContext): Promise<BlueprintPage> {
   let lastError: unknown;
   let input: PageDetailInput = {
     brief: ctx.brief,
@@ -382,11 +389,11 @@ async function requestPageDetail(ctx: {
       return parsePageDetail(raw, ctx.keys);
     } catch (error) {
       lastError = error;
-      input = { ...input, previousAttempt: raw, validationError: asText(error) };
+      input = { ...input, previousAttempt: raw, validationError: errorText(error) };
     }
   }
   throw new Error(
-    `Page ${ctx.pageIndex + 1} detail was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${asText(lastError)}`,
+    `Page ${ctx.pageIndex + 1} detail was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${errorText(lastError)}`,
   );
 }
 
@@ -426,9 +433,6 @@ function publish(
   publishProgress(channel, progressEvent(fields), LogError);
 }
 
-function asText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 // --- Media -------------------------------------------------------------------------
 
@@ -451,6 +455,9 @@ async function runMediaStage(
   total: number,
   step: number,
 ): Promise<string[]> {
+  const publishMedia = (label: string, changed?: { optionId?: string; screenId?: string }): void =>
+    publish(options.channel, { formId: built.formId, stage: 'image', step, total, label, changed });
+
   const requests = collectImageRequests({
     welcomeScreen: built.imageTargets.welcomeScreen,
     endingScreens: built.imageTargets.endingScreens,
@@ -459,49 +466,68 @@ async function runMediaStage(
     options: [...built.imageTargets.options, ...optionImages],
   });
 
-  if (requests.length === 0 || !options.imageModel) {
-    // No pictures asked for is silent — nothing went wrong. No image model IS reported, but only
-    // when something was actually asked for, so a host without one is not nagged on every build.
-    const missingModel = requests.length > 0 && !options.imageModel;
-    publish(options.channel, {
-      formId: built.formId,
-      stage: 'image',
-      step,
-      total,
-      label: missingModel ? 'Skipped the pictures' : 'No pictures needed',
-    });
-    return missingModel ? ['image:no image model available on this instance'] : [];
+  const skip = reasonToSkipMedia(requests, options.imageModel);
+  if (skip) {
+    publishMedia(skip.label);
+    return skip.degraded;
   }
 
-  publish(options.channel, {
-    formId: built.formId,
-    stage: 'image',
-    step,
-    total,
-    label: `Making ${requests.length === 1 ? 'a picture' : `${requests.length} pictures`}`,
-  });
+  publishMedia(`Making ${requests.length === 1 ? 'a picture' : `${requests.length} pictures`}`);
+  const outcome = await runImageStage(
+    built.formId,
+    requests,
+    options.imageModel as ImageGenerationModel,
+    contextUser,
+  );
+  const attachFailures = await attachImages(built.formId, outcome.stored, contextUser, publishMedia);
+  return [...outcome.degraded, ...attachFailures];
+}
 
-  const outcome = await runImageStage(built.formId, requests, options.imageModel, contextUser);
-  const degraded = [...outcome.degraded];
+/**
+ * Whether the media stage has anything to do, and what to say about it.
+ *
+ * A form that asked for no pictures is SILENT — nothing went wrong. A missing image model IS
+ * reported, but only when pictures were actually wanted, so a host that has never configured one
+ * is not nagged on every build it runs.
+ */
+function reasonToSkipMedia(
+  requests: readonly unknown[],
+  imageModel: ImageGenerationModel | undefined,
+): { label: string; degraded: string[] } | undefined {
+  if (requests.length > 0 && imageModel) {
+    return undefined;
+  }
+  if (requests.length > 0) {
+    return {
+      label: 'Skipped the pictures',
+      degraded: ['image:no image model available on this instance'],
+    };
+  }
+  return { label: 'No pictures needed', degraded: [] };
+}
 
-  for (const { target, url } of outcome.stored) {
+/** Write each stored image's URL onto its row, degrading one attach without losing the others. */
+async function attachImages(
+  formId: string,
+  stored: ReadonlyArray<{ target: ImageTarget; url: string }>,
+  contextUser: UserInfo,
+  publishMedia: (label: string, changed?: { optionId?: string; screenId?: string }) => void,
+): Promise<string[]> {
+  const degraded: string[] = [];
+  for (const { target, url } of stored) {
     try {
-      await applyGeneratedImage(built.formId, target, url, contextUser);
-      publish(options.channel, {
-        formId: built.formId,
-        stage: 'image',
-        step,
-        total,
-        label: 'Added a picture',
-        changed: target.kind === 'option' ? { optionId: target.optionId } : { screenId: target.screenId },
-      });
+      await applyGeneratedImage(formId, target, url, contextUser);
+      publishMedia(
+        'Added a picture',
+        target.kind === 'option' ? { optionId: target.optionId } : { screenId: target.screenId },
+      );
     } catch (error) {
       // The bytes exist and the URL is good; only the row write failed. Named so nobody hunts for
       // a missing image in storage when the problem is one column.
       LogError(
-        `[Forms authoring] Stored an image for form ${built.formId} but could not attach it: ${asText(error)}`,
+        `[Forms authoring] Stored an image for form ${formId} but could not attach it: ${errorText(error)}`,
       );
-      degraded.push(`image:could not attach a generated picture`);
+      degraded.push('image:could not attach a generated picture');
     }
   }
   return degraded;
@@ -530,7 +556,7 @@ async function runThemeStage(
   total: number,
   step: number,
 ): Promise<string[]> {
-  const publishThemeStep = (label: string, styleId?: string): void =>
+  const publishTheme = (label: string, styleId?: string): void =>
     publish(options.channel, {
       formId: built.formId,
       stage: 'theme',
@@ -542,37 +568,47 @@ async function runThemeStage(
 
   if (!built.styleId) {
     // The Builder could not create a style row, and said so at the time. Nothing to write onto.
-    publishThemeStep('Using the default look');
+    publishTheme('Using the default look');
     return ['theme:no style row to write onto'];
   }
 
-  publishThemeStep('Painting the theme');
+  publishTheme('Painting the theme');
   try {
     const outcome = validateTheme(await requestTheme(brief, model, outline, contextUser));
     await applyThemeTokens(built.formId, built.styleId, outcome.cssVariables, contextUser);
-    publishThemeStep('Theme applied', built.styleId);
-
-    // Both lists are reported, not logged and forgotten. A stripped token means the prompt is
-    // drifting from its vocabulary; an unreadable pair means the author's own colour choice cannot
-    // carry text, which they can only act on if somebody tells them.
-    const notes: string[] = [];
-    if (outcome.strippedTokens.length > 0) {
-      LogStatus(
-        `[Forms authoring] The theme for form ${built.formId} named ${outcome.strippedTokens.length} ` +
-          `token(s) the widget does not read: ${outcome.strippedTokens.join(', ')}.`,
-      );
-    }
-    for (const pair of outcome.unreadablePairs) {
-      notes.push(`theme:${pair} cannot reach AA contrast`);
-    }
-    return notes;
+    publishTheme('Theme applied', built.styleId);
+    return reportThemeOutcome(outcome, built.formId);
   } catch (error) {
     LogError(
-      `[Forms authoring] Could not theme form ${built.formId}; it will use the widget defaults. ${asText(error)}`,
+      `[Forms authoring] Could not theme form ${built.formId}; it will use the widget defaults. ${errorText(error)}`,
     );
-    publishThemeStep('Kept the default look');
+    publishTheme('Kept the default look');
     return ['theme:could not be generated'];
   }
+}
+
+/**
+ * Say what the theme validator had to do, splitting it by who needs to know.
+ *
+ * Stripped tokens and repairs go to the LOG: both mean the theme came out fine and something about
+ * the prompt is worth watching over many runs, which a per-run message to one author cannot show.
+ * An unreadable pair is RETURNED, because it is the one outcome the author alone can fix — the
+ * remaining remedy is changing the background colour they asked for.
+ */
+function reportThemeOutcome(outcome: ThemeOutcome, formId: string): string[] {
+  if (outcome.strippedTokens.length > 0) {
+    LogStatus(
+      `[Forms authoring] The theme for form ${formId} named ${outcome.strippedTokens.length} ` +
+        `token(s) the widget does not read: ${outcome.strippedTokens.join(', ')}.`,
+    );
+  }
+  if (outcome.repairedTokens.length > 0) {
+    LogStatus(
+      `[Forms authoring] Corrected ${outcome.repairedTokens.length} token(s) in form ${formId}'s ` +
+        `theme to keep the text readable: ${outcome.repairedTokens.join(', ')}.`,
+    );
+  }
+  return outcome.unreadablePairs.map((pair) => `theme:${pair} cannot reach AA contrast`);
 }
 
 /** Ask for a token map, retrying on an unparseable response. */
@@ -595,8 +631,8 @@ async function requestTheme(
       return themeResponseSchema.parse(JSON.parse(extractJSON(raw)));
     } catch (error) {
       lastError = error;
-      input = { ...input, previousAttempt: raw, validationError: asText(error) };
+      input = { ...input, previousAttempt: raw, validationError: errorText(error) };
     }
   }
-  throw new Error(`Theme was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${asText(lastError)}`);
+  throw new Error(`Theme was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${errorText(lastError)}`);
 }

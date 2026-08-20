@@ -24,6 +24,13 @@ export const GENERATE_IMAGE_ACTION_NAME = 'Generate Image';
 /**
  * Base64 is requested rather than a URL because the bytes have to be re-hosted anyway: a
  * provider's URL expires, and a published form has to keep rendering long after it would.
+ *
+ * THIS IS TRANSPORT, NOT IMAGE FORMAT. `OutputFormat` accepts only `base64` or `url`; the core
+ * action exposes no way to ask for PNG over WebP, so the image type is whatever the configured
+ * generator emits. That is fine because the guard is downstream and unconditional: the asset
+ * pipeline runs the same `validateImage()` raster allowlist over these bytes that it runs over a
+ * human upload, so an unexpected type is refused at storage rather than served to a respondent.
+ * Worth stating because the obvious place to look for a format request is here, and it is not here.
  */
 const OUTPUT_FORMAT = 'base64';
 

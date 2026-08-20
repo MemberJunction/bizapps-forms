@@ -15,8 +15,23 @@ interface SavedRow {
 }
 
 const saved: SavedRow[] = [];
-/** Rows the fake RunView will return, keyed by entity name. */
+
+/**
+ * The fake database's current rows, by entity name.
+ *
+ * Written by `Save()` and read by `RunView`, so the outline's questions ARE the stubs the detail
+ * pass reads back. That coherence is the point: hand-staging a separate stub list made the
+ * key-to-id map the pipeline built disagree with the rows the fake returned — a disagreement the
+ * real system cannot have, and one that hid a genuine reordering bug behind a fixture incapable of
+ * reproducing it.
+ */
 const rows = new Map<string, Array<Record<string, unknown>>>();
+
+/** Entities whose saves the fake keeps, because something later reads them back. */
+const READ_BACK_ENTITIES = new Set([
+  'MJ_BizApps_Forms: Form Questions',
+  'MJ_BizApps_Forms: Form Question Options',
+]);
 
 class FakeEntity {
   ID = '';
@@ -31,12 +46,31 @@ class FakeEntity {
     return true;
   }
   async Save(): Promise<boolean> {
-    if (!this.ID) {
-      this.ID = `${this.entityName}#${saved.length + 1}`;
+    const isNew = !this.ID;
+    if (isNew) {
+      // A real GUID shape, because the Builder now refuses to interpolate anything else into a
+      // filter — and a fake that mints ids the production code would reject is a fake that
+      // cannot exercise the path it is standing in for.
+      this.ID = fakeGuid(saved.length + 1);
     }
     saved.push({ entity: this.entityName, fields: snapshot(this) });
+    if (isNew && READ_BACK_ENTITIES.has(this.entityName)) {
+      const table = rows.get(this.entityName) ?? [];
+      table.push(this as unknown as Record<string, unknown>);
+      rows.set(this.entityName, table);
+    }
     return true;
   }
+}
+
+/**
+ * A deterministic GUID for the fake's rows.
+ *
+ * Deterministic rather than random so a failing assertion names the same id twice in a row, and
+ * genuinely GUID-shaped so it survives the Builder's injection guard.
+ */
+function fakeGuid(n: number): string {
+  return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
 function snapshot(entity: FakeEntity): Record<string, unknown> {
@@ -49,6 +83,30 @@ function snapshot(entity: FakeEntity): Record<string, unknown> {
   return out;
 }
 
+/**
+ * Enough `ExtraFilter` understanding to keep one page's rows out of another page's read.
+ *
+ * Only the two shapes the Builder actually emits — `PageID='x'` and `QuestionID IN ('a','b')`.
+ * A fake that ignored filters handed page 1's options to page 2, which made page 2 skip its own
+ * option creation and quietly turned every multi-page test into a single-page one. It throws on
+ * anything else rather than silently matching everything.
+ */
+function matchesFilter(row: Record<string, unknown>, filter: string | undefined): boolean {
+  if (!filter) {
+    return true;
+  }
+  const equals = /^(\w+)='([^']*)'$/.exec(filter.trim());
+  if (equals) {
+    return row[equals[1]] === equals[2];
+  }
+  const inList = /^(\w+) IN \(([^)]*)\)$/.exec(filter.trim());
+  if (inList) {
+    const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
+    return allowed.has(String(row[inList[1]]));
+  }
+  throw new Error(`The fake RunView does not understand this filter: ${filter}`);
+}
+
 vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
   Metadata: class {
@@ -56,12 +114,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       return new FakeEntity(entityName);
     }
   },
-  // The detail stage reads back the stub questions it is about to refine. The fake returns
-  // whatever the test staged into `rows`, defaulting to empty — which exercises the
-  // "more detailed questions than stubs" branch unless a test says otherwise.
   RunView: class {
-    async RunView(params: { EntityName: string }): Promise<{ Success: boolean; Results: unknown[] }> {
-      return { Success: true, Results: rows.get(params.EntityName) ?? [] };
+    async RunView(params: { EntityName: string; ExtraFilter?: string }): Promise<{
+      Success: boolean;
+      Results: unknown[];
+    }> {
+      const table = rows.get(params.EntityName) ?? [];
+      return { Success: true, Results: table.filter((r) => matchesFilter(r, params.ExtraFilter)) };
     }
   },
   UserInfo: class {},
@@ -84,17 +143,34 @@ const ENTITY_NAME = {
   style: 'MJ_BizApps_Forms: Form Styles',
 } as const;
 
-/** A stub question row as the outline would have left it, ready for the detail pass to refine. */
-function stubQuestionRow(id: string, prompt: string, displayOrder: number): FakeEntity {
-  const row = new FakeEntity('MJ_BizApps_Forms: Form Questions');
-  row.ID = id;
-  Object.assign(row, {
-    QuestionType: 'ShortText',
-    Prompt: prompt,
-    DisplayOrder: displayOrder,
-    IsRequired: false,
-  });
-  return row;
+const QUESTION_ENTITY = 'MJ_BizApps_Forms: Form Questions';
+
+/**
+ * The ids the OUTLINE minted for the questions, in outline order.
+ *
+ * First-save order IS outline order: the outline creates the rows and the detail pass only ever
+ * re-saves them. Reading ids back this way rather than hand-writing them is what keeps these tests
+ * honest about which row a key actually names.
+ */
+function stubIdsInOutlineOrder(): string[] {
+  const seen: string[] = [];
+  for (const row of saved.filter((r) => r.entity === QUESTION_ENTITY)) {
+    const id = String(row.fields.ID);
+    if (!seen.includes(id)) {
+      seen.push(id);
+    }
+  }
+  return seen;
+}
+
+/** What the question row with this id holds after the last write to it. */
+function finalQuestion(id: string): Record<string, unknown> | undefined {
+  return saved.filter((r) => r.entity === QUESTION_ENTITY && r.fields.ID === id).at(-1)?.fields;
+}
+
+/** How many times this row was written — 1 means the detail pass never touched it. */
+function writeCount(id: string): number {
+  return saved.filter((r) => r.entity === QUESTION_ENTITY && r.fields.ID === id).length;
 }
 
 const user = new UserInfo();
@@ -351,16 +427,18 @@ describe('runStagedAuthoring — refining outline stubs in place', () => {
     saved.length = 0;
     rows.clear();
     resetFormsProgressPublisher();
+    resetGeneratedImageStore();
   });
 
   it('fills in the stub rows the outline created rather than making new questions', async () => {
     // The stub is the whole reason the author sees a form in two seconds. If the detail pass
     // created fresh rows instead of refining these, every question would appear twice.
-    rows.set('MJ_BizApps_Forms: Form Questions', [stubQuestionRow('q-1', 'Coming?', 0)]);
-
     const model = stubModel({
       outline: vi.fn(async () =>
-        JSON.stringify({ name: 'RSVP', pages: [{ title: 'Attendance', questions: [{ type: 'YesNo', prompt: 'Coming?' }] }] }),
+        JSON.stringify({
+          name: 'RSVP',
+          pages: [{ title: 'Attendance', questions: [{ type: 'YesNo', prompt: 'Coming?' }] }],
+        }),
       ),
       pageDetail: vi.fn(async () =>
         JSON.stringify({
@@ -379,26 +457,23 @@ describe('runStagedAuthoring — refining outline stubs in place', () => {
 
     await runStagedAuthoring('an RSVP', model, user, options);
 
-    const refined = saved.filter((r) => r.entity === 'MJ_BizApps_Forms: Form Questions' && r.fields.ID === 'q-1');
-    expect(refined).toHaveLength(1);
+    const ids = stubIdsInOutlineOrder();
+    expect(ids).toHaveLength(1);
+    const refined = finalQuestion(ids[0]);
     // Type and prompt are overwritten: the detail pass is the later, better-informed judgement.
-    expect(refined[0].fields.QuestionType).toBe('SingleChoice');
-    expect(refined[0].fields.Prompt).toBe('Will you be joining us?');
-    expect(refined[0].fields.HelpText).toBe('Pick one.');
-    expect(refined[0].fields.IsRequired).toBe(true);
+    expect(refined?.QuestionType).toBe('SingleChoice');
+    expect(refined?.Prompt).toBe('Will you be joining us?');
+    expect(refined?.HelpText).toBe('Pick one.');
+    expect(refined?.IsRequired).toBe(true);
     // Options belong to the refined row, not to a duplicate.
     const opts = saved.filter((r) => r.entity === 'MJ_BizApps_Forms: Form Question Options');
     expect(opts).toHaveLength(2);
-    expect(opts.every((o) => o.fields.QuestionID === 'q-1')).toBe(true);
+    expect(opts.every((o) => o.fields.QuestionID === ids[0])).toBe(true);
   });
 
   it('keeps an un-detailed stub rather than dropping the question', async () => {
     // Fewer detailed questions than stubs. The extra stub is already a valid question; losing it
     // would silently shorten the author's form.
-    rows.set('MJ_BizApps_Forms: Form Questions', [
-      stubQuestionRow('q-1', 'Coming?', 0),
-      stubQuestionRow('q-2', 'Anything else?', 1),
-    ]);
     const model = stubModel({
       outline: vi.fn(async () =>
         JSON.stringify({
@@ -421,11 +496,145 @@ describe('runStagedAuthoring — refining outline stubs in place', () => {
 
     await runStagedAuthoring('an RSVP', model, user, options);
 
-    // q-2 was never re-saved by the detail pass, so it survives exactly as the outline left it.
-    const detailSaves = saved.filter(
-      (r) => r.entity === 'MJ_BizApps_Forms: Form Questions' && r.fields.ID === 'q-2',
+    const ids = stubIdsInOutlineOrder();
+    expect(ids).toHaveLength(2);
+    // The first was refined; the second was never re-saved, so it survives as the outline left it.
+    expect(writeCount(ids[0])).toBe(2);
+    expect(writeCount(ids[1])).toBe(1);
+    expect(finalQuestion(ids[1])?.Prompt).toBe('Anything else?');
+  });
+});
+
+describe('runStagedAuthoring — a reordered detail response', () => {
+  beforeEach(() => {
+    saved.length = 0;
+    rows.clear();
+    resetFormsProgressPublisher();
+    resetGeneratedImageStore();
+  });
+
+  it('refines each question onto the stub its KEY names, not the one in that position', async () => {
+    // THE BUG THIS GUARDS. Rules resolve through the key-to-id map the OUTLINE built, so a key
+    // permanently names one row. Matching purely by position meant a model returning the same two
+    // questions in the other order wrote question B's content onto question A's row — while every
+    // rule naming A's key kept pointing at it. The form renders and one branch is silently gated on
+    // the wrong answer, forever. That is the exact failure keys exist to prevent.
+    const outline = {
+      name: 'RSVP',
+      pages: [
+        {
+          title: 'Details',
+          questions: [
+            { key: 'attending', type: 'YesNo', prompt: 'Will you attend?' },
+            { key: 'diet', type: 'ShortText', prompt: 'Dietary needs?' },
+          ],
+        },
+      ],
+    };
+    // The detail pass returns them in the OPPOSITE order, keys intact.
+    const reordered = JSON.stringify({
+      questions: [
+        { key: 'diet', type: 'LongText', prompt: 'Tell us about any dietary needs' },
+        {
+          key: 'attending',
+          type: 'SingleChoice',
+          prompt: 'Can you make it?',
+          options: [{ label: 'Yes' }, { label: 'No' }],
+        },
+      ],
+    });
+
+    await runStagedAuthoring(
+      'an RSVP',
+      stubModel({
+        outline: vi.fn(async () => JSON.stringify(outline)),
+        pageDetail: vi.fn(async () => reordered),
+      } as Partial<StagedAuthoringModel>),
+      user,
+      options,
     );
-    expect(detailSaves).toHaveLength(0);
+
+    // Outline order: [0] is the row `attending` names, [1] is `diet`'s.
+    const [attendingId, dietId] = stubIdsInOutlineOrder();
+    expect(finalQuestion(attendingId)?.Prompt).toBe('Can you make it?');
+    expect(finalQuestion(attendingId)?.QuestionType).toBe('SingleChoice');
+    expect(finalQuestion(dietId)?.Prompt).toBe('Tell us about any dietary needs');
+    expect(finalQuestion(dietId)?.QuestionType).toBe('LongText');
+  });
+
+  it('claims each stub once, so a repeated key cannot consume another question row', async () => {
+    const outline = {
+      name: 'RSVP',
+      pages: [
+        {
+          title: 'Details',
+          questions: [
+            { key: 'attending', type: 'YesNo', prompt: 'Will you attend?' },
+            { type: 'ShortText', prompt: 'Anything else?' },
+          ],
+        },
+      ],
+    };
+    // Both detailed questions name the same key. Without single-claim the second would land on the
+    // first's row and the unkeyed stub would be silently left behind.
+    const duplicated = JSON.stringify({
+      questions: [
+        { key: 'attending', type: 'YesNo', prompt: 'Coming?' },
+        { key: 'attending', type: 'ShortText', prompt: 'Notes?' },
+      ],
+    });
+
+    await runStagedAuthoring(
+      'an RSVP',
+      stubModel({
+        outline: vi.fn(async () => JSON.stringify(outline)),
+        pageDetail: vi.fn(async () => duplicated),
+      } as Partial<StagedAuthoringModel>),
+      user,
+      options,
+    );
+
+    const ids = stubIdsInOutlineOrder();
+    expect(ids).toHaveLength(2);
+    expect(finalQuestion(ids[0])?.Prompt).toBe('Coming?');
+    // The second fell through to the next free stub rather than overwriting the first.
+    expect(finalQuestion(ids[1])?.Prompt).toBe('Notes?');
+  });
+
+  it('still matches by position for the unkeyed questions', async () => {
+    // Most questions carry no key — the Designer is told to add one only where a rule needs it —
+    // so position has to keep working for them.
+    const outline = {
+      name: 'Plain',
+      pages: [
+        {
+          title: 'Details',
+          questions: [
+            { type: 'ShortText', prompt: 'First' },
+            { type: 'ShortText', prompt: 'Second' },
+          ],
+        },
+      ],
+    };
+    await runStagedAuthoring(
+      'a plain form',
+      stubModel({
+        outline: vi.fn(async () => JSON.stringify(outline)),
+        pageDetail: vi.fn(async () =>
+          JSON.stringify({
+            questions: [
+              { type: 'ShortText', prompt: 'First, refined' },
+              { type: 'LongText', prompt: 'Second, refined' },
+            ],
+          }),
+        ),
+      } as Partial<StagedAuthoringModel>),
+      user,
+      options,
+    );
+    const [first, second] = stubIdsInOutlineOrder();
+    expect(finalQuestion(first)?.Prompt).toBe('First, refined');
+    expect(finalQuestion(second)?.Prompt).toBe('Second, refined');
   });
 });
 

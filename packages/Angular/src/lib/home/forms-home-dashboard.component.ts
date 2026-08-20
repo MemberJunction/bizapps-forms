@@ -24,6 +24,7 @@ import {
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
 import { FormCloneService } from '../templates/form-clone.service';
 import { FormGenerationService } from '../builder/form-generation.service';
+import type { GenerationProgress } from '@mj-biz-apps/forms-entities';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -332,7 +333,7 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   }
 
   /** Live build progress for the panel's bar, or null when nothing is generating. */
-  protected get generationProgress() {
+  protected get generationProgress(): GenerationProgress | null {
     return this.generation.progress();
   }
 

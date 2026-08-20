@@ -122,7 +122,11 @@ async function runNamedPrompt(
   params.attemptJSONRepair = true;
   params.cancellationToken = AbortSignal.timeout(STAGE_TIMEOUT_MS);
 
-  const result = await new AIPromptRunner().ExecutePrompt<unknown>(params);
+  // No type argument: this returns RAW TEXT and each of the three stages parses it against its own
+  // zod schema afterwards, so naming a shape here would be a claim this function cannot make.
+  // `ExecutePrompt`'s own parameter already defaults to `unknown` — spelling it out added nothing
+  // but a banned keyword.
+  const result = await new AIPromptRunner().ExecutePrompt(params);
   if (!result.success) {
     throw new Error(`AI Prompt "${promptName}" failed to run: ${result.errorMessage ?? 'unknown error'}`);
   }

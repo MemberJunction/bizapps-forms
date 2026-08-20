@@ -68,7 +68,13 @@ export interface ThemeOutcome {
    * from its vocabulary instead of quietly producing thinner themes over time.
    */
   strippedTokens: string[];
-  /** Tokens whose value was replaced to reach the bar. Named, for the same reason. */
+  /**
+   * Tokens whose value was replaced to reach the bar. Named, for the same reason.
+   *
+   * A repair is NOT a degradation — the theme is better afterwards, not worse — so it is logged
+   * rather than surfaced to the author. What an operator wants to see is a prompt that keeps
+   * needing repairing, which a log makes visible over time and a per-run message would not.
+   */
   repairedTokens: string[];
   /**
    * Pairs that STILL fail after the best available repair, as `ink on background`.

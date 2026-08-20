@@ -50,13 +50,26 @@ class FakeEntity {
       this._failureDetail = failTimes.detail;
       return false;
     }
-    this.ID = `${this.entityName}#${saved.length + 1}`;
+    // A real GUID shape, because the Builder now refuses to interpolate anything else into a
+    // filter — and a fake that mints ids the production code would reject is a fake that
+    // cannot exercise the path it is standing in for.
+    this.ID = fakeGuid(saved.length + 1);
     saved.push({ entity: this.entityName, fields: snapshot(this) });
     return true;
   }
 }
 
 /** Snapshot the business fields an instance has accumulated (own enumerable, minus internals). */
+/**
+ * A deterministic GUID for the fake's rows.
+ *
+ * Deterministic rather than random so a failing assertion names the same id twice in a row, and
+ * genuinely GUID-shaped so it survives the Builder's injection guard.
+ */
+function fakeGuid(n: number): string {
+  return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+}
+
 function snapshot(entity: FakeEntity): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entity)) {

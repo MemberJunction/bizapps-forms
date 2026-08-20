@@ -61,6 +61,7 @@ import {
   type StagedAuthoringResult,
 } from './staged-authoring';
 import type { ProgressChannel } from './progress-events';
+import { errorText } from '../shared/error-text';
 
 let activeDesignerModel: FormDesignerModel = new AIPromptFormDesignerModel();
 let activeStagedModel: StagedAuthoringModel = new AIPromptStagedAuthoringModel();
@@ -198,7 +199,7 @@ function failureFor(error: unknown, params: RunActionParams): ActionResultSimple
   if (error instanceof FormPersistError) {
     return persistFailure(error, params);
   }
-  return fail(`AI form design failed: ${asText(error)}`, 'DESIGN_FAILED');
+  return fail(`AI form design failed: ${errorText(error)}`, 'DESIGN_FAILED');
 }
 
 /**
@@ -215,16 +216,13 @@ function persistFailure(error: FormPersistError, params: RunActionParams): Actio
     setOutputParam(params, 'FormID', error.formId);
     return fail(
       'The form was only partly generated and has been left as a draft you can review and finish: ' +
-        asText(error),
+        errorText(error),
       'PARTIAL',
     );
   }
-  return fail(`Failed to persist generated form: ${asText(error)}`, 'PERSIST_FAILED');
+  return fail(`Failed to persist generated form: ${errorText(error)}`, 'PERSIST_FAILED');
 }
 
-function asText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function fail(message: string, resultCode: string): ActionResultSimple {
   return { Success: false, Message: message, ResultCode: resultCode };

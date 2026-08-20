@@ -44,6 +44,7 @@ import {
 import { conditionalRuleJSON, type QuestionIdByKey } from './blueprint-rules';
 import { COLUMN_LIMITS } from './limits';
 import { clampText, FormPersistError, isDuplicateKeyFailure, saveRow } from './persist';
+import { errorText } from '../shared/error-text';
 
 /**
  * Re-exported so every existing importer keeps working after the class moved to `persist.ts`.
@@ -507,7 +508,7 @@ async function createStyle(
     // by the undefined return, and the author still gets their form.
     LogError(
       `[Forms authoring] Could not create a style for "${formName}"; the form will use the ` +
-        `widget defaults until its Design tab is opened. ${asText(error)}`,
+        `widget defaults until its Design tab is opened. ${errorText(error)}`,
     );
     return undefined;
   }
@@ -523,9 +524,6 @@ function renameOnCollision(baseName: string) {
   };
 }
 
-function asText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 // --- Staged detail ---------------------------------------------------------------
 //
@@ -556,11 +554,20 @@ export interface PageDetailResult {
 /**
  * Fill in one page's stub questions from its detail blueprint, and add their options.
  *
- * MATCHING IS BY POSITION, not by key or prompt. The detail prompt is handed this page's stubs and
- * asked to return them in the same order, so position is what it is actually being asked to
- * preserve — and it is the only matcher that still works when the model tweaks a prompt's wording,
- * which is a thing it is explicitly allowed to do. The two ways position can disagree are both
- * handled without losing anything:
+ * MATCHING IS BY KEY FIRST, THEN BY POSITION, and the order of those two matters.
+ *
+ * Position alone was wrong, and wrong in the worst way. A key permanently names one row: the
+ * outline mints `key -> questionId` and every conditional rule in the form resolves through that
+ * map, forever. So a detail response that returned the same questions in a different order — which
+ * a model is free to do — would write question B's content onto question A's row while every rule
+ * naming A's key kept pointing at it. The form renders perfectly and one branch is silently gated
+ * on the wrong answer, which is precisely the failure keys exist to prevent. Keyed questions are
+ * therefore matched by KEY, which is the thing the prompt is actually told to preserve.
+ *
+ * Position remains the matcher for everything else, because most questions have no key — the
+ * Designer is told to add one only where a rule needs it — and position is what still works when
+ * the model rewords a prompt, which it is explicitly allowed to do. The two ways position can
+ * disagree are both handled without losing anything:
  *
  *   - MORE detailed questions than stubs: the extras are appended as new questions. A model that
  *     decided a page needed one more question has made an authoring judgement, and discarding it
@@ -589,9 +596,10 @@ export async function applyPageDetail(
     optionsAdded: 0,
     optionImages: [],
   };
+  const claim = stubClaimer(stubs, idByKey);
   for (let i = 0; i < detail.questions.length; i++) {
     const detailed = detail.questions[i];
-    const stub = stubs[i];
+    const stub = claim(detailed.key);
     const question = stub
       ? await refineQuestion(stub, detailed, idByKey, formId)
       : await createQuestion(md, formId, pageId, detailed, i, idByKey, contextUser);
@@ -609,16 +617,58 @@ export async function applyPageDetail(
   return result;
 }
 
+/**
+ * Hands out the stub each detailed question belongs to, by key where there is one.
+ *
+ * Stateful because a stub may be claimed only once: without that, two detailed questions naming
+ * the same key would both refine the same row and one would be lost, and a keyed claim followed by
+ * positional claims could hand the same row out twice. The closure is the smallest thing that can
+ * hold "which stubs are still free" while the caller walks the detail list in order.
+ *
+ * Returns `undefined` when nothing is left to claim — the caller creates a new question, which is
+ * the documented "more detailed questions than stubs" case.
+ */
+function stubClaimer(
+  stubs: readonly mjBizAppsFormsFormQuestionEntity[],
+  idByKey: QuestionIdByKey,
+): (key: string | undefined) => mjBizAppsFormsFormQuestionEntity | undefined {
+  const byId = new Map(stubs.map((stub) => [stub.ID, stub]));
+  const unclaimed = [...stubs];
+
+  const take = (stub: mjBizAppsFormsFormQuestionEntity): mjBizAppsFormsFormQuestionEntity => {
+    byId.delete(stub.ID);
+    const at = unclaimed.indexOf(stub);
+    if (at !== -1) {
+      unclaimed.splice(at, 1);
+    }
+    return stub;
+  };
+
+  return (key) => {
+    // A key that maps to a stub ON THIS PAGE wins outright. A key mapping elsewhere — the model
+    // echoing another page's key — resolves to nothing here and correctly falls through.
+    const keyed = key ? byId.get(idByKey.get(key) ?? '') : undefined;
+    if (keyed) {
+      return take(keyed);
+    }
+    return unclaimed.length > 0 ? take(unclaimed[0]) : undefined;
+  };
+}
+
 /** This page's questions in display order, as savable entities. */
 async function loadPageQuestions(
   md: Metadata,
   pageId: string,
   contextUser: UserInfo,
 ): Promise<mjBizAppsFormsFormQuestionEntity[]> {
+  // The id is interpolated into a filter, and `applyPageDetail` is exported — so "it always comes
+  // from the Builder's own return value" is an invariant nothing enforces. The GUID check IS the
+  // injection guard (a value matching this pattern cannot carry a quote), which is the same
+  // arrangement the asset route uses rather than a second escaping rule to keep right.
+  assertGuid(pageId, 'page id');
   const view = await new RunView().RunView<mjBizAppsFormsFormQuestionEntity>(
     {
       EntityName: ENTITY.FormQuestion,
-      // pageId comes from the Builder's own return value, never from a caller's string.
       ExtraFilter: `PageID='${pageId}'`,
       OrderBy: 'DisplayOrder',
       ResultType: 'entity_object',
@@ -634,6 +684,21 @@ async function loadPageQuestions(
 }
 
 /**
+ * Reject anything that is not a GUID before it reaches a filter string.
+ *
+ * Throws rather than returning a flag: every caller here is mid-build with a form already created,
+ * and a non-GUID id means a programming error upstream, not a data condition to route around.
+ */
+function assertGuid(value: string, what: string): void {
+  if (!GUID_PATTERN.test(value)) {
+    throw new FormPersistError(`Refusing to query with a ${what} that is not a GUID: "${value}".`);
+  }
+}
+
+/** Matches the canonical 8-4-4-4-12 form. */
+const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Which of these questions already carry options.
  *
  * One batched read rather than a per-question check, and the reason it exists at all is
@@ -647,6 +712,9 @@ async function loadQuestionsHavingOptions(
 ): Promise<Set<string>> {
   if (questionIds.length === 0) {
     return new Set();
+  }
+  for (const id of questionIds) {
+    assertGuid(id, 'question id');
   }
   const view = await new RunView().RunView<{ QuestionID: string }>(
     {
