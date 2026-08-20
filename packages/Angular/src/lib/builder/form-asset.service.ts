@@ -20,7 +20,7 @@
  */
 import { Injectable } from '@angular/core';
 
-import { resolveApiOrigin, resolveApiToken } from './mj-api-origin';
+import { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 
 /** Route MJAPI serves the authoring-asset endpoints from. */
 const ASSET_PATH = '/forms/asset';

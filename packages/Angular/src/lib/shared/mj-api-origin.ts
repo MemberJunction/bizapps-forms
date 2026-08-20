@@ -7,7 +7,9 @@
  * `http://localhost:4321/f/:slug`, an Explorer login page where a form should have been.
  *
  * Extracted from `DistributionManagerComponent` when the asset uploader needed the same answer;
- * one resolution rule beats two that can disagree about where the API is.
+ * one resolution rule beats two that can disagree about where the API is. Moved out of `builder/`
+ * when the Responses tab needed it too — a `responses/` module reaching into `builder/` would
+ * have made a sibling look like a dependency.
  */
 import { GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 

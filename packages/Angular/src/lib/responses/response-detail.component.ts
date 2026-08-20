@@ -1,22 +1,26 @@
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   ElementRef,
   EventEmitter,
   Input,
   Output,
   ViewChild,
+  inject,
 } from '@angular/core';
 import { FORMS_UI_CSS } from '../shared';
 import { MJ_CORE_ENTITY } from '../shared/entity-names';
 import type {
   ResponseAnswerView,
+  ResponseFileView,
   ResponseAutomationRunView,
   ResponseBindingRecordView,
   ResponseDetail,
   ResponseRecordLink,
 } from './response-models';
+import { ResponseFileDownloadService } from './response-file-download.service';
 
 /** Byte-size units, largest step first, for the human-readable file size. */
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
@@ -57,6 +61,7 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
   selector: 'mj-forms-response-detail',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [ResponseFileDownloadService],
   template: `
     <div class="rd">
       <header class="rd-head">
@@ -97,8 +102,23 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
               <dt>{{ a.prompt }}</dt>
               <dd>
                 @if (a.file; as f) {
-                  <button type="button" class="file" (click)="OpenFile(f.fileId)">
-                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+                  <!-- Clicking downloads the file itself. It used to open the MJ: Files RECORD,
+                       which is a metadata page about a row — never what someone reviewing an
+                       application wanted from a résumé. A revoked file has no bytes left to
+                       fetch, so it stays a plain label rather than a button that can only fail. -->
+                  <button
+                    type="button"
+                    class="file"
+                    [disabled]="f.isRevoked || DownloadingFileId === f.fileId"
+                    [attr.aria-busy]="DownloadingFileId === f.fileId"
+                    [title]="f.isRevoked ? 'This file was revoked and is no longer stored' : 'Download ' + f.fileName"
+                    (click)="DownloadFile(f)"
+                  >
+                    @if (DownloadingFileId === f.fileId) {
+                      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                    } @else {
+                      <i class="fa-solid fa-download" aria-hidden="true"></i>
+                    }
                     <span class="file-name" [class.file-name--unresolved]="!f.isResolved">{{ f.fileName }}</span>
                     @if (f.sizeBytes !== null) {
                       <span class="file-size">{{ FileSize(f.sizeBytes) }}</span>
@@ -110,7 +130,20 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
                   @if (!f.isResolved) {
                     <span
                       class="mjf-badge"
-                      title="A file was submitted, but its upload record could not be read. The link still opens the file record.">Details unavailable</span>
+                      title="A file was submitted, but its upload record could not be read. Downloading it may still work.">Details unavailable</span>
+                  }
+                  <!-- The record is still one click away for anyone who wants the metadata; it
+                       is just no longer what the filename does. -->
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                    title="Open the file record"
+                    (click)="OpenFile(f.fileId)"
+                  >
+                    <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                  </button>
+                  @if (DownloadError && DownloadErrorFileId === f.fileId) {
+                    <span class="file-error" role="alert">{{ DownloadError }}</span>
                   }
                 } @else {
                   {{ a.displayValue || '—' }}
@@ -274,9 +307,20 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
       }
       .file:hover { background: var(--mj-bg-surface-hover); border-color: var(--mj-border-strong); }
       .file:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+      /* A revoked file has no bytes behind it, so the control reads as unavailable rather than
+         as something that will work if pressed harder. */
+      .file:disabled {
+        cursor: not-allowed;
+        color: var(--mj-text-muted);
+        background: var(--mj-bg-surface-sunken);
+      }
+      .file:disabled:hover { background: var(--mj-bg-surface-sunken); border-color: var(--mj-border-default); }
       .file-name { overflow-wrap: anywhere; }
       .file-name--unresolved { font-style: italic; color: var(--mj-text-muted); }
       .file-size { color: var(--mj-text-muted); font-variant-numeric: tabular-nums; }
+      /* Beside the file it belongs to, never as a page-level banner: which file failed is the
+         first thing the reader needs to know. */
+      .file-error { font-size: var(--mjf-meta); color: var(--mj-status-error-text); }
 
       /* --- what this submission did --- */
 
@@ -312,6 +356,15 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
   ],
 })
 export class FormsResponseDetailComponent implements AfterViewInit {
+  private readonly downloads = inject(ResponseFileDownloadService);
+  private readonly cdr = inject(ChangeDetectorRef);
+
+  /** The file currently being fetched, so only its own row shows a spinner. */
+  public DownloadingFileId = '';
+  /** The last download failure, and which file it belongs to. */
+  public DownloadError = '';
+  public DownloadErrorFileId = '';
+
   @Input({ required: true }) Detail!: ResponseDetail;
 
   /**
@@ -348,6 +401,35 @@ export class FormsResponseDetailComponent implements AfterViewInit {
   /** Badge tone for a binding record's outcome. See OUTCOME_TONE. */
   public OutcomeTone(b: ResponseBindingRecordView): string {
     return OUTCOME_TONE[b.outcome] ?? '';
+  }
+
+  /**
+   * Download one file answer.
+   *
+   * State is kept per file id rather than as a single boolean so a failure lands next to the
+   * file it belongs to. A reviewer looking at a response with a résumé and a signature needs to
+   * know which one did not arrive, and one shared error message beside both answers that
+   * question wrongly half the time.
+   */
+  public async DownloadFile(file: ResponseFileView): Promise<void> {
+    if (file.isRevoked || this.DownloadingFileId) {
+      return;
+    }
+    this.DownloadingFileId = file.fileId;
+    this.DownloadError = '';
+    this.DownloadErrorFileId = '';
+    try {
+      const outcome = await this.downloads.download(file.fileId, file.fileName);
+      if (!outcome.ok) {
+        this.DownloadError = outcome.error ?? 'The download did not go through.';
+        this.DownloadErrorFileId = file.fileId;
+      }
+    } finally {
+      this.DownloadingFileId = '';
+      // OnPush with an awaited handler: without this the spinner never clears, because nothing
+      // else on this component changes when the promise settles.
+      this.cdr.markForCheck();
+    }
   }
 
   public OpenFile(fileId: string): void {

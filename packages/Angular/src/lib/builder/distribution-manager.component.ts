@@ -19,7 +19,7 @@ import { FORMS_UI_CSS } from '../shared';
 import { DISTRIBUTION_STYLES } from './distribution-manager.styles';
 import { DistributionService, type MutationOutcome } from './distribution.service';
 import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
-import { resolveApiOrigin } from './mj-api-origin';
+import { resolveApiOrigin } from '../shared/mj-api-origin';
 import { textToQrSvg } from './qr-code';
 import { readResponseLimit } from './response-limit';
 import { autoShareName, shareState, type ShareState } from './share-state';

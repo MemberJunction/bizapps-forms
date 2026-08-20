@@ -46,7 +46,7 @@ export {
   assetErrorMessage,
   type UploadedAsset,
 } from './form-asset.service';
-export { resolveApiOrigin, resolveApiToken } from './mj-api-origin';
+export { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';
