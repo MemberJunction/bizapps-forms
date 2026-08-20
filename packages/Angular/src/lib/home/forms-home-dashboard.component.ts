@@ -23,6 +23,7 @@ import {
 } from './home-models';
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
 import { FormCloneService } from '../templates/form-clone.service';
+import { FormGenerationService } from '../builder/form-generation.service';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -86,7 +87,7 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService, FormCloneService],
+  providers: [FormsHomeService, FormCloneService, FormGenerationService],
   imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
@@ -94,6 +95,7 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
   private readonly clone = inject(FormCloneService);
+  private readonly generation = inject(FormGenerationService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   public loading = false;
@@ -296,9 +298,42 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       this.cdr.markForCheck();
       return;
     }
-    await this.runAuthoring(HOME_ACTION.generateFromBrief, [
-      { Name: 'Brief', Value: brief, Type: 'Input' },
-    ]);
+    this.busy = true;
+    this.errorMessage = null;
+    this.cdr.markForCheck();
+    try {
+      const outcome = await this.generation.generate(brief, 'brief', (name) =>
+        this.data.resolveActionId(name),
+      );
+      // A PARTIAL build failed AND left a reviewable draft. Opening it is right — the author can
+      // see what did get made and finish it — but the message has to say so, because a form that
+      // opens looks finished and this one is not.
+      if (!outcome.formId) {
+        this.errorMessage = outcome.message;
+        return;
+      }
+      if (outcome.partial || outcome.degraded.length > 0) {
+        this.errorMessage = outcome.message;
+      }
+      this.closePanel();
+      this.brief = '';
+      this.OpenEntityRecord.emit({
+        EntityName: HOME_ENTITY.forms,
+        RecordPKey: CompositeKey.FromID(outcome.formId),
+      });
+      await this.loadForms();
+    } catch (err) {
+      this.fail(err, 'The form could not be generated.');
+    } finally {
+      this.generation.reset();
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /** Live build progress for the panel's bar, or null when nothing is generating. */
+  protected get generationProgress() {
+    return this.generation.progress();
   }
 
   /**

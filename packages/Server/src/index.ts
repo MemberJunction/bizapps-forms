@@ -63,6 +63,12 @@ import './download/DownloadMiddleware.js';
 // deployment that configures neither behaves exactly as it does without this import.
 import './storage/LocalDiskFileStorage.js';
 
+// Fills the forms-actions progress seam with the real `statusUpdates` publisher, so a streamed
+// form build can tell the author's browser what it is doing. Installed at MODULE LOAD as well as
+// from the startup export below — see the function's own note for why both.
+import { installFormsProgressPublisher } from './authoring/progress-publisher.js';
+installFormsProgressPublisher();
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
@@ -98,4 +104,5 @@ export function LoadBizAppsFormsServer(): void {
     // magic-link minter so the FormDistribution hook can provision anonymous links.
     // Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
+    installFormsProgressPublisher();
 }

@@ -48,6 +48,14 @@ export * from './shared/form-response-context';
 export * from './authoring/form-blueprint';
 export * from './authoring/form-blueprint-builder';
 export * from './authoring/llm-form-designer';
+export * from './authoring/limits';
+export * from './authoring/persist';
+export * from './authoring/blueprint-rules';
+export * from './authoring/staged-authoring';
+export * from './authoring/staged-authoring-model';
+// The progress seam forms-server fills in. Exported from here so the server package imports it
+// from the package's public surface rather than reaching into a deep path.
+export * from './authoring/progress-events';
 export {
   GenerateFormFromBriefAction as GenerateFormAction,
   setFormDesignerModel,

@@ -28,6 +28,27 @@ export const MAX_DESIGNER_ATTEMPTS = 3;
 export const MAX_PERSIST_ATTEMPTS = 3;
 
 /**
+ * Page-detail model calls in flight at once during a staged build.
+ *
+ * A cap rather than "all of them": a ten-page form opening ten simultaneous calls is how a
+ * provider rate-limits an author into a form where most pages degraded to their outline stubs.
+ * Reaching it does not fail anything — later pages simply wait for a slot.
+ */
+export const PAGE_DETAIL_CONCURRENCY = 3;
+
+/**
+ * How long one stage's model call may run before it is cancelled.
+ *
+ * Enforced through the prompt runner's own `cancellationToken`, so reaching it actually STOPS the
+ * provider call rather than just resolving the caller — a `Promise.race` would leave the request
+ * running, streaming and billing behind a pipeline that had already moved on.
+ *
+ * Reaching it degrades that stage: a timed-out page keeps its outline questions. A timed-out
+ * OUTLINE fails the run with `DESIGN_FAILED`, because there is nothing yet to degrade to.
+ */
+export const STAGE_TIMEOUT_MS = 120_000;
+
+/**
  * The bounded string columns, and how much each will hold.
  *
  * These are clamped ON WRITE rather than repaired after a failed save. The builder knows every

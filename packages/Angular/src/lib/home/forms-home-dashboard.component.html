@@ -39,9 +39,32 @@
           ></textarea>
           <span class="mjf-field-hint">AI drafts the questions; you can edit everything before publishing.</span>
         </div>
+        @if (generationProgress; as progress) {
+          <!-- Determinate from the first event: the outline stage reports the total before any
+               page work starts, so this is a real fraction rather than an animated guess. It is
+               only ever shown when events actually arrive — a build with no progress channel
+               falls back to the disabled button below, which is the same experience as before. -->
+          <div class="home-gen" role="status" aria-live="polite">
+            <div class="home-gen-head">
+              <span class="home-gen-label">{{ progress.label }}</span>
+              <span class="home-gen-count">{{ progress.percent }}%</span>
+            </div>
+            <div
+              class="home-gen-track"
+              role="progressbar"
+              [attr.aria-valuenow]="progress.percent"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              [attr.aria-label]="'Generating ' + progress.label"
+            >
+              <div class="home-gen-fill" [style.width.%]="progress.percent"></div>
+            </div>
+          </div>
+        }
         <div class="home-panel-actions">
           <button type="button" class="mjf-btn mjf-btn--primary" (click)="authorWithAI()" [disabled]="busy">
-            <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> Generate
+            <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+            {{ busy ? 'Generating…' : 'Generate' }}
           </button>
           <button type="button" class="mjf-btn mjf-btn--quiet" (click)="closePanel()" [disabled]="busy">Cancel</button>
         </div>

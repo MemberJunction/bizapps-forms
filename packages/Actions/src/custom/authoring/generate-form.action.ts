@@ -8,22 +8,36 @@
  * It reuses the deterministic Designer→Builder split proven by MJ's Form Builder
  * agent: the LLM (Designer) emits a structured JSON {@link FormBlueprint}; deterministic
  * code (Builder) validates it against the §5.3 taxonomy and persists it. The model is
- * chosen by MemberJunction from the 'Forms: Form Designer' AI Prompt's metadata — there
- * is no model or vendor name in code (see {@link AIPromptFormDesignerModel}).
+ * chosen by MemberJunction from the AI Prompt's metadata — there is no model or vendor
+ * name in code (see {@link AIPromptFormDesignerModel}).
+ *
+ * TWO ROUTES TO THE SAME FORM, chosen by whether anyone is watching. With a `SessionID` the build
+ * runs in STAGES and publishes progress, so the author sees a real form within seconds and watches
+ * it fill in. Without one it is a single prompt — cheaper, fewer calls, identical output shape.
+ * Staging buys time-to-first-paint and nothing else, so it is spent only where that is worth the
+ * extra calls. See `shouldStage`.
  *
  * Input params:
- *   - `Brief` (string, required) — the natural-language description.
+ *   - `Brief` (string, required) — the natural-language description, or the author's own list of
+ *      questions when `InputMode` is `'questions'`.
+ *   - `InputMode` (`'brief' | 'questions'`, optional, default `'brief'`) — see
+ *      {@link FormDesignerInputMode}. An unrecognised value falls back to `'brief'` rather than
+ *      failing the run: the wrong mode produces a usable form, a rejected run produces nothing.
+ *   - `SessionID` (string, optional) — the caller's push-channel session. Supplying it switches
+ *      the build to the staged, progress-publishing route. Absent = a silent single-shot build.
  *   - `OwnerUserID` (string, optional) — stamped on the created Form.
  * Output params:
  *   - `FormID`, `FormVersionID`, `StyleID` (created ids)
  *   - `PageCount`, `QuestionCount`, `OptionCount`, `ScreenCount`
  *   - `Blueprint` (the validated blueprint object, for inspection/preview)
+ *   - `Degraded` (string[]) — parts a staged build could not complete, named. Empty is the norm.
  *
  * Result codes: `SUCCESS`, `PARTIAL` (a reviewable half-built draft — `FormID` is still set),
  * `MISSING_PARAMETERS`, `DESIGN_FAILED`, `PERSIST_FAILED`, `FAILED`.
  *
- * The blueprint→persist path is unit-testable with a stubbed {@link FormDesignerModel}
- * (no network/API key) — see `generate-form.action.spec.ts`.
+ * Both routes are unit-testable offline through their model seams ({@link setFormDesignerModel},
+ * {@link setStagedAuthoringModel}) — no network, no API key, no websocket. See
+ * `llm-form-designer.spec.ts` and `staged-authoring.spec.ts`.
  */
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
@@ -34,14 +48,29 @@ import { buildFormFromBlueprint, FormPersistError } from './form-blueprint-build
 import {
   AIPromptFormDesignerModel,
   designFormFromBrief,
+  type FormDesignerInputMode,
   type FormDesignerModel,
 } from './llm-form-designer';
+import { AIPromptStagedAuthoringModel } from './staged-authoring-model';
+import {
+  runStagedAuthoring,
+  shouldStage,
+  type StagedAuthoringModel,
+  type StagedAuthoringResult,
+} from './staged-authoring';
+import type { ProgressChannel } from './progress-events';
 
 let activeDesignerModel: FormDesignerModel = new AIPromptFormDesignerModel();
+let activeStagedModel: StagedAuthoringModel = new AIPromptStagedAuthoringModel();
 
-/** Override the Designer model (e.g. a deterministic stub in tests). */
+/** Override the single-shot Designer model (e.g. a deterministic stub in tests). */
 export function setFormDesignerModel(model: FormDesignerModel): void {
   activeDesignerModel = model;
+}
+
+/** Override the staged pipeline's model (e.g. a deterministic stub in tests). */
+export function setStagedAuthoringModel(model: StagedAuthoringModel): void {
+  activeStagedModel = model;
 }
 
 @RegisterClass(BaseAction, 'Forms: Generate Form From Brief')
@@ -51,49 +80,120 @@ export class GenerateFormFromBriefAction extends BaseAction {
     if (!brief) {
       return fail('Brief parameter is required', 'MISSING_PARAMETERS');
     }
-    return runAuthoring(brief, getStringParam(params, 'OwnerUserID'), params, params.ContextUser);
+    return runAuthoring(brief, getStringParam(params, 'OwnerUserID'), params, params.ContextUser, {
+      inputMode: readInputMode(params),
+      channel: readChannel(params),
+    });
   }
 }
 
 /**
- * Shared authoring pipeline (also usable directly from tests): Designer → validated
- * blueprint → deterministic Builder → output params.
+ * The progress channel for this run, or `undefined` when there is nobody to publish to.
+ *
+ * BOTH identities or neither. `sessionId` routes the push to the right browser tab; `ownerUserId`
+ * is what MJ's subscription filter checks against the subscribing connection's authenticated user,
+ * and it FAILS CLOSED on 6.x. A channel carrying only the session would publish events that are
+ * silently discarded — which looks exactly like a network problem and is not one. A context user
+ * with no id is not a channel.
+ */
+function readChannel(params: RunActionParams): ProgressChannel | undefined {
+  const sessionId = getStringParam(params, 'SessionID');
+  const ownerUserId = params.ContextUser?.ID;
+  return sessionId && ownerUserId ? { sessionId, ownerUserId } : undefined;
+}
+
+/**
+ * Read `InputMode`, defaulting anything unrecognised to `'brief'`.
+ *
+ * Lenient on purpose. This param decides how the Designer TREATS the text, not whether the text is
+ * usable — so a caller who sends `"Questions"` or a typo gets a designed form rather than a
+ * `MISSING_PARAMETERS` refusal over a hint.
+ */
+function readInputMode(params: RunActionParams): FormDesignerInputMode {
+  return getStringParam(params, 'InputMode')?.toLowerCase() === 'questions' ? 'questions' : 'brief';
+}
+
+/**
+ * The authoring pipeline, both routes. Also usable directly from tests.
+ *
+ * Route selection is the only branch: everything after it — output params, result codes, the
+ * partial-draft story — is shared, so the two routes cannot drift in what a caller sees.
  */
 export async function runAuthoring(
   brief: string,
   ownerUserId: string | undefined,
   params: RunActionParams,
   contextUser: UserInfo,
+  options: { inputMode?: FormDesignerInputMode; channel?: ProgressChannel } = {},
 ): Promise<ActionResultSimple> {
-  let blueprint;
+  const inputMode = options.inputMode ?? 'brief';
   try {
-    blueprint = await designFormFromBrief(brief, activeDesignerModel, contextUser);
+    const outcome = shouldStage(options.channel)
+      ? await runStagedAuthoring(brief, activeStagedModel, contextUser, {
+          inputMode,
+          ownerUserId,
+          channel: options.channel,
+        })
+      : await runSingleShot(brief, contextUser, ownerUserId, inputMode);
+    return report(outcome, params);
   } catch (error) {
-    return fail(`AI form design failed: ${asText(error)}`, 'DESIGN_FAILED');
-  }
-
-  try {
-    const built = await buildFormFromBlueprint(blueprint, contextUser, ownerUserId);
-    setOutputParam(params, 'FormID', built.formId);
-    setOutputParam(params, 'FormVersionID', built.formVersionId);
-    setOutputParam(params, 'PageCount', built.pageCount);
-    setOutputParam(params, 'QuestionCount', built.questionCount);
-    setOutputParam(params, 'OptionCount', built.optionCount);
-    setOutputParam(params, 'ScreenCount', built.screenCount);
-    setOutputParam(params, 'StyleID', built.styleId);
-    setOutputParam(params, 'Blueprint', blueprint);
-    return {
-      Success: true,
-      ResultCode: 'SUCCESS',
-      Message: `Generated draft form "${blueprint.name}" (${built.questionCount} questions across ${built.pageCount} page(s)).`,
-    };
-  } catch (error) {
-    return persistFailure(error, params);
+    return failureFor(error, params);
   }
 }
 
+/** One prompt, one persist. What an API caller gets, and what every form got before staging. */
+async function runSingleShot(
+  brief: string,
+  contextUser: UserInfo,
+  ownerUserId: string | undefined,
+  inputMode: FormDesignerInputMode,
+): Promise<StagedAuthoringResult> {
+  const blueprint = await designFormFromBrief(brief, activeDesignerModel, contextUser, inputMode);
+  const built = await buildFormFromBlueprint(blueprint, contextUser, ownerUserId);
+  // Shaped as a staged result so `report` has one thing to write out. A single-shot build cannot
+  // partly succeed — it is one persist — so `degraded` is empty by construction, not by omission.
+  return { blueprint, built, degraded: [] };
+}
+
+/** Write the output params and the success message. Identical for both routes. */
+function report(outcome: StagedAuthoringResult, params: RunActionParams): ActionResultSimple {
+  const { blueprint, built, degraded } = outcome;
+  setOutputParam(params, 'FormID', built.formId);
+  setOutputParam(params, 'FormVersionID', built.formVersionId);
+  setOutputParam(params, 'PageCount', built.pageCount);
+  setOutputParam(params, 'QuestionCount', built.questionCount);
+  setOutputParam(params, 'OptionCount', built.optionCount);
+  setOutputParam(params, 'ScreenCount', built.screenCount);
+  setOutputParam(params, 'StyleID', built.styleId);
+  setOutputParam(params, 'Blueprint', blueprint);
+  setOutputParam(params, 'Degraded', degraded);
+
+  const summary = `Generated draft form "${blueprint.name}" (${built.questionCount} questions across ${built.pageCount} page(s)).`;
+  return {
+    Success: true,
+    ResultCode: 'SUCCESS',
+    // Degradations are named in the message as well as the output param, because a caller reading
+    // only the message is the common case and "some parts were left plain" is not a detail.
+    Message: degraded.length === 0 ? summary : `${summary} Left plain: ${degraded.join(', ')}.`,
+  };
+}
+
 /**
- * Map a persist failure to a result, distinguishing the half-built case.
+ * Map a thrown error to a result.
+ *
+ * A `FormPersistError` is the only one that can arrive with a form already in the database, so it
+ * is the only one that can report `PARTIAL`. Everything else failed before anything was written:
+ * a design failure is `DESIGN_FAILED` on either route, matching what callers already handle.
+ */
+function failureFor(error: unknown, params: RunActionParams): ActionResultSimple {
+  if (error instanceof FormPersistError) {
+    return persistFailure(error, params);
+  }
+  return fail(`AI form design failed: ${asText(error)}`, 'DESIGN_FAILED');
+}
+
+/**
+ * A persist failure, distinguishing the half-built case.
  *
  * A build that got as far as creating the Form row leaves a DRAFT behind — invisible to
  * respondents, editable by its author, and better than nothing. Reporting `PARTIAL` with its id on
@@ -101,17 +201,16 @@ export async function runAuthoring(
  * failed" while a form they cannot find sits in the database. Still `Success: false`, because a
  * half-built form is not a success and a caller that opens it must do so deliberately.
  */
-function persistFailure(error: unknown, params: RunActionParams): ActionResultSimple {
-  if (error instanceof FormPersistError && error.formId) {
+function persistFailure(error: FormPersistError, params: RunActionParams): ActionResultSimple {
+  if (error.formId) {
     setOutputParam(params, 'FormID', error.formId);
     return fail(
-      `The form was only partly generated and has been left as a draft you can review and finish: ` +
-        `${asText(error)}`,
+      'The form was only partly generated and has been left as a draft you can review and finish: ' +
+        asText(error),
       'PARTIAL',
     );
   }
-  const code = error instanceof FormPersistError ? 'PERSIST_FAILED' : 'FAILED';
-  return fail(`Failed to persist generated form: ${asText(error)}`, code);
+  return fail(`Failed to persist generated form: ${asText(error)}`, 'PERSIST_FAILED');
 }
 
 function asText(error: unknown): string {

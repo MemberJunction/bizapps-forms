@@ -419,6 +419,57 @@ export function parseFormBlueprint(input: string | object): FormBlueprint {
 }
 
 /**
+ * Parse one page's DETAIL — the second stage's output — against the keys the outline established.
+ *
+ * A detail page is an ordinary {@link blueprintPageSchema} page; nothing about its shape is
+ * special. What is special is the context it is validated in: its rules reference keys declared
+ * across the WHOLE form, most of which are not on this page, so the form-level key check cannot be
+ * reused and a bare `blueprintPageSchema.parse` would accept a reference to nothing.
+ *
+ * `knownKeys` is the outline's full key set. The ordering rules the form-level validator enforces
+ * are deliberately NOT re-applied here: the detail pass refines questions the outline already
+ * placed, so their positions are fixed and a rule that was legal in the outline stays legal. What
+ * can still go wrong is a reference to a key that never existed, which is what this catches.
+ *
+ * Throws a `ZodError` — the same currency the Designer retry loop already speaks, so a bad detail
+ * page is retried with the specific complaint rather than failing the page.
+ */
+export function parsePageDetail(input: string | object, knownKeys: ReadonlySet<string>): BlueprintPage {
+  const raw: unknown = typeof input === 'string' ? JSON.parse(extractJSON(input)) : input;
+  return blueprintPageSchema
+    .superRefine((page, ctx) => {
+      const rules = [page.conditionalRule, ...page.questions.map((q) => q.conditionalRule)];
+      for (const rule of rules) {
+        for (const condition of conditionsOf(rule)) {
+          if (!knownKeys.has(condition.questionKey)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['conditionalRule'],
+              message:
+                `Conditional rule references question key "${condition.questionKey}", which is not ` +
+                `part of this form. Available keys: ${[...knownKeys].join(', ') || '(none)'}.`,
+            });
+          }
+        }
+      }
+    })
+    .parse(raw);
+}
+
+/** Every question key the blueprint declares, for {@link parsePageDetail} to validate against. */
+export function declaredKeys(blueprint: FormBlueprint): Set<string> {
+  const keys = new Set<string>();
+  for (const page of blueprint.pages) {
+    for (const question of page.questions) {
+      if (question.key) {
+        keys.add(question.key);
+      }
+    }
+  }
+  return keys;
+}
+
+/**
  * LLMs frequently wrap JSON in prose or ```json fences. Pull out the first balanced
  * top-level object so `JSON.parse` sees clean input.
  */
