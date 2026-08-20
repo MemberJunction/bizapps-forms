@@ -34,9 +34,13 @@ export const CODEGEN_TIMESTAMP_COLUMNS = ['__mj_CreatedAt', '__mj_UpdatedAt'];
 /** Migration files in the order Flyway will apply them. */
 export function readMigrations(root) {
     const dir = join(root, 'migrations');
+    // Baseline (`B…`) files count. They create most of this schema's tables, and excluding them
+    // left ten of thirteen tables outside every check below — a gate that passed because it could
+    // not see the code, which is worse than no gate.
     return readdirSync(dir)
-        .filter((f) => /^V\d+__.*\.sql$/.test(f))
-        .sort()
+        .filter((f) => /^[BV]\d+__.*\.sql$/.test(f))
+        // Flyway applies the baseline first, then versioned migrations in version order.
+        .sort((a, b) => (a[0] === b[0] ? a.localeCompare(b) : a[0] === 'B' ? -1 : 1))
         .map((file) => ({
             file,
             version: file.slice(1, file.indexOf('__')),
@@ -53,44 +57,45 @@ export function readMigrations(root) {
 export function findColumnsAdded(sql) {
     const found = [];
     for (const [, table, body] of sql.matchAll(
-        /CREATE TABLE\s+\[\$\{flyway:defaultSchema\}\]\.\[?(\w+)\]?\s*\(([\s\S]*?)\n\s*\);/g,
+        /CREATE TABLE\s+(?:\[\$\{flyway:defaultSchema\}\]|\[?__mj_\w+\]?)\.\[?(\w+)\]?\s*\(([\s\S]*?)\n\s*\);/g,
     )) {
-        for (const column of columnNamesFromTableBody(body)) {
+        for (const column of columnNamesFromBody(body)) {
             found.push({ table, column });
         }
     }
     for (const [, table, body] of sql.matchAll(
-        /ALTER TABLE\s+\[\$\{flyway:defaultSchema\}\]\.\[?(\w+)\]?\s+ADD\b([\s\S]*?);/g,
+        /ALTER TABLE\s+(?:\[\$\{flyway:defaultSchema\}\]|\[?__mj_\w+\]?)\.\[?(\w+)\]?\s+ADD\b([\s\S]*?);/g,
     )) {
-        for (const column of columnNamesFromAlterBody(body)) {
+        for (const column of columnNamesFromBody(body)) {
             found.push({ table, column });
         }
     }
     return found;
 }
 
-/** Column names from a CREATE TABLE body, skipping table-level constraints. */
-function columnNamesFromTableBody(body) {
-    const names = [];
-    for (const rawLine of body.split('\n')) {
-        const line = rawLine.trim();
-        if (line === '' || line.startsWith('--') || /^(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK|INDEX)\b/i.test(line)) {
-            continue;
-        }
-        const match = line.match(/^\[?(\w+)\]?\s+\w/);
-        if (match && !match[1].startsWith('__mj_')) {
-            names.push(match[1]);
-        }
-    }
-    return names;
-}
-
-/** Column names from an `ALTER TABLE … ADD` body (one statement, possibly several columns). */
-function columnNamesFromAlterBody(body) {
+/**
+ * Column names from a `CREATE TABLE` or `ALTER TABLE … ADD` body.
+ *
+ * One parser for both: they were separate copies of the same line-by-line rules, which is how the
+ * two of them came to disagree about which lines to skip.
+ */
+function columnNamesFromBody(body) {
     const names = [];
     for (const rawLine of body.split('\n')) {
         const line = rawLine.trim().replace(/^,/, '').trim();
-        if (line === '' || line.startsWith('--') || /^(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK|INDEX)\b/i.test(line)) {
+        // Table-level constraints, and the continuation lines that belong to them. Without `ON`
+        // and friends, `ON DELETE CASCADE;` parses as a column named `ON` and the gate fails a
+        // perfectly good foreign-key migration with a nonsense message.
+        if (
+            line === '' ||
+            line.startsWith('--') ||
+            /^(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK|INDEX|ON|WITH|REFERENCES|DEFAULT)\b/i.test(line)
+        ) {
+            continue;
+        }
+        // A computed column (`Total AS (Price * Qty)`) is not writable, so CodeGen never gives it a
+        // parameter — demanding one would fail correct output.
+        if (/^\[?\w+\]?\s+AS\b/i.test(line)) {
             continue;
         }
         const match = line.match(/^\[?(\w+)\]?\s+\w/);
@@ -109,7 +114,7 @@ function columnNamesFromAlterBody(body) {
 export function findProcedures(sql) {
     const procs = [];
     for (const match of sql.matchAll(
-        /CREATE PROCEDURE\s+\[\$\{flyway:defaultSchema\}\]\.\[?(\w+)\]?([\s\S]*?)\nAS\b/g,
+        /CREATE PROCEDURE\s+(?:\[\$\{flyway:defaultSchema\}\]|\[?__mj_\w+\]?)\.\[?(\w+)\]?([\s\S]*?)\nAS\b/g,
     )) {
         const [, name, paramBlock] = match;
         procs.push({ name, params: [...paramBlock.matchAll(/@(\w+)/g)].map((p) => p[1]) });
@@ -185,7 +190,7 @@ export function runChecks(root = REPO_ROOT) {
         }
     }
 
-    violations.push(...checkProcParity(lastProcDefinition));
+    violations.push(...checkProcParity(lastProcDefinition, columnsByTable));
     violations.push(...checkTimestampOrder(migrations, timestampVersion, columnsByTable));
     violations.push(...checkEntityRowOrder(migrations, entityRowVersion, columnsByTable));
     return violations;
@@ -209,21 +214,33 @@ function snapshotColumns(columnsByTable) {
  * `EntityField` row survives, so MJ keeps composing an EXEC that passes `@SocialLinks` to a
  * procedure that has no such parameter, and every save of that entity fails.
  */
-function checkProcParity(lastProcDefinition) {
+function checkProcParity(lastProcDefinition, columnsAtEnd) {
     const violations = [];
     for (const [name, { proc, migration, columnsThen }] of lastProcDefinition) {
         const table = name.match(/^sp(?:Create|Update)(\w+)$/)?.[1];
-        if (!table || !columnsThen.has(table)) {
+        if (!table || !columnsAtEnd.has(table)) {
             continue;
         }
         const params = new Set(proc.params);
-        const missing = [...columnsThen.get(table)].filter((c) => !params.has(c));
+        // Measured against the columns the table has at the END of the chain, not just the ones it
+        // had when this procedure was last written. Comparing only against `columnsThen` left the
+        // gate blind to the commoner half of this defect: a migration that adds a column and never
+        // regenerates the procedure at all. That is exactly the state V202608191200 was in before
+        // its CodeGen half was appended — so the first version of this gate would not have caught
+        // the bug it was built for, only the narrower case where a LATER migration re-defines the
+        // procedure. `columnsThen` is kept because it distinguishes the two causes in the message.
+        const missing = [...columnsAtEnd.get(table).keys()].filter((c) => !params.has(c));
         if (missing.length > 0) {
+            const thrownAway = missing.filter((c) => columnsThen.get(table)?.has(c));
             violations.push(
                 `${migration.file}: ${name} is the last definition of that procedure but has no parameter for ` +
-                    `${missing.map((m) => `[${m}]`).join(', ')} on table ${table}. A later migration regenerated ` +
-                    `this procedure from a database that predated the column, so the column ships without a way ` +
-                    `to write it and every save of the entity fails with "too many arguments specified".`,
+                    `${missing.map((m) => `[${m}]`).join(', ')} on table ${table}. ` +
+                    (thrownAway.length > 0
+                        ? `A later migration regenerated it from a database that predated ` +
+                          `${thrownAway.map((m) => `[${m}]`).join(', ')}, throwing the parameter away.`
+                        : `A later migration adds the column and never regenerates this procedure.`) +
+                    ` Either way the column ships with no way to write it, and once its EntityField ` +
+                    `row exists every save of the entity fails with "too many arguments specified".`,
             );
         }
     }

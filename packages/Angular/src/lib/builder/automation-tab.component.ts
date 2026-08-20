@@ -497,29 +497,66 @@ export class AutomationTabComponent implements OnInit {
       return;
     }
     const myOrder = mine.DisplayOrder;
-    mine.DisplayOrder = theirs.DisplayOrder;
+    const theirOrder = theirs.DisplayOrder;
+    mine.DisplayOrder = theirOrder;
     theirs.DisplayOrder = myOrder;
     await this.run(async () => {
-      // Both saves are attempted, and both entities are reverted if either fails. A reorder is
-      // ONE change expressed as two rows, and the obvious `a.Save() || b.Save()` gets it wrong
-      // twice: `||` short-circuits, so a failure on the first leaves the second holding the first
-      // one's old order in memory — dirty, unreverted, and flushed to the database minutes later
-      // by an unrelated edit — and a failure on the SECOND leaves the first one's swap committed,
-      // so two steps share a DisplayOrder and the runner's tie-break decides the order instead of
-      // the author.
+      // A reorder is ONE change expressed as two rows, and the obvious `a.Save() || b.Save()`
+      // gets it wrong twice: `||` short-circuits, so a failure on the first leaves the second
+      // holding the first one's old order in memory — dirty, unreverted, and flushed to the
+      // database minutes later by an unrelated edit — and a failure on the SECOND leaves the
+      // first one's swap committed, so two steps share a DisplayOrder and the runner's tie-break
+      // decides the order instead of the author.
       const mineSaved = await mine.Save();
       const theirsSaved = await theirs.Save();
       if (mineSaved && theirsSaved) {
         return;
       }
-      // Revert restores each entity to its last saved state, which undoes the committed half too.
-      mine.Revert();
-      theirs.Revert();
       const failed = mineSaved ? theirs : mine;
+      const reason = failed.LatestResult?.CompleteMessage ?? 'Those steps could not be reordered.';
+      const stranded = await this.undoHalfDoneSwap(
+        { entity: mine, saved: mineSaved, order: myOrder },
+        { entity: theirs, saved: theirsSaved, order: theirOrder },
+      );
       throw new Error(
-        failed.LatestResult?.CompleteMessage ?? 'Those steps could not be reordered.',
+        stranded
+          ? `${reason} The saved half of that move could not be undone either, so the order shown here may not match what runs — reload the tab.`
+          : reason,
       );
     });
+  }
+
+  /**
+   * Put back whichever half of a failed swap actually committed.
+   *
+   * `Revert()` cannot do this job and it is worth being explicit about why, because reaching for
+   * it here is the obvious move and it silently does nothing: it copies `OldValue` back over
+   * `Value` in MEMORY and returns early when the entity is not dirty — and a successful `Save()`
+   * has already advanced `OldValue` and cleared the dirty flag. So after a commit, `Revert()` is
+   * a no-op against a row that is already changed in the database. Undoing a committed write
+   * takes another write.
+   *
+   * Returns true when a compensating write was needed and itself failed, which is the one case
+   * the author has to be told about explicitly: the database is then genuinely inconsistent with
+   * the list, and no amount of re-rendering will fix it.
+   */
+  private async undoHalfDoneSwap(
+    ...halves: Array<{ entity: mjBizAppsFormsFormAutomationEntity; saved: boolean; order: number }>
+  ): Promise<boolean> {
+    let stranded = false;
+    for (const half of halves) {
+      if (!half.saved) {
+        // Never reached the database, so memory is the only thing to clean up — and here Revert
+        // is exactly right, because the entity IS still dirty.
+        half.entity.Revert();
+        continue;
+      }
+      half.entity.DisplayOrder = half.order;
+      if (!(await half.entity.Save())) {
+        stranded = true;
+      }
+    }
+    return stranded;
   }
 
   private neighbourOf(
@@ -899,14 +936,20 @@ export class AutomationTabComponent implements OnInit {
     // Sequential by default so a later step can rely on what this one produced — the confirmation
     // email that reports a created record, or a follow-up task that links to it.
     automation.ExecutionMode = 'Sync';
-    // One past the highest order in use, NOT a count. After any deletion the two diverge: seed
-    // four built-ins (1-4), add two steps (5, 6), delete the one at 3, and a count-derived order
-    // hands the next step 6 — colliding with the step already there. Two steps then share a
-    // DisplayOrder, so this tab and the server fall back to different tie-breaks (the
-    // DisplayOrder-sorted read here, the published snapshot's order there) and the sequence the
-    // author sees stops being the sequence that runs. It also makes the arrows a silent no-op
-    // between the tied pair, since swapping two equal numbers writes nothing.
-    automation.DisplayOrder = this.nextDisplayOrder() + seeded;
+    // One past the highest order in use, NOT a count, and taking the rows just seeded into
+    // account — `automations()` is not reloaded between the seed and here, so on the seeding path
+    // it is still empty and cannot answer this on its own.
+    //
+    // Count-derived orders collide two different ways. After a deletion: seed four built-ins
+    // (1-4), add two steps (5, 6), delete the one at 3, and `length + 1` hands the next step 6,
+    // on top of the step already there. And on the seeding path, a built-in whose action is not
+    // registered here is skipped while the rest keep their own displayOrder, so the rows can
+    // occupy 1, 3, 4 while the count says 3. Either way two steps end up sharing a DisplayOrder,
+    // this tab and the server then fall back to different tie-breaks (the DisplayOrder-sorted
+    // read here, the published snapshot's order there), and the sequence the author sees stops
+    // being the sequence that runs — while the arrows silently do nothing between the tied pair,
+    // since swapping two equal numbers writes nothing.
+    automation.DisplayOrder = Math.max(this.highestDisplayOrder(), seeded) + 1;
     automation.ContinueOnError = true;
     automation.IsActive = true;
     configure(automation);
@@ -926,6 +969,12 @@ export class AutomationTabComponent implements OnInit {
    * save — it was not running before either, since the legacy runner also resolves by name and
    * skips what it cannot find, so skipping preserves the behaviour instead of inventing a failure.
    */
+  /** The highest DisplayOrder among the steps currently loaded, or 0 when there are none. */
+  private highestDisplayOrder(): number {
+    const orders = this.automations().map((a) => a.DisplayOrder ?? 0);
+    return orders.length === 0 ? 0 : Math.max(...orders);
+  }
+
   private async seedLegacyDefaultsIfFirst(): Promise<number> {
     if (this.automations().length > 0) {
       return 0;
@@ -978,7 +1027,12 @@ export class AutomationTabComponent implements OnInit {
             `The built-in step "${legacy.actionName}" could not be saved, so adding this one was stopped rather than silently switching that step off.`,
         );
       }
-      seeded += 1;
+      // The highest order actually written, NOT a count. The two diverge whenever a built-in
+      // is skipped because its action is not registered on this deployment: the remaining rows
+      // keep their own `legacy.displayOrder`, so three seeded rows can occupy 1, 3 and 4 while
+      // the count says 3 — and a caller deriving the next order from the count lands on 4, on top
+      // of a row that is already there.
+      seeded = Math.max(seeded, legacy.displayOrder);
     }
     return seeded;
   }
@@ -990,12 +1044,6 @@ export class AutomationTabComponent implements OnInit {
    * change that leaves the list showing the old value is the bug this screen is least able to
    * afford, since the list IS the explanation of what the form does.
    */
-  /** One past the highest DisplayOrder currently in use, or 1 when there are no steps yet. */
-  private nextDisplayOrder(): number {
-    const orders = this.automations().map((a) => a.DisplayOrder ?? 0);
-    return orders.length === 0 ? 1 : Math.max(...orders) + 1;
-  }
-
   private async run(work: () => Promise<void>): Promise<void> {
     this.busy.set(true);
     this.actionError.set('');
@@ -1005,6 +1053,21 @@ export class AutomationTabComponent implements OnInit {
     } catch (err) {
       LogError(err);
       this.actionError.set(err instanceof Error ? err.message : String(err));
+      // Reload after a FAILURE too, not just after a success.
+      //
+      // A failed mutation is rarely a mutation that did nothing: seeding the built-in hooks
+      // writes four rows one at a time and can stop on the third, and a failed reorder can leave
+      // a compensating write behind. Leaving the signals holding pre-failure state meant the list
+      // disagreed with the database, and worse, `seedLegacyDefaultsIfFirst` decides whether to
+      // seed by asking whether `automations()` is empty — so after a partial seed the stale empty
+      // signal told it to seed again from scratch and DUPLICATE the rows that had succeeded.
+      try {
+        await this.loadConfigured();
+      } catch (reloadErr) {
+        // Reported, never allowed to replace the original message: the author needs to know what
+        // failed, not what failed while we were tidying up after it.
+        LogError(reloadErr);
+      }
     } finally {
       this.busy.set(false);
     }

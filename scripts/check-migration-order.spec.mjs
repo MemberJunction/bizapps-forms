@@ -154,6 +154,75 @@ withMigrations(
     },
 );
 
+// 3b. The OTHER half of check 1, and the commoner one: a migration adds a column and simply never
+//     regenerates the procedure. The first version of this gate compared each procedure only
+//     against the columns known AT ITS OWN migration, so this shape passed silently — meaning it
+//     would not have caught the defect that motivated it, only the narrower re-definition case.
+withMigrations(
+    {
+        'V202601010000__v0.1.x__Create.sql': CREATE_WIDGET + ENTITY_ROW_FOR_WIDGET + widgetProc('Update', ['Title']),
+        'V202601020000__v0.1.x__Add_Column_Only.sql': `ALTER TABLE [\${flyway:defaultSchema}].[Widget] ADD\n    Subtitle NVARCHAR(MAX) NULL;\nGO\n`,
+    },
+    (violations) => {
+        check(
+            'catches a column added by a later migration that never regenerates the procedure',
+            violations.some((v) => v.includes('[Subtitle]') && v.includes('never regenerates')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 3c. The baseline creates most of this schema's tables and spells the schema literally. Excluding
+//     it left ten of thirteen tables outside every check — a gate that passed because it was blind.
+withMigrations(
+    {
+        'B202601010000__v0.1.x__Baseline.sql':
+            `CREATE TABLE __mj_BizAppsForms.Widget (\n    ID UNIQUEIDENTIFIER NOT NULL,\n    Title NVARCHAR(500) NOT NULL,\n    Subtitle NVARCHAR(MAX) NULL,\n    CONSTRAINT PK_Widget PRIMARY KEY (ID)\n);\nGO\n`,
+        'V202601020000__v0.1.x__Regen.sql': widgetProc('Update', ['Title']),
+    },
+    (violations) => {
+        check(
+            'reads the baseline migration, and its literal schema name',
+            violations.some((v) => v.includes('[Subtitle]')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 3d. False FAIL: a multi-line FK constraint. `ON DELETE CASCADE` trimmed to a line starting with
+//     `ON` parsed as a column named ON, failing a correct migration with a nonsense message.
+withMigrations(
+    {
+        'V202601010000__v0.1.x__Create.sql': CREATE_WIDGET + ENTITY_ROW_FOR_WIDGET + widgetProc('Update', ['Title']),
+        'V202601020000__v0.1.x__Fk.sql':
+            `ALTER TABLE [\${flyway:defaultSchema}].[Widget] ADD\n    CONSTRAINT FK_Widget_Owner FOREIGN KEY (OwnerID)\n    REFERENCES [\${flyway:defaultSchema}].[Owner](ID)\n    ON DELETE CASCADE;\nGO\n`,
+    },
+    (violations) => {
+        check(
+            'does not invent a column from an ON DELETE CASCADE continuation line',
+            !violations.some((v) => v.includes('[ON]')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 3e. False FAIL: a computed column is not writable, so CodeGen never emits a parameter for it.
+withMigrations(
+    {
+        'V202601010000__v0.1.x__Create.sql':
+            `CREATE TABLE [\${flyway:defaultSchema}].[Widget] (\n    ID UNIQUEIDENTIFIER NOT NULL,\n    Price INT NOT NULL,\n    Qty INT NOT NULL,\n    Total AS ([Price] * [Qty]),\n    CONSTRAINT PK_Widget PRIMARY KEY (ID)\n);\nGO\n` +
+            ENTITY_ROW_FOR_WIDGET +
+            widgetProc('Update', ['Price', 'Qty']),
+    },
+    (violations) => {
+        check(
+            'does not demand a parameter for a computed column',
+            !violations.some((v) => v.includes('[Total]')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
 console.log('\nCHECK 2 — a CodeGen timestamp column referenced before it exists');
 
 // 4. The trigger-before-column defect: CREATE TRIGGER resolves column names against the real

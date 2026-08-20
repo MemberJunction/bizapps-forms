@@ -67,6 +67,14 @@ describe('a multi-stroke signature is one upload, not one per stroke', () => {
     expect(pad()).toMatch(/clear\(\)[\s\S]{0,400}clearTimeout\(/);
   });
 
+  it('flushes a settling stroke when the pad is destroyed', () => {
+    // The settle window is 400ms of real time in which the respondent can tap Next or Submit —
+    // the pad already reads "Signed.". Without this the deferred export was simply lost and the
+    // answer stayed null under a UI claiming otherwise, which is a worse bug than the duplicate
+    // uploads the deferral removes.
+    expect(pad()).toMatch(/DestroyRef[\s\S]{0,600}onDestroy\([\s\S]{0,400}emitPng\(\)/);
+  });
+
   it('does not export straight from the pointer-up handler', () => {
     // The shipped bug in one line: `onPointerUp` called `emitPng()` directly, so stroke 2, 3, 4…
     // each launched their own upload.

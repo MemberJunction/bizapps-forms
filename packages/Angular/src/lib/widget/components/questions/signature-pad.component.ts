@@ -13,7 +13,9 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
+  inject,
   input,
   output,
   signal,
@@ -141,6 +143,27 @@ export class SignaturePadComponent {
 
   /** Pending settle timer for {@link scheduleExport}; `undefined` when nothing is queued. */
   private exportTimer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor() {
+    // Export IMMEDIATELY if the pad goes away with a stroke still settling, rather than dropping
+    // the timer or letting it fire into a destroyed tree.
+    //
+    // The settle window is 400ms of real time in which the respondent can tap Next or Submit —
+    // the pad reads "Signed.", so they have every reason to. Destroying the component then
+    // stranded the drawing: the deferred `emitPng` either never ran or emitted `drawn` into a
+    // tree that no longer had a listener, so `uploadFile` was never called and the answer stayed
+    // null under a UI that said otherwise. Flushing here makes the deferral invisible to the
+    // respondent: the only thing the timer was ever buying is fewer uploads, and that is not
+    // worth a lost signature.
+    inject(DestroyRef).onDestroy(() => {
+      if (this.exportTimer === undefined) {
+        return;
+      }
+      clearTimeout(this.exportTimer);
+      this.exportTimer = undefined;
+      void this.emitPng();
+    });
+  }
 
   protected onPointerDown(event: PointerEvent): void {
     const ctx = this.beginStroke(event);

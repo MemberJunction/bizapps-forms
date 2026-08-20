@@ -51,7 +51,16 @@ function mirror(fromDir, toDir, scope = '') {
   }
   mkdirSync(toDir, { recursive: true });
   for (const entry of readdirSync(fromDir)) {
-    if (entry === '.bin' || entry === '.package-lock.json') {
+    if (entry === '.package-lock.json') {
+      continue;
+    }
+    // `.bin` is mirrored, not skipped. Skipping it made every package RESOLVABLE but none of them
+    // RUNNABLE: `pnpm run test` in a worktree died on `sh: vitest: command not found`, and
+    // `pnpm run build` on `sh: ngc: command not found`, because pnpm puts a package's executables
+    // only here. Turbo then reported the other packages as passing from CACHE, so the whole suite
+    // looked green while nothing had actually run — which is worse than an obvious failure.
+    if (entry === '.bin') {
+      mirrorBin(join(fromDir, entry), join(toDir, entry));
       continue;
     }
     if (entry.startsWith('@') && !scope) {
@@ -70,6 +79,28 @@ function mirror(fromDir, toDir, scope = '') {
       symlinkSync(join(fromDir, entry), target, 'dir');
       linked++;
     }
+  }
+}
+
+/**
+ * Mirror an executables directory.
+ *
+ * Each entry is symlinked to the MAIN checkout's `.bin` entry rather than resolved through it: the
+ * originals are themselves relative symlinks into pnpm's store, and copying that relative target
+ * into a worktree would point it at a path that does not exist here.
+ */
+function mirrorBin(fromDir, toDir) {
+  if (!existsSync(fromDir)) {
+    return;
+  }
+  mkdirSync(toDir, { recursive: true });
+  for (const entry of readdirSync(fromDir)) {
+    const target = join(toDir, entry);
+    if (existsSync(target) || isBrokenLink(target)) {
+      rmSync(target, { recursive: true, force: true });
+    }
+    symlinkSync(join(fromDir, entry), target, 'file');
+    linked++;
   }
 }
 

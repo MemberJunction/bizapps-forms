@@ -62,10 +62,14 @@ describe('the form survives its own submit', () => {
 });
 
 describe('the sending state is a scrim, as its own comment claims', () => {
-  it('is positioned over the form rather than laid out in flow', () => {
-    // A plain in-flow block with `min-height: 40vh` is not a scrim: it pushes the page around
-    // instead of covering it. The comment beside this CSS promised an overlay.
-    expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*position:\s*(absolute|fixed)/);
+  it('is anchored to the VIEWPORT, not to the form', () => {
+    // `position: absolute` is not enough and is its own bug: nothing in the widget is a scroll
+    // container, so `inset: 0` on an absolutely-positioned scrim sizes it to the whole form —
+    // ~4000px on a long one — and centres the spinner around y=2000, off screen from the Submit
+    // button that was just tapped. That is the exact "no visible feedback where their eyes were"
+    // failure this feature was added to fix.
+    expect(css()).toMatch(/\.mjf-sending\s*\{[^}]*position:\s*fixed/);
+    expect(css()).not.toMatch(/\.mjf-sending\s*\{[^}]*position:\s*absolute/);
   });
 
   it('sits above the form it covers', () => {
