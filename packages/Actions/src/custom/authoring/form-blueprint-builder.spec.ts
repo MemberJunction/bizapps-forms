@@ -27,6 +27,9 @@ let failOn: string | null = null;
  */
 let failTimes: { entity: string; times: number; detail: string } | null = null;
 
+/** Rows minted so far, so NewRecord can hand out a stable unique id. */
+let minted = 0;
+
 class FakeEntity {
   ID = '';
   /** Mutable so a test can choose the provider wording the repair classifier will see. */
@@ -38,7 +41,10 @@ class FakeEntity {
   }
 
   NewRecord(): void {
-    // Clear any previously-set business fields (none on a fresh instance).
+    // MJ assigns the primary key CLIENT-SIDE here, before the insert — the generated SQL passes
+    // @ID explicitly. The fake does the same, because the collision repair reads that id on its
+    // last attempt and a fake that left it blank could never exercise that path.
+    this.ID = fakeGuid(++minted);
   }
 
   async Save(): Promise<boolean> {
@@ -481,5 +487,26 @@ describe('buildFormFromBlueprint — partial failures', () => {
       name: 'FormPersistError',
       formId: byEntity(ENTITY_NAME.form)[0]?.fields.ID ?? expect.any(String),
     });
+  });
+});
+
+describe('buildFormFromBlueprint — repeated style-name collisions', () => {
+  beforeEach(() => {
+    saved.length = 0;
+    failOn = null;
+    failTimes = null;
+  });
+
+  it('falls back to the row id when counting up runs out of attempts', async () => {
+    // Counting up survives only as many collisions as there are attempts, so a tenant generating a
+    // FOURTH form with the same name lost its style entirely. The id is assigned before the insert
+    // and is unique by construction, so the last attempt uses that instead of guessing again.
+    failTimes = { entity: ENTITY_NAME.style, times: 2, detail: 'Cannot insert duplicate key row.' };
+    const result = await buildFormFromBlueprint(blueprint, user);
+    const name = String(byEntity(ENTITY_NAME.style)[0].fields.Name);
+    expect(result.styleId).toBeDefined();
+    expect(name.startsWith('Event RSVP theme (')).toBe(true);
+    // Not the counted form — that is what just failed twice.
+    expect(name).not.toBe('Event RSVP theme (3)');
   });
 });

@@ -1,26 +1,13 @@
 {
   "name": "Conference RSVP",
-  "description": "Let us know if you can make it.",
-  "renderMode": "Scroll",
-  "confirmationMessage": "Thanks — your RSVP has been recorded.",
+  "description?": "Let us know if you can make it.",
+  "renderMode?": "Scroll",
+  "confirmationMessage?": "Thanks — your RSVP has been recorded.",
   "pages": [
     {
-      "title": "Your details",
-      "questions": [
-        {
-          "type": "ContactInfo",
-          "prompt": "How can we reach you?"
-        },
-        {
-          "key": "attending",
-          "type": "SingleChoice",
-          "prompt": "Will you attend?"
-        }
-      ]
-    },
-    {
-      "title": "Travel",
-      "conditionalRule": {
+      "title?": "Your details",
+      "description?": "A few quick questions.",
+      "conditionalRule?": {
         "show": {
           "all": [
             {
@@ -33,28 +20,29 @@
       },
       "questions": [
         {
-          "type": "Date",
-          "prompt": "When do you arrive?"
-        },
-        {
-          "type": "YesNo",
-          "prompt": "Do you need a hotel room?"
+          "key?": "attending",
+          "type": "SingleChoice",
+          "prompt": "Will you attend?"
         }
       ]
     }
   ],
-  "screens": {
-    "welcome": {
+  "screens?": {
+    "welcome?": {
       "title": "You're invited",
-      "body": "Two minutes, and we'll have everything we need.",
-      "buttonLabel": "RSVP",
-      "imagePrompt": "a long table set for dinner in a bright hall, warm evening light"
+      "body?": "Two minutes.",
+      "buttonLabel?": "RSVP",
+      "imagePrompt?": "a long table set for dinner, warm evening light"
     },
-    "endings": [
+    "endings?": [
       {
         "title": "See you there",
-        "body": "We'll email the details closer to the date.",
-        "conditionalRule": {
+        "body?": "We'll email the details.",
+        "buttonLabel?": "Done",
+        "redirectURL?": "https://example.com",
+        "isDefault?": true,
+        "imagePrompt?": "confetti on a dark background",
+        "conditionalRule?": {
           "show": {
             "all": [
               {
@@ -65,16 +53,11 @@
             ]
           }
         }
-      },
-      {
-        "title": "Thanks for letting us know",
-        "body": "We'll catch you next time.",
-        "isDefault": true
       }
     ]
   },
-  "theme": {
-    "brandAdjectives": [
+  "theme?": {
+    "brandAdjectives?": [
       "warm",
       "welcoming"
     ]

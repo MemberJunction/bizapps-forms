@@ -42,7 +42,7 @@ import {
   type FormBlueprint,
 } from './form-blueprint';
 import { conditionalRuleJSON, type QuestionIdByKey } from './blueprint-rules';
-import { COLUMN_LIMITS } from './limits';
+import { COLUMN_LIMITS, MAX_PERSIST_ATTEMPTS } from './limits';
 import { clampText, FormPersistError, isDuplicateKeyFailure, saveRow } from './persist';
 import { errorText } from '../shared/error-text';
 
@@ -519,11 +519,30 @@ function renameOnCollision(baseName: string) {
     if (!isDuplicateKeyFailure(detail)) {
       return false;
     }
-    style.Name = clampText(`${baseName} (${attempt + 1})`, COLUMN_LIMITS.styleName, "The generated style's name");
+    style.Name = clampText(collisionName(baseName, style, attempt), COLUMN_LIMITS.styleName, "The generated style's name");
     return true;
   };
 }
 
+/**
+ * The name to try next after a collision.
+ *
+ * The first retry appends `(2)`, which is what a person would do and what reads best in the theme
+ * gallery. The LAST retry appends the row's own id instead, because counting up only survives as
+ * many collisions as there are attempts — a tenant generating a fourth "Customer Feedback" form hit
+ * the cap and lost their style entirely, which a smoke test found by running four times. The id is
+ * assigned client-side before the insert, so it is available here and unique by construction.
+ *
+ * Falls back to counting when there is no id yet, so this degrades rather than producing `theme ()`.
+ */
+function collisionName(baseName: string, style: mjBizAppsFormsFormStyleEntity, attempt: number): string {
+  const isLastChance = attempt >= MAX_PERSIST_ATTEMPTS - 1;
+  const id = style.ID?.trim();
+  if (isLastChance && id) {
+    return `${baseName} (${id.slice(0, 8)})`;
+  }
+  return `${baseName} (${attempt + 1})`;
+}
 
 // --- Staged detail ---------------------------------------------------------------
 //

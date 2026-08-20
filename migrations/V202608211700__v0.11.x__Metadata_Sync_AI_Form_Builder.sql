@@ -23,6 +23,15 @@
 --   V202608131600 established is unaffected — verified by inspection of the generated log and by
 --   `npm run lint:distribution` CHECK 3.
 --
+-- WHY THIS STAMP AND NOT THE DATE IT WAS GENERATED
+--   A new migration must sort AFTER every migration already in the directory, not after the day it
+--   was written. This was first stamped V202608202100 — an honest generation timestamp that landed
+--   BEFORE V202608211000 and V202608211600, which were already here. Skyway does not quietly skip
+--   an out-of-order file; it refuses the whole run with "Detected resolved migration not applied to
+--   database: 202608202100", so every database already past that point could no longer migrate at
+--   all. Nothing caught it: `npm run lint:migrations` checks the three CodeGen-ordering hazards in
+--   migrations/README.md and not this one. Running the migration is what caught it.
+--
 -- HOW IT WAS GENERATED (migrations/README.md, the delta path)
 --   Pushed against MJ_Install_Rehearsal: a database built from the SHIPPED CHAIN via
 --   `mj app install` (0 Form rows — it has never held dev data), brought to head first with
