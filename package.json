@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n\u274c Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\"",
+    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n❌ Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\"",
     "build": "pnpm run build:stream",
     "build:stream": "turbo --log-order=stream build --filter=\"@mj-biz-apps/*\"",
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/forms-entities\" --filter=\"@mj-biz-apps/forms-actions\"",
@@ -21,6 +21,7 @@
     "lint:ui": "node scripts/check-ui-tokens.mjs",
     "lint:generated": "node scripts/check-generated-schema-scope.mjs",
     "lint:distribution": "node scripts/check-distribution-seed.mjs",
+    "lint:migrations": "node scripts/check-migration-order.mjs",
     "seed:manifest": "node scripts/write-seed-manifest.mjs",
     "smoke:respondent": "node smoke/respondent-path.mjs",
     "smoke:scope": "node smoke/respondent-scope-path.mjs",

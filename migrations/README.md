@@ -21,6 +21,29 @@ appended into the feature migration instead. `migrations/metadata-seed.manifest.
 metadata hashes the current seed was generated from — `npm run lint:distribution` fails if they
 have drifted, which is the only thing standing between a metadata edit and a silent non-ship.
 
+## Order is a correctness property — `npm run lint:migrations`
+
+Flyway applies these files in version order against a database nobody here has seen. Three
+orderings are load-bearing, and all three break in the same silent way: CodeGen is re-run against
+a database in state N, its output is appended to a migration that will apply at state N+1, and the
+difference between the two states is a column someone added an hour earlier. Nothing errors on the
+authoring box, because that box already ran the statements by hand.
+
+1. **A CRUD procedure must not be regenerated from a database that predates a column.** A later
+   `DROP`/`CREATE` of `spUpdateX` wins, the `EntityField` row survives, and MJ keeps composing an
+   `EXEC` that passes a parameter the procedure no longer has — so *every* save of that entity
+   fails with "too many arguments specified", not just saves that touch the new column.
+2. **Nothing may reference `__mj_CreatedAt`/`__mj_UpdatedAt` before the migration that adds them.**
+   SQL Server resolves column names at `CREATE TRIGGER` time: `Msg 207`, chain halted.
+3. **An `EntityField` insert may not precede its `__mj.Entity` row.** CodeGen writes `EntityID` as a
+   subquery; on a fresh database it yields `NULL`, the `IF NOT EXISTS` guard passes on the `NULL`
+   comparison, and the insert dies on `NOT NULL`.
+
+`scripts/check-migration-order.mjs` enforces all three, `scripts/check-migration-order.spec.mjs`
+proves it still fires, and the Migration Order Gate workflow runs both. All three violations above
+are reconstructions of defects that actually reached a pull request here (2026-08-19,
+`V202608191200` / `V202608191300`), which is why the split into `V202608191400` exists.
+
 ## The loop, whenever you touch `metadata/`
 
 ```

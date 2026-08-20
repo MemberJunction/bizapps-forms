@@ -1,0 +1,57 @@
+name: Migration Order Gate
+
+# Catches the three ways a regenerated migration silently undoes the one before it. All three
+# share a character: they are invisible on the machine that authored the migration, because that
+# machine already ran the statements by hand, and they only surface on a database built purely
+# from `migrations/` — which is every install except the author's.
+#
+#   1. A CRUD procedure regenerated from a database that predated a column, dropping the
+#      parameter a previous migration had just added. The EntityField row survives, so MJ keeps
+#      passing the parameter and every save of that entity fails.
+#   2. A trigger or statement touching __mj_CreatedAt/__mj_UpdatedAt before the migration that
+#      adds those columns. CREATE TRIGGER resolves column names at create time: Msg 207, chain
+#      halted.
+#   3. An EntityField insert whose EntityID subquery targets an Entity row a later migration
+#      creates. The NULL comparison passes the IF NOT EXISTS guard, then the insert dies on the
+#      NOT NULL constraint.
+#
+# See scripts/check-migration-order.mjs and migrations/README.md.
+
+on:
+  workflow_dispatch:
+  # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
+  # land a broken chain without the gate ever running.
+  push:
+    branches: [next, main]
+    paths:
+      - 'migrations/**'
+      - 'scripts/check-migration-order.mjs'
+      # The gate's own tests. `npm test` is Vitest and never executes a plain-Node .mjs spec, so
+      # without this entry a PR that weakened a case would run neither step.
+      - 'scripts/check-migration-order.spec.mjs'
+      - '.github/workflows/migration-order-gate.yml'
+  pull_request:
+    branches: [next, main]
+    paths:
+      - 'migrations/**'
+      - 'scripts/check-migration-order.mjs'
+      - 'scripts/check-migration-order.spec.mjs'
+      - '.github/workflows/migration-order-gate.yml'
+
+jobs:
+  migration-order-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No `npm ci`: the gate is Node stdlib only, deliberately, so a dependency problem can never
+      # be the reason nobody finds out the migration chain does not apply.
+      - name: Check the migration chain applies in order
+        run: npm run lint:migrations
+
+      - name: Check the gate itself still fires
+        run: node scripts/check-migration-order.spec.mjs
