@@ -40,7 +40,7 @@ import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
  * including it would make every form permanently dirty.
  *
  * `automations` is excluded for a different and less satisfying reason: it is real
- * publishable content, but it is edited in the On Submit tab, which does not report changes
+ * publishable content, but it is edited in the Automate tab, which does not report changes
  * to the builder shell. The latch did not track it either, so excluding it holds the
  * existing behaviour rather than quietly regressing — but it IS a gap, and the fix is to
  * have the automation tab feed its state up, not to add it here where nothing refreshes it.

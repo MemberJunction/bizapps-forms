@@ -170,7 +170,7 @@ function parseJsonObject(raw: string | null | undefined): Record<string, unknown
  *
  * Matched against the question prompt because the published snapshot carries no
  * "this field is the respondent's name" marker — `PublishedFormQuestion` has id, type,
- * prompt and settings, and nothing semantic. The On Submit tab's entity binding is where
+ * prompt and settings, and nothing semantic. The Automate tab's entity binding is where
  * an author states that mapping properly; until a response has been bound to a Person,
  * the prompt is the only signal available.
  */

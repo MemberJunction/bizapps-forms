@@ -97,7 +97,7 @@ const LAYOUT_CSS = /* css */ `
 
 /* flex:none here is load-bearing, not cosmetic. .fb is a fixed-height flex column, so
    any child that omits it is a shrink candidate. The tab strip has no intrinsic content
-   height to defend itself with, so when a tall pane (Responses, On Submit) followed it,
+   height to defend itself with, so when a tall pane (Responses, Automate) followed it,
    the strip was crushed to 1px and the user lost every route back out of the tab. */
 .fb-tabs {
   flex: none;

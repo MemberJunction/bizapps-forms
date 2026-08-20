@@ -65,11 +65,11 @@ import {
 /**
  * Which workspace tab is showing.
  *
- * `responses` sits last, after `onsubmit`: the tabs read left to right as the life of a
+ * `responses` sits last, after `automate`: the tabs read left to right as the life of a
  * form — build it, style it, distribute it, decide what happens on submit, then read what
  * came back. Collection follows configuration.
  */
-type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit' | 'responses';
+type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
 
 /**
  * Stand-in version id used only while fingerprinting.
@@ -673,7 +673,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     return sources;
   }
 
-  /** Every question on the form, in page/display order — what the On Submit tab maps from. */
+  /** Every question on the form, in page/display order — what the Automate tab maps from. */
   protected get mappableQuestions(): MappableQuestion[] {
     if (!this.tree) {
       return [];

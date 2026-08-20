@@ -121,10 +121,10 @@
       type="button"
       class="fb-tab"
       role="tab"
-      [class.is-on]="activeTab === 'onsubmit'"
-      [attr.aria-selected]="activeTab === 'onsubmit'"
-      (click)="setTab('onsubmit')"
-    ><i class="fa-solid fa-bolt" aria-hidden="true"></i> On Submit</button>
+      [class.is-on]="activeTab === 'automate'"
+      [attr.aria-selected]="activeTab === 'automate'"
+      (click)="setTab('automate')"
+    ><i class="fa-solid fa-bolt" aria-hidden="true"></i> Automate</button>
     <button
       type="button"
       class="fb-tab"
@@ -135,7 +135,7 @@
     ><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses</button>
   </nav>
 
-  @if (activeTab === 'onsubmit' && tree) {
+  @if (activeTab === 'automate' && tree) {
     <mjf-automation-tab class="fb-pane-host" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
   }
 
@@ -147,7 +147,7 @@
   <!-- `&& tree` matters: everything below reads the loaded tree, and the tree is assigned after
        an await. Rendering the pane first meant `welcomeScreen` evaluated undefined, then defined
        within the same change-detection pass — NG0100, and a canvas that visibly popped its
-       screens in. The On Submit and Responses tabs above already gate on `tree` for the same
+       screens in. The Automate and Responses tabs above already gate on `tree` for the same
        reason; this one did not. -->
   @if (activeTab === 'build' && builderReady) {
     <div class="fb-body">

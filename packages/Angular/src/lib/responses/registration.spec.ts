@@ -67,9 +67,9 @@ describe('builder Responses tab wiring', () => {
   const component = () => readFileSync(join(BUILDER, 'form-builder.component.ts'), 'utf8');
   const template = () => readFileSync(join(BUILDER, 'form-builder.component.html'), 'utf8');
 
-  it("adds 'responses' to BuilderTab, last, after 'onsubmit'", () => {
+  it("adds 'responses' to BuilderTab, last, after 'automate'", () => {
     expect(component()).toMatch(
-      /type BuilderTab = 'build' \| 'design' \| 'distribute' \| 'onsubmit' \| 'responses';/,
+      /type BuilderTab = 'build' \| 'design' \| 'distribute' \| 'automate' \| 'responses';/,
     );
   });
 
@@ -90,7 +90,7 @@ describe('builder Responses tab wiring', () => {
 
   it('does not also render the Distribute panel underneath it', () => {
     // The body chain ended in a bare `@else`, which matched every tab that was not
-    // build/design — so Responses (and On Submit before it) rendered the distribution
+    // build/design — so Responses (and Automate before it) rendered the distribution
     // manager stacked below, firing its queries and defeating the lazy-load entirely.
     expect(template()).toContain("} @else if (activeTab === 'distribute') {");
     expect(template()).not.toMatch(/\}\s*@else\s*\{\s*\n\s*<div class="fb-distribute">/);

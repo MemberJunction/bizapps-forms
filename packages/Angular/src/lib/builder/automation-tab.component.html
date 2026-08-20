@@ -1,0 +1,639 @@
+<div class="at">
+  @if (loadError()) {
+    <div class="at-pad">
+      <div class="at-pad-inner">
+        <div class="mjf-alert" role="alert">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <span>Could not load what happens when this form is submitted. {{ loadError() }}</span>
+        </div>
+        <div>
+          <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="busy()" (click)="reload()">
+            <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Try again
+          </button>
+        </div>
+      </div>
+    </div>
+  } @else if (loading()) {
+    <p class="mjf-state at-pad">
+      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading&hellip;
+    </p>
+  } @else if (adding()) {
+    <!-- ===================================================== adding a step ===== -->
+    <div class="at-pad">
+      <div class="at-pad-inner">
+        <div class="mjf-toolbar">
+          <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="cancelAdd()">
+            <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back
+          </button>
+        </div>
+
+        @if (actionError()) {
+          <div class="mjf-alert" role="alert">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <span>{{ actionError() }}</span>
+          </div>
+        }
+
+        @switch (adding()) {
+          @case ('choose') {
+            <header class="at-head">
+              <h2 class="at-title">What should happen when someone submits?</h2>
+              <p class="at-what">
+                Their answers are saved either way. This is what you want done with them.
+              </p>
+            </header>
+            <div class="at-choices">
+              @for (choice of choices; track choice.kind) {
+                <button type="button" class="at-choice" (click)="chooseKind(choice.kind)">
+                  <span class="mjf-tile"><i class="fa-solid" [class]="choice.icon" aria-hidden="true"></i></span>
+                  <span class="at-choice-title">{{ choice.title }}</span>
+                  <span class="at-choice-blurb">{{ choice.blurb }}</span>
+                </button>
+              }
+            </div>
+          }
+
+          @case ('record') {
+            @if (!chosenEntity()) {
+              <header class="at-head">
+                <h2 class="at-title">Which record should a submission create?</h2>
+                <p class="at-what">
+                  Pick the thing a submission is really about — the person applying, the
+                  organisation registering. Each submission will create one, or update it if it
+                  already exists.
+                </p>
+              </header>
+
+              <label class="mjf-field">
+                <span class="mjf-field-label">Search</span>
+                <span class="mjf-search">
+                  <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                  <input
+                    #entityBox
+                    type="text"
+                    class="mjf-input"
+                    placeholder="Start typing — people, organisation, application…"
+                    [value]="entityQuery()"
+                    (input)="entityQuery.set(entityBox.value)"
+                  />
+                </span>
+              </label>
+
+              @let picks = entityPicks();
+              @if (picks.suggested.length > 0) {
+                <p class="mjf-eyebrow">Most forms use one of these</p>
+                <ul class="at-results" role="list">
+                  @for (choice of picks.suggested; track choice.name) {
+                    <li>
+                      <button type="button" class="at-result" (click)="selectEntity(choice.name)">
+                        <span class="mjf-tile"><i class="fa-solid fa-database" aria-hidden="true"></i></span>
+                        <span class="at-result-text">
+                          <span class="at-result-name mjf-truncate">{{ choice.label }}</span>
+                          <span class="at-result-meta mjf-truncate">{{ choice.schema }}</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-right mjf-muted" aria-hidden="true"></i>
+                      </button>
+                    </li>
+                  }
+                </ul>
+                <p class="mjf-field-hint">
+                  Anything else in your system works too — search for it above.
+                </p>
+              }
+
+              @if (picks.matches.length > 0) {
+                <ul class="at-results" role="list">
+                  @for (choice of picks.matches; track choice.name) {
+                    <li>
+                      <button type="button" class="at-result" (click)="selectEntity(choice.name)">
+                        <span class="at-result-text">
+                          <span class="at-result-name mjf-truncate">{{ choice.label }}</span>
+                          <span class="at-result-meta mjf-truncate">{{ choice.schema }}</span>
+                        </span>
+                        <i class="fa-solid fa-chevron-right mjf-muted" aria-hidden="true"></i>
+                      </button>
+                    </li>
+                  }
+                </ul>
+                @if (picks.hidden > 0) {
+                  <p class="mjf-field-hint">
+                    {{ picks.hidden }} more match. Type a little more to narrow them down.
+                  </p>
+                }
+              } @else if (picks.empty) {
+                <p class="mjf-field-hint">Nothing matches “{{ entityQuery() }}”.</p>
+              }
+            } @else {
+              <!-- Entity chosen: map the answers onto it. -->
+              <header class="at-head">
+                <div class="at-head-row">
+                  <h2 class="at-title">What goes into {{ chosenEntity()?.label }}</h2>
+                  <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="clearEntity()">
+                    Change
+                  </button>
+                </div>
+                <p class="at-what">
+                  Each answer below goes into the field beside it. Anything you leave blank is left
+                  alone on the record.
+                </p>
+              </header>
+
+              @if (autoMatched() > 0) {
+                <p class="mjf-field-hint">
+                  <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+                  Matched {{ autoMatched() }}
+                  {{ autoMatched() === 1 ? 'answer' : 'answers' }} by name — worth a check.
+                </p>
+              }
+
+              <div class="at-map-head">
+                <p class="mjf-eyebrow">Fields</p>
+                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="toggleAllFields()">
+                  {{ showAllFields() ? 'Show fewer' : 'Show all ' + targetFields().length + ' fields' }}
+                </button>
+              </div>
+
+              <div class="mjf-table-wrap">
+                <table class="at-map">
+                  <thead>
+                    <tr>
+                      <th scope="col">Field</th>
+                      <th scope="col">Answer</th>
+                      <th scope="col" class="at-col-rule">If it already has a value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (field of visibleFields(); track field.Name) {
+                      <tr>
+                        <td>
+                          <span class="at-map-field">
+                            <span class="at-map-name">
+                              {{ field.DisplayNameOrName }}
+                              @if (!field.AllowsNull) {
+                                <span class="at-req" title="This field cannot be left empty">*</span>
+                              }
+                            </span>
+                            <span class="at-map-type">{{ field.TSType }}</span>
+                          </span>
+                        </td>
+                        <td>
+                          <select
+                            class="mjf-select"
+                            [attr.aria-label]="'Answer for ' + field.DisplayNameOrName"
+                            [ngModel]="mappingFor(field.Name)"
+                            (ngModelChange)="setMapping(field.Name, $event)"
+                          >
+                            <option value="">Leave empty</option>
+                            @for (q of compatibleQuestions(field); track q.id) {
+                              <option [value]="q.id">{{ q.prompt }}</option>
+                            }
+                          </select>
+                        </td>
+                        <td class="at-col-rule">
+                          <select
+                            class="mjf-select"
+                            [attr.aria-label]="'Overwrite rule for ' + field.DisplayNameOrName"
+                            [disabled]="!mappingFor(field.Name)"
+                            [ngModel]="ruleFor(field.Name)"
+                            (ngModelChange)="setRule(field.Name, $event)"
+                          >
+                            <option value="neverBlank">Keep what is there if the answer is blank</option>
+                            <option value="latestWins">Always use the new answer</option>
+                            <option value="writeOnce">Only fill it in if it is empty</option>
+                          </select>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              <label class="mjf-field">
+                <span class="mjf-field-label">If the record already exists</span>
+                <select class="mjf-select" [ngModel]="identityField()" (ngModelChange)="identityField.set($event)">
+                  <option value="">Always add a new one</option>
+                  @for (name of mappedFieldNames(); track name) {
+                    <option [value]="name">Update the one with the same {{ fieldLabel(name) }}</option>
+                  }
+                </select>
+                <span class="mjf-field-hint">
+                  Matching updates that record instead of adding another one every time.
+                  Only a field you filled in above can be matched on — the value has to come from
+                  somewhere.
+                </span>
+              </label>
+
+              @if (preview().length > 0) {
+                <p class="mjf-eyebrow">Your latest response would write</p>
+                <ul class="at-facts">
+                  @for (row of preview(); track row.field) {
+                    <li class="at-fact">
+                      <i class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>
+                      <span><strong>{{ row.field }}</strong> — {{ row.value }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+              @if (previewNote()) { <p class="mjf-field-hint">{{ previewNote() }}</p> }
+
+              <div class="mjf-toolbar">
+                <button type="button" class="mjf-btn mjf-btn--primary" [disabled]="!canSave() || busy()" (click)="saveBinding()">
+                  <i class="fa-solid fa-check" aria-hidden="true"></i>
+                  {{ busy() ? 'Adding…' : 'Add this step' }}
+                </button>
+                <button type="button" class="mjf-btn mjf-btn--ghost" [disabled]="!canSave() || busy()" (click)="dryRun()">
+                  <i class="fa-solid fa-eye" aria-hidden="true"></i> Try it against a real response
+                </button>
+              </div>
+              @if (!canSave()) {
+                <p class="mjf-field-hint">Choose an answer for at least one field to continue.</p>
+              }
+            }
+          }
+
+          @case ('action') {
+            <header class="at-head">
+              <h2 class="at-title">Which action should run?</h2>
+              <p class="at-what">Actions are the jobs already built in your system.</p>
+            </header>
+            <label class="mjf-field">
+              <span class="mjf-field-label">Search</span>
+              <span class="mjf-search">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input
+                  #actionBox
+                  type="text"
+                  class="mjf-input"
+                  placeholder="Search actions…"
+                  [value]="targetQuery()"
+                  (input)="targetQuery.set(actionBox.value)"
+                />
+              </span>
+            </label>
+            <ng-container *ngTemplateOutlet="targetList" />
+          }
+
+          @case ('agent') {
+            <header class="at-head">
+              <h2 class="at-title">Which AI agent should run?</h2>
+              <p class="at-what">The agent receives the submitted answers to work on.</p>
+            </header>
+            <label class="mjf-field">
+              <span class="mjf-field-label">Search</span>
+              <span class="mjf-search">
+                <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                <input
+                  #agentBox
+                  type="text"
+                  class="mjf-input"
+                  placeholder="Search agents…"
+                  [value]="targetQuery()"
+                  (input)="targetQuery.set(agentBox.value)"
+                />
+              </span>
+            </label>
+            <ng-container *ngTemplateOutlet="targetList" />
+          }
+        }
+      </div>
+    </div>
+  } @else if (steps().length === 0) {
+    <!-- ================================================ nothing configured ===== -->
+    <div class="at-pad">
+      <div class="at-pad-inner">
+        <!-- Deliberately NOT "nothing runs on submit yet", which is what this said before and
+             was simply untrue: the four built-in hooks below fire on every form that has
+             configured nothing. Telling an author their form does nothing, while it emails
+             their respondents, is the worst kind of wrong — it is wrong in the direction of
+             them not looking. -->
+        <header class="at-head">
+          <h2 class="at-title">When someone submits this form</h2>
+          <p class="at-what">
+            Their answers are saved first, always — you can read every one on the Responses tab.
+            Then this happens.
+          </p>
+        </header>
+
+        @if (builtIns().length > 0) {
+          <div class="mjf-card mjf-card--pad">
+            <p class="mjf-eyebrow">Already happening</p>
+            <ul class="at-builtin">
+              @for (item of builtIns(); track item) {
+                <li>
+                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  <span>{{ item }}</span>
+                </li>
+              }
+            </ul>
+            <p class="mjf-field-hint">
+              These are built in. Add a step of your own and they become rows here too, which you
+              can reorder or switch off individually.
+            </p>
+          </div>
+        }
+
+        <div class="mjf-empty">
+          <span class="mjf-empty-icon"><i class="fa-solid fa-bolt" aria-hidden="true"></i></span>
+          <span class="mjf-empty-title">Do more with each submission</span>
+          <p class="mjf-empty-body">
+            Turn answers into a real record your team can already search and report on, run an
+            action, or hand the submission to an AI agent.
+          </p>
+          <button type="button" class="mjf-btn mjf-btn--primary" (click)="startAdd()">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add a step
+          </button>
+        </div>
+      </div>
+    </div>
+  } @else {
+    <!-- ======================================================= the two panes ===== -->
+    <div class="at-shell">
+      <aside class="at-rail" aria-label="What happens on submit">
+        <div class="at-rail-head">
+          <p class="at-rail-title">On submit</p>
+          <button
+            type="button"
+            class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+            [disabled]="busy()"
+            (click)="startAdd()"
+          >
+            <i class="fa-solid fa-plus" aria-hidden="true"></i> Add
+          </button>
+        </div>
+
+        <ul class="at-rail-list" role="list">
+          @for (step of steps(); track step.id) {
+            <li>
+              <button
+                type="button"
+                class="at-rail-item"
+                [class.is-on]="step.id === selectedId()"
+                [class.is-disabled]="!step.enabled"
+                [attr.aria-current]="step.id === selectedId()"
+                (click)="selectedId.set(step.id)"
+              >
+                <span class="at-step-num" [class.is-off]="!step.enabled" aria-hidden="true">
+                  {{ step.position ?? '–' }}
+                </span>
+                <span class="at-rail-text">
+                  <span class="at-rail-name mjf-truncate">{{ step.name }}</span>
+                  <!-- State in words, never only as a shade of grey. -->
+                  <span class="at-rail-meta mjf-truncate">
+                    {{ step.enabled ? step.kindLabel : 'Switched off' }}
+                  </span>
+                </span>
+              </button>
+            </li>
+          }
+        </ul>
+      </aside>
+
+      <div class="at-main">
+        <section class="at-detail" aria-label="Selected step">
+          <p class="at-summary">
+            <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+            <span>
+              {{ summary() }}
+              <!-- True whether or not the deployment runs hooks blocking: persistence happens
+                   before dispatch either way, so the guarantee below holds in both modes. A note
+                   promising "the respondent never waits" would not — that one is a default an
+                   operator can flip with FORMS_HOOKS_BLOCKING. -->
+              <span class="at-summary-note">
+                Their answers are saved before any of this runs, so a step that fails or takes its
+                time never costs someone their submission.
+              </span>
+            </span>
+          </p>
+
+          @if (actionError()) {
+            <div class="mjf-alert" role="alert">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <span>{{ actionError() }}</span>
+            </div>
+          }
+
+          @if (selected(); as step) {
+            <header class="at-head">
+              <div class="at-head-row">
+                <span class="mjf-tile"><i class="fa-solid" [class]="step.icon" aria-hidden="true"></i></span>
+                <h2 class="at-title mjf-truncate">{{ step.name }}</h2>
+                <span class="mjf-badge" [class.mjf-badge--success]="step.enabled">
+                  {{ step.enabled ? step.kindLabel : 'Switched off' }}
+                </span>
+              </div>
+              <p class="at-what">{{ step.what }}</p>
+            </header>
+
+            <ul class="at-facts">
+              <li class="at-fact">
+                <i class="fa-solid fa-arrow-down-1-9" aria-hidden="true"></i>
+                <span>{{ step.timing }}</span>
+              </li>
+              <li class="at-fact">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <span>{{ step.failure }}</span>
+              </li>
+              @if (step.trigger) {
+                <li class="at-fact">
+                  <i class="fa-solid fa-clock" aria-hidden="true"></i>
+                  <span>{{ step.trigger }}</span>
+                </li>
+              }
+            </ul>
+
+            @if (mappingSummary(step.id); as mapping) {
+              <div class="mjf-card mjf-card--pad">
+                <p class="mjf-eyebrow">What it writes</p>
+                <ul class="at-facts">
+                  @for (row of mapping.rows; track row.field) {
+                    <li class="at-fact">
+                      <i class="fa-solid fa-arrow-right-long" aria-hidden="true"></i>
+                      <span><strong>{{ row.field }}</strong> ← {{ row.answer }}</span>
+                    </li>
+                  }
+                </ul>
+                <p class="mjf-field-hint">{{ mapping.identity }}</p>
+              </div>
+            }
+
+            <section class="at-settings" aria-label="Settings for this step">
+              <p class="at-settings-title">Settings</p>
+
+              <div class="at-setting">
+                <span class="at-setting-text">
+                  <span class="at-setting-label" id="at-on-label">Switched on</span>
+                  <span class="at-setting-hint">
+                    Turn off to stop this step running, without losing how it is set up.
+                  </span>
+                </span>
+                <span class="at-setting-control">
+                  <button
+                    type="button"
+                    class="mjf-switch"
+                    role="switch"
+                    [class.is-on]="step.enabled"
+                    [attr.aria-checked]="step.enabled"
+                    aria-labelledby="at-on-label"
+                    [disabled]="busy()"
+                    (click)="toggleActive(step.id)"
+                  ></button>
+                </span>
+              </div>
+
+              <div class="at-setting">
+                <span class="at-setting-text">
+                  <span class="at-setting-label" id="at-seq-label">Run it in sequence</span>
+                  <span class="at-setting-hint">
+                    On: it waits for the step before it, so a later step can rely on what it made.
+                    Off: it starts straight away, alongside the other background steps.
+                  </span>
+                </span>
+                <span class="at-setting-control">
+                  <button
+                    type="button"
+                    class="mjf-switch"
+                    role="switch"
+                    [class.is-on]="isSequential(step.id)"
+                    [attr.aria-checked]="isSequential(step.id)"
+                    aria-labelledby="at-seq-label"
+                    [disabled]="busy()"
+                    (click)="toggleSequential(step.id)"
+                  ></button>
+                </span>
+              </div>
+
+              <div class="at-setting">
+                <span class="at-setting-text">
+                  <span class="at-setting-label" id="at-cont-label">Carry on if it fails</span>
+                  <span class="at-setting-hint">
+                    @if (isSequential(step.id)) {
+                      Off means a failure here stops the steps after it, which is what you want
+                      when they depend on this one.
+                    } @else {
+                      Only applies to steps that run in sequence — a background step never holds
+                      up the others.
+                    }
+                  </span>
+                </span>
+                <span class="at-setting-control">
+                  <button
+                    type="button"
+                    class="mjf-switch"
+                    role="switch"
+                    [class.is-on]="continuesOnError(step.id)"
+                    [attr.aria-checked]="continuesOnError(step.id)"
+                    aria-labelledby="at-cont-label"
+                    [disabled]="busy() || !isSequential(step.id)"
+                    (click)="toggleContinue(step.id)"
+                  ></button>
+                </span>
+              </div>
+
+              <div class="at-setting">
+                <span class="at-setting-text">
+                  <span class="at-setting-label">Position</span>
+                  <span class="at-setting-hint">
+                    Steps that run in sequence go in this order. Background steps all start
+                    together, so they can only be moved among themselves.
+                  </span>
+                </span>
+                <span class="at-setting-control">
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+                    [disabled]="busy() || !canMove(step.id, -1)"
+                    (click)="move(step.id, -1)"
+                  >
+                    <i class="fa-solid fa-arrow-up" aria-hidden="true"></i> Earlier
+                  </button>
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--ghost mjf-btn--sm"
+                    [disabled]="busy() || !canMove(step.id, 1)"
+                    (click)="move(step.id, 1)"
+                  >
+                    <i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Later
+                  </button>
+                </span>
+              </div>
+
+              <div class="at-danger">
+                @if (confirmingRemove()) {
+                  <!-- Confirm LEFT, cancel RIGHT, per the house rule. -->
+                  <button type="button" class="mjf-btn mjf-btn--danger" [disabled]="busy()" (click)="remove(step.id)">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i> Remove it
+                  </button>
+                  <button type="button" class="mjf-btn mjf-btn--quiet" [disabled]="busy()" (click)="confirmingRemove.set(false)">
+                    Keep it
+                  </button>
+                  <span class="at-setting-hint">
+                    Past submissions keep whatever this already did. Only future ones change.
+                  </span>
+                } @else {
+                  <button type="button" class="mjf-btn mjf-btn--quiet" [disabled]="busy()" (click)="confirmingRemove.set(true)">
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i> Remove this step
+                  </button>
+                }
+              </div>
+            </section>
+
+            <section aria-label="Recent activity">
+              <p class="mjf-eyebrow">Recent activity</p>
+              @let recent = runsFor(step.id);
+              @if (recent.length === 0) {
+                <p class="mjf-field-hint">
+                  This has not run yet. It runs the next time someone submits — after you publish.
+                </p>
+              } @else {
+                <ul class="at-runs" role="list">
+                  @for (run of recent; track run.id) {
+                    <li class="at-run">
+                      <span class="mjf-badge" [class]="runBadgeClass(run.status)">{{ run.status }}</span>
+                      <span class="at-run-when">{{ run.when ? (run.when | date: 'short') : '—' }}</span>
+                      <span class="at-run-msg">{{ run.message }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </section>
+          }
+        </section>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- Shared by the Action and Agent pickers: the same list of one-line choices, differing only in
+     what was loaded into it. Two copies of this markup would be two places to fix a bug. -->
+<ng-template #targetList>
+  @if (targetsLoading()) {
+    <p class="mjf-state"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Loading&hellip;</p>
+  } @else if (visibleTargets().length === 0) {
+    <p class="mjf-field-hint">
+      @if (targetQuery()) {
+        Nothing matches “{{ targetQuery() }}”.
+      } @else {
+        There are none set up in this system yet.
+      }
+    </p>
+  } @else {
+    <ul class="at-results" role="list">
+      @for (target of visibleTargets(); track target.id) {
+        <li>
+          <button type="button" class="at-result" [disabled]="busy()" (click)="saveTarget(target)">
+            <span class="at-result-text">
+              <span class="at-result-name mjf-truncate">{{ target.name }}</span>
+              @if (target.description) {
+                <span class="at-result-meta mjf-truncate">{{ target.description }}</span>
+              }
+            </span>
+            <i class="fa-solid fa-chevron-right mjf-muted" aria-hidden="true"></i>
+          </button>
+        </li>
+      }
+    </ul>
+    @if (hiddenTargets() > 0) {
+      <p class="mjf-field-hint">{{ hiddenTargets() }} more. Type to narrow them down.</p>
+    }
+  }
+</ng-template>
