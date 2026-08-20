@@ -253,6 +253,28 @@ describe('runUpload', () => {
     expect(second).not.toBe(first);
   });
 
+  it('gives every upload its own path even when an operator configures the prefix', async () => {
+    // The fix above lived in the `?? defaultPathPrefix()` FALLBACK, so it only protected hosts
+    // that had not configured anything. `FORMS_UPLOAD_PATH_PREFIX` is a documented, supported
+    // setting, and setting it put back the exact data loss the fallback had just removed:
+    // `cfg.pathPrefix` is a constant string, so every `signature.png` writes to one object and
+    // the new download route hands a reviewer whichever respondent's signature landed last.
+    // Uniqueness has to be an invariant of the path builder, not of one branch of it.
+    process.env.FORMS_UPLOAD_PATH_PREFIX = 'forms-uploads';
+    resetUploadConfigForTests();
+    try {
+      const { engine, upload } = storageEngine();
+      await runUpload(context({ storage: engine }), request());
+      await runUpload(context({ storage: engine }), request());
+      const [first, second] = upload.mock.calls.map((c) => c[0].pathPrefix);
+      expect(first).toMatch(/^forms-uploads\//);
+      expect(second).not.toBe(first);
+    } finally {
+      delete process.env.FORMS_UPLOAD_PATH_PREFIX;
+      resetUploadConfigForTests();
+    }
+  });
+
   it('accepts a Signature question, whose answer is a file drawn on a canvas', async () => {
     // The shipped bug: the guard hardcoded 'FileUpload', so every signature came back 400
     // and the respondent saw "Upload failed (HTTP 400)" under a signature they had just

@@ -76,7 +76,7 @@ export class DownloadMiddleware extends BaseServerMiddleware {
       contextUser,
       elevatedUser: systemUser,
       runViewProvider: new RunView(),
-      storage: FileStorageEngine.Instance as unknown as StorageReadEngine,
+      storage: FileStorageEngine.Instance as StorageReadEngine,
     };
 
     const result = await loadResponseFile(ctx, fileId);

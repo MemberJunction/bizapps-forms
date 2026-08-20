@@ -112,7 +112,12 @@ describe('runAssetUpload', () => {
 
     expect(result.success).toEqual({ fileId: FILE_ID, name: 'logo.png', size: 32, contentType: 'image/png' });
     expect(ctx.storage.UploadFile).toHaveBeenCalledWith(
-      expect.objectContaining({ pathPrefix: `forms-assets/${FORM_ID}`, contextUser: SYSTEM }),
+      expect.objectContaining({
+        // Prefix-match, not equality: every asset gets its own trailing segment so two
+        // same-named images on one form cannot resolve to one object.
+        pathPrefix: expect.stringMatching(new RegExp(`^forms-assets/${FORM_ID}/[0-9a-f-]{36}$`)),
+        contextUser: SYSTEM,
+      }),
     );
   });
 
@@ -149,7 +154,11 @@ describe('runAssetUpload', () => {
     const ctx = uploadContext({ runViewProvider: runViewWith([{ ID: FORM_ID.toUpperCase() }]) });
     await runAssetUpload(ctx, { file: png(), formId: FORM_ID });
     expect(ctx.storage.UploadFile).toHaveBeenCalledWith(
-      expect.objectContaining({ pathPrefix: `forms-assets/${FORM_ID.toUpperCase()}` }),
+      expect.objectContaining({
+        pathPrefix: expect.stringMatching(
+          new RegExp(`^forms-assets/${FORM_ID.toUpperCase()}/[0-9a-f-]{36}$`),
+        ),
+      }),
     );
   });
 

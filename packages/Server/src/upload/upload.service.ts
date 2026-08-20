@@ -337,7 +337,7 @@ async function storeFile(
       mimeType: bareContentType(file.contentType),
       contextUser: writer,
       storageAccountId: cfg.storageAccountId,
-      pathPrefix: cfg.pathPrefix ?? defaultPathPrefix(),
+      pathPrefix: uploadPathPrefix(cfg.pathPrefix),
     });
 
     if (resolved) {
@@ -423,13 +423,23 @@ function describeAllowedTypes(allowed: readonly string[]): string {
   return `You can upload ${list}.`;
 }
 
-function defaultPathPrefix(): string {
-  // The UUID is the whole point, not decoration. Without it the prefix is only a date, and
-  // the object path is `<prefix>/<filename>` — so every signature (the pad names them all
-  // `signature.png`) and every same-named upload on a given day resolved to ONE object.
-  // Each upload overwrote the previous one while its own MJ: Files row was created happily,
-  // leaving several responses pointing at whichever bytes landed last: a respondent's
-  // signature replaced by a stranger's. The date stays because it makes the store browsable;
-  // uniqueness comes from the UUID, the same way MJ's own default builds it.
-  return `forms-uploads/${new Date().toISOString().slice(0, 10)}/${randomUUID()}`;
+/**
+ * Where one upload's bytes go, given whatever prefix the operator configured.
+ *
+ * The UUID is the whole point, not decoration. The object path is `<prefix>/<filename>`, and the
+ * signature pad names every file it exports `signature.png` — so without a unique segment every
+ * signature drawn on a given day, by every respondent, on every form, resolved to ONE object.
+ * Each upload overwrote the previous one while its own MJ: Files row was created happily, leaving
+ * several responses pointing at whichever bytes landed last: a respondent's signature replaced by
+ * a stranger's, now served to a reviewer with a 200 by the download route.
+ *
+ * `configured` is folded in HERE rather than short-circuiting this function, because the first
+ * version of this fix lived in a `?? defaultPathPrefix()` fallback — which meant it protected only
+ * the hosts that had configured nothing, and `FORMS_UPLOAD_PATH_PREFIX` (documented and supported)
+ * silently put the data loss back. Uniqueness is an invariant of the path, so it belongs on every
+ * path this builds. The date stays because it makes the store browsable.
+ */
+export function uploadPathPrefix(configured?: string): string {
+  const base = configured?.replace(/\/+$/, '') || `forms-uploads/${new Date().toISOString().slice(0, 10)}`;
+  return `${base}/${randomUUID()}`;
 }

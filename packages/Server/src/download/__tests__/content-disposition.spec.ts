@@ -50,4 +50,14 @@ describe('attachmentDisposition', () => {
   it('falls back when stripping removes everything', () => {
     expect(attachmentDisposition('世界')).toContain(`filename="${FALLBACK_FILE_NAME}"`);
   });
+  // An empty name is reachable: `FormUpload.FileName` and `MJ: Files`.`Name` are both nullable,
+  // and the service falls back to `''` when neither has anything. The general path then emits
+  // `filename*=UTF-8''` with no value — and browsers PREFER `filename*`, so an empty extended
+  // value (not a valid RFC 5987 ext-value) is what wins over the perfectly good `download`
+  // sitting in the quoted parameter beside it.
+  it('emits only the quoted fallback when there is no name at all', () => {
+    for (const empty of ['', null, undefined, '   ']) {
+      expect(attachmentDisposition(empty)).toBe(`attachment; filename="${FALLBACK_FILE_NAME}"`);
+    }
+  });
 });

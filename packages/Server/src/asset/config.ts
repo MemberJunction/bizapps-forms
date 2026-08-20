@@ -30,6 +30,8 @@
  *                                  (shared with the respondent host page).
  */
 
+import { randomUUID } from 'node:crypto';
+
 /** Base path both asset routes hang off. */
 export const ASSET_ROUTE = '/forms/asset';
 
@@ -96,9 +98,18 @@ export function getAssetConfig(): AssetConfig {
  * The storage path an asset for `formId` is written under. Keeping the form id in the path makes
  * a bucket listing legible and gives a future cleanup job something to select on; it is NOT an
  * access control — {@link ASSET_STORAGE_PREFIX} is what decides readability.
+ *
+ * The trailing UUID is load-bearing, not decoration. MJ composes the object key as
+ * `<pathPrefix>/<fileName>`, and two of a form's images can honestly share a file name: a welcome
+ * screen's `logo.png` and an ending screen's, or four picture-choice options that all arrived off
+ * a phone as `IMG_0001.jpg`. Without it the second write overwrites the first while its own
+ * `MJ: Files` row is created happily, so one id serves another id's bytes — and because the asset
+ * route answers `immutable` for a year, every respondent who already loaded the original keeps the
+ * wrong image until that expires. A fresh segment per asset is what makes the `immutable` promise
+ * at {@link ASSET_RESPONSE_HEADERS} true.
  */
 export function assetPathPrefix(formId: string): string {
-  return `${ASSET_STORAGE_PREFIX}/${formId}`;
+  return `${ASSET_STORAGE_PREFIX}/${formId}/${randomUUID()}`;
 }
 
 /**

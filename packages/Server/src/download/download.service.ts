@@ -16,10 +16,20 @@
  *
  *   the caller must be able to read the `FormUpload` provenance row for this file.
  *
- * The row is loaded AS THE CALLER, so MJ's own permission model answers "may this person see
- * this response's uploads" — not a hand-rolled role check that drifts from it. And because only
- * a Forms upload has such a row, the route cannot be turned into a reader for arbitrary
- * `MJ: Files` records: no provenance row, no bytes, whatever the id.
+ * The row is loaded AS THE CALLER, so MJ's own permission model decides — not a hand-rolled role
+ * check that drifts from it. And because only a Forms upload has such a row, the route cannot be
+ * turned into a reader for arbitrary `MJ: Files` records: no provenance row, no bytes, whatever
+ * the id.
+ *
+ * BE PRECISE ABOUT WHAT THAT BUYS, because the granularity is easy to over-read. `Form Uploads`
+ * grants `CanRead` to the `UI` role with no `ReadRLSFilterID`, exactly as `Form Responses` and
+ * `Form Response Answers` do. So the question this answers is "may this person read Forms
+ * uploads at all", NOT "is this particular response theirs to see": any signed-in user holding
+ * `UI` can read every provenance row and therefore download every respondent's file. That is the
+ * app's existing posture rather than something this route introduces — the same user can already
+ * read every response and answer through the ordinary entity API — and the route deliberately
+ * inherits it instead of inventing a second, divergent answer. Narrowing it is a change to the
+ * Forms permission model (a row-level filter on those three entities), not to this file.
  *
  * That single check is also what excludes the anonymous respondent session, and excludes it
  * precisely. The "Form Respondent" role grants CanCreate on the two response entities and

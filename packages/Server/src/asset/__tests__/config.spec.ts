@@ -119,8 +119,19 @@ describe('the public-prefix invariant', () => {
 
   it('writes assets under the public prefix, partitioned by form', () => {
     const prefix = assetPathPrefix('44444444-4444-4444-4444-444444444444');
-    expect(prefix).toBe(`${ASSET_STORAGE_PREFIX}/44444444-4444-4444-4444-444444444444`);
+    expect(prefix.startsWith(`${ASSET_STORAGE_PREFIX}/44444444-4444-4444-4444-444444444444/`)).toBe(true);
     expect(isPublicAssetKey(`${prefix}/logo.png`)).toBe(true);
+  });
+
+  // The object key is `<pathPrefix>/<fileName>`, and two images can honestly share a file name:
+  // a welcome screen's `logo.png` and an ending screen's, or four picture-choice options that
+  // all came off a phone as `IMG_0001.jpg`. Without a unique segment the second write silently
+  // overwrites the first while its own `MJ: Files` row is created happily — and the asset route
+  // serves these `immutable` for a year, so every respondent who already loaded the first one
+  // keeps the wrong image until the cache expires.
+  it('gives every asset its own path, so two same-named images cannot collide', () => {
+    const formId = '44444444-4444-4444-4444-444444444444';
+    expect(assetPathPrefix(formId)).not.toBe(assetPathPrefix(formId));
   });
 });
 

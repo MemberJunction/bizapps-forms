@@ -30,6 +30,13 @@ export const FALLBACK_FILE_NAME = 'download';
 export function attachmentDisposition(rawName: string | null | undefined): string {
   const name = basename(rawName ?? '');
   const ascii = asciiFallback(name);
+  // No name at all takes the quoted form alone. Both columns the caller reads a name from are
+  // nullable, so this is reachable — and the general path below would emit `filename*=UTF-8''`
+  // with an EMPTY value, which is not a valid RFC 5987 ext-value and which browsers nonetheless
+  // prefer over the perfectly good fallback sitting beside it.
+  if (name === '') {
+    return `attachment; filename="${FALLBACK_FILE_NAME}"`;
+  }
   if (name === ascii && !needsEncoding(name)) {
     return `attachment; filename="${ascii}"`;
   }

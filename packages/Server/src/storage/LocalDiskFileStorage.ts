@@ -141,7 +141,16 @@ export class LocalDiskFileStorage extends FileStorageBase {
 
   public async ListObjects(prefix: string, _delimiter?: string): Promise<StorageListResult> {
     const dir = this.pathFor(prefix || '.');
-    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    // A prefix with nothing under it is an ordinary, expected answer — "no objects yet" — and
+    // ENOENT is how the filesystem says it. Anything else (a permission problem, an I/O error, a
+    // root that was deleted out from under us) is NOT an empty listing, and reporting it as one
+    // would let a broken store read as a working, empty store.
+    const entries = await readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err?.code === 'ENOENT') {
+        return [];
+      }
+      throw new Error(`Could not list local storage objects under "${prefix}" (${dir}): ${err?.message ?? err}`);
+    });
     const objects: StorageObjectMetadata[] = [];
     const prefixes: string[] = [];
     for (const entry of entries) {
