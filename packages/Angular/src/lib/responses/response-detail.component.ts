@@ -137,7 +137,8 @@ const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
                   <button
                     type="button"
                     class="mjf-btn mjf-btn--quiet mjf-btn--sm"
-                    title="Open the file record"
+                    [title]="'Open the file record for ' + f.fileName"
+                    [attr.aria-label]="'Open the file record for ' + f.fileName"
                     (click)="OpenFile(f.fileId)"
                   >
                     <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
