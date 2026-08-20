@@ -21,6 +21,7 @@
     "lint:ui": "node scripts/check-ui-tokens.mjs",
     "lint:generated": "node scripts/check-generated-schema-scope.mjs",
     "lint:distribution": "node scripts/check-distribution-seed.mjs",
+    "lint:codegen-compat": "node scripts/check-generated-api-compat.mjs",
     "lint:migrations": "node scripts/check-migration-order.mjs",
     "seed:manifest": "node scripts/write-seed-manifest.mjs",
     "smoke:respondent": "node smoke/respondent-path.mjs",
