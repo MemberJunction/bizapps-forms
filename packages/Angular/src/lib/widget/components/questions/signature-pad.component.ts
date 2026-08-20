@@ -13,9 +13,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   ElementRef,
-  inject,
   input,
   output,
   signal,
@@ -88,15 +86,6 @@ const SIGNATURE_PAD_CSS = /* css */ `
 .mjf-sig__clear:disabled { opacity: 0.5; cursor: default; }
 `;
 
-/**
- * How long the pad waits after the last stroke before exporting.
- *
- * Long enough to join the strokes of a normal signature into one export, short enough that the
- * answer is in place well before a respondent can reach the submit button. Not a debounce on
- * DRAWING — the ink appears immediately; this only delays turning it into a PNG.
- */
-export const SIGNATURE_SETTLE_MS = 400;
-
 @Component({
   selector: 'mjf-signature-pad',
   standalone: true,
@@ -141,30 +130,6 @@ export class SignaturePadComponent {
   private readonly pad = viewChild<ElementRef<HTMLCanvasElement>>('pad');
   private drawing = false;
 
-  /** Pending settle timer for {@link scheduleExport}; `undefined` when nothing is queued. */
-  private exportTimer: ReturnType<typeof setTimeout> | undefined;
-
-  constructor() {
-    // Export IMMEDIATELY if the pad goes away with a stroke still settling, rather than dropping
-    // the timer or letting it fire into a destroyed tree.
-    //
-    // The settle window is 400ms of real time in which the respondent can tap Next or Submit —
-    // the pad reads "Signed.", so they have every reason to. Destroying the component then
-    // stranded the drawing: the deferred `emitPng` either never ran or emitted `drawn` into a
-    // tree that no longer had a listener, so `uploadFile` was never called and the answer stayed
-    // null under a UI that said otherwise. Flushing here makes the deferral invisible to the
-    // respondent: the only thing the timer was ever buying is fewer uploads, and that is not
-    // worth a lost signature.
-    inject(DestroyRef).onDestroy(() => {
-      if (this.exportTimer === undefined) {
-        return;
-      }
-      clearTimeout(this.exportTimer);
-      this.exportTimer = undefined;
-      void this.emitPng();
-    });
-  }
-
   protected onPointerDown(event: PointerEvent): void {
     const ctx = this.beginStroke(event);
     if (!ctx) {
@@ -200,31 +165,25 @@ export class SignaturePadComponent {
     if (canvas?.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
-    this.scheduleExport();
-  }
-
-  /**
-   * Export once the drawing has settled, not once per stroke.
-   *
-   * `hasInk` stays true after the first stroke, so exporting straight from here fired a fresh
-   * PNG upload on every pointer-up — a two-word signature is at least two strokes, and each one
-   * stored its own MJ: Files row against the respondent's upload quota while racing the others
-   * to decide which image the answer ended up pointing at. Coalescing on a short idle window
-   * makes a signature one upload of the finished drawing, which is also the only version the
-   * respondent ever meant to submit.
-   */
-  private scheduleExport(): void {
-    if (this.exportTimer !== undefined) {
-      clearTimeout(this.exportTimer);
-    }
-    if (!this.hasInk()) {
-      this.exportTimer = undefined;
-      return;
-    }
-    this.exportTimer = setTimeout(() => {
-      this.exportTimer = undefined;
+    // Export on every stroke, deliberately.
+    //
+    // A settle timer looks like the obvious improvement here — a two-word signature is several
+    // strokes and each one starts its own upload — and it was tried. It cannot be made safe. The
+    // window it opens is real time in which the pad already reads "Signed." and the respondent
+    // can tap Next or Submit, which destroys this component with the export still pending; and it
+    // cannot be flushed on the way out, because `output()` registers its OWN destroy hook in a
+    // field initializer that runs BEFORE any hook a constructor adds, so by then `emit()` only
+    // logs "Unexpected emit for destroyed OutputRef" and returns. `emitPng` is async besides, so
+    // the emit lands after destruction regardless. The respondent would be left with a null answer
+    // under a pad that says "Signed." — a worse bug than the one being optimised away.
+    //
+    // Correctness does not depend on coalescing anyway: every upload carries a generation stamp
+    // (see FormQuestionComponent.uploadFile), so the LAST one started wins no matter which
+    // arrives first, and that is the most complete drawing. What the extra strokes cost is extra
+    // stored files, which is quota, not data. Quota is the cheaper thing to lose.
+    if (this.hasInk()) {
       void this.emitPng();
-    }, SIGNATURE_SETTLE_MS);
+    }
   }
 
   /** Wipe the pad and tell the parent the answer is gone. */
@@ -235,12 +194,6 @@ export class SignaturePadComponent {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
     this.hasInk.set(false);
-    // Drop any export still waiting on the settle timer, or it would fire against the pad the
-    // respondent has just wiped and hand the parent a signature they explicitly discarded.
-    if (this.exportTimer !== undefined) {
-      clearTimeout(this.exportTimer);
-      this.exportTimer = undefined;
-    }
     this.cleared.emit();
   }
 

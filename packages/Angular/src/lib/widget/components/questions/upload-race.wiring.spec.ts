@@ -57,27 +57,22 @@ describe('clearing a signature cannot be undone by an upload already in flight',
   });
 });
 
-describe('a multi-stroke signature is one upload, not one per stroke', () => {
-  it('waits for the drawing to settle before exporting', () => {
-    expect(pad()).toMatch(/SIGNATURE_SETTLE_MS/);
-    expect(pad()).toMatch(/setTimeout\(/);
+describe('a multi-stroke signature stays correct without deferring the export', () => {
+  it('exports on pointer-up rather than on a timer', () => {
+    // A settle timer was tried and removed. It opens a window of real time in which the pad reads
+    // "Signed." and the respondent can tap Next or Submit — destroying the component with the
+    // export pending — and it CANNOT be flushed on destroy, because `output()` registers its own
+    // destroy hook in a field initializer that runs before any constructor hook, so `emit()` by
+    // then only warns and returns. A null answer under a pad claiming "Signed." is worse than the
+    // duplicate uploads the timer saved.
+    expect(pad()).not.toMatch(/setTimeout\(/);
+    expect(pad()).not.toMatch(/SIGNATURE_SETTLE_MS/);
+    expect(pad()).toMatch(/onPointerUp\([\s\S]{0,1400}void this\.emitPng\(\);/);
   });
 
-  it('cancels a pending export when the pad is cleared', () => {
-    expect(pad()).toMatch(/clear\(\)[\s\S]{0,400}clearTimeout\(/);
-  });
-
-  it('flushes a settling stroke when the pad is destroyed', () => {
-    // The settle window is 400ms of real time in which the respondent can tap Next or Submit —
-    // the pad already reads "Signed.". Without this the deferred export was simply lost and the
-    // answer stayed null under a UI claiming otherwise, which is a worse bug than the duplicate
-    // uploads the deferral removes.
-    expect(pad()).toMatch(/DestroyRef[\s\S]{0,600}onDestroy\([\s\S]{0,400}emitPng\(\)/);
-  });
-
-  it('does not export straight from the pointer-up handler', () => {
-    // The shipped bug in one line: `onPointerUp` called `emitPng()` directly, so stroke 2, 3, 4…
-    // each launched their own upload.
-    expect(pad()).not.toMatch(/onPointerUp\([\s\S]{0,500}void this\.emitPng\(\);/);
+  it('relies on the generation stamp, not on ordering, for which image wins', () => {
+    // This is what makes exporting per stroke safe: the last upload STARTED wins regardless of
+    // which arrives first, and that is the most complete drawing.
+    expect(question()).toMatch(/const generation = \+\+this\.uploadGeneration;/);
   });
 });
