@@ -1,4 +1,23 @@
 <div class="mjf-shell">
+  <!--
+    The form's logo, above every phase.
+    A logo is the form's IDENTITY, not decoration on one screen, so it stays put while the
+    respondent moves welcome -> questions -> thank-you. It used to render nowhere at all:
+    applyStyleTokens set a --mjf-logo-url custom property that no rule and no template ever
+    read, so an author could upload a logo, save it, publish it, and never see it.
+
+    An <img> rather than a background-image, which is what the dead token implied: a real
+    element can carry alt text, and — the reason it matters here — it can tell us when the URL
+    is dead. A background-image that 404s leaves a silent empty gap; this hides itself instead.
+    alt is empty on purpose: the form's name sits right beneath it, and a screen reader
+    announcing the brand twice is worse than not announcing the picture.
+  -->
+  @if (logoUrl(); as logo) {
+    <div class="mjf-logo-bar">
+      <img class="mjf-logo" [src]="logo" alt="" decoding="async" (error)="onLogoError()" />
+    </div>
+  }
+
   @switch (phase()) {
     @case ('loading') {
       <div class="mjf-state" role="status" aria-live="polite">
@@ -12,20 +31,64 @@
         <button type="button" class="mjf-retry" (click)="retry()">Try again</button>
       </div>
     }
+    @case ('welcome') {
+      <!-- Deliberately NOT inside the intake components: a welcome screen is a phase of the
+           shell, so while it shows there is no runtime rendered, no question in the DOM and
+           nothing for a respondent (or a scraper) to fill in. -->
+      @if (welcomeScreen(); as ws) {
+        <mjf-form-screen [screen]="ws" (activated)="startIntake()" />
+      }
+    }
     @case ('done') {
-      <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
-        <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
-        <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
-      </div>
+      @if (activeEndingScreen(); as es) {
+        <mjf-form-screen [screen]="es" />
+      } @else {
+        <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
+          <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
+          <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
+        </div>
+      }
     }
     @default {
+      <!--
+        The submit wait, as a scrim OVER the form rather than a phase that replaces it.
+
+        Angular's @switch renders exactly one branch, so a @case ('submitting') here would
+        unmount mjf-form-scroll / mjf-form-one-question for the length of the request — and a
+        failed submit sets phase back to 'ready', which builds brand new ones. In one-question
+        mode `index` starts at 0, so a respondent who filled in twenty questions and lost the
+        network on the last would be returned to question one; in scroll mode the viewport jumps
+        to the top; and both lose the "file uploaded" confirmation and the drawn signature while
+        the answers themselves survive. That turns a recoverable network failure into "fill the
+        form in again", which is the loss this state exists to prevent.
+
+        Keeping the form mounted underneath is also what makes the wait legible: the respondent's
+        answers stay visible, so it reads as "this is being sent" rather than "the page went
+        away". aria-live announces it to a screen reader, which otherwise gets no hint at all.
+      -->
+      @if (phase() === 'submitting') {
+        <div class="mjf-sending" role="status" aria-live="polite">
+          <span class="mjf-sending__spinner" aria-hidden="true"></span>
+          <p class="mjf-sending__msg">{{ waitMessage() }}</p>
+        </div>
+      }
       @if (definition(); as def) {
-        <header class="mjf-header">
-          <h1 class="mjf-header__title">{{ def.name }}</h1>
-          @if (def.description) {
-            <p class="mjf-header__desc">{{ def.description }}</p>
-          }
-        </header>
+        <!-- Only when there is no welcome screen. A form WITH one has already introduced itself
+             by name and description on the screen the respondent just dismissed; repeating both
+             above the first question is the same copy twice, and the description in particular
+             is authoring metadata ("Collects the five fields the demo screen maps") that reads
+             like a leaked internal note to whoever is filling the thing in.
+
+             Not deleted outright: a form with no welcome screen has nothing else that says what
+             it is, and an unlabelled page of inputs is worse than a repeated title. -->
+        @if (!welcomeScreen()) {
+          <header class="mjf-header">
+            <h1 class="mjf-header__title">{{ def.name }}</h1>
+            @if (def.description) {
+              <p class="mjf-header__desc">{{ def.description }}</p>
+            }
+          </header>
+        }
 
         @if (errorText()) {
           <p class="mjf-banner-error" role="alert">{{ errorText() }}</p>

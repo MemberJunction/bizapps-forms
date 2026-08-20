@@ -11,6 +11,9 @@ import type {
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import type { ResponseListRow } from '../../responses/response-models';
+import type { QuestionInsightRole } from '../services/question-insight-roles';
+import type { RespondentProfile } from '../services/respondent-profile';
+import type { OpenTextInsight } from '../services/open-text-insights';
 
 /** A form the user can pick to report on, plus its published-version pointer. */
 export interface ReportableForm {
@@ -32,10 +35,17 @@ export interface FormSummaryStats {
   /** completeResponses / totalResponses, 0..1. 0 when no responses. */
   completionRate: number;
   /**
-   * Average seconds between StartedAt and SubmittedAt across complete responses
-   * that have both timestamps. Null when not computable.
+   * MEDIAN seconds between StartedAt and SubmittedAt across complete responses that have
+   * both timestamps and a plausible gap between them. Null when not computable.
+   *
+   * The median, not the mean, and the rename is the point: this figure is presented as the
+   * TYPICAL time to fill the form in, and a mean is the one statistic that cannot survive
+   * the data this column actually holds. A single response whose `StartedAt` is the Unix
+   * epoch — which live data has — drags a mean of forty real submissions to "212759h 19m",
+   * roughly twenty-four years, shown to a form owner as how long their form takes. The
+   * median ignores it, and `PLAUSIBLE_SESSION_SECONDS` drops it from the sample entirely.
    */
-  averageCompletionSeconds: number | null;
+  typicalCompletionSeconds: number | null;
   /** Most recent SubmittedAt across complete responses, or null. */
   lastSubmittedAt: Date | null;
 }
@@ -62,22 +72,26 @@ export interface NumericAggregate {
   npsSegments?: { detractors: number; passives: number; promoters: number };
 }
 
-/** How a given question's answers should be visualised. */
-export type BreakdownKind = 'distribution' | 'numeric' | 'freeText' | 'boolean';
-
-/** Per-question breakdown view-model. */
+/**
+ * Per-question breakdown view-model — only for questions that are CHARTED.
+ *
+ * Identity, attachment and written-answer questions no longer produce one of these. They are
+ * summarised by `RespondentProfile` and `OpenTextInsight` respectively, because a bar chart is
+ * the wrong shape for all three and rendering them here is what put a column of email
+ * addresses on the dashboard. See `question-insight-roles.ts`.
+ */
 export interface QuestionBreakdown {
   questionId: string;
   prompt: string;
   type: FormQuestionType;
-  kind: BreakdownKind;
+  role: QuestionInsightRole;
   /** Total responses that answered this question. */
   answeredCount: number;
-  /** Choice/boolean distribution buckets (kind 'distribution' | 'boolean'). */
+  /** Distribution buckets — 'choice', 'sentiment', 'consent' and 'temporal' roles. */
   buckets: DistributionBucket[];
-  /** Numeric aggregates (kind 'numeric'). */
+  /** Numeric aggregates ('scale' role). */
   numeric: NumericAggregate | null;
-  /** Free-text answers (kind 'freeText'); capped for display. */
+  /** Rendered answers for 'composite' (Matrix), which has no aggregate form; capped. */
   textAnswers: string[];
 }
 
@@ -100,7 +114,12 @@ export interface FormReportData {
   /** The published questions, flattened in page/display order, for labelling. */
   questions: PublishedFormQuestion[];
   summary: FormSummaryStats;
+  /** Who reached us — identity and attachment questions, counted rather than quoted. */
+  profile: RespondentProfile;
+  /** What they chose — the questions with a genuine aggregate form. */
   breakdowns: QuestionBreakdown[];
+  /** What they wrote — rates, lengths and themes; never the answers themselves. */
+  openText: OpenTextInsight[];
   funnel: FunnelStep[];
   responses: ResponseListRow[];
 }

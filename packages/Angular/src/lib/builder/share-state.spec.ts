@@ -1,0 +1,148 @@
+import { describe, expect, it } from 'vitest';
+
+import { autoShareName, shareState, type ShareLinkFacts } from './share-state';
+
+const NOW = new Date('2026-08-19T12:00:00Z');
+const PAST = new Date('2026-08-01T12:00:00Z');
+const FUTURE = new Date('2026-09-01T12:00:00Z');
+
+/** A link with nothing wrong with it; each test breaks exactly one thing. */
+function link(overrides: Partial<ShareLinkFacts> = {}): ShareLinkFacts {
+  return {
+    Status: 'Active',
+    IsActive: true,
+    OpenAt: null,
+    CloseAt: null,
+    MaxResponses: null,
+    ResponseCount: 0,
+    PublicLinkToken: 'tok_abc',
+    ...overrides,
+  };
+}
+
+describe('shareState', () => {
+  it('is live when nothing stands in the way', () => {
+    const state = shareState(link(), NOW);
+    expect(state.kind).toBe('live');
+    expect(state.accepting).toBe(true);
+  });
+
+  it('reports each reason a submission would be refused', () => {
+    // One case per server-side gate. If a gate is added and this list is not, the badge
+    // starts claiming "Live" for a link that bounces every response — the exact defect
+    // this module exists to prevent.
+    expect(shareState(link({ Status: 'Closed' }), NOW).kind).toBe('paused');
+    expect(shareState(link({ IsActive: false }), NOW).kind).toBe('paused');
+    expect(shareState(link({ Status: 'Draft' }), NOW).kind).toBe('paused');
+    expect(shareState(link({ CloseAt: PAST }), NOW).kind).toBe('ended');
+    expect(shareState(link({ OpenAt: FUTURE }), NOW).kind).toBe('scheduled');
+    expect(shareState(link({ MaxResponses: 50, ResponseCount: 50 }), NOW).kind).toBe('full');
+    expect(shareState(link({ PublicLinkToken: null }), NOW).kind).toBe('pending');
+  });
+
+  it('accepts responses only when live', () => {
+    const broken: Partial<ShareLinkFacts>[] = [
+      { Status: 'Closed' },
+      { IsActive: false },
+      { CloseAt: PAST },
+      { OpenAt: FUTURE },
+      { MaxResponses: 1, ResponseCount: 1 },
+      { PublicLinkToken: null },
+    ];
+    for (const override of broken) {
+      expect(shareState(link(override), NOW).accepting).toBe(false);
+    }
+  });
+
+  it('reads a datetime that arrived over the wire as a string', () => {
+    // RunView hands datetimes back as strings over GraphQL and as Dates from a local
+    // provider. A state machine that only understood Date would call every scheduled
+    // link live in the browser and be right only in tests.
+    expect(shareState(link({ CloseAt: PAST.toISOString() }), NOW).kind).toBe('ended');
+    expect(shareState(link({ OpenAt: FUTURE.toISOString() }), NOW).kind).toBe('scheduled');
+  });
+
+  it('stays inside its window at the boundaries', () => {
+    const open = new Date(NOW);
+    expect(shareState(link({ OpenAt: open }), NOW).kind).toBe('live');
+    expect(shareState(link({ CloseAt: open }), NOW).kind).toBe('live');
+  });
+
+  describe('when several things are wrong at once', () => {
+    it('puts a missing link ahead of every other reason', () => {
+      // Telling someone their never-issued link is merely "Scheduled" sends them to
+      // edit a date when the actual problem is that the host never minted a token.
+      const state = shareState(
+        link({ PublicLinkToken: null, Status: 'Closed', OpenAt: FUTURE, MaxResponses: 0 }),
+        NOW,
+      );
+      expect(state.kind).toBe('pending');
+    });
+
+    it('puts a human decision ahead of a calendar one', () => {
+      expect(shareState(link({ Status: 'Closed', OpenAt: FUTURE }), NOW).kind).toBe('paused');
+      expect(shareState(link({ Status: 'Closed', MaxResponses: 0 }), NOW).kind).toBe('paused');
+    });
+
+    it('puts a passed closing date ahead of a cap that was never hit', () => {
+      expect(shareState(link({ CloseAt: PAST, MaxResponses: 9, ResponseCount: 0 }), NOW).kind).toBe(
+        'ended',
+      );
+    });
+  });
+
+  it('names a way out of every state that is not live', () => {
+    // A status that reports a problem and leaves you to find the cure is half a message.
+    // The component switches on `kind` to perform these, so a kind with no `fix` is a
+    // dead end in the UI.
+    const broken: Array<[string, Partial<ShareLinkFacts>]> = [
+      ['pending', { PublicLinkToken: null }],
+      ['paused', { Status: 'Closed' }],
+      ['ended', { CloseAt: PAST }],
+      ['scheduled', { OpenAt: FUTURE }],
+      ['full', { MaxResponses: 1, ResponseCount: 1 }],
+    ];
+    for (const [kind, override] of broken) {
+      const state = shareState(link(override), NOW);
+      expect(state.kind).toBe(kind);
+      expect(state.fix, `${kind} offers no way out`).toBeTruthy();
+    }
+  });
+
+  it('offers no fix when the link is already live', () => {
+    expect(shareState(link(), NOW).fix).toBeNull();
+  });
+
+  it('treats a zero cap as already full, not as unlimited', () => {
+    // `MaxResponses: 0` is a falsy number, and a truthiness check here would silently
+    // read it as "no limit" — the inverse of what it says.
+    expect(shareState(link({ MaxResponses: 0, ResponseCount: 0 }), NOW).kind).toBe('full');
+  });
+
+  it('is full once the count passes the cap, not only when it lands on it', () => {
+    expect(shareState(link({ MaxResponses: 5, ResponseCount: 9 }), NOW).kind).toBe('full');
+  });
+});
+
+describe('autoShareName', () => {
+  it('names the first one plainly', () => {
+    expect(autoShareName([])).toBe('Share link');
+  });
+
+  it('numbers from two, so there is never a lonely "1"', () => {
+    expect(autoShareName(['Share link'])).toBe('Share link 2');
+    expect(autoShareName(['Share link', 'Share link 2'])).toBe('Share link 3');
+  });
+
+  it('fills a gap left by a deletion instead of colliding with a live name', () => {
+    expect(autoShareName(['Share link', 'Share link 3'])).toBe('Share link 2');
+  });
+
+  it('ignores case and padding, which is how duplicates actually get typed', () => {
+    expect(autoShareName(['  share LINK  '])).toBe('Share link 2');
+  });
+
+  it('leaves names the author chose alone', () => {
+    expect(autoShareName(['Careers poster', 'Homepage'])).toBe('Share link');
+  });
+});

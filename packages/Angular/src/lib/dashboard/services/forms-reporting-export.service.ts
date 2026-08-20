@@ -10,7 +10,7 @@ import { ExportService } from '@memberjunction/ng-export-service';
 import type { ExportFormat } from '@memberjunction/export-engine';
 import type { mjBizAppsFormsFormResponseAnswerEntityType } from '@mj-biz-apps/forms-entities';
 import type { FormReportData } from '../models/reporting.model';
-import { buildExportColumns, buildExportMatrix, scoredQuestionIds } from './export-pivot';
+import { buildExportColumns, buildExportMatrix } from './export-pivot';
 
 type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 
@@ -21,7 +21,7 @@ export class FormsReportingExportService {
   /**
    * Exports the response matrix for a report. The caller supplies the raw answer rows (the
    * dashboard already holds them) so we can pivot to one row per response with a column per
-   * non-display question, plus a score column for each question the AI actually scored.
+   * non-display question.
    */
   public async exportResponses(
     report: FormReportData,
@@ -29,13 +29,12 @@ export class FormsReportingExportService {
     format: ExportFormat,
   ): Promise<void> {
     const questions = report.questions.filter((q) => q.type !== 'Statement');
-    const scored = scoredQuestionIds(answers);
 
     await this.exporter.exportAndDownload(
-      buildExportMatrix(report.responses, questions, answers, scored),
+      buildExportMatrix(report.responses, questions, answers),
       {
         format,
-        columns: buildExportColumns(questions, scored),
+        columns: buildExportColumns(questions),
         fileName: `${this.safeName(report.form.name)}-responses`,
         sheetName: 'Responses',
       },

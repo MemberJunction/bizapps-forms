@@ -10,8 +10,9 @@
         [question]="q"
         [value]="runtime().valueFor(q.id)"
         [errorMessage]="runtime().visibleErrorFor(q)"
+        [partErrors]="runtime().visiblePartErrorsFor(q)"
         [distributionSlug]="distributionSlug()"
-              [responseId]="responseId()"
+        [responseId]="responseId()"
         (valueChange)="onValueChange(q, $event)"
         (focusout)="onBlur(q, $event)"
       />

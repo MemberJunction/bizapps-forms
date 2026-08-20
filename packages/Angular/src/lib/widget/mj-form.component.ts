@@ -19,19 +19,27 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import type {
-  FormSubmissionInput,
-  FormSubmissionResult,
-  PublishedFormDefinition,
+import {
+  endingMessage,
+  endingRedirectUrl,
+  resolveEndingScreen,
+  type FormSubmissionInput,
+  type FormSubmissionResult,
+  type FormStyleTokens,
+  type PublishedFormDefinition,
+  type PublishedFormScreen,
 } from '@mj-biz-apps/forms-entities';
 
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
+import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
-import { outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
+import { passedSubmitPoints } from './core/partial-submit-point';
+import { initialPhaseFor, outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
+import { resolveShownScreen, shownScreenFor, type ShownScreen } from './core/shown-screen';
 import {
   canRenderChallenge,
   canSubmit,
@@ -39,6 +47,7 @@ import {
   isConfigGap,
   isTurnstileError,
 } from './core/turnstile-gate';
+import { FormScreenComponent } from './components/form-screen.component';
 import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
@@ -48,7 +57,12 @@ import type { WidgetPhase } from './core/submit-phase';
   selector: 'mj-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormScrollComponent, FormOneQuestionComponent, TurnstileChallengeComponent],
+  imports: [
+    FormScreenComponent,
+    FormScrollComponent,
+    FormOneQuestionComponent,
+    TurnstileChallengeComponent,
+  ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
 })
@@ -79,6 +93,93 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /** Subtle, non-blocking autosave indicator. */
   protected readonly autosaveStatus = signal<AutosaveStatus>('idle');
+
+  /**
+   * The ending screen this response resolved to, set once at submit time.
+   *
+   * Captured rather than recomputed on every render, because it is resolved from the answers
+   * AS SUBMITTED. Recomputing would re-read a runtime the respondent can no longer edit but
+   * which a stray autosave or a re-render could still perturb, and a thank-you page that
+   * changes after it is shown is a genuinely disorienting thing to ship.
+   */
+  private readonly endingScreen = signal<PublishedFormScreen | undefined>(undefined);
+
+  /** The welcome screen, when the form has one. */
+  protected readonly welcomeScreen = computed(() => this.definition()?.welcomeScreen);
+
+  /**
+   * Set once the logo's URL fails to load, so a dead link leaves NOTHING rather than a broken
+   * image icon. An author who deletes the asset should get a form that looks un-branded, not
+   * one that looks broken — and they cannot see the difference from a respondent's browser.
+   */
+  private readonly logoBroken = signal(false);
+
+  /**
+   * A design host's live, unsaved style. Null for a real respondent, always.
+   *
+   * The builder previews colour by writing custom properties onto this element, which works
+   * because colour IS a custom property. A logo is not — it is an <img> the widget renders from
+   * its definition, and the definition is read once at load — so an author could pick a logo,
+   * watch every colour update live beside it, and see no logo at all until they left the tab and
+   * came back. This is the channel for the part of a style that is content rather than CSS.
+   */
+  private readonly styleOverride = signal<FormStyleTokens | null>(null);
+
+  /** The form's logo, or undefined when there is none (or the one there is will not load). */
+  protected readonly logoUrl = computed(() => {
+    if (this.logoBroken()) {
+      return undefined;
+    }
+    const tokens = this.styleOverride() ?? this.definition()?.styleTokens;
+    return tokens?.logoURL?.trim() || undefined;
+  });
+
+  protected onLogoError(): void {
+    this.logoBroken.set(true);
+  }
+
+  /**
+   * Re-style this form from a design host's working values.
+   *
+   * A command, like {@link showScreen}, and for the same reason: the host owns a draft that
+   * changes on every keystroke, and an input holding it would be one more thing to keep in step.
+   * It replaces the host reaching into this element and calling the widget's own theming
+   * function on it from outside — the widget applies its own style, which is the only way the
+   * non-CSS parts of one (the logo) can be applied at all.
+   */
+  public applyPreviewStyle(tokens: FormStyleTokens): void {
+    this.logoBroken.set(false);
+    this.styleOverride.set(tokens);
+    applyStyleTokens(this.hostRef.nativeElement, tokens);
+  }
+
+  /**
+   * How long the in-flight submit has been running, in ms. Zero when nothing is submitting.
+   *
+   * Ticked rather than derived because the message has to change while nothing else does —
+   * the whole point is that the respondent sees the page acknowledge a wait it cannot
+   * shorten. The interval is cleared on every exit path, including failure.
+   */
+  private readonly submitElapsed = signal(0);
+  private submitTicker: ReturnType<typeof setInterval> | null = null;
+
+  /** The reassurance shown under the spinner, escalating if the wait drags on. */
+  protected readonly waitMessage = computed(() => submitWaitMessage(this.submitElapsed()));
+
+  /** The resolved ending screen for the template. */
+  protected readonly activeEndingScreen = computed(() => this.endingScreen());
+
+  /**
+   * The surface currently on display, for a host that reflects it in its own chrome.
+   *
+   * Read-only and derived, so it reports where the widget ACTUALLY is — including after the
+   * respondent pressed Start or a submit landed — rather than wherever a host last pointed it.
+   * The builder's preview strip highlights from this, which is why it needs no state of its own
+   * and cannot drift out of step with the form.
+   */
+  public readonly shownScreen = computed<ShownScreen | null>(() =>
+    shownScreenFor(this.phase(), this.endingScreen()),
+  );
 
   /** Public Cloudflare Turnstile site key (global; from widget config). May be undefined. */
   protected readonly siteKey = this.config.turnstileSiteKey;
@@ -133,6 +234,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private responseId: string | undefined;
   private autosave: AutosaveController | null = null;
+  /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
+  private bankedSubmitPoints = new Set<string>();
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -163,9 +266,57 @@ export class MjFormComponent implements OnInit, OnDestroy {
         () => this.savePartial(),
         (status) => this.autosaveStatus.set(status),
       );
-      this.phase.set('ready');
+      this.endingScreen.set(undefined);
+      this.logoBroken.set(false);
+      this.bankedSubmitPoints = new Set<string>();
+      this.phase.set(initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
+    }
+  }
+
+  /**
+   * Jump straight to a screen, without traversing the form to reach it.
+   *
+   * A COMMAND rather than an input, deliberately. As an input it would carry the host's last
+   * request as state, and the two would desynchronise the moment the widget moved on its own:
+   * a respondent pressing Start leaves the request saying `welcome`, so asking for `welcome`
+   * again would set the input to a value it already held, change nothing, and look broken.
+   * Having nothing to keep in step is the only reliable way to keep it in step — the host
+   * commands through here and reads {@link shownScreen} back.
+   *
+   * This exists for the builder's preview, where an author styles all of these surfaces and a
+   * CONDITIONAL ending is otherwise unreachable without answering the way its rule demands.
+   * It sets phase directly and never submits, so no response is written and no automation runs.
+   *
+   * Answers survive the jump: the runtime is untouched, so an author can look at their ending
+   * screen and come back to a half-filled form. An unsatisfiable request (a welcome screen the
+   * form has not got) is refused rather than honoured into a blank preview, and a request
+   * arriving mid-submit is ignored — the in-flight result would overwrite it a moment later.
+   */
+  public showScreen(selection: ShownScreen): void {
+    const def = this.definition();
+    if (!def || this.phase() === 'submitting') {
+      return;
+    }
+    const target = resolveShownScreen(def, selection);
+    if (!target) {
+      return;
+    }
+    this.endingScreen.set(target.ending);
+    this.phase.set(target.phase);
+  }
+
+  /**
+   * Leave the welcome screen and begin intake.
+   *
+   * Guarded on the phase so a double-tap on the start button cannot pull an already-submitting
+   * form back to `ready` — the same re-entrancy the submit guard exists for, on the other end
+   * of the lifecycle.
+   */
+  protected startIntake(): void {
+    if (this.phase() === 'welcome') {
+      this.phase.set('ready');
     }
   }
 
@@ -176,6 +327,36 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** Progress checkpoint from a child render mode → schedule a debounced partial save. */
   protected onProgress(): void {
     this.autosave?.ping();
+    void this.bankPassedSubmitPoints();
+  }
+
+  /**
+   * Bank a partial the moment the respondent moves past a page the author marked as a submit
+   * point, instead of waiting for the debounce.
+   *
+   * Each page fires at most once — `bankedSubmitPoints` is what makes this a checkpoint rather
+   * than a second, undebounced autosave that writes on every keystroke after the point is
+   * crossed.
+   */
+  private async bankPassedSubmitPoints(): Promise<void> {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt || this.phase() !== 'ready') {
+      return;
+    }
+    const passed = passedSubmitPoints(def.pages, rt.answeredQuestionIds());
+    const fresh = passed.filter((pageId) => !this.bankedSubmitPoints.has(pageId));
+    if (fresh.length === 0) {
+      return;
+    }
+    for (const pageId of fresh) {
+      this.bankedSubmitPoints.add(pageId);
+    }
+    // `flushNow()` rather than `settle()`: settle CANCELS the pending debounce without firing it,
+    // so banking a checkpoint with it discarded the very answers the checkpoint promised to keep —
+    // and left the page marked banked, so nothing retried. flushNow writes now and awaits the
+    // write, still never overlapping two requests on the same clientResponseId.
+    await this.autosave?.flushNow();
   }
 
   protected async onSubmit(): Promise<void> {
@@ -204,16 +385,60 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.errorText.set('');
     await this.autosave?.settle();
     const input = this.buildSubmission(def, rt, false);
+    const startedAt = Date.now();
+    this.startSubmitTicker();
     try {
       const res = await this.api.submitResponse(input, this.responseTarget());
+      this.logSubmitTiming(startedAt, true);
       this.applySubmitResult(res);
     } catch (err) {
+      this.logSubmitTiming(startedAt, false);
       this.result.set(null);
       this.phase.set('ready');
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
       this.handlePossibleTurnstileFailure(message);
+    } finally {
+      this.stopSubmitTicker();
     }
+  }
+
+  /**
+   * Drive the escalating wait message.
+   *
+   * A plain interval rather than anything cleverer because the only requirement is that the
+   * text changes while the page is otherwise frozen; the cost is one timer for the length of
+   * one request, cleared in a `finally` so a thrown submit cannot leave it running.
+   */
+  private startSubmitTicker(): void {
+    this.submitElapsed.set(0);
+    const startedAt = Date.now();
+    this.stopSubmitTicker();
+    this.submitTicker = setInterval(() => this.submitElapsed.set(Date.now() - startedAt), 250);
+  }
+
+  private stopSubmitTicker(): void {
+    if (this.submitTicker !== null) {
+      clearInterval(this.submitTicker);
+      this.submitTicker = null;
+    }
+    this.submitElapsed.set(0);
+  }
+
+  /**
+   * Report where a submit spent its time, in the respondent's own console.
+   *
+   * Round-trip measured from the client, because that is the number the respondent actually
+   * experiences — a server that finishes in 40ms is still a four-second submit if the request
+   * spent the rest of it in flight, and only the client can see the difference. The server
+   * logs its own per-stage breakdown under the same heading, so the two read together.
+   */
+  private logSubmitTiming(startedAt: number, ok: boolean): void {
+    const ms = Date.now() - startedAt;
+    // eslint-disable-next-line no-console -- diagnostic output is the entire purpose here
+    console.info(
+      `[mj-form] submit ${ok ? 'completed' : 'failed'} in ${ms}ms (client round trip; see the API log for the server-side stage breakdown)`,
+    );
   }
 
   /**
@@ -236,11 +461,38 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       return;
     }
+    this.resolveEnding();
     // Success always reaches 'done' (both render modes). Redirect ONLY when a URL is set, and
     // only after 'done' — so a blocked/slow navigation still shows the confirmation.
-    if (outcome.redirect && res.redirectUrl) {
-      this.redirect(res.redirectUrl);
+    const url = this.endingRedirect(res);
+    if (url) {
+      this.redirect(url);
     }
+  }
+
+  /** Pick the ending screen for the answers as submitted. */
+  private resolveEnding(): void {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt) {
+      return;
+    }
+    this.endingScreen.set(resolveEndingScreen(def.endScreens ?? [], rt.currentAnswers()));
+  }
+
+  /**
+   * Where to send the respondent, or `undefined` to show a screen.
+   *
+   * The SERVER's echoed `redirectUrl` still wins: it is the only party that knows about a
+   * redirect the snapshot does not carry, and `outcomeForResult` already gates it on success.
+   * Below that, the resolved ending's own URL beats the form-wide one — which is what lets an
+   * author send qualified respondents to a booking page and everyone else to a thank-you.
+   */
+  private endingRedirect(res: FormSubmissionResult): string | undefined {
+    if (outcomeForResult(res).redirect && res.redirectUrl) {
+      return res.redirectUrl;
+    }
+    return endingRedirectUrl(this.endingScreen(), this.definition()?.settings ?? {});
   }
 
   /** Called by the challenge when the respondent solves it — holds the single-use token. */
@@ -337,12 +589,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
     };
   }
 
+  /**
+   * The confirmation message for a form with no ending screen.
+   *
+   * The server's echoed message wins over the form's own setting, because a server that
+   * overrode it (a quota message, say) knows something the snapshot does not.
+   */
   protected confirmationMessage(): string {
-    return (
-      this.result()?.confirmationMessage ??
-      this.definition()?.settings.confirmationMessage ??
-      'Thank you — your response has been recorded.'
-    );
+    const echoed = this.result()?.confirmationMessage;
+    if (echoed) {
+      return echoed;
+    }
+    return endingMessage(undefined, this.definition()?.settings ?? {});
   }
 
   protected retry(): void {

@@ -15,7 +15,7 @@ import type {
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import { LogError } from '@memberjunction/core';
-import { renderAnswer, respondentLabel } from '../shared/answer-values';
+import { deriveRespondent, renderAnswer } from '../shared/answer-values';
 import { toDate } from '../shared/runview-dates';
 import type {
   ResponseListRow,
@@ -61,24 +61,55 @@ export interface ResponseDetailInput {
  * autosave, not a submitted response, so it must not appear in the headline response list
  * (it is still reflected in the funnel/drop-off metric, which reads all answers).
  */
+/**
+ * Whether an answer row actually holds an answer.
+ *
+ * Every answerable question a respondent reaches can leave a row behind, blank ones
+ * included, so counting rows reports questions SEEN rather than questions answered — and
+ * the column it feeds is headed "Answered", the only per-response completeness signal the
+ * list gives a reader.
+ *
+ * Tests each typed column for EMPTINESS, never for falsiness. A numeric `0`, a `false`
+ * boolean and an empty-string-but-present text answer are not the same thing: the first two
+ * are real answers a respondent chose, and reading them as blank would under-count exactly
+ * the responses that answered "no" or "none".
+ */
+function storedSomething(a: AnswerRow): boolean {
+  if (a.TextValue !== null && a.TextValue !== undefined && a.TextValue.trim() !== '') return true;
+  if (a.NumericValue !== null && a.NumericValue !== undefined) return true;
+  if (a.BooleanValue !== null && a.BooleanValue !== undefined) return true;
+  if (a.DateValue !== null && a.DateValue !== undefined) return true;
+  if (a.FileID !== null && a.FileID !== undefined && a.FileID !== '') return true;
+  if (a.JSONValue !== null && a.JSONValue !== undefined && a.JSONValue.trim() !== '') return true;
+  return false;
+}
+
 export function buildResponseRows(
   responses: ResponseRow[],
   answers: AnswerRow[],
+  questions: PublishedFormQuestion[] = [],
 ): ResponseListRow[] {
-  const answerCountByResponse = new Map<string, number>();
+  const answersByResponse = new Map<string, AnswerRow[]>();
   for (const a of answers) {
-    answerCountByResponse.set(a.ResponseID, (answerCountByResponse.get(a.ResponseID) ?? 0) + 1);
+    const bucket = answersByResponse.get(a.ResponseID);
+    if (bucket) bucket.push(a);
+    else answersByResponse.set(a.ResponseID, [a]);
   }
   return responses
     .filter((r) => r.Status === 'Complete')
-    .map((r) => ({
-      responseId: r.ID,
-      status: r.Status,
-      startedAt: toDate(r.StartedAt),
-      submittedAt: toDate(r.SubmittedAt),
-      respondent: respondentLabel(r),
-      answeredCount: answerCountByResponse.get(r.ID) ?? 0,
-    }));
+    .map((r) => {
+      const own = answersByResponse.get(r.ID) ?? [];
+      return {
+        responseId: r.ID,
+        status: r.Status,
+        startedAt: toDate(r.StartedAt),
+        submittedAt: toDate(r.SubmittedAt),
+        // `questions` defaults to empty so a caller with no snapshot still gets rows —
+        // it just falls back to the Person name, or to "Anonymous", as before.
+        respondent: deriveRespondent(r, own, questions),
+        answeredCount: own.filter(storedSomething).length,
+      };
+    });
 }
 
 /** Builds one response's full detail: labelled answers, plus what the submission did. */
@@ -90,7 +121,7 @@ export function buildResponseDetail(input: ResponseDetailInput): ResponseDetail 
     status: response.Status,
     startedAt: toDate(response.StartedAt),
     submittedAt: toDate(response.SubmittedAt),
-    respondent: respondentLabel(response),
+    respondent: deriveRespondent(response, input.answers, input.questions),
     answers: views,
     unlabelledAnswerCount: unlabelled,
     unavailableSections: input.unavailableSections ?? [],
@@ -100,8 +131,7 @@ export function buildResponseDetail(input: ResponseDetailInput): ResponseDetail 
 }
 
 /**
- * Labels each answer by its question, attaching the AI score and — for file answers — the
- * upload behind it.
+ * Labels each answer by its question, attaching — for file answers — the upload behind it.
  *
  * An answer whose question is absent from `questions` is dropped: it was submitted against
  * a version where the question still existed, and there is nothing truthful to label it
@@ -112,20 +142,22 @@ function buildAnswerViews(
   questions: PublishedFormQuestion[],
   uploads: UploadRow[],
 ): { views: ResponseAnswerView[]; unlabelled: number } {
-  const questionById = new Map(questions.map((q) => [q.id, q]));
+  const answerByQuestion = new Map(answers.map((a) => [a.QuestionID, a]));
   const uploadByFileId = new Map(uploads.map((u) => [u.FileID, u]));
   const views: ResponseAnswerView[] = [];
-  let unlabelled = 0;
 
-  for (const a of answers) {
-    const q = questionById.get(a.QuestionID);
-    if (!q) {
-      // A real answer we cannot name. Counted, not forgotten.
-      unlabelled++;
-      continue;
-    }
+  // Driven by QUESTIONS, not by answers. `questions` arrives flattened in page/display
+  // order, whereas `answers` arrives in whatever order the view returned — which is how a
+  // response rendered "Last name" above "First name". Reading a transcript out of order
+  // is not a cosmetic problem: it silently misrepresents what the respondent filled in.
+  for (const q of questions) {
     if (q.type === 'Statement') {
       // Display-only prose; a Statement never carries an answer worth showing.
+      continue;
+    }
+    const a = answerByQuestion.get(q.id);
+    if (!a) {
+      // Not answered — skipped, conditionally hidden, or added after this submission.
       continue;
     }
     views.push({
@@ -133,11 +165,15 @@ function buildAnswerViews(
       prompt: q.prompt,
       type: q.type,
       displayValue: renderAnswer(q, a),
-      score: a.Score ?? null,
-      scoreRationale: a.ScoreRationale ?? null,
       file: toFileView(a, uploadByFileId),
     });
   }
+
+  // Real answers we cannot name: counted, not forgotten. Statements are excluded because a
+  // stray answer against one is display-only noise, not lost respondent input.
+  const knownIds = new Set(questions.filter((q) => q.type !== 'Statement').map((q) => q.id));
+  const unlabelled = answers.filter((a) => !knownIds.has(a.QuestionID)).length;
+
   return { views, unlabelled };
 }
 

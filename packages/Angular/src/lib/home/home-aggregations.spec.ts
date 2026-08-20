@@ -5,6 +5,7 @@ import {
   buildFormRows,
   categoryNameMap,
   readFormIdFromParams,
+  readFormIdFromResult,
   responseCountMap,
   sortByUpdatedDesc,
 } from './home-aggregations';
@@ -123,5 +124,22 @@ describe('readFormIdFromParams', () => {
     expect(readFormIdFromParams(undefined)).toBeNull();
     expect(readFormIdFromParams([])).toBeNull();
     expect(readFormIdFromParams([{ Name: 'FormID', Value: '', Type: 'Output' }])).toBeNull();
+  });
+});
+
+describe('readFormIdFromResult', () => {
+  it('reads FormID out of the output collection the server actually returns', () => {
+    // GraphQLActionClient.processActionResult puts OUTPUT params in `Result` (parsed from
+    // ResultData) and sets `Params` to the caller's INPUTS. Captured live from a starter run.
+    const result = {
+      Success: true,
+      Params: [{ Name: 'TemplateKey', Value: 'nps', Type: 'Input' as const }],
+      Result: {
+        '0': { Name: 'FormID', Value: '242E020F-D4FE-4D86-8B1B-B7729B802736', Type: 'Output' },
+        '1': { Name: 'FormVersionID', Value: 'CBBA56BE-A89F-45BE-AEA3-0FE76660A24B', Type: 'Output' },
+        '2': { Name: 'PageCount', Value: 1, Type: 'Output' },
+      },
+    };
+    expect(readFormIdFromResult(result)).toBe('242E020F-D4FE-4D86-8B1B-B7729B802736');
   });
 });

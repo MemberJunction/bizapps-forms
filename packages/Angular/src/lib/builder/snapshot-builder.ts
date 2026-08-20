@@ -6,9 +6,13 @@ import type {
   PublishedFormPage,
   PublishedFormQuestion,
   PublishedFormQuestionOption,
+  PublishedFormScreen,
   FormRenderMode,
+  mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { withUniqueValues } from './option-labels';
+import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   parseConditionalRule,
   parseValidationRule,
@@ -16,6 +20,7 @@ import {
   parseFormSettings,
   buildStyleTokens,
 } from './json-fields';
+import { parseSocialLinks } from '@mj-biz-apps/forms-entities';
 
 /**
  * Pure transform from the live builder tree to the immutable
@@ -66,7 +71,63 @@ export function buildPublishedDefinition(
     // than loudly broken. An empty array is also what keeps an already-published form on the
     // legacy hook list, so it is a meaningful value rather than a placeholder.
     automations: [...automations],
+    // Same reasoning, one level up: the welcome screen is OPTIONAL because absent genuinely means
+    // "start on the first question", while the ending list is always emitted because empty and
+    // absent resolve identically and a consumer should not have to tell them apart.
+    welcomeScreen: buildWelcomeScreen(tree),
+    endScreens: endScreensOf(tree).map(buildScreen),
   };
+}
+
+/**
+ * Freeze one screen into the snapshot.
+ *
+ * `displayOrder` is re-derived from position rather than copied, matching how pages and questions
+ * are renumbered above: ending resolution walks this list in order, so a gap left by a deleted
+ * screen must not survive into the published form.
+ */
+function buildWelcomeScreen(tree: FormTree): PublishedFormScreen | undefined {
+  const welcome = welcomeScreenOf(tree);
+  return welcome ? buildScreen(welcome, 0) : undefined;
+}
+
+function buildScreen(
+  screen: mjBizAppsFormsFormScreenEntity,
+  displayOrder: number,
+): PublishedFormScreen {
+  const built: PublishedFormScreen = {
+    id: screen.ID,
+    screenType: screen.ScreenType,
+    title: screen.Title,
+    displayOrder,
+  };
+  if (screen.Body) {
+    built.body = screen.Body;
+  }
+  if (screen.ButtonLabel) {
+    built.buttonLabel = screen.ButtonLabel;
+  }
+  if (screen.MediaURL) {
+    built.mediaURL = screen.MediaURL;
+  }
+  if (screen.RedirectURL) {
+    built.redirectURL = screen.RedirectURL;
+  }
+  if (screen.IsDefault) {
+    built.isDefault = true;
+  }
+  const conditional = parseConditionalRule(screen.ConditionalRule);
+  if (conditional) {
+    built.conditionalRule = conditional;
+  }
+  // Parsed rather than copied: the snapshot is what a public page renders, so a link that could
+  // not be drawn — unknown platform, blank, or a non-web scheme — is dropped at publish time
+  // rather than shipped to every respondent for the widget to re-litigate.
+  const social = parseSocialLinks(screen.SocialLinks);
+  if (social.length > 0) {
+    built.socialLinks = social;
+  }
+  return built;
 }
 
 function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {
@@ -82,6 +143,9 @@ function buildPage(page: PageNode, displayOrder: number): PublishedFormPage {
   }
   if (page.entity.Description) {
     result.description = page.entity.Description;
+  }
+  if (page.entity.IsPartialSubmitPoint) {
+    result.isPartialSubmitPoint = true;
   }
   const conditional = parseConditionalRule(page.entity.ConditionalRule);
   if (conditional) {
@@ -118,7 +182,20 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
   return result;
 }
 
+/**
+ * Publish a question's options in display order, with unique values.
+ *
+ * The uniqueness pass is not cosmetic. An option's value IS the respondent's answer, so two
+ * options sharing a value are one answer wearing two labels: the widget highlighted both when
+ * either was picked, and the response was indistinguishable afterwards. Deduping here rather
+ * than in the widget is deliberate — the widget would only be papering over a definition that
+ * was already ambiguous, and the ambiguity would survive into the stored response.
+ */
 function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
+  return withUniqueValues(buildRawOptions(node));
+}
+
+function buildRawOptions(node: QuestionNode): PublishedFormQuestionOption[] {
   return [...node.options]
     .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
     .map((opt, index) => {
@@ -130,6 +207,12 @@ function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
       };
       if (opt.IsDefault) {
         built.isDefault = true;
+      }
+      if (opt.ImageURL) {
+        built.imageURL = opt.ImageURL;
+      }
+      if (opt.MatrixAxis) {
+        built.matrixAxis = opt.MatrixAxis;
       }
       return built;
     });

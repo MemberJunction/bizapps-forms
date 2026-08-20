@@ -7,7 +7,7 @@ import type {
   ConditionalRule,
   ConditionValue,
 } from '@mj-biz-apps/forms-entities';
-import { BUILDER_CONTROL_STYLES } from './builder-styles';
+import { FORMS_UI_CSS } from '../shared';
 
 const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre { display: flex; flex-direction: column; gap: 10px; }
@@ -64,7 +64,7 @@ const OPERATORS: ReadonlyArray<OperatorOption> = [
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule],
   templateUrl: './conditional-rule-editor.component.html',
-  styles: [BUILDER_CONTROL_STYLES, CONDITIONAL_EDITOR_CSS],
+  styles: [FORMS_UI_CSS, CONDITIONAL_EDITOR_CSS],
 })
 export class ConditionalRuleEditorComponent {
   /** Questions that may be referenced (typically those preceding the current one). */

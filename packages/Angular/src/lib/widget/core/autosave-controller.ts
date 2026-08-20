@@ -88,6 +88,40 @@ export class AutosaveController {
     }
   }
 
+  /**
+   * Write the pending progress NOW, and resolve once it is on disk.
+   *
+   * The counterpart to {@link settle}, and the distinction is the whole point. `settle()` means
+   * "quiesce" — it is called by the final submit, which is about to send every answer itself, so
+   * discarding a queued autosave is exactly right there. A CHECKPOINT wants the opposite: it is
+   * the only thing that will ever write those answers, so cancelling the debounce without
+   * flushing it silently drops the progress the checkpoint exists to bank. Calling `settle()`
+   * for that made a submit point strictly WORSE than no submit point at all — crossing one
+   * cancelled the autosave that would otherwise have fired 1500ms later.
+   *
+   * A save already in flight is awaited first and then superseded by a fresh one, because that
+   * save captured its payload before this progress existed. The two run in sequence, never
+   * concurrently, so they cannot collide on the shared `clientResponseId`.
+   *
+   * Never throws — a checkpoint is background work like any other autosave (fail-soft).
+   */
+  public async flushNow(): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    if (this.inFlightSave) {
+      await this.inFlightSave;
+    }
+    // A ping landing during that await may have re-armed the debounce; this call supersedes it.
+    this.clearTimer();
+    this.rearm = false;
+    if (this.disposed) {
+      return;
+    }
+    this.flush();
+    await this.inFlightSave;
+  }
+
   /** Stop all activity; a controller is dead after this. */
   public dispose(): void {
     this.disposed = true;

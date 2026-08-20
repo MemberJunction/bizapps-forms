@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import type { FormQuestionType, ValidationRule } from '@mj-biz-apps/forms-entities';
-import { BUILDER_CONTROL_STYLES } from './builder-styles';
+import { FORMS_UI_CSS } from '../shared';
 
 const VALIDATION_EDITOR_CSS = /* css */ `
 .vre { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -24,7 +24,7 @@ const VALIDATION_EDITOR_CSS = /* css */ `
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, FormsModule],
   templateUrl: './validation-rule-editor.component.html',
-  styles: [BUILDER_CONTROL_STYLES, VALIDATION_EDITOR_CSS],
+  styles: [FORMS_UI_CSS, VALIDATION_EDITOR_CSS],
 })
 export class ValidationRuleEditorComponent {
   @Input() questionType: FormQuestionType = 'ShortText';

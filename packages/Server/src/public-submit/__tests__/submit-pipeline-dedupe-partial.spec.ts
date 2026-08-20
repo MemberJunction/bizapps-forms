@@ -34,6 +34,7 @@ function validSubmission(overrides?: Partial<PipelineSubmission>): PipelineSubmi
 }
 
 interface BuildOptions {
+  definition?: ReturnType<typeof makeDefinition>;
   existingResponses?: ExistingResponseRow[];
   concurrentlyCreated?: ExistingResponseRow[];
   failRunViewFor?: string;
@@ -41,7 +42,7 @@ interface BuildOptions {
 }
 
 function build(options: BuildOptions = {}): { ctx: PipelineContext; fake: FakeProvider } {
-  const definition = makeDefinition();
+  const definition = options.definition ?? makeDefinition();
   const fake = makeFakeProvider({
     distribution: makeDistribution(),
     version: makeVersion(definition),
@@ -420,6 +421,30 @@ describe('submission shape validation (loud failure, not a throw)', () => {
     expect(result.errors?.[0].message).toMatch(/formVersionId/i);
   });
 
+  it('LOGS why a submit was refused, not just how long it took', async () => {
+    // OBSERVED IN PRODUCTION. A refused submit emitted only the timing line — the refusal
+    // reason was never written anywhere. Five refusals in one session could only be diagnosed
+    // by noticing which stage was LAST in the breakdown and reading the pipeline source to see
+    // which gate returns before its own mark. The respondent is told what happened; the
+    // operator, who is the one who can fix it, is told nothing.
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx } = build();
+      const result = await runSubmitPipeline(ctx, validSubmission({ formVersionId: '' }));
+      expect(result.success).toBe(false);
+
+      const line = logged.find((l) => l.includes('[Forms] submit'));
+      expect(line, 'the submit should still log a line').toBeDefined();
+      expect(line).toMatch(/refused/i);
+      expect(line).toMatch(/formVersionId/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('returns a clear error result when an answer is missing its question id', async () => {
     const { ctx } = build();
     const result = await runSubmitPipeline(
@@ -428,5 +453,71 @@ describe('submission shape validation (loud failure, not a throw)', () => {
     );
     expect(result.success).toBe(false);
     expect(result.errors?.[0].message).toMatch(/question id/i);
+  });
+});
+
+describe('an idempotent resubmit lands on the SAME ending the first submit did', () => {
+  /** A form whose thank-you page depends on how the respondent answered. */
+  const conditionalEndings = () =>
+    makeDefinition({
+      endScreens: [
+        {
+          id: 'end-vip',
+          screenType: 'Ending',
+          title: 'VIP',
+          displayOrder: 0,
+          body: 'A concierge will call you.',
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-name', op: 'equals', value: 'Ada Lovelace' }] },
+          },
+        },
+        { id: 'end-default', screenType: 'Ending', title: 'Thanks', displayOrder: 1, isDefault: true },
+      ],
+    });
+
+  it('resolves the conditional ending on a retry of an already-Complete response', async () => {
+    // A retry is the case this matters in: the first submit SUCCEEDED and its network response was
+    // lost, so the respondent sees only what the retry returns. Resolving with no answers gave
+    // them the default ending — a different thank-you page, or no redirect at all, for a response
+    // the server had already accepted and routed correctly.
+    const { ctx } = build({
+      definition: conditionalEndings(),
+      existingResponses: [
+        {
+          ID: 'resp-1',
+          Status: 'Complete',
+          FormVersionID: 'ver-1',
+          AnonymousSessionID: SESSION,
+        },
+      ],
+    });
+
+    const result = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe('resp-1');
+    expect(result.confirmationMessage).toBe('VIP\n\nA concierge will call you.');
+  });
+
+  it('still falls back to the default ending when the answers match no condition', async () => {
+    const { ctx } = build({
+      definition: conditionalEndings(),
+      existingResponses: [
+        {
+          ID: 'resp-1',
+          Status: 'Complete',
+          FormVersionID: 'ver-1',
+          AnonymousSessionID: SESSION,
+        },
+      ],
+    });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      validSubmission({ answers: [{ questionId: 'q-name', textValue: 'Someone Else' }] }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.confirmationMessage).toBe('Thanks');
   });
 });

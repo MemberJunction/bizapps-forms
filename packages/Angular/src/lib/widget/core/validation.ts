@@ -5,9 +5,12 @@
  */
 import {
   coerceAnswerToNumber,
+  isAnswerableQuestionType,
   isAnswerSupplied,
+  isRequiredSatisfied,
   matchesValidationPattern,
   validateAnswerFormat,
+  validateCompositeParts,
 } from '@mj-biz-apps/forms-entities';
 import type {
   AnswerValue,
@@ -19,6 +22,15 @@ import type {
 export interface FieldValidationResult {
   valid: boolean;
   message: string | null;
+  /**
+   * For composite questions (Address / ContactInfo): which SUB-FIELD each problem belongs to,
+   * so the UI can put every message beneath the input that caused it and mark only that input.
+   *
+   * Absent — not empty — when the failure belongs to the question as a whole (required, or a
+   * value that is not a record at all). That distinction is what the renderer branches on: a
+   * group-level failure still gets one message under the group.
+   */
+  parts?: Record<string, string>;
 }
 
 const VALID: FieldValidationResult = { valid: true, message: null };
@@ -43,12 +55,20 @@ export function validateQuestion(
   question: PublishedFormQuestion,
   value: AnswerValue,
 ): FieldValidationResult {
-  if (question.type === 'Statement') {
+  if (!isAnswerableQuestionType(question.type)) {
     return VALID;
   }
   const present = hasValue(value);
-  if (question.isRequired && !present) {
-    return { valid: false, message: 'This question is required.' };
+  // Not `present`: a required consent box is only satisfied by a TICK, and an unticked one is
+  // `false`, which counts as supplied. See isRequiredSatisfied.
+  if (question.isRequired && !isRequiredSatisfied(question.type, value)) {
+    return {
+      valid: false,
+      message:
+        question.type === 'Checkbox' || question.type === 'Legal'
+          ? 'Please tick this box to continue.'
+          : 'This question is required.',
+    };
   }
   if (!present) {
     return VALID;
@@ -71,8 +91,13 @@ function validateByType(
   question: PublishedFormQuestion,
   value: AnswerValue,
 ): FieldValidationResult {
-  const message = validateAnswerFormat(question.type, value);
-  return message ? { valid: false, message } : VALID;
+  const message = validateAnswerFormat(question, value);
+  if (!message) {
+    return VALID;
+  }
+  // The summary IS these parts joined, so asking for both cannot produce a disagreement.
+  const parts = validateCompositeParts(question.type, value);
+  return Object.keys(parts).length > 0 ? { valid: false, message, parts } : { valid: false, message };
 }
 
 /** Apply the declarative {@link ValidationRule} (length / range / pattern). */

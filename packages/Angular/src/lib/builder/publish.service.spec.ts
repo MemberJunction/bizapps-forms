@@ -6,7 +6,7 @@ import type { FormTree } from './builder-models';
  * Publish is the only place the authored automation rows become executable.
  *
  * Automations run from the `FormVersion.DefinitionSnapshot`, never from the live `FormAutomation`
- * rows — so a binding an author configures in the On Submit tab does nothing at all until a
+ * rows — so a binding an author configures in the Automate tab does nothing at all until a
  * publish copies it into a snapshot. These tests cover that copy, because it is invisible when it
  * is missing: the submit path falls back to the legacy hook list, every form keeps working, and
  * the only symptom is that the configured binding silently never fires.
@@ -83,7 +83,7 @@ function tree(): FormTree {
     Save: async () => true,
     LatestResult: { CompleteMessage: '' },
   };
-  return { form, pages: [] } as unknown as FormTree;
+  return { form, pages: [], screens: [] } as unknown as FormTree;
 }
 
 function publishedSnapshot(): PublishedFormDefinition {

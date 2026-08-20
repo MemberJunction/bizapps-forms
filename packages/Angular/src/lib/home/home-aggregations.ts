@@ -83,3 +83,56 @@ export function readFormIdFromParams(
   const value = hit?.Value;
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
+
+/**
+ * The shape an action result has once `GraphQLActionClient` is done with it.
+ *
+ * `Result` is the parsed `ResultData` — the OUTPUT params, as an object keyed by array index
+ * (`{"0": {...}, "1": {...}}`) because the server JSON-stringifies the array. `Params` is set to
+ * the caller's ORIGINAL INPUTS and never carries outputs.
+ */
+interface AuthoringActionResult {
+  Params?: readonly ActionParam[];
+  Result?: unknown;
+}
+
+/**
+ * The id of the form an authoring action just created.
+ *
+ * THE BUG THIS FIXES. `readFormIdFromParams` looked for `FormID` in `result.Params`, which can
+ * never contain it: `GraphQLActionClient.processActionResult` builds its return value with
+ * `Params: originalParams` — the inputs the caller sent — and puts the action's output params in
+ * `Result`, parsed from the `ResultData` string. So the lookup always came back null, the
+ * "open the form I just made for you" step was skipped, and both "From template" and "Author
+ * with AI" silently dumped the author back on the list with no idea whether anything happened.
+ * The form was there; nothing took them to it.
+ *
+ * `Params` is still consulted as a fallback so a caller that hands us a genuinely
+ * output-bearing param list (a direct server-side run, a future client that returns them) keeps
+ * working.
+ */
+export function readFormIdFromResult(result: AuthoringActionResult | undefined): string | null {
+  if (!result) {
+    return null;
+  }
+  const fromOutputs = readFormIdFromOutputCollection(result.Result);
+  return fromOutputs ?? readFormIdFromParams(result.Params);
+}
+
+/** Pull `FormID` out of the index-keyed output-param object (or a plain array). */
+function readFormIdFromOutputCollection(collection: unknown): string | null {
+  if (typeof collection !== 'object' || collection === null) {
+    return null;
+  }
+  const entries = Array.isArray(collection) ? collection : Object.values(collection);
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const param = entry as { Name?: unknown; Value?: unknown };
+    if (param.Name === 'FormID' && typeof param.Value === 'string' && param.Value.length > 0) {
+      return param.Value;
+    }
+  }
+  return null;
+}

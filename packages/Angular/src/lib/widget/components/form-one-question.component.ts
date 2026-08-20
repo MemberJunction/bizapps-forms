@@ -61,10 +61,16 @@ export class FormOneQuestionComponent {
   );
   protected readonly isFirst = computed(() => this.index() === 0);
   protected readonly isLast = computed(() => this.index() >= this.total() - 1);
-  protected readonly progress = computed(() => {
-    const t = this.total();
-    return t === 0 ? 1 : (this.index() + 1) / t;
-  });
+  /**
+   * Progress comes from the runtime, the same as Scroll mode.
+   *
+   * This used to be `(index + 1) / total` — the respondent's POSITION in the deck, which is a
+   * different quantity wearing the same name. It read 14% on arrival with nothing filled in,
+   * moved when someone skipped an optional question without answering it, and disagreed with
+   * the bar the other render mode showed for the identical form. One definition of "how far
+   * along am I", in the one place that can answer it.
+   */
+  protected readonly progress = computed(() => this.runtime().progress());
   protected readonly stepLabel = computed(() => `${this.index() + 1} of ${this.total()}`);
 
   /** Disable the primary control while submitting, or on the final (submit) step when blocked. */

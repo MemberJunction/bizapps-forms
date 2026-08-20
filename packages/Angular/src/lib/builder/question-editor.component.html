@@ -1,9 +1,14 @@
 @if (!node) {
-  <div class="qe-empty">Select a question to edit its settings.</div>
+  <div class="qe-empty">
+    <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+    <span class="qe-empty-title">No question selected</span>
+    <p>Pick a question on the canvas to edit its wording, validation and logic.</p>
+  </div>
 } @else {
   <div class="qe">
     <div class="qe-head">
-      <span class="mjf-pill"><i [class]="typeIcon" aria-hidden="true"></i> {{ typeLabel }}</span>
+      <span class="qe-head-title">Question settings</span>
+      <span [class]="'mjf-type-pill ' + typeColorClass"><i [class]="typeIcon" aria-hidden="true"></i> {{ typeLabel }}</span>
     </div>
 
     <div class="mjf-field">
@@ -11,15 +16,15 @@
       <textarea
         #promptInput
         id="qe-prompt"
-        class="mjf-input"
-        rows="2"
+        class="mjf-textarea"
+        rows="3"
         [value]="node.entity.Prompt"
         (change)="setPrompt(promptInput.value)"
       ></textarea>
     </div>
 
     <div class="mjf-field">
-      <label class="mjf-field-label" for="qe-help">Help text</label>
+      <label class="mjf-field-label" for="qe-help">Description</label>
       <input
         #helpInput
         id="qe-help"
@@ -31,9 +36,9 @@
       />
     </div>
 
-    <div class="qe-required">
-      <span>Required</span>
+    <mjf-setting-row label="Required" hint="The respondent cannot continue without answering.">
       <button
+        slot="control"
         type="button"
         class="mjf-switch"
         [class.is-on]="node.entity.IsRequired"
@@ -42,55 +47,226 @@
         aria-label="Required"
         (click)="toggleRequired()"
       ></button>
-    </div>
+    </mjf-setting-row>
 
-    @if (hasOptions) {
-      <div class="qe-section">
-        <p class="qe-section-title">Options</p>
-        <div class="qe-options">
-          @for (opt of node.options; track opt.ID) {
-            <div class="qe-option">
-              <input
-                #optInput
-                type="text"
-                class="mjf-input"
-                [value]="opt.Label"
-                (change)="setOptionLabel($index, optInput.value)"
-                [attr.aria-label]="'Option ' + ($index + 1)"
-              />
-              <button
-                type="button"
-                class="qe-opt-remove"
-                (click)="removeOption($index)"
-                aria-label="Remove option"
-              >
-                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-              </button>
-            </div>
-          }
-        </div>
-        <button type="button" class="mjf-btn mjf-btn--ghost" style="margin-top:8px" (click)="addOption()">
-          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add option
-        </button>
-      </div>
+    @if (hasPlaceholder) {
+      <mjf-setting-row
+        label="Custom placeholder text"
+        hint="Grey text shown inside the empty field. It is a hint, not an answer."
+        [open]="placeholderOpen"
+      >
+        <button
+          slot="control"
+          type="button"
+          class="mjf-switch"
+          [class.is-on]="placeholderOpen"
+          role="switch"
+          [attr.aria-checked]="placeholderOpen"
+          aria-label="Custom placeholder text"
+          (click)="togglePlaceholder()"
+        ></button>
+        <input
+          #phInput
+          class="mjf-input"
+          type="text"
+          [value]="settingValue(placeholderField)"
+          [attr.placeholder]="placeholderField.placeholder ?? null"
+          aria-label="Placeholder text"
+          (change)="setSetting(placeholderField, phInput.value)"
+        />
+      </mjf-setting-row>
     }
 
-    <div class="qe-section">
-      <p class="qe-section-title">Validation</p>
+    @if (canBeMultiAnswer) {
+      <mjf-setting-row
+        label="Multiple answers"
+        hint="Let the respondent pick more than one. Changes how the answer is stored, so set it before collecting responses."
+      >
+        <button
+          slot="control"
+          type="button"
+          class="mjf-switch"
+          [class.is-on]="isMultiAnswer"
+          role="switch"
+          [attr.aria-checked]="isMultiAnswer"
+          aria-label="Multiple answers"
+          (click)="toggleMultiAnswer()"
+        ></button>
+      </mjf-setting-row>
+    }
+
+    <mjf-setting-row
+      label="Answer validation"
+      hint="Reject an answer that does not match, and tell the respondent why."
+      [open]="validationOpen"
+    >
+      <button
+        slot="control"
+        type="button"
+        class="mjf-switch"
+        [class.is-on]="validationOpen"
+        role="switch"
+        [attr.aria-checked]="validationOpen"
+        aria-label="Answer validation"
+        (click)="toggleValidation()"
+      ></button>
       <mjf-validation-rule-editor
         [questionType]="node.entity.QuestionType"
         [rule]="validationRule"
         (ruleChange)="onValidationChange($event)"
       ></mjf-validation-rule-editor>
-    </div>
+    </mjf-setting-row>
 
-    <div class="qe-section">
-      <p class="qe-section-title">Conditional logic</p>
+    <mjf-setting-row
+      label="Show only if"
+      hint="Hide this question unless an earlier answer matches."
+      [open]="conditionalOpen"
+    >
+      <button
+        slot="control"
+        type="button"
+        class="mjf-switch"
+        [class.is-on]="conditionalOpen"
+        role="switch"
+        [attr.aria-checked]="conditionalOpen"
+        aria-label="Show only if"
+        (click)="toggleConditional()"
+      ></button>
       <mjf-conditional-rule-editor
         [sources]="conditionalSources"
         [rule]="conditionalRule"
         (ruleChange)="onConditionalChange($event)"
       ></mjf-conditional-rule-editor>
-    </div>
+    </mjf-setting-row>
+
+    @if (otherSettingFields.length > 0) {
+      <div class="qe-section">
+        <p class="qe-section-title">Settings</p>
+        @for (field of otherSettingFields; track field.key) {
+          <div class="mjf-field">
+            <label class="mjf-field-label" [attr.for]="'qe-set-' + field.key">{{ field.label }}</label>
+            @if (field.kind === 'multiline') {
+              <textarea
+                #setInput
+                class="mjf-textarea"
+                rows="5"
+                [id]="'qe-set-' + field.key"
+                [value]="settingValue(field)"
+                [attr.placeholder]="field.placeholder ?? null"
+                (change)="setSetting(field, setInput.value)"
+              ></textarea>
+            } @else {
+              <input
+                #setInput
+                class="mjf-input"
+                [id]="'qe-set-' + field.key"
+                [type]="field.kind === 'number' ? 'number' : 'text'"
+                [value]="settingValue(field)"
+                [attr.placeholder]="field.placeholder ?? null"
+                (change)="setSetting(field, setInput.value)"
+              />
+            }
+            @if (field.hint) {
+              <p class="qe-hint">{{ field.hint }}</p>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    @if (optionMode === 'matrix') {
+      <!-- Rows and columns are the same table with an axis discriminator, so they get two lists
+           rather than one: an author looking at a grid thinks in rows and columns, not in a flat
+           option list where the axis is a dropdown on each row. -->
+      <div class="qe-section">
+        <p class="qe-section-title">Rows</p>
+        <div class="qe-options">
+          @for (opt of matrixRows; track opt.ID) {
+            <div class="qe-option">
+              <input
+                #rowInput
+                type="text"
+                class="mjf-input"
+                [value]="opt.Label"
+                (change)="setOptionLabel(indexOfOption(opt), rowInput.value)"
+                [attr.aria-label]="'Row ' + ($index + 1)"
+              />
+              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" aria-label="Remove row">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          }
+        </div>
+        <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="addOption('Row')">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add row
+        </button>
+      </div>
+
+      <div class="qe-section">
+        <p class="qe-section-title">Columns</p>
+        <div class="qe-options">
+          @for (opt of matrixColumns; track opt.ID) {
+            <div class="qe-option">
+              <input
+                #colInput
+                type="text"
+                class="mjf-input"
+                [value]="opt.Label"
+                (change)="setOptionLabel(indexOfOption(opt), colInput.value)"
+                [attr.aria-label]="'Column ' + ($index + 1)"
+              />
+              <button type="button" class="qe-opt-remove" (click)="removeOption(indexOfOption(opt))" aria-label="Remove column">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          }
+        </div>
+        <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="addOption('Column')">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add column
+        </button>
+      </div>
+    } @else if (hasOptions) {
+      <div class="qe-section">
+        <p class="qe-section-title">{{ optionMode === 'images' ? 'Choices' : 'Options' }}</p>
+        <div class="qe-options">
+          @for (opt of node.options; track opt.ID) {
+            <div class="qe-option-block">
+              <div class="qe-option">
+                <span class="qe-opt-letter" aria-hidden="true">{{ letterFor($index) }}</span>
+                <input
+                  #optInput
+                  type="text"
+                  class="mjf-input"
+                  [value]="opt.Label"
+                  (change)="setOptionLabel($index, optInput.value)"
+                  [attr.aria-label]="'Option ' + letterFor($index)"
+                />
+                <button
+                  type="button"
+                  class="qe-opt-remove"
+                  (click)="removeOption($index)"
+                  aria-label="Remove option"
+                >
+                  <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
+              </div>
+              @if (optionMode === 'images') {
+                <mjf-image-field
+                  class="qe-option-img"
+                  compact
+                  [value]="opt.ImageURL ?? ''"
+                  [formId]="formId"
+                  [ariaLabel]="'image for option ' + letterFor($index)"
+                  (valueChange)="setOptionImage(opt, $event)"
+                />
+              }
+            </div>
+          }
+        </div>
+        <button type="button" class="mjf-btn mjf-btn--ghost mjf-btn--sm" (click)="addOption()">
+          <i class="fa-solid fa-plus" aria-hidden="true"></i> Add option
+        </button>
+      </div>
+    }
   </div>
 }

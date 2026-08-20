@@ -208,6 +208,12 @@ async function createOptions(
     optEntity.Value = opt.value ?? opt.label;
     optEntity.DisplayOrder = i;
     optEntity.IsDefault = opt.isDefault ?? false;
+    if (opt.imageURL) {
+      optEntity.ImageURL = opt.imageURL;
+    }
+    if (opt.matrixAxis) {
+      optEntity.MatrixAxis = opt.matrixAxis;
+    }
     await save(optEntity, 'FormQuestionOption');
     count++;
   }

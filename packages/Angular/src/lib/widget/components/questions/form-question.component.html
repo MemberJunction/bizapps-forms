@@ -1,7 +1,7 @@
 @let q = question();
 
 <div class="mjf-question" [class.mjf-question--error]="!!errorMessage()">
-  @if (q.type === 'Statement') {
+  @if (!isAnswerable()) {
     <div class="mjf-statement" role="note">
       <h3 class="mjf-statement__title">{{ q.prompt }}</h3>
       @if (q.helpText) {
@@ -60,13 +60,14 @@
                 [attr.aria-checked]="textValue() === opt.value"
                 (click)="onSingleChoice(opt.value)"
               >
-                <span class="mjf-choice__mark" aria-hidden="true"></span>
+                <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
                 <span class="mjf-choice__label">{{ opt.label }}</span>
               </button>
             }
           </div>
         }
         @case ('MultiChoice') {
+          <p class="mjf-choices__hint">Choose as many as you like.</p>
           <div class="mjf-choices" role="group" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
@@ -77,7 +78,7 @@
                 [attr.aria-checked]="isSelected(opt.value)"
                 (click)="onMultiToggle(opt.value)"
               >
-                <span class="mjf-choice__mark mjf-choice__mark--box" aria-hidden="true"></span>
+                <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
                 <span class="mjf-choice__label">{{ opt.label }}</span>
               </button>
             }
@@ -199,8 +200,197 @@
             </button>
           }
         }
+        @case ('PictureChoice') {
+          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            @for (opt of q.options; track opt.id) {
+              <button
+                type="button"
+                role="radio"
+                class="mjf-pic"
+                [class.mjf-pic--selected]="textValue() === opt.value"
+                [attr.aria-checked]="textValue() === opt.value"
+                (click)="onSingleChoice(opt.value)"
+              >
+                @if (opt.imageURL) {
+                  <img class="mjf-pic__img" [src]="opt.imageURL" [alt]="opt.label" loading="lazy" />
+                } @else {
+                  <span class="mjf-pic__img mjf-pic__img--empty" aria-hidden="true">
+                    <i class="fa-regular fa-image"></i>
+                  </span>
+                }
+                <span class="mjf-pic__label">
+                  <span class="mjf-choice__letter" aria-hidden="true">{{ letterAt($index) }}</span>
+                  {{ opt.label }}
+                </span>
+              </button>
+            }
+          </div>
+        }
+        @case ('OpinionScale') {
+          <div class="mjf-scale">
+            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+              @for (point of scalePoints(); track point) {
+                <button
+                  type="button"
+                  role="radio"
+                  class="mjf-scale__btn"
+                  [class.mjf-scale__btn--selected]="numericValue() === point"
+                  [attr.aria-checked]="numericValue() === point"
+                  [attr.aria-label]="point + ' out of ' + scaleMax()"
+                  (click)="onRating(point)"
+                >{{ point }}</button>
+              }
+            </div>
+            @if (scaleLabelMin() || scaleLabelMax()) {
+              <div class="mjf-scale__ends" aria-hidden="true">
+                <span>{{ scaleLabelMin() }}</span>
+                <span>{{ scaleLabelMax() }}</span>
+              </div>
+            }
+          </div>
+        }
+        @case ('Ranking') {
+          <!-- Draggable, AND up/down buttons. The buttons are not a legacy path: a drag is
+               unreachable by keyboard and by a screen reader, so removing them would take the
+               question away from anyone not using a pointer. Both write through the same
+               reorder, so neither can drift from the other. -->
+          <p class="mjf-rank__hint">Drag to rank them, or use the arrows.</p>
+          <ol
+            #rankList
+            class="mjf-rank"
+            cdkDropList
+            [attr.aria-describedby]="describedBy()"
+            (cdkDropListDropped)="onRankDrop($event.previousIndex, $event.currentIndex)"
+          >
+            @for (opt of rankedOptions(); track opt.id; let i = $index, first = $first, last = $last) {
+              <li
+                class="mjf-rank__item"
+                [class.mjf-rank__item--moved]="movedRankId() === opt.id"
+                [attr.data-rank-key]="opt.id"
+                cdkDrag
+                cdkDragPreviewContainer="parent"
+                cdkDragBoundary=".mjf-rank"
+              >
+                <!-- The gap left behind while dragging. Without one the list collapses under the
+                     pointer and there is nothing showing where the item would land. -->
+                <div class="mjf-rank__ghost" *cdkDragPlaceholder></div>
+
+                <span class="mjf-rank__grip" cdkDragHandle aria-hidden="true">
+                  <i class="fa-solid fa-grip-vertical"></i>
+                </span>
+                <span class="mjf-rank__pos" aria-hidden="true">{{ i + 1 }}</span>
+                <span class="mjf-rank__label">{{ opt.label }}</span>
+                <span class="mjf-rank__moves">
+                  <button type="button" class="mjf-rank__move" [disabled]="first"
+                    [attr.aria-label]="'Move ' + opt.label + ' up'" (click)="moveRank(i, -1)">
+                    <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+                  </button>
+                  <button type="button" class="mjf-rank__move" [disabled]="last"
+                    [attr.aria-label]="'Move ' + opt.label + ' down'" (click)="moveRank(i, 1)">
+                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                  </button>
+                </span>
+              </li>
+            }
+          </ol>
+          <!-- The travel and the mark say "it moved" to an eye and to nothing else. -->
+          <p class="mjf-visually-hidden" aria-live="polite">{{ rankLiveMessage() }}</p>
+        }
+        @case ('Matrix') {
+          <div class="mjf-matrix-wrap">
+            <table class="mjf-matrix" [attr.aria-describedby]="describedBy()">
+              <thead>
+                <tr>
+                  <td class="mjf-matrix__corner"></td>
+                  @for (col of matrixColumns(); track col.id) {
+                    <th scope="col" class="mjf-matrix__col">{{ col.label }}</th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of matrixRows(); track row.id) {
+                  <tr>
+                    <th scope="row" class="mjf-matrix__row">{{ row.label }}</th>
+                    @for (col of matrixColumns(); track col.id) {
+                      <td class="mjf-matrix__cell">
+                        <button
+                          type="button"
+                          role="radio"
+                          class="mjf-matrix__pick"
+                          [class.mjf-matrix__pick--selected]="isMatrixSelected(row.value, col.value)"
+                          [attr.aria-checked]="isMatrixSelected(row.value, col.value)"
+                          [attr.aria-label]="row.label + ': ' + col.label"
+                          (click)="onMatrix(row.value, col.value)"
+                        ><span class="mjf-choice__mark" aria-hidden="true"></span></button>
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+        @case ('Checkbox') {
+          <button
+            type="button"
+            role="checkbox"
+            class="mjf-choice mjf-consent"
+            [id]="inputId()"
+            [class.mjf-choice--selected]="booleanValue() === true"
+            [attr.aria-checked]="booleanValue() === true"
+            [attr.aria-describedby]="describedBy()"
+            (click)="onYesNo(true)"
+          >
+            <span class="mjf-choice__mark mjf-choice__mark--box" aria-hidden="true"></span>
+            <span class="mjf-choice__label">{{ placeholder() || 'I agree' }}</span>
+          </button>
+        }
+        @case ('Legal') {
+          <div class="mjf-legal">
+            @if (legalTerms()) {
+              <div class="mjf-legal__terms" tabindex="0" role="region" [attr.aria-label]="'Terms for ' + q.prompt">
+                {{ legalTerms() }}
+              </div>
+            }
+            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+              <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
+                [class.mjf-choice--selected]="booleanValue() === true"
+                [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">I accept</button>
+              <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
+                [class.mjf-choice--selected]="booleanValue() === false"
+                [attr.aria-checked]="booleanValue() === false" (click)="onYesNo(false)">I decline</button>
+            </div>
+          </div>
+        }
+        @case ('Address') {
+          <ng-container *ngTemplateOutlet="compositeControl" />
+        }
+        @case ('ContactInfo') {
+          <ng-container *ngTemplateOutlet="compositeControl" />
+        }
+        @case ('Signature') {
+          <mjf-signature-pad
+            [label]="q.prompt"
+            (drawn)="onSignatureDrawn($event)"
+            (cleared)="onSignatureCleared()"
+          />
+          @if (uploadStatus() === 'uploading') {
+            <p class="mjf-file__status" aria-live="polite">
+              <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Saving signature…
+            </p>
+          }
+          @if (uploadStatus() === 'error') {
+            <p class="mjf-file__error" role="alert">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              {{ uploadError() }}
+            </p>
+            <button type="button" class="mjf-file__retry" (click)="retryUpload()">
+              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry
+            </button>
+          }
+        }
         @default {
-          <!-- ShortText · Email · Phone · Date · Time -->
+          <!-- ShortText · Email · Phone · Website · Date · Time -->
           <input
             class="mjf-input"
             [id]="inputId()"
@@ -218,8 +408,43 @@
       }
     </div>
 
-    @if (errorMessage()) {
+    @if (errorMessage() && !hasPartErrors()) {
       <p class="mjf-question__error" [id]="errorId()" role="alert">{{ errorMessage() }}</p>
     }
   }
 </div>
+
+<!-- Address and ContactInfo render identically — a labelled stack of text inputs — and differ
+     only in WHICH fields, which `compositeFields()` already answers. Angular's @switch has no
+     fall-through, so one template shared by two cases is how the two stay one control. -->
+<ng-template #compositeControl>
+  @let cq = question();
+  <div class="mjf-composite">
+    @for (field of compositeFields(); track field) {
+      @let fieldError = partError(field);
+      <div class="mjf-composite__field" [class.mjf-composite__field--wide]="field === 'line1' || field === 'line2'">
+        <label class="mjf-composite__label" [attr.for]="inputId() + '-' + field">{{ compositeLabel(field) }}</label>
+        <input
+          class="mjf-input"
+          [id]="inputId() + '-' + field"
+          [type]="compositeInputType(field)"
+          [attr.autocomplete]="compositeAutocomplete(field)"
+          [value]="compositePart(field)"
+          [attr.aria-required]="cq.isRequired"
+          [attr.aria-invalid]="compositeInvalid(field)"
+          [attr.aria-describedby]="fieldError ? partErrorId(field) : null"
+          (input)="onComposite(field, $any($event.target).value)"
+        />
+        @if (fieldError) {
+          <p class="mjf-composite__error" [id]="partErrorId(field)">{{ fieldError }}</p>
+        }
+      </div>
+    }
+  </div>
+  @if (hasPartErrors()) {
+    <!-- The visible messages sit beside their own inputs, which is right for sighted users but
+         announces nothing when validation fires on pressing Next. One hidden alert carries the
+         summary (the same messages joined) so the announcement survives the split. -->
+    <p class="mjf-visually-hidden" role="alert">{{ errorMessage() }}</p>
+  }
+</ng-template>

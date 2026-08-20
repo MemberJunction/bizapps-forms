@@ -17,19 +17,18 @@ import type {
   PublishedFormQuestion,
   FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
+import { isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
 import type {
   FormSummaryStats,
   QuestionBreakdown,
-  BreakdownKind,
   DistributionBucket,
   NumericAggregate,
   FunnelStep,
 } from '../models/reporting.model';
-import {
-  CHOICE_TYPES,
-  NUMERIC_TYPES,
-  extractChoiceValues,
-} from '../../shared/answer-values';
+import { insightRoleFor, isChartedRole, type QuestionInsightRole } from './question-insight-roles';
+import { temporalBuckets } from './temporal-buckets';
+import { median } from './statistics';
+import { extractChoiceValues, renderAnswer } from '../../shared/answer-values';
 import { toDate } from '../../shared/runview-dates';
 
 type ResponseRow = mjBizAppsFormsFormResponseEntityType;
@@ -38,13 +37,29 @@ type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 /** Max free-text answers surfaced in a breakdown card before truncation. */
 const FREE_TEXT_CAP = 200;
 
-/** Maps a question type to the breakdown visualisation kind. */
-export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
-  if (type === 'YesNo') return 'boolean';
-  if (CHOICE_TYPES.has(type)) return 'distribution';
-  if (NUMERIC_TYPES.has(type)) return 'numeric';
-  return 'freeText';
-}
+/**
+ * The scale NPS is defined on. A rating outside it did not come from an NPS control.
+ *
+ * Bucketing out-of-range values anyway let `50` count as a promoter and `-20` as a
+ * detractor — and a single stored `99` produced a perfect score of 100 from one bad number.
+ * The score is the headline of the card, so it must be computed only from ratings that
+ * could actually be NPS ratings.
+ */
+const NPS_MIN = 0;
+const NPS_MAX = 10;
+
+/**
+ * The longest gap between StartedAt and SubmittedAt that is credible as one sitting.
+ *
+ * Beyond this the pair is not a duration, it is a broken `StartedAt` — an epoch default, a
+ * resumed draft, a row migrated without its start time. Including such a pair does not make
+ * the figure slightly wrong; it makes it wrong by orders of magnitude, and it is reported
+ * under a label claiming to say how long the form takes to fill in.
+ *
+ * A day is deliberately generous. Nobody spends eight hours on a form, so anything this
+ * check discards was never a real session, and a genuine long-but-plausible fill is kept.
+ */
+const PLAUSIBLE_SESSION_SECONDS = 24 * 60 * 60;
 
 /**
  * Builds top-line summary stats from response rows.
@@ -57,8 +72,7 @@ export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
 export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
   let complete = 0;
   let partial = 0;
-  let durationSum = 0;
-  let durationCount = 0;
+  const durations: number[] = [];
   let lastSubmitted: Date | null = null;
 
   for (const r of responses) {
@@ -71,9 +85,8 @@ export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
     const started = toDate(r.StartedAt);
     if (submitted && started) {
       const secs = (submitted.getTime() - started.getTime()) / 1000;
-      if (secs >= 0) {
-        durationSum += secs;
-        durationCount++;
+      if (secs >= 0 && secs <= PLAUSIBLE_SESSION_SECONDS) {
+        durations.push(secs);
       }
     }
     if (submitted && (!lastSubmitted || submitted > lastSubmitted)) {
@@ -89,12 +102,19 @@ export function buildSummary(responses: ResponseRow[]): FormSummaryStats {
     partialResponses: partial,
     // Completion rate keeps the started (complete + partial) denominator as the drop-off signal.
     completionRate: started > 0 ? complete / started : 0,
-    averageCompletionSeconds: durationCount > 0 ? durationSum / durationCount : null,
+    typicalCompletionSeconds: median(durations),
     lastSubmittedAt: lastSubmitted,
   };
 }
 
-/** Builds per-question breakdowns. */
+/**
+ * Builds the charted breakdowns — and ONLY the charted ones.
+ *
+ * Questions whose role is identity, attachment or written answer are dropped here rather than
+ * being given a card that cannot say anything true about them. They are not lost: the report
+ * builds `RespondentProfile` and `OpenTextInsight[]` from exactly the questions this filter
+ * removes, so every answerable question is still accounted for somewhere in the view.
+ */
 export function buildBreakdowns(
   questions: PublishedFormQuestion[],
   answers: AnswerRow[],
@@ -102,39 +122,67 @@ export function buildBreakdowns(
   const byQuestion = groupBy(answers, (a) => a.QuestionID);
 
   return questions
-    .filter((q) => q.type !== 'Statement') // display-only, nothing to aggregate
+    .filter((q) => isAnswerableQuestionType(q.type)) // display-only types collect no answer
+    .filter((q) => isChartedRole(insightRoleFor(q.type)))
     .map((q) => {
-      const qAnswers = byQuestion.get(q.id) ?? [];
-      const kind = breakdownKindFor(q.type);
+      const role = insightRoleFor(q.type);
+      const qAnswers = answersThatSaidSomething(role, byQuestion.get(q.id) ?? []);
       const base: QuestionBreakdown = {
         questionId: q.id,
         prompt: q.prompt,
         type: q.type,
-        kind,
+        role,
         answeredCount: qAnswers.length,
         buckets: [],
         numeric: null,
         textAnswers: [],
       };
-      switch (kind) {
-        case 'distribution':
+      switch (role) {
+        case 'choice':
           base.buckets = choiceBuckets(q, qAnswers);
           break;
-        case 'boolean':
+        case 'sentiment':
+        case 'consent':
           base.buckets = booleanBuckets(qAnswers);
           break;
-        case 'numeric':
+        case 'scale':
           base.numeric = numericAggregate(q.type, qAnswers);
           break;
-        case 'freeText':
+        case 'temporal':
+          base.buckets = temporalBuckets(q.type, qAnswers);
+          break;
+        case 'composite':
+          // Matrix has no aggregate form yet, so its answers are listed in their rendered
+          // one-line shape. Informative, if not summarised.
           base.textAnswers = qAnswers
-            .map((a) => (a.TextValue ?? '').trim())
+            .map((a) => renderAnswer(q, a).trim())
             .filter((t) => t.length > 0)
             .slice(0, FREE_TEXT_CAP);
+          break;
+        default:
+          // Unreachable: isChartedRole already excluded every other role. Left explicit so a
+          // new charted role fails loudly in review rather than rendering an empty card.
           break;
       }
       return base;
     });
+}
+
+/**
+ * Drops answer rows that exist but chose nothing, so they are not counted as answers.
+ *
+ * Only choice questions can be in this state: a stored `[]` on a MultiChoice means the
+ * respondent reached the question and selected none of its options, which is a skip in
+ * substance however it is stored. Counting the row inflated `answeredCount`, understated the
+ * "% skipped" figure on the card header, and left a card claiming two answers above bars
+ * that totalled one selection.
+ *
+ * Deliberately narrow. A numeric `0`, a `false` boolean and an empty-string text answer are
+ * all real answers with real meaning, and none of them comes near this filter.
+ */
+function answersThatSaidSomething(role: QuestionInsightRole, answers: AnswerRow[]): AnswerRow[] {
+  if (role !== 'choice') return answers;
+  return answers.filter((a) => extractChoiceValues(a).length > 0);
 }
 
 /** Distribution buckets for choice questions, seeded from the option list. */
@@ -171,7 +219,7 @@ function choiceBuckets(
   return buckets.sort((a, b) => b.count - a.count);
 }
 
-/** Yes/No distribution. */
+/** Yes/No distribution. Labels stay Yes/No; the consent CARD does the "accepted" reading. */
 function booleanBuckets(answers: AnswerRow[]): DistributionBucket[] {
   let yes = 0;
   let no = 0;
@@ -217,22 +265,48 @@ function numericAggregate(type: FormQuestionType, answers: AnswerRow[]): Numeric
   };
 
   if (type === 'NPS') {
+    // Scored over the on-scale ratings only. `answered`, `min`, `max` and `average` above
+    // still describe every stored number — those report what IS in the column, which is the
+    // honest reading and the only way an out-of-range value stays visible at all.
     let detractors = 0;
     let passives = 0;
     let promoters = 0;
+    let rated = 0;
     for (const v of values) {
+      if (v < NPS_MIN || v > NPS_MAX) continue;
+      rated++;
       if (v <= 6) detractors++;
       else if (v <= 8) passives++;
       else promoters++;
     }
-    agg.npsSegments = { detractors, passives, promoters };
-    agg.npsScore = Math.round(((promoters - detractors) / answered) * 100);
+    if (rated > 0) {
+      agg.npsSegments = { detractors, passives, promoters };
+      agg.npsScore = Math.round(((promoters - detractors) / rated) * 100);
+    }
+    // With nothing on the scale, `npsScore` stays null and the card falls back to the plain
+    // numeric aggregates — which is the truthful rendering of numbers that are not an NPS.
   }
 
   return agg;
 }
 
-/** Builds the page completion / drop-off funnel. */
+/**
+ * Builds the page completion / drop-off funnel.
+ *
+ * A page is "reached" when some response answered a question on it, which means a page with
+ * no ANSWERABLE questions can never be reached — it collects nothing by definition. Such
+ * pages are therefore not steps in the funnel at all, and including them broke the chart in
+ * two ways on the most ordinary form shape there is:
+ *
+ *   - As the FIRST page, a welcome statement made `firstReached` zero, and every retention
+ *     after it divides by that. The whole funnel read 0% while the reached counts printed
+ *     beside the empty bars were not zero.
+ *   - In the MIDDLE, it reported a 100% drop-off — the severe-warning treatment — at a page
+ *     behaving exactly as designed, then showed every respondent returning on the next step.
+ *
+ * What is deliberately NOT filtered is a page that asks real questions nobody answered. That
+ * is a genuine total drop-off and has to keep saying so.
+ */
 export function buildFunnel(
   def: PublishedFormDefinition,
   answers: AnswerRow[],
@@ -247,7 +321,9 @@ export function buildFunnel(
     set.add(a.QuestionID);
   }
 
-  const pages = [...def.pages].sort((a, b) => a.displayOrder - b.displayOrder);
+  const pages = [...def.pages]
+    .filter((p) => p.questions.some((question) => isAnswerableQuestionType(question.type)))
+    .sort((a, b) => a.displayOrder - b.displayOrder);
   const steps: FunnelStep[] = [];
   let firstReached = 0;
   let prevReached = 0;

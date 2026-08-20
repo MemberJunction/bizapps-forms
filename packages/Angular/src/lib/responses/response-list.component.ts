@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { FORMS_UI_CSS } from '../shared';
 import type { ResponseListRow, ResponseStatus } from './response-models';
 
 /** Status filter values for the response list: any status, or one specific one. */
@@ -16,21 +17,24 @@ type StatusFilter = 'all' | ResponseStatus;
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule],
   template: `
-    <div class="toolbar">
-      <input
-        class="search"
-        type="search"
-        placeholder="Search respondent..."
-        [ngModel]="search()"
-        (ngModelChange)="search.set($event)"
-        aria-label="Search responses by respondent" />
+    <div class="rl-toolbar">
+      <div class="mjf-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input
+          class="mjf-input"
+          type="search"
+          placeholder="Search respondent"
+          [ngModel]="search()"
+          (ngModelChange)="search.set($event)"
+          aria-label="Search responses by respondent" />
+      </div>
       @if (StatusFiltersApply()) {
-      <div class="filters" role="group" aria-label="Filter by status">
+      <div class="mjf-seg" role="group" aria-label="Filter by status">
         @for (f of statusFilters; track f.value) {
           <button
             type="button"
-            class="chip"
-            [class.chip--active]="statusFilter() === f.value"
+            [class.is-on]="statusFilter() === f.value"
+            [attr.aria-pressed]="statusFilter() === f.value"
             (click)="statusFilter.set(f.value)">
             {{ f.label }}
           </button>
@@ -40,34 +44,38 @@ type StatusFilter = 'all' | ResponseStatus;
     </div>
 
     @if (filtered().length === 0) {
-      <p class="empty">No responses match.</p>
+      <div class="mjf-empty">
+        <span class="mjf-empty-icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span>
+        <span class="mjf-empty-title">No responses match</span>
+        <p class="mjf-empty-body">Clear the search or the status filter to see them all.</p>
+      </div>
     } @else {
-      <div class="table-scroll">
-        <table class="grid">
+      <div class="mjf-table-wrap">
+        <table class="mjf-table">
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Respondent</th>
-              <th>Answered</th>
-              <th>Submitted</th>
-              <th></th>
+              <th scope="col">Status</th>
+              <th scope="col">Respondent</th>
+              <th scope="col" class="is-num">Answered</th>
+              <th scope="col">Submitted</th>
+              <th scope="col"><span class="rl-sr">Open</span></th>
             </tr>
           </thead>
           <tbody>
             @for (r of filtered(); track r.responseId) {
-              <tr (click)="Open.emit(r.responseId)">
+              <tr class="is-clickable" (click)="Open.emit(r.responseId)">
                 <td>
-                  <span class="status" [class.status--complete]="r.status === 'Complete'">
+                  <span class="mjf-badge" [class.mjf-badge--success]="r.status === 'Complete'">
                     {{ r.status }}
                   </span>
                 </td>
                 <td>{{ r.respondent }}</td>
-                <td class="num">{{ r.answeredCount }}</td>
-                <td>{{ submittedLabel(r) }}</td>
-                <td class="open-cell">
+                <td class="is-num">{{ r.answeredCount }}</td>
+                <td class="rl-when">{{ submittedLabel(r) }}</td>
+                <td class="rl-open-cell">
                   <button
                     type="button"
-                    class="open-btn"
+                    class="mjf-btn mjf-btn--quiet mjf-btn--icon mjf-btn--sm"
                     [attr.aria-label]="'Open response from ' + r.respondent"
                     (click)="$event.stopPropagation(); Open.emit(r.responseId)">
                     <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
@@ -81,111 +89,31 @@ type StatusFilter = 'all' | ResponseStatus;
     }
   `,
   styles: [
+    FORMS_UI_CSS,
     `
-      :host {
-        display: block;
-      }
-      .toolbar {
+      :host { display: block; }
+
+      .rl-toolbar {
         display: flex;
-        gap: var(--mj-space-2);
         flex-wrap: wrap;
         align-items: center;
-        margin-bottom: var(--mj-space-3);
+        gap: var(--mjf-gap-sm);
+        margin-bottom: var(--mjf-gap);
       }
-      .search {
-        flex: 1 1 220px;
-        padding: var(--mj-space-2);
-        border: 1px solid var(--mj-border-default);
-        border-radius: var(--mj-radius-md);
-        background: var(--mj-bg-surface);
-        color: var(--mj-text-primary);
-        font-size: 13px;
-      }
-      .filters {
-        display: flex;
-        gap: var(--mj-space-1);
-      }
-      .chip {
-        padding: var(--mj-space-1) var(--mj-space-2);
-        border: 1px solid var(--mj-border-default);
-        border-radius: var(--mj-radius-full);
-        background: var(--mj-bg-surface);
-        color: var(--mj-text-secondary);
-        font-size: 12px;
-        cursor: pointer;
-      }
-      .chip--active {
-        background: var(--mj-brand-primary);
-        border-color: var(--mj-brand-primary);
-        color: var(--mj-text-inverse);
-      }
-      .empty {
-        color: var(--mj-text-muted);
-        font-style: italic;
-        margin: 0;
-      }
-      .table-scroll {
-        overflow-x: auto;
-      }
-      .grid {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }
-      .grid th {
-        text-align: left;
-        padding: var(--mj-space-2);
-        color: var(--mj-text-muted);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        border-bottom: 1px solid var(--mj-border-default);
-      }
-      .grid td {
-        padding: var(--mj-space-2);
-        color: var(--mj-text-primary);
-        border-bottom: 1px solid var(--mj-border-subtle);
-      }
-      .grid tbody tr {
-        cursor: pointer;
-      }
-      .grid tbody tr:hover {
-        background: var(--mj-bg-surface-hover);
-      }
-      .num {
-        font-variant-numeric: tabular-nums;
-      }
-      .status {
-        display: inline-block;
-        padding: 2px var(--mj-space-2);
-        border-radius: var(--mj-radius-full);
-        font-size: 11px;
-        background: var(--mj-bg-surface-sunken);
-        color: var(--mj-text-secondary);
-      }
-      .status--complete {
-        background: var(--mj-status-success-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-success-text, var(--mj-text-secondary));
-      }
-      .open-cell {
-        text-align: right;
-      }
-      /*
-       * The row is clickable for convenience, but this button is what makes a response
-       * reachable and nameable by keyboard and screen reader. A tabbable <tr> with no role
-       * announces as a table row with no name and only responds to Enter.
-       */
-      .open-btn {
-        min-width: 44px;
-        min-height: 44px;
-        padding: 0;
-        border: none;
-        background: none;
-        color: var(--mj-text-muted);
-        cursor: pointer;
-      }
-      .open-btn:hover {
-        color: var(--mj-text-primary);
+      .rl-toolbar .mjf-search { flex: 1 1 240px; max-width: 360px; }
+
+      .rl-when { color: var(--mj-text-secondary); white-space: nowrap; }
+      .rl-open-cell { width: 1%; text-align: right; padding-left: 0; }
+
+      /* The header cell above the open button needs an accessible name without a
+         visible one; an empty <th> announces as a blank column. */
+      .rl-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
     `,
   ],

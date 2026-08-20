@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   BRAND_TOKENS,
-  RADIUS_TOKENS,
+  typeAlignChoice,
+  BUTTON_RADIUS_TOKEN,
   serializeCssVariables,
+  cssColorToHex,
   readBrandToken,
   withBrandToken,
-  readRadiusPx,
-  withRadiusPx,
+  readButtonRadiusPx,
+  withButtonRadiusPx,
 } from './style-tokens';
 
 const PRESET = JSON.stringify({
@@ -71,18 +73,73 @@ describe('withBrandToken', () => {
   });
 });
 
-describe('radius tokens', () => {
-  it('sets all four radius tokens together to keep rounding coherent', () => {
-    const map = JSON.parse(withRadiusPx(PRESET, 16));
-    for (const token of RADIUS_TOKENS) {
-      expect(map[token]).toBe('16px');
+describe('button radius', () => {
+  it('sets the button radius and nothing else', () => {
+    // Deliberately narrow. This used to set card, input and choice radius too, so an
+    // author rounding the buttons silently rounded every text field and card on the form.
+    const map = JSON.parse(withButtonRadiusPx(PRESET, 16));
+    expect(map[BUTTON_RADIUS_TOKEN]).toBe('16px');
+    for (const collateral of ['--mjf-card-radius', '--mjf-input-radius', '--mjf-choice-radius']) {
+      expect(map[collateral]).toBeUndefined();
     }
     expect(map['--mjf-accent']).toBe('#1f5d4c'); // other tokens preserved
   });
 
-  it('reads the card radius back as a number, 0 when unset/invalid', () => {
-    expect(readRadiusPx(withRadiusPx(PRESET, 22))).toBe(22);
-    expect(readRadiusPx(PRESET)).toBe(0);
-    expect(readRadiusPx(null)).toBe(0);
+  it('reads the button radius back as a number, 0 when unset/invalid', () => {
+    expect(readButtonRadiusPx(withButtonRadiusPx(PRESET, 22))).toBe(22);
+    expect(readButtonRadiusPx(PRESET)).toBe(0);
+    expect(readButtonRadiusPx(null)).toBe(0);
+  });
+});
+
+describe('cssColorToHex', () => {
+  it('passes six-digit hex through, lowercased', () => {
+    expect(cssColorToHex('#AABBCC')).toBe('#aabbcc');
+  });
+
+  it('expands three-digit hex', () => {
+    expect(cssColorToHex('#0af')).toBe('#00aaff');
+  });
+
+  it('converts the rgb() a browser reports for a plain colour', () => {
+    expect(cssColorToHex('rgb(47, 91, 234)')).toBe('#2f5bea');
+    expect(cssColorToHex('rgba(47, 91, 234, 0.5)')).toBe('#2f5bea');
+  });
+
+  it('converts the color(srgb ...) a browser reports for a color-mix()', () => {
+    // Several widget defaults are color-mix values. Without this the swatch for a mixed
+    // colour fell back to black and claimed the form was black.
+    expect(cssColorToHex('color(srgb 0.88 0.9355 0.9656)')).toBe('#e0eff6');
+    expect(cssColorToHex('color(srgb 0 0 0)')).toBe('#000000');
+    expect(cssColorToHex('color(srgb 1 1 1)')).toBe('#ffffff');
+  });
+
+  it('clamps out-of-gamut components rather than emitting nonsense', () => {
+    expect(cssColorToHex('color(srgb 1.4 -0.2 0.5)')).toBe('#ff0080');
+  });
+
+  it('returns empty for anything it cannot read, rather than inventing a colour', () => {
+    // An unresolved custom property reports as its declared text; guessing here would show
+    // the author a colour the form does not use.
+    expect(cssColorToHex('var(--mjf-accent-soft)')).toBe('');
+    expect(cssColorToHex('')).toBe('');
+    expect(cssColorToHex('transparent')).toBe('');
+  });
+});
+
+describe('typeAlignChoice defaults', () => {
+  it('reads an explicitly stored alignment for either target', () => {
+    expect(typeAlignChoice('title', 'left')).toBe('left');
+    expect(typeAlignChoice('title', 'center')).toBe('center');
+    expect(typeAlignChoice('question', 'flex-start')).toBe('left');
+    expect(typeAlignChoice('question', 'center')).toBe('center');
+  });
+
+  it('defaults a title to centre and a question to left when nothing is stored', () => {
+    // The control has to agree with what the form actually renders. Welcome and ending screens
+    // are heroes and have always centred; questions have always been left. Defaulting both to
+    // left showed "left" selected on a brand-new form whose screens were plainly centred.
+    expect(typeAlignChoice('title', '')).toBe('center');
+    expect(typeAlignChoice('question', '')).toBe('left');
   });
 });

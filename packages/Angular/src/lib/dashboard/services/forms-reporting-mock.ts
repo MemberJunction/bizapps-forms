@@ -18,6 +18,10 @@ import type { ResponseDetail, ResponseListRow } from '../../responses/response-m
 import { flattenQuestions } from '../../shared/published-questions';
 import { buildResponseRows } from '../../responses/response-aggregations';
 import { buildSummary, buildBreakdowns, buildFunnel } from './reporting-aggregations';
+import { buildRespondentProfile } from './respondent-profile';
+import { buildOpenTextInsights } from './open-text-insights';
+import { insightRoleFor } from './question-insight-roles';
+import { questionTypeMeta } from '../../builder/question-type-catalog';
 
 const MOCK_FORM: ReportableForm = {
   formId: 'mock-form-0001',
@@ -52,6 +56,7 @@ export function mockDefinition(): PublishedFormDefinition {
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
     automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'pg-1',
@@ -103,13 +108,24 @@ export function mockReport(): FormReportData {
   const responses = mockResponses();
   const answers = mockAnswers(responses);
 
+  const summary = buildSummary(responses);
+  const completeIds = new Set(responses.filter((r) => r.Status === 'Complete').map((r) => r.ID));
+  const completeAnswers = answers.filter((a) => completeIds.has(a.ResponseID));
+
   return {
     form: MOCK_FORM,
     questions,
-    summary: buildSummary(responses),
-    breakdowns: buildBreakdowns(questions, answers),
+    summary,
+    profile: buildRespondentProfile(questions, completeAnswers, summary.totalResponses),
+    openText: buildOpenTextInsights(
+      questions.filter((q) => insightRoleFor(q.type) === 'openText'),
+      completeAnswers,
+      summary.totalResponses,
+      (q) => questionTypeMeta(q.type).label,
+    ),
+    breakdowns: buildBreakdowns(questions, completeAnswers),
     funnel: buildFunnel(definition, answers),
-    responses: buildResponseRows(responses, answers),
+    responses: buildResponseRows(responses, answers, questions),
   };
 }
 
@@ -117,7 +133,7 @@ export function mockReport(): FormReportData {
  * Builds the mock detail for one response — the `useMock` twin of
  * `ResponsesDataService.loadResponseDetail`.
  *
- * It deliberately populates EVERY enriched branch (a scored free-text answer, a file
+ * It deliberately populates EVERY enriched branch (a free-text answer, a file
  * answer, automation runs including a failure, and a binding-ledger row), because the
  * point of mock mode is to render the UI before real data exists. A mock that only fills
  * the fields the old detail view had is a mock that hides exactly the new UI you are
@@ -143,10 +159,6 @@ export function mockResponseDetail(
         prompt: q.prompt,
         type: q.type,
         displayValue: 'Sample answer',
-        // Only the free-text question is scored — that is what the AI automation does.
-        score: q.type === 'LongText' ? 7.5 : null,
-        scoreRationale:
-          q.type === 'LongText' ? 'Constructive feedback with a clear, specific suggestion.' : null,
         file: null,
       })),
       {
@@ -154,8 +166,6 @@ export function mockResponseDetail(
         prompt: 'Attach anything that helps us understand your answer',
         type: 'FileUpload' as const,
         displayValue: '',
-        score: null,
-        scoreRationale: null,
         file: {
           fileId: 'mock-file-0001',
           fileName: 'screenshot.png',
@@ -273,14 +283,7 @@ function mockAnswers(responses: ResponseRow[]): AnswerRow[] {
       push('q-nps', { NumericValue: i % 11 });
       push('q-recommend', { BooleanValue: i % 3 !== 0 });
       if (i % 2 === 0) {
-        // Scored, because `Forms: Analyze Written Responses` scores free text — and because
-        // an unscored mock makes DG-B's per-question score column unreachable in mock mode,
-        // which is precisely the part of the export a preview exists to show.
-        push('q-comments', {
-          TextValue: `Sample comment from respondent ${i}.`,
-          Score: 4 + (i % 7),
-          ScoreRationale: 'Specific, actionable feedback with a concrete example.',
-        });
+        push('q-comments', { TextValue: `Sample comment from respondent ${i}.` });
       }
     }
   }
@@ -289,7 +292,7 @@ function mockAnswers(responses: ResponseRow[]): AnswerRow[] {
 
 /** The answer columns a mock row sets; everything else defaults to null. */
 type MockAnswerValues = Partial<
-  Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue' | 'Score' | 'ScoreRationale'>
+  Pick<AnswerRow, 'TextValue' | 'NumericValue' | 'BooleanValue' | 'JSONValue'>
 >;
 
 function stubAnswer(
@@ -309,8 +312,8 @@ function stubAnswer(
     BooleanValue: vals.BooleanValue ?? null,
     JSONValue: vals.JSONValue ?? null,
     FileID: null,
-    Score: vals.Score ?? null,
-    ScoreRationale: vals.ScoreRationale ?? null,
+    Score: null,
+    ScoreRationale: null,
     __mj_CreatedAt: now,
     __mj_UpdatedAt: now,
     File: null,

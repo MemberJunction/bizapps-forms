@@ -10,19 +10,21 @@
  * mutated client-side, so this stays independent of generated Forms types.
  */
 import { Injectable } from '@angular/core';
-import { RunView, type RunViewResult } from '@memberjunction/core';
+import { LogError, Metadata, RunView, type RunViewResult } from '@memberjunction/core';
 import type { MJActionEntityType } from '@memberjunction/core-entities';
+import type { mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
 import type { ActionParam, ActionResult } from '@memberjunction/actions-base';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 
 import {
   HOME_ENTITY,
+  type FormStatus,
   type FormCategorySimpleRecord,
   type FormResponseSimpleRecord,
   type FormSimpleRecord,
   type FormSummaryRow,
 } from './home-models';
-import { buildFormRows, readFormIdFromParams } from './home-aggregations';
+import { buildFormRows, readFormIdFromResult } from './home-aggregations';
 
 /** Outcome of running an authoring/template action. */
 export interface AuthoringResult {
@@ -40,6 +42,10 @@ export class FormsHomeService {
     const [formsRes, catsRes, responsesRes] = (await this.rv.RunViews([
       {
         EntityName: HOME_ENTITY.forms,
+        // Templates are Form rows too (see form-clone.service.ts for why). They are offered in
+        // the gallery, never listed here — a template in the forms list reads as a form somebody
+        // forgot to finish, and its response count would always be zero.
+        ExtraFilter: 'IsTemplate = 0',
         ResultType: 'simple',
         Fields: ['ID', 'Name', 'Status', 'CategoryID', '__mj_UpdatedAt'],
         OrderBy: 'Name',
@@ -51,6 +57,11 @@ export class FormsHomeService {
       },
       {
         EntityName: HOME_ENTITY.responses,
+        // COMPLETE only, matching the reporting dashboard. A Partial row is an in-progress
+        // autosave, not a submitted response, and counting it here made the same form read
+        // "43 responses" on this page and "32 responses" on Responses & Analytics — two
+        // numbers for one fact, which sends the reader looking for the missing eleven.
+        ExtraFilter: `Status='Complete'`,
         ResultType: 'simple',
         Fields: ['FormID'],
       },
@@ -73,6 +84,36 @@ export class FormsHomeService {
    * Runs an authoring/template Action by name with the given input params and
    * returns the created form id from the action's output params.
    */
+  /**
+   * Moves a form between lifecycle states — the archive/restore path behind the list's
+   * row actions.
+   *
+   * This is how "delete a form" is offered, and the reason it is not a delete: every
+   * child table (FormVersion, FormPage, FormQuestion, FormDistribution, FormResponse,
+   * FormUpload, FormAutomation, FormEntityBinding) holds a plain FK to `Form(ID)` with no
+   * `ON DELETE CASCADE`, so removing a row would fail for any form that has ever been
+   * edited — and would destroy submitted responses for one that succeeded. `Closed`
+   * already means "no longer accepting responses", which is the honest version of what an
+   * author wants when they reach for delete, and it is reversible.
+   */
+  public async setStatus(formId: string, status: FormStatus): Promise<string | null> {
+    const md = new Metadata();
+    const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>(HOME_ENTITY.forms);
+    if (!(await form.Load(formId))) {
+      const message = `Could not load form ${formId} to set its status to ${status}.`;
+      LogError(message);
+      return message;
+    }
+    form.Status = status;
+    if (await form.Save()) {
+      return null;
+    }
+    const message =
+      form.LatestResult?.CompleteMessage ?? `Saving form ${formId} as ${status} failed.`;
+    LogError(`setStatus(${formId}, ${status}) failed: ${message}`);
+    return message;
+  }
+
   public async runAuthoringAction(
     actionName: string,
     inputs: ActionParam[],
@@ -92,7 +133,7 @@ export class FormsHomeService {
     }
     return {
       success: true,
-      formId: readFormIdFromParams(result.Params),
+      formId: readFormIdFromResult(result),
       message: result.Message || 'Form created.',
     };
   }

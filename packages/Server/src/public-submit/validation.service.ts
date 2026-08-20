@@ -36,7 +36,9 @@
  */
 import {
   evaluateConditionalRule,
+  isAnswerableQuestionType,
   isAnswerSupplied,
+  isRequiredSatisfied,
   coerceAnswerToNumber,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -58,6 +60,15 @@ export interface ValidatedAnswer {
 export interface ValidationOutcome {
   errors: FieldError[];
   answers: ValidatedAnswer[];
+  /**
+   * The comparable answer map the conditional rules were evaluated against.
+   *
+   * Surfaced so ending-screen resolution runs on exactly the values validation judged. Building
+   * a second map from the same inputs would be a second implementation of `answerValueOf`'s
+   * column precedence, and the two disagreeing would show a respondent the wrong thank-you page
+   * — a quiet, un-loggable wrong answer rather than a failure anyone notices.
+   */
+  answerMap: ReadonlyMap<string, AnswerValue>;
 }
 
 /**
@@ -84,6 +95,14 @@ export function answerValueOf(input: FormAnswerInput): AnswerValue {
   }
   if (Array.isArray(input.jsonValue)) {
     return jsonArrayToScalarArray(input.jsonValue);
+  }
+  // A COMPOSITE answer (Address / ContactInfo / Matrix) is a JSON object, not an array. Without
+  // this branch it falls straight past to `fileId`, returns `undefined`, and is read as
+  // unanswered — which drops it before persistence and, when the question is required, rejects
+  // the whole submit with a message the respondent cannot act on because they DID fill it in.
+  // Exactly the failure documented for `fileId` below, one column over.
+  if (input.jsonValue != null && typeof input.jsonValue === 'object') {
+    return input.jsonValue;
   }
   // A file answer populates `fileId` and nothing else, so omitting it here made every FileUpload
   // answer read as unanswered: `collectVisibleQuestion` dropped it before persistence (leaving
@@ -137,7 +156,7 @@ export function validateSubmission(
       collectVisibleQuestion(question, answerMap, inputByQuestion, partial, errors, visible);
     }
   }
-  return { errors, answers: visible };
+  return { errors, answers: visible, answerMap };
 }
 
 /** Evaluate one question's visibility, requiredness, and format; append findings. */
@@ -149,7 +168,7 @@ function collectVisibleQuestion(
   errors: FieldError[],
   visible: ValidatedAnswer[],
 ): void {
-  if (question.type === 'Statement') {
+  if (!isAnswerableQuestionType(question.type)) {
     return; // display-only, never an answer
   }
   if (!evaluateConditionalRule(question.conditionalRule, answerMap)) {
@@ -160,10 +179,16 @@ function collectVisibleQuestion(
   const value = input ? answerValueOf(input) : undefined;
   const answered = isAnswerSupplied(value);
 
+  // Required is asked SEPARATELY from answered, because the two disagree on consent: an
+  // unticked box is `false`, which is a supplied answer, so a required "I agree to the terms"
+  // used to pass here as well as in the widget. A rule enforced only in the browser is not
+  // enforced at all — this mutation is reachable without it.
+  if (question.isRequired && !partial && !isRequiredSatisfied(question.type, value)) {
+    errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
+    return;
+  }
+
   if (!answered) {
-    if (question.isRequired && !partial) {
-      errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
-    }
     return; // nothing to persist / validate for an unanswered, optional question
   }
 
@@ -204,7 +229,9 @@ function validateValue(
   if (partial) {
     return rule ? validateUpperBounds(value, rule) : undefined;
   }
-  const formatError = validateAnswerFormat(question.type, value);
+  // The whole question, not just its type: an option-based answer cannot be checked against
+  // options it was never given. See `AnswerFormatQuestion`.
+  const formatError = validateAnswerFormat(question, value);
   if (formatError) {
     return formatError;
   }

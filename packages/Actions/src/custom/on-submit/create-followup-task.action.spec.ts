@@ -71,7 +71,16 @@ const state: {
   getEntityCalls: [],
 };
 
-vi.mock('@memberjunction/core', () => {
+/**
+ * PARTIAL mock: the real module first, then the two classes this test fakes.
+ *
+ * The whole-module form this replaced failed to load with
+ * `No "BaseEngine" export is defined on the mock` — a symbol nothing here mentions, coming from
+ * something further down the import graph. Overriding rather than replacing keeps the mock's
+ * surface to what it actually stubs.
+ */
+vi.mock('@memberjunction/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
     async GetEntityObject<T>(entityName: string): Promise<T> {
       state.getEntityCalls.push(entityName);
@@ -99,7 +108,7 @@ vi.mock('@memberjunction/core', () => {
       return { Success: true, Results: results as T[] };
     }
   }
-  return { Metadata, RunView };
+  return { ...actual, Metadata, RunView };
 });
 
 // The action loads the response via a shared helper; stub it to return our fake context.

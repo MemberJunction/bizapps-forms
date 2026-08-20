@@ -143,6 +143,44 @@ async function submit(token, definition, { email, name, partial = false, respons
   return r;
 }
 
+/**
+ * On-submit hooks are DETACHED from the request — the submit answers the respondent as soon
+ * as the response is persisted and lets automations run after, which is what took a submit
+ * from ~8.3s to ~0.3s. Every assertion about a hook's effect is therefore an assertion about
+ * something that becomes true shortly AFTER the mutation returns, and reading the table the
+ * instant the submit resolves now races the work it is inspecting.
+ *
+ * Two shapes, and the difference matters:
+ *
+ *  - Expecting a run: poll until it appears. Fast when it lands quickly, and a timeout is a
+ *    real failure — the automation genuinely never ran.
+ *  - Expecting NO run: there is nothing to wait for, so waiting is the only way to be sure.
+ *    Settle for the same budget, THEN read. This assertion is weaker than it was under
+ *    blocking hooks and that is inherent to the change, not an oversight: "did not fire"
+ *    can now only ever mean "had not fired within the budget".
+ */
+const HOOK_BUDGET_MS = 15_000;
+const POLL_MS = 250;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll `read` until it equals `expected`, or give up after the budget. Returns the last value. */
+async function eventually(read, expected) {
+  const deadline = Date.now() + HOOK_BUDGET_MS;
+  let value = read();
+  while (value !== expected && Date.now() < deadline) {
+    await sleep(POLL_MS);
+    value = read();
+  }
+  return value;
+}
+
+/** Let detached hooks finish, then read — for assertions that something did NOT happen. */
+async function afterHooksSettle(read) {
+  await sleep(HOOK_BUDGET_MS / 3);
+  return read();
+}
+
 const runsFor = (responseId) =>
   sql(`SELECT COUNT(*) FROM __mj_BizAppsForms.FormAutomationRun WHERE FormResponseID='${responseId}';`).trim();
 const ledgerCountFor = (responseId) =>
@@ -168,18 +206,20 @@ async function main() {
     const token = await newSession();
     const def = await definitionFor(token);
     const partial = await submit(token, def, { email: emailFor('partial'), name: 'Partial', partial: true });
-    check(runsFor(partial.responseId) === '0',
+    const partialRuns = await afterHooksSettle(() => runsFor(partial.responseId));
+    check(partialRuns === '0',
       'an OnComplete automation does NOT fire on a partial autosave',
-      `got ${runsFor(partial.responseId)} run(s) — autosaves would trigger side effects on every keystroke`);
+      `got ${partialRuns} run(s) — autosaves would trigger side effects on every keystroke`);
     check(partial.status === 'Partial', `the partial save is recorded as Partial (got ${partial.status})`);
 
     // ...and the SAME response, completed, does fire exactly once.
     const completed = await submit(token, def, {
       email: emailFor('partial'), name: 'Partial Completed', partial: false, responseId: partial.responseId,
     });
-    check(runsFor(completed.responseId) === '1',
+    const completedRuns = await eventually(() => runsFor(completed.responseId), '1');
+    check(completedRuns === '1',
       'completing that same response fires it exactly once',
-      `got ${runsFor(completed.responseId)}`);
+      `got ${completedRuns} after waiting ${HOOK_BUDGET_MS}ms for detached hooks`);
   }
 
   // ---------------------------------------------------------------- isActive
@@ -193,9 +233,10 @@ async function main() {
       'the snapshot carries the disabled automation rather than dropping it',
       'dropping it makes "disabled" indistinguishable from "never configured"');
     const res = await submit(token, def, { email: emailFor('inactive'), name: 'Inactive' });
-    check(runsFor(res.responseId) === '0',
+    const inactiveRuns = await afterHooksSettle(() => runsFor(res.responseId));
+    check(inactiveRuns === '0',
       'a disabled automation does not run',
-      `got ${runsFor(res.responseId)} run(s)`);
+      `got ${inactiveRuns} run(s)`);
     check(ledgerCountFor(res.responseId) === '0', 'and it writes no binding record');
   }
 
@@ -212,9 +253,10 @@ async function main() {
     const token = await newSession();
     const def = await definitionFor(token);
     const res = await submit(token, def, { email: emailFor('cond-no'), name: 'NoMatch' });
-    check(runsFor(res.responseId) === '0',
+    const noMatchRuns = await afterHooksSettle(() => runsFor(res.responseId));
+    check(noMatchRuns === '0',
       'an automation whose condition does not match does not run',
-      `got ${runsFor(res.responseId)} run(s)`);
+      `got ${noMatchRuns} run(s)`);
   }
 
   const matchEmail = emailFor('cond-yes');
@@ -226,9 +268,10 @@ async function main() {
     const token = await newSession();
     const def = await definitionFor(token);
     const res = await submit(token, def, { email: matchEmail, name: 'Match' });
-    check(runsFor(res.responseId) === '1',
+    const matchRuns = await eventually(() => runsFor(res.responseId), '1');
+    check(matchRuns === '1',
       'the same automation DOES run when its condition matches',
-      `got ${runsFor(res.responseId)} run(s) — a condition that never matches is indistinguishable from a broken evaluator`);
+      `got ${matchRuns} run(s) — a condition that never matches is indistinguishable from a broken evaluator`);
   }
 
   // ------------------------------------------------------------------ ledger
@@ -245,11 +288,15 @@ async function main() {
       email, name: 'Ledger', responseId: first.responseId,
     });
     check(again.responseId === first.responseId, 'the replay reuses the same response id');
-    check(ledgerCountFor(first.responseId) === '1',
+    // Settle rather than poll-to-1: a poll that stops the moment it sees one row would pass
+    // even if a second arrived a tick later, which is the exact duplicate this asserts against.
+    const ledgerRows = await afterHooksSettle(() => ledgerCountFor(first.responseId));
+    check(ledgerRows === '1',
       'a replayed submission leaves exactly ONE ledger row',
-      `got ${ledgerCountFor(first.responseId)} — more than one means the unique index is the only thing preventing a duplicate write`);
-    check(['Created', 'Unchanged', 'Merged'].includes(outcomeFor(first.responseId)),
-      `the ledger records a real outcome (got ${outcomeFor(first.responseId)})`);
+      `got ${ledgerRows} — more than one means the unique index is the only thing preventing a duplicate write`);
+    const outcome = outcomeFor(first.responseId);
+    check(['Created', 'Unchanged', 'Merged'].includes(outcome),
+      `the ledger records a real outcome (got ${outcome})`);
   }
 
   // ---------------------------------------------------------------- ordering
@@ -282,6 +329,9 @@ ELSE
     );
 
     const res = await submit(token, def, { email: emailFor('order'), name: 'Ordered' });
+    // Wait for BOTH before reading the order: with detached hooks, reading after the first
+    // lands would assert an ordering over a list that is still being appended to.
+    await eventually(() => runsFor(res.responseId), '2');
     const runs = sql(`SELECT Status FROM __mj_BizAppsForms.FormAutomationRun
       WHERE FormResponseID='${res.responseId}' ORDER BY StartedAt ASC, __mj_CreatedAt ASC;`)
       .split('\n').map((l) => l.trim()).filter(Boolean);

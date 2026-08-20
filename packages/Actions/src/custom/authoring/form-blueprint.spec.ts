@@ -5,6 +5,7 @@ import {
   formQuestionTypeSchema,
   CHOICE_QUESTION_TYPES,
 } from './form-blueprint';
+import { FORM_QUESTION_TYPES, questionTypeBehavior } from '@mj-biz-apps/forms-entities';
 
 describe('parseFormBlueprint', () => {
   it('parses a valid blueprint object', () => {
@@ -16,11 +17,14 @@ describe('parseFormBlueprint', () => {
     expect(bp.pages[0].questions[0].type).toBe('Email');
   });
 
-  it('rejects an unknown question type (enforces the §5.3 taxonomy)', () => {
+  it('rejects a question type outside the contract taxonomy', () => {
+    // Was `Signature`, which the taxonomy has since grown to include — a rejection test whose
+    // example became valid stops testing rejection and starts asserting nothing. `Payment` is a
+    // type we have deliberately NOT implemented, so it is a stable stand-in for "not a type".
     expect(() =>
       parseFormBlueprint({
         name: 'Bad',
-        pages: [{ questions: [{ type: 'Signature', prompt: 'Sign here' }] }],
+        pages: [{ questions: [{ type: 'Payment', prompt: 'Pay here' }] }],
       }),
     ).toThrow();
   });
@@ -53,10 +57,19 @@ describe('extractJSON', () => {
 });
 
 describe('taxonomy', () => {
-  it('choice types are exactly Single/Multi/Dropdown', () => {
-    expect([...CHOICE_QUESTION_TYPES].sort()).toEqual(['Dropdown', 'MultiChoice', 'SingleChoice']);
+  // Both assertions now check that the blueprint DERIVES from the contract rather than pinning
+  // the numbers it derived to. Pinning is what let the enum sit at 15 while the contract moved
+  // to 25: the test kept passing and the AI Designer quietly could not author the new types.
+  it('offers exactly the contract\'s question types', () => {
+    expect([...formQuestionTypeSchema.options].sort()).toEqual([...FORM_QUESTION_TYPES].sort());
   });
-  it('the question-type enum has the 15 Phase-1 types', () => {
-    expect(formQuestionTypeSchema.options).toHaveLength(15);
+
+  it('treats every option-carrying type as a choice type, not just the original three', () => {
+    const expected = FORM_QUESTION_TYPES.filter((t) => questionTypeBehavior(t).optionMode !== 'none');
+    expect([...CHOICE_QUESTION_TYPES].sort()).toEqual([...expected].sort());
+    // The ones the hand-written set missed, named explicitly so a regression is legible.
+    for (const type of ['Ranking', 'Matrix', 'PictureChoice'] as const) {
+      expect(CHOICE_QUESTION_TYPES.has(type), type).toBe(true);
+    }
   });
 });

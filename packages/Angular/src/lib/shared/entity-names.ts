@@ -18,11 +18,13 @@ export const FORMS_ENTITY = {
   FormPage: 'MJ_BizApps_Forms: Form Pages',
   FormQuestion: 'MJ_BizApps_Forms: Form Questions',
   FormQuestionOption: 'MJ_BizApps_Forms: Form Question Options',
+  FormScreen: 'MJ_BizApps_Forms: Form Screens',
   FormResponse: 'MJ_BizApps_Forms: Form Responses',
   FormResponseAnswer: 'MJ_BizApps_Forms: Form Response Answers',
   FormDistribution: 'MJ_BizApps_Forms: Form Distributions',
   FormAutomation: 'MJ_BizApps_Forms: Form Automations',
   FormAutomationRun: 'MJ_BizApps_Forms: Form Automation Runs',
+  FormEntityBinding: 'MJ_BizApps_Forms: Form Entity Bindings',
   FormEntityBindingRecord: 'MJ_BizApps_Forms: Form Entity Binding Records',
   FormUpload: 'MJ_BizApps_Forms: Form Uploads',
 } as const;

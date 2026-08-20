@@ -601,6 +601,12 @@ export const mjBizAppsFormsFormPageSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    IsPartialSubmitPoint: z.boolean().describe(`
+        * * Field Name: IsPartialSubmitPoint
+        * * Display Name: Is Partial Submit Point
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When set, advancing past this page banks a Partial response immediately instead of waiting for the autosave debounce`),
     Form: z.string().describe(`
         * * Field Name: Form
         * * Display Name: Form
@@ -655,6 +661,20 @@ export const mjBizAppsFormsFormQuestionOptionSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    ImageURL: z.string().nullable().describe(`
+        * * Field Name: ImageURL
+        * * Display Name: Image URL
+        * * SQL Data Type: nvarchar(1000)
+        * * Description: PictureChoice only: image shown above the option label. Ignored by every other question type`),
+    MatrixAxis: z.union([z.literal('Column'), z.literal('Row')]).nullable().describe(`
+        * * Field Name: MatrixAxis
+        * * Display Name: Matrix Axis
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Column
+    *   * Row
+        * * Description: Matrix only: whether this option is a Row or a Column of the grid. NULL for every other question type, and read as Row if left NULL on a Matrix`),
 });
 
 export type mjBizAppsFormsFormQuestionOptionEntityType = z.infer<typeof mjBizAppsFormsFormQuestionOptionSchema>;
@@ -678,26 +698,36 @@ export const mjBizAppsFormsFormQuestionSchema = z.object({
         * * Display Name: Page ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Pages (vwFormPages.ID)`),
-    QuestionType: z.union([z.literal('Date'), z.literal('Dropdown'), z.literal('Email'), z.literal('FileUpload'), z.literal('LongText'), z.literal('MultiChoice'), z.literal('NPS'), z.literal('Number'), z.literal('Phone'), z.literal('Rating'), z.literal('ShortText'), z.literal('SingleChoice'), z.literal('Statement'), z.literal('Time'), z.literal('YesNo')]).describe(`
+    QuestionType: z.union([z.literal('Address'), z.literal('Checkbox'), z.literal('ContactInfo'), z.literal('Date'), z.literal('Dropdown'), z.literal('Email'), z.literal('FileUpload'), z.literal('Legal'), z.literal('LongText'), z.literal('Matrix'), z.literal('MultiChoice'), z.literal('NPS'), z.literal('Number'), z.literal('OpinionScale'), z.literal('Phone'), z.literal('PictureChoice'), z.literal('Ranking'), z.literal('Rating'), z.literal('ShortText'), z.literal('Signature'), z.literal('SingleChoice'), z.literal('Statement'), z.literal('Time'), z.literal('Website'), z.literal('YesNo')]).describe(`
         * * Field Name: QuestionType
         * * Display Name: Question Type
         * * SQL Data Type: nvarchar(50)
     * * Value List Type: List
     * * Possible Values 
+    *   * Address
+    *   * Checkbox
+    *   * ContactInfo
     *   * Date
     *   * Dropdown
     *   * Email
     *   * FileUpload
+    *   * Legal
     *   * LongText
+    *   * Matrix
     *   * MultiChoice
     *   * NPS
     *   * Number
+    *   * OpinionScale
     *   * Phone
+    *   * PictureChoice
+    *   * Ranking
     *   * Rating
     *   * ShortText
+    *   * Signature
     *   * SingleChoice
     *   * Statement
     *   * Time
+    *   * Website
     *   * YesNo
         * * Description: Question input type (ShortText, Email, SingleChoice, Rating, NPS, FileUpload, Statement, etc.)`),
     Prompt: z.string().describe(`
@@ -916,6 +946,94 @@ export const mjBizAppsFormsFormResponseSchema = z.object({
 });
 
 export type mjBizAppsFormsFormResponseEntityType = z.infer<typeof mjBizAppsFormsFormResponseSchema>;
+
+/**
+ * zod schema definition for the entity MJ_BizApps_Forms: Form Screens
+ */
+export const mjBizAppsFormsFormScreenSchema = z.object({
+    ID: z.string().describe(`
+        * * Field Name: ID
+        * * Display Name: ID
+        * * SQL Data Type: uniqueidentifier
+        * * Default Value: newsequentialid()`),
+    FormID: z.string().describe(`
+        * * Field Name: FormID
+        * * Display Name: Form
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
+    ScreenType: z.union([z.literal('Ending'), z.literal('Welcome')]).describe(`
+        * * Field Name: ScreenType
+        * * Display Name: Screen Type
+        * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Ending
+    *   * Welcome
+        * * Description: Whether this screen is shown before intake begins (Welcome) or after a successful submit (Ending)`),
+    Title: z.string().describe(`
+        * * Field Name: Title
+        * * Display Name: Title
+        * * SQL Data Type: nvarchar(500)
+        * * Description: Headline shown on the screen`),
+    Body: z.string().nullable().describe(`
+        * * Field Name: Body
+        * * Display Name: Body
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Body copy shown under the title. Plain text — the widget does not render HTML from this column`),
+    ButtonLabel: z.string().nullable().describe(`
+        * * Field Name: ButtonLabel
+        * * Display Name: Button Label
+        * * SQL Data Type: nvarchar(100)
+        * * Description: Label for the screens single button. The widget supplies Start / Done when this is blank`),
+    MediaURL: z.string().nullable().describe(`
+        * * Field Name: MediaURL
+        * * Display Name: Media URL
+        * * SQL Data Type: nvarchar(1000)
+        * * Description: Optional image shown above the title`),
+    RedirectURL: z.string().nullable().describe(`
+        * * Field Name: RedirectURL
+        * * Display Name: Redirect URL
+        * * SQL Data Type: nvarchar(1000)
+        * * Description: Ending only: send the respondent here instead of showing this screen. Takes precedence over the form-wide redirect in Form.Settings`),
+    DisplayOrder: z.number().describe(`
+        * * Field Name: DisplayOrder
+        * * Display Name: Display Order
+        * * SQL Data Type: int
+        * * Default Value: 0
+        * * Description: Order among the forms Ending screens. Resolution walks them in this order and takes the first whose ConditionalRule the answers satisfy`),
+    ConditionalRule: z.string().nullable().describe(`
+        * * Field Name: ConditionalRule
+        * * Display Name: Conditional Rule
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Ending only: JSON ConditionalRule deciding whether this ending applies to a given response. Unlike a page rule, a blank rule here does NOT mean always — it means this screen is only reachable as the default`),
+    IsDefault: z.boolean().describe(`
+        * * Field Name: IsDefault
+        * * Display Name: Is Default
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Ending only: the fallback shown when no conditional ending matched`),
+    __mj_CreatedAt: z.date().describe(`
+        * * Field Name: __mj_CreatedAt
+        * * Display Name: Created At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    __mj_UpdatedAt: z.date().describe(`
+        * * Field Name: __mj_UpdatedAt
+        * * Display Name: Updated At
+        * * SQL Data Type: datetimeoffset
+        * * Default Value: getutcdate()`),
+    SocialLinks: z.string().nullable().describe(`
+        * * Field Name: SocialLinks
+        * * Display Name: Social Links
+        * * SQL Data Type: nvarchar(MAX)
+        * * Description: Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`),
+    Form: z.string().describe(`
+        * * Field Name: Form
+        * * Display Name: Form Name
+        * * SQL Data Type: nvarchar(255)`),
+});
+
+export type mjBizAppsFormsFormScreenEntityType = z.infer<typeof mjBizAppsFormsFormScreenSchema>;
 
 /**
  * zod schema definition for the entity MJ_BizApps_Forms: Form Styles
@@ -1165,12 +1283,12 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: Detailed description / purpose of the form`),
     CategoryID: z.string().nullable().describe(`
         * * Field Name: CategoryID
-        * * Display Name: Category ID
+        * * Display Name: Category
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Categories (vwFormCategories.ID)`),
     StyleID: z.string().nullable().describe(`
         * * Field Name: StyleID
-        * * Display Name: Style ID
+        * * Display Name: Style
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Styles (vwFormStyles.ID)`),
     Status: z.union([z.literal('Closed'), z.literal('Draft'), z.literal('Published')]).describe(`
@@ -1186,7 +1304,7 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: Lifecycle status: Draft, Published, or Closed`),
     OwnerUserID: z.string().nullable().describe(`
         * * Field Name: OwnerUserID
-        * * Display Name: Owner User ID
+        * * Display Name: Owner
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)`),
     RenderMode: z.union([z.literal('OneQuestion'), z.literal('Scroll')]).describe(`
@@ -1214,18 +1332,38 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    IsTemplate: z.boolean().describe(`
+        * * Field Name: IsTemplate
+        * * Display Name: Is Template
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response`),
+    TemplateSourceFormID: z.string().nullable().describe(`
+        * * Field Name: TemplateSourceFormID
+        * * Display Name: Template Source Form
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+        * * Description: On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source`),
     Category: z.string().nullable().describe(`
         * * Field Name: Category
-        * * Display Name: Category
+        * * Display Name: Category Name
         * * SQL Data Type: nvarchar(255)`),
     Style: z.string().nullable().describe(`
         * * Field Name: Style
-        * * Display Name: Style
+        * * Display Name: Style Name
         * * SQL Data Type: nvarchar(255)`),
     OwnerUser: z.string().nullable().describe(`
         * * Field Name: OwnerUser
-        * * Display Name: Owner
+        * * Display Name: Owner Name
         * * SQL Data Type: nvarchar(100)`),
+    TemplateSourceForm: z.string().nullable().describe(`
+        * * Field Name: TemplateSourceForm
+        * * Display Name: Template Source Name
+        * * SQL Data Type: nvarchar(255)`),
+    RootTemplateSourceFormID: z.string().nullable().describe(`
+        * * Field Name: RootTemplateSourceFormID
+        * * Display Name: Root Template Source
+        * * SQL Data Type: uniqueidentifier`),
 });
 
 export type mjBizAppsFormsFormEntityType = z.infer<typeof mjBizAppsFormsFormSchema>;
@@ -2761,6 +2899,20 @@ export class mjBizAppsFormsFormPageEntity extends BaseEntity<mjBizAppsFormsFormP
     }
 
     /**
+    * * Field Name: IsPartialSubmitPoint
+    * * Display Name: Is Partial Submit Point
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When set, advancing past this page banks a Partial response immediately instead of waiting for the autosave debounce
+    */
+    get IsPartialSubmitPoint(): boolean {
+        return this.Get('IsPartialSubmitPoint');
+    }
+    set IsPartialSubmitPoint(value: boolean) {
+        this.Set('IsPartialSubmitPoint', value);
+    }
+
+    /**
     * * Field Name: Form
     * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
@@ -2900,6 +3052,36 @@ export class mjBizAppsFormsFormQuestionOptionEntity extends BaseEntity<mjBizApps
     get __mj_UpdatedAt(): Date {
         return this.Get('__mj_UpdatedAt');
     }
+
+    /**
+    * * Field Name: ImageURL
+    * * Display Name: Image URL
+    * * SQL Data Type: nvarchar(1000)
+    * * Description: PictureChoice only: image shown above the option label. Ignored by every other question type
+    */
+    get ImageURL(): string | null {
+        return this.Get('ImageURL');
+    }
+    set ImageURL(value: string | null) {
+        this.Set('ImageURL', value);
+    }
+
+    /**
+    * * Field Name: MatrixAxis
+    * * Display Name: Matrix Axis
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Column
+    *   * Row
+    * * Description: Matrix only: whether this option is a Row or a Column of the grid. NULL for every other question type, and read as Row if left NULL on a Matrix
+    */
+    get MatrixAxis(): 'Column' | 'Row' | null {
+        return this.Get('MatrixAxis');
+    }
+    set MatrixAxis(value: 'Column' | 'Row' | null) {
+        this.Set('MatrixAxis', value);
+    }
 }
 
 
@@ -2978,27 +3160,37 @@ export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsF
     * * SQL Data Type: nvarchar(50)
     * * Value List Type: List
     * * Possible Values 
+    *   * Address
+    *   * Checkbox
+    *   * ContactInfo
     *   * Date
     *   * Dropdown
     *   * Email
     *   * FileUpload
+    *   * Legal
     *   * LongText
+    *   * Matrix
     *   * MultiChoice
     *   * NPS
     *   * Number
+    *   * OpinionScale
     *   * Phone
+    *   * PictureChoice
+    *   * Ranking
     *   * Rating
     *   * ShortText
+    *   * Signature
     *   * SingleChoice
     *   * Statement
     *   * Time
+    *   * Website
     *   * YesNo
     * * Description: Question input type (ShortText, Email, SingleChoice, Rating, NPS, FileUpload, Statement, etc.)
     */
-    get QuestionType(): 'Date' | 'Dropdown' | 'Email' | 'FileUpload' | 'LongText' | 'MultiChoice' | 'NPS' | 'Number' | 'Phone' | 'Rating' | 'ShortText' | 'SingleChoice' | 'Statement' | 'Time' | 'YesNo' {
+    get QuestionType(): 'Address' | 'Checkbox' | 'ContactInfo' | 'Date' | 'Dropdown' | 'Email' | 'FileUpload' | 'Legal' | 'LongText' | 'Matrix' | 'MultiChoice' | 'NPS' | 'Number' | 'OpinionScale' | 'Phone' | 'PictureChoice' | 'Ranking' | 'Rating' | 'ShortText' | 'Signature' | 'SingleChoice' | 'Statement' | 'Time' | 'Website' | 'YesNo' {
         return this.Get('QuestionType');
     }
-    set QuestionType(value: 'Date' | 'Dropdown' | 'Email' | 'FileUpload' | 'LongText' | 'MultiChoice' | 'NPS' | 'Number' | 'Phone' | 'Rating' | 'ShortText' | 'SingleChoice' | 'Statement' | 'Time' | 'YesNo') {
+    set QuestionType(value: 'Address' | 'Checkbox' | 'ContactInfo' | 'Date' | 'Dropdown' | 'Email' | 'FileUpload' | 'Legal' | 'LongText' | 'Matrix' | 'MultiChoice' | 'NPS' | 'Number' | 'OpinionScale' | 'Phone' | 'PictureChoice' | 'Ranking' | 'Rating' | 'ShortText' | 'Signature' | 'SingleChoice' | 'Statement' | 'Time' | 'Website' | 'YesNo') {
         this.Set('QuestionType', value);
     }
 
@@ -3540,6 +3732,229 @@ export class mjBizAppsFormsFormResponseEntity extends BaseEntity<mjBizAppsFormsF
     */
     get RespondentPerson(): string | null {
         return this.Get('RespondentPerson');
+    }
+}
+
+
+/**
+ * MJ_BizApps_Forms: Form Screens - strongly typed entity sub-class
+ * * Schema: __mj_BizAppsForms
+ * * Base Table: FormScreen
+ * * Base View: vwFormScreens
+ * * @description Welcome and Ending screens for a form. Distinct from questions: a screen is never answered, produces no FormResponseAnswer row, appears in no aggregation and cannot be referenced by a conditional rule. It brackets the intake rather than sitting inside it
+ * * Primary Key: ID
+ * @extends {BaseEntity}
+ * @class
+ * @public
+ */
+@RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Screens')
+export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFormScreenEntityType> {
+    /**
+    * Loads the MJ_BizApps_Forms: Form Screens record from the database
+    * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Screens record.
+    * @param EntityRelationshipsToLoad - (optional) the relationships to load
+    * @returns {Promise<boolean>} - true if successful, false otherwise
+    * @public
+    * @async
+    * @memberof mjBizAppsFormsFormScreenEntity
+    * @method
+    * @override
+    */
+    public async Load(ID: string, EntityRelationshipsToLoad?: string[]) : Promise<boolean> {
+        const compositeKey: CompositeKey = new CompositeKey();
+        compositeKey.KeyValuePairs.push({ FieldName: 'ID', Value: ID });
+        return await super.InnerLoad(compositeKey, EntityRelationshipsToLoad);
+    }
+
+    /**
+    * * Field Name: ID
+    * * Display Name: ID
+    * * SQL Data Type: uniqueidentifier
+    * * Default Value: newsequentialid()
+    */
+    get ID(): string {
+        return this.Get('ID');
+    }
+    set ID(value: string) {
+        this.Set('ID', value);
+    }
+
+    /**
+    * * Field Name: FormID
+    * * Display Name: Form
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    */
+    get FormID(): string {
+        return this.Get('FormID');
+    }
+    set FormID(value: string) {
+        this.Set('FormID', value);
+    }
+
+    /**
+    * * Field Name: ScreenType
+    * * Display Name: Screen Type
+    * * SQL Data Type: nvarchar(20)
+    * * Value List Type: List
+    * * Possible Values 
+    *   * Ending
+    *   * Welcome
+    * * Description: Whether this screen is shown before intake begins (Welcome) or after a successful submit (Ending)
+    */
+    get ScreenType(): 'Ending' | 'Welcome' {
+        return this.Get('ScreenType');
+    }
+    set ScreenType(value: 'Ending' | 'Welcome') {
+        this.Set('ScreenType', value);
+    }
+
+    /**
+    * * Field Name: Title
+    * * Display Name: Title
+    * * SQL Data Type: nvarchar(500)
+    * * Description: Headline shown on the screen
+    */
+    get Title(): string {
+        return this.Get('Title');
+    }
+    set Title(value: string) {
+        this.Set('Title', value);
+    }
+
+    /**
+    * * Field Name: Body
+    * * Display Name: Body
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Body copy shown under the title. Plain text — the widget does not render HTML from this column
+    */
+    get Body(): string | null {
+        return this.Get('Body');
+    }
+    set Body(value: string | null) {
+        this.Set('Body', value);
+    }
+
+    /**
+    * * Field Name: ButtonLabel
+    * * Display Name: Button Label
+    * * SQL Data Type: nvarchar(100)
+    * * Description: Label for the screens single button. The widget supplies Start / Done when this is blank
+    */
+    get ButtonLabel(): string | null {
+        return this.Get('ButtonLabel');
+    }
+    set ButtonLabel(value: string | null) {
+        this.Set('ButtonLabel', value);
+    }
+
+    /**
+    * * Field Name: MediaURL
+    * * Display Name: Media URL
+    * * SQL Data Type: nvarchar(1000)
+    * * Description: Optional image shown above the title
+    */
+    get MediaURL(): string | null {
+        return this.Get('MediaURL');
+    }
+    set MediaURL(value: string | null) {
+        this.Set('MediaURL', value);
+    }
+
+    /**
+    * * Field Name: RedirectURL
+    * * Display Name: Redirect URL
+    * * SQL Data Type: nvarchar(1000)
+    * * Description: Ending only: send the respondent here instead of showing this screen. Takes precedence over the form-wide redirect in Form.Settings
+    */
+    get RedirectURL(): string | null {
+        return this.Get('RedirectURL');
+    }
+    set RedirectURL(value: string | null) {
+        this.Set('RedirectURL', value);
+    }
+
+    /**
+    * * Field Name: DisplayOrder
+    * * Display Name: Display Order
+    * * SQL Data Type: int
+    * * Default Value: 0
+    * * Description: Order among the forms Ending screens. Resolution walks them in this order and takes the first whose ConditionalRule the answers satisfy
+    */
+    get DisplayOrder(): number {
+        return this.Get('DisplayOrder');
+    }
+    set DisplayOrder(value: number) {
+        this.Set('DisplayOrder', value);
+    }
+
+    /**
+    * * Field Name: ConditionalRule
+    * * Display Name: Conditional Rule
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Ending only: JSON ConditionalRule deciding whether this ending applies to a given response. Unlike a page rule, a blank rule here does NOT mean always — it means this screen is only reachable as the default
+    */
+    get ConditionalRule(): string | null {
+        return this.Get('ConditionalRule');
+    }
+    set ConditionalRule(value: string | null) {
+        this.Set('ConditionalRule', value);
+    }
+
+    /**
+    * * Field Name: IsDefault
+    * * Display Name: Is Default
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: Ending only: the fallback shown when no conditional ending matched
+    */
+    get IsDefault(): boolean {
+        return this.Get('IsDefault');
+    }
+    set IsDefault(value: boolean) {
+        this.Set('IsDefault', value);
+    }
+
+    /**
+    * * Field Name: __mj_CreatedAt
+    * * Display Name: Created At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_CreatedAt(): Date {
+        return this.Get('__mj_CreatedAt');
+    }
+
+    /**
+    * * Field Name: __mj_UpdatedAt
+    * * Display Name: Updated At
+    * * SQL Data Type: datetimeoffset
+    * * Default Value: getutcdate()
+    */
+    get __mj_UpdatedAt(): Date {
+        return this.Get('__mj_UpdatedAt');
+    }
+
+    /**
+    * * Field Name: SocialLinks
+    * * Display Name: Social Links
+    * * SQL Data Type: nvarchar(MAX)
+    * * Description: Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag
+    */
+    get SocialLinks(): string | null {
+        return this.Get('SocialLinks');
+    }
+    set SocialLinks(value: string | null) {
+        this.Set('SocialLinks', value);
+    }
+
+    /**
+    * * Field Name: Form
+    * * Display Name: Form Name
+    * * SQL Data Type: nvarchar(255)
+    */
+    get Form(): string {
+        return this.Get('Form');
     }
 }
 
@@ -4145,6 +4560,38 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
     }
 
     /**
+    * Validate() method override for MJ_BizApps_Forms: Forms entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
+    * * Table-Level: Templates cannot be published, and published items cannot be marked as templates.
+    * @public
+    * @method
+    * @override
+    */
+    public override Validate(): ValidationResult {
+        const result = super.Validate();
+        this.ValidateTemplateStatus(result);
+        result.Success = result.Success && (result.Errors.length === 0);
+
+        return result;
+    }
+
+    /**
+    * Templates cannot be published, and published items cannot be marked as templates.
+    * @param result - the ValidationResult object to add any errors or warnings to
+    * @public
+    * @method
+    */
+    public ValidateTemplateStatus(result: ValidationResult) {
+    	if (this.IsTemplate && this.Status === "Published") {
+    		result.Errors.push(new ValidationErrorInfo(
+    			"Status",
+    			"An item cannot be marked as a template and have a status of Published at the same time.",
+    			this.Status,
+    			ValidationErrorType.Failure
+    		));
+    	}
+    }
+
+    /**
     * * Field Name: ID
     * * Display Name: ID
     * * SQL Data Type: uniqueidentifier
@@ -4185,7 +4632,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: CategoryID
-    * * Display Name: Category ID
+    * * Display Name: Category
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Categories (vwFormCategories.ID)
     */
@@ -4198,7 +4645,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: StyleID
-    * * Display Name: Style ID
+    * * Display Name: Style
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Styles (vwFormStyles.ID)
     */
@@ -4230,7 +4677,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: OwnerUserID
-    * * Display Name: Owner User ID
+    * * Display Name: Owner
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
     */
@@ -4293,8 +4740,36 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
     }
 
     /**
+    * * Field Name: IsTemplate
+    * * Display Name: Is Template
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response
+    */
+    get IsTemplate(): boolean {
+        return this.Get('IsTemplate');
+    }
+    set IsTemplate(value: boolean) {
+        this.Set('IsTemplate', value);
+    }
+
+    /**
+    * * Field Name: TemplateSourceFormID
+    * * Display Name: Template Source Form
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
+    * * Description: On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source
+    */
+    get TemplateSourceFormID(): string | null {
+        return this.Get('TemplateSourceFormID');
+    }
+    set TemplateSourceFormID(value: string | null) {
+        this.Set('TemplateSourceFormID', value);
+    }
+
+    /**
     * * Field Name: Category
-    * * Display Name: Category
+    * * Display Name: Category Name
     * * SQL Data Type: nvarchar(255)
     */
     get Category(): string | null {
@@ -4303,7 +4778,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: Style
-    * * Display Name: Style
+    * * Display Name: Style Name
     * * SQL Data Type: nvarchar(255)
     */
     get Style(): string | null {
@@ -4312,10 +4787,28 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: OwnerUser
-    * * Display Name: Owner
+    * * Display Name: Owner Name
     * * SQL Data Type: nvarchar(100)
     */
     get OwnerUser(): string | null {
         return this.Get('OwnerUser');
+    }
+
+    /**
+    * * Field Name: TemplateSourceForm
+    * * Display Name: Template Source Name
+    * * SQL Data Type: nvarchar(255)
+    */
+    get TemplateSourceForm(): string | null {
+        return this.Get('TemplateSourceForm');
+    }
+
+    /**
+    * * Field Name: RootTemplateSourceFormID
+    * * Display Name: Root Template Source
+    * * SQL Data Type: uniqueidentifier
+    */
+    get RootTemplateSourceFormID(): string | null {
+        return this.Get('RootTemplateSourceFormID');
     }
 }

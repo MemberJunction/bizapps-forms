@@ -9,48 +9,98 @@ import {
   moveItemInArray,
   type CdkDragDrop,
 } from '@angular/cdk/drag-drop';
-import { CompositeKey } from '@memberjunction/core';
-import { RegisterClass } from '@memberjunction/global';
+import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
+import { MJEventType, MJGlobal, RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
   mjBizAppsFormsFormEntity,
+  mjBizAppsFormsFormQuestionOptionEntity,
+  mjBizAppsFormsFormScreenEntity,
+  mjBizAppsFormsFormStyleEntity,
   FormQuestionType,
   FormRenderMode,
   FormStyleTokens,
   PublishedFormDefinition,
+  PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { BuilderStateService } from './builder-state.service';
 import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
+import { ScreenEditorComponent } from './screen-editor.component';
+import { ImportQuestionsComponent } from './import-questions.component';
+import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
+import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
+import { FormCloneService } from '../templates/form-clone.service';
+import { FormTemplatesService } from '../templates/form-templates.service';
+import {
+  templateFingerprint,
+  templateControlState,
+  type TemplateControlState,
+} from '../templates/template-fingerprint';
 import { ResponsesTabComponent } from '../responses/responses-tab.component';
 import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   QUESTION_PALETTE_GROUPS,
   questionTypeMeta,
+  questionTypeColorClass,
   questionTypesInGroup,
+  searchQuestionTypes,
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
 import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
+import {
+  definitionFingerprint,
+  storedSnapshotFingerprint,
+  publishControlState,
+  type PublishControlState,
+} from './publish-fingerprint';
 import { isValidReorder } from './reorder';
+import { nextOptionLabel } from './option-labels';
+import {
+  NOTHING_SELECTED,
+  clearIfQuestion,
+  clearIfScreen,
+  questionId,
+  screenId,
+  selectQuestion as questionSelection,
+  selectScreen as screenSelection,
+  type BuilderSelection,
+} from './builder-selection';
 
 /**
  * Which workspace tab is showing.
  *
- * `responses` sits last, after `onsubmit`: the tabs read left to right as the life of a
+ * `responses` sits last, after `automate`: the tabs read left to right as the life of a
  * form — build it, style it, distribute it, decide what happens on submit, then read what
  * came back. Collection follows configuration.
  */
-type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit' | 'responses';
+/**
+ * The handle returned by subscribing to MJGlobal's event stream. Derived from the API because
+ * rxjs is not a dependency of this package (it arrives through Angular in the host).
+ */
+type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
+
+type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
+
+/**
+ * Stand-in version id used only while fingerprinting.
+ *
+ * `formVersionId` is excluded from the comparison anyway (it is a fresh GUID per publish),
+ * but `buildPublishedDefinition` requires one — a constant keeps the built snapshot itself
+ * deterministic rather than relying on the exclusion to hide a value that changes.
+ */
+const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
 
 /**
  * The visual form builder — registered as the override for the
@@ -78,44 +128,226 @@ type BuilderTab = 'build' | 'design' | 'distribute' | 'onsubmit' | 'responses';
     CdkDragHandle,
     CdkDragPreview,
     QuestionEditorComponent,
+    ScreenEditorComponent,
+    ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
     FormPreviewModalComponent,
     AutomationTabComponent,
     ResponsesTabComponent,
+    SaveAsTemplateDialogComponent,
   ],
-  providers: [BuilderStateService, DesignStateService, PublishService],
+  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
 export class FormBuilderComponent extends BaseFormComponent {
   declare public record: mjBizAppsFormsFormEntity;
 
-  private readonly state = inject(BuilderStateService);
+  protected readonly state = inject(BuilderStateService);
   private readonly design = inject(DesignStateService);
   private readonly publisher = inject(PublishService);
+  private readonly clone = inject(FormCloneService);
+  private readonly templates = inject(FormTemplatesService);
 
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
   protected tree: FormTree | null = null;
-  protected selectedQuestionId: string | null = null;
+  /**
+   * What the right-hand pane is showing. ONE value, not a question id beside a screen id: the
+   * pane shows a single editor, and two independent fields let it show a screen's properties
+   * while a freshly-added question sat highlighted and unreachable on the canvas.
+   */
+  protected selection: BuilderSelection = NOTHING_SELECTED;
+  protected get selectedQuestionId(): string | null {
+    return questionId(this.selection);
+  }
+
+  protected get selectedScreenId(): string | null {
+    return screenId(this.selection);
+  }
+
+  /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
+  protected paletteQuery = '';
+  /** Whether the paste-to-import dialog is open. */
+  protected importOpen = false;
   protected activeTab: BuilderTab = 'build';
   protected busy = false;
   protected statusMessage = '';
 
+  /** Whether the "Save as template" dialog is up. */
+  protected templateDialogOpen = false;
+  /** The template saved from this form, if one still exists. */
+  protected savedTemplateId: string | null = null;
+  /** Its name, for the tooltip that explains what the form has drifted away from. */
+  protected savedTemplateName: string | null = null;
+  /** Content fingerprint of that template; null when there is none to compare against. */
+  private savedTemplateFingerprint: string | null = null;
+  /** Any problem with the save the dialog needs to show (a name already in use). */
+  protected templateDialogError: string | null = null;
+  /** MJGlobal subscription behind {@link watchForTemplateChanges}; released on destroy. */
+  private templateChanges?: EventSubscription;
+
   /**
-   * True when the draft has edits not yet in the published snapshot. The public link serves
-   * the last published `FormVersion`, so theme/content changes only go live on Publish — this
-   * drives the "unpublished changes" hint so that isn't surprising.
+   * Whether to offer saving, confirm one exists, or offer again because the form has changed.
+   *
+   * Derived on every read from the two fingerprints, never latched — see
+   * `template-fingerprint.ts` for why the latch version was wrong in both directions.
    */
-  protected dirty = false;
+  protected get templateState(): TemplateControlState {
+    return templateControlState({
+      savedFingerprint: this.savedTemplateFingerprint,
+      draftFingerprint: this.templateDraftFingerprint,
+    });
+  }
+
+  /** This form's own content fingerprint, in the same terms the template was measured in. */
+  private get templateDraftFingerprint(): string | null {
+    return this.tree
+      ? templateFingerprint(
+          buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, []),
+        )
+      : null;
+  }
+
+  /**
+   * Fingerprint of the snapshot currently on the public link; null when never published.
+   * Refreshed on load and after a successful publish.
+   */
+  private publishedFingerprint: string | null = null;
+
+  /** Fingerprint of the draft as it stands. Recomputed after every edit. */
+  private draftFingerprint: string | null = null;
+
+  /**
+   * The form's authored automations, as the published snapshot would carry them.
+   *
+   * Cached so {@link markDirty} stays synchronous, and refreshed from `BaseEntity` events rather
+   * than from a callback the Automate tab has to remember to fire — the tab mutates automations
+   * from a dozen places (add, delete, reorder, toggle active, switch execution mode, seed the
+   * legacy defaults), and a notification that has to be added at each one is a notification that
+   * will be missed at the next one.
+   */
+  private draftAutomations: readonly PublishedFormAutomation[] = [];
+
+  /**
+   * The automation read failed, so we cannot say whether the draft matches what is published.
+   *
+   * Deliberately NOT the same as "no automations". Treating a failed read as an empty list would
+   * make a form with automations report identical to its published snapshot and hide the publish
+   * control — the exact failure `publishControlState` documents for a failed baseline read. This
+   * routes through the same safe direction: no provable baseline, so offer Publish.
+   */
+  private automationsUnknown = false;
+
+  /** MJGlobal subscription behind {@link watchForAutomationChanges}; released on destroy. */
+  private automationChanges?: EventSubscription;
+
+  /**
+   * The style the draft currently resolves to, cached so the fingerprint stays synchronous.
+   * A style change is publishable, so this is refreshed whenever one is applied.
+   */
+  private appliedStyle: mjBizAppsFormsFormStyleEntity | undefined;
+
+  /**
+   * True when the draft differs from what the public link is serving.
+   *
+   * A comparison, not a flag. The previous boolean latch could only ever be set by an edit
+   * and cleared by a publish, so adding a question and deleting it again left the form
+   * claiming unpublished changes it did not have.
+   */
+  protected get dirty(): boolean {
+    return (
+      this.publishedFingerprint !== null &&
+      this.draftFingerprint !== null &&
+      this.publishedFingerprint !== this.draftFingerprint
+    );
+  }
 
   /** Non-null while the full-screen WYSIWYG Preview is open (holds the draft definition). */
   protected previewDef: PublishedFormDefinition | null = null;
 
-  /** Mark the draft as having changes not yet published, and refresh the view. */
+  /**
+   * What the Publish control should currently offer.
+   *
+   * The button used to be a solid primary CTA at all times, which made a fully-published
+   * form look like it still owed the author an action — press it and nothing meaningful
+   * happens. State now lives in the control itself:
+   *
+   *  - `publish`  — a Draft that has never gone live. There IS something to do.
+   *  - `update`   — live, with edits the public link has not seen yet. The urgent case.
+   *  - `current`  — live and in sync. Nothing to do, and the button says so instead of
+   *                 pretending otherwise.
+   */
+  /**
+   * Whether {@link publishState} has been resolved against the published snapshot yet.
+   *
+   * Both fingerprints start null, which reads as "not dirty" — so before the async read lands, a
+   * Published form claims to be in sync and then corrects itself. Gating the control on this is
+   * what stops the header changing its mind in front of the author (and what silenced NG0100).
+   */
+  protected publishStateReady = false;
+
+  /**
+   * Whether the loaded tree is safe for the view to read — see {@link announceReady}.
+   *
+   * Distinct from `!busy`: `busy` toggles for every edit, and hiding the canvas while a question
+   * saves would make the builder flicker on every keystroke.
+   */
+  protected builderReady = false;
+
+  protected get publishState(): PublishControlState {
+    return publishControlState({
+      dirty: this.dirty,
+      // An unreadable automation list is an unusable baseline: we cannot prove the draft matches
+      // what is live, so the control must stay available rather than claim "Published".
+      hasPublishedBaseline: this.publishedFingerprint !== null && !this.automationsUnknown,
+      status: this.record.Status,
+    });
+  }
+
+  /**
+   * Recompute the draft fingerprint and refresh the view.
+   *
+   * Called wherever the old `markDirty()` was — same frequency, but it re-derives the answer
+   * instead of latching it, so an edit that restores the published state reports clean.
+   */
   private markDirty(): void {
-    this.dirty = true;
+    this.draftFingerprint = this.tree
+      ? definitionFingerprint(
+          buildPublishedDefinition(
+            this.tree,
+            this.appliedStyle,
+            FINGERPRINT_VERSION_ID,
+            this.draftAutomations,
+          ),
+        )
+      : null;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * The draft as a published definition, for the Design tab's live sample.
+   *
+   * Same builder as publish and as Preview, so the Design tab shows the actual form rather
+   * than a stand-in — the whole point of styling it is seeing your own questions.
+   */
+  protected get designPreviewDefinition(): PublishedFormDefinition | null {
+    return this.tree
+      ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
+      : null;
+  }
+
+  /** Read the live snapshot and the current draft, so `dirty` has both sides to compare. */
+  private async refreshPublishState(): Promise<void> {
+    this.appliedStyle = this.record.StyleID
+      ? ((await this.design.loadStyleById(this.record.StyleID)) ?? undefined)
+      : undefined;
+    this.publishedFingerprint = storedSnapshotFingerprint(
+      await this.publisher.latestPublishedSnapshot(this.record.ID),
+    );
+    await this.refreshDraftAutomations();
+    this.publishStateReady = true;
+    this.markDirty();
   }
 
   override async ngOnInit(): Promise<void> {
@@ -140,8 +372,31 @@ export class FormBuilderComponent extends BaseFormComponent {
         this.tree.pages.push(page);
       }
     }
+    await this.refreshPublishState();
+    await this.refreshSavedTemplate(this.record.ID);
+    this.watchForTemplateChanges();
+    this.watchForAutomationChanges();
     this.busy = false;
-    this.cdr.markForCheck();
+    this.announceReady();
+  }
+
+  /**
+   * Publish "the builder is loaded" to the view as a single transition, in its own task.
+   *
+   * `loadBuilder` awaits four different things, and Angular runs a change-detection pass at each
+   * await boundary. Any template expression reading `tree` therefore flipped mid-check and Angular
+   * reported NG0100 — first on the welcome-screen conditional, then, once that was gated, on the
+   * gate itself. Gating cannot fix it, because the gate is the thing that changes.
+   *
+   * So the view reads ONE flag that flips exactly once, from a `setTimeout` — a macrotask, which
+   * is the only scheduling primitive here guaranteed to run after the current cycle has finished
+   * checking rather than inside it.
+   */
+  private announceReady(): void {
+    setTimeout(() => {
+      this.builderReady = true;
+      this.cdr.markForCheck();
+    }, 0);
   }
 
   /**
@@ -162,7 +417,22 @@ export class FormBuilderComponent extends BaseFormComponent {
   // -- palette --------------------------------------------------------------
 
   protected typesInGroup(group: QuestionPaletteGroup): QuestionTypeMeta[] {
-    return questionTypesInGroup(group);
+    const inGroup = questionTypesInGroup(group);
+    if (this.paletteQuery.trim() === '') {
+      return inGroup;
+    }
+    const matches = new Set(searchQuestionTypes(this.paletteQuery).map((m) => m.type));
+    return inGroup.filter((m) => matches.has(m.type));
+  }
+
+  /** True when a filter is active and this group has nothing left, so the heading can hide. */
+  protected groupHasMatches(group: QuestionPaletteGroup): boolean {
+    return this.typesInGroup(group).length > 0;
+  }
+
+  protected setPaletteQuery(value: string): void {
+    this.paletteQuery = value;
+    this.cdr.markForCheck();
   }
 
   protected async addQuestion(type: FormQuestionType): Promise<void> {
@@ -177,7 +447,9 @@ export class FormBuilderComponent extends BaseFormComponent {
     const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type));
     if (node) {
       page.questions.push(node);
-      this.selectedQuestionId = node.entity.ID;
+      // Selecting the new question is what clears any screen selection. The author asked for a
+      // question; the pane has to show them the question they just got.
+      this.selection = questionSelection(node.entity.ID);
       this.markDirty();
     }
     this.busy = false;
@@ -210,9 +482,263 @@ export class FormBuilderComponent extends BaseFormComponent {
     return this.tree?.pages ?? [];
   }
 
-  protected selectQuestion(node: QuestionNode): void {
-    this.selectedQuestionId = node.entity.ID;
+  protected async setPageTitle(page: PageNode, title: string): Promise<void> {
+    page.entity.Title = title.trim() === '' ? null : title;
+    await this.state.save(page.entity);
+    this.markDirty();
     this.cdr.markForCheck();
+  }
+
+  protected async setPageDescription(page: PageNode, description: string): Promise<void> {
+    page.entity.Description = description.trim() === '' ? null : description;
+    await this.state.save(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Start a new section.
+   *
+   * Pages shipped end to end — entity, published contract, page header on the canvas, the widget
+   * rendering a title and description per section — with no way for an author to CREATE one.
+   * `addPage` had exactly two callers: the implicit first page, and the import/paste path when a
+   * pasted block named a section. So a multi-page form was reachable only by pasting one, and
+   * the page header hides itself below two pages, which meant an author who had never pasted
+   * never saw page controls at all and had no way to discover they existed.
+   */
+  protected async addPage(): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    // Untitled, not "Page N": the title is a heading respondents READ, and a real one ("Contact
+    // details") is the whole reason to split a form. A default that looks deliberate is a
+    // default that ships.
+    const page = await this.state.addPage(this.tree, '');
+    if (page) {
+      this.tree.pages.push(page);
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Delete a page AND every question on it.
+   *
+   * Hover-revealed like every other delete on the canvas, but unlike them it asks first, because
+   * the blast radius is not what the button is attached to: the page header shows a title and a
+   * toggle, with no hint of how many questions go down with it. The last page is never deletable
+   * — a form with no page has nowhere to put a question, and the builder would immediately
+   * recreate one underneath the author.
+   */
+  protected async deletePage(page: PageNode): Promise<void> {
+    if (!this.tree || this.busy || this.tree.pages.length <= 1) {
+      return;
+    }
+    const count = page.questions.length;
+    const what = count === 1 ? '1 question' : `${count} questions`;
+    if (count > 0 && !confirm(`Delete this section and its ${what}? This cannot be undone.`)) {
+      return;
+    }
+    this.busy = true;
+    if (await this.state.deletePage(page)) {
+      this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
+      for (const q of page.questions) {
+        this.selection = clearIfQuestion(this.selection, q.entity.ID);
+      }
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  /** Toggle whether leaving this page banks a Partial response immediately. */
+  protected async togglePartialSubmitPoint(page: PageNode): Promise<void> {
+    page.entity.IsPartialSubmitPoint = !page.entity.IsPartialSubmitPoint;
+    await this.state.save(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  protected selectQuestion(node: QuestionNode): void {
+    this.selection = questionSelection(node.entity.ID);
+    this.cdr.markForCheck();
+  }
+
+  // -- screens --------------------------------------------------------------
+  //
+  // Screens live beside the pages on the canvas rather than among the questions, because that is
+  // what they are: the welcome sits above the whole form and the endings below it. An author who
+  // can see the shape of the flow does not have to be told that a welcome screen is not question
+  // zero.
+
+  protected get welcomeScreen(): mjBizAppsFormsFormScreenEntity | undefined {
+    return this.tree ? welcomeScreenOf(this.tree) : undefined;
+  }
+
+  protected get endScreens(): mjBizAppsFormsFormScreenEntity[] {
+    return this.tree ? endScreensOf(this.tree) : [];
+  }
+
+  protected get selectedScreen(): mjBizAppsFormsFormScreenEntity | null {
+    if (!this.tree || !this.selectedScreenId) {
+      return null;
+    }
+    return this.tree.screens.find((s) => s.ID === this.selectedScreenId) ?? null;
+  }
+
+  protected selectScreen(screen: mjBizAppsFormsFormScreenEntity): void {
+    this.selection = screenSelection(screen.ID);
+    this.cdr.markForCheck();
+  }
+
+  protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    const title = screenType === 'Welcome' ? this.record.Name || 'Welcome' : 'Thanks for your response';
+    const screen = await this.state.addScreen(this.tree, screenType, title);
+    if (screen) {
+      // `addScreen` returns the EXISTING welcome screen when one is already there, so guard
+      // against pushing a duplicate into the tree the database correctly refused to duplicate.
+      if (!this.tree.screens.some((s) => s.ID === screen.ID)) {
+        this.tree.screens.push(screen);
+      }
+      this.selectScreen(screen);
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  protected async deleteScreen(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    if (await this.state.deleteScreen(screen)) {
+      this.tree.screens = this.tree.screens.filter((s) => s.ID !== screen.ID);
+      this.selection = clearIfScreen(this.selection, screen.ID);
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  protected onScreenChanged(screen: mjBizAppsFormsFormScreenEntity): void {
+    // Same coalescing as a question edit — the screen editor has five sibling inputs, and it
+    // writes on every keystroke, so this is the busiest surface in the builder.
+    this.state.saveDebounced(screen);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Conditional sources for an ENDING: every question on the form.
+   *
+   * Deliberately not the "questions before this one" rule that governs a question's own
+   * condition. An ending is evaluated after the whole form is answered, so every answer is
+   * available to it — restricting it to a prefix would hide the last page from the branch that
+   * most wants to read it.
+   */
+  protected get endingConditionalSources(): ConditionalSourceQuestion[] {
+    if (!this.tree) {
+      return [];
+    }
+    return this.tree.pages.flatMap((page) =>
+      page.questions.map((q) => ({ id: q.entity.ID, prompt: q.entity.Prompt })),
+    );
+  }
+
+  // -- import ---------------------------------------------------------------
+
+  protected openImport(): void {
+    this.importOpen = true;
+    this.cdr.markForCheck();
+  }
+
+  protected closeImport(): void {
+    this.importOpen = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Create the pages and questions a paste described.
+   *
+   * Appends rather than replaces. Import is used to ADD a section far more often than to start
+   * over, and an import that silently wiped an existing form would be unrecoverable — there is
+   * no undo here.
+   */
+  protected async onImported(result: ImportResult): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.importOpen = false;
+    this.busy = true;
+    try {
+      for (const importedPage of result.pages) {
+        const page = await this.pageForImport(importedPage.title);
+        if (!page) {
+          continue;
+        }
+        for (const q of importedPage.questions) {
+          await this.createImportedQuestion(page, q);
+        }
+      }
+      this.markDirty();
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /**
+   * The page an imported block goes on: a new one when the paste named it, else the last
+   * existing page so an untitled paste extends the form the author is already looking at.
+   */
+  private async pageForImport(title: string | undefined): Promise<PageNode | undefined> {
+    if (!this.tree) {
+      return undefined;
+    }
+    if (title) {
+      const created = await this.state.addPage(this.tree, title);
+      if (created) {
+        this.tree.pages.push(created);
+      }
+      return created;
+    }
+    return this.tree.pages[this.tree.pages.length - 1];
+  }
+
+  private async createImportedQuestion(page: PageNode, imported: ImportedQuestion): Promise<void> {
+    if (!this.tree) {
+      return;
+    }
+    const node = await this.state.addQuestion(this.tree, page, imported.type, imported.prompt);
+    if (!node) {
+      return;
+    }
+    if (imported.isRequired) {
+      node.entity.IsRequired = true;
+      await this.state.save(node.entity);
+    }
+    if (imported.options.length > 0) {
+      // The seeded "Option 1 / Option 2" pair is a placeholder for an author who will edit it;
+      // a paste that named its options has already done that, so the placeholders go.
+      for (const seeded of [...node.options]) {
+        await this.state.deleteOption(seeded);
+      }
+      node.options = [];
+      for (const label of imported.options) {
+        const option = await this.state.addOption(node, label);
+        if (option) {
+          node.options.push(option);
+        }
+      }
+    }
+    page.questions.push(node);
   }
 
   protected get selectedNode(): QuestionNode | null {
@@ -245,7 +771,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     return sources;
   }
 
-  /** Every question on the form, in page/display order — what the On Submit tab maps from. */
+  /** Every question on the form, in page/display order — what the Automate tab maps from. */
   protected get mappableQuestions(): MappableQuestion[] {
     if (!this.tree) {
       return [];
@@ -259,6 +785,11 @@ export class FormBuilderComponent extends BaseFormComponent {
     return questionTypeMeta(node.entity.QuestionType);
   }
 
+  /** The `mjf-viz-*` class carrying this type's group colour. */
+  protected colorClassFor(type: FormQuestionType): string {
+    return questionTypeColorClass(type);
+  }
+
   protected displayIndex(page: PageNode, node: QuestionNode): string {
     const idx = page.questions.indexOf(node) + 1;
     return idx.toString().padStart(2, '0');
@@ -266,13 +797,42 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   // -- editing handlers (persist on change) ---------------------------------
 
-  protected async onQuestionChanged(node: QuestionNode): Promise<void> {
-    await this.state.save(node.entity);
+  /**
+   * A field on the selected question changed.
+   *
+   * Coalesced rather than saved immediately: the properties panel has several sibling inputs, and
+   * two committing in the same tick used to race and lose the second edit outright — see
+   * `saveDebounced`. The in-memory tree is updated synchronously by the editor either way, so
+   * Preview and Publish always see the current state; only the write is deferred.
+   */
+  protected onQuestionChanged(node: QuestionNode): void {
+    this.state.saveDebounced(node.entity);
     this.markDirty();
   }
 
-  protected async onAddOption(node: QuestionNode): Promise<void> {
-    const option = await this.state.addOption(node, `Option ${node.options.length + 1}`);
+  /**
+   * Persist an option's own edit.
+   *
+   * `FormQuestionOption` is already a `SaveableEntity`, so this gets the same coalescing, checked
+   * save and failure banner every other builder write goes through — the option simply never
+   * reached it before.
+   */
+  protected onOptionChanged(option: mjBizAppsFormsFormQuestionOptionEntity): void {
+    this.state.saveDebounced(option);
+    this.markDirty();
+  }
+
+  protected async onAddOption(event: { node: QuestionNode; matrixAxis?: 'Row' | 'Column' }): Promise<void> {
+    const { node, matrixAxis } = event;
+    // Number within the AXIS, not within the whole option list: a matrix whose second column
+    // was labelled "Option 4" because two rows came first is just confusing.
+    // Named from the labels that EXIST, not from how many there are: a list that had lost
+    // "Option 1" used to mint a second "Option 2", and two options with one name are one answer.
+    const peers = matrixAxis
+      ? node.options.filter((o) => (o.MatrixAxis ?? 'Row') === matrixAxis)
+      : node.options;
+    const label = nextOptionLabel(peers.map((o) => o.Label), matrixAxis ?? 'Option');
+    const option = await this.state.addOption(node, label, matrixAxis);
     if (option) {
       node.options.push(option);
       this.markDirty();
@@ -295,9 +855,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     page.questions = page.questions.filter((q) => q !== node);
     await this.state.persistQuestionOrder(page);
-    if (this.selectedQuestionId === node.entity.ID) {
-      this.selectedQuestionId = null;
-    }
+    this.selection = clearIfQuestion(this.selection, node.entity.ID);
     this.markDirty();
   }
 
@@ -340,19 +898,196 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   // -- publish --------------------------------------------------------------
 
+  // --- Templates -------------------------------------------------------------
+
+  /**
+   * Notice when the template saved from this form is deleted somewhere else.
+   *
+   * The builder stays mounted while its tab is open, so without this, deleting a template in the
+   * gallery left the form still announcing "Saved as template" — the inconsistency that prompted
+   * this whole control being derived rather than latched. Same MJGlobal entity-event mechanism the
+   * forms list and the gallery use.
+   */
+  /**
+   * Release the template listener. Overrides rather than shadows: `BaseFormComponent` does real
+   * teardown of its own, and a subscription that outlives its component keeps reloading trees for
+   * a form nobody is looking at.
+   */
+  public override ngOnDestroy(): void {
+    this.templateChanges?.unsubscribe();
+    this.templateChanges = undefined;
+    this.automationChanges?.unsubscribe();
+    this.automationChanges = undefined;
+    super.ngOnDestroy();
+  }
+
+  /**
+   * Re-read the authored automations into the draft, then re-fingerprint.
+   *
+   * A failed read sets {@link automationsUnknown} rather than emptying the list, because an empty
+   * list is a real and publishable state that would otherwise be indistinguishable from "we could
+   * not ask".
+   */
+  private async refreshDraftAutomations(): Promise<void> {
+    const automations = await this.publisher.loadAutomations(this.record.ID);
+    this.automationsUnknown = automations === null;
+    this.draftAutomations = automations ?? [];
+  }
+
+  /**
+   * Keep the publish state honest about automation edits made in the Automate tab.
+   *
+   * Both save AND delete, unlike {@link watchForTemplateChanges}: this builder never writes
+   * `FormAutomation` rows itself, so — unlike the `Form` rows it autosaves constantly — an
+   * automation save can only have come from the Automate tab and is always worth re-reading.
+   */
+  private watchForAutomationChanges(): void {
+    if (this.automationChanges) {
+      return;
+    }
+    this.automationChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+        return;
+      }
+      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
+      if (args?.type !== 'save' && args?.type !== 'delete') {
+        return;
+      }
+      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.FormAutomation) {
+        return;
+      }
+      void this.refreshDraftAutomations().then(() => this.markDirty());
+    });
+  }
+
+  private watchForTemplateChanges(): void {
+    if (this.templateChanges) {
+      return;
+    }
+    this.templateChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+        return;
+      }
+      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
+      // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
+      // and re-reading the template on each one would load a tree per keystroke.
+      if (args?.type !== 'delete' || args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.Form) {
+        return;
+      }
+      if (!this.tree) {
+        return;
+      }
+      void this.refreshSavedTemplate(this.tree.form.ID);
+    });
+  }
+
+  protected openTemplateDialog(): void {
+    this.templateDialogOpen = true;
+    this.templateDialogError = null;
+    this.cdr.markForCheck();
+  }
+
+  protected closeTemplateDialog(): void {
+    this.templateDialogOpen = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Re-read the template saved from this form and fingerprint its content.
+   *
+   * Both halves matter: the id answers "does one exist" (a deleted template must stop the form
+   * claiming to be saved), and the fingerprint answers "is it still the same form", which is the
+   * question an author actually has once they have kept editing.
+   */
+  private async refreshSavedTemplate(formId: string): Promise<void> {
+    this.savedTemplateId = await this.templates.findTemplateSavedFrom(formId);
+    this.savedTemplateName = null;
+    this.savedTemplateFingerprint = null;
+    if (this.savedTemplateId) {
+      const templateForm = await this.templates.loadTemplateForm(this.savedTemplateId);
+      if (templateForm) {
+        this.savedTemplateName = templateForm.Name;
+        const templateTree = await this.state.loadTree(templateForm);
+        const style = templateForm.StyleID
+          ? await this.design.loadStyleById(templateForm.StyleID)
+          : undefined;
+        this.savedTemplateFingerprint = templateFingerprint(
+          buildPublishedDefinition(templateTree, style ?? undefined, FINGERPRINT_VERSION_ID, []),
+        );
+      }
+    }
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Copy this form into the template gallery.
+   *
+   * Pending edits are flushed first for the same reason publish flushes them: the copy is made
+   * from the database rows, so an edit still sitting in the debounce would be missing from a
+   * template that looks like it was taken from what is on screen.
+   */
+  protected async saveAsTemplate(request: SaveAsTemplateRequest): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    const formId = this.tree.form.ID;
+    this.busy = true;
+    this.statusMessage = '';
+    this.templateDialogError = null;
+    this.cdr.markForCheck();
+    try {
+      // Refuse a duplicate name BEFORE writing anything: two cards reading "Client intake" are
+      // indistinguishable, and the copy is already made by the time a later check could fire.
+      if ((await this.templates.templateNameTaken(request.name)) === true) {
+        this.templateDialogError = `A template called “${request.name}” already exists. Give this one a name that tells them apart.`;
+        return;
+      }
+      await this.state.flushPendingSaves();
+      const result = await this.clone.cloneForm(formId, {
+        name: request.name,
+        description: request.description,
+        isTemplate: true,
+        sourceFormId: formId,
+      });
+      this.templateDialogOpen = false;
+      await this.refreshSavedTemplate(formId);
+      this.statusMessage =
+        result.warnings.length > 0
+          ? `Saved as a template, with notes: ${result.warnings.join(' ')}`
+          : `Saved "${request.name}" to your templates.`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save this form as a template.';
+      LogError(message);
+      this.statusMessage = message;
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
   protected async publish(): Promise<void> {
     if (!this.tree || this.busy) {
       return;
     }
     this.busy = true;
     this.statusMessage = '';
+    // Land every coalesced edit before publishing. The snapshot is built from the in-memory tree
+    // so it would be correct either way, but a form whose published version contains an edit its
+    // own draft rows do not is a genuinely confusing thing to debug later.
+    await this.state.flushPendingSaves();
+    this.publishStateReady = false;
     const result: PublishResult = await this.publisher.publish(this.tree);
     this.busy = false;
     if (result.success) {
       this.statusMessage = `Published version ${result.versionNumber}.`;
-      this.dirty = false;
+      // The draft IS the published snapshot now; re-read rather than assume, so a publish
+      // that transformed anything server-side still leaves the two sides comparable.
+      await this.refreshPublishState();
     } else {
       this.statusMessage = result.error ?? 'Publish failed.';
+      // A failed publish changed nothing, so the state we already had still holds. Without this
+      // the control would sit on "Checking…" forever and the author would have no way to retry.
+      this.publishStateReady = true;
     }
     this.cdr.markForCheck();
   }
@@ -377,7 +1112,9 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** The Design panel persisted `Form.StyleID`; the theme reaches the live link only on Publish. */
   protected onStyleApplied(): void {
-    this.markDirty();
+    // The applied style is part of the published snapshot, so the cache backing the
+    // fingerprint has to be re-read before the comparison means anything.
+    void this.refreshPublishState();
   }
 
   // -- WYSIWYG preview ------------------------------------------------------
@@ -392,15 +1129,6 @@ export class FormBuilderComponent extends BaseFormComponent {
       : undefined;
     // No automations: Preview renders the form, it never runs a submission's side effects.
     this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
-    this.cdr.markForCheck();
-  }
-
-  /** Design-tab "Preview form": render the draft with the current (possibly unsaved) theme. */
-  protected previewWithTokens(tokens: FormStyleTokens): void {
-    if (!this.tree) {
-      return;
-    }
-    this.previewDef = buildPublishedDefinition(this.tree, undefined, 'draft-preview', [], tokens);
     this.cdr.markForCheck();
   }
 

@@ -30,7 +30,8 @@ import { LogError, LogStatus, Metadata, RunView, type UserInfo } from '@memberju
 import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
-import { getUploadConfig, UPLOAD_ROUTE } from './config.js';
+import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
 
@@ -38,19 +39,6 @@ import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEn
 interface VerifiedUserPayload {
   userRecord?: UserInfo;
   sessionId?: string;
-}
-
-/** Flat body-read outcome (non-discriminated) so field access is safe under non-strictNullChecks. */
-interface BodyReadResult {
-  ok: boolean;
-  body?: Buffer;
-  status?: number;
-  error?: string;
-}
-
-/** Read the verified anonymous session's UserInfo off the request (set by the auth middleware). */
-function userPayloadOf(req: Request): VerifiedUserPayload | undefined {
-  return (req as Request & { userPayload?: VerifiedUserPayload }).userPayload;
 }
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsUpload')
@@ -77,7 +65,7 @@ export class UploadMiddleware extends BaseServerMiddleware {
         }
         void this.handleUpload(req, res).catch((e: unknown) => {
           LogError(`[Forms] Upload route error: ${e instanceof Error ? e.message : String(e)}`);
-          this.sendError(res, 500, 'Upload failed unexpectedly. Please try again later.');
+          sendJsonError(res, 500, 'Upload failed unexpectedly. Please try again later.');
         });
       },
     ];
@@ -85,22 +73,22 @@ export class UploadMiddleware extends BaseServerMiddleware {
 
   /** Buffer the body (size-capped), parse multipart, run the service, and respond JSON. */
   private async handleUpload(req: Request, res: Response): Promise<void> {
-    const contextUser = userPayloadOf(req)?.userRecord;
+    const contextUser = userPayloadOf<VerifiedUserPayload>(req)?.userRecord;
     if (!contextUser) {
       // Should not happen (unified auth would have 401'd) — defensive fail-closed.
-      this.sendError(res, 401, 'Authentication required to upload.');
+      sendJsonError(res, 401, 'Authentication required to upload.');
       return;
     }
 
-    const bodyResult = await this.readCappedBody(req);
+    const bodyResult = await readCappedBody(req, uploadBodyCap(), uploadTooLargeMessage());
     if (!bodyResult.ok || !bodyResult.body) {
-      this.sendError(res, bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
+      sendJsonError(res, bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
       return;
     }
 
     const parsed = parseMultipart(bodyResult.body, req.headers['content-type']);
     if (!parsed.ok) {
-      this.sendError(res, 400, parsed.reason ?? 'Malformed upload.');
+      sendJsonError(res, 400, parsed.reason ?? 'Malformed upload.');
       return;
     }
 
@@ -120,65 +108,16 @@ export class UploadMiddleware extends BaseServerMiddleware {
       // anonymous caller: the anonymous role holds no `MJ: Files` grant, and a provenance row the
       // caller could write would prove nothing about who uploaded the file.
       elevatedUser: UserCache.Instance.GetSystemUser(),
-      sessionId: userPayloadOf(req)?.sessionId,
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
     };
 
     const result = await runUpload(ctx, uploadReq);
     if (!result.ok || !result.success) {
       const failure = result.failure ?? { status: 500, error: 'Upload failed.' };
-      this.sendError(res, failure.status, failure.error);
+      sendJsonError(res, failure.status, failure.error);
       return;
     }
     res.status(200).set('Cache-Control', 'no-store').json(result.success);
-  }
-
-  /**
-   * Read the request body into a Buffer, aborting fail-closed once it exceeds the configured
-   * cap (so an oversized upload never buffers unbounded memory). Also short-circuits on a
-   * `Content-Length` that already exceeds the cap.
-   */
-  private readCappedBody(req: Request): Promise<BodyReadResult> {
-    const maxBytes = getUploadConfig().maxBytes;
-    const declared = Number(req.headers['content-length'] ?? '');
-    if (Number.isFinite(declared) && declared > maxBytes) {
-      return Promise.resolve({ ok: false, status: 413, error: `Upload exceeds the maximum size of ${maxBytes} bytes.` });
-    }
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = [];
-      let total = 0;
-      let aborted = false;
-      req.on('data', (chunk: Buffer) => {
-        if (aborted) {
-          return;
-        }
-        total += chunk.length;
-        if (total > maxBytes) {
-          aborted = true;
-          resolve({ ok: false, status: 413, error: `Upload exceeds the maximum size of ${maxBytes} bytes.` });
-          return;
-        }
-        chunks.push(chunk);
-      });
-      req.on('end', () => {
-        if (!aborted) {
-          resolve({ ok: true, body: Buffer.concat(chunks) });
-        }
-      });
-      req.on('error', (err: Error) => {
-        if (!aborted) {
-          aborted = true;
-          resolve({ ok: false, status: 400, error: `Failed to read upload: ${err.message}` });
-        }
-      });
-    });
-  }
-
-  /** Send a JSON error body with the given status (never throws twice). */
-  private sendError(res: Response, status: number, error: string): void {
-    if (res.headersSent) {
-      return;
-    }
-    res.status(status).set('Cache-Control', 'no-store').json({ error });
   }
 
   /** The configured MJ file-storage engine (canonical "store bytes + create File row"). */

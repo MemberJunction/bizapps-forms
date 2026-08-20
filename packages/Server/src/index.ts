@@ -45,6 +45,24 @@ import './widget-bundle/WidgetBundleMiddleware.js';
 // so it reads the verified anonymous session; missing storage config yields a 5xx, never a crash.
 import './upload/UploadMiddleware.js';
 
+// Import the authoring-asset middleware so its @RegisterClass fires and MJ server bootstrap
+// discovers BOTH its routes: POST /forms/asset (authenticated authors uploading form artwork)
+// and GET /forms/asset/:id (anonymous, so a published form's images render for a respondent
+// with no session). The read route serves ONLY objects stored under the public asset prefix.
+import './asset/AssetMiddleware.js';
+
+// Import the response-file download middleware so its @RegisterClass fires and MJ server
+// bootstrap discovers GET /forms/files/:fileId — an AUTHENTICATED reader downloading one
+// respondent-uploaded answer. Mounted post-auth because identity is the guard here, unlike the
+// asset read route beside it, whose guard is the public storage prefix.
+import './download/DownloadMiddleware.js';
+
+// Registers the development-only local-disk storage driver. Importing it is enough — the
+// @RegisterClass decorator does the work — and the driver stays inert unless both
+// FORMS_LOCAL_STORAGE_ROOT is set AND a FileStorageAccount points at its driver key, so a
+// deployment that configures neither behaves exactly as it does without this import.
+import './storage/LocalDiskFileStorage.js';
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 

@@ -123,12 +123,17 @@ export class PublishService {
   /**
    * Read the form's authored automations, or null when the read itself failed.
    *
+   * Public because the BUILDER needs the same list publish uses: automations are part of the
+   * published snapshot, so they are part of the draft the publish fingerprint compares. Reading
+   * them through the same method is what keeps the "is there anything to publish?" answer and the
+   * thing publish actually writes from drifting apart.
+   *
    * Null and empty are deliberately different. Empty means "this form configures no automations",
    * which is a normal, publishable state that keeps the form on the legacy hook list. Null means
    * we do not know — and publishing an empty array on a failed read would silently disable
    * automations the form actually has, for every response until someone republished.
    */
-  private async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
+  public async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
     const rv = new RunView();
     const result = await rv.RunView<AuthoredAutomationRow>(
       {
@@ -145,6 +150,38 @@ export class PublishService {
       return null;
     }
     return buildPublishedAutomations(result.Results ?? []);
+  }
+
+  /**
+   * The snapshot currently serving the public link, or null when there is not one to read.
+   *
+   * The builder compares this against the draft to decide whether there is anything to
+   * publish — see `publish-fingerprint.ts` for why that is a comparison and not a flag.
+   *
+   * Null does NOT mean "nothing is published". It means no baseline was obtained, which covers a
+   * form that has never been published AND a read that failed, and the caller cannot tell them
+   * apart. That is deliberate but it is also a trap: treating null as "up to date" is what made
+   * the builder show a static "Published" badge, with no publish control, over a draft full of
+   * edits that were never going live. `publishControlState` is where that is handled — anything
+   * else consuming this must fail in the same direction.
+   */
+  public async latestPublishedSnapshot(formId: string): Promise<string | null> {
+    const rv = new RunView();
+    const result = await rv.RunView<{ DefinitionSnapshot: string | null }>({
+      EntityName: FORMS_ENTITY.FormVersion,
+      ExtraFilter: `FormID='${formId}' AND Status='Published'`,
+      OrderBy: 'VersionNumber DESC',
+      Fields: ['DefinitionSnapshot'],
+      MaxRows: 1,
+      ResultType: 'simple',
+    });
+    if (!result.Success) {
+      LogError(
+        `Forms publish: could not read the published snapshot for form ${formId}: ${result.ErrorMessage}`,
+      );
+      return null;
+    }
+    return result.Results?.[0]?.DefinitionSnapshot ?? null;
   }
 
   private async maxVersionNumber(formId: string): Promise<number> {

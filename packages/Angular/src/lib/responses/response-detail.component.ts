@@ -1,28 +1,57 @@
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   ElementRef,
   EventEmitter,
   Input,
   Output,
   ViewChild,
+  inject,
 } from '@angular/core';
+import { FORMS_UI_CSS } from '../shared';
 import { MJ_CORE_ENTITY } from '../shared/entity-names';
 import type {
   ResponseAnswerView,
+  ResponseFileView,
   ResponseAutomationRunView,
+  ResponseBindingRecordView,
   ResponseDetail,
   ResponseRecordLink,
 } from './response-models';
+import { ResponseFileDownloadService } from './response-file-download.service';
 
 /** Byte-size units, largest step first, for the human-readable file size. */
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
 /**
+ * Run status / binding outcome -> badge tone.
+ *
+ * These map to SEMANTIC status tones, never the brand accent — "Succeeded" and "Failed"
+ * have to read as status even on a tenant whose accent happens to be the same hue as
+ * one of them. Both maps are total over their CodeGen union, so a new value in the
+ * CHECK constraint fails the build here instead of silently rendering as neutral.
+ */
+const RUN_TONE: Record<ResponseAutomationRunView['status'], string> = {
+  Succeeded: 'mjf-badge--success',
+  Failed: 'mjf-badge--danger',
+  Running: 'mjf-badge--info',
+  Pending: 'mjf-badge--warning',
+  Skipped: '',
+};
+
+const OUTCOME_TONE: Record<ResponseBindingRecordView['outcome'], string> = {
+  Created: 'mjf-badge--success',
+  Merged: 'mjf-badge--info',
+  Unchanged: '',
+  Skipped: '',
+};
+
+/**
  * Single-response detail: each answer labelled by its question from the snapshot, with the
- * AI score behind it and the real file behind a file answer — plus what the submission
- * actually did (which automations ran, which business records they wrote).
+ * real file behind a file answer — plus what the submission actually did (which automations
+ * ran, which business records they wrote).
  *
  * Deep links are emitted, not navigated: this component is mounted inside a dashboard
  * (which relays via `BaseDashboard.OpenEntityRecord`) and inside two `BaseFormComponent`
@@ -32,16 +61,17 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
   selector: 'mj-forms-response-detail',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [ResponseFileDownloadService],
   template: `
-    <div class="detail">
-      <header class="detail-head">
+    <div class="rd">
+      <header class="rd-head">
         @if (ShowBack) {
-          <button #backButton type="button" class="back" (click)="Back.emit()">
+          <button #backButton type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm rd-back" (click)="Back.emit()">
             <i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Back to responses
           </button>
         }
         <div class="meta">
-          <span class="status" [class.status--complete]="Detail.status === 'Complete'">{{ Detail.status }}</span>
+          <span class="mjf-badge" [class.mjf-badge--success]="Detail.status === 'Complete'">{{ Detail.status }}</span>
           <span class="respondent">{{ Detail.respondent }}</span>
           @if (Detail.submittedAt) {
             <span class="ts">Submitted {{ Detail.submittedAt.toLocaleString() }}</span>
@@ -50,7 +80,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
       </header>
 
       @if (Detail.unlabelledAnswerCount > 0) {
-        <p class="unlabelled" role="status">
+        <p class="rd-note" role="status">
           <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
           {{ Detail.unlabelledAnswerCount }}
           {{ Detail.unlabelledAnswerCount === 1 ? 'answer is' : 'answers are' }} not shown:
@@ -60,7 +90,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
       }
 
       @if (Detail.answers.length === 0) {
-        <p class="empty">
+        <p class="rd-empty">
           {{ Detail.unlabelledAnswerCount > 0
              ? 'None of this response’s answers could be labelled.'
              : 'This response has no answers.' }}
@@ -72,46 +102,52 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
               <dt>{{ a.prompt }}</dt>
               <dd>
                 @if (a.file; as f) {
-                  <button type="button" class="file" (click)="OpenFile(f.fileId)">
-                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+                  <!-- Clicking downloads the file itself. It used to open the MJ: Files RECORD,
+                       which is a metadata page about a row — never what someone reviewing an
+                       application wanted from a résumé. A revoked file has no bytes left to
+                       fetch, so it stays a plain label rather than a button that can only fail. -->
+                  <button
+                    type="button"
+                    class="file"
+                    [disabled]="f.isRevoked || DownloadingFileId === f.fileId"
+                    [attr.aria-busy]="DownloadingFileId === f.fileId"
+                    [title]="f.isRevoked ? 'This file was revoked and is no longer stored' : 'Download ' + f.fileName"
+                    (click)="DownloadFile(f)"
+                  >
+                    @if (DownloadingFileId === f.fileId) {
+                      <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                    } @else {
+                      <i class="fa-solid fa-download" aria-hidden="true"></i>
+                    }
                     <span class="file-name" [class.file-name--unresolved]="!f.isResolved">{{ f.fileName }}</span>
                     @if (f.sizeBytes !== null) {
                       <span class="file-size">{{ FileSize(f.sizeBytes) }}</span>
                     }
                   </button>
                   @if (f.isRevoked) {
-                    <span class="badge badge--revoked" title="This file has been revoked and is no longer retrievable">Revoked</span>
+                    <span class="mjf-badge mjf-badge--warning" title="This file has been revoked and is no longer retrievable">Revoked</span>
                   }
                   @if (!f.isResolved) {
                     <span
-                      class="badge badge--unresolved"
-                      title="A file was submitted, but its upload record could not be read. The link still opens the file record.">Details unavailable</span>
+                      class="mjf-badge"
+                      title="A file was submitted, but its upload record could not be read. Downloading it may still work.">Details unavailable</span>
+                  }
+                  <!-- The record is still one click away for anyone who wants the metadata; it
+                       is just no longer what the filename does. -->
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                    [title]="'Open the file record for ' + f.fileName"
+                    [attr.aria-label]="'Open the file record for ' + f.fileName"
+                    (click)="OpenFile(f.fileId)"
+                  >
+                    <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                  </button>
+                  @if (DownloadError && DownloadErrorFileId === f.fileId) {
+                    <span class="file-error" role="alert">{{ DownloadError }}</span>
                   }
                 } @else {
                   {{ a.displayValue || '—' }}
-                }
-
-                @if (a.score !== null) {
-                  <div class="score-row">
-                    <span class="score">
-                      <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-                      <span class="score-label">AI score</span>
-                      {{ a.score }}
-                    </span>
-                    @if (a.scoreRationale) {
-                      <button
-                        type="button"
-                        class="score-toggle"
-                        [attr.aria-expanded]="IsRationaleOpen(a)"
-                        [attr.aria-controls]="'rationale-' + a.questionId"
-                        (click)="ToggleRationale(a)">
-                        Why this score?
-                      </button>
-                    }
-                  </div>
-                  @if (a.scoreRationale && IsRationaleOpen(a)) {
-                    <p class="rationale" [id]="'rationale-' + a.questionId">{{ a.scoreRationale }}</p>
-                  }
                 }
               </dd>
             </div>
@@ -120,7 +156,7 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
       }
 
       @if (Detail.unavailableSections.length > 0) {
-        <p class="unlabelled" role="status">
+        <p class="rd-note" role="status">
           <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
           Could not load {{ Detail.unavailableSections.join(', ') }} for this response — your
           role may not have read access. What is shown below is incomplete rather than empty.
@@ -128,12 +164,12 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
       }
 
       @if (Detail.automationRuns.length > 0 || Detail.bindingRecords.length > 0) {
-        <section class="did">
-          <h3 class="did-title">What this submission did</h3>
+        <section class="rd-did">
+          <h3 class="mjf-section-title rd-did-title">What this submission did</h3>
 
           @for (r of Detail.automationRuns; track r.runId) {
             <div class="run">
-              <span class="pill" [class]="'pill--' + r.status.toLowerCase()">{{ r.status }}</span>
+              <span class="mjf-badge" [class]="RunTone(r)">{{ r.status }}</span>
               <span class="run-name">{{ r.automationName }}</span>
               <span class="run-meta">
                 @if (r.durationSeconds !== null) {
@@ -142,10 +178,10 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
                 {{ r.attemptCount }} {{ r.attemptCount === 1 ? 'attempt' : 'attempts' }}
               </span>
               @if (r.actionExecutionLogId) {
-                <button type="button" class="link" (click)="OpenActionLog(r)">Action log</button>
+                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenActionLog(r)">Action log</button>
               }
               @if (r.aiAgentRunId) {
-                <button type="button" class="link" (click)="OpenAgentRun(r)">Agent run</button>
+                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenAgentRun(r)">Agent run</button>
               }
               @if (r.errorMessage) {
                 <p class="run-error">{{ r.errorMessage }}</p>
@@ -158,10 +194,10 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
           @for (b of Detail.bindingRecords; track b.bindingRecordId) {
             <div class="bind">
-              <span class="pill" [class]="'pill--' + b.outcome.toLowerCase()">{{ b.outcome }}</span>
+              <span class="mjf-badge" [class]="OutcomeTone(b)">{{ b.outcome }}</span>
               <span class="bind-entity">{{ b.targetEntityName ?? b.targetEntityId }}</span>
               @if (b.targetEntityName && b.targetRecordId) {
-                <button type="button" class="link" (click)="OpenBoundRecord(b.targetEntityName, b.targetRecordId)">
+                <button type="button" class="mjf-btn mjf-btn--quiet mjf-btn--sm" (click)="OpenBoundRecord(b.targetEntityName, b.targetRecordId)">
                   Open record
                 </button>
               }
@@ -175,269 +211,161 @@ const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
     </div>
   `,
   styles: [
+    FORMS_UI_CSS,
     `
-      .detail-head {
-        display: flex;
-        flex-direction: column;
-        gap: var(--mj-space-2);
-        margin-bottom: var(--mj-space-4);
-      }
-      .back {
-        align-self: flex-start;
-        background: none;
-        border: none;
-        color: var(--mj-brand-primary);
-        cursor: pointer;
-        font-size: 13px;
-        /* The sole escape from the detail view on a phone — it gets a real tap target. */
-        min-height: 44px;
-        display: inline-flex;
-        align-items: center;
-        gap: var(--mj-space-1);
-        padding: 0 var(--mj-space-1);
-      }
-      .meta {
-        display: flex;
-        gap: var(--mj-space-2);
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .respondent {
-        font-weight: 600;
-        color: var(--mj-text-primary);
-      }
-      .ts {
-        font-size: 12px;
-        color: var(--mj-text-muted);
-      }
-      .status {
-        display: inline-block;
-        padding: 2px var(--mj-space-2);
-        border-radius: var(--mj-radius-full);
-        font-size: 11px;
-        background: var(--mj-bg-surface-sunken);
+      :host { display: block; }
+      .rd { display: flex; flex-direction: column; gap: var(--mjf-stack); }
+
+      /* --- header --- */
+
+      .rd-head { display: flex; flex-direction: column; align-items: flex-start; gap: var(--mjf-gap-sm); }
+      /* The sole escape from the detail view, so it is drawn as a real button rather than
+         a bare link: a border, a radius and a hover it visibly responds to. The arrow
+         slides on hover to say which way it goes. */
+      .rd-back {
+        padding: 0 14px;
         color: var(--mj-text-secondary);
+        background: var(--mj-bg-surface);
+        border: 1px solid var(--mj-border-default);
+        border-radius: var(--mjf-radius-pill);
       }
-      .status--complete {
-        background: var(--mj-status-success-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-success-text, var(--mj-text-secondary));
+      .rd-back:hover:not(:disabled) {
+        color: var(--mj-text-primary);
+        background: var(--mj-bg-surface-hover);
+        border-color: var(--mj-border-strong);
       }
-      .empty {
-        color: var(--mj-text-muted);
-        font-style: italic;
+      .rd-back i { transition: transform var(--mjf-ease); }
+      .rd-back:hover i { transform: translateX(-2px); }
+      .meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--mjf-gap-sm); }
+      .respondent { font-size: var(--mjf-section); font-weight: 600; color: var(--mj-text-primary); }
+      .ts { font-size: var(--mjf-meta); color: var(--mj-text-muted); }
+
+      /* --- notes --- */
+
+      .rd-note {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--mjf-gap-sm);
+        margin: 0;
+        padding: 12px 16px;
+        font-size: var(--mjf-meta);
+        line-height: 1.5;
+        border: 1px solid var(--mj-status-warning-border);
+        border-radius: var(--mjf-radius-sm);
+        background: var(--mj-status-warning-bg);
+        color: var(--mj-status-warning-text);
       }
-      .unlabelled {
-        margin: 0 0 var(--mj-space-3);
-        font-size: 13px;
-        color: var(--mj-status-warning-text, var(--mj-text-secondary));
-      }
-      .score-label {
-        /* Named for assistive tech and for anyone who does not know the wand glyph;
-           a title attribute alone never appears on touch. */
-        font-weight: 600;
-      }
+      .rd-empty { margin: 0; font-size: var(--mjf-body); color: var(--mj-text-muted); }
+
+      /* --- answers ---
+         One card, one row per answer. Separating rows with a hairline rather than
+         giving each answer its own card keeps a 20-question response readable as a
+         single transcript instead of a stack of twenty boxes. */
+
       .answers {
         margin: 0;
         display: flex;
         flex-direction: column;
-        gap: var(--mj-space-3);
+        border: 1px solid var(--mj-border-subtle);
+        border-radius: var(--mjf-radius);
+        background: var(--mj-bg-surface);
+        overflow: hidden;
       }
+      .answer { padding: var(--mjf-card-pad); }
+      .answer + .answer { border-top: 1px solid var(--mjf-rule); }
       .answer dt {
-        font-size: 13px;
+        margin: 0 0 6px;
+        font-size: var(--mjf-meta);
         font-weight: 600;
         color: var(--mj-text-secondary);
-        margin-bottom: var(--mj-space-1);
       }
       .answer dd {
         margin: 0;
-        font-size: 14px;
+        font-size: var(--mjf-body);
+        line-height: 1.55;
         color: var(--mj-text-primary);
         white-space: pre-wrap;
       }
 
-      /* File answers */
+      /* --- file answers --- */
+
       .file {
         display: inline-flex;
         align-items: center;
-        gap: var(--mj-space-2);
+        gap: var(--mjf-gap-sm);
+        min-height: var(--mjf-tap);
+        padding: 0 12px;
         font: inherit;
-        min-height: 44px;
-        padding: var(--mj-space-1) var(--mj-space-2);
+        font-size: var(--mjf-meta);
+        font-weight: 500;
+        text-align: left;
+        cursor: pointer;
         border: 1px solid var(--mj-border-default);
-        border-radius: var(--mj-radius-md);
+        border-radius: var(--mjf-radius-sm);
         background: var(--mj-bg-surface);
         color: var(--mj-text-link, var(--mj-brand-primary));
-        cursor: pointer;
-        text-align: left;
+        transition: background var(--mjf-ease), border-color var(--mjf-ease);
       }
-      .file:hover {
-        background: var(--mj-bg-surface-hover);
-      }
-      .file-name {
-        overflow-wrap: anywhere;
-      }
-      .file-name--unresolved {
-        font-style: italic;
+      .file:hover { background: var(--mj-bg-surface-hover); border-color: var(--mj-border-strong); }
+      .file:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+      /* A revoked file has no bytes behind it, so the control reads as unavailable rather than
+         as something that will work if pressed harder. */
+      .file:disabled {
+        cursor: not-allowed;
         color: var(--mj-text-muted);
-      }
-      .file-size {
-        color: var(--mj-text-muted);
-        font-size: 12px;
-        font-variant-numeric: tabular-nums;
-      }
-      .badge {
-        display: inline-block;
-        margin-left: var(--mj-space-2);
-        padding: 2px var(--mj-space-2);
-        border-radius: var(--mj-radius-full);
-        font-size: 11px;
-      }
-      .badge--unresolved {
         background: var(--mj-bg-surface-sunken);
-        color: var(--mj-text-muted);
-        border: 1px solid var(--mj-border-default);
       }
-      .badge--revoked {
-        background: var(--mj-status-warning-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-warning-text, var(--mj-text-secondary));
-        border: 1px solid var(--mj-status-warning-border, var(--mj-border-default));
-      }
+      .file:disabled:hover { background: var(--mj-bg-surface-sunken); border-color: var(--mj-border-default); }
+      .file-name { overflow-wrap: anywhere; }
+      .file-name--unresolved { font-style: italic; color: var(--mj-text-muted); }
+      .file-size { color: var(--mj-text-muted); font-variant-numeric: tabular-nums; }
+      /* Beside the file it belongs to, never as a page-level banner: which file failed is the
+         first thing the reader needs to know. */
+      .file-error { font-size: var(--mjf-meta); color: var(--mj-status-error-text); }
 
-      /* AI scoring */
-      .score-row {
-        display: flex;
-        align-items: center;
-        gap: var(--mj-space-2);
-        margin-top: var(--mj-space-1);
-      }
-      .score {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--mj-space-1);
-        padding: 2px var(--mj-space-2);
-        border-radius: var(--mj-radius-full);
-        font-size: 11px;
-        font-variant-numeric: tabular-nums;
-        background: var(--mj-status-info-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-info-text, var(--mj-text-secondary));
-      }
-      .score-toggle {
-        font: inherit;
-        font-size: 12px;
-        min-height: 44px;
-        padding: 0 var(--mj-space-1);
-        background: none;
-        border: none;
-        color: var(--mj-brand-primary);
-        cursor: pointer;
-      }
-      .rationale {
-        margin: var(--mj-space-1) 0 0;
-        font-size: 13px;
-        color: var(--mj-text-secondary);
-        white-space: pre-wrap;
-      }
+      /* --- what this submission did --- */
 
-      /* What this submission did */
-      .did {
-        margin-top: var(--mj-space-5, var(--mj-space-4));
-        padding-top: var(--mj-space-4);
-        border-top: 1px solid var(--mj-border-subtle);
-        display: flex;
-        flex-direction: column;
-        gap: var(--mj-space-2);
-      }
-      .did-title {
-        margin: 0 0 var(--mj-space-1);
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--mj-text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
+      .rd-did { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); }
+      .rd-did-title { margin-bottom: var(--mjf-gap-xs); }
       .run,
       .bind {
         display: flex;
         align-items: center;
-        gap: var(--mj-space-2);
         flex-wrap: wrap;
-        font-size: 13px;
+        gap: var(--mjf-gap-sm);
+        padding: 12px var(--mjf-card-pad-sm);
+        font-size: var(--mjf-meta);
         color: var(--mj-text-primary);
+        border: 1px solid var(--mj-border-subtle);
+        border-radius: var(--mjf-radius-sm);
+        background: var(--mj-bg-surface);
       }
       .run-name,
-      .bind-entity {
-        font-weight: 600;
-      }
+      .bind-entity { font-weight: 600; }
       .run-meta,
-      .bind-fields {
-        color: var(--mj-text-muted);
-        font-size: 12px;
-      }
+      .bind-fields { color: var(--mj-text-muted); }
       .run-error,
-      .run-output {
-        flex-basis: 100%;
-        margin: 0;
-        font-size: 12px;
-        white-space: pre-wrap;
-      }
-      .run-error {
-        color: var(--mj-status-error-text, var(--mj-status-error));
-      }
-      .run-output {
-        color: var(--mj-text-muted);
-      }
-      .link {
-        font: inherit;
-        font-size: 12px;
-        min-height: 44px;
-        padding: 0 var(--mj-space-1);
-        background: none;
-        border: none;
-        color: var(--mj-brand-primary);
-        cursor: pointer;
-      }
-
-      /*
-       * Run/outcome states are SEMANTIC status colors, never the brand accent — a green
-       * "Succeeded" and a red "Failed" must read as status even when the accent is red.
-       */
-      .pill {
-        display: inline-block;
-        padding: 2px var(--mj-space-2);
-        border-radius: var(--mj-radius-full);
-        font-size: 11px;
-        background: var(--mj-bg-surface-sunken);
-        color: var(--mj-text-secondary);
-      }
-      .pill--succeeded,
-      .pill--created {
-        background: var(--mj-status-success-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-success-text, var(--mj-text-secondary));
-      }
-      .pill--failed {
-        background: var(--mj-status-error-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-error-text, var(--mj-text-secondary));
-      }
-      .pill--running,
-      .pill--merged {
-        background: var(--mj-status-info-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-info-text, var(--mj-text-secondary));
-      }
-      .pill--pending {
-        background: var(--mj-status-warning-bg, var(--mj-bg-surface-sunken));
-        color: var(--mj-status-warning-text, var(--mj-text-secondary));
-      }
+      .run-output { flex-basis: 100%; margin: 0; font-size: var(--mjf-label); line-height: 1.5; white-space: pre-wrap; }
+      .run-error { color: var(--mj-status-error-text); }
+      .run-output { color: var(--mj-text-muted); }
 
       @media (max-width: 600px) {
         .run,
-        .bind {
-          align-items: flex-start;
-        }
+        .bind { align-items: flex-start; }
       }
     `,
   ],
 })
 export class FormsResponseDetailComponent implements AfterViewInit {
+  private readonly downloads = inject(ResponseFileDownloadService);
+  private readonly cdr = inject(ChangeDetectorRef);
+
+  /** The file currently being fetched, so only its own row shows a spinner. */
+  public DownloadingFileId = '';
+  /** The last download failure, and which file it belongs to. */
+  public DownloadError = '';
+  public DownloadErrorFileId = '';
+
   @Input({ required: true }) Detail!: ResponseDetail;
 
   /**
@@ -466,16 +394,42 @@ export class FormsResponseDetailComponent implements AfterViewInit {
     this.backButton?.nativeElement.focus();
   }
 
-  /** Question ids whose score rationale is expanded. */
-  private readonly openRationales = new Set<string>();
-
-  public IsRationaleOpen(a: ResponseAnswerView): boolean {
-    return this.openRationales.has(a.questionId);
+  /** Badge tone for an automation run's status. See RUN_TONE. */
+  public RunTone(r: ResponseAutomationRunView): string {
+    return RUN_TONE[r.status] ?? '';
   }
 
-  public ToggleRationale(a: ResponseAnswerView): void {
-    if (!this.openRationales.delete(a.questionId)) {
-      this.openRationales.add(a.questionId);
+  /** Badge tone for a binding record's outcome. See OUTCOME_TONE. */
+  public OutcomeTone(b: ResponseBindingRecordView): string {
+    return OUTCOME_TONE[b.outcome] ?? '';
+  }
+
+  /**
+   * Download one file answer.
+   *
+   * State is kept per file id rather than as a single boolean so a failure lands next to the
+   * file it belongs to. A reviewer looking at a response with a résumé and a signature needs to
+   * know which one did not arrive, and one shared error message beside both answers that
+   * question wrongly half the time.
+   */
+  public async DownloadFile(file: ResponseFileView): Promise<void> {
+    if (file.isRevoked || this.DownloadingFileId) {
+      return;
+    }
+    this.DownloadingFileId = file.fileId;
+    this.DownloadError = '';
+    this.DownloadErrorFileId = '';
+    try {
+      const outcome = await this.downloads.download(file.fileId, file.fileName);
+      if (!outcome.ok) {
+        this.DownloadError = outcome.error ?? 'The download did not go through.';
+        this.DownloadErrorFileId = file.fileId;
+      }
+    } finally {
+      this.DownloadingFileId = '';
+      // OnPush with an awaited handler: without this the spinner never clears, because nothing
+      // else on this component changes when the promise settles.
+      this.cdr.markForCheck();
     }
   }
 

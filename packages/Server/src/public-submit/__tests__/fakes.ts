@@ -309,6 +309,8 @@ export function makeDefinition(overrides?: Partial<PublishedFormDefinition>): Pu
         ],
       },
     ],
+    automations: [],
+    endScreens: [],
     ...overrides,
   };
 }

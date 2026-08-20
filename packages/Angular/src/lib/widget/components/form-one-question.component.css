@@ -1,9 +1,30 @@
+/* Progress pinned to the top, the question centred in whatever is left.
+   The card used to sit at the top of a 60vh box, which was wrong twice over: one question on a
+   tall screen read as a page that had failed to finish loading, and `vh` is a VIEWPORT unit in a
+   widget that is embedded inside other people's layouts — in a preview frame, or in a sidebar,
+   60vh is 60% of a window this element does not own, so the box was routinely taller than the
+   space it was given. Flex fills the actual container and ignores the question entirely. */
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .mjf-oneq {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 1.5rem;
-  min-height: 60vh;
 }
+
+.mjf-oneq__progress { flex: none; }
+
+/* auto margins eat the free space above AND below, which is what centres it — and collapses to
+   nothing when the question is taller than the container, so a long question still scrolls
+   from the top instead of having its head cut off. */
+.mjf-oneq__card { margin: auto 0; }
 
 .mjf-oneq__progress {
   display: flex;
@@ -15,11 +36,21 @@
   flex: 1;
 }
 
+/* "3 of 9" is gone from the page but not from the form: the bar already shows the position,
+   and a second copy of it in words was noise beside it. It stays in the accessibility tree
+   because a progress bar conveys nothing to a screen reader on its own, and this span is the
+   live region that announces each step as the respondent moves. Hidden, not deleted. */
 .mjf-oneq__step {
-  font-family: var(--mjf-font-body);
-  font-size: 0.875rem;
-  color: var(--mj-text-muted);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
+  border: 0;
 }
 
 .mjf-oneq__card {
@@ -82,10 +113,10 @@
 }
 
 .mjf-oneq__empty {
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
-@media (min-width: 640px) {
+@container mjf (min-width: 640px) {
   .mjf-oneq__card {
     padding: 3rem;
   }

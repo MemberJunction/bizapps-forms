@@ -1,3 +1,10 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .mjf-scroll {
   display: flex;
   flex-direction: column;
@@ -38,7 +45,7 @@
 
 .mjf-page__desc {
   margin: 0;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-page__questions {
@@ -80,7 +87,7 @@
   box-shadow: var(--mjf-focus-ring);
 }
 
-@media (min-width: 640px) {
+@container mjf (min-width: 640px) {
   .mjf-page {
     padding: 2rem;
   }

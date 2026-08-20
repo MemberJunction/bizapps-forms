@@ -8,25 +8,28 @@
 }
 
 .mjf-question__label {
-  display: inline-flex;
+  display: flex;
   align-items: baseline;
   gap: 0.25rem;
   font-family: var(--mjf-font-body);
   font-weight: 600;
-  font-size: 1.0625rem;
+  font-size: var(--mjf-question-size);
+  /* justify-content, not text-align: the label is a flex row (prompt + required marker),
+     so text-align would not move it. */
+  justify-content: var(--mjf-question-align);
   line-height: 1.4;
   color: var(--mjf-page-ink);
 }
 
 .mjf-question__required {
-  color: var(--mj-status-error);
+  color: var(--mjf-status-error);
   font-weight: 700;
 }
 
 .mjf-question__help {
   margin: 0;
   font-size: 0.9375rem;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-question__control {
@@ -66,13 +69,26 @@
 }
 
 .mjf-question--error .mjf-input {
-  border-color: var(--mj-status-error);
+  border-color: var(--mjf-status-error);
+}
+
+/* A composite is several fields wearing one question's clothes, so the question-wide rule above
+   reddened all five inputs because the email was malformed. Red only works while it is scarce:
+   it says "look HERE", and five of them says "hunt". Sub-fields opt out and are marked one at a
+   time from aria-invalid, which the template already sets per field — so the visual state and
+   the state screen readers get cannot drift apart. When the failure is group-level (required),
+   every sub-field carries aria-invalid and the group lights up as before, correctly. */
+.mjf-question--error .mjf-composite .mjf-input {
+  border-color: var(--mjf-input-border);
+}
+.mjf-question--error .mjf-composite .mjf-input[aria-invalid='true'] {
+  border-color: var(--mjf-status-error);
 }
 
 .mjf-question__error {
   margin: 0;
   font-size: 0.875rem;
-  color: var(--mj-status-error);
+  color: var(--mjf-status-error);
 }
 
 /* ---- Choice buttons (Single / Multi / YesNo) ---- */
@@ -114,6 +130,54 @@
   background: var(--mjf-choice-selected-bg);
   border-color: var(--mjf-choice-selected-border);
   color: var(--mjf-choice-selected-text);
+}
+
+/* The A/B/C badge, which IS the choice indicator — there is no separate radio or checkbox.
+
+   Both together read as two boxes on one row, which is how it shipped for about ten minutes and
+   how it was rightly reported. What the mark was carrying — whether you may pick more than one —
+   is now said in words above the list, which is clearer than a shape a respondent has to already
+   know how to read.
+
+   Every colour here is a --mjf-* token the widget itself declares. The widget is a standalone
+   custom element on someone else's page: a bare --mj-* would resolve to nothing there, and the
+   badge would render as invisible text on no background. */
+.mjf-choice__letter {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.3rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--mjf-accent);
+  background: var(--mjf-choice-bg);
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mj-radius-sm, 0.25rem);
+}
+
+.mjf-choice--selected .mjf-choice__letter,
+.mjf-pic--selected .mjf-choice__letter {
+  color: var(--mjf-on-accent);
+  background: var(--mjf-accent);
+  border-color: var(--mjf-accent);
+}
+
+/* Inside a picture choice the badge shares a line with the label, so it needs the gap the
+   flex row gives it in a plain choice. */
+.mjf-pic__label { display: flex; align-items: center; gap: 0.5rem; }
+
+/* Says the thing the checkbox shape used to imply. Above the options rather than below, because
+   it changes how the respondent reads the list they are about to look at. */
+.mjf-choices__hint {
+  margin: 0 0 0.5rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.875rem;
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-choice__mark {
@@ -182,7 +246,7 @@
   color: var(--mjf-on-accent);
 }
 
-@media (max-width: 480px) {
+@container mjf (max-width: 480px) {
   .mjf-nps {
     grid-template-columns: repeat(6, 1fr);
   }
@@ -192,7 +256,7 @@
 .mjf-file__name {
   margin: 0.5rem 0 0;
   font-size: 0.875rem;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-file__progress {
@@ -227,7 +291,7 @@
 .mjf-file__status {
   margin: 0.5rem 0 0;
   font-size: 0.875rem;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 .mjf-file__status .mjf-file__ok {
@@ -240,7 +304,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  color: var(--mj-status-error);
+  color: var(--mjf-status-error);
 }
 
 .mjf-file__retry {
@@ -282,7 +346,7 @@
 
 .mjf-statement__help {
   margin: 0.375rem 0 0;
-  color: var(--mj-text-muted);
+  color: var(--mjf-page-ink-muted);
 }
 
 /* ---- a11y ---- */
@@ -296,4 +360,338 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ---- PictureChoice ---- */
+.mjf-pics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.mjf-pic {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  background: var(--mjf-choice-bg);
+  border: 2px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-choice-radius);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.mjf-pic:hover { border-color: var(--mjf-accent); }
+.mjf-pic:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+
+.mjf-pic--selected {
+  background: var(--mjf-choice-selected-bg);
+  border-color: var(--mjf-choice-selected-border);
+  color: var(--mjf-choice-selected-text);
+}
+
+.mjf-pic__img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: calc(var(--mjf-choice-radius) - 2px);
+}
+
+/* An option with no image still needs to occupy its slot — a collapsed tile in a grid of
+   pictures reads as a broken image, not as an option without one. */
+.mjf-pic__img--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mjf-page-sunken);
+  color: var(--mjf-page-ink-faint);
+  font-size: 1.5rem;
+}
+
+.mjf-pic__label { font-size: 0.9375rem; color: var(--mjf-page-ink); }
+
+/* ---- OpinionScale ---- */
+.mjf-scale { display: flex; flex-direction: column; gap: 0.375rem; }
+
+.mjf-scale__row { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+
+.mjf-scale__btn {
+  flex: 1 1 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  color: var(--mjf-page-ink);
+  background: var(--mjf-choice-bg);
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-choice-radius);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mjf-scale__btn:hover { border-color: var(--mjf-accent); }
+.mjf-scale__btn:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+
+.mjf-scale__btn--selected {
+  background: var(--mjf-accent);
+  border-color: var(--mjf-accent);
+  color: var(--mjf-on-accent);
+}
+
+.mjf-scale__ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8125rem;
+  color: var(--mjf-page-ink-muted);
+}
+
+/* ---- Ranking ---- */
+.mjf-rank { display: flex; flex-direction: column; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+
+.mjf-rank__hint {
+  margin: 0 0 0.5rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.875rem;
+  color: var(--mjf-page-ink-muted);
+}
+
+.mjf-rank__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--mjf-choice-bg);
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-choice-radius);
+  transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* ---- Dragging ----
+   The buttons remain the accessible path; this is the pointer one. Everything below is CDK's
+   own class contract, styled here so the gesture reads: the item lifts, the list opens a gap
+   where it will land, and the rest slide rather than jump. */
+
+.mjf-rank__grip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.75rem;
+  color: var(--mjf-page-ink-muted);
+  cursor: grab;
+  /* Stops a drag on touch from scrolling the page instead — without it the gesture is simply
+     unavailable on a phone, which is where this widget mostly runs. */
+  touch-action: none;
+}
+.mjf-rank__grip:active { cursor: grabbing; }
+.mjf-rank__item:hover .mjf-rank__grip { color: var(--mjf-page-ink); }
+
+/* THE GRAB. The instant the handle is pressed — before the pointer has travelled far enough for
+   a drag to begin — the row pops: it grows a little and lifts off the page. This is the moment
+   that makes the control feel physical, and it is the one CDK gives no class for, so it hangs
+   off :active on the handle.
+
+   Scaling is safe HERE and nowhere later: from drag start onwards CDK writes an inline transform
+   to position the element, and an inline style beats a stylesheet, so a transform declared for
+   the dragging state would simply be discarded — or worse, fight the positioning. */
+.mjf-rank__item:has(.mjf-rank__grip:active) {
+  transform: scale(1.015);
+  box-shadow: var(--mjf-lift-shadow, 0 12px 28px rgba(20, 24, 31, 0.22));
+  border-color: var(--mjf-accent);
+  cursor: grabbing;
+}
+
+/* THE CARRY. Held above the list while it moves. The lift is drawn with shadow, border and a
+   trace of transparency rather than scale, for the inline-transform reason above — CDK owns
+   this element's transform for as long as the drag lasts. */
+.cdk-drag-preview.mjf-rank__item {
+  box-shadow: var(--mjf-lift-shadow, 0 12px 28px rgba(20, 24, 31, 0.22));
+  border-color: var(--mjf-accent);
+  background: var(--mjf-choice-bg);
+  opacity: 0.96;
+  cursor: grabbing;
+}
+
+/* The hole it came out of. An outline rather than a blank, so the list keeps its shape and the
+   landing place is obvious. */
+.mjf-rank__ghost {
+  height: 3rem;
+  border: 1px dashed var(--mjf-accent);
+  border-radius: var(--mjf-choice-radius);
+  background: var(--mjf-choice-selected-bg);
+  opacity: 0.6;
+}
+
+/* Items sliding out of the way, and the item settling after release. */
+.cdk-drag-animating,
+.cdk-drop-list-dragging .mjf-rank__item:not(.cdk-drag-placeholder) {
+  transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ---- Arrow reorder ----
+   A drag explains itself: you carried the row. The arrows did not — the list simply re-rendered
+   with two rows swapped, and the eye cannot track an object it never saw move. The travel is
+   done in script (see rank-motion.ts, Web Animations) because only script knows where the rows
+   used to be. What is left for CSS is the other half: WHICH row was yours.
+
+   Both rows in a swap travel, so motion alone is ambiguous. The mark answers that, then leaves.
+
+   It borrows the accent border the drag lift already uses, because it means the same thing in a
+   later moment: this is the row in play. Deliberately NOT a fill (that is what a selected choice
+   looks like — nothing was selected here) and deliberately weaker than the focus ring at 35%,
+   so "you moved this" and "you are focused here" stay legible as two different signals on the
+   same row at the same time, which is exactly what a keyboard respondent sees. The fade in and
+   out comes free from the border-color / box-shadow transition already on .mjf-rank__item. */
+.mjf-rank__item--moved {
+  border-color: var(--mjf-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mjf-accent) 18%, transparent);
+}
+
+/* The position badge is the thing that actually CHANGED — it is the number they were reading.
+   A brief scale draws the eye to it after the row lands, so the new rank is read rather than
+   assumed. */
+.mjf-rank__item--moved .mjf-rank__pos {
+  animation: mjf-rank-pos-pop 0.42s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes mjf-rank-pos-pop {
+  0%   { transform: scale(1); }
+  38%  { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mjf-rank__item:has(.mjf-rank__grip:active) { transform: none; }
+  .cdk-drag-animating,
+  .cdk-drop-list-dragging .mjf-rank__item:not(.cdk-drag-placeholder) { transition: none; }
+  /* The mark stays — it is the non-motion half of the feedback, and the half this setting
+     makes load-bearing. Only the movement goes. */
+  .mjf-rank__item--moved .mjf-rank__pos { animation: none; }
+}
+
+.mjf-rank__pos {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--mjf-on-accent);
+  background: var(--mjf-accent);
+  border-radius: 50%;
+}
+
+.mjf-rank__label { flex: 1; color: var(--mjf-page-ink); }
+.mjf-rank__moves { flex: none; display: flex; gap: 0.25rem; }
+
+.mjf-rank__move {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  cursor: pointer;
+  color: var(--mjf-page-ink-soft);
+  background: transparent;
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-choice-radius);
+}
+
+.mjf-rank__move:hover:not(:disabled) { border-color: var(--mjf-accent); color: var(--mjf-accent); }
+.mjf-rank__move:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-rank__move:disabled { opacity: 0.35; cursor: default; }
+
+/* ---- Matrix ---- */
+/* The grid is the one control here that cannot reflow to a phone width, so it scrolls INSIDE
+   its own box. Without this the page itself scrolls sideways and every other question on it
+   goes with it. */
+.mjf-matrix-wrap { overflow-x: auto; }
+
+.mjf-matrix { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+
+.mjf-matrix__col,
+.mjf-matrix__row {
+  padding: 0.5rem 0.625rem;
+  font-weight: 600;
+  color: var(--mjf-page-ink-soft);
+  text-align: center;
+}
+
+.mjf-matrix__row { text-align: left; color: var(--mjf-page-ink); white-space: nowrap; }
+.mjf-matrix__corner { padding: 0.5rem; }
+
+.mjf-matrix tbody tr { border-top: 1px solid var(--mjf-choice-border); }
+.mjf-matrix__cell { padding: 0.375rem; text-align: center; }
+
+.mjf-matrix__pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+
+.mjf-matrix__pick:hover { background: var(--mjf-accent-soft); }
+.mjf-matrix__pick:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+.mjf-matrix__pick--selected .mjf-choice__mark { border-color: var(--mjf-accent); background: var(--mjf-accent); }
+
+/* ---- Checkbox (single consent) / Legal ---- */
+.mjf-consent { width: 100%; }
+
+.mjf-legal { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.mjf-legal__terms {
+  max-height: 12rem;
+  overflow-y: auto;
+  padding: 0.875rem 1rem;
+  white-space: pre-wrap;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--mjf-page-ink-soft);
+  background: var(--mjf-page-sunken);
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-input-radius);
+}
+
+.mjf-legal__terms:focus-visible { outline: none; box-shadow: var(--mjf-focus-ring); }
+
+/* ---- Composites (Address / ContactInfo) ---- */
+.mjf-composite {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+/* Street lines run the full width; a two-column street address reads as two fields. */
+.mjf-composite__field--wide { grid-column: 1 / -1; }
+
+.mjf-composite__field { display: flex; flex-direction: column; gap: 0.25rem; }
+
+/* Sits directly beneath the input it belongs to: proximity is what makes a respondent read it
+   as "this field", which the old bottom-of-the-group placement actively defeated — a bad email
+   put its message under Phone. `grid-column` inheritance is not a concern; the field is a
+   flex column, so the message simply follows its input. */
+.mjf-composite__error {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--mjf-status-error);
+}
+
+.mjf-composite__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--mjf-page-ink-muted);
 }

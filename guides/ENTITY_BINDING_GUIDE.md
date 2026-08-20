@@ -255,7 +255,7 @@ public path completely broken and every unit test passing.
 | `Forms: Bind Response To Entity` action | `packages/Actions/src/custom/binding/bind-response-to-entity.action.ts` |
 | Recovery sweep | `packages/Server/src/automation/recovery-sweep.ts` |
 | Upload provenance | `packages/Server/src/upload/upload-provenance.service.ts` |
-| Builder "On Submit" tab | `packages/Angular/src/lib/builder/automation-tab.component.ts` |
+| Builder "Automate" tab | `packages/Angular/src/lib/builder/automation-tab.component.ts` |
 | Service principal, allow-list, sweep | `packages/Server/src/automation/{service-principal,allowed-entities,recovery-sweep}.ts` |
 
 The split that matters: **policy is testable without a database, I/O is not**. Everything in

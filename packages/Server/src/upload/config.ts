@@ -13,7 +13,13 @@
  *  - `FORMS_UPLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID to force a specific
  *                                   account; when unset the engine uses the first active one.
  *  - `FORMS_UPLOAD_PATH_PREFIX`     Optional storage path prefix. Default `forms-uploads/<date>`.
+ *                                   REFUSED if it lands under the authoring-asset prefix — see
+ *                                   {@link assertUploadPrefixIsPrivate}.
  */
+
+import { LogError } from '@memberjunction/core';
+
+import { assertUploadPrefixIsPrivate, formatBytes } from '../asset/config.js';
 
 /** Route the public upload endpoint is served from (the frozen widget contract). */
 export const UPLOAD_ROUTE = '/forms/upload';
@@ -78,7 +84,7 @@ export function getUploadConfig(): UploadConfig {
     maxBytes: numberFromEnv('FORMS_UPLOAD_MAX_BYTES', DEFAULT_MAX_BYTES),
     allowedTypes: allowedTypesFromEnv(),
     storageAccountId: process.env.FORMS_UPLOAD_STORAGE_ACCOUNT?.trim() || undefined,
-    pathPrefix: process.env.FORMS_UPLOAD_PATH_PREFIX?.trim() || undefined,
+    pathPrefix: privatePathPrefix(),
   });
   return cached;
 }
@@ -103,7 +109,54 @@ export function contentTypeAllowed(contentType: string | undefined, allowed: rea
   });
 }
 
+/**
+ * The configured respondent-upload prefix, refusing one that would land these files under the
+ * world-readable authoring-asset prefix. A misconfiguration here would publish every file a
+ * respondent ever uploaded, so it fails loudly to the log and falls back rather than obeying.
+ */
+function privatePathPrefix(): string | undefined {
+  const requested = process.env.FORMS_UPLOAD_PATH_PREFIX?.trim() || undefined;
+  const verdict = assertUploadPrefixIsPrivate(requested);
+  if (verdict.refused) {
+    LogError(`[Forms] ${verdict.refused}`);
+  }
+  return verdict.prefix;
+}
+
 /** Test-only: clear the memoized config so env changes take effect. */
 export function resetUploadConfigForTests(): void {
   cached = undefined;
+}
+
+/**
+ * Slack between the raw-body cap and the file cap, for the multipart envelope — boundary
+ * lines, part headers, the field parts that travel beside the file.
+ */
+const MULTIPART_ENVELOPE_HEADROOM = 64 * 1024;
+
+/**
+ * Byte cap for the raw request body, deliberately ABOVE the file cap.
+ *
+ * The body reader is a memory guard, not the size policy. Capping the body at exactly
+ * `maxBytes` made it the policy by accident: it fired before the file was ever inspected,
+ * so a respondent who picked a slightly-too-big file read "Upload exceeds the maximum size
+ * of 10485760 bytes" while the file check's own sentence was unreachable through the route.
+ * It also rejected a file of exactly the limit, because the envelope pushed the body past
+ * the cap — making the advertised limit a lie by a few hundred bytes.
+ *
+ * The authoring asset route hit this and fixed it; the PUBLIC upload route kept the bug,
+ * which is the worse half — respondents cannot read source to work out what went wrong.
+ */
+export function uploadBodyCap(): number {
+  return getUploadConfig().maxBytes + MULTIPART_ENVELOPE_HEADROOM;
+}
+
+/**
+ * The one wording for "too big", shared by the body reader and the file check.
+ *
+ * Both can reject an oversized upload, at different layers and against different numbers,
+ * and a respondent should not be able to tell which one fired.
+ */
+export function uploadTooLargeMessage(): string {
+  return `That file is larger than the ${formatBytes(getUploadConfig().maxBytes)} limit.`;
 }

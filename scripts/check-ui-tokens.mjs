@@ -78,6 +78,28 @@ const NAMED_COLOR_RE = new RegExp(
   'i',
 );
 
+/**
+ * Opt-out marker, on the line immediately before the literal.
+ *
+ * Narrow on purpose, and it must carry a reason after the em dash. There IS a case where a
+ * literal is the only correct value — a colour picker's saturation/value plane is built from
+ * literal white and black because they are the AXES of the colour space, not theme decisions,
+ * and its cursor ring must stay visible over whatever colour sits under it. A gate with no
+ * escape hatch gets disabled wholesale the first time it is wrong; one that demands a written
+ * reason stays on.
+ */
+const ALLOW_MARKER = /ui-gate:\s*allow-literal-color(?:\((\d+)\))?\s*—\s*\S/;
+
+/** How many following lines a marker covers (default 1), or 0 when the line is not a marker. */
+function allowanceOn(line) {
+  const m = ALLOW_MARKER.exec(line);
+  if (!m) return 0;
+  return m[1] ? Math.min(Number(m[1]), MAX_ALLOWANCE_LINES) : 1;
+}
+
+/** A marker covers a handful of lines, never a file. Anything longer wants a different fix. */
+const MAX_ALLOWANCE_LINES = 12;
+
 /** Color keywords that are always allowed as values. */
 const ALLOWED_COLOR_KEYWORDS = ['transparent', 'currentcolor', 'inherit', 'none', 'initial', 'unset'];
 
@@ -150,6 +172,42 @@ function isAllowedColorLine(line) {
   return false;
 }
 
+/**
+ * Blank out comments so PROSE about colour is not read as colour.
+ *
+ * The gate used to flag its own documentation — a sentence explaining which colours failed a
+ * contrast check tripped the hex pattern, and a comment naming `#fff` as the thing NOT to write
+ * was reported as writing it. A gate that fires on the explanation of why it exists teaches
+ * people to stop reading it.
+ */
+function stripComments(lines) {
+  let inBlock = false;
+  return lines.map((line) => {
+    let out = '';
+    let i = 0;
+    while (i < line.length) {
+      if (inBlock) {
+        const end = line.indexOf('*/', i);
+        if (end === -1) return out;
+        inBlock = false;
+        i = end + 2;
+        continue;
+      }
+      const start = line.indexOf('/*', i);
+      // `//` only when it opens the line's remaining content — never inside a URL.
+      const slash = /^\s*\/\//.test(line.slice(i)) ? line.indexOf('//', i) : -1;
+      if (slash !== -1 && (start === -1 || slash < start)) {
+        return out + line.slice(i, slash);
+      }
+      if (start === -1) return out + line.slice(i);
+      out += line.slice(i, start);
+      inBlock = true;
+      i = start + 2;
+    }
+    return out;
+  });
+}
+
 /** Does the (possibly var()-stripped) text contain a raw color literal value? */
 function hasRawColorLiteral(text) {
   for (const { re } of COLOR_PATTERNS) {
@@ -173,19 +231,37 @@ function runColorGate(files) {
   for (const abs of files) {
     if (!COLOR_GATE_EXTS.has(extname(abs))) continue;
     const text = readFileSync(abs, 'utf8');
-    const lines = text.split(/\r?\n/);
+    const raw = text.split(/\r?\n/);
+    const lines = stripComments(raw);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!hasRawColorLiteral(line)) continue; // fast reject
       if (isAllowedColorLine(line)) continue;
+      // The marker is read from the RAW lines above — it lives in a comment.
+      if (isAllowed(raw, lines, i)) continue;
       violations.push({
         file: relative(REPO_ROOT, abs),
         line: i + 1,
-        text: line.trim().slice(0, 120),
+        text: raw[i].trim().slice(0, 120),
       });
     }
   }
   return violations;
+}
+
+/** Whether a marker above line `i` still covers it. */
+function isAllowed(raw, lines, i) {
+  // The span counts CODE lines, skipping the comment the marker itself sits in. Counting raw
+  // lines made the number depend on how long the justification was — write a fuller reason and
+  // your own marker stops reaching the thing it excuses, which is precisely backwards.
+  let code = 0;
+  for (let j = i - 1; j >= 0; j--) {
+    const span = allowanceOn(raw[j]);
+    if (span > 0) return span > code;
+    if (lines[j].trim() !== '') code++;
+    if (code > MAX_ALLOWANCE_LINES) return false;
+  }
+  return false;
 }
 
 function runButtonGate(files) {

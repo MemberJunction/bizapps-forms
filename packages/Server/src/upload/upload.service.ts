@@ -19,10 +19,14 @@
  */
 import { LogError, Metadata } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { answerColumnFor, isFormQuestionType } from '@mj-biz-apps/forms-entities';
+import { randomUUID } from 'node:crypto';
+
+
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
-import { contentTypeAllowed, getUploadConfig } from './config';
+import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
 
 /** What the service needs about the just-parsed request. */
@@ -182,10 +186,13 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
     return fail(400, 'Uploaded file is empty.');
   }
   if (file.data.length > cfg.maxBytes) {
-    return fail(413, `File exceeds the maximum allowed size of ${cfg.maxBytes} bytes.`);
+    return fail(413, uploadTooLargeMessage());
   }
   if (!contentTypeAllowed(file.contentType, cfg.allowedTypes)) {
-    return fail(415, `Content type "${file.contentType}" is not allowed.`);
+    return fail(
+      415,
+      `Files of type "${file.contentType}" are not accepted here. ${describeAllowedTypes(cfg.allowedTypes)}`,
+    );
   }
   return { ok: true };
 }
@@ -287,8 +294,18 @@ function validateQuestion(
   if (!question) {
     return fail(400, 'Unknown "questionId" for this form.');
   }
-  if (question.type !== 'FileUpload') {
-    return fail(400, `Question is not a FileUpload question (got "${question.type}").`);
+  // Ask the question-type contract whether this answer IS a file, rather than naming one type.
+  // The hardcoded 'FileUpload' rejected every Signature upload with a 400 — the pad exports a
+  // PNG and sends it down this exact route, so the respondent drew a signature and got
+  // "Upload failed (HTTP 400)" underneath it with nothing to do about it. Both types declare
+  // `answerColumn: 'file'`, which is the property this guard was always reaching for: the
+  // ledger row must match a file answer at submit, and that is decided by the column, not the
+  // type name. Anything else added to that column later works here without a second edit.
+  // Guarded rather than cast: `type` arrives as a plain string off the published snapshot (it
+  // is JSON), so a definition published by an older or newer build can carry a type this server
+  // does not know. Treating an unrecognised one as "not a file" keeps the endpoint fail-closed.
+  if (!isFormQuestionType(question.type) || answerColumnFor(question.type) !== 'file') {
+    return fail(400, `Question does not take a file answer (got "${question.type}").`);
   }
   // Return the DEFINITION's id, not the caller's — the one place that decides which question this
   // upload answered, so the ledger cannot record a spelling the definition disagrees with.
@@ -320,7 +337,7 @@ async function storeFile(
       mimeType: bareContentType(file.contentType),
       contextUser: writer,
       storageAccountId: cfg.storageAccountId,
-      pathPrefix: cfg.pathPrefix ?? defaultPathPrefix(),
+      pathPrefix: uploadPathPrefix(cfg.pathPrefix),
     });
 
     if (resolved) {
@@ -381,6 +398,48 @@ function safeFileName(filename: string): string {
 }
 
 /** Default storage path prefix: `forms-uploads/<YYYY-MM-DD>`. */
-function defaultPathPrefix(): string {
-  return `forms-uploads/${new Date().toISOString().slice(0, 10)}`;
+/**
+ * The allow-list, as a sentence a respondent can act on.
+ *
+ * Deliberately families rather than the raw MIME list: "application/vnd.openxmlformats-
+ * officedocument.wordprocessingml.document" is the correct answer to a question nobody
+ * asked, and eleven of them is not a hint, it is a wall. Naming the recognisable kinds
+ * gets someone to the right file; the exact list stays in config for the operator.
+ */
+function describeAllowedTypes(allowed: readonly string[]): string {
+  const families = new Set<string>();
+  for (const type of allowed) {
+    if (type.startsWith('image/')) families.add('images');
+    else if (type === 'application/pdf') families.add('PDFs');
+    else if (type.startsWith('text/')) families.add('text files');
+    else families.add('Word and Excel documents');
+  }
+  const names = [...families];
+  if (names.length === 0) {
+    return 'No file types are currently accepted.';
+  }
+  const list =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `You can upload ${list}.`;
+}
+
+/**
+ * Where one upload's bytes go, given whatever prefix the operator configured.
+ *
+ * The UUID is the whole point, not decoration. The object path is `<prefix>/<filename>`, and the
+ * signature pad names every file it exports `signature.png` — so without a unique segment every
+ * signature drawn on a given day, by every respondent, on every form, resolved to ONE object.
+ * Each upload overwrote the previous one while its own MJ: Files row was created happily, leaving
+ * several responses pointing at whichever bytes landed last: a respondent's signature replaced by
+ * a stranger's, now served to a reviewer with a 200 by the download route.
+ *
+ * `configured` is folded in HERE rather than short-circuiting this function, because the first
+ * version of this fix lived in a `?? defaultPathPrefix()` fallback — which meant it protected only
+ * the hosts that had configured nothing, and `FORMS_UPLOAD_PATH_PREFIX` (documented and supported)
+ * silently put the data loss back. Uniqueness is an invariant of the path, so it belongs on every
+ * path this builds. The date stays because it makes the store browsable.
+ */
+export function uploadPathPrefix(configured?: string): string {
+  const base = configured?.replace(/\/+$/, '') || `forms-uploads/${new Date().toISOString().slice(0, 10)}`;
+  return `${base}/${randomUUID()}`;
 }

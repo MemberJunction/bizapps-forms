@@ -17,7 +17,7 @@ import { MaxLength } from 'class-validator';
 import * as mj_core_schema_server_object_types from '@memberjunction/server'
 
 
-import { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormAutomationEntity, mjBizAppsFormsFormCategoryEntity, mjBizAppsFormsFormDistributionEntity, mjBizAppsFormsFormEntityBindingRecordEntity, mjBizAppsFormsFormEntityBindingEntity, mjBizAppsFormsFormPageEntity, mjBizAppsFormsFormQuestionOptionEntity, mjBizAppsFormsFormQuestionEntity, mjBizAppsFormsFormResponseAnswerEntity, mjBizAppsFormsFormResponseEntity, mjBizAppsFormsFormStyleEntity, mjBizAppsFormsFormUploadEntity, mjBizAppsFormsFormVersionEntity, mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
+import { mjBizAppsFormsFormAutomationRunEntity, mjBizAppsFormsFormAutomationEntity, mjBizAppsFormsFormCategoryEntity, mjBizAppsFormsFormDistributionEntity, mjBizAppsFormsFormEntityBindingRecordEntity, mjBizAppsFormsFormEntityBindingEntity, mjBizAppsFormsFormPageEntity, mjBizAppsFormsFormQuestionOptionEntity, mjBizAppsFormsFormQuestionEntity, mjBizAppsFormsFormResponseAnswerEntity, mjBizAppsFormsFormResponseEntity, mjBizAppsFormsFormScreenEntity, mjBizAppsFormsFormStyleEntity, mjBizAppsFormsFormUploadEntity, mjBizAppsFormsFormVersionEntity, mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
     
 
 //****************************************************************************
@@ -1532,6 +1532,9 @@ export class mjBizAppsFormsFormPage_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field(() => Boolean, {description: `When set, advancing past this page banks a Partial response immediately instead of waiting for the autosave debounce`}) 
+    IsPartialSubmitPoint: boolean;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -1564,6 +1567,9 @@ export class CreatemjBizAppsFormsFormPageInput {
     @Field({ nullable: true })
     ConditionalRule: string | null;
 
+    @Field(() => Boolean, { nullable: true })
+    IsPartialSubmitPoint?: boolean;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -1591,6 +1597,9 @@ export class UpdatemjBizAppsFormsFormPageInput {
 
     @Field({ nullable: true })
     ConditionalRule?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsPartialSubmitPoint?: boolean;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -1728,6 +1737,14 @@ export class mjBizAppsFormsFormQuestionOption_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true, description: `PictureChoice only: image shown above the option label. Ignored by every other question type`}) 
+    @MaxLength(1000)
+    ImageURL?: string;
+        
+    @Field({nullable: true, description: `Matrix only: whether this option is a Row or a Column of the grid. NULL for every other question type, and read as Row if left NULL on a Matrix`}) 
+    @MaxLength(20)
+    MatrixAxis?: string;
+        
 }
 
 //****************************************************************************
@@ -1752,6 +1769,12 @@ export class CreatemjBizAppsFormsFormQuestionOptionInput {
 
     @Field(() => Boolean, { nullable: true })
     IsDefault?: boolean;
+
+    @Field({ nullable: true })
+    ImageURL: string | null;
+
+    @Field({ nullable: true })
+    MatrixAxis: string | null;
 
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
@@ -1780,6 +1803,12 @@ export class UpdatemjBizAppsFormsFormQuestionOptionInput {
 
     @Field(() => Boolean, { nullable: true })
     IsDefault?: boolean;
+
+    @Field({ nullable: true })
+    ImageURL?: string | null;
+
+    @Field({ nullable: true })
+    MatrixAxis?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -2638,6 +2667,246 @@ export class mjBizAppsFormsFormResponseResolver extends ResolverBase {
 }
 
 //****************************************************************************
+// ENTITY CLASS for MJ_BizApps_Forms: Form Screens
+//****************************************************************************
+@ObjectType({ description: `Welcome and Ending screens for a form. Distinct from questions: a screen is never answered, produces no FormResponseAnswer row, appears in no aggregation and cannot be referenced by a conditional rule. It brackets the intake rather than sitting inside it` })
+export class mjBizAppsFormsFormScreen_ {
+    @Field() 
+    @MaxLength(36)
+    ID: string;
+        
+    @Field() 
+    @MaxLength(36)
+    FormID: string;
+        
+    @Field({description: `Whether this screen is shown before intake begins (Welcome) or after a successful submit (Ending)`}) 
+    @MaxLength(20)
+    ScreenType: string;
+        
+    @Field({description: `Headline shown on the screen`}) 
+    @MaxLength(500)
+    Title: string;
+        
+    @Field({nullable: true, description: `Body copy shown under the title. Plain text — the widget does not render HTML from this column`}) 
+    Body?: string;
+        
+    @Field({nullable: true, description: `Label for the screens single button. The widget supplies Start / Done when this is blank`}) 
+    @MaxLength(100)
+    ButtonLabel?: string;
+        
+    @Field({nullable: true, description: `Optional image shown above the title`}) 
+    @MaxLength(1000)
+    MediaURL?: string;
+        
+    @Field({nullable: true, description: `Ending only: send the respondent here instead of showing this screen. Takes precedence over the form-wide redirect in Form.Settings`}) 
+    @MaxLength(1000)
+    RedirectURL?: string;
+        
+    @Field(() => Int, {description: `Order among the forms Ending screens. Resolution walks them in this order and takes the first whose ConditionalRule the answers satisfy`}) 
+    DisplayOrder: number;
+        
+    @Field({nullable: true, description: `Ending only: JSON ConditionalRule deciding whether this ending applies to a given response. Unlike a page rule, a blank rule here does NOT mean always — it means this screen is only reachable as the default`}) 
+    ConditionalRule?: string;
+        
+    @Field(() => Boolean, {description: `Ending only: the fallback shown when no conditional ending matched`}) 
+    IsDefault: boolean;
+        
+    @Field() 
+    _mj__CreatedAt: Date;
+        
+    @Field() 
+    _mj__UpdatedAt: Date;
+        
+    @Field({nullable: true, description: `Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`}) 
+    SocialLinks?: string;
+        
+    @Field() 
+    @MaxLength(255)
+    Form: string;
+        
+}
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Screens
+//****************************************************************************
+@InputType()
+export class CreatemjBizAppsFormsFormScreenInput {
+    @Field({ nullable: true })
+    ID?: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    ScreenType?: string;
+
+    @Field({ nullable: true })
+    Title?: string;
+
+    @Field({ nullable: true })
+    Body: string | null;
+
+    @Field({ nullable: true })
+    ButtonLabel: string | null;
+
+    @Field({ nullable: true })
+    MediaURL: string | null;
+
+    @Field({ nullable: true })
+    RedirectURL: string | null;
+
+    @Field(() => Int, { nullable: true })
+    DisplayOrder?: number;
+
+    @Field({ nullable: true })
+    ConditionalRule: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsDefault?: boolean;
+
+    @Field({ nullable: true })
+    SocialLinks: string | null;
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+
+//****************************************************************************
+// INPUT TYPE for MJ_BizApps_Forms: Form Screens
+//****************************************************************************
+@InputType()
+export class UpdatemjBizAppsFormsFormScreenInput {
+    @Field()
+    ID: string;
+
+    @Field({ nullable: true })
+    FormID?: string;
+
+    @Field({ nullable: true })
+    ScreenType?: string;
+
+    @Field({ nullable: true })
+    Title?: string;
+
+    @Field({ nullable: true })
+    Body?: string | null;
+
+    @Field({ nullable: true })
+    ButtonLabel?: string | null;
+
+    @Field({ nullable: true })
+    MediaURL?: string | null;
+
+    @Field({ nullable: true })
+    RedirectURL?: string | null;
+
+    @Field(() => Int, { nullable: true })
+    DisplayOrder?: number;
+
+    @Field({ nullable: true })
+    ConditionalRule?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsDefault?: boolean;
+
+    @Field({ nullable: true })
+    SocialLinks?: string | null;
+
+    @Field(() => [KeyValuePairInput], { nullable: true })
+    OldValues___?: KeyValuePairInput[];
+
+    @Field(() => RestoreContextInput, { nullable: true })
+    RestoreContext___?: RestoreContextInput;
+}
+    
+//****************************************************************************
+// RESOLVER for MJ_BizApps_Forms: Form Screens
+//****************************************************************************
+@ObjectType()
+export class RunmjBizAppsFormsFormScreenViewResult {
+    @Field(() => [mjBizAppsFormsFormScreen_])
+    Results: mjBizAppsFormsFormScreen_[];
+
+    @Field(() => String, {nullable: true})
+    UserViewRunID?: string;
+
+    @Field(() => Int, {nullable: true})
+    RowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    TotalRowCount: number;
+
+    @Field(() => Int, {nullable: true})
+    ExecutionTime: number;
+
+    @Field({nullable: true})
+    ErrorMessage?: string;
+
+    @Field(() => Boolean, {nullable: false})
+    Success: boolean;
+}
+
+@Resolver(mjBizAppsFormsFormScreen_)
+export class mjBizAppsFormsFormScreenResolver extends ResolverBase {
+    @Query(() => RunmjBizAppsFormsFormScreenViewResult)
+    async RunmjBizAppsFormsFormScreenViewByID(@Arg('input', () => RunViewByIDInput) input: RunViewByIDInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByIDGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormScreenViewResult)
+    async RunmjBizAppsFormsFormScreenViewByName(@Arg('input', () => RunViewByNameInput) input: RunViewByNameInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        return super.RunViewByNameGeneric(input, provider, userPayload, pubSub);
+    }
+
+    @Query(() => RunmjBizAppsFormsFormScreenViewResult)
+    async RunmjBizAppsFormsFormScreenDynamicView(@Arg('input', () => RunDynamicViewInput) input: RunDynamicViewInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        input.EntityName = 'MJ_BizApps_Forms: Form Screens';
+        return super.RunDynamicViewGeneric(input, provider, userPayload, pubSub);
+    }
+    @Query(() => mjBizAppsFormsFormScreen_, { nullable: true })
+    async mjBizAppsFormsFormScreen(@Arg('ID', () => String) ID: string, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine): Promise<mjBizAppsFormsFormScreen_ | null> {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Screens', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormScreens')} WHERE ${provider.QuoteIdentifier('ID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Screens', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.MapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Screens', rows && rows.length > 0 ? rows[0] : null, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormScreen_)
+    async CreatemjBizAppsFormsFormScreen(
+        @Arg('input', () => CreatemjBizAppsFormsFormScreenInput) input: CreatemjBizAppsFormsFormScreenInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.CreateRecord('MJ_BizApps_Forms: Form Screens', input, provider, userPayload, pubSub)
+    }
+        
+    @Mutation(() => mjBizAppsFormsFormScreen_)
+    async UpdatemjBizAppsFormsFormScreen(
+        @Arg('input', () => UpdatemjBizAppsFormsFormScreenInput) input: UpdatemjBizAppsFormsFormScreenInput,
+        @Ctx() { providers, userPayload }: AppContext,
+        @PubSub() pubSub: PubSubEngine
+    ) {
+        const provider = GetReadWriteProvider(providers);
+        return this.UpdateRecord('MJ_BizApps_Forms: Form Screens', input, provider, userPayload, pubSub);
+    }
+    
+    @Mutation(() => mjBizAppsFormsFormScreen_)
+    async DeletemjBizAppsFormsFormScreen(@Arg('ID', () => String) ID: string, @Arg('options___', () => DeleteOptionsInput) options: DeleteOptionsInput, @Ctx() { providers, userPayload }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        const provider = GetReadWriteProvider(providers);
+        const key = new CompositeKey([{FieldName: 'ID', Value: ID}]);
+        return this.DeleteRecord('MJ_BizApps_Forms: Form Screens', key, options, provider, userPayload, pubSub);
+    }
+    
+}
+
+//****************************************************************************
 // ENTITY CLASS for MJ_BizApps_Forms: Form Styles
 //****************************************************************************
 @ObjectType({ description: `Reusable visual themes (design-token overrides + custom CSS) that a Form can adopt` })
@@ -3352,6 +3621,13 @@ export class mjBizAppsFormsForm_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field(() => Boolean, {description: `When 1 this Form is a reusable template rather than a live form: it is hidden from the forms list, cannot be published or distributed, and is offered in the template gallery as a starting point. Creating a form from a template deep-copies it, so the two are independent afterwards. Templates are the only forms that may be deleted, which is safe precisely because CK_Form_TemplateNotPublished stops one ever collecting a response`}) 
+    IsTemplate: boolean;
+        
+    @Field({nullable: true, description: `On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source`}) 
+    @MaxLength(36)
+    TemplateSourceFormID?: string;
+        
     @Field({nullable: true}) 
     @MaxLength(255)
     Category?: string;
@@ -3363,6 +3639,14 @@ export class mjBizAppsFormsForm_ {
     @Field({nullable: true}) 
     @MaxLength(100)
     OwnerUser?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    TemplateSourceForm?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(36)
+    RootTemplateSourceFormID?: string;
         
     @Field(() => [mjBizAppsFormsFormDistribution_])
     mjBizAppsFormsFormDistributions_FormIDArray: mjBizAppsFormsFormDistribution_[]; // Link to mjBizAppsFormsFormDistributions
@@ -3387,6 +3671,12 @@ export class mjBizAppsFormsForm_ {
     
     @Field(() => [mjBizAppsFormsFormUpload_])
     mjBizAppsFormsFormUploads_FormIDArray: mjBizAppsFormsFormUpload_[]; // Link to mjBizAppsFormsFormUploads
+    
+    @Field(() => [mjBizAppsFormsFormScreen_])
+    mjBizAppsFormsFormScreens_FormIDArray: mjBizAppsFormsFormScreen_[]; // Link to mjBizAppsFormsFormScreens
+    
+    @Field(() => [mjBizAppsFormsForm_])
+    mjBizAppsFormsForms_TemplateSourceFormIDArray: mjBizAppsFormsForm_[]; // Link to mjBizAppsFormsForms
     
 }
 
@@ -3421,6 +3711,12 @@ export class CreatemjBizAppsFormsFormInput {
 
     @Field({ nullable: true })
     Settings: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsTemplate?: boolean;
+
+    @Field({ nullable: true })
+    TemplateSourceFormID: string | null;
 
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
@@ -3458,6 +3754,12 @@ export class UpdatemjBizAppsFormsFormInput {
 
     @Field({ nullable: true })
     Settings?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsTemplate?: boolean;
+
+    @Field({ nullable: true })
+    TemplateSourceFormID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -3600,6 +3902,26 @@ export class mjBizAppsFormsFormResolver extends ResolverBase {
         const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormUploads')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Uploads', userPayload, EntityPermissionType.Read, 'AND');
         const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
         const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Uploads', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsFormScreen_])
+    async mjBizAppsFormsFormScreens_FormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Form Screens', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwFormScreens')} WHERE ${provider.QuoteIdentifier('FormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Form Screens', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Form Screens', rows, this.GetUserFromPayload(userPayload));
+        return result;
+    }
+        
+    @FieldResolver(() => [mjBizAppsFormsForm_])
+    async mjBizAppsFormsForms_TemplateSourceFormIDArray(@Root() mjbizappsformsform_: mjBizAppsFormsForm_, @Ctx() { userPayload, providers }: AppContext, @PubSub() pubSub: PubSubEngine) {
+        this.CheckUserReadPermissions('MJ_BizApps_Forms: Forms', userPayload);
+        const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+        const sSQL = `SELECT * FROM ${provider.QuoteSchemaAndView('__mj_BizAppsForms', 'vwForms')} WHERE ${provider.QuoteIdentifier('TemplateSourceFormID')}=${provider.BuildParameterPlaceholder(0)} ` + this.getRowLevelSecurityWhereClause(provider, 'MJ_BizApps_Forms: Forms', userPayload, EntityPermissionType.Read, 'AND');
+        const rows = await provider.ExecuteSQL(sSQL, [mjbizappsformsform_.ID], undefined, this.GetUserFromPayload(userPayload));
+        const result = await this.ArrayMapFieldNamesToCodeNames('MJ_BizApps_Forms: Forms', rows, this.GetUserFromPayload(userPayload));
         return result;
     }
         

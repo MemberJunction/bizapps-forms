@@ -7,6 +7,8 @@
 import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
+  isAnswerableQuestionType,
+  answerCompleteness,
   isAnswerSupplied,
   type AnswerValue,
   type FormAnswerInput,
@@ -16,6 +18,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 
 import { toAnswerInputs } from './answer-value';
+import { computeProgress } from './progress';
 import { validateQuestion } from './validation';
 
 export class FormRuntime {
@@ -27,6 +30,34 @@ export class FormRuntime {
   // --- Answer access -------------------------------------------------------
 
   public readonly answerMap = this.answers.asReadonly();
+
+  /**
+   * The live answer map, for consumers that evaluate a rule over the WHOLE response rather
+   * than one question — ending-screen resolution is the only one today.
+   *
+   * Read-only by type so a caller cannot mutate the runtime's state behind its back: every
+   * write goes through `setValue`, which is what keeps the derived signals correct.
+   */
+  public currentAnswers(): ReadonlyMap<string, AnswerValue> {
+    return this.answers();
+  }
+
+  /**
+   * Ids of the questions that currently hold a real answer.
+   *
+   * Uses the contract's `isAnswerSupplied` — the same "is this answered" definition the required
+   * check and the conditional evaluator use — rather than "has a map entry", which a focused-then-
+   * abandoned field also satisfies.
+   */
+  public answeredQuestionIds(): ReadonlySet<string> {
+    const ids = new Set<string>();
+    for (const [questionId, value] of this.answers()) {
+      if (isAnswerSupplied(value)) {
+        ids.add(questionId);
+      }
+    }
+    return ids;
+  }
 
   public valueFor(questionId: string): AnswerValue {
     return this.answers().get(questionId);
@@ -73,12 +104,12 @@ export class FormRuntime {
       .filter((q) => evaluateConditionalRule(q.conditionalRule, map));
   }
 
-  /** Every visible, non-statement question across the form, in document order. */
+  /** Every visible, answer-collecting question across the form, in document order. */
   public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() => {
     const out: PublishedFormQuestion[] = [];
     for (const page of this.visiblePages()) {
       for (const q of this.visibleQuestions(page)) {
-        if (q.type !== 'Statement') {
+        if (isAnswerableQuestionType(q.type)) {
           out.push(q);
         }
       }
@@ -96,6 +127,20 @@ export class FormRuntime {
   /** Error shown in the UI only after the field has been touched. */
   public visibleErrorFor(question: PublishedFormQuestion): string | null {
     return this.isTouched(question.id) ? this.errorFor(question) : null;
+  }
+
+  /**
+   * Per-sub-field errors for a composite, on the SAME touched gate as {@link visibleErrorFor} —
+   * the two are one verdict shown two ways, so they must appear and clear together.
+   *
+   * `{}` when the question has no per-field problems, which includes every group-level failure;
+   * the renderer reads that as "show the one message under the group instead".
+   */
+  public visiblePartErrorsFor(question: PublishedFormQuestion): Record<string, string> {
+    if (!this.isTouched(question.id)) {
+      return {};
+    }
+    return validateQuestion(question, this.valueFor(question.id)).parts ?? {};
   }
 
   /** True when every supplied list of questions currently validates. */
@@ -122,14 +167,15 @@ export class FormRuntime {
   // --- Progress ------------------------------------------------------------
 
   /** Fraction 0–1 of visible answerable questions that have a value. */
-  public readonly progress = computed(() => {
-    const qs = this.visibleAnswerableQuestions();
-    if (qs.length === 0) {
-      return 1;
-    }
-    const answered = qs.filter((q) => isAnswerSupplied(this.valueFor(q.id))).length;
-    return answered / qs.length;
-  });
+  /** How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`. */
+  public readonly progress = computed(() =>
+    computeProgress(
+      this.visibleAnswerableQuestions().map((q) => ({
+        required: q.isRequired,
+        completeness: answerCompleteness(q.type, this.valueFor(q.id)),
+      })),
+    ),
+  );
 
   // --- Submission ----------------------------------------------------------
 

@@ -44,8 +44,8 @@ function respondentPerms(): Record<string, boolean> {
 
 /**
  * The published definition the fake distribution serves: the shared fake's ShortText question
- * plus the FileUpload question ('q-file') the requests here upload against — the endpoint now
- * verifies the question exists on the definition AND is a FileUpload question.
+ * plus the two file-answer questions the requests here upload against — the endpoint verifies
+ * the question exists on the definition AND that its answer lands in the file column.
  */
 function makeUploadDefinition() {
   const definition = makeDefinition();
@@ -55,6 +55,16 @@ function makeUploadDefinition() {
     prompt: 'Upload your résumé',
     isRequired: false,
     displayOrder: 2,
+    options: [],
+  });
+  // A Signature answer IS a file answer — the pad exports a PNG and sends it down this same
+  // route — so the definition carries one to upload against.
+  definition.pages[0].questions.push({
+    id: 'q-sign',
+    type: 'Signature',
+    prompt: 'Sign here',
+    isRequired: false,
+    displayOrder: 3,
     options: [],
   });
   return definition;
@@ -204,11 +214,87 @@ describe('runUpload', () => {
     expect(upload).not.toHaveBeenCalled();
   });
 
-  it('rejects (400) a questionId that is not a FileUpload question', async () => {
+  it('says what a refused file type should have been instead', async () => {
+    // "Content type "text/markdown" is not allowed." names the problem and stops. The
+    // respondent is now holding a file they cannot use and no idea what would work, so
+    // the next thing they try is a guess.
+    const { engine } = storageEngine();
+    const file = { ...pngFile(), filename: 'notes.md', contentType: 'text/markdown' };
+    const result = await runUpload(context({ storage: engine }), request({ file }));
+    expect(result.failure?.status).toBe(415);
+    expect(result.failure?.error).toMatch(/text\/markdown/);
+    expect(result.failure?.error.toLowerCase()).toMatch(/pdf|image/);
+  });
+
+  it('states the size cap in units a person reads, not raw bytes', async () => {
+    // "10485760 bytes" is a number from a spec sheet. The respondent has to divide by
+    // 1048576 to learn their file is 3 MB over — and this exact rawness was already fixed
+    // once on the authoring asset route, so the fix belongs in one place, not two.
+    const { engine } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ file: pngFile(50 * 1024 * 1024) }));
+    expect(result.failure?.status).toBe(413);
+    expect(result.failure?.error).toMatch(/\bMB\b/);
+    expect(result.failure?.error).not.toMatch(/\d{7,}/);
+  });
+
+  it('gives every upload its own storage path, even for identical filenames', async () => {
+    // DATA LOSS. The prefix was `forms-uploads/<date>` with nothing unique in it, and the
+    // signature pad names every file it exports `signature.png` — so every signature drawn
+    // on a given day, by every respondent, on every form, wrote to the SAME object path.
+    // Each upload silently overwrote the last, and the MJ: Files rows all pointed at one
+    // set of bytes, so a response ended up showing a stranger's signature. Verified on a
+    // real host: five uploads, one file on disk. MJ's own default prefix carries a UUID
+    // for exactly this reason; this one dropped it.
+    const { engine, upload } = storageEngine();
+    await runUpload(context({ storage: engine }), request());
+    await runUpload(context({ storage: engine }), request());
+    const [first, second] = upload.mock.calls.map((c) => c[0].pathPrefix);
+    expect(first).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
+  it('gives every upload its own path even when an operator configures the prefix', async () => {
+    // The fix above lived in the `?? defaultPathPrefix()` FALLBACK, so it only protected hosts
+    // that had not configured anything. `FORMS_UPLOAD_PATH_PREFIX` is a documented, supported
+    // setting, and setting it put back the exact data loss the fallback had just removed:
+    // `cfg.pathPrefix` is a constant string, so every `signature.png` writes to one object and
+    // the new download route hands a reviewer whichever respondent's signature landed last.
+    // Uniqueness has to be an invariant of the path builder, not of one branch of it.
+    process.env.FORMS_UPLOAD_PATH_PREFIX = 'forms-uploads';
+    resetUploadConfigForTests();
+    try {
+      const { engine, upload } = storageEngine();
+      await runUpload(context({ storage: engine }), request());
+      await runUpload(context({ storage: engine }), request());
+      const [first, second] = upload.mock.calls.map((c) => c[0].pathPrefix);
+      expect(first).toMatch(/^forms-uploads\//);
+      expect(second).not.toBe(first);
+    } finally {
+      delete process.env.FORMS_UPLOAD_PATH_PREFIX;
+      resetUploadConfigForTests();
+    }
+  });
+
+  it('accepts a Signature question, whose answer is a file drawn on a canvas', async () => {
+    // The shipped bug: the guard hardcoded 'FileUpload', so every signature came back 400
+    // and the respondent saw "Upload failed (HTTP 400)" under a signature they had just
+    // drawn, with no way forward. Signature and FileUpload both declare answerColumn:
+    // 'file' in the question-type contract, which is the thing this should be asking.
+    const { engine, upload } = storageEngine();
+    const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-sign' }));
+    expect(result.failure).toBeUndefined();
+    expect(result.success?.fileId).toBeTruthy();
+    expect(upload).toHaveBeenCalled();
+  });
+
+  it('rejects (400) a questionId whose answer is not a file at all', async () => {
+    // Still fail-closed for a text question: a ledger row minted against one could never be
+    // matched to a file answer at submit. Only the reason changed — the guard now asks the
+    // contract which column the answer lands in instead of naming a single type.
     const { engine, upload } = storageEngine();
     const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-name' }));
     expect(result.failure?.status).toBe(400);
-    expect(result.failure?.error).toMatch(/not a FileUpload question/);
+    expect(result.failure?.error).toMatch(/does not take a file answer/);
     expect(upload).not.toHaveBeenCalled();
   });
 

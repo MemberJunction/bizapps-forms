@@ -59,6 +59,31 @@
             [FormContext]="formContext"
             LinkType="Record"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="IsTemplate"
+            Type="checkbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="TemplateSourceFormID"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+            LinkType="Record"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="RootTemplateSourceFormID"
+            Type="textbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -90,7 +115,7 @@
             [Record]="record"
             [ShowLabel]="true"
             FieldName="Settings"
-            Type="code"
+            Type="textarea"
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
@@ -323,6 +348,56 @@
                 [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormUploads', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Form Screens Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormScreens"
+        SectionName="Form Screens"
+        Icon="fa fa-file-alt"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormScreens')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Screens','FormID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Screens')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormScreens')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormScreens', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Forms Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsForms"
+        SectionName="Forms"
+        Icon="fa fa-wpforms"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsForms')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Forms','TemplateSourceFormID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Forms')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsForms')"
+                [ShowToolbar]="false"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsForms', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>
