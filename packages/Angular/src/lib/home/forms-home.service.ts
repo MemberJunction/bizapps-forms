@@ -53,6 +53,11 @@ export class FormsHomeService {
       },
       {
         EntityName: HOME_ENTITY.responses,
+        // COMPLETE only, matching the reporting dashboard. A Partial row is an in-progress
+        // autosave, not a submitted response, and counting it here made the same form read
+        // "43 responses" on this page and "32 responses" on Responses & Analytics — two
+        // numbers for one fact, which sends the reader looking for the missing eleven.
+        ExtraFilter: `Status='Complete'`,
         ResultType: 'simple',
         Fields: ['FormID'],
       },

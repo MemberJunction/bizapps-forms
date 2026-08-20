@@ -4,6 +4,8 @@ import { questionTypeMeta } from '../../builder/question-type-catalog';
 import {
   answerRate,
   booleanSegments,
+  consentRate,
+  consentSegments,
   npsSegments,
   percent,
   plural,
@@ -27,13 +29,11 @@ const VERBATIM_PREVIEW = 3;
  * question, nothing in the chart can tell you, and the healthy-looking split is measuring a
  * self-selected third.
  *
- * WHY YES/NO IS NOT A DISTRIBUTION. It renders as a two-part proportion bar with semantic
- * colour rather than through the categorical chart — see `booleanSegments` for why the
- * rotation is wrong for it.
- *
- * VERBATIMS ARE FOLDED. Free text used to dump up to 200 answers into a 240px scroll box,
- * which is a wall of text inside a grid of cards and buries every card after it. Three are
- * shown; the rest are one click away.
+ * ONE CARD PER ROLE, NOT PER TYPE. What renders is chosen by `insightRoleFor`, so a Checkbox
+ * shows an acceptance rate rather than the fifty-fifty split its YesNo-shaped storage would
+ * suggest, and a Date shows months rather than a column of formatted dates. Identity,
+ * attachment and written-answer questions never reach this component at all — they have their
+ * own panels, because a bar chart cannot say anything true about any of them.
  */
 @Component({
   selector: 'mj-forms-question-breakdown',
@@ -59,27 +59,49 @@ const VERBATIM_PREVIEW = 3;
       </header>
 
       <div class="qb-body">
-        @switch (breakdown.kind) {
-          @case ('distribution') {
+        @switch (breakdown.role) {
+          @case ('choice') {
             <mj-forms-distribution-chart [buckets]="breakdown.buckets"></mj-forms-distribution-chart>
           }
-          @case ('boolean') {
+          @case ('temporal') {
+            <!-- Ordered: months and parts of the day are a sequence, so they keep one
+                 colour and are never sorted or truncated by count. -->
+            <mj-forms-distribution-chart
+              [buckets]="breakdown.buckets"
+              [ordered]="true"></mj-forms-distribution-chart>
+          }
+          @case ('sentiment') {
             @if (yesNo.length > 0) {
               <mj-forms-proportion-bar [segments]="yesNo"></mj-forms-proportion-bar>
             } @else {
               <p class="qb-none">No answers yet.</p>
             }
           }
-          @case ('numeric') {
+          @case ('consent') {
+            @if (acceptedLabel) {
+              <div class="qb-consent">
+                <div class="qb-headline">
+                  <span class="qb-headline-value">{{ acceptedLabel }}</span>
+                  <span class="qb-headline-caption">accepted</span>
+                </div>
+                <mj-forms-proportion-bar [segments]="consent"></mj-forms-proportion-bar>
+              </div>
+            } @else {
+              <p class="qb-none">Nobody has answered this yet.</p>
+            }
+          }
+          @case ('scale') {
             @if (breakdown.numeric; as n) {
               @if (n.npsScore !== null) {
                 <div class="qb-nps">
-                  <div class="qb-nps-score">
-                    <span class="qb-nps-value">{{ n.npsScore }}</span>
-                    <span class="qb-nps-caption">Net promoter score, −100 to 100</span>
+                  <div class="qb-headline">
+                    <span class="qb-headline-value">{{ n.npsScore }}</span>
+                    <span class="qb-headline-caption">Net promoter score, −100 to 100</span>
                   </div>
                   <mj-forms-proportion-bar [segments]="nps"></mj-forms-proportion-bar>
                 </div>
+              } @else if (n.answered === 0) {
+                <p class="qb-none">No answers yet.</p>
               } @else {
                 <dl class="qb-agg">
                   <div><dt>Average</dt><dd>{{ fmt(n.average) }}</dd></div>
@@ -89,21 +111,7 @@ const VERBATIM_PREVIEW = 3;
               }
             }
           }
-          @case ('files') {
-            @if (breakdown.answeredCount === 0) {
-              <p class="qb-none">Nothing attached yet.</p>
-            } @else {
-              <p class="qb-files">
-                <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
-                <span>
-                  <strong>{{ breakdown.answeredCount }}</strong>
-                  {{ breakdown.answeredCount === 1 ? 'file' : 'files' }} attached. Open a
-                  submission under <strong>Responses</strong> to view or download them.
-                </span>
-              </p>
-            }
-          }
-          @case ('freeText') {
+          @case ('composite') {
             @if (breakdown.textAnswers.length === 0) {
               <p class="qb-none">No answers yet.</p>
             } @else {
@@ -115,7 +123,7 @@ const VERBATIM_PREVIEW = 3;
               @if (hiddenTextCount() > 0 || expanded()) {
                 <button type="button" class="qb-more" (click)="toggle()">
                   <i class="fa-solid" [class.fa-chevron-down]="!expanded()" [class.fa-chevron-up]="expanded()" aria-hidden="true"></i>
-                  {{ expanded() ? 'Show fewer' : 'Read all ' + breakdown.textAnswers.length + ' answers' }}
+                  {{ expanded() ? 'Show fewer' : 'Show all ' + breakdown.textAnswers.length }}
                 </button>
               }
             }
@@ -167,9 +175,12 @@ const VERBATIM_PREVIEW = 3;
       .qb-body { flex: 1 1 auto; padding: var(--mjf-card-pad); min-width: 0; }
       .qb-none { margin: 0; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
 
-      .qb-nps { display: flex; flex-direction: column; gap: var(--mjf-gap); }
-      .qb-nps-score { display: flex; flex-direction: column; gap: 2px; }
-      .qb-nps-value {
+      .qb-nps,
+      .qb-consent { display: flex; flex-direction: column; gap: var(--mjf-gap); }
+      /* One headline treatment for the two cards whose answer IS a single figure — an NPS
+         score and an acceptance rate. Both are read before the bar under them. */
+      .qb-headline { display: flex; flex-direction: column; gap: 2px; }
+      .qb-headline-value {
         font-size: 2.5rem;
         font-weight: 650;
         line-height: 1;
@@ -177,7 +188,7 @@ const VERBATIM_PREVIEW = 3;
         color: var(--mj-text-primary);
         font-variant-numeric: tabular-nums;
       }
-      .qb-nps-caption { font-size: var(--mjf-label); color: var(--mj-text-muted); }
+      .qb-headline-caption { font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
       .qb-agg { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--mjf-gap-sm); margin: 0; }
       .qb-agg > div {
@@ -207,23 +218,6 @@ const VERBATIM_PREVIEW = 3;
         border-radius: 0 var(--mjf-radius-sm) var(--mjf-radius-sm) 0;
         overflow-wrap: anywhere;
       }
-
-      /* Not a chart and not pretending to be one. There is nothing to aggregate about a
-         set of files; the honest card says how many there are and where to open them. */
-      .qb-files {
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        margin: 0;
-        padding: 12px 14px;
-        font-size: var(--mjf-meta);
-        line-height: 1.5;
-        color: var(--mj-text-secondary);
-        background: var(--mj-bg-surface-sunken);
-        border-radius: var(--mjf-radius-sm);
-      }
-      .qb-files i { margin-top: 3px; color: var(--mj-text-muted); }
-      .qb-files strong { color: var(--mj-text-primary); }
 
       .qb-more {
         display: inline-flex;
@@ -291,6 +285,16 @@ export class FormsQuestionBreakdownComponent {
 
   public get yesNo(): ProportionSegment[] {
     return booleanSegments(this.breakdown.buckets);
+  }
+
+  public get consent(): ProportionSegment[] {
+    return consentSegments(this.breakdown.buckets);
+  }
+
+  /** "94%", or empty when nobody answered and there is no rate to state. */
+  public get acceptedLabel(): string {
+    const rate = consentRate(this.breakdown.buckets);
+    return rate === null ? '' : percent(rate);
   }
 
   public get nps(): ProportionSegment[] {

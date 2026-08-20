@@ -30,6 +30,8 @@ import {
 } from './reporting-view-model';
 
 import { FormsSummaryStatsComponent } from './components/summary-stats.component';
+import { FormsRespondentProfileComponent } from './components/respondent-profile.component';
+import { FormsOpenTextPanelComponent } from './components/open-text-panel.component';
 import { FormsQuestionBreakdownComponent } from './components/question-breakdown.component';
 import { FormsFunnelChartComponent } from './components/funnel-chart.component';
 import { FormsResponseListComponent } from '../responses/response-list.component';
@@ -74,6 +76,8 @@ type DashboardMode = 'insights' | 'responses';
   imports: [
     FormsModule,
     FormsSummaryStatsComponent,
+    FormsRespondentProfileComponent,
+    FormsOpenTextPanelComponent,
     FormsQuestionBreakdownComponent,
     FormsFunnelChartComponent,
     FormsResponseListComponent,
@@ -265,6 +269,18 @@ export class FormsReportingDashboardComponent extends BaseDashboard {
 
   public get completionLabel(): string {
     return percent(this.report?.summary.completionRate ?? 0);
+  }
+
+  /**
+   * Whether the form asks anything that profiles a respondent.
+   *
+   * Absent for an anonymous survey, and the section is then omitted entirely rather than
+   * rendered empty — "0 contactable" on a form that never asked for contact details is a
+   * finding about nothing.
+   */
+  public get hasProfile(): boolean {
+    const profile = this.report?.profile;
+    return !!profile && !profile.isEmpty && profile.metrics.length > 0;
   }
 
   public async openResponse(responseId: string): Promise<void> {

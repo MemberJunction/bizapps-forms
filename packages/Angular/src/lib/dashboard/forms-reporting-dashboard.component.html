@@ -160,11 +160,23 @@
                     </section>
                   }
 
+                  @if (hasProfile) {
+                    <section class="mjf-section">
+                      <div class="mjf-section-head">
+                        <h4 class="mjf-section-title">Who responded</h4>
+                        <p class="mjf-section-sub">
+                          Counted from the contact questions. Individual details stay under Responses.
+                        </p>
+                      </div>
+                      <mj-forms-respondent-profile [profile]="r.profile"></mj-forms-respondent-profile>
+                    </section>
+                  }
+
                   @if (r.breakdowns.length > 0) {
                     <section class="mjf-section">
                       <div class="mjf-section-head">
-                        <h4 class="mjf-section-title">What they said</h4>
-                        <p class="mjf-section-sub">Every question, in the order it is asked.</p>
+                        <h4 class="mjf-section-title">What they chose</h4>
+                        <p class="mjf-section-sub">Every question with an aggregate answer, in the order it is asked.</p>
                       </div>
                       <div class="rp-breakdowns">
                         @for (b of r.breakdowns; track b.questionId) {
@@ -173,6 +185,20 @@
                             [totalResponses]="r.summary.totalResponses"></mj-forms-question-breakdown>
                         }
                       </div>
+                    </section>
+                  }
+
+                  @if (r.openText.length > 0) {
+                    <section class="mjf-section">
+                      <div class="mjf-section-head">
+                        <h4 class="mjf-section-title">What they wrote</h4>
+                        <p class="mjf-section-sub">
+                          Rates, lengths and recurring words. The answers themselves are under Responses.
+                        </p>
+                      </div>
+                      <mj-forms-open-text-panel
+                        [insights]="r.openText"
+                        (ReadAnswers)="setMode('responses')"></mj-forms-open-text-panel>
                     </section>
                   }
                 }

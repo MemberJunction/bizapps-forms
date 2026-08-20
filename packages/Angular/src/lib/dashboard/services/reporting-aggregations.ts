@@ -17,15 +17,16 @@ import type {
   PublishedFormQuestion,
   FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
-import { analysisKindFor, answerColumnFor, isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
+import { isAnswerableQuestionType } from '@mj-biz-apps/forms-entities';
 import type {
   FormSummaryStats,
   QuestionBreakdown,
-  BreakdownKind,
   DistributionBucket,
   NumericAggregate,
   FunnelStep,
 } from '../models/reporting.model';
+import { insightRoleFor, isChartedRole } from './question-insight-roles';
+import { temporalBuckets } from './temporal-buckets';
 import { extractChoiceValues, renderAnswer } from '../../shared/answer-values';
 import { toDate } from '../../shared/runview-dates';
 
@@ -47,36 +48,6 @@ const FREE_TEXT_CAP = 200;
  * check discards was never a real session, and a genuine long-but-plausible fill is kept.
  */
 const PLAUSIBLE_SESSION_SECONDS = 24 * 60 * 60;
-
-/**
- * Maps a question type to the breakdown visualisation kind.
- *
- * Reads the contract's ANALYSIS kind rather than naming types, so a new type is summarised the
- * way its behaviour row says without this function being edited. The mapping is one-way and
- * lossy on purpose: `composite` has no card of its own yet and falls back to the free-text list,
- * which reads the rendered one-line form — informative, if not aggregated.
- */
-export function breakdownKindFor(type: FormQuestionType): BreakdownKind {
-  // Asked BEFORE the analysis kind, because the answer COLUMN is what decides whether there
-  // is anything to render. File and Signature answers store a `FileID` and leave every
-  // renderable column null, so the free-text fallback below produced an empty list under a
-  // header counting the answers it could not show. Deliberately not keyed on
-  // `analysisKindFor(type) === 'none'`, which would catch Date and Time too — those DO
-  // render, as a readable list of dates, and pulling them in would lose that.
-  if (answerColumnFor(type) === 'file') {
-    return 'files';
-  }
-  switch (analysisKindFor(type)) {
-    case 'boolean':
-      return 'boolean';
-    case 'choice':
-      return 'distribution';
-    case 'numeric':
-      return 'numeric';
-    default:
-      return 'freeText';
-  }
-}
 
 /**
  * Builds top-line summary stats from response rows.
@@ -138,7 +109,14 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-/** Builds per-question breakdowns. */
+/**
+ * Builds the charted breakdowns — and ONLY the charted ones.
+ *
+ * Questions whose role is identity, attachment or written answer are dropped here rather than
+ * being given a card that cannot say anything true about them. They are not lost: the report
+ * builds `RespondentProfile` and `OpenTextInsight[]` from exactly the questions this filter
+ * removes, so every answerable question is still accounted for somewhere in the view.
+ */
 export function buildBreakdowns(
   questions: PublishedFormQuestion[],
   answers: AnswerRow[],
@@ -147,41 +125,45 @@ export function buildBreakdowns(
 
   return questions
     .filter((q) => isAnswerableQuestionType(q.type)) // display-only types collect no answer
+    .filter((q) => isChartedRole(insightRoleFor(q.type)))
     .map((q) => {
       const qAnswers = byQuestion.get(q.id) ?? [];
-      const kind = breakdownKindFor(q.type);
+      const role = insightRoleFor(q.type);
       const base: QuestionBreakdown = {
         questionId: q.id,
         prompt: q.prompt,
         type: q.type,
-        kind,
+        role,
         answeredCount: qAnswers.length,
         buckets: [],
         numeric: null,
         textAnswers: [],
       };
-      switch (kind) {
-        case 'distribution':
+      switch (role) {
+        case 'choice':
           base.buckets = choiceBuckets(q, qAnswers);
           break;
-        case 'boolean':
+        case 'sentiment':
+        case 'consent':
           base.buckets = booleanBuckets(qAnswers);
           break;
-        case 'numeric':
+        case 'scale':
           base.numeric = numericAggregate(q.type, qAnswers);
           break;
-        case 'files':
-          // Nothing to build: `answeredCount` above is the whole card.
+        case 'temporal':
+          base.buckets = temporalBuckets(q.type, qAnswers);
           break;
-        case 'freeText':
-          // `renderAnswer`, not `a.TextValue`. The free-text bucket is now the fallback for
-          // Ranking, Matrix, Address and ContactInfo too, and none of those store anything in
-          // TextValue — reading the column directly would show an empty card for every one of
-          // them while the answers sat in JSONValue.
+        case 'composite':
+          // Matrix has no aggregate form yet, so its answers are listed in their rendered
+          // one-line shape. Informative, if not summarised.
           base.textAnswers = qAnswers
             .map((a) => renderAnswer(q, a).trim())
             .filter((t) => t.length > 0)
             .slice(0, FREE_TEXT_CAP);
+          break;
+        default:
+          // Unreachable: isChartedRole already excluded every other role. Left explicit so a
+          // new charted role fails loudly in review rather than rendering an empty card.
           break;
       }
       return base;
@@ -222,7 +204,7 @@ function choiceBuckets(
   return buckets.sort((a, b) => b.count - a.count);
 }
 
-/** Yes/No distribution. */
+/** Yes/No distribution. Labels stay Yes/No; the consent CARD does the "accepted" reading. */
 function booleanBuckets(answers: AnswerRow[]): DistributionBucket[] {
   let yes = 0;
   let no = 0;

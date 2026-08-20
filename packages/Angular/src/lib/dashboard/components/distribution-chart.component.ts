@@ -98,6 +98,22 @@ export class FormsDistributionChartComponent {
   /** Beyond this many options the tail collapses behind a control. */
   public readonly collapsedLimit = 6;
 
+  /**
+   * Whether the buckets are a SEQUENCE rather than a set of categories.
+   *
+   * Set for temporal buckets (months, parts of the day), where two things change: every bar
+   * takes the single series colour, because eight hues over twelve consecutive months implies
+   * a category difference that does not exist; and the tail is never collapsed, because
+   * hiding the last six months of a year is hiding the trend rather than a long tail.
+   */
+  @Input()
+  set ordered(value: boolean) {
+    this._ordered.set(value);
+  }
+  get ordered(): boolean {
+    return this._ordered();
+  }
+
   private readonly _buckets = signal<DistributionBucket[]>([]);
   @Input({ required: true })
   set buckets(value: DistributionBucket[]) {
@@ -109,7 +125,11 @@ export class FormsDistributionChartComponent {
 
   public readonly expanded = signal(false);
 
-  public readonly hasMore = computed(() => this._buckets().length > this.collapsedLimit);
+  private readonly _ordered = signal(false);
+
+  public readonly hasMore = computed(
+    () => !this._ordered() && this._buckets().length > this.collapsedLimit,
+  );
 
   public readonly visible = computed(() =>
     this.expanded() || !this.hasMore()
@@ -126,7 +146,7 @@ export class FormsDistributionChartComponent {
    * hue of the rotation and cards across the dashboard open the same way.
    */
   public colorFor(index: number): string {
-    return vizSeriesClass(index);
+    return this._ordered() ? 'mjf-viz-series' : vizSeriesClass(index);
   }
 
   public pct(fraction: number): string {

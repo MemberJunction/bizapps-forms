@@ -18,6 +18,10 @@ import type { ResponseDetail, ResponseListRow } from '../../responses/response-m
 import { flattenQuestions } from '../../shared/published-questions';
 import { buildResponseRows } from '../../responses/response-aggregations';
 import { buildSummary, buildBreakdowns, buildFunnel } from './reporting-aggregations';
+import { buildRespondentProfile } from './respondent-profile';
+import { buildOpenTextInsights } from './open-text-insights';
+import { insightRoleFor } from './question-insight-roles';
+import { questionTypeMeta } from '../../builder/question-type-catalog';
 
 const MOCK_FORM: ReportableForm = {
   formId: 'mock-form-0001',
@@ -104,11 +108,22 @@ export function mockReport(): FormReportData {
   const responses = mockResponses();
   const answers = mockAnswers(responses);
 
+  const summary = buildSummary(responses);
+  const completeIds = new Set(responses.filter((r) => r.Status === 'Complete').map((r) => r.ID));
+  const completeAnswers = answers.filter((a) => completeIds.has(a.ResponseID));
+
   return {
     form: MOCK_FORM,
     questions,
-    summary: buildSummary(responses),
-    breakdowns: buildBreakdowns(questions, answers),
+    summary,
+    profile: buildRespondentProfile(questions, completeAnswers, summary.totalResponses),
+    openText: buildOpenTextInsights(
+      questions.filter((q) => insightRoleFor(q.type) === 'openText'),
+      completeAnswers,
+      summary.totalResponses,
+      (q) => questionTypeMeta(q.type).label,
+    ),
+    breakdowns: buildBreakdowns(questions, completeAnswers),
     funnel: buildFunnel(definition, answers),
     responses: buildResponseRows(responses, answers, questions),
   };

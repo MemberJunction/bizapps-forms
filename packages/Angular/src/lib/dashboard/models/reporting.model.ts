@@ -11,6 +11,9 @@ import type {
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
 import type { ResponseListRow } from '../../responses/response-models';
+import type { QuestionInsightRole } from '../services/question-insight-roles';
+import type { RespondentProfile } from '../services/respondent-profile';
+import type { OpenTextInsight } from '../services/open-text-insights';
 
 /** A form the user can pick to report on, plus its published-version pointer. */
 export interface ReportableForm {
@@ -70,29 +73,25 @@ export interface NumericAggregate {
 }
 
 /**
- * How a given question's answers should be visualised.
+ * Per-question breakdown view-model — only for questions that are CHARTED.
  *
- * `files` is not a chart. A FileUpload or Signature answer holds a `FileID` and nothing
- * renderable — there is no text to list and no category to bucket — so the card states how
- * many were attached and sends the reader to the response detail, which can actually open
- * them. It exists because the alternative was the free-text fallback, which printed "No
- * answers yet" directly beneath a header reading "19 answers".
+ * Identity, attachment and written-answer questions no longer produce one of these. They are
+ * summarised by `RespondentProfile` and `OpenTextInsight` respectively, because a bar chart is
+ * the wrong shape for all three and rendering them here is what put a column of email
+ * addresses on the dashboard. See `question-insight-roles.ts`.
  */
-export type BreakdownKind = 'distribution' | 'numeric' | 'freeText' | 'boolean' | 'files';
-
-/** Per-question breakdown view-model. */
 export interface QuestionBreakdown {
   questionId: string;
   prompt: string;
   type: FormQuestionType;
-  kind: BreakdownKind;
+  role: QuestionInsightRole;
   /** Total responses that answered this question. */
   answeredCount: number;
-  /** Choice/boolean distribution buckets (kind 'distribution' | 'boolean'). */
+  /** Distribution buckets — 'choice', 'sentiment', 'consent' and 'temporal' roles. */
   buckets: DistributionBucket[];
-  /** Numeric aggregates (kind 'numeric'). */
+  /** Numeric aggregates ('scale' role). */
   numeric: NumericAggregate | null;
-  /** Free-text answers (kind 'freeText'); capped for display. */
+  /** Rendered answers for 'composite' (Matrix), which has no aggregate form; capped. */
   textAnswers: string[];
 }
 
@@ -115,7 +114,12 @@ export interface FormReportData {
   /** The published questions, flattened in page/display order, for labelling. */
   questions: PublishedFormQuestion[];
   summary: FormSummaryStats;
+  /** Who reached us — identity and attachment questions, counted rather than quoted. */
+  profile: RespondentProfile;
+  /** What they chose — the questions with a genuine aggregate form. */
   breakdowns: QuestionBreakdown[];
+  /** What they wrote — rates, lengths and themes; never the answers themselves. */
+  openText: OpenTextInsight[];
   funnel: FunnelStep[];
   responses: ResponseListRow[];
 }

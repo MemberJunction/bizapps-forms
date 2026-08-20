@@ -168,6 +168,46 @@ export function booleanSegments(buckets: readonly DistributionBucket[]): Proport
 }
 
 /**
+ * A consent question read as an acceptance RATE, not as an opinion split.
+ *
+ * Checkbox and Legal store the same boolean YesNo does, and the previous view rendered all
+ * three identically. Nobody reads a terms box as a fifty-fifty preference: the question is
+ * "did they agree", the answer is a percentage, and on a legal question it is usually the
+ * only number on the page anyone has to act on. Returns null when nobody answered, so the
+ * card says so rather than reporting 0% agreement.
+ */
+export function consentRate(buckets: readonly DistributionBucket[]): number | null {
+  let accepted = 0;
+  let total = 0;
+  for (const b of buckets) {
+    total += b.count;
+    if (b.label.trim().toLowerCase() === 'yes') accepted += b.count;
+  }
+  return total > 0 ? accepted / total : null;
+}
+
+/**
+ * A consent split, coloured by whether agreement was given.
+ *
+ * Declining is `negative` here where a plain "No" is `neutral` elsewhere — on a consent
+ * question a decline genuinely is the adverse outcome, and it is usually the row someone
+ * needs to find.
+ */
+export function consentSegments(buckets: readonly DistributionBucket[]): ProportionSegment[] {
+  return buckets
+    .filter((b) => b.count > 0)
+    .map((b) => {
+      const accepted = b.label.trim().toLowerCase() === 'yes';
+      return {
+        label: accepted ? 'Accepted' : 'Declined',
+        count: b.count,
+        fraction: b.fraction,
+        vizClass: accepted ? 'mjf-viz-positive' : 'mjf-viz-negative',
+      };
+    });
+}
+
+/**
  * How many of the form's responses answered a given question, 0..1.
  *
  * The question-level signal the dashboard never had: a distribution can look healthy while

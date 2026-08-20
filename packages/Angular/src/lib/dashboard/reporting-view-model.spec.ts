@@ -12,6 +12,8 @@ import {
   answerRate,
   booleanSegments,
   completionSegments,
+  consentRate,
+  consentSegments,
   dropOffSeverity,
   filterForms,
   formatDuration,
@@ -162,6 +164,29 @@ describe('booleanSegments', () => {
   it('drops a band nobody chose', () => {
     const segments = booleanSegments([bucket('Yes', 4, 1), bucket('No', 0, 0)]);
     expect(segments.map((s) => s.label)).toEqual(['Yes']);
+  });
+});
+
+describe('consent questions', () => {
+  const bucket = (label: string, count: number, fraction: number) => ({ label, count, fraction });
+
+  it('reads as an acceptance rate rather than an opinion split', () => {
+    expect(consentRate([bucket('Yes', 47, 0.94), bucket('No', 3, 0.06)])).toBeCloseTo(0.94);
+  });
+
+  it('has no rate when nobody answered, rather than reporting zero agreement', () => {
+    // "0% accepted" is a claim that everyone refused. Nobody answering is a different fact.
+    expect(consentRate([bucket('Yes', 0, 0), bucket('No', 0, 0)])).toBeNull();
+    expect(consentRate([])).toBeNull();
+  });
+
+  it('labels the split by consent, and marks declining as the adverse outcome', () => {
+    // Elsewhere a "No" is neutral — declining to answer is not a fault. On a consent
+    // question it genuinely is the row someone has to go and find.
+    expect(consentSegments([bucket('Yes', 9, 0.9), bucket('No', 1, 0.1)])).toEqual([
+      { label: 'Accepted', count: 9, fraction: 0.9, vizClass: 'mjf-viz-positive' },
+      { label: 'Declined', count: 1, fraction: 0.1, vizClass: 'mjf-viz-negative' },
+    ]);
   });
 });
 

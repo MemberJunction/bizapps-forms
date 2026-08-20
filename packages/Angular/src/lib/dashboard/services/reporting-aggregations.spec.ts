@@ -1,41 +1,54 @@
 import { describe, it, expect } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 import {
-  breakdownKindFor,
   buildSummary,
   buildBreakdowns,
   buildFunnel,
 } from './reporting-aggregations';
+import { insightRoleFor } from './question-insight-roles';
 import { flattenQuestions } from '../../shared/published-questions';
 import { q, response, answer } from '../../shared/testing/entity-row-fixtures';
 
-describe('breakdownKindFor', () => {
-  it('maps types to kinds', () => {
-    expect(breakdownKindFor('SingleChoice')).toBe('distribution');
-    expect(breakdownKindFor('MultiChoice')).toBe('distribution');
-    expect(breakdownKindFor('Dropdown')).toBe('distribution');
-    expect(breakdownKindFor('YesNo')).toBe('boolean');
-    expect(breakdownKindFor('Number')).toBe('numeric');
-    expect(breakdownKindFor('Rating')).toBe('numeric');
-    expect(breakdownKindFor('NPS')).toBe('numeric');
-    expect(breakdownKindFor('LongText')).toBe('freeText');
-    expect(breakdownKindFor('Email')).toBe('freeText');
+describe('insightRoleFor', () => {
+  it('charts the questions that have a genuine aggregate form', () => {
+    expect(insightRoleFor('SingleChoice')).toBe('choice');
+    expect(insightRoleFor('MultiChoice')).toBe('choice');
+    expect(insightRoleFor('Dropdown')).toBe('choice');
+    expect(insightRoleFor('Number')).toBe('scale');
+    expect(insightRoleFor('Rating')).toBe('scale');
+    expect(insightRoleFor('NPS')).toBe('scale');
+    expect(insightRoleFor('YesNo')).toBe('sentiment');
   });
 
-  it('gives file-backed answers their own kind instead of the free-text fallback', () => {
-    // The live defect: these landed in 'freeText', whose list reads `renderAnswer`, which
-    // has nothing to return for an answer that stores only a FileID. The card printed "No
-    // answers yet" underneath its own header saying "19 answers".
-    expect(breakdownKindFor('FileUpload')).toBe('files');
-    expect(breakdownKindFor('Signature')).toBe('files');
+  it('treats contact fields as identity, not as free text', () => {
+    // THE defect this taxonomy exists for. These are `analysis: 'text'` in the contract, so
+    // reading the contract as an analytical plan rendered a column of real email addresses
+    // and names at the top of the dashboard — useless as analysis, and personal data on a
+    // screen that did not need it.
+    expect(insightRoleFor('Email')).toBe('identity');
+    expect(insightRoleFor('Phone')).toBe('identity');
+    expect(insightRoleFor('Website')).toBe('identity');
+    expect(insightRoleFor('Address')).toBe('identity');
+    expect(insightRoleFor('ContactInfo')).toBe('identity');
   });
 
-  it('still lists dates as text, though the contract calls them unanalysable too', () => {
-    // Date and Time are `analysis: 'none'` like the file types are, so keying the fix on
-    // the analysis kind would have swept them up and lost a readable list of real dates.
-    // The discriminator is the answer COLUMN, which is what decides if anything renders.
-    expect(breakdownKindFor('Date')).toBe('freeText');
-    expect(breakdownKindFor('Time')).toBe('freeText');
+  it('separates consent from opinion, though both store one boolean', () => {
+    // Identical in shape to YesNo, and nobody reads a terms box as a fifty-fifty split.
+    expect(insightRoleFor('Checkbox')).toBe('consent');
+    expect(insightRoleFor('Legal')).toBe('consent');
+    expect(insightRoleFor('YesNo')).toBe('sentiment');
+  });
+
+  it('makes dates analysable by period, which the contract calls unanalysable by value', () => {
+    expect(insightRoleFor('Date')).toBe('temporal');
+    expect(insightRoleFor('Time')).toBe('temporal');
+  });
+
+  it('routes written answers and attachments to their own panels', () => {
+    expect(insightRoleFor('ShortText')).toBe('openText');
+    expect(insightRoleFor('LongText')).toBe('openText');
+    expect(insightRoleFor('FileUpload')).toBe('attachment');
+    expect(insightRoleFor('Signature')).toBe('attachment');
   });
 });
 
@@ -136,6 +149,7 @@ describe('buildBreakdowns', () => {
   const nps = q('qn', 'NPS', 2);
   const yn = q('qy', 'YesNo', 3);
   const text = q('qt', 'LongText', 4);
+  const email = q('qe', 'Email', 5);
 
   const answers: AnswerRow[] = [
     answer('r1', 'qc', { TextValue: 'red' }),
@@ -149,13 +163,14 @@ describe('buildBreakdowns', () => {
     answer('r1', 'qy', { BooleanValue: true }),
     answer('r2', 'qy', { BooleanValue: false }),
     answer('r1', 'qt', { TextValue: 'hello' }),
+    answer('r1', 'qe', { TextValue: 'someone@example.com' }),
   ];
 
-  const breakdowns = buildBreakdowns([choice, multi, nps, yn, text], answers);
+  const breakdowns = buildBreakdowns([choice, multi, nps, yn, text, email], answers);
 
   it('builds choice distribution with option labels, sorted by count', () => {
     const b = breakdowns.find((x) => x.questionId === 'qc')!;
-    expect(b.kind).toBe('distribution');
+    expect(b.role).toBe('choice');
     expect(b.buckets[0]).toMatchObject({ label: 'Red', count: 2 });
     expect(b.buckets[1]).toMatchObject({ label: 'Blue', count: 1 });
   });
@@ -178,17 +193,23 @@ describe('buildBreakdowns', () => {
 
   it('builds boolean buckets for YesNo', () => {
     const b = breakdowns.find((x) => x.questionId === 'qy')!;
-    expect(b.kind).toBe('boolean');
+    expect(b.role).toBe('sentiment');
     expect(b.buckets).toEqual([
       { label: 'Yes', count: 1, fraction: 0.5 },
       { label: 'No', count: 1, fraction: 0.5 },
     ]);
   });
 
-  it('lists free-text answers', () => {
-    const b = breakdowns.find((x) => x.questionId === 'qt')!;
-    expect(b.kind).toBe('freeText');
-    expect(b.textAnswers).toEqual(['hello']);
+  it('does not chart written answers at all', () => {
+    // They get the "What they wrote" panel instead — rates, lengths and themes. A card here
+    // could only ever quote three arbitrary answers, which is not a summary of the rest.
+    expect(breakdowns.find((x) => x.questionId === 'qt')).toBeUndefined();
+  });
+
+  it('does not chart contact fields at all', () => {
+    // The regression guard for the whole change: an Email question must never produce a
+    // card, because the only thing a card could show is the addresses themselves.
+    expect(breakdowns.find((x) => x.questionId === 'qe')).toBeUndefined();
   });
 });
 

@@ -31,6 +31,10 @@ import {
   buildBreakdowns,
   buildFunnel,
 } from './reporting-aggregations';
+import { buildRespondentProfile } from './respondent-profile';
+import { buildOpenTextInsights } from './open-text-insights';
+import { insightRoleFor } from './question-insight-roles';
+import { questionTypeMeta } from '../../builder/question-type-catalog';
 
 @Injectable()
 export class FormsReportingService {
@@ -125,11 +129,38 @@ export class FormsReportingService {
     const questions = flattenQuestions(definition);
     const { responses, answers } = await this.responses.loadResponsesForForm(form.formId);
 
+    const summary = buildSummary(responses);
+    // Every rate on the Insights view divides by the RESPONSE count rather than by the
+    // number of answers to the question, so a skipped question counts against its own
+    // coverage instead of silently reporting 100%.
+    const totalResponses = summary.totalResponses;
+
+    // Insights describe the COMPLETE responses the headline counts, so their answers must
+    // come from the same population. `answers` spans partial (in-progress) responses too,
+    // and mixing them produced counts larger than the denominator they were shown against —
+    // "Contactable: 40 of 32 responses" on a live form, which reads as a broken dashboard
+    // because it is an impossible statement.
+    //
+    // The funnel below deliberately keeps the UNFILTERED rows: drop-off is a fact about the
+    // people who abandoned, so excluding partials would leave it measuring only the
+    // respondents who never dropped off.
+    const completeResponseIds = new Set(
+      responses.filter((r) => r.Status === 'Complete').map((r) => r.ID),
+    );
+    const completeAnswers = answers.filter((a) => completeResponseIds.has(a.ResponseID));
+
     return {
       form,
       questions,
-      summary: buildSummary(responses),
-      breakdowns: buildBreakdowns(questions, answers),
+      summary,
+      profile: buildRespondentProfile(questions, completeAnswers, totalResponses),
+      breakdowns: buildBreakdowns(questions, completeAnswers),
+      openText: buildOpenTextInsights(
+        questions.filter((q) => insightRoleFor(q.type) === 'openText'),
+        completeAnswers,
+        totalResponses,
+        (q) => questionTypeMeta(q.type).label,
+      ),
       funnel: buildFunnel(definition, answers),
       responses: buildResponseRows(responses, answers, questions),
     };
