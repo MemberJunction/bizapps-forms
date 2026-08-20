@@ -154,6 +154,8 @@
    still exists — a text input the width of a 2400px display is unusable, and long lines are hard
    to read — but it now grows in steps with the space actually available. */
 .mjf-shell {
+  /* Containing block for the sending scrim, which is absolutely positioned over the form. */
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -336,6 +338,15 @@
    so the click produced no visible feedback where their eyes were, and an unacknowledged
    click gets clicked again. */
 .mjf-sending {
+  /* An actual overlay, which is what the comment above always claimed. As an in-flow block with
+     `min-height: 40vh` it pushed the form down the page instead of covering it — and it only
+     looked like a replacement because it lived in a @switch branch that really did replace the
+     form. The form now stays mounted underneath (see the template), so this has to sit on top of
+     it, and has to block clicks: the submit is already in flight and a second tap on anything
+     underneath is either a no-op or a duplicate. */
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -344,6 +355,10 @@
   min-height: 40vh;
   padding: 2rem 1rem;
   text-align: center;
+  /* Semi-opaque rather than solid: the answers staying faintly visible underneath is the whole
+     reason this is a scrim, and it is what tells the respondent the page did not go away. */
+  background: color-mix(in srgb, var(--mjf-page-bg) 82%, transparent);
+  backdrop-filter: blur(1px);
 }
 
 /* A ring that turns. Deliberately NOT a progress bar: we do not know how long this takes, and

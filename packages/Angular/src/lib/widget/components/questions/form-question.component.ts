@@ -521,6 +521,11 @@ export class FormQuestionComponent {
   }
 
   protected onSignatureCleared(): void {
+    // Retire the running upload before clearing. Without this, a respondent who draws, dislikes
+    // it and taps Clear gets the discarded signature back a moment later: the in-flight upload
+    // resolves and emits its fileId over the null, leaving a stored signature beside an empty pad
+    // that reads "Draw your signature above."
+    this.uploadGeneration += 1;
     this.lastFile = null;
     this.resetUploadState();
     this.valueChange.emit(null);
@@ -575,6 +580,17 @@ export class FormQuestionComponent {
   /** Last selected file, retained so the respondent can retry a failed upload. */
   private lastFile: File | null = null;
 
+  /**
+   * Which upload is allowed to write the answer.
+   *
+   * Uploads are not serialized — the signature pad can start a second one while the first is
+   * still going, and a respondent can pick a different file mid-upload — so without a stamp the
+   * answer is whichever response ARRIVES last rather than whichever the respondent asked for
+   * last. On a lossy mobile link those differ routinely. Every upload captures this value at the
+   * start and refuses to touch component state if it has moved on since.
+   */
+  private uploadGeneration = 0;
+
   protected async onFile(input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0] ?? null;
     if (!file) {
@@ -601,6 +617,7 @@ export class FormQuestionComponent {
    * required FileUpload cannot be satisfied by a not-yet-stored file.
    */
   private async uploadFile(file: File): Promise<void> {
+    const generation = ++this.uploadGeneration;
     this.uploadFileName.set(file.name);
     this.uploadError.set(null);
     this.uploadStatus.set('uploading');
@@ -612,13 +629,29 @@ export class FormQuestionComponent {
         file,
         this.distributionSlug(),
         this.question().id,
-        (fraction) => this.uploadProgress.set(fraction),
+        (fraction) => {
+          if (generation !== this.uploadGeneration) {
+            return;
+          }
+          this.uploadProgress.set(fraction);
+        },
         this.responseId() || undefined,
       );
+      // A superseded upload must not write ANYTHING: not the answer, not the status. Its bytes
+      // are stored and its MJ: Files row exists, but the respondent has since asked for a
+      // different file — or for none — and that is the answer that has to stand.
+      if (generation !== this.uploadGeneration) {
+        return;
+      }
       this.uploadStatus.set('done');
       this.uploadProgress.set(1);
       this.valueChange.emit(result.fileId);
     } catch (err) {
+      // Guarded for the same reason, and it matters more here: an unguarded stale failure emits
+      // null and wipes the answer the NEWER upload had already stored successfully.
+      if (generation !== this.uploadGeneration) {
+        return;
+      }
       this.uploadStatus.set('error');
       this.uploadProgress.set(null);
       this.uploadError.set(err instanceof Error ? err.message : 'Upload failed. Please try again.');

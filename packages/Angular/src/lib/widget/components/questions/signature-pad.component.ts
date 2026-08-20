@@ -86,6 +86,15 @@ const SIGNATURE_PAD_CSS = /* css */ `
 .mjf-sig__clear:disabled { opacity: 0.5; cursor: default; }
 `;
 
+/**
+ * How long the pad waits after the last stroke before exporting.
+ *
+ * Long enough to join the strokes of a normal signature into one export, short enough that the
+ * answer is in place well before a respondent can reach the submit button. Not a debounce on
+ * DRAWING — the ink appears immediately; this only delays turning it into a PNG.
+ */
+export const SIGNATURE_SETTLE_MS = 400;
+
 @Component({
   selector: 'mjf-signature-pad',
   standalone: true,
@@ -130,6 +139,9 @@ export class SignaturePadComponent {
   private readonly pad = viewChild<ElementRef<HTMLCanvasElement>>('pad');
   private drawing = false;
 
+  /** Pending settle timer for {@link scheduleExport}; `undefined` when nothing is queued. */
+  private exportTimer: ReturnType<typeof setTimeout> | undefined;
+
   protected onPointerDown(event: PointerEvent): void {
     const ctx = this.beginStroke(event);
     if (!ctx) {
@@ -165,9 +177,31 @@ export class SignaturePadComponent {
     if (canvas?.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
-    if (this.hasInk()) {
-      void this.emitPng();
+    this.scheduleExport();
+  }
+
+  /**
+   * Export once the drawing has settled, not once per stroke.
+   *
+   * `hasInk` stays true after the first stroke, so exporting straight from here fired a fresh
+   * PNG upload on every pointer-up — a two-word signature is at least two strokes, and each one
+   * stored its own MJ: Files row against the respondent's upload quota while racing the others
+   * to decide which image the answer ended up pointing at. Coalescing on a short idle window
+   * makes a signature one upload of the finished drawing, which is also the only version the
+   * respondent ever meant to submit.
+   */
+  private scheduleExport(): void {
+    if (this.exportTimer !== undefined) {
+      clearTimeout(this.exportTimer);
     }
+    if (!this.hasInk()) {
+      this.exportTimer = undefined;
+      return;
+    }
+    this.exportTimer = setTimeout(() => {
+      this.exportTimer = undefined;
+      void this.emitPng();
+    }, SIGNATURE_SETTLE_MS);
   }
 
   /** Wipe the pad and tell the parent the answer is gone. */
@@ -178,6 +212,12 @@ export class SignaturePadComponent {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
     this.hasInk.set(false);
+    // Drop any export still waiting on the settle timer, or it would fire against the pad the
+    // respondent has just wiped and hand the parent a signature they explicitly discarded.
+    if (this.exportTimer !== undefined) {
+      clearTimeout(this.exportTimer);
+      this.exportTimer = undefined;
+    }
     this.cleared.emit();
   }
 

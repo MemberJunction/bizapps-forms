@@ -14,6 +14,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseFormComponent } from '@memberjunction/ng-base-forms';
 import type {
   mjBizAppsFormsFormEntity,
+  mjBizAppsFormsFormQuestionOptionEntity,
   mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
   FormQuestionType,
@@ -704,6 +705,18 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   protected onQuestionChanged(node: QuestionNode): void {
     this.state.saveDebounced(node.entity);
+    this.markDirty();
+  }
+
+  /**
+   * Persist an option's own edit.
+   *
+   * `FormQuestionOption` is already a `SaveableEntity`, so this gets the same coalescing, checked
+   * save and failure banner every other builder write goes through — the option simply never
+   * reached it before.
+   */
+  protected onOptionChanged(option: mjBizAppsFormsFormQuestionOptionEntity): void {
+    this.state.saveDebounced(option);
     this.markDirty();
   }
 

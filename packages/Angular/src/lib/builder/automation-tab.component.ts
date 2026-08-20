@@ -314,6 +314,15 @@ export class AutomationTabComponent implements OnInit {
       },
     ]);
 
+    // A failed read is NOT an empty result. Rendering it as one tells the author this step has no
+    // mapping and no history — the two things the redesign exists to show them — and the reason
+    // (a permission gap, a bad filter) reaches nobody.
+    if (!bindings.Success) {
+      LogError(`Forms Automate tab: could not read entity bindings: ${bindings.ErrorMessage}`);
+      this.actionError.set(
+        'The record-mapping details for these steps could not be loaded, so any step that saves a record is shown without its mapping.',
+      );
+    }
     const bindingRows = bindings.Success ? (bindings.Results as BindingRow[]) : [];
     const byBinding = new Map(bindingRows.map((b) => [b.ID, b]));
     const actionDescriptions = describedById(actions);
@@ -336,6 +345,12 @@ export class AutomationTabComponent implements OnInit {
     }
     this.resolved.set(resolved);
     this.mappingSummaries.set(summaries);
+    if (!runs.Success) {
+      LogError(`Forms Automate tab: could not read automation runs: ${runs.ErrorMessage}`);
+      this.actionError.set(
+        'Recent activity could not be loaded, so this list is not a record of what has run.',
+      );
+    }
     this.runs.set(runs.Success ? toRunRows(runs.Results as RawRunRow[]) : []);
   }
 
@@ -485,9 +500,25 @@ export class AutomationTabComponent implements OnInit {
     mine.DisplayOrder = theirs.DisplayOrder;
     theirs.DisplayOrder = myOrder;
     await this.run(async () => {
-      if (!(await mine.Save()) || !(await theirs.Save())) {
-        throw new Error(mine.LatestResult?.CompleteMessage ?? 'Those steps could not be reordered.');
+      // Both saves are attempted, and both entities are reverted if either fails. A reorder is
+      // ONE change expressed as two rows, and the obvious `a.Save() || b.Save()` gets it wrong
+      // twice: `||` short-circuits, so a failure on the first leaves the second holding the first
+      // one's old order in memory — dirty, unreverted, and flushed to the database minutes later
+      // by an unrelated edit — and a failure on the SECOND leaves the first one's swap committed,
+      // so two steps share a DisplayOrder and the runner's tie-break decides the order instead of
+      // the author.
+      const mineSaved = await mine.Save();
+      const theirsSaved = await theirs.Save();
+      if (mineSaved && theirsSaved) {
+        return;
       }
+      // Revert restores each entity to its last saved state, which undoes the committed half too.
+      mine.Revert();
+      theirs.Revert();
+      const failed = mineSaved ? theirs : mine;
+      throw new Error(
+        failed.LatestResult?.CompleteMessage ?? 'Those steps could not be reordered.',
+      );
     });
   }
 
@@ -868,7 +899,14 @@ export class AutomationTabComponent implements OnInit {
     // Sequential by default so a later step can rely on what this one produced — the confirmation
     // email that reports a created record, or a follow-up task that links to it.
     automation.ExecutionMode = 'Sync';
-    automation.DisplayOrder = this.automations().length + seeded + 1;
+    // One past the highest order in use, NOT a count. After any deletion the two diverge: seed
+    // four built-ins (1-4), add two steps (5, 6), delete the one at 3, and a count-derived order
+    // hands the next step 6 — colliding with the step already there. Two steps then share a
+    // DisplayOrder, so this tab and the server fall back to different tie-breaks (the
+    // DisplayOrder-sorted read here, the published snapshot's order there) and the sequence the
+    // author sees stops being the sequence that runs. It also makes the arrows a silent no-op
+    // between the tied pair, since swapping two equal numbers writes nothing.
+    automation.DisplayOrder = this.nextDisplayOrder() + seeded;
     automation.ContinueOnError = true;
     automation.IsActive = true;
     configure(automation);
@@ -927,9 +965,20 @@ export class AutomationTabComponent implements OnInit {
       row.DisplayOrder = legacy.displayOrder;
       row.ContinueOnError = true;
       row.IsActive = true;
-      if (await row.Save()) {
-        seeded += 1;
+      if (!(await row.Save())) {
+        // Not skippable. Dispatch is all-or-nothing: a form carrying ANY automations runs those
+        // and nothing else, so a built-in that fails to seed here is not "one row missing" — it
+        // is that hook switched off for this form permanently, silently, at the moment the author
+        // added something unrelated. `Forms: Send Confirmation Email` is one of the four.
+        //
+        // Throwing also keeps `seeded` honest: the caller derives the new step's DisplayOrder
+        // from it, so an under-count collides with an existing row's order.
+        throw new Error(
+          row.LatestResult?.CompleteMessage ??
+            `The built-in step "${legacy.actionName}" could not be saved, so adding this one was stopped rather than silently switching that step off.`,
+        );
       }
+      seeded += 1;
     }
     return seeded;
   }
@@ -941,6 +990,12 @@ export class AutomationTabComponent implements OnInit {
    * change that leaves the list showing the old value is the bug this screen is least able to
    * afford, since the list IS the explanation of what the form does.
    */
+  /** One past the highest DisplayOrder currently in use, or 1 when there are no steps yet. */
+  private nextDisplayOrder(): number {
+    const orders = this.automations().map((a) => a.DisplayOrder ?? 0);
+    return orders.length === 0 ? 1 : Math.max(...orders) + 1;
+  }
+
   private async run(work: () => Promise<void>): Promise<void> {
     this.busy.set(true);
     this.actionError.set('');

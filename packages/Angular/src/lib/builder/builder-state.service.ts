@@ -24,6 +24,15 @@ import { FORMS_ENTITY } from '../shared/entity-names';
  */
 const SAVE_DEBOUNCE_MS = 400;
 
+/**
+ * How many times {@link BuilderStateService.flushPendingSaves} will drain the save chains before
+ * giving up.
+ *
+ * Generous on purpose — a real flush finishes in one or two passes, and every extra pass here
+ * costs nothing unless something is genuinely re-queueing without end.
+ */
+const MAX_FLUSH_PASSES = 50;
+
 /** Anything the builder persists in place. */
 type SaveableEntity =
   | mjBizAppsFormsFormEntity
@@ -385,8 +394,22 @@ export class BuilderStateService {
     }
     // Loop rather than one `Promise.all`: awaiting a chain can let a queued save start, and the
     // caller asked for "nothing pending", not "nothing pending a moment ago".
-    while (this.saveChains.size > 0) {
+    //
+    // Capped, because the exit condition depends on something this method does not control:
+    // edits arriving during the drain re-arm the debounce and put a new chain in the map. A
+    // steady enough stream keeps it non-empty indefinitely, and since publish AWAITS this, an
+    // uncapped loop would hang Publish with no error and no way out but a reload. No path in the
+    // builder saves on save today, so the cap is a backstop rather than a fix for a live hang —
+    // but "no caller does this yet" is not something a loop should rely on.
+    for (let pass = 0; pass < MAX_FLUSH_PASSES && this.saveChains.size > 0; pass++) {
       await Promise.all([...this.saveChains.values()]);
+    }
+    if (this.saveChains.size > 0) {
+      // Surfaced, never swallowed: the caller is about to publish, and it has to be able to say
+      // that what it publishes may not match what is stored.
+      this._lastFailure.set(
+        'Some changes were still being saved and could not be confirmed. Reload the builder and check the form before sharing it.',
+      );
     }
   }
 

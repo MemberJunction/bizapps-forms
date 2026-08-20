@@ -444,6 +444,7 @@
             [formId]="record.ID"
             [conditionalSources]="conditionalSources"
             (questionChanged)="onQuestionChanged($event)"
+            (optionChanged)="onOptionChanged($event)"
             (addOptionRequested)="onAddOption($event)"
             (removeOptionRequested)="onRemoveOption($event)"
           ></mjf-question-editor>

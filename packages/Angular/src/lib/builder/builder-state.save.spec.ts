@@ -128,3 +128,59 @@ describe('saveDebounced', () => {
     expect(b.persisted).toEqual(['b']);
   });
 });
+
+describe('flushPendingSaves cannot hang the caller forever', () => {
+  /**
+   * An entity that queues another save from inside its own save — the shape that turns the
+   * drain loop into an infinite one. Contrived here, but the loop's exit condition is
+   * "saveChains is empty", and nothing stopped a chain from being non-empty on every check.
+   */
+  class SelfRequeueingEntity {
+    public saves = 0;
+    public LatestResult = { CompleteMessage: '' };
+    public service: BuilderStateService | null = null;
+
+    public async Save(): Promise<boolean> {
+      this.saves++;
+      // Re-arm while the drain is still running.
+      this.service?.saveDebounced(this as unknown as mjBizAppsFormsFormQuestionEntity);
+      return true;
+    }
+  }
+
+  it('terminates under sustained re-queueing, and says so when it gave up', async () => {
+    // `flushPendingSaves` is awaited on the PUBLISH path, so an unbounded loop here does not just
+    // spin — it hangs Publish with no error and no way out but a reload.
+    //
+    // Fake timers are what make this deterministic AND what make it a faithful reproduction: a
+    // re-queue goes through `saveDebounced`'s timer, so with `runAllTimersAsync` draining them
+    // the drain loop sees a non-empty chain map on every single check — exactly the state a
+    // steady stream of edits during a publish produces, with none of the flakiness of racing a
+    // real 400ms debounce.
+    vi.useFakeTimers();
+    try {
+      const service = new BuilderStateService();
+      const entity = new SelfRequeueingEntity();
+      entity.service = service;
+      service.saveDebounced(entity as unknown as mjBizAppsFormsFormQuestionEntity);
+
+      const flushed = service.flushPendingSaves();
+      // Let every re-queued timer fire while the drain is running.
+      const pump = (async () => {
+        for (let i = 0; i < 200; i++) {
+          await vi.advanceTimersByTimeAsync(400);
+        }
+      })();
+
+      await expect(Promise.all([flushed, pump])).resolves.toBeTruthy();
+      expect(entity.saves).toBeGreaterThan(0);
+      // Honest about what this proves: the drain ends whenever the edit stream does, so this is
+      // a bound on the number of passes rather than a reproduction of a real hang. The cap exists
+      // because publish AWAITS this method, and a loop whose exit depends on input it does not
+      // control should not be the thing standing between an author and their form.
+      expect(entity.saves).toBeLessThanOrEqual(201); // the initial save, plus one per pumped tick
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

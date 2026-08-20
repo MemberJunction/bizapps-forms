@@ -164,6 +164,16 @@ export class QuestionEditorComponent {
 
   /** Emitted whenever a field on the question entity changed (parent persists). */
   @Output() questionChanged = new EventEmitter<QuestionNode>();
+
+  /**
+   * An OPTION's own fields changed and that record needs saving.
+   *
+   * Separate from `questionChanged` because they are different records. Option edits used to
+   * emit `questionChanged`, whose handler saves `node.entity` — the question — so the option was
+   * never written at all. Nothing complained: the publish snapshot reads the in-memory entity, so
+   * the change appeared to take until the builder was reloaded and it was simply gone.
+   */
+  @Output() optionChanged = new EventEmitter<mjBizAppsFormsFormQuestionOptionEntity>();
   /**
    * Emitted when an option is added (parent persists via the state service).
    *
@@ -335,7 +345,7 @@ export class QuestionEditorComponent {
   protected setOptionImage(option: mjBizAppsFormsFormQuestionOptionEntity, url: string): void {
     if (!this.node) return;
     option.ImageURL = url.trim() === '' ? null : url;
-    this.questionChanged.emit(this.node);
+    this.optionChanged.emit(option);
   }
 
   protected get typeLabel(): string {
@@ -374,8 +384,9 @@ export class QuestionEditorComponent {
 
   protected setOptionLabel(index: number, value: string): void {
     if (!this.node) return;
-    this.node.options[index].Label = value;
-    this.questionChanged.emit(this.node);
+    const option = this.node.options[index];
+    option.Label = value;
+    this.optionChanged.emit(option);
   }
 
   protected addOption(matrixAxis?: 'Row' | 'Column'): void {
