@@ -18,4 +18,5 @@ export * from './entity-binding';
 export * from './entity-binding-merge';
 export * from './legacy-automations';
 export * from './submission';
+export * from './starter-templates';
 export * from './schemas';
