@@ -15,9 +15,12 @@
  *   - `Brief` (string, required) — the natural-language description.
  *   - `OwnerUserID` (string, optional) — stamped on the created Form.
  * Output params:
- *   - `FormID`, `FormVersionID` (created ids)
- *   - `PageCount`, `QuestionCount`, `OptionCount`
+ *   - `FormID`, `FormVersionID`, `StyleID` (created ids)
+ *   - `PageCount`, `QuestionCount`, `OptionCount`, `ScreenCount`
  *   - `Blueprint` (the validated blueprint object, for inspection/preview)
+ *
+ * Result codes: `SUCCESS`, `PARTIAL` (a reviewable half-built draft — `FormID` is still set),
+ * `MISSING_PARAMETERS`, `DESIGN_FAILED`, `PERSIST_FAILED`, `FAILED`.
  *
  * The blueprint→persist path is unit-testable with a stubbed {@link FormDesignerModel}
  * (no network/API key) — see `generate-form.action.spec.ts`.
@@ -76,6 +79,8 @@ export async function runAuthoring(
     setOutputParam(params, 'PageCount', built.pageCount);
     setOutputParam(params, 'QuestionCount', built.questionCount);
     setOutputParam(params, 'OptionCount', built.optionCount);
+    setOutputParam(params, 'ScreenCount', built.screenCount);
+    setOutputParam(params, 'StyleID', built.styleId);
     setOutputParam(params, 'Blueprint', blueprint);
     return {
       Success: true,
@@ -83,9 +88,30 @@ export async function runAuthoring(
       Message: `Generated draft form "${blueprint.name}" (${built.questionCount} questions across ${built.pageCount} page(s)).`,
     };
   } catch (error) {
-    const code = error instanceof FormPersistError ? 'PERSIST_FAILED' : 'FAILED';
-    return fail(`Failed to persist generated form: ${asText(error)}`, code);
+    return persistFailure(error, params);
   }
+}
+
+/**
+ * Map a persist failure to a result, distinguishing the half-built case.
+ *
+ * A build that got as far as creating the Form row leaves a DRAFT behind — invisible to
+ * respondents, editable by its author, and better than nothing. Reporting `PARTIAL` with its id on
+ * the output param is what lets a caller offer it, instead of an author being told "generation
+ * failed" while a form they cannot find sits in the database. Still `Success: false`, because a
+ * half-built form is not a success and a caller that opens it must do so deliberately.
+ */
+function persistFailure(error: unknown, params: RunActionParams): ActionResultSimple {
+  if (error instanceof FormPersistError && error.formId) {
+    setOutputParam(params, 'FormID', error.formId);
+    return fail(
+      `The form was only partly generated and has been left as a draft you can review and finish: ` +
+        `${asText(error)}`,
+      'PARTIAL',
+    );
+  }
+  const code = error instanceof FormPersistError ? 'PERSIST_FAILED' : 'FAILED';
+  return fail(`Failed to persist generated form: ${asText(error)}`, code);
 }
 
 function asText(error: unknown): string {
