@@ -16,13 +16,22 @@ import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import type { UserInfo } from '@memberjunction/core';
 import { STAGE_TIMEOUT_MS } from './limits';
-import type { OutlineInput, PageDetailInput, StagedAuthoringModel } from './staged-authoring';
+import { THEME_TOKEN_NAMES } from './theme-tokens';
+import type {
+  OutlineInput,
+  PageDetailInput,
+  StagedAuthoringModel,
+  ThemeInput,
+} from './staged-authoring';
 
 /** The AI Prompt that sketches the whole form. Small and fast — it gates time-to-first-paint. */
 export const FORM_OUTLINE_PROMPT_NAME = 'Forms: Form Outline';
 
 /** The AI Prompt that writes one page's questions in full. */
 export const PAGE_DETAIL_PROMPT_NAME = 'Forms: Page Detail';
+
+/** The AI Prompt that picks the form's `--mjf-*` colours and type from the brand adjectives. */
+export const THEME_DESIGNER_PROMPT_NAME = 'Forms: Theme Designer';
 
 /** Runs the two staged prompts. Fails loudly; never silently falls back to a default client. */
 export class AIPromptStagedAuthoringModel implements StagedAuthoringModel {
@@ -46,11 +55,28 @@ export class AIPromptStagedAuthoringModel implements StagedAuthoringModel {
       contextUser,
     );
   }
+
+  async theme(input: ThemeInput, contextUser: UserInfo): Promise<string> {
+    return runNamedPrompt(
+      THEME_DESIGNER_PROMPT_NAME,
+      {
+        Brief: input.brief,
+        FormName: input.formName,
+        // Joined here rather than passed as an array: a template renders `{{ BrandAdjectives }}`
+        // as text, and a bare array becomes a comma-jammed string anyway — doing it explicitly
+        // means the prompt sees "warm, welcoming" instead of relying on JavaScript's default.
+        BrandAdjectives: (input.brandAdjectives ?? []).join(', '),
+        Tokens: THEME_TOKEN_NAMES.join('\n'),
+        ...retryData(input),
+      },
+      contextUser,
+    );
+  }
 }
 
-/** The fields both stages share, including the retry feedback. */
-function promptDataFor(input: OutlineInput | PageDetailInput): Record<string, string> {
-  const data: Record<string, string> = { Brief: input.brief, InputMode: input.inputMode };
+/** The prior-attempt fields, present only on a retry. */
+function retryData(input: { previousAttempt?: string; validationError?: string }): Record<string, string> {
+  const data: Record<string, string> = {};
   if (input.previousAttempt !== undefined) {
     data.PreviousAttempt = input.previousAttempt;
   }
@@ -58,6 +84,11 @@ function promptDataFor(input: OutlineInput | PageDetailInput): Record<string, st
     data.ValidationError = input.validationError;
   }
   return data;
+}
+
+/** The fields the two blueprint stages share, including the retry feedback. */
+function promptDataFor(input: OutlineInput | PageDetailInput): Record<string, string> {
+  return { Brief: input.brief, InputMode: input.inputMode, ...retryData(input) };
 }
 
 /**

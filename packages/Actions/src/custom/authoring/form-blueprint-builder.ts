@@ -61,6 +61,18 @@ const ENTITY = {
   FormStyle: 'MJ_BizApps_Forms: Form Styles',
 } as const;
 
+/**
+ * Ids an image can be attached to, with the prompt that asked for it.
+ *
+ * The prompt travels with the id because `imagePrompt` is authoring intent and is deliberately
+ * never persisted — after the build there is nowhere else to read it from.
+ */
+export interface ImageTargets {
+  welcomeScreen?: { screenId: string; imagePrompt?: string };
+  endingScreens: Array<{ screenId: string; title: string; imagePrompt?: string }>;
+  options: Array<{ optionId: string; label: string; imagePrompt?: string }>;
+}
+
 /** What the builder created — surfaced back to the calling action's output params. */
 export interface BuiltFormResult {
   formId: string;
@@ -85,6 +97,15 @@ export interface BuiltFormResult {
    * the detail stage rebuilding it from the database.
    */
   questionIdByKey: Map<string, string>;
+  /**
+   * What the image stage will need to address, paired with the prompts that asked for it.
+   *
+   * Returned rather than re-read from the database because `imagePrompt` is authoring intent and
+   * is deliberately never persisted — only the blueprint knows it, and only the Builder knows
+   * which row each prompt ended up attached to. Options are empty on a staged build: its outline
+   * carries no options, and they arrive from {@link applyPageDetail} instead.
+   */
+  imageTargets: ImageTargets;
   /**
    * The per-form style row this draft was given, or `undefined` when one could not be created.
    *
@@ -118,6 +139,7 @@ export async function buildFormFromBlueprint(
 
   const idByKey = new Map<string, string>();
   const pageIds: string[] = [];
+  const imageTargets: ImageTargets = { endingScreens: [], options: [] };
   let questionCount = 0;
   let optionCount = 0;
   for (let pageIndex = 0; pageIndex < blueprint.pages.length; pageIndex++) {
@@ -127,9 +149,10 @@ export async function buildFormFromBlueprint(
     const counts = await createQuestionsForPage(md, formId, page.ID, blueprintPage, idByKey, contextUser);
     questionCount += counts.questions;
     optionCount += counts.options;
+    imageTargets.options.push(...counts.optionImages);
   }
 
-  const screenCount = await createScreens(md, formId, blueprint, idByKey, contextUser);
+  const screenCount = await createScreens(md, formId, blueprint, idByKey, imageTargets, contextUser);
 
   return {
     formId,
@@ -140,6 +163,7 @@ export async function buildFormFromBlueprint(
     screenCount,
     pageIds,
     questionIdByKey: idByKey,
+    imageTargets,
     styleId: style?.ID,
   };
 }
@@ -226,16 +250,19 @@ async function createQuestionsForPage(
   page: BlueprintPage,
   idByKey: Map<string, string>,
   contextUser: UserInfo,
-): Promise<{ questions: number; options: number }> {
+): Promise<{ questions: number; options: number; optionImages: ImageTargets['options'] }> {
   let optionCount = 0;
+  const optionImages: ImageTargets['options'] = [];
   for (let i = 0; i < page.questions.length; i++) {
     const question = await createQuestion(md, formId, pageId, page.questions[i], i, idByKey, contextUser);
     if (page.questions[i].key) {
       idByKey.set(page.questions[i].key as string, question.ID);
     }
-    optionCount += await createOptions(md, formId, question.ID, page.questions[i], contextUser);
+    const created = await createOptions(md, formId, question.ID, page.questions[i], contextUser);
+    optionCount += created.count;
+    optionImages.push(...created.imageTargets);
   }
-  return { questions: page.questions.length, options: optionCount };
+  return { questions: page.questions.length, options: optionCount, optionImages };
 }
 
 async function createQuestion(
@@ -280,11 +307,12 @@ async function createOptions(
   questionId: string,
   question: BlueprintQuestion,
   contextUser: UserInfo,
-): Promise<number> {
+): Promise<{ count: number; imageTargets: ImageTargets['options'] }> {
   if (!CHOICE_QUESTION_TYPES.has(question.type) || !question.options?.length) {
-    return 0;
+    return { count: 0, imageTargets: [] };
   }
   let count = 0;
+  const imageTargets: ImageTargets['options'] = [];
   for (let i = 0; i < question.options.length; i++) {
     const opt = question.options[i];
     const optEntity = await md.GetEntityObject<mjBizAppsFormsFormQuestionOptionEntity>(
@@ -309,8 +337,11 @@ async function createOptions(
     }
     await saveRow(optEntity, 'FormQuestionOption', { formId });
     count++;
+    if (opt.imagePrompt) {
+      imageTargets.push({ optionId: optEntity.ID, label: opt.label, imagePrompt: opt.imagePrompt });
+    }
   }
-  return count;
+  return { count, imageTargets };
 }
 
 // --- Screens ---------------------------------------------------------------------
@@ -326,6 +357,7 @@ async function createScreens(
   formId: string,
   blueprint: FormBlueprint,
   idByKey: QuestionIdByKey,
+  imageTargets: ImageTargets,
   contextUser: UserInfo,
 ): Promise<number> {
   const screens = blueprint.screens;
@@ -334,12 +366,18 @@ async function createScreens(
   }
   let count = 0;
   if (screens.welcome) {
-    await createWelcomeScreen(md, formId, screens.welcome, contextUser);
+    const screen = await createWelcomeScreen(md, formId, screens.welcome, contextUser);
+    imageTargets.welcomeScreen = { screenId: screen.ID, imagePrompt: screens.welcome.imagePrompt };
     count++;
   }
   const endings = withExactlyOneDefault(screens.endings ?? []);
   for (let i = 0; i < endings.length; i++) {
-    await createEndingScreen(md, formId, endings[i], i, idByKey, contextUser);
+    const screen = await createEndingScreen(md, formId, endings[i], i, idByKey, contextUser);
+    imageTargets.endingScreens.push({
+      screenId: screen.ID,
+      title: endings[i].title,
+      imagePrompt: endings[i].imagePrompt,
+    });
     count++;
   }
   return count;
@@ -372,7 +410,7 @@ async function createWelcomeScreen(
   formId: string,
   welcome: BlueprintWelcomeScreen,
   contextUser: UserInfo,
-): Promise<void> {
+): Promise<mjBizAppsFormsFormScreenEntity> {
   const screen = await newScreen(md, formId, 'Welcome', contextUser);
   screen.Title = clampText(welcome.title, COLUMN_LIMITS.screenTitle, "The welcome screen's title");
   applyScreenCopy(screen, welcome);
@@ -381,6 +419,7 @@ async function createWelcomeScreen(
   // Ending-only flag, so leaving it false keeps the row saying what it means.
   screen.IsDefault = false;
   await saveRow(screen, 'FormScreen (Welcome)', { formId });
+  return screen;
 }
 
 async function createEndingScreen(
@@ -390,7 +429,7 @@ async function createEndingScreen(
   index: number,
   idByKey: QuestionIdByKey,
   contextUser: UserInfo,
-): Promise<void> {
+): Promise<mjBizAppsFormsFormScreenEntity> {
   const screen = await newScreen(md, formId, 'Ending', contextUser);
   screen.Title = clampText(ending.title, COLUMN_LIMITS.screenTitle, `Ending ${index + 1}'s title`);
   applyScreenCopy(screen, ending);
@@ -401,6 +440,7 @@ async function createEndingScreen(
   }
   screen.ConditionalRule = conditionalRuleJSON(ending.conditionalRule, idByKey, `Ending ${index + 1}`);
   await saveRow(screen, 'FormScreen (Ending)', { formId });
+  return screen;
 }
 
 async function newScreen(
@@ -504,6 +544,13 @@ export interface PageDetailResult {
   /** Detailed questions with no stub to fill in. See {@link applyPageDetail} for when that happens. */
   questionsAdded: number;
   optionsAdded: number;
+  /**
+   * Options on this page that asked for a generated picture.
+   *
+   * A staged build's options are created HERE, not by the outline, so this is where their image
+   * requests come from. A single-shot build collects them from the Builder instead.
+   */
+  optionImages: ImageTargets['options'];
 }
 
 /**
@@ -536,7 +583,12 @@ export async function applyPageDetail(
   const stubs = await loadPageQuestions(md, pageId, contextUser);
   const questionsWithOptions = await loadQuestionsHavingOptions(stubs.map((q) => q.ID), contextUser);
 
-  const result: PageDetailResult = { questionsUpdated: 0, questionsAdded: 0, optionsAdded: 0 };
+  const result: PageDetailResult = {
+    questionsUpdated: 0,
+    questionsAdded: 0,
+    optionsAdded: 0,
+    optionImages: [],
+  };
   for (let i = 0; i < detail.questions.length; i++) {
     const detailed = detail.questions[i];
     const stub = stubs[i];
@@ -549,7 +601,9 @@ export async function applyPageDetail(
       result.questionsAdded++;
     }
     if (!questionsWithOptions.has(question.ID)) {
-      result.optionsAdded += await createOptions(md, formId, question.ID, detailed, contextUser);
+      const created = await createOptions(md, formId, question.ID, detailed, contextUser);
+      result.optionsAdded += created.count;
+      result.optionImages.push(...created.imageTargets);
     }
   }
   return result;
@@ -646,4 +700,61 @@ async function refineQuestion(
   );
   await saveRow(stub, 'FormQuestion (detail)', { formId });
   return stub;
+}
+
+// --- Media and theme write-back ---------------------------------------------------
+//
+// Both run AFTER the form is built and both are best-effort: a form is complete without them.
+// They are here rather than in their stages because writing a row is the Builder's job and
+// deciding what to write is the stage's.
+
+/** Attach a generated image's URL to the option or screen that asked for it. */
+export async function applyGeneratedImage(
+  formId: string,
+  target: { kind: 'option'; optionId: string } | { kind: 'screen'; screenId: string },
+  url: string,
+  contextUser: UserInfo,
+): Promise<void> {
+  const md = new Metadata();
+  const clamped = clampText(url, COLUMN_LIMITS.optionImageUrl, 'A generated image URL');
+  if (target.kind === 'option') {
+    const option = await md.GetEntityObject<mjBizAppsFormsFormQuestionOptionEntity>(
+      ENTITY.FormQuestionOption,
+      contextUser,
+    );
+    if (!(await option.Load(target.optionId))) {
+      throw new FormPersistError(`Could not load option ${target.optionId} to attach its image.`);
+    }
+    option.ImageURL = clamped;
+    await saveRow(option, 'FormQuestionOption (image)', { formId });
+    return;
+  }
+  const screen = await md.GetEntityObject<mjBizAppsFormsFormScreenEntity>(ENTITY.FormScreen, contextUser);
+  if (!(await screen.Load(target.screenId))) {
+    throw new FormPersistError(`Could not load screen ${target.screenId} to attach its image.`);
+  }
+  screen.MediaURL = clamped;
+  await saveRow(screen, 'FormScreen (image)', { formId });
+}
+
+/**
+ * Write a validated token map onto the form's style row.
+ *
+ * Writes to the style the Builder ALREADY created and linked, rather than creating one: the form
+ * is pointed at it from its own insert, so a second row here would leave the first orphaned and
+ * the form styled by whichever one won.
+ */
+export async function applyThemeTokens(
+  formId: string,
+  styleId: string,
+  cssVariables: Record<string, string>,
+  contextUser: UserInfo,
+): Promise<void> {
+  const md = new Metadata();
+  const style = await md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(ENTITY.FormStyle, contextUser);
+  if (!(await style.Load(styleId))) {
+    throw new FormPersistError(`Could not load style ${styleId} to apply the generated theme.`);
+  }
+  style.CSSVariables = JSON.stringify(cssVariables, null, 2);
+  await saveRow(style, 'FormStyle (theme)', { formId });
 }

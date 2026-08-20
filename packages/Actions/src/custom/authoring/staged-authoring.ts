@@ -23,12 +23,22 @@
 import { LogError, LogStatus } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import {
+  applyGeneratedImage,
   applyPageDetail,
+  applyThemeTokens,
   buildFormFromBlueprint,
   type BuiltFormResult,
+  type ImageTargets,
 } from './form-blueprint-builder';
 import {
+  collectImageRequests,
+  runImageStage,
+  type ImageGenerationModel,
+} from './image-stage';
+import { themeResponseSchema, validateTheme } from './theme-tokens';
+import {
   declaredKeys,
+  extractJSON,
   parseFormBlueprint,
   parsePageDetail,
   type BlueprintPage,
@@ -58,6 +68,19 @@ export interface StagedAuthoringModel {
   outline(input: OutlineInput, contextUser: UserInfo): Promise<string>;
   /** One page's questions in full, given the brief, the outline for coherence, and its stubs. */
   pageDetail(input: PageDetailInput, contextUser: UserInfo): Promise<string>;
+  /** A `--mjf-*` token map for the form, from the brief and the Designer's brand adjectives. */
+  theme(input: ThemeInput, contextUser: UserInfo): Promise<string>;
+}
+
+/** What the theme stage is given. */
+export interface ThemeInput {
+  brief: string;
+  /** The form's name, so the theme can be about THIS form rather than about the brief in general. */
+  formName: string;
+  /** e.g. `["warm", "professional"]`, from the outline. Absent when the Designer offered none. */
+  brandAdjectives?: string[];
+  previousAttempt?: string;
+  validationError?: string;
 }
 
 /** What the outline stage is given. */
@@ -107,6 +130,14 @@ export interface StagedAuthoringOptions {
   ownerUserId?: string;
   /** Absent means no progress is published — a silent build, which is a supported configuration. */
   channel?: ProgressChannel;
+  /**
+   * How pictures get made. Absent means the image stage is skipped entirely and says so.
+   *
+   * Separate from {@link StagedAuthoringModel} because it is a different KIND of model — an image
+   * generator, resolved from different metadata — and because a host may reasonably have one and
+   * not the other.
+   */
+  imageModel?: ImageGenerationModel;
 }
 
 /**
@@ -140,7 +171,7 @@ export async function runStagedAuthoring(
   const outline = await requestOutline(brief, model, contextUser, options.inputMode);
   const built = await buildFormFromBlueprint(outline, contextUser, options.ownerUserId);
 
-  const total = outlineTotal(outline);
+  const total = totalSteps(outline);
   publish(options.channel, {
     formId: built.formId,
     stage: 'outline',
@@ -149,8 +180,12 @@ export async function runStagedAuthoring(
     label: `Sketching ${outline.name}`,
   });
 
-  const degraded = await detailEveryPage(brief, model, contextUser, options, outline, built, total);
+  const pages = await detailEveryPage(brief, model, contextUser, options, outline, built, total);
+  const mediaStep = 1 + outline.pages.length + 1;
+  const media = await runMediaStage(built, pages.optionImages, options, contextUser, total, mediaStep);
+  const theme = await runThemeStage(brief, model, outline, built, contextUser, options, total, mediaStep + 1);
 
+  const degraded = [...pages.degraded, ...media, ...theme];
   publish(options.channel, {
     formId: built.formId,
     stage: 'complete',
@@ -193,16 +228,21 @@ async function requestOutline(
 }
 
 /**
- * Units of work an author will watch tick by: the outline, then one per page.
+ * Units of work an author will watch tick by: outline, one per page, media, theme.
  *
- * Images and theme are NOT counted here even though they are stages of the wider design. They are
- * Phase-C work and, more importantly, their count is not knowable until the outline exists — a
- * total that grows mid-build turns a determinate progress bar back into a guess. When those stages
- * land, the total is recomputed here from the outline's image prompts, once, before step 1 is
- * published.
+ * MEDIA IS ONE STEP NO MATTER HOW MANY PICTURES IT MAKES, and that is the whole reason the total
+ * is knowable at step 1. How many images a form wants is not known until the DETAIL pass has run —
+ * options carry the prompts and the outline has no options — so counting images individually would
+ * mean a total that grows mid-build, which turns a determinate bar back into a guess. Individual
+ * image events still fire; they update the LABEL at the same step rather than advancing the bar,
+ * which is exactly the shape `foldProgress` already handles.
+ *
+ * The media and theme steps are counted even when neither has anything to do. A bar that jumps
+ * from 80% to 100% because a form wanted no pictures is better than one whose maximum depends on
+ * what the model happened to ask for.
  */
-function outlineTotal(outline: FormBlueprint): number {
-  return 1 + outline.pages.length;
+function totalSteps(outline: FormBlueprint): number {
+  return 1 + outline.pages.length + 2;
 }
 
 /**
@@ -224,15 +264,16 @@ async function detailEveryPage(
   outline: FormBlueprint,
   built: BuiltFormResult,
   total: number,
-): Promise<string[]> {
+): Promise<{ degraded: string[]; optionImages: ImageTargets['options'] }> {
   const keys = declaredKeys(outline);
   const degraded: string[] = [];
+  const optionImages: ImageTargets['options'] = [];
   let completed = 1; // the outline
 
   const pageIndexes = outline.pages.map((_, index) => index);
   await inBatches(pageIndexes, PAGE_DETAIL_CONCURRENCY, async (pageIndex) => {
     const pageId = built.pageIds[pageIndex];
-    const failure = await detailOnePage({
+    const outcome = await detailOnePage({
       brief,
       model,
       contextUser,
@@ -243,9 +284,11 @@ async function detailEveryPage(
       pageId,
       keys,
     });
+    const failure = outcome.degraded;
     if (failure) {
       degraded.push(failure);
     }
+    optionImages.push(...outcome.optionImages);
     completed++;
     publish(options.channel, {
       formId: built.formId,
@@ -257,10 +300,10 @@ async function detailEveryPage(
     });
   });
 
-  return degraded;
+  return { degraded, optionImages };
 }
 
-/** One page: prompt, validate, persist. Returns a degradation marker, or undefined on success. */
+/** One page: prompt, validate, persist. Reports its degradation marker and its image requests. */
 async function detailOnePage(ctx: {
   brief: string;
   model: StagedAuthoringModel;
@@ -271,7 +314,7 @@ async function detailOnePage(ctx: {
   pageIndex: number;
   pageId: string;
   keys: ReadonlySet<string>;
-}): Promise<string | undefined> {
+}): Promise<{ degraded?: string; optionImages: ImageTargets['options'] }> {
   const marker = `page:${ctx.pageIndex + 1}`;
   let detail: BlueprintPage;
   try {
@@ -283,7 +326,7 @@ async function detailOnePage(ctx: {
       `[Forms authoring] Could not detail page ${ctx.pageIndex + 1} of form ${ctx.built.formId}; ` +
         `keeping its outline questions. ${asText(error)}`,
     );
-    return marker;
+    return { degraded: marker, optionImages: [] };
   }
 
   try {
@@ -298,7 +341,7 @@ async function detailOnePage(ctx: {
       `[Forms authoring] Page ${ctx.pageIndex + 1}: ${applied.questionsUpdated} question(s) ` +
         `detailed, ${applied.questionsAdded} added, ${applied.optionsAdded} option(s).`,
     );
-    return undefined;
+    return { optionImages: applied.optionImages };
   } catch (error) {
     // A persist failure here is NOT fatal for the same reason a prompt failure is not: the page
     // already exists with usable questions. Fatal would mean discarding a form over one page.
@@ -306,7 +349,7 @@ async function detailOnePage(ctx: {
       `[Forms authoring] Could not persist page ${ctx.pageIndex + 1} of form ${ctx.built.formId}; ` +
         `keeping its outline questions. ${asText(error)}`,
     );
-    return marker;
+    return { degraded: marker, optionImages: [] };
   }
 }
 
@@ -385,4 +428,175 @@ function publish(
 
 function asText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// --- Media -------------------------------------------------------------------------
+
+/**
+ * Make the form's pictures and attach them.
+ *
+ * ONE step on the progress bar however many pictures it makes — see {@link totalSteps}. Each image
+ * still publishes an event, at the same step, so the label moves while the bar holds. That is the
+ * only arrangement that keeps the total knowable at step 1, since how many images a form wants is
+ * not known until the detail pass has run.
+ *
+ * Returns degradation markers and never throws: an image is enhancement, and a form that lost its
+ * pictures is a form, whereas a run discarded over an image generator is nothing.
+ */
+async function runMediaStage(
+  built: BuiltFormResult,
+  optionImages: ImageTargets['options'],
+  options: StagedAuthoringOptions,
+  contextUser: UserInfo,
+  total: number,
+  step: number,
+): Promise<string[]> {
+  const requests = collectImageRequests({
+    welcomeScreen: built.imageTargets.welcomeScreen,
+    endingScreens: built.imageTargets.endingScreens,
+    // The Builder's own option targets AND the detail pass's: a single-shot outline can carry
+    // options, a staged one cannot, and this stage should not have to know which it just ran.
+    options: [...built.imageTargets.options, ...optionImages],
+  });
+
+  if (requests.length === 0 || !options.imageModel) {
+    // No pictures asked for is silent — nothing went wrong. No image model IS reported, but only
+    // when something was actually asked for, so a host without one is not nagged on every build.
+    const missingModel = requests.length > 0 && !options.imageModel;
+    publish(options.channel, {
+      formId: built.formId,
+      stage: 'image',
+      step,
+      total,
+      label: missingModel ? 'Skipped the pictures' : 'No pictures needed',
+    });
+    return missingModel ? ['image:no image model available on this instance'] : [];
+  }
+
+  publish(options.channel, {
+    formId: built.formId,
+    stage: 'image',
+    step,
+    total,
+    label: `Making ${requests.length === 1 ? 'a picture' : `${requests.length} pictures`}`,
+  });
+
+  const outcome = await runImageStage(built.formId, requests, options.imageModel, contextUser);
+  const degraded = [...outcome.degraded];
+
+  for (const { target, url } of outcome.stored) {
+    try {
+      await applyGeneratedImage(built.formId, target, url, contextUser);
+      publish(options.channel, {
+        formId: built.formId,
+        stage: 'image',
+        step,
+        total,
+        label: 'Added a picture',
+        changed: target.kind === 'option' ? { optionId: target.optionId } : { screenId: target.screenId },
+      });
+    } catch (error) {
+      // The bytes exist and the URL is good; only the row write failed. Named so nobody hunts for
+      // a missing image in storage when the problem is one column.
+      LogError(
+        `[Forms authoring] Stored an image for form ${built.formId} but could not attach it: ${asText(error)}`,
+      );
+      degraded.push(`image:could not attach a generated picture`);
+    }
+  }
+  return degraded;
+}
+
+// --- Theme -------------------------------------------------------------------------
+
+/**
+ * Ask for a palette, make it readable, and write it onto the style the Builder already linked.
+ *
+ * Degrades rather than fails, like every stage after the outline: a form with no theme renders on
+ * the widget's defaults, which is what every hand-made form starts as.
+ *
+ * The retry loop is the same shape as the other two stages, but the thing it retries on is narrow:
+ * only a response that is not a parseable token map. An UNREADABLE palette is not a retry — it is
+ * fixed by arithmetic, because asking a model that produced one unreadable pair to try again is a
+ * round trip for a coin flip. See `theme-tokens.ts`.
+ */
+async function runThemeStage(
+  brief: string,
+  model: StagedAuthoringModel,
+  outline: FormBlueprint,
+  built: BuiltFormResult,
+  contextUser: UserInfo,
+  options: StagedAuthoringOptions,
+  total: number,
+  step: number,
+): Promise<string[]> {
+  const publishThemeStep = (label: string, styleId?: string): void =>
+    publish(options.channel, {
+      formId: built.formId,
+      stage: 'theme',
+      step,
+      total,
+      label,
+      changed: styleId ? { styleId } : undefined,
+    });
+
+  if (!built.styleId) {
+    // The Builder could not create a style row, and said so at the time. Nothing to write onto.
+    publishThemeStep('Using the default look');
+    return ['theme:no style row to write onto'];
+  }
+
+  publishThemeStep('Painting the theme');
+  try {
+    const outcome = validateTheme(await requestTheme(brief, model, outline, contextUser));
+    await applyThemeTokens(built.formId, built.styleId, outcome.cssVariables, contextUser);
+    publishThemeStep('Theme applied', built.styleId);
+
+    // Both lists are reported, not logged and forgotten. A stripped token means the prompt is
+    // drifting from its vocabulary; an unreadable pair means the author's own colour choice cannot
+    // carry text, which they can only act on if somebody tells them.
+    const notes: string[] = [];
+    if (outcome.strippedTokens.length > 0) {
+      LogStatus(
+        `[Forms authoring] The theme for form ${built.formId} named ${outcome.strippedTokens.length} ` +
+          `token(s) the widget does not read: ${outcome.strippedTokens.join(', ')}.`,
+      );
+    }
+    for (const pair of outcome.unreadablePairs) {
+      notes.push(`theme:${pair} cannot reach AA contrast`);
+    }
+    return notes;
+  } catch (error) {
+    LogError(
+      `[Forms authoring] Could not theme form ${built.formId}; it will use the widget defaults. ${asText(error)}`,
+    );
+    publishThemeStep('Kept the default look');
+    return ['theme:could not be generated'];
+  }
+}
+
+/** Ask for a token map, retrying on an unparseable response. */
+async function requestTheme(
+  brief: string,
+  model: StagedAuthoringModel,
+  outline: FormBlueprint,
+  contextUser: UserInfo,
+): Promise<{ cssVariables: Record<string, string> }> {
+  let lastError: unknown;
+  let input: ThemeInput = {
+    brief,
+    formName: outline.name,
+    brandAdjectives: outline.theme?.brandAdjectives,
+  };
+
+  for (let attempt = 1; attempt <= MAX_DESIGNER_ATTEMPTS; attempt++) {
+    const raw = await model.theme(input, contextUser);
+    try {
+      return themeResponseSchema.parse(JSON.parse(extractJSON(raw)));
+    } catch (error) {
+      lastError = error;
+      input = { ...input, previousAttempt: raw, validationError: asText(error) };
+    }
+  }
+  throw new Error(`Theme was invalid after ${MAX_DESIGNER_ATTEMPTS} attempts: ${asText(lastError)}`);
 }

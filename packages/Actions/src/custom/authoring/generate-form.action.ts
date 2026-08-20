@@ -52,6 +52,8 @@ import {
   type FormDesignerModel,
 } from './llm-form-designer';
 import { AIPromptStagedAuthoringModel } from './staged-authoring-model';
+import { CoreActionImageGenerationModel } from './generate-image-model';
+import type { ImageGenerationModel } from './image-stage';
 import {
   runStagedAuthoring,
   shouldStage,
@@ -62,6 +64,7 @@ import type { ProgressChannel } from './progress-events';
 
 let activeDesignerModel: FormDesignerModel = new AIPromptFormDesignerModel();
 let activeStagedModel: StagedAuthoringModel = new AIPromptStagedAuthoringModel();
+let activeImageModel: ImageGenerationModel = new CoreActionImageGenerationModel();
 
 /** Override the single-shot Designer model (e.g. a deterministic stub in tests). */
 export function setFormDesignerModel(model: FormDesignerModel): void {
@@ -71,6 +74,11 @@ export function setFormDesignerModel(model: FormDesignerModel): void {
 /** Override the staged pipeline's model (e.g. a deterministic stub in tests). */
 export function setStagedAuthoringModel(model: StagedAuthoringModel): void {
   activeStagedModel = model;
+}
+
+/** Override the image generator (e.g. a deterministic stub in tests, or none at all). */
+export function setImageGenerationModel(model: ImageGenerationModel): void {
+  activeImageModel = model;
 }
 
 @RegisterClass(BaseAction, 'Forms: Generate Form From Brief')
@@ -133,6 +141,7 @@ export async function runAuthoring(
           inputMode,
           ownerUserId,
           channel: options.channel,
+          imageModel: activeImageModel,
         })
       : await runSingleShot(brief, contextUser, ownerUserId, inputMode);
     return report(outcome, params);

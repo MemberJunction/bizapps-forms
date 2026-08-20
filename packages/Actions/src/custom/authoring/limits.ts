@@ -49,6 +49,18 @@ export const PAGE_DETAIL_CONCURRENCY = 3;
 export const STAGE_TIMEOUT_MS = 120_000;
 
 /**
+ * Generated images per run.
+ *
+ * A cap on COST, not on taste: a brief that yields twenty picture-choice options would otherwise
+ * run twenty image generations, which is slow and expensive enough to be a surprise on somebody
+ * else's bill. Six covers a picture-choice question and a hero, which is what images are for here.
+ *
+ * Reaching it does not fail anything — the overflow is NAMED in the run's degraded list, because a
+ * silent cap tells an author "the AI decided six was enough", which is not what happened.
+ */
+export const MAX_GENERATED_IMAGES = 6;
+
+/**
  * The bounded string columns, and how much each will hold.
  *
  * These are clamped ON WRITE rather than repaired after a failed save. The builder knows every

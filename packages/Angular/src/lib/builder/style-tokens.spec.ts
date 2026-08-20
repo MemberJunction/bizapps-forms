@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   BRAND_TOKENS,
   typeAlignChoice,
@@ -141,5 +143,51 @@ describe('typeAlignChoice defaults', () => {
     // left showed "left" selected on a brand-new form whose screens were plainly centred.
     expect(typeAlignChoice('title', '')).toBe('center');
     expect(typeAlignChoice('question', '')).toBe('left');
+  });
+});
+
+describe('the AI theme vocabulary matches what this panel edits', () => {
+  /**
+   * `forms-actions` holds its own copy of the token names an AI theme may write, because a server
+   * package cannot depend on an Angular one. A copy with no guard is a copy that drifts: the
+   * generator would keep emitting a token this panel no longer reads, or stop emitting one it does,
+   * and neither shows up as a failure — just as themes that get quietly worse.
+   *
+   * Read from source rather than imported, for the same dependency reason in reverse.
+   */
+  const themeTokenNames = (): string[] => {
+    const source = readFileSync(
+      join(__dirname, '../../../../Actions/src/custom/authoring/theme-tokens.ts'),
+      'utf8',
+    );
+    const block = /export const THEME_TOKEN_NAMES = \[([\s\S]*?)\] as const;/.exec(source)?.[1] ?? '';
+    return [...block.matchAll(/'(--[a-z0-9-]+)'/g)].map((m) => m[1]);
+  };
+
+  it('names only tokens the Design panel writes', () => {
+    const panelTokens = new Set<string>(Object.values(BRAND_TOKENS));
+    for (const token of themeTokenNames()) {
+      expect(panelTokens.has(token), `${token} is generated but the panel does not edit it`).toBe(true);
+    }
+  });
+
+  it('covers every colour and font the panel offers', () => {
+    // Layout tokens — type size, alignment, background image — are deliberately NOT generated:
+    // they are decisions an author makes by looking at their form, not ones a model guesses from a
+    // brief. Everything else the panel treats as brand should be reachable by generation.
+    const generated = new Set(themeTokenNames());
+    const layoutOnly = new Set<string>([
+      BRAND_TOKENS.titleSize,
+      BRAND_TOKENS.questionSize,
+      BRAND_TOKENS.titleAlign,
+      BRAND_TOKENS.questionAlign,
+      BRAND_TOKENS.pageBgImage,
+    ]);
+    for (const token of Object.values(BRAND_TOKENS)) {
+      if (layoutOnly.has(token)) {
+        continue;
+      }
+      expect(generated.has(token), `${token} is editable here but generation never sets it`).toBe(true);
+    }
   });
 });

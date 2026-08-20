@@ -56,6 +56,10 @@ export * from './authoring/staged-authoring-model';
 // The progress seam forms-server fills in. Exported from here so the server package imports it
 // from the package's public surface rather than reaching into a deep path.
 export * from './authoring/progress-events';
+export * from './authoring/generated-image-store';
+export * from './authoring/image-stage';
+export * from './authoring/generate-image-model';
+export * from './authoring/theme-tokens';
 export {
   GenerateFormFromBriefAction as GenerateFormAction,
   setFormDesignerModel,

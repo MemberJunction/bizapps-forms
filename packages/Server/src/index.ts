@@ -69,6 +69,13 @@ import './storage/LocalDiskFileStorage.js';
 import { installFormsProgressPublisher } from './authoring/progress-publisher.js';
 installFormsProgressPublisher();
 
+// Fills the forms-actions image-store seam, routing AI-generated pictures through the SAME asset
+// pipeline a human upload takes — so they inherit its size cap, raster allowlist, public prefix and
+// cache headers rather than growing a second path into storage. Installed at module load for the
+// same reason as the publisher above.
+import { installGeneratedImageStore } from './authoring/generated-image-store.js';
+installGeneratedImageStore();
+
 // Import generated class registrations manifest
 import { CLASS_REGISTRATIONS } from './generated/class-registrations-manifest.js';
 
@@ -105,4 +112,5 @@ export function LoadBizAppsFormsServer(): void {
     // Idempotent: re-registering simply replaces the instance.
     MagicLinkMinterRegistry.Instance.Register(new MagicLinkInviteMinter());
     installFormsProgressPublisher();
+    installGeneratedImageStore();
 }
