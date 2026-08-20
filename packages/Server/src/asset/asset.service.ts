@@ -30,6 +30,7 @@ import {
   isPublicAssetKey,
 } from './config.js';
 import type { ParsedFile } from '../upload/multipart.js';
+import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 
 /** Entity-definition lookup — satisfied by a global `Metadata` and by a per-request provider. */
 export interface AssetMetadataProvider {
@@ -56,13 +57,13 @@ export interface AssetUploadStorage {
   }): Promise<{ FileID: string; StoragePath?: string }>;
 }
 
-/** The slice of `FileStorageEngine` the read path depends on. */
-export interface AssetReadStorage {
-  Config(forceRefresh?: boolean, contextUser?: UserInfo): Promise<void>;
-  GetAccountsByProviderID(providerId: string): ReadonlyArray<{ ID: string }>;
-  ResolveStorageAccount(accountId?: string): { account: { ID: string } } | null;
-  GetDriver(accountId: string, contextUser: UserInfo): Promise<{ GetObject(params: { objectId?: string }): Promise<Buffer> }>;
-}
+/**
+ * The slice of `FileStorageEngine` the read path depends on.
+ *
+ * An alias rather than its own declaration: the response-file download needs exactly the same
+ * slice, and two structurally identical interfaces are two things to keep in step.
+ */
+export type AssetReadStorage = StorageReadEngine;
 
 /** The stored-file facts the read path needs, however the caller chooses to load them. */
 export interface StoredAssetRecord {
@@ -319,14 +320,12 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
   }
 
   try {
-    await ctx.storage.Config(false, ctx.systemUser);
-    const accountId = resolveReadAccountId(ctx.storage, file.ProviderID);
-    if (!accountId) {
-      LogError(`[Forms] No storage account resolves for provider ${file.ProviderID} (asset ${wanted}).`);
-      return failRead(500, 'Could not read the image.');
-    }
-    const driver = await ctx.storage.GetDriver(accountId, ctx.systemUser);
-    const content = await driver.GetObject({ objectId: file.ProviderKey ?? undefined });
+    const content = await readStoredObject(
+      ctx.storage,
+      ctx.systemUser,
+      { providerId: file.ProviderID, providerKey: file.ProviderKey },
+      getAssetConfig().storageAccountId,
+    );
     return {
       ok: true,
       asset: {
@@ -340,22 +339,6 @@ export async function loadAssetBytes(ctx: AssetReadContext, fileId: string): Pro
     LogError(`[Forms] Asset read failed for ${wanted}: ${detail}`);
     return failRead(500, 'Could not read the image.');
   }
-}
-
-/**
- * Which storage account to read through.
- *
- * `MJ: Files` records a PROVIDER, not an account, so a deployment with two accounts on one
- * provider is genuinely ambiguous at this level — MJ's model does not record which one held the
- * bytes. Preferring an account on the file's own provider is the closest available answer;
- * the configured/default account is the fallback for a provider with none.
- */
-function resolveReadAccountId(storage: AssetReadStorage, providerId: string): string | undefined {
-  const onProvider = storage.GetAccountsByProviderID(providerId);
-  if (onProvider.length > 0) {
-    return onProvider[0].ID;
-  }
-  return storage.ResolveStorageAccount(getAssetConfig().storageAccountId)?.account.ID;
 }
 
 /** Strip any `; charset=` parameter from a content type. */
