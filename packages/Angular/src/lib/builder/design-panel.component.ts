@@ -265,6 +265,11 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
     this.syncFromStyle();
     this.cdr.markForCheck();
     this.applyPreview();
+    // The builder caches the applied style to compute the publish fingerprint, so a restyle it is
+    // never told about leaves `dirty` false against tokens that have already changed — the author
+    // sees the new colours and the Publish button insists there is nothing to publish. Every other
+    // path that writes this row emits the same event; this one did not.
+    this.styleApplied.emit(this.style.ID);
   }
 
   /** Read every control's value out of the style's stored tokens. */

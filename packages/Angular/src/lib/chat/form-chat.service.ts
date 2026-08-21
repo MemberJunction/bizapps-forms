@@ -66,6 +66,17 @@ export class FormChatService {
   /** The thread, oldest first. Rendered directly by the chat panel. */
   public readonly turns = this._turns.asReadonly();
 
+  /**
+   * Which load is the current one.
+   *
+   * A load that started before a newer one must not write its result — and a load must never
+   * clobber a message already in flight. Both happened: the service is provided on the builder, so
+   * it outlives the component across a tab switch, and switching to Design and back while a reply
+   * was in the air remounted the component, re-ran `load()`, and overwrote the optimistic user turn
+   * with database rows that did not include it yet. The reply then landed under no question.
+   */
+  private loadToken = 0;
+
   private readonly _busy = signal(false);
   /** True while a message is in flight, so the input can disable and show a pending state. */
   public readonly busy = this._busy.asReadonly();
@@ -89,10 +100,15 @@ export class FormChatService {
    * regardless of whether the client managed to display it.
    */
   public async load(formId: string | null): Promise<void> {
+    const token = ++this.loadToken;
+    /** True while this load is still the newest one AND nothing is mid-send. */
+    const mayWrite = (): boolean => token === this.loadToken && !this._busy();
     try {
       const conversationId = guidOrUndefined(await this.findConversation(formId));
       if (!conversationId) {
-        this._turns.set([]);
+        if (mayWrite()) {
+          this._turns.set([]);
+        }
         return;
       }
       const details = await this.rv.RunView<{
@@ -108,7 +124,12 @@ export class FormChatService {
       });
       if (!details.Success) {
         LogError(`[Forms chat] Could not load the thread: ${details.ErrorMessage}`);
-        this._turns.set([]);
+        if (mayWrite()) {
+          this._turns.set([]);
+        }
+        return;
+      }
+      if (!mayWrite()) {
         return;
       }
       this._turns.set(
@@ -120,7 +141,9 @@ export class FormChatService {
       );
     } catch (error) {
       LogError(`[Forms chat] Could not load the thread: ${asText(error)}`);
-      this._turns.set([]);
+      if (mayWrite()) {
+        this._turns.set([]);
+      }
     }
   }
 

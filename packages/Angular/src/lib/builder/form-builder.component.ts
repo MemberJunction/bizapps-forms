@@ -46,6 +46,7 @@ import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
+import { CachedDefinition } from './cached-definition';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
@@ -314,6 +315,8 @@ export class FormBuilderComponent extends BaseFormComponent {
    * instead of latching it, so an edit that restores the published state reports clean.
    */
   private markDirty(): void {
+    // The Design tab's preview rides on this same signal — see `designPreviewDefinition`.
+    this.designPreview.invalidate();
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
           buildPublishedDefinition(
@@ -332,12 +335,23 @@ export class FormBuilderComponent extends BaseFormComponent {
    *
    * Same builder as publish and as Preview, so the Design tab shows the actual form rather
    * than a stand-in — the whole point of styling it is seeing your own questions.
+   *
+   * CACHED, and that is not an optimisation. Building on every read handed `<mj-form>` a new
+   * object identity per change-detection tick; Angular diffs inputs with `Object.is` and the
+   * widget reloads from `ngOnChanges`, so the preview tore itself down continuously — Start did
+   * nothing, trial answers vanished, and a colour drag reverted mid-drag to the saved style. The
+   * cache is invalidated by `markDirty()`, the same signal the Publish button's `dirty` flag
+   * already rides on.
    */
   protected get designPreviewDefinition(): PublishedFormDefinition | null {
-    return this.tree
-      ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
-      : null;
+    return this.designPreview.read(() =>
+      this.tree
+        ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
+        : null,
+    );
   }
+
+  private readonly designPreview = new CachedDefinition<PublishedFormDefinition>();
 
   /** Read the live snapshot and the current draft, so `dirty` has both sides to compare. */
   private async refreshPublishState(): Promise<void> {
@@ -1144,6 +1158,22 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected async onChatRestyled(): Promise<void> {
     await this.refreshPublishState();
     this.cdr.markForCheck();
+  }
+
+  /**
+   * A chat turn built a NEW form — open it, the way the forms list does.
+   *
+   * Without this the turn was a dead end: the form was created and persisted, and the author was
+   * left looking at the one they started from with no way to reach it except by going back to the
+   * list and finding it. The dashboard wired this from the start; the builder did not, and the two
+   * hosts are supposed to behave the same.
+   */
+  protected onChatCreatedForm(formId: string): void {
+    this.Navigate.emit({
+      Kind: 'record',
+      EntityName: FORMS_ENTITY.Form,
+      PrimaryKey: CompositeKey.FromID(formId),
+    });
   }
 
   /**

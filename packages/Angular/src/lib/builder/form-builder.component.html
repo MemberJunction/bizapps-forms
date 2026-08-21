@@ -474,6 +474,7 @@
         <div class="fb-chat">
           <mjf-form-chat
             [formId]="record.ID"
+            (formCreated)="onChatCreatedForm($event)"
             (formRestyled)="onChatRestyled()"
             (formChanged)="onChatChangedForm()"
           />
