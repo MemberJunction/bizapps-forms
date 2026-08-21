@@ -641,7 +641,12 @@ export async function applyPageDetail(
   // occur while reserved stubs are still live. Nothing renumbers this page afterwards, and every
   // reader sorts on this column alone, so a tie is decided by the query plan and then frozen into
   // the published snapshot — the same intermittent reordering `apply-edits.ts` documents.
-  let nextOrder = stubs.length;
+  // DERIVED FROM THE ROWS, not from their count. `createQuestionsForPage` numbers stubs 0..n-1, so
+  // `stubs.length` is past them — today, on the generation path. But `apply-edits.ts` writes this
+  // same column when the chat edits a form, and `applyPageDetail` is exported, so "the numbers are
+  // dense and start at zero" is an invariant nothing enforces. One gap and a count-based next
+  // number lands on a live row.
+  let nextOrder = stubs.reduce((max, stub) => Math.max(max, (stub.DisplayOrder ?? 0) + 1), 0);
   for (let i = 0; i < detail.questions.length; i++) {
     const detailed = detail.questions[i];
     const stub = claim(detailed.key);

@@ -156,6 +156,33 @@ describe('applyPageDetail — every question lands on its own row', () => {
     expect(a?.Prompt).toBe('first');
   });
 
+  it('appends past the HIGHEST DisplayOrder, not past the stub count', async () => {
+    // `createQuestionsForPage` numbers stubs densely from zero, so a count-based next number works
+    // on the generation path — but `apply-edits.ts` writes this same column when the chat edits a
+    // form, and this function is exported. Gapped numbers are reachable, and a count-based guess
+    // lands on a live row.
+    rows.set(QUESTION, [
+      { ID: STUB_A, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'A', DisplayOrder: 5 },
+      { ID: STUB_B, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'B', DisplayOrder: 9 },
+    ]);
+
+    await applyPageDetail(
+      FORM,
+      PAGE,
+      detail([
+        { type: 'ShortText', prompt: 'first' },
+        { type: 'ShortText', prompt: 'created' },
+        { key: 'b', type: 'ShortText', prompt: 'keyed' },
+      ]),
+      new Map([['b', STUB_B]]),
+      user,
+    );
+
+    const orders = (rows.get(QUESTION) ?? []).map((q) => Number(q.DisplayOrder)).sort((a, b) => a - b);
+    expect(new Set(orders).size).toBe(3);
+    expect(Math.max(...orders)).toBe(10);
+  });
+
   it('refines in place when the detail matches the stubs one for one', async () => {
     const result = await applyPageDetail(
       FORM,
