@@ -92,15 +92,34 @@ export interface ThemeOutcome {
 }
 
 /**
- * Turn a raw theme response into tokens that are safe to persist.
+ * Turn a raw theme response into the complete palette that is safe to persist.
  *
- * Two passes, in this order and not the other: strip first, because a token outside the vocabulary
- * should not be contrast-checked (nothing will ever render it), and repairing before stripping
- * would spend the arithmetic on values about to be discarded.
+ * ── IT JUDGES WHAT WILL RENDER, NOT WHAT THE MODEL SENT. ─────────────────────────────────────
+ * `base` is the palette the response is laid over — the house defaults for a new form, the form's
+ * CURRENT tokens for a restyle — and the merge happens BEFORE the contrast gate rather than after
+ * it. That ordering is the whole point, and getting it the other way round is a defect this code
+ * shipped with: the gate ran on the model's fragment, `enforceReadability` skips any pair whose
+ * halves are not both present, and the theme prompt explicitly invites a partial answer ("leave
+ * one out and the form uses its own sensible default"). So a model that set only the background
+ * had its ink pair skipped, the house ink shipped on top of it at 1.45:1, and `unreadablePairs`
+ * came back empty. The widget's render-time guard could not catch it either, because the merge
+ * writes all fourteen tokens and the guard declines to touch a colour an author chose.
+ *
+ * Passing `base` also makes a restyle non-destructive. Merging over the house palette meant a
+ * one-token change ("make the buttons darker") reset every other colour the author had tuned.
+ *
+ * Three passes, in this order: strip first, because a token outside the vocabulary should not be
+ * contrast-checked (nothing will ever render it); merge second, so the gate sees the real
+ * colours; repair last.
  */
-export function validateTheme(response: ThemeResponse): ThemeOutcome {
+export function validateTheme(
+  response: ThemeResponse,
+  base: Readonly<Record<string, string>>,
+): ThemeOutcome {
   const { kept, strippedTokens } = stripUnknownTokens(response.cssVariables);
-  const { cssVariables, repairedTokens, unreadablePairs } = enforceReadability(kept);
+  // The strip already removed everything outside THEME_TOKEN_NAMES, and that list carries no
+  // layout tokens, so a spread cannot let the model reach sizing or alignment through here.
+  const { cssVariables, repairedTokens, unreadablePairs } = enforceReadability({ ...base, ...kept });
   return { cssVariables, strippedTokens, repairedTokens, unreadablePairs };
 }
 
@@ -128,21 +147,33 @@ const AA_BODY = 4.5;
 const NON_TEXT_MIN = 3;
 
 /**
- * The pairs that have to be readable, and against what.
+ * The pairs that have to be readable, against what, and which half may be moved to get there.
  *
- * Only pairs BOTH of whose halves the theme sets are checked. A token the model left alone falls
- * back to the widget's own default, which the widget's own render-time guard already handles with
- * the fully-resolved colours — and those are the only correct ones to judge. Second-guessing an
- * unset token from here means judging a pairing that may not be the one that renders.
+ * `repair: null` means BOTH halves are identity colours and neither may be touched — the pair is
+ * reported and left alone. That is the accent-on-page pair, and giving it a repair target was a
+ * defect: the accent was listed as the "ink" and duly replaced with near-black, which discarded
+ * the brand colour the brief asked for, left `--mjf-accent-strong` at its old hue so hover became
+ * a different colour, and silently broke the on-accent pair that had been checked against the OLD
+ * accent two entries earlier and passed. Button labels sit on the accent, so the accent is a
+ * background, and the invariant below already said backgrounds do not move.
+ *
+ * With that entry non-repairing, no pair mutates a token another pair reads as a background — so
+ * the order of this list stops being load-bearing rather than being load-bearing and undocumented.
  */
-const INK_PAIRS: ReadonlyArray<{ ink: ThemeTokenName; on: ThemeTokenName; min: number }> = [
-  { ink: '--mjf-page-ink', on: '--mjf-page-bg', min: AA_BODY },
-  { ink: '--mjf-page-ink', on: '--mjf-card-bg', min: AA_BODY },
+const INK_PAIRS: ReadonlyArray<{
+  foreground: ThemeTokenName;
+  background: ThemeTokenName;
+  min: number;
+  repair: ThemeTokenName | null;
+}> = [
+  { foreground: '--mjf-page-ink', background: '--mjf-page-bg', min: AA_BODY, repair: '--mjf-page-ink' },
+  { foreground: '--mjf-page-ink', background: '--mjf-card-bg', min: AA_BODY, repair: '--mjf-page-ink' },
   // Button labels sit on the accent, so this is body text on a brand colour — the pairing most
   // often got wrong, because a saturated brand colour looks confident and reads terribly.
-  { ink: '--mjf-on-accent', on: '--mjf-accent', min: AA_BODY },
-  // The accent is a large element rather than text: it only has to be distinguishable.
-  { ink: '--mjf-accent', on: '--mjf-page-bg', min: NON_TEXT_MIN },
+  { foreground: '--mjf-on-accent', background: '--mjf-accent', min: AA_BODY, repair: '--mjf-on-accent' },
+  // The accent is a large element rather than text: it only has to be distinguishable. Nothing
+  // here may move — see above.
+  { foreground: '--mjf-accent', background: '--mjf-page-bg', min: NON_TEXT_MIN, repair: null },
 ];
 
 /**
@@ -168,27 +199,34 @@ function enforceReadability(tokens: Record<string, string>): {
   const unreadablePairs: string[] = [];
 
   for (const pair of INK_PAIRS) {
-    const background = parseCssColor(cssVariables[pair.on] ?? '');
-    const ink = parseCssColor(cssVariables[pair.ink] ?? '');
-    if (!background || !ink || contrastRatio(background, ink) >= pair.min) {
+    const background = parseCssColor(cssVariables[pair.background] ?? '');
+    const foreground = parseCssColor(cssVariables[pair.foreground] ?? '');
+    if (!background || !foreground || contrastRatio(background, foreground) >= pair.min) {
+      continue;
+    }
+    const name = `${pair.foreground} on ${pair.background}`;
+    if (!pair.repair) {
+      // Nothing here may move, so the only honest response is to say so.
+      unreadablePairs.push(name);
       continue;
     }
     // The off-black or off-white that reads best on this background — the same two values the
     // widget's defaults use, so a repaired theme still looks like a theme rather than a failure.
-    const repaired = readableInk(background, ink);
+    const repaired = readableInk(background, foreground);
     // Only counted as a repair when the value ACTUALLY changed. `readableInk` returns the best of
     // near-black and near-white, which on a mid-tone background is sometimes the colour already
     // there — reporting that as "corrected 1 token" claims work that did not happen, and the log
     // line exists precisely so somebody can trust the count.
-    const changed = repaired[0] !== ink[0] || repaired[1] !== ink[1] || repaired[2] !== ink[2];
+    const changed =
+      repaired[0] !== foreground[0] || repaired[1] !== foreground[1] || repaired[2] !== foreground[2];
     if (changed) {
-      cssVariables[pair.ink] = toCssRgb(repaired);
-      if (!repairedTokens.includes(pair.ink)) {
-        repairedTokens.push(pair.ink);
+      cssVariables[pair.repair] = toCssRgb(repaired);
+      if (!repairedTokens.includes(pair.repair)) {
+        repairedTokens.push(pair.repair);
       }
     }
     if (contrastRatio(background, repaired) < pair.min) {
-      unreadablePairs.push(`${pair.ink} on ${pair.on}`);
+      unreadablePairs.push(name);
     }
   }
   return { cssVariables, repairedTokens, unreadablePairs };

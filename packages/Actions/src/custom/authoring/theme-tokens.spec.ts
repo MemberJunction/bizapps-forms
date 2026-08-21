@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { contrastRatio, parseCssColor } from '@mj-biz-apps/forms-entities';
+import { DEFAULT_FORM_THEME, contrastRatio, parseCssColor } from '@mj-biz-apps/forms-entities';
 import { THEME_TOKEN_NAMES, validateTheme } from './theme-tokens';
 
 /** Measured contrast between two token values, for asserting the gate actually moved the needle. */
@@ -152,5 +152,102 @@ describe('validateTheme — "repaired" means the value actually changed', () => 
       cssVariables: { '--mjf-page-bg': '#1c1c1c', '--mjf-page-ink': '#2a2a2a' },
     });
     expect(result.repairedTokens).toEqual(['--mjf-page-ink']);
+  });
+});
+
+describe('validateTheme — it judges what will actually render', () => {
+  /**
+   * THE BUG THIS GUARDS. The gate ran on the fragment the model returned, while what got persisted
+   * was that fragment merged over the house palette. `enforceReadability` skips any pair whose two
+   * halves are not both present, so a model that set only the background — which the theme prompt
+   * explicitly invites ("leave one out and the form uses its own sensible default") — had its ink
+   * pair skipped entirely. The house ink then shipped on top of the model's background at 1.45:1,
+   * with `unreadablePairs` empty and the author told the theme applied.
+   *
+   * The widget's render-time guard could not save it either: the merge writes all fourteen tokens,
+   * so every AI form marks page-ink as author-chosen and `inkRepair` declines to touch it.
+   */
+  it('catches an ink it never set colliding with a background it did', () => {
+    const result = validateTheme(
+      { cssVariables: { '--mjf-page-bg': '#111827', '--mjf-card-bg': '#111827' } },
+      DEFAULT_FORM_THEME,
+    );
+
+    // The house ink is #373530 — 1.45:1 on #111827. Something has to have happened to it.
+    expect(result.cssVariables['--mjf-page-ink']).not.toBe(DEFAULT_FORM_THEME['--mjf-page-ink']);
+    expect(ratio(result.cssVariables['--mjf-page-ink'], '#111827')).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('returns the whole palette, so the caller persists exactly what was judged', () => {
+    // The two-step — validate the fragment, merge afterwards — is what let the gate and the
+    // persisted value disagree. There is no second step now.
+    const result = validateTheme({ cssVariables: { '--mjf-accent': '#0055aa' } }, DEFAULT_FORM_THEME);
+    for (const name of Object.keys(DEFAULT_FORM_THEME)) {
+      expect(result.cssVariables[name], name).toBeDefined();
+    }
+    expect(result.cssVariables['--mjf-accent']).toBe('#0055aa');
+  });
+
+  it('judges a restyle against the tokens the form already has', () => {
+    // A restyle merges over the FORM's palette, not the house one, so a token the author tuned in
+    // the Design tab is what the model's change is checked against — and what survives it.
+    // A complete dark palette, as the Design tab would have left it. `--mjf-card-bg` is set too:
+    // leaving it at the house white while darkening the page is itself a contrast failure, and the
+    // gate correctly repairs that — which is the whole point of judging the merged map.
+    const authored = {
+      ...DEFAULT_FORM_THEME,
+      '--mjf-page-bg': '#101010',
+      '--mjf-card-bg': '#181818',
+      '--mjf-page-ink': '#f5f5f5',
+    };
+    const result = validateTheme({ cssVariables: { '--mjf-accent': '#4477dd' } }, authored);
+    expect(result.cssVariables['--mjf-page-bg']).toBe('#101010');
+    expect(result.cssVariables['--mjf-card-bg']).toBe('#181818');
+    expect(result.cssVariables['--mjf-page-ink']).toBe('#f5f5f5');
+    expect(result.cssVariables['--mjf-accent']).toBe('#4477dd');
+    expect(result.repairedTokens).toEqual([]);
+  });
+});
+
+describe('validateTheme — the accent is a background, so it never moves', () => {
+  /**
+   * THE BUG THIS GUARDS. The accent/page pair listed `--mjf-accent` as its INK, so a pale accent
+   * on a pale page was "repaired" to near-black — discarding the brand colour the brief asked for,
+   * leaving `--mjf-accent-strong` pastel so hover became a different colour, and silently breaking
+   * the on-accent pair that had already been checked against the OLD accent and passed.
+   *
+   * The function's own invariant is "the INK moves, never the background", and button labels sit
+   * on the accent, so the accent is a background. It is reported now, not repaired.
+   */
+  it('leaves a low-contrast accent alone and says so', () => {
+    const pastel = {
+      '--mjf-page-bg': '#FFF8F0',
+      '--mjf-card-bg': '#FFFFFF',
+      '--mjf-page-ink': '#3A2A1E',
+      '--mjf-accent': '#F7C8A0',
+      '--mjf-accent-strong': '#E8A87C',
+      '--mjf-on-accent': '#3A2A1E',
+    };
+    expect(ratio('#F7C8A0', '#FFF8F0')).toBeLessThan(3);
+
+    const result = validateTheme({ cssVariables: pastel }, DEFAULT_FORM_THEME);
+
+    expect(result.cssVariables['--mjf-accent']).toBe('#F7C8A0');
+    expect(result.repairedTokens).not.toContain('--mjf-accent');
+    expect(result.unreadablePairs.join(' ')).toContain('--mjf-accent');
+  });
+
+  it('keeps the button label readable on the accent it kept', () => {
+    // The pair that the old repair silently broke: on-accent was judged against the accent, passed,
+    // and was then left sitting on a completely different colour.
+    const pastel = {
+      '--mjf-page-bg': '#FFF8F0',
+      '--mjf-accent': '#F7C8A0',
+      '--mjf-on-accent': '#3A2A1E',
+    };
+    const result = validateTheme({ cssVariables: pastel }, DEFAULT_FORM_THEME);
+    expect(
+      ratio(result.cssVariables['--mjf-on-accent'], result.cssVariables['--mjf-accent']),
+    ).toBeGreaterThanOrEqual(4.5);
   });
 });
