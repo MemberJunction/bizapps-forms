@@ -34,18 +34,30 @@ const ACCOUNT_NAME = 'Local Disk (development)';
 const args = new Set(process.argv.slice(2));
 const MODE = args.has('--status') ? 'status' : args.has('--off') ? 'off' : 'on';
 
-/** Read `KEY=value` pairs out of an env file, tolerating quotes and blank lines. */
+/**
+ * Read `KEY=value` pairs out of an env file, the way dotenv does.
+ *
+ * TRAILING COMMENTS ARE PART OF THE FORMAT, not decoration to ignore. This used to strip quotes
+ * and nothing else, so `DB_PASSWORD='...'   # the local container` produced a password with a
+ * sentence glued to it, and the script died with a bare `ELOGIN` that pointed at credentials
+ * rather than at the parser. The env file this reads has such a comment on almost every line.
+ */
 function readEnvFile(path) {
   const out = {};
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const i = line.indexOf('=');
     if (i < 0 || line.trim().startsWith('#')) continue;
-    out[line.slice(0, i).trim()] = line
-      .slice(i + 1)
-      .trim()
-      .replace(/^['"]|['"]$/g, '');
+    out[line.slice(0, i).trim()] = readEnvValue(line.slice(i + 1).trim());
   }
   return out;
+}
+
+/** One value: quoted up to its closing quote, or unquoted up to an ` #` comment. */
+function readEnvValue(raw) {
+  const quoted = /^(['"])([\s\S]*?)\1/.exec(raw);
+  if (quoted) return quoted[2];
+  const comment = raw.search(/\s#/);
+  return (comment === -1 ? raw : raw.slice(0, comment)).trim();
 }
 
 const envPath =
