@@ -401,10 +401,7 @@ async function requestPageDetail(ctx: PageDetailContext): Promise<BlueprintPage>
   for (let attempt = 1; attempt <= MAX_DESIGNER_ATTEMPTS; attempt++) {
     const raw = await ctx.model.pageDetail(input, ctx.contextUser);
     try {
-      return parsePageDetail(raw, ctx.keys, {
-        positions: declaredKeyPositions(ctx.outline),
-        pageIndex: ctx.pageIndex,
-      });
+      return parsePageDetail(raw, ctx.keys, { positions: declaredKeyPositions(ctx.outline) });
     } catch (error) {
       lastError = error;
       input = { ...input, previousAttempt: raw, validationError: errorText(error) };

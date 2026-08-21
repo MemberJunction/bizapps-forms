@@ -48,8 +48,7 @@ const gatedOn = (key: string) => ({
 describe('parsePageDetail — question rules are ordering-checked', () => {
   it('accepts a rule that references an EARLIER page', () => {
     const page = parsePageDetail(detail(gatedOn('first')), keys, {
-      positions: declaredKeyPositions(outline()),
-      pageIndex: 1,
+      positions: declaredKeyPositions(outline())
     });
     expect(page.questions).toHaveLength(1);
   });
@@ -59,8 +58,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     // respondent simply never sees it.
     expect(() =>
       parsePageDetail(detail(gatedOn('last')), keys, {
-        positions: declaredKeyPositions(outline()),
-        pageIndex: 1,
+        positions: declaredKeyPositions(outline())
       }),
     ).toThrow(/later|earlier/i);
   });
@@ -73,7 +71,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
       ],
     };
     expect(() =>
-      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()), pageIndex: 1 }),
+      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()) }),
     ).toThrow(/earlier/i);
   });
 
@@ -85,8 +83,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
       ],
     };
     const parsed = parsePageDetail(page, keys, {
-      positions: declaredKeyPositions(outline()),
-      pageIndex: 1,
+      positions: declaredKeyPositions(outline())
     });
     expect(parsed.questions).toHaveLength(2);
   });
@@ -105,8 +102,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     };
 
     const parsed = parsePageDetail(reordered, keys, {
-      positions: declaredKeyPositions(outline()),
-      pageIndex: 1,
+      positions: declaredKeyPositions(outline())
     });
 
     expect(parsed.questions).toHaveLength(2);
@@ -123,7 +119,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     };
 
     expect(() =>
-      parsePageDetail(reordered, keys, { positions: declaredKeyPositions(outline()), pageIndex: 1 }),
+      parsePageDetail(reordered, keys, { positions: declaredKeyPositions(outline()) }),
     ).toThrow(/earlier/i);
   });
 
@@ -135,7 +131,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     };
 
     expect(() =>
-      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()), pageIndex: 1 }),
+      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()) }),
     ).toThrow(/earlier/i);
   });
 

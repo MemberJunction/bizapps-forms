@@ -451,11 +451,14 @@ export function parseFormBlueprint(input: string | object): FormBlueprint {
  * page is retried with the specific complaint rather than failing the page.
  */
 
-/** Where this page sits, and where every key the outline declared sits, for the ordering check. */
+/**
+ * Where every key the outline declared sits, for the ordering check.
+ *
+ * Positions only. This carried a `pageIndex` while the check compared pages; judging on ordinals
+ * made it dead, and a required field nobody reads is a lie about what the function needs.
+ */
 export interface PageDetailOrdering {
   positions: ReadonlyMap<string, KeyPosition>;
-  /** This page's index in the outline. */
-  pageIndex: number;
 }
 
 /**
