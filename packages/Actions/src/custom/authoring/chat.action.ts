@@ -118,14 +118,64 @@ export async function runChatTurn(
   setOutputParam(params, 'Action', response.action);
 
   const outcome = await performAction(response, params, formId, contextUser, conversation.ID);
-  // A turn that made a form moves the thread onto it, so the conversation is where the author is
-  // taken next rather than back on the list they just left.
-  const created = getStringParam(params, 'FormID');
-  if (response.action === 'create' && created && created !== formId) {
+  // A turn made ON THE FORMS LIST that produced a form moves the thread onto it, so the
+  // conversation is where the author is taken next rather than back on the list they just left.
+  //
+  // ONLY on the forms list. The condition used to be "the new id differs from the open one",
+  // which is always true when a form is created from inside the builder — so an author working on
+  // form A who asked for a new form had A's whole conversation moved onto B, and A's panel came
+  // back empty. `formId` being absent IS the forms-list case, and it is the only one the
+  // re-filing rationale covers.
+  //
+  // Re-validated rather than reused: this reads the param bag back, and on a generation that
+  // failed before persisting, `FormID` is still whatever the CLIENT sent. Passing that to
+  // `refileConversationToForm` would throw past its own `assertGuid`, which sits outside its try
+  // block, and lose a reply that both turns had already been persisted for.
+  const created = guidOrUndefined(getStringParam(params, 'FormID'));
+  if (response.action === 'create' && created && !formId) {
     await refileConversationToForm(conversation.ID, created, contextUser);
   }
   setOutputParam(params, 'Reply', outcome.reply);
   return { Success: true, ResultCode: 'SUCCESS', Message: outcome.reply };
+}
+
+/**
+ * What each acting action needs before it can be carried out, in the author's words.
+ *
+ * A table rather than a condition per branch, because the three branches used to carry the check
+ * inline as `action === 'create' && response.brief` and each one FELL THROUGH silently when the
+ * payload was absent. One table cannot fall through: an action either appears here and is checked,
+ * or does not and carries no payload. `none` and `unsupported` are the second kind.
+ *
+ * Emptiness is what is checked, not truthiness — `{}` is truthy, and an empty token map used to
+ * pass the restyle guard and reset the whole theme to the house default.
+ */
+const REQUIRED_PAYLOAD: Partial<Record<FormChatResponse['action'], string>> = {
+  create: 'what the form should contain',
+  restyle: 'which colours to change',
+  image: 'what the picture should show',
+};
+
+/** Verb for the apology, so it names the thing the author actually asked for. */
+const VERB: Partial<Record<FormChatResponse['action'], string>> = {
+  create: 'build that form',
+  restyle: 'restyle it',
+  image: 'add that picture',
+};
+
+/** The missing payload's description, or undefined when this turn has everything it needs. */
+function missingPayloadFor(response: FormChatResponse): string | undefined {
+  const needed = REQUIRED_PAYLOAD[response.action];
+  if (!needed) {
+    return undefined;
+  }
+  const present =
+    response.action === 'create'
+      ? Boolean(response.brief?.trim())
+      : response.action === 'image'
+        ? Boolean(response.imagePrompt?.trim())
+        : Object.keys(response.cssVariables ?? {}).length > 0;
+  return present ? undefined : needed;
 }
 
 /** Carry out whatever the assistant declared. Never throws — a failure becomes part of the reply. */
@@ -137,13 +187,24 @@ async function performAction(
   conversationId: string,
 ): Promise<{ reply: string }> {
   try {
-    if (response.action === 'create' && response.brief) {
+    const missing = missingPayloadFor(response);
+    if (missing) {
+      // The assistant declared a change and did not send what performing it needs. Say so, rather
+      // than falling through to its own optimistic reply — which used to leave the author reading
+      // "Done — I've built your RSVP form." about a form that was never created.
+      return {
+        reply:
+          `${response.reply}\n\n**I could not do that:** I meant to ${VERB[response.action]} but ` +
+          `did not manage to say ${missing}. Ask me again and I will.`,
+      };
+    }
+    if (response.action === 'create') {
       return { reply: await createForm(response, params, contextUser) };
     }
-    if (response.action === 'restyle' && response.cssVariables) {
+    if (response.action === 'restyle') {
       return { reply: await restyleForm(response, params, formId, contextUser) };
     }
-    if (response.action === 'image' && response.imagePrompt) {
+    if (response.action === 'image') {
       return { reply: await addScreenImage(response, params, formId, contextUser) };
     }
     return { reply: response.reply };
@@ -202,12 +263,19 @@ async function restyleForm(
   // Same validation and contrast gate a generated theme goes through: unknown tokens stripped,
   // unreadable ink corrected, layout tokens left alone. A colour arriving by chat is no more
   // trustworthy than one arriving from the theme prompt.
-  const outcome = validateTheme({ cssVariables: response.cssVariables ?? {} });
-  await applyThemeTokens(formId, form.StyleID, themeWithOverrides(outcome.cssVariables), contextUser);
+  //
+  // THE BASE IS THE FORM'S OWN PALETTE, not the house one. Merging over the house defaults meant a
+  // model correctly answering "make the buttons darker" with a single token reset every other
+  // colour the author had tuned in the Design tab — a full replace dressed up as a small change,
+  // confirmed cheerfully and with no warning.
+  const base = themeWithOverrides(await currentThemeTokens(form.StyleID, contextUser));
+  const outcome = validateTheme({ cssVariables: response.cssVariables ?? {} }, base);
+  await applyThemeTokens(formId, form.StyleID, outcome.cssVariables, contextUser);
   setOutputParam(params, 'StyleID', form.StyleID);
 
   const notes = outcome.unreadablePairs.length
-    ? `\n\nOne thing to know: ${outcome.unreadablePairs.join('; ')} — the text there will be hard to read.`
+    ? `\n\nOne thing to know: ${outcome.unreadablePairs.join('; ')} — that pairing is below the ` +
+      'contrast bar and will be hard to read.'
     : '';
   return `${response.reply}${notes}`;
 }
@@ -266,7 +334,15 @@ async function addScreenImage(
   return response.reply;
 }
 
-/** The form's welcome or first ending screen, or undefined when it has none of that kind. */
+/**
+ * The form's welcome or first ending screen, or undefined when it has none of that kind.
+ *
+ * A FAILED read and an ABSENT screen are different answers and used to collapse into the same
+ * `undefined`, so a transient failure told the author "this form has no welcome screen yet" about
+ * a screen plainly on their canvas, with nothing in the log to contradict it. The failure is
+ * logged now; the reply is still the gentle one, because there is nothing the author can do about
+ * either case in the moment.
+ */
 async function findScreen(
   formId: string,
   kind: 'welcome' | 'ending',
@@ -282,7 +358,46 @@ async function findScreen(
     },
     contextUser,
   );
-  return view.Success ? view.Results?.[0] : undefined;
+  if (!view.Success) {
+    LogError(
+      `[Forms chat] Could not read the ${kind} screen for form ${formId}: ${view.ErrorMessage}`,
+    );
+    return undefined;
+  }
+  return view.Results?.[0];
+}
+
+/**
+ * The tokens a style currently carries, or an empty map when it has none or cannot be read.
+ *
+ * Degraded rather than fatal: a style whose JSON is unreadable should not block a restyle, and the
+ * house palette underneath is a sound floor. It IS logged, because a style row that stopped
+ * parsing is a real problem somebody should see.
+ */
+async function currentThemeTokens(
+  styleId: string,
+  contextUser: UserInfo,
+): Promise<Record<string, string>> {
+  const md = new Metadata();
+  const style = await md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(
+    'MJ_BizApps_Forms: Form Styles',
+    contextUser,
+  );
+  if (!(await style.Load(styleId)) || !style.CSSVariables) {
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(style.CSSVariables);
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, string>)
+      : {};
+  } catch (error) {
+    LogError(
+      `[Forms chat] Style ${styleId} has unreadable CSSVariables; restyling from the house ` +
+        `palette instead. ${errorText(error)}`,
+    );
+    return {};
+  }
 }
 
 /**
@@ -319,6 +434,16 @@ async function describeOpenForm(
       },
       contextUser,
     );
+    if (!questions.Success) {
+      // Fail the whole description rather than describing a form with no questions. `RunView` does
+      // not throw, so an unchecked read here handed the assistant an empty question list and it
+      // confidently advised an author to add the name and email fields already on their form.
+      LogError(
+        `[Forms chat] Could not read questions for form ${formId}, so the assistant was given no ` +
+          `context rather than a form that looks empty: ${questions.ErrorMessage}`,
+      );
+      return undefined;
+    }
 
     let cssVariables: Record<string, string> = {};
     if (form.StyleID) {

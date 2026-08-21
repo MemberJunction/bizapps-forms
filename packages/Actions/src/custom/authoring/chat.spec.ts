@@ -17,6 +17,17 @@ const saved: SavedRow[] = [];
 const rows = new Map<string, Array<Record<string, unknown>>>();
 let minted = 0;
 
+/**
+ * Every `ExtraFilter` the fake was handed, in order.
+ *
+ * Recorded because asserting on OUTCOMES could not distinguish a guard that works from a fixture
+ * that happens to return nothing: an injected id names no row, so `Load` fails and the context
+ * comes back undefined whether or not anything validated it. Three of these tests passed with the
+ * guard fully neutered for exactly that reason. The filter string is the thing the guard exists to
+ * protect, so it is the thing to look at.
+ */
+const seenFilters: string[] = [];
+
 function fakeGuid(n: number): string {
   return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
@@ -89,6 +100,11 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       Success: boolean;
       Results: unknown[];
     }> {
+      // Recorded BEFORE matching: `matchesFilter` throws on a clause it cannot read, and an
+      // injected filter is exactly such a clause.
+      if (params.ExtraFilter) {
+        seenFilters.push(params.ExtraFilter);
+      }
       const table = rows.get(params.EntityName) ?? [];
       return { Success: true, Results: table.filter((r) => matchesFilter(r, params.ExtraFilter)) };
     }
@@ -103,6 +119,7 @@ import { runChatTurn, setChatAssistantModel, setChatImageModel } from './chat.ac
 import { setStagedAuthoringModel, setFormDesignerModel } from './generate-form.action';
 import { chatExternalId, MAX_CHAT_HISTORY_TURNS } from './chat-assistant';
 import { resetGeneratedImageStore, setGeneratedImageStore } from './generated-image-store';
+import type { RunActionParams } from '@memberjunction/actions-base';
 import type { FormChatResponse } from '@mj-biz-apps/forms-entities';
 
 /**
@@ -139,8 +156,11 @@ async function turn(message: string, inputs: Record<string, string> = {}) {
     Params: Object.entries(inputs).map(([Name, Value]) => ({ Name, Value, Type: 'Input' as const })),
     ContextUser: user,
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result = await runChatTurn(message, params as any, user);
+  // `as unknown as` rather than `as any`, which CLAUDE.md forbids outright and which this file
+  // was the repo's only use of. The double assertion is the convention the other action specs
+  // here already follow: the fixture is a deliberate partial of `RunActionParams`, carrying the
+  // two fields `runChatTurn` reads.
+  const result = await runChatTurn(message, params as unknown as RunActionParams, user);
   const out = (name: string): unknown => params.Params.find((p) => p.Name === name)?.Value;
   return { result, out, params };
 }
@@ -150,6 +170,7 @@ const turns = (): SavedRow[] => saved.filter((r) => r.entity === DETAIL);
 beforeEach(() => {
   saved.length = 0;
   rows.clear();
+  seenFilters.length = 0;
   minted = 0;
   resetGeneratedImageStore();
   setChatAssistantModel({ respond: async () => JSON.stringify({ reply: 'ok', action: 'none' }) });
@@ -277,6 +298,29 @@ describe('a create turn', () => {
     const filings = saved.filter((r) => r.entity === CONVERSATION).map((r) => r.fields.ExternalID);
     expect(filings[0]).toBe('mj-forms:home');
     expect(filings.at(-1)).toBe(chatExternalId(formId));
+  });
+
+  it('does not steal the thread of the form the author is already in', async () => {
+    /**
+     * THE BUG THIS GUARDS. The re-file fired whenever the new form's id differed from the open
+     * one — which is always true when a form is created FROM inside the builder. So an author
+     * working on form A who said "make me a volunteer form" had A's entire conversation moved
+     * onto the brand-new B, and A's chat panel came back empty. The justification for re-filing
+     * covers exactly one case, the forms LIST, and that is now the only case it fires in.
+     */
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null }]);
+    rows.set('MJ_BizApps_Forms: Form Questions', []);
+    assistant({ reply: 'Building that now.', action: 'create', brief: 'A volunteer sign-up.' });
+    setFormDesignerModel({
+      design: async () =>
+        JSON.stringify({ name: 'Volunteers', pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }] }),
+    });
+
+    const { out } = await turn('make me a volunteer form', { FormID: FORM_ID });
+
+    expect(out('FormID')).toBeTruthy();
+    const filings = saved.filter((r) => r.entity === CONVERSATION).map((r) => r.fields.ExternalID);
+    expect(new Set(filings)).toEqual(new Set([chatExternalId(FORM_ID)]));
   });
 
   it('leaves the thread where it is when the turn made no form', async () => {
@@ -493,16 +537,28 @@ describe('ids that reach a SQL filter', () => {
     expect(String(conversation?.fields.ExternalID)).not.toContain("'");
   });
 
-  it('never lets an injected conversation id reach the filter', async () => {
+  it('starts a fresh thread rather than building a query from an injected conversation id', async () => {
+    /**
+     * Named for what it actually proves. A client `ConversationID` reaches a PARAMETERISED
+     * `Load`, never an interpolated filter — the only filter carrying a conversation id is
+     * `loadChatHistory`'s, and that id comes from a row already loaded. So this test passes with
+     * `isGuid` neutered, and that is correct rather than weak: the structural property holds
+     * without the guard.
+     *
+     * It was previously titled as an injection guard, which claimed evidence it does not provide.
+     * The guard that DOES matter for this parameter is ownership, tested in its own block above.
+     */
     await turn('hello', { ConversationID: INJECTION });
-    // A fresh thread, not a lookup built from the injected value.
     expect(saved.filter((r) => r.entity === CONVERSATION)).toHaveLength(1);
     expect(String(saved[0].fields.ExternalID)).not.toContain("'");
+    expect(seenFilters.join(' | ')).not.toContain("OR '1'='1");
   });
 
   it('treats a malformed id as absent rather than failing the message', async () => {
-    // The author still gets an answer. A bad id means the same thing as an id naming something
-    // that does not exist, and erroring would be a failure they cannot act on.
+    // A DEGRADATION test, not a guard test — it passes with or without `isGuid` and is not
+    // evidence the guard works. It is here because the guard's chosen failure mode is a design
+    // decision worth pinning: a bad id means the same thing as an id naming something that does
+    // not exist, and erroring would be a failure the author cannot act on.
     assistant({ reply: 'Sure.', action: 'none' });
     const { result, out } = await turn('what goes with navy?', { FormID: INJECTION });
     expect(result.Success).toBe(true);
@@ -515,6 +571,9 @@ describe('ids that reach a SQL filter', () => {
     await turn('tell me about this form', { FormID: INJECTION });
     // No context at all — the lookup never ran.
     expect(respond.mock.calls.at(-1)?.[0].context).toBeUndefined();
+    // Asserted on the QUERIES, not just the outcome: an injected id names no row either way, so
+    // "context is undefined" alone is true with the guard removed.
+    expect(seenFilters.some((f) => f.includes(INJECTION))).toBe(false);
   });
 
   it('still works normally for a real GUID', async () => {
@@ -524,6 +583,120 @@ describe('ids that reach a SQL filter', () => {
     expect(saved.find((r) => r.entity === CONVERSATION)?.fields.ExternalID).toBe(
       `mj-forms:form:${realId}`,
     );
+  });
+});
+
+describe('an action declared without the payload it needs', () => {
+  /**
+   * THE BUG THIS GUARDS. Dispatch was three guards of the form
+   * `action === 'create' && response.brief`, each falling through to `return { reply }` when the
+   * payload was missing. So a model answering
+   *
+   *     {"reply": "Done — I've built your RSVP form.", "action": "create"}
+   *
+   * built nothing, logged nothing, set `Action` to `create`, and handed the author a sentence
+   * saying their form existed. A change that silently does not happen is the worst outcome
+   * available — worse than an error, because nothing tells anyone to look.
+   *
+   * `restyle` had a second edge: the guard was truthiness and `{}` is truthy, so an empty token
+   * map passed it and reset the whole theme to house default.
+   */
+  beforeEach(() => {
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: STYLE_ID }]);
+    rows.set(STYLE, [{ ID: STYLE_ID, Name: 'RSVP theme', CSSVariables: '{}' }]);
+    rows.set('MJ_BizApps_Forms: Form Questions', []);
+  });
+
+  it('does not claim a form was built when no brief arrived', async () => {
+    assistant({ reply: "Done — I've built your RSVP form.", action: 'create' });
+    const { out } = await turn('build me an RSVP');
+    expect(out('FormID')).toBeUndefined();
+    expect(saved.some((r) => r.entity === 'MJ_BizApps_Forms: Forms')).toBe(false);
+    expect(String(out('Reply'))).toMatch(/could not/i);
+  });
+
+  it('does not reset the theme when the token map is empty', async () => {
+    assistant({ reply: 'Made it warmer.', action: 'restyle', cssVariables: {} });
+    const { out } = await turn('make it warmer', { FormID: FORM_ID });
+    expect(saved.some((r) => r.entity === STYLE)).toBe(false);
+    expect(String(out('Reply'))).toMatch(/could not/i);
+  });
+
+  it('does not claim a picture was added when no description arrived', async () => {
+    assistant({ reply: 'Added a photo to the start screen.', action: 'image' });
+    const { out } = await turn('add a picture', { FormID: FORM_ID });
+    expect(out('ImageURL')).toBeUndefined();
+    expect(String(out('Reply'))).toMatch(/could not/i);
+  });
+
+  it('leaves a reply-only turn alone', async () => {
+    // `none` and `unsupported` carry no payload by design, so nothing here may touch them.
+    assistant({ reply: 'Navy pairs well with off-white.', action: 'none' });
+    const { out } = await turn('what goes with navy?');
+    expect(out('Reply')).toBe('Navy pairs well with off-white.');
+  });
+});
+
+describe('a conversation id that belongs to somebody else', () => {
+  /**
+   * THE BUG THIS GUARDS. `ConversationID` is a declared, client-supplied action input, and the
+   * branch that honours it called `Load(id)` and returned the row — no ownership check at all —
+   * while the sibling lookup eleven lines below it filters on `UserID`. `guidOrUndefined` made a
+   * foreign id injection-SAFE, which is a different property from authorized, and the gap was easy
+   * to miss precisely because the guard next to it looked like the guard.
+   *
+   * Read AND write: `loadChatHistory` would have fed the victim's last ten turns to the model, and
+   * `appendTurn` would then have written the caller\'s message into the victim's thread.
+   */
+  const OTHER_USER_THREAD = 'dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb';
+
+  beforeEach(() => {
+    rows.set(CONVERSATION, [
+      {
+        ID: OTHER_USER_THREAD,
+        UserID: 'somebody-else',
+        ExternalID: 'mj-forms:home',
+        Name: 'Their private thread',
+        IsArchived: false,
+      },
+    ]);
+  });
+
+  it('does not adopt it', async () => {
+    const { out } = await turn('what were we saying?', { ConversationID: OTHER_USER_THREAD });
+    expect(out('ConversationID')).not.toBe(OTHER_USER_THREAD);
+  });
+
+  it('does not read their turns into the prompt', async () => {
+    rows.set(DETAIL, [
+      {
+        ID: 'their-turn',
+        ConversationID: OTHER_USER_THREAD,
+        Role: 'User',
+        Message: 'my salary is confidential',
+        HiddenToUser: false,
+      },
+    ]);
+    const respond = assistant({ reply: 'ok', action: 'none' });
+    await turn('what were we saying?', { ConversationID: OTHER_USER_THREAD });
+    const history = respond.mock.calls.at(-1)?.[0].history ?? [];
+    expect(JSON.stringify(history)).not.toContain('confidential');
+  });
+
+  it('does not write into their thread', async () => {
+    await turn('hello', { ConversationID: OTHER_USER_THREAD });
+    const written = turns().map((t) => t.fields.ConversationID);
+    expect(written).not.toContain(OTHER_USER_THREAD);
+  });
+
+  it('still adopts the caller\'s own thread', async () => {
+    // The guard must not break the path it is protecting.
+    const mine = 'eeeeeeee-ffff-4aaa-8bbb-cccccccccccc';
+    rows.set(CONVERSATION, [
+      { ID: mine, UserID: user.ID, ExternalID: 'mj-forms:home', Name: 'Mine', IsArchived: false },
+    ]);
+    const { out } = await turn('carry on', { ConversationID: mine });
+    expect(out('ConversationID')).toBe(mine);
   });
 });
 

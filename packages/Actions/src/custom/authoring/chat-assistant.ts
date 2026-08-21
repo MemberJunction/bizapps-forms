@@ -136,11 +136,29 @@ export async function ensureConversation(
   if (requestedConversation) {
     const existing = await md.GetEntityObject<MJConversationEntity>(ENTITY.Conversation, contextUser);
     if (await existing.Load(requestedConversation)) {
-      return existing;
+      // OWNERSHIP IS CHECKED HERE, not assumed from the id being well-formed.
+      //
+      // `ConversationID` is a client-supplied action param. `guidOrUndefined` above makes a
+      // foreign id injection-SAFE, which is a different property from authorized — and the
+      // lookup twenty lines below has always filtered on `UserID`, which is exactly what made
+      // this branch's absence of a check easy to miss: the guard beside it looked like the guard.
+      //
+      // Without this, passing another author's thread id read their last ten turns into the
+      // prompt AND appended the caller's message to their thread. Read and write, from one
+      // optional parameter. Do not rely on the host's row-level security to cover this: a clean
+      // MJ install ships no RLS filter for `MJ: Conversations`, so the only check is the one here.
+      if (existing.UserID === contextUser.ID) {
+        return existing;
+      }
+      LogError(
+        `[Forms chat] Refusing conversation ${requestedConversation}: it belongs to user ` +
+          `${existing.UserID}, not to ${contextUser.ID}. Starting a new thread.`,
+      );
+    } else {
+      // A conversation id that no longer resolves is not an error worth failing a message over —
+      // the author's thread was deleted. Start a fresh one.
+      LogError(`[Forms chat] Conversation ${requestedConversation} did not load; starting a new thread.`);
     }
-    // A conversation id that no longer resolves is not an error worth failing a message over —
-    // the author's thread was deleted or belongs elsewhere. Start a fresh one.
-    LogError(`[Forms chat] Conversation ${requestedConversation} did not load; starting a new thread.`);
   }
 
   const externalId = chatExternalId(formId);
