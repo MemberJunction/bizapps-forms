@@ -88,14 +88,25 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'Action',            '7F0A0004-A1B2-4C3D-8E4F-000000000004', 0),  -- Send Confirmation Email
     ('${mjSchema}', 'Action',            '7F0A0005-A1B2-4C3D-8E4F-000000000005', 0),  -- Create Followup Task
     ('${mjSchema}', 'Action',            '7F0A0006-A1B2-4C3D-8E4F-000000000006', 0),  -- Analyze Written Responses
+    ('${mjSchema}', 'Action',            '7F0A0007-A1B2-4C3D-8E4F-000000000007', 0),  -- Chat
     ('${mjSchema}', 'ActionCategory',    '7F0C0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Forms
     -- AI prompts (AIPromptModel.PromptID is NOT NULL) and their category.
     ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829304', 0),  -- Forms: Form Designer
     ('${mjSchema}', 'AIPrompt',          'B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E', 0),  -- Forms: Response Analyzer
+    -- The staged authoring pipeline's four prompts, added with the AI form builder.
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829305', 0),  -- Forms: Form Outline
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829306', 0),  -- Forms: Page Detail
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829307', 0),  -- Forms: Theme Designer
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829308', 0),  -- Forms: Chat Assistant
     ('${mjSchema}', 'AIPromptCategory',  '4F5A6B7C-8D9E-4F0A-1B2C-3D4E5F607182', 0),  -- MJ_BizApps_Forms
     -- Templates (TemplateContent and TemplateParam are NOT NULL children).
     ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61', 0),  -- Form Designer
     ('${mjSchema}', 'Template',          'F6A7B8C9-D0E1-4F2A-3B4C-5D6E7F809102', 0),  -- Response Analyzer
+    -- The four templates those prompts render.
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F62', 0),  -- Form Outline
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F63', 0),  -- Page Detail
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F64', 0),  -- Theme Designer
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F65', 0),  -- Chat Assistant
     -- The Forms application (ApplicationEntity / ApplicationRole / UserApplication are NOT NULL).
     ('${mjSchema}', 'Application',       'BFB97C57-4552-4643-8933-A0B2D76544D8', 0),  -- Forms
     -- Dashboards. Listed explicitly rather than left to the Application cascade, because
