@@ -19,6 +19,7 @@
  * install.
  */
 import { LogError, Metadata, RunView } from '@memberjunction/core';
+import { UserCache } from '@memberjunction/generic-database-provider';
 import type { UserInfo } from '@memberjunction/core';
 import { FileStorageEngine } from '@memberjunction/storage';
 import {
@@ -46,6 +47,13 @@ export class AssetPipelineImageStore implements GeneratedImageStore {
         metadataProvider: metadata,
         runViewProvider: new RunView(),
         storage: FileStorageEngine.Instance,
+        // The `MJ: Files` row is written as the system user, exactly as a human upload's is
+        // (`AssetMiddleware`). Omitting this made the header above describe behaviour the code did
+        // not have: the row was written as the AUTHOR, who carries no Files grant on a clean
+        // install — so every generated picture failed at the Files insert while the upload button
+        // beside it worked. Update-on-Forms is still checked against the caller; only the Files
+        // row is elevated, which is the whole scope of the elevation.
+        elevatedUser: UserCache.Instance.GetSystemUser(),
       },
       {
         // `Buffer.from(bytes)` rather than a cast: the asset pipeline hands these to
