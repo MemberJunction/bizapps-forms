@@ -33,6 +33,7 @@ import {
   mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
   defaultThemeJSON,
+  isGuid,
 } from '@mj-biz-apps/forms-entities';
 import {
   CHOICE_QUESTION_TYPES,
@@ -720,15 +721,17 @@ async function loadPageQuestions(
  *
  * Throws rather than returning a flag: every caller here is mid-build with a form already created,
  * and a non-GUID id means a programming error upstream, not a data condition to route around.
+ *
+ * The SHAPE test is `isGuid` from the shared contract, not a regex of its own — a second copy of
+ * that pattern is a second place for it to drift, and this file carried one. What stays local is
+ * only the error TYPE: `FormPersistError` is what the persist layer's handling keys on, and the
+ * shared `assertGuid` throws a plain `Error`.
  */
 function assertGuid(value: string, what: string): void {
-  if (!GUID_PATTERN.test(value)) {
+  if (!isGuid(value)) {
     throw new FormPersistError(`Refusing to query with a ${what} that is not a GUID: "${value}".`);
   }
 }
-
-/** Matches the canonical 8-4-4-4-12 form. */
-const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Which of these questions already carry options.

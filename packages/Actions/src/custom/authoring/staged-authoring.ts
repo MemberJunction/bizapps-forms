@@ -147,8 +147,14 @@ export interface StagedAuthoringOptions {
  * Whether a request should be built in stages.
  *
  * Derived from the presence of a progress channel, because that is the one signal that says
- * somebody is WATCHING — and watching is the only thing staging buys (see the file header). An API
- * or batch caller supplies no channel, wants the cheaper single call, and gets an identical form.
+ * somebody is WATCHING. An API or batch caller supplies no channel and wants the cheaper single
+ * call.
+ *
+ * WATCHING IS NO LONGER THE ONLY THING STAGING BUYS, and this sentence used to claim it was. The
+ * image and theme stages live inside `runStagedAuthoring` only, so a single-shot form gets the
+ * house palette and no pictures — it is NOT "an identical form". That is a defensible cost trade,
+ * since pictures are billed per picture, but it is a second axis riding on one boolean. If a
+ * caller ever wants pictures without a progress channel, this is where the explicit switch goes.
  *
  * A named function rather than an inline `if` because this conflates two ideas — "where do I send
  * progress" and "how do I generate" — and that is a decision, not an accident. If a caller ever

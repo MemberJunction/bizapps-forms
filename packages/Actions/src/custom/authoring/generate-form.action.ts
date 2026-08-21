@@ -61,6 +61,7 @@ import {
   type StagedAuthoringResult,
 } from './staged-authoring';
 import type { ProgressChannel } from './progress-events';
+import type { FormBlueprint } from './form-blueprint';
 import { errorText } from '../shared/error-text';
 
 let activeDesignerModel: FormDesignerModel = new AIPromptFormDesignerModel();
@@ -160,9 +161,46 @@ async function runSingleShot(
 ): Promise<StagedAuthoringResult> {
   const blueprint = await designFormFromBrief(brief, activeDesignerModel, contextUser, inputMode);
   const built = await buildFormFromBlueprint(blueprint, contextUser, ownerUserId);
-  // Shaped as a staged result so `report` has one thing to write out. A single-shot build cannot
-  // partly succeed — it is one persist — so `degraded` is empty by construction, not by omission.
-  return { blueprint, built, degraded: [] };
+  // Shaped as a staged result so `report` has one thing to write out.
+  //
+  // WHAT THIS ROUTE DOES NOT DO, said out loud. The image and theme stages live inside
+  // `runStagedAuthoring`; `buildFormFromBlueprint` calls neither. So a single-shot form carries
+  // the house palette and no pictures however hard the blueprint asked for them — the model still
+  // returns `theme.brandAdjectives` and per-option `imagePrompt`, and both are dropped on the
+  // floor. That is a deliberate cost trade (image generation is billed per picture and a batch
+  // caller did not ask to be billed), NOT an oversight, but a caller cannot tell those apart from
+  // a result that reports nothing degraded. Naming them here is what makes the trade visible.
+  const skipped: string[] = [];
+  if (blueprint.theme) {
+    skipped.push('the requested colours — the form carries the house palette');
+  }
+  if (countImagePrompts(blueprint) > 0) {
+    skipped.push('the requested pictures — generate them from a channel-backed call');
+  }
+  return { blueprint, built, degraded: skipped };
+}
+
+/**
+ * How many pictures the blueprint asked for, across screens and picture-choice options.
+ *
+ * Counted rather than tested for truthiness so the reported line is honest about a blueprint that
+ * asked for nothing: a form with no `imagePrompt` anywhere is not degraded by a route that skips
+ * image generation.
+ */
+function countImagePrompts(blueprint: FormBlueprint): number {
+  let n = 0;
+  if (blueprint.screens?.welcome?.imagePrompt) n++;
+  for (const ending of blueprint.screens?.endings ?? []) {
+    if (ending.imagePrompt) n++;
+  }
+  for (const page of blueprint.pages ?? []) {
+    for (const question of page.questions ?? []) {
+      for (const option of question.options ?? []) {
+        if (typeof option === 'object' && option.imagePrompt) n++;
+      }
+    }
+  }
+  return n;
 }
 
 /** Write the output params and the success message. Identical for both routes. */

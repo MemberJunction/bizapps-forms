@@ -113,3 +113,26 @@ export const MAX_BLUEPRINT_OPTIONS = 50;
 
 /** The most ending screens one form may have. Each is a conditional branch a respondent can reach. */
 export const MAX_BLUEPRINT_ENDINGS = 10;
+
+/**
+ * The most answer rows one snapshot read will pull back.
+ *
+ * `loadFormSnapshot` runs on EVERY chat turn, and the answer counts it needs are the delete gate's
+ * only evidence. Counting them by fetching one row per answer meant a published form with 50,000
+ * responses across 20 questions moved a million rows into the action process to compute a handful
+ * of integers — so the busier the form, the less usable its assistant, which is exactly backwards.
+ *
+ * Reaching the cap is treated as "every question is answered" rather than as a partial count. A
+ * capped result is an ARBITRARY subset: a question missing from it may still hold answers, so
+ * believing the subset would let the gate approve deleting an answered question. Same direction as
+ * a failed read — see `readAnswerCounts`.
+ */
+export const MAX_ANSWER_ROWS_SCANNED = 20_000;
+
+/**
+ * The most response rows one snapshot read will pull back, for the count in the context header.
+ *
+ * Cosmetic, unlike {@link MAX_ANSWER_ROWS_SCANNED} — nothing gates on it — so hitting the cap
+ * renders as "20000+" rather than refusing anything.
+ */
+export const MAX_RESPONSE_ROWS_SCANNED = 20_000;

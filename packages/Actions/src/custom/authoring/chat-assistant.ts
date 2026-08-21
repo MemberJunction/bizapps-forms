@@ -22,7 +22,6 @@ import {
 } from '@memberjunction/core-entities';
 import {
   assertGuid,
-  describeFormForChat,
   guidOrUndefined,
   isGuid,
   parseFormChatResponse,
@@ -298,4 +297,3 @@ export async function askAssistant(
 }
 
 /** Re-exported so the action and the prompt model share one renderer for the context block. */
-export { describeFormForChat };

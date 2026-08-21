@@ -10,6 +10,7 @@
  * form would otherwise cost twenty-five round trips on EVERY chat turn, and the whole point of
  * this being cheap is that it ships with every message.
  */
+import { MAX_ANSWER_ROWS_SCANNED, MAX_RESPONSE_ROWS_SCANNED } from './limits';
 import { LogError, Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import {
@@ -57,7 +58,7 @@ export async function loadFormSnapshot(
         { EntityName: ENTITY.page, ExtraFilter: filter, OrderBy: 'DisplayOrder', ResultType: 'simple', Fields: ['ID', 'Title'] },
         { EntityName: ENTITY.question, ExtraFilter: filter, OrderBy: 'DisplayOrder', ResultType: 'simple', Fields: ['ID', 'PageID', 'QuestionType', 'Prompt', 'IsRequired'] },
         { EntityName: ENTITY.screen, ExtraFilter: filter, OrderBy: 'DisplayOrder', ResultType: 'simple', Fields: ['ID', 'ScreenType', 'Title', 'ConditionalRule'] },
-        { EntityName: ENTITY.response, ExtraFilter: filter, ResultType: 'simple', Fields: ['ID'] },
+        { EntityName: ENTITY.response, ExtraFilter: filter, ResultType: 'simple', Fields: ['ID'], MaxRows: MAX_RESPONSE_ROWS_SCANNED },
       ],
       contextUser,
     );
@@ -165,6 +166,7 @@ async function readAnswerCounts(
       ExtraFilter: `QuestionID IN (${questionIds.map((id) => `'${id}'`).join(',')})`,
       ResultType: 'simple',
       Fields: ['QuestionID'],
+      MaxRows: MAX_ANSWER_ROWS_SCANNED,
     },
     contextUser,
   );
@@ -177,7 +179,18 @@ async function readAnswerCounts(
     }
     return counts;
   }
-  for (const row of view.Results ?? []) {
+  const rows = view.Results ?? [];
+  if (rows.length >= MAX_ANSWER_ROWS_SCANNED) {
+    // Fail CLOSED, for the same reason a failed read does. A capped result is an ARBITRARY subset
+    // of the answers, so a question absent from it may still hold some — believing the subset
+    // would let the gate approve deleting an answered question on exactly the busiest forms.
+    LogError(
+      `[Forms snapshot] Answer scan hit its ${MAX_ANSWER_ROWS_SCANNED}-row cap; treating every question as answered`,
+    );
+    for (const id of questionIds) counts.set(id, Number.MAX_SAFE_INTEGER);
+    return counts;
+  }
+  for (const row of rows) {
     counts.set(row.QuestionID, (counts.get(row.QuestionID) ?? 0) + 1);
   }
   return counts;

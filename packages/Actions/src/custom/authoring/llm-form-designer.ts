@@ -19,7 +19,7 @@ import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import type { UserInfo } from '@memberjunction/core';
 import { parseFormBlueprint, type FormBlueprint } from './form-blueprint';
-import { MAX_DESIGNER_ATTEMPTS } from './limits';
+import { MAX_DESIGNER_ATTEMPTS, STAGE_TIMEOUT_MS } from './limits';
 
 /**
  * What the author gave us, which changes what the Designer is allowed to do with it.
@@ -86,6 +86,11 @@ export class AIPromptFormDesignerModel implements FormDesignerModel {
     // runner parses/validates the model's JSON for us; this lets it also repair
     // slightly-malformed JSON (trailing commas, stray fences) before giving up.
     params.attemptJSONRepair = true;
+    // The same bound the staged path and the chat put on a model call. Without it this path had
+    // none at all, and `MAX_DESIGNER_ATTEMPTS` retries it — so a hung call was three hung calls.
+    // This is the documented fallback for a caller with no SessionID, which is exactly the caller
+    // with nobody watching a progress bar to notice.
+    params.cancellationToken = AbortSignal.timeout(STAGE_TIMEOUT_MS);
 
     const result = await new AIPromptRunner().ExecutePrompt<FormBlueprint>(params);
     if (!result.success) {

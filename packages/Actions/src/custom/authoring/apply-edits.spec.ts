@@ -140,6 +140,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 import { UserInfo } from '@memberjunction/core';
 import { buildFormSnapshot, planEdits } from '@mj-biz-apps/forms-entities';
 import { applyEdits } from './apply-edits';
+import { MAX_ANSWER_ROWS_SCANNED } from './limits';
 import { loadFormList, loadFormSnapshot } from './load-snapshot';
 
 const FORM = '11111111-2222-4333-8444-555555555555';
@@ -449,6 +450,29 @@ describe('loadFormSnapshot', () => {
 
   it('is undefined for a form that does not exist', async () => {
     expect(await loadFormSnapshot('99999999-9999-4999-8999-999999999999', user)).toBeUndefined();
+  });
+});
+
+describe('loadFormSnapshot — the answer scan is bounded', () => {
+  it('treats every question as answered when the scan hits its cap', async () => {
+    // A capped result is an arbitrary subset, so a question missing from it may still hold
+    // answers. Believing the subset is what would let the gate approve deleting an answered
+    // question — and it would do so on exactly the busiest forms.
+    const answers: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < MAX_ANSWER_ROWS_SCANNED; i++) {
+      answers.push({ ID: guid(900000 + i), QuestionID: Q_NAME, ResponseID: guid(1) });
+    }
+    rows.set('MJ_BizApps_Forms: Form Response Answers', answers);
+
+    const snap = await loadFormSnapshot(FORM, user);
+
+    // Q_MAIL has no answers at all, and must still be treated as answered.
+    const mail = snap!.pages[0].questions.find((q) => q.id === Q_MAIL);
+    expect(mail!.answerCount).toBe(Number.MAX_SAFE_INTEGER);
+
+    const plan = planEdits(snap!, [{ op: 'deleteQuestion', handle: 'q2' }]);
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused).toHaveLength(1);
   });
 });
 
