@@ -61,35 +61,6 @@ export interface FormChatTurn {
    * way out, rather than a Retry button somewhere else having to guess which message it means.
    */
   retryOf?: string;
-  /**
-   * What this turn changed, and what it changed it from. Client-only.
-   *
-   * Read back from `MJ: Record Changes` after the turn lands, so it is what the database actually
-   * recorded rather than what the assistant claims it did. It is the whole of undo: an author who
-   * asked for "warmer" and got fuchsia needs the previous value, not an apology.
-   */
-  change?: FormChatTurnChange;
-}
-
-/** What one turn changed on one record, and the value that was there before it. */
-export interface FormChatTurnChange {
-  /**
-   * Which of the two single-field edits this was.
-   *
-   * Only these two are undoable, and the honesty matters more than the coverage: both are one
-   * field on one record, so putting them back is a write of a value we hold. A structural edit
-   * spans pages, questions and options — reversing it correctly is version restore, not an undo
-   * button, and offering one that half-works is worse than offering none.
-   */
-  kind: 'style' | 'image';
-  /** The `Form Styles` or `Form Screens` row that changed. */
-  recordId: string;
-  /** What changed, in the author's words: "Accent, Page background" or "Welcome screen image". */
-  summary: string;
-  /** The value to write back. Empty string is a real value here — it means "there was none". */
-  previous: string;
-  /** Set once the author has taken it back, so the offer is not made twice. */
-  undone?: boolean;
 }
 
 /**

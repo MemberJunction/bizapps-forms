@@ -23,7 +23,6 @@ import {
   type GenerateFormStage,
 } from '@mj-biz-apps/forms-entities';
 import { FormChatService, type ChatSendResult } from './form-chat.service';
-import { TurnChangesService } from './turn-changes.service';
 import { parseChatMarkdown } from './chat-markdown';
 import { FORM_CHAT_STYLES } from './form-chat.styles';
 import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
@@ -62,7 +61,6 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, ImagePickerDialogComponent],
-  providers: [TurnChangesService],
   styles: [FORM_CHAT_STYLES],
   template: `
     <div class="fc">
@@ -218,25 +216,6 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
                     }
                   }
 
-                  <!--
-                    What the turn did, and the way back out of it. Read from the database's own
-                    record of the change rather than from the reply above it, so "Accent, Page
-                    background" is what was written and not what was claimed.
-                  -->
-                  @if (turn.change; as change) {
-                    <div class="fc-did">
-                      <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
-                      <span class="fc-did-what">{{ change.summary }}</span>
-                      @if (change.undone) {
-                        <span class="fc-did-done">Undone</span>
-                      } @else {
-                        <button type="button" class="fc-turn-btn" [disabled]="undoing()" (click)="undo($index)">
-                          Undo
-                        </button>
-                      }
-                    </div>
-                  }
-
                   <div class="fc-turn-actions">
                     @if (turn.retryOf; as failed) {
                       <button type="button" class="fc-turn-btn" [disabled]="chat.busy()" (click)="retry(failed)">
@@ -328,7 +307,7 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
               type="button"
               class="fc-go fc-go--ghost fc-attach"
               [disabled]="chat.busy()"
-              (click)="picking = true"
+              (click)="openPicker()"
               aria-label="Attach a picture"
               title="Attach a picture"
             >
@@ -392,17 +371,36 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
             </button>
           }
         </div>
+        <!--
+          The picker, INSIDE the panel and in a popover of its own.
+
+          Both halves are load-bearing. The panel is a popover, so it lives in the TOP LAYER, and
+          the top layer beats every z-index there is — the picker's own z-index:1000 put it
+          behind the panel, which is exactly what it looked like. And the picker was a DOM SIBLING
+          of the panel, so clicking it counted as clicking outside an 'auto' popover and light-
+          dismissed the whole conversation.
+
+          A 'manual' popover nested here fixes both: it is promoted to the top layer itself (shown
+          after the panel, so painted above it) and it is a descendant, so the light-dismiss walk
+          finds the panel as its ancestor and leaves it open. Verified in a browser rather than
+          reasoned about. The shared mjf-image-picker-dialog is untouched — five other hosts use
+          it as an ordinary fixed overlay and it still is one.
+
+          No display rule here, for the reason in form-chat.styles.ts's header: setting it would beat
+          the UA's own popover hide rule and pin this open forever.
+        -->
+        <div class="fc-picker" #pickerHost popover="manual">
+          @if (picking) {
+            <mjf-image-picker-dialog
+              subject="a picture for this form"
+              [formId]="formId() ?? ''"
+              (picked)="onPicked($event)"
+              (closed)="closePicker()"
+            />
+          }
+        </div>
       </div>
     </div>
-
-    @if (picking) {
-      <mjf-image-picker-dialog
-        subject="a picture for this form"
-        [formId]="formId() ?? ''"
-        (picked)="onPicked($event)"
-        (closed)="picking = false"
-      />
-    }
   `,
 })
 export class FormChatComponent {
@@ -449,6 +447,7 @@ export class FormChatComponent {
   private readonly panel = viewChild.required<ElementRef<HTMLElement>>('panel');
   private readonly thread = viewChild<ElementRef<HTMLElement>>('thread');
   private readonly box = viewChild<ElementRef<HTMLTextAreaElement>>('box');
+  private readonly pickerHost = viewChild<ElementRef<HTMLElement>>('pickerHost');
 
   protected readonly placeholder = computed(() =>
     this.formId() ? 'Chat to change' : 'Chat to create',
@@ -534,10 +533,6 @@ export class FormChatComponent {
   protected readonly copied = this._copied.asReadonly();
   private copiedTimer?: ReturnType<typeof setTimeout>;
 
-  /** True while an undo is being written, so the button cannot be pressed twice. */
-  private readonly _undoing = signal(false);
-  protected readonly undoing = this._undoing.asReadonly();
-
   /**
    * Whether the thread is scrolled to the newest turn.
    *
@@ -547,8 +542,6 @@ export class FormChatComponent {
    */
   private readonly _atNewest = signal(true);
   protected readonly atNewest = this._atNewest.asReadonly();
-
-  private readonly changes = inject(TurnChangesService);
 
   constructor() {
     // Re-load the thread whenever the host points us at a different form. Reading history from the
@@ -787,32 +780,22 @@ export class FormChatComponent {
     this.copiedTimer = setTimeout(() => this._copied.set(null), COPIED_FOR_MS);
   }
 
-  /** Put back what the turn at `index` changed, and tell the host to reload what it is showing. */
-  protected async undo(index: number): Promise<void> {
-    const turn = this.chat.turns()[index];
-    const change = turn?.change;
-    if (!change || change.undone || this._undoing()) {
-      return;
-    }
-    this._undoing.set(true);
-    try {
-      if (!(await this.changes.undo(change))) {
-        return;
-      }
-      this.chat.markUndone(index);
-      // The same events the change itself raised: whatever reloaded to show it reloads to unshow it.
-      if (change.kind === 'style') {
-        this.formRestyled.emit(change.recordId);
-      } else {
-        this.formChanged.emit();
-      }
-    } finally {
-      this._undoing.set(false);
+  protected openPicker(): void {
+    this.picking = true;
+    this.pickerHost()?.nativeElement.showPopover();
+  }
+
+  /** Close the picker without touching the panel it sits inside. */
+  protected closePicker(): void {
+    this.picking = false;
+    const host = this.pickerHost()?.nativeElement;
+    if (host?.matches(':popover-open')) {
+      host.hidePopover();
     }
   }
 
   protected onPicked(url: string): void {
-    this.picking = false;
+    this.closePicker();
     this._attached.set(url);
     this.box()?.nativeElement.focus();
   }
@@ -848,9 +831,6 @@ export class FormChatComponent {
     }
     const message = image ? withAttachedImage(typed, image) : typed;
     this.expand();
-    // Noted BEFORE the send: it is the floor for "changed by this turn", and a clock read after a
-    // fifty-second build would exclude the very change it is looking for.
-    const sentAt = new Date();
     const result = await this.chat.send(message, this.formId());
     // An image turn runs for the better part of a minute, and the Build tab's chat is destroyed by
     // the tab switch. `OutputEmitterRef.emit` on a destroyed component DISCARDS the value in
@@ -873,38 +853,6 @@ export class FormChatComponent {
     if (result.openFormId) {
       this.formOpened.emit(result.openFormId);
     }
-    await this.noteWhatChanged(result, sentAt);
-  }
-
-  /**
-   * Read back what the turn actually wrote, and hang it on the reply.
-   *
-   * After the host events, not before: reloading the form is what the author is waiting for, and
-   * this is a second round trip whose only job is to caption a turn that has already landed. A
-   * failure to read it leaves the reply uncaptioned, which is exactly what it was before.
-   */
-  private async noteWhatChanged(result: ChatSendResult, sentAt: Date): Promise<void> {
-    const target = result.restyledStyleId
-      ? ({ kind: 'style', id: result.restyledStyleId } as const)
-      : result.imagedScreenId
-        ? ({ kind: 'image', id: result.imagedScreenId } as const)
-        : undefined;
-    if (!target) {
-      return;
-    }
-    const change = await this.changes.describe(target.kind, target.id, sentAt);
-    if (!change || this.destroyed) {
-      return;
-    }
-    // A `setLayout` arrives as an EDIT, so the same turn may also have added a question or moved a
-    // page — and those are not coming back. Undo writes one field on the style row, which is the
-    // honest whole of what it does; a bare "Undo" sitting under a reply that lists five structural
-    // changes reads as an offer to reverse all five.
-    const scoped =
-      result.changedFormId && target.kind === 'style'
-        ? { ...change, summary: `${change.summary} — undo puts the theme back, not the wording` }
-        : change;
-    this.chat.attachChange(scoped);
   }
 
   /** Load this scope's thread, and open the panel if the author is plainly still in it. */

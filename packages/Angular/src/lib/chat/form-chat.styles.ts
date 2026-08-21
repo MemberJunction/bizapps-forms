@@ -449,24 +449,6 @@ export const FORM_CHAT_STYLES = /* css */ `
   color: var(--mj-text-muted);
 }
 
-/* What the turn changed, and the way back. Its own row rather than a line in the prose, because
-   it is a fact about the turn rather than something the assistant said. */
-.fc-did {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 6px 8px;
-  font-size: 0.8125rem;
-  color: var(--mj-text-secondary);
-  background: var(--fc-inset);
-  border: 1px solid var(--fc-hairline);
-  border-radius: var(--mj-radius-md, 8px);
-}
-.fc-did-what { flex: 1 1 auto; min-width: 0; color: var(--mj-text-primary); }
-.fc-did-done { color: var(--mj-text-muted); font-style: italic; }
-
 /* Revealed on hover, present always for a keyboard: an action that only exists on hover is an
    action a keyboard user does not have. */
 .fc-turn-actions {
@@ -508,6 +490,21 @@ export const FORM_CHAT_STYLES = /* css */ `
 }
 .fc-can dt { font-weight: 600; color: var(--mj-text-secondary); }
 .fc-can dd { margin: 0; }
+
+/* The nested popover the picker sits in. It paints nothing of its own — the dialog inside brings
+   its own backdrop and card — so this is a transparent full-viewport box whose only job is to be
+   in the top layer. inset:0 rather than the UA's centring, and no display outside
+   :popover-open (see this file's header). */
+.fc-picker {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  overflow: visible;
+}
+.fc-picker:popover-open { display: block; }
 
 /* --- what is going with the next message ------------------------------------------ */
 

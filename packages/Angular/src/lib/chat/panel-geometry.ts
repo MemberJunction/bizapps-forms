@@ -71,8 +71,6 @@ export const PANEL_MIN_HEIGHT = 320;
  * can neither read nor find the close button in.
  */
 export const PANEL_FLOOR = 200;
-/** Two thirds of the pane, so a conversation always has room to be one. */
-export const MIN_HEIGHT_SHARE = 0.66;
 /** Above this a panel stops reading as a panel and starts reading as a takeover. */
 export const MAX_HEIGHT_SHARE = 0.86;
 /** On a phone there is nothing behind worth preserving, so the sheet takes most of the screen. */
@@ -119,8 +117,19 @@ export function panelGeometry(
   const floor = Math.min(PANEL_MIN_HEIGHT, Math.max(PANEL_FLOOR, areaHeight - PANEL_GUTTER * 2));
   const bottomEdge = Math.min(Math.max(box.bottom, topLimit + floor), area.bottom - PANEL_GUTTER);
   const available = Math.max(PANEL_FLOOR, bottomEdge - topLimit);
-  const share = phone ? PHONE_HEIGHT_SHARE : MIN_HEIGHT_SHARE;
-  const minHeight = Math.min(Math.max(PANEL_MIN_HEIGHT, areaHeight * share), available);
+  // THE FLOOR IS A FIXED HEIGHT, NOT A SHARE OF THE PANE. It used to be two thirds of the pane,
+  // reasoning that a two-turn thread should not render as a box a few lines high. In a tall window
+  // that produced the opposite failure and a worse one: on a 1150px-high forms list the panel was
+  // forced to 760px, so a two-turn conversation sat at the bottom of an enormous empty slab that
+  // read as floating in the middle of the page rather than as attached to the box it grew from.
+  //
+  // Between this floor and the cap the height is decided by CONTENT — the panel is a flex column
+  // and the thread inside it flexes — so a short conversation now gets a compact panel sitting on
+  // its own composer, and a long one still grows to most of the pane. A phone keeps its share: a
+  // sheet covering the screen is the point there, and there is nothing behind it worth seeing.
+  const minHeight = phone
+    ? Math.min(Math.max(PANEL_MIN_HEIGHT, areaHeight * PHONE_HEIGHT_SHARE), available)
+    : Math.min(PANEL_MIN_HEIGHT, available);
   const maxHeight = Math.min(available, areaHeight * MAX_HEIGHT_SHARE);
 
   return {

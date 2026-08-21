@@ -13,6 +13,7 @@ import {
   MAX_HEIGHT_SHARE,
   PANEL_GUTTER,
   PANEL_MAX_WIDTH,
+  PANEL_MIN_HEIGHT,
   panelGeometry,
   type AnchorBox,
   type PanelArea,
@@ -113,6 +114,19 @@ describe('panelGeometry', () => {
     expect(at.width).toBeGreaterThan(1000);
     // Centred on the pill, to within the rounding that turns the numbers into whole pixels.
     expect(Math.abs(at.left + at.width / 2 - (pill.left + pill.width / 2))).toBeLessThanOrEqual(1);
+  });
+
+  it('does not inflate to a share of a tall pane, leaving the thread in an empty slab', () => {
+    // The bug this replaced: on a 1150px-high forms list the floor was two thirds of the pane, so a
+    // two-turn conversation was forced into a 760px panel and read as floating in the middle of the
+    // page. The floor is a fixed height now; content decides the rest.
+    const tall: PanelArea = { left: 0, top: 40, right: 1240, bottom: 1180 };
+
+    const at = panelGeometry(pillAtFootOf(tall), tall, 1200, false);
+
+    expect(at.minHeight).toBeLessThanOrEqual(PANEL_MIN_HEIGHT);
+    // The cap still lets a long thread use the room.
+    expect(at.maxHeight).toBeGreaterThan(700);
   });
 
   it('fits a pane shorter than the panel it would like to be', () => {

@@ -7,7 +7,6 @@ import {
   guidOrUndefined,
   isGuid,
   type FormChatTurn,
-  type FormChatTurnChange,
   type GenerationProgress,
 } from '@mj-biz-apps/forms-entities';
 import { readActionOutputString } from '../shared/action-output';
@@ -36,7 +35,7 @@ export interface ChatSendResult {
   /** Set when the turn created a form, so the host can open it. */
   createdFormId: string | null;
   /**
-   * The style row this turn wrote, so the host can reload it and the author can undo it.
+   * The style row this turn wrote, so the host can reload it.
    *
    * Set by a `restyle` and, since `setLayout` writes the same `CSSVariables` field on the same
    * row, by a layout edit as well — in which case `changedFormId` is set too and both fire.
@@ -99,6 +98,14 @@ export class FormChatService {
    */
   private sendToken = 0;
 
+  /**
+   * Where the "stopped waiting" notice sits, while one is showing.
+   *
+   * Null whenever there is nothing to replace — which includes after a reload, since the indices
+   * of a thread read back from the database have nothing to do with the ones in memory.
+   */
+  private stoppedNoticeIndex: number | null = null;
+
   private readonly _busy = signal(false);
   /** True while a message is in flight, so the input can disable and show a pending state. */
   public readonly busy = this._busy.asReadonly();
@@ -123,6 +130,7 @@ export class FormChatService {
    */
   public async load(formId: string | null): Promise<void> {
     const token = ++this.loadToken;
+    this.stoppedNoticeIndex = null;
     /** True while this load is still the newest one AND nothing is mid-send. */
     const mayWrite = (): boolean => token === this.loadToken && !this._busy();
     try {
@@ -192,6 +200,8 @@ export class FormChatService {
     }
     this._turns.update((t) => [...t, { role: 'User', message: trimmed, at: new Date() }]);
     const sendToken = ++this.sendToken;
+    // A new message is not the reply to an older stop; whatever notice is showing stays showing.
+    this.stoppedNoticeIndex = null;
     this._busy.set(true);
     this._progress.set(null);
     try {
@@ -200,16 +210,25 @@ export class FormChatService {
       // whatever the author's patience did — but it is marked so the thread does not read as if
       // the wait had simply been shorter than it was.
       const stopped = sendToken !== this.sendToken;
-      this._turns.update((t) => [
-        ...t,
-        {
-          role: result.ok ? 'AI' : 'Error',
-          message: stopped ? `${STOPPED_PREFIX}${result.reply}` : result.reply,
-          at: new Date(),
-          // Only a failure carries its own retry; a reply has nothing to retry.
-          ...(result.ok ? {} : { retryOf: trimmed }),
-        },
-      ]);
+      const turn: FormChatTurn = {
+        role: result.ok ? 'AI' : 'Error',
+        message: stopped ? `${STOPPED_PREFIX}${result.reply}` : result.reply,
+        at: new Date(),
+        // Only a failure carries its own retry; a reply has nothing to retry.
+        ...(result.ok ? {} : { retryOf: trimmed }),
+      };
+      // A stopped turn REPLACES its own notice rather than adding to it. Most turns answer in a
+      // second or two, so pressing Stop on one produced "Stopped waiting" and then the reply
+      // immediately under it — two messages about one exchange, and the thread reading as though
+      // something had gone wrong when nothing had. The notice exists for the case where the reply
+      // never comes; the moment it does come, it is the better version of the same fact.
+      const noticeAt = stopped ? this.stoppedNoticeIndex : null;
+      this.stoppedNoticeIndex = null;
+      this._turns.update((t) =>
+        noticeAt !== null && noticeAt < t.length
+          ? t.map((existing, i) => (i === noticeAt ? turn : existing))
+          : [...t, turn],
+      );
       return result;
     } finally {
       if (sendToken === this.sendToken) {
@@ -217,27 +236,6 @@ export class FormChatService {
         this._progress.set(null);
       }
     }
-  }
-
-  /**
-   * Record that the author took back what a turn changed, so the offer is not made twice.
-   *
-   * The turn keeps its summary — "Accent, Page background" is still what happened, and a thread
-   * that erases its own history the moment something is reversed is harder to follow, not easier.
-   */
-  public markUndone(index: number): void {
-    this._turns.update((turns) =>
-      turns.map((turn, i) =>
-        i === index && turn.change ? { ...turn, change: { ...turn.change, undone: true } } : turn,
-      ),
-    );
-  }
-
-  /** Attach what a turn changed to the newest turn, once it has been read back. */
-  public attachChange(change: FormChatTurnChange): void {
-    this._turns.update((turns) =>
-      turns.map((turn, i) => (i === turns.length - 1 ? { ...turn, change } : turn)),
-    );
   }
 
   /**
@@ -257,10 +255,11 @@ export class FormChatService {
     this.sendToken++;
     this._busy.set(false);
     this._progress.set(null);
-    this._turns.update((t) => [
-      ...t,
-      { role: 'AI', message: STOPPED_WAITING, at: new Date() },
-    ]);
+    this._turns.update((t) => {
+      // Remembered so the reply can take this turn's place instead of piling up beneath it.
+      this.stoppedNoticeIndex = t.length;
+      return [...t, { role: 'AI', message: STOPPED_WAITING, at: new Date() }];
+    });
   }
 
   /**
