@@ -432,15 +432,103 @@ export function parseFormBlueprint(input: string | object): FormBlueprint {
  * across the WHOLE form, most of which are not on this page, so the form-level key check cannot be
  * reused and a bare `blueprintPageSchema.parse` would accept a reference to nothing.
  *
- * `knownKeys` is the outline's full key set. The ordering rules the form-level validator enforces
- * are deliberately NOT re-applied here: the detail pass refines questions the outline already
- * placed, so their positions are fixed and a rule that was legal in the outline stays legal. What
- * can still go wrong is a reference to a key that never existed, which is what this catches.
+ * `knownKeys` is the outline's full key set, and a reference to a key that never existed is the
+ * first thing this catches.
+ *
+ * `ordering` is the second, and it exists because the reasoning that used to sit here was wrong.
+ * It said the form-level ordering rules "are deliberately NOT re-applied: the detail pass refines
+ * questions the outline already placed, so a rule that was legal in the outline stays legal". That
+ * holds for PAGE rules. It does not hold for QUESTION rules, because the outline template emits
+ * only `key`, `type` and `prompt` per question — question-level rules are authored ENTIRELY by the
+ * detail pass, so there was no earlier legality for them to inherit and nothing checked them at
+ * all on the staged route. A page-1 question gated on a page-3 answer validated, persisted, and
+ * was hidden from every respondent forever with nothing logged. The single-shot route caught it;
+ * the staged one, which is what the chat uses, did not.
+ *
+ * Optional so a caller with no outline to hand keeps the key check on its own.
  *
  * Throws a `ZodError` — the same currency the Designer retry loop already speaks, so a bad detail
  * page is retried with the specific complaint rather than failing the page.
  */
-export function parsePageDetail(input: string | object, knownKeys: ReadonlySet<string>): BlueprintPage {
+
+/** Where this page sits, and where every key the outline declared sits, for the ordering check. */
+export interface PageDetailOrdering {
+  positions: ReadonlyMap<string, KeyPosition>;
+  /** This page's index in the outline. */
+  pageIndex: number;
+}
+
+/**
+ * Every declared key and its position, without a refinement context.
+ *
+ * The same walk `indexQuestionKeys` does, minus the duplicate reporting — the outline has already
+ * been validated by the time a detail page is parsed, so there is nothing left to report here.
+ */
+export function declaredKeyPositions(blueprint: FormBlueprint): Map<string, KeyPosition> {
+  const positions = new Map<string, KeyPosition>();
+  let ordinal = 0;
+  blueprint.pages.forEach((page, pageIndex) => {
+    page.questions.forEach((question) => {
+      const current = ordinal++;
+      if (question.key && !positions.has(question.key)) {
+        positions.set(question.key, { pageIndex, ordinal: current });
+      }
+    });
+  });
+  return positions;
+}
+
+/**
+ * A question on a detail page may only be gated by an answer given before it.
+ *
+ * WHY THIS EXISTS SEPARATELY from `checkQuestionRules`. The form-level check needs the whole
+ * blueprint; a detail page is one page in isolation. What it can still establish is the only thing
+ * that matters: a referenced key is either on an EARLIER page (from the outline's positions) or
+ * earlier on THIS page (from the detail's own order). Anything else names an answer the respondent
+ * has not given yet, so the question can never be shown — and nothing logs it, which is why the
+ * staged route could hide a question forever while reporting success.
+ *
+ * Positions come from the outline, and the detail pass refines questions in place rather than
+ * moving them, so a key's PAGE is stable even though its index on the page may not be.
+ */
+function checkDetailQuestionOrder(
+  page: BlueprintPage,
+  ordering: PageDetailOrdering,
+  ctx: z.RefinementCtx,
+): void {
+  const indexOnThisPage = new Map<string, number>();
+  page.questions.forEach((question, index) => {
+    if (question.key && !indexOnThisPage.has(question.key)) {
+      indexOnThisPage.set(question.key, index);
+    }
+  });
+
+  page.questions.forEach((question, questionIndex) => {
+    for (const condition of conditionsOf(question.conditionalRule)) {
+      const key = condition.questionKey;
+      const here = indexOnThisPage.get(key);
+      const earlierHere = here !== undefined && here < questionIndex;
+      const earlierPage =
+        here === undefined && (ordering.positions.get(key)?.pageIndex ?? Infinity) < ordering.pageIndex;
+      if (earlierHere || earlierPage) {
+        continue;
+      }
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['questions', questionIndex, 'conditionalRule'],
+        message:
+          `Question "${question.prompt}" is shown based on "${key}", which is not asked earlier ` +
+          'in the form. A rule may only reference an earlier question.',
+      });
+    }
+  });
+}
+
+export function parsePageDetail(
+  input: string | object,
+  knownKeys: ReadonlySet<string>,
+  ordering?: PageDetailOrdering,
+): BlueprintPage {
   const raw: unknown = typeof input === 'string' ? JSON.parse(extractJSON(input)) : input;
   return blueprintPageSchema
     .superRefine((page, ctx) => {
@@ -457,6 +545,9 @@ export function parsePageDetail(input: string | object, knownKeys: ReadonlySet<s
             });
           }
         }
+      }
+      if (ordering) {
+        checkDetailQuestionOrder(page, ordering, ctx);
       }
     })
     .parse(raw);
