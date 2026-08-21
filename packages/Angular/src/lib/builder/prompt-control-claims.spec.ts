@@ -134,15 +134,37 @@ describe('the chat prompt names controls the builder actually has', () => {
     const designTab = bulletContaining(prompt(), '**Design tab**');
     expect(designTab, 'the prompt no longer names the Design tab at all').not.toBe('');
 
-    // The bullet may HAND BACK a capability — saying "its colours are yours" is the correction, not
-    // the defect — so what is checked is the part that sends somebody away: everything before the
-    // sentence that returns them. Split on the hand-back, and inspect only the offer.
-    const offer = designTab.split(/which are the only|are all\s+yours|are yours/i)[0];
-    for (const owned of ['colour', 'font', 'size', 'alignment', 'radius']) {
+    // PRESENCE, NOT ABSENCE, and this is the third design for this one assertion — the first two
+    // were unsound and both were caught by running them rather than reading them.
+    //
+    // Banning words outright failed correct prose, because the bullet legitimately MENTIONS
+    // colours in the course of handing them back. Splitting on the hand-back and banning words
+    // only in the offer failed too, in both directions: a hand-back worded any other way failed a
+    // correct bullet, and an offer placed AFTER any hand-back phrase was discarded by the split and
+    // sailed through. The split point is positional; the claim is not. No amount of better
+    // splitting fixes that, because it needs to understand English.
+    //
+    // What is checkable without understanding English is that the bullet says the two things it
+    // has to say: it NAMES what the Design tab exclusively owns, and it NAMES the operations that
+    // cover everything else. Order-independent, survives rewording, and the stale bullet — which
+    // named neither — fails.
+    const lower = designTab.toLowerCase();
+    for (const exclusive of ['logo', 'background image']) {
       expect(
-        offer.toLowerCase(),
-        `the Design tab bullet offers "${owned}", which the assistant can set itself: ${offer}`,
-      ).not.toContain(owned);
+        lower,
+        `the Design tab bullet must name "${exclusive}", which is one of the two things only that tab can set: ${designTab}`,
+      ).toContain(exclusive);
     }
+    // Naming the operation is what makes the hand-back actionable — this prompt's own rule is to
+    // name the control, and for the assistant's own capabilities the "control" is the operation.
+    expect(
+      designTab,
+      `the Design tab bullet must name the operations that cover its other controls: ${designTab}`,
+    ).toMatch(/`restyle`|`setLayout`/);
+
+    // WHAT THIS GIVES UP, said plainly: a bullet that names the logo, names `setLayout`, AND still
+    // offers colours would pass. That is a sentence contradicting itself twice in one breath, and
+    // nobody writes it. The alternative was a guard that fails on correct prose, which is worse —
+    // a false failure gets the assertion deleted, and then nothing checks anything.
   });
 });
