@@ -82,7 +82,9 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Respondent Gate Only, Never A Writer
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Respondent Own Distribution
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Respondent Own Form Versions
-    -- Actions (ActionParam.ActionID is NOT NULL, so the 9 params follow automatically).
+    -- Actions (ActionParam.ActionID is NOT NULL, so the 15 params follow automatically). Counted,
+    -- not incremented — it said 9 while the migrations created 15, after the AI builder added its
+    -- own. Same instruction as the header: recount rather than trust the number.
     ('${mjSchema}', 'Action',            '7F0A0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Generate Form From Brief
     ('${mjSchema}', 'Action',            '7F0A0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Create Form From Template
     ('${mjSchema}', 'Action',            '7F0A0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Upsert Respondent Person

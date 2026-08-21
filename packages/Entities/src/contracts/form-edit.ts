@@ -220,6 +220,11 @@ export function planEdits(
   // time it runs — and the applier cannot tell that apart from "no position given", so it appends
   // silently and reports success.
   const doomed = new Set<string>();
+  // Where this batch has already moved a question TO. Two later checks need it, both because they
+  // reason about a snapshot taken before the batch ran: a `deletePage` must not claim to be taking
+  // a question that has left, and a position must be judged against where the anchor IS by then,
+  // not where the snapshot last saw it.
+  const movedTo = new Map<string, string>();
   for (const operation of operations) {
     if (isHandleFree(operation)) {
       const refusal = vetHandleFree(operation);
@@ -312,12 +317,16 @@ export function planEdits(
       const placement = resolvePlacement(
         snapshot,
         operation,
-        page.toPageId ?? pageIdOfQuestion(snapshot, target.id),
+        page.toPageId ?? movedTo.get(target.id) ?? pageIdOfQuestion(snapshot, target.id),
         doomed,
+        movedTo,
       );
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
+      }
+      if (page.toPageId) {
+        movedTo.set(target.id, page.toPageId);
       }
       plan.resolved.push({ ...operation, id: target.id, ...placement, ...page });
       continue;
@@ -333,7 +342,7 @@ export function planEdits(
         });
         continue;
       }
-      const placement = resolvePlacement(snapshot, operation, target.id, doomed);
+      const placement = resolvePlacement(snapshot, operation, target.id, doomed, movedTo);
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
@@ -359,9 +368,15 @@ export function planEdits(
       doomed.add(target.id);
     }
     if (operation.op === 'deletePage' && target.kind === 'page') {
-      // A page takes its questions with it, so each of them stops being a usable position too.
+      // A page takes its questions with it, so each of them stops being a usable position too —
+      // EXCEPT the ones this same turn has already moved off it. `deletePage` re-reads the page's
+      // questions when it runs, so a question carried elsewhere by an earlier `moveQuestion`
+      // survives, and dooming it refused a legitimate position ("merge page 1 into page 2, then
+      // drop page 1") with a reason that was simply untrue.
       for (const question of target.questions) {
-        doomed.add(question.id);
+        if (!movedTo.has(question.id)) {
+          doomed.add(question.id);
+        }
       }
     }
     plan.resolved.push({ ...operation, id: target.id });
@@ -418,6 +433,7 @@ function resolvePlacement(
   operation: { after?: string },
   destinationPageId: string | undefined,
   doomed: ReadonlySet<string>,
+  movedTo: ReadonlyMap<string, string>,
 ): { afterId?: string } | { reason: string } {
   if (!operation.after) {
     return {};
@@ -434,7 +450,10 @@ function resolvePlacement(
   if (anchor.kind !== 'question') {
     return { reason: `${operation.after} is ${article(anchor.kind)} ${anchor.kind}, so it cannot be a position` };
   }
-  if (destinationPageId && pageIdOfQuestion(snapshot, anchor.id) !== destinationPageId) {
+  // Where the anchor lives by the time this operation runs — which is where an earlier move in
+  // this same batch put it, if one did, and only otherwise what the snapshot shows.
+  const anchorPageId = movedTo.get(anchor.id) ?? pageIdOfQuestion(snapshot, anchor.id);
+  if (destinationPageId && anchorPageId !== destinationPageId) {
     return {
       reason: `${operation.after} is not on that page, so it cannot be a position there — name a question on the destination page, or leave the position out`,
     };

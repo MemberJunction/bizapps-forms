@@ -78,11 +78,22 @@ export const DEFAULT_FORM_THEME: Readonly<Record<string, string>> = Object.freez
 });
 
 /**
- * The tokens a generated theme may override, i.e. colour and type family only.
+ * The LAYOUT tokens — the five a generated theme may NOT set.
  *
- * Exported so the theme stage can merge a model's palette on top of the default without letting it
- * reach the layout tokens. Deriving it from the default rather than listing it twice means a token
- * added above is covered here by construction.
+ * Every claim the previous version of this comment made was wrong, in the direction that matters:
+ * it read as "the tokens a theme may override", which is the exact inverse, and a reader acting on
+ * it would have let a model set sizing and alignment.
+ *
+ * WHAT IT IS FOR NOW. Nothing in production reads it — the helper that did (`themeWithOverrides`)
+ * had its last caller removed and was deleted. It survives as the CANONICAL list that two drift
+ * guards assert against: `form-edit.spec.ts` checks `SETTABLE_LAYOUT_TOKENS` (the five `setLayout`
+ * may write) still mirrors it, and `form-snapshot.spec.ts` checks the snapshot's LAYOUT block
+ * still prints all five. Delete it and both guards lose their reference point.
+ *
+ * A HARDCODED LIST, not derived. The old comment claimed derivation "so a token added above is
+ * covered by construction", which was never true of this literal — adding a layout token to
+ * `DEFAULT_FORM_THEME` does NOT add it here. Add it in both places, and the two specs above will
+ * tell you if you miss the second.
  */
 export const THEME_LAYOUT_TOKENS: readonly string[] = Object.freeze([
   '--mjf-title-size',

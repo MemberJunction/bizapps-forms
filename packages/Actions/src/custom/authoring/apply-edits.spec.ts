@@ -360,6 +360,24 @@ describe('applyEdits — naming the style row a layout change touched', () => {
   });
 });
 
+describe('applyEdits — a layout change that did NOT land', () => {
+  it('names no style row when the write failed', async () => {
+    // The id was reported before the write, so a setLayout that threw still told the caller a
+    // style row had been touched. `EditOutcome.styleId` is documented as "the row a setLayout in
+    // this turn WROTE TO, when one landed" — the client offers an Undo on the strength of it.
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM, Name: 'Assessment', StyleID: guid(4242) }]);
+    const plan = planEdits(snapshot(), [
+      { op: 'setLayout', tokens: { '--mjf-question-size': '0.9375rem' } },
+    ]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied).toHaveLength(0);
+    expect(outcome.refused).toHaveLength(1);
+    expect(outcome.styleId).toBeUndefined();
+  });
+});
+
 describe('applyEdits — a delete that fails partway', () => {
   /**
    * The property both of these pin: a multi-row delete either happens or does not. There is no

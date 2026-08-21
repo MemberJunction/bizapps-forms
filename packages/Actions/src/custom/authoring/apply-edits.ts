@@ -314,9 +314,6 @@ async function applyOne(
     if (!(await form.Load(formId)) || !form.StyleID) {
       throw new Error('this form has no style to change');
     }
-    // Recorded for the caller here rather than re-read afterwards: this is the layer that knows
-    // which row it wrote, and it is already holding the id.
-    onStyleTouched(form.StyleID);
     const style = await md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(ENTITY.style, contextUser);
     if (!(await style.Load(form.StyleID))) {
       throw new Error(`style ${form.StyleID} could not be loaded`);
@@ -326,6 +323,10 @@ async function applyOne(
     const current = readTokens(style.CSSVariables);
     style.CSSVariables = JSON.stringify({ ...current, ...edit.tokens }, null, 2);
     await saveRow(style, 'FormStyle (layout)', { formId });
+    // AFTER the write, not before. Reported early, a `setLayout` that then failed to load or save
+    // still told the caller a style row had been touched — and the client offers an Undo on the
+    // strength of it, which would have restored a row nothing had changed.
+    onStyleTouched(form.StyleID);
     const names = Object.keys(edit.tokens).join(', ');
     return `set ${names}`;
   }
@@ -502,15 +503,15 @@ function positionAfter(
   }
   const index = siblings.findIndex((q) => q.ID === afterId);
   if (index === -1) {
-    // Reachable, despite the plan's check. `planEdits` refuses a position naming a question on
-    // another page, but it resolves the WHOLE batch against one snapshot — so a `deleteQuestion`
-    // earlier in the same turn can remove the very row a later `addQuestion` names, and by the
-    // time this runs the anchor is gone. An unusable position is then the same situation as no
-    // position at all, and answering it with `siblings.length` rather than the caller's default
-    // silently gave `moveQuestion` the append that `addQuestion` wanted.
+    // Still reachable, but no longer by the route this comment used to describe. `planEdits`
+    // refuses a position naming a question on another page, and its `doomed` set now also refuses
+    // one that an earlier operation in the SAME turn deletes. What is left is a row that goes
+    // missing between the plan and the write — a concurrent edit in another tab, or a
+    // `moveQuestion` earlier in this turn that carried the anchor to another page.
     //
-    // It is still SILENT, which is the part worth fixing next: the author asked for a slot and got
-    // the end of the page with no line saying so.
+    // An unusable position is then the same situation as no position at all, and answering it with
+    // `siblings.length` rather than the caller's default silently gave `moveQuestion` the append
+    // that `addQuestion` wanted.
     return whenUnanchored === 'top' ? 0 : siblings.length;
   }
   return index + 1;

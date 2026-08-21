@@ -420,6 +420,36 @@ describe('planEdits — a position removed earlier in the same turn', () => {
     expect(plan.resolved.map((r) => r.op)).toEqual(['deletePage']);
   });
 
+  /** Two pages, so a question can be moved off one before that page is deleted. */
+  const spread = () =>
+    buildFormSnapshot({
+      formId: 'form-1', name: 'A', status: 'Draft', responseCount: 0, cssVariables: {},
+      pages: [
+        { id: 'p-1', title: 'One', questions: [
+          { id: 'q-a', type: 'ShortText', prompt: 'A', isRequired: false, answerCount: 0, options: [] },
+        ] },
+        { id: 'p-2', title: 'Two', questions: [
+          { id: 'q-b', type: 'ShortText', prompt: 'B', isRequired: false, answerCount: 0, options: [] },
+        ] },
+      ],
+      screens: [],
+    });
+
+  it('does not doom a question that moved OFF the page before it was deleted', () => {
+    // "Merge page 1 into page 2, then drop page 1." The move carries q1 to p2, so deleting p1 no
+    // longer takes it — but the plan doomed every question the SNAPSHOT showed on that page, and
+    // then refused a later position naming q1 with "q1 is being removed by this same turn". It is
+    // not: `deletePage` re-reads the page's questions at apply time and finds q1 gone.
+    const plan = planEdits(spread(), [
+      { op: 'moveQuestion', handle: 'q1', toPage: 'p2' },
+      { op: 'deletePage', handle: 'p1' },
+      { op: 'addQuestion', handle: 'p2', type: 'Rating', prompt: 'How was it?', after: 'q1' },
+    ]);
+
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved.map((r) => r.op)).toEqual(['moveQuestion', 'deletePage', 'addQuestion']);
+  });
+
   it('leaves an untouched position alone', () => {
     const plan = planEdits(snapshot(0), [
       { op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'How was it?', after: 'q1' },

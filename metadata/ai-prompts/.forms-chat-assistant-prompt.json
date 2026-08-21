@@ -2,7 +2,7 @@
   {
     "fields": {
       "Name": "Forms: Chat Assistant",
-      "Description": "The conversational surface of AI authoring. Replies to the author AND declares an action — none, create, restyle, or unsupported — which deterministic code then performs. The model never touches the database, the same split the rest of the authoring pipeline uses. Model selection is metadata-driven and this prompt is the most likely to want a different tier from the structural stages, since it is conversational rather than generative.",
+      "Description": "The conversational surface of AI authoring. Replies to the author AND declares an action — none, create, restyle, image, edit, open, or unsupported — which deterministic code then performs. The model never touches the database, the same split the rest of the authoring pipeline uses. Model selection is metadata-driven and this prompt is the most likely to want a different tier from the structural stages, since it is conversational rather than generative.",
       "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Chat Assistant",
       "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
       "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",

@@ -1,7 +1,7 @@
 {
   "fields": {
     "Name": "MJ_BizApps_Forms: Chat Assistant",
-    "Description": "The authoring chat. Given the conversation so far, the form on screen and the author's new message, replies and declares what should be done about it: nothing, create a form, restyle the open one, or say plainly that the change is not supported yet.",
+    "Description": "The authoring chat. Given the conversation so far, the form on screen and the author's new message, replies and declares what should be done about it: nothing, create a form, restyle the open one, put a picture on a screen, change the open form's structure, open another of the author's forms, or say plainly that the change is not supported yet.",
     "UserID": "@lookup:MJ: Users.Name=System",
     "IsActive": true
   },
