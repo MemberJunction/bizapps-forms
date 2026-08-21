@@ -473,8 +473,25 @@ async function runMediaStage(
   total: number,
   step: number,
 ): Promise<string[]> {
-  const publishMedia = (label: string, changed?: { optionId?: string; screenId?: string }): void =>
-    publish(options.channel, { formId: built.formId, stage: 'image', step, total, label, changed });
+  /**
+   * Same rule as the theme stage: `step` is COMPLETED work, so this stage's number is only true
+   * once it is over. Announcing "Making 3 pictures" at the completed step showed the media stage
+   * finished for the whole of the longest call in the build. `attachImages` publishes per picture
+   * as they land, and those are still in-progress — the stage is done when its caller says so.
+   */
+  const publishMedia = (
+    label: string,
+    changed?: { optionId?: string; screenId?: string },
+    done = false,
+  ): void =>
+    publish(options.channel, {
+      formId: built.formId,
+      stage: 'image',
+      step: done ? step : step - 1,
+      total,
+      label,
+      changed,
+    });
 
   const requests = collectImageRequests({
     welcomeScreen: built.imageTargets.welcomeScreen,
@@ -486,7 +503,7 @@ async function runMediaStage(
 
   const skip = reasonToSkipMedia(requests, options.imageModel);
   if (skip) {
-    publishMedia(skip.label);
+    publishMedia(skip.label, undefined, true);
     return skip.degraded;
   }
 
@@ -498,6 +515,14 @@ async function runMediaStage(
     contextUser,
   );
   const attachFailures = await attachImages(built.formId, outcome.stored, contextUser, publishMedia);
+  // The stage is over — say so. Without this the bar never counted media as finished, because
+  // every other publish here is now an in-progress one and the skip path is the only terminal one.
+  const made = outcome.stored.length;
+  publishMedia(
+    made === 0 ? 'No pictures were made' : `${made === 1 ? 'Picture' : `${made} pictures`} ready`,
+    undefined,
+    true,
+  );
   return [...outcome.degraded, ...attachFailures];
 }
 

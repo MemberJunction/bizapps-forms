@@ -105,8 +105,13 @@ function matchesFilter(row: Record<string, unknown>, filter: string | undefined)
       const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
       return allowed.has(String(row[inList[1]] ?? ''));
     }
+    // NUMERIC, matching the sibling fake in `apply-edits.spec.ts`. These two landed on different
+    // rules for the same `IsTemplate = 0` clause — one compared numbers, the other stringified
+    // booleans — so a fixture written in the other file's spelling was silently dropped here, and
+    // the failure named the handles rather than the column. A bit column is 0/1 in SQL and either
+    // `false` or `0` in a fixture; both must read the same.
     const num = /^(\w+)\s*=\s*(\d+)$/.exec(clause);
-    if (num) return String(row[num[1]] ?? '') === String(Boolean(Number(num[2])));
+    if (num) return Number(row[num[1]] ?? 0) === Number(num[2]);
     throw new Error(`fake RunView cannot read filter clause: ${clause}`);
   });
 }
@@ -387,7 +392,7 @@ describe('a create turn', () => {
      * onto the brand-new B, and A's chat panel came back empty. The justification for re-filing
      * covers exactly one case, the forms LIST, and that is now the only case it fires in.
      */
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null, IsTemplate: 0 }]);
     rows.set('MJ_BizApps_Forms: Form Questions', []);
     assistant({ reply: 'Building that now.', action: 'create', brief: 'A volunteer sign-up.' });
     setFormDesignerModel({
@@ -424,7 +429,7 @@ describe('a create turn', () => {
 describe('a restyle turn', () => {
   beforeEach(() => {
     // A form with a style to edit, as the builder would have left it.
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: STYLE_ID, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: STYLE_ID, IsTemplate: 0 }]);
     rows.set(STYLE, [{ ID: STYLE_ID, Name: 'RSVP theme', CSSVariables: '{}' }]);
     rows.set('MJ_BizApps_Forms: Form Questions', []);
   });
@@ -515,7 +520,7 @@ describe('an image turn', () => {
   const PROMPT = 'a sunlit conference hall with rows of empty chairs';
 
   beforeEach(() => {
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null, IsTemplate: 0 }]);
     rows.set('MJ_BizApps_Forms: Form Questions', []);
     rows.set(SCREEN, [
       { ID: SCREEN_ID, FormID: FORM_ID, ScreenType: 'Welcome', DisplayOrder: 1, MediaURL: null },
@@ -679,7 +684,7 @@ describe('ids that reach a SQL filter', () => {
   });
 
   it('does not describe a form for an injected id', async () => {
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null, IsTemplate: 0 }]);
     const respond = assistant({ reply: 'ok', action: 'none' });
     await turn('tell me about this form', { FormID: INJECTION });
     // No context at all — the lookup never ran.
@@ -702,8 +707,8 @@ describe('ids that reach a SQL filter', () => {
 describe('listing and opening forms', () => {
   beforeEach(() => {
     rows.set('MJ_BizApps_Forms: Forms', [
-      { ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: null, IsArchived: false, IsTemplate: false },
-      { ID: '99999999-8888-4777-8666-555555555555', Name: 'Event RSVP', Status: 'Published', StyleID: null, IsArchived: false, IsTemplate: false },
+      { ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: null, IsArchived: false },
+      { ID: '99999999-8888-4777-8666-555555555555', Name: 'Event RSVP', Status: 'Published', StyleID: null, IsArchived: false },
     ]);
   });
 
@@ -756,7 +761,7 @@ describe('an edit turn', () => {
   const Q1 = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
 
   beforeEach(() => {
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: null, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: null, IsTemplate: 0 }]);
     rows.set('MJ_BizApps_Forms: Form Pages', [{ ID: PAGE, FormID: FORM_ID, Title: 'Details', DisplayOrder: 0 }]);
     rows.set('MJ_BizApps_Forms: Form Questions', [
       { ID: Q1, FormID: FORM_ID, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'Your name', DisplayOrder: 0, IsRequired: false },
@@ -772,7 +777,7 @@ describe('an edit turn', () => {
     // it is exactly as undoable — but the turn reported only `ChangedFormID`, and the undo path
     // keys on `StyleID`. "Make the questions smaller" was the one theme change with no way back.
     const STYLE_ROW = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: STYLE_ROW, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: STYLE_ROW, IsTemplate: 0 }]);
     rows.set(STYLE, [
       { ID: STYLE_ROW, Name: 'theme', CSSVariables: JSON.stringify({ '--mjf-accent': '#1b7fa8' }) },
     ]);
@@ -797,7 +802,7 @@ describe('an edit turn', () => {
     // undefined whether the gate works or not, so the assertion passed with the gate removed —
     // it asserted the fixture, not the behaviour.
     const STYLE_ROW = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: STYLE_ROW, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: STYLE_ROW, IsTemplate: 0 }]);
     rows.set(STYLE, [{ ID: STYLE_ROW, Name: 'theme', CSSVariables: '{}' }]);
     assistant({
       reply: 'Renamed the page.',
@@ -884,7 +889,7 @@ describe('an action declared without the payload it needs', () => {
    * map passed it and reset the whole theme to house default.
    */
   beforeEach(() => {
-    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: STYLE_ID, IsTemplate: false }]);
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: STYLE_ID, IsTemplate: 0 }]);
     rows.set(STYLE, [{ ID: STYLE_ID, Name: 'RSVP theme', CSSVariables: '{}' }]);
     rows.set('MJ_BizApps_Forms: Form Questions', []);
   });
@@ -992,7 +997,7 @@ describe('a conversation id that belongs to somebody else', () => {
     // The guard must not break the path it is protecting.
     const mine = 'eeeeeeee-ffff-4aaa-8bbb-cccccccccccc';
     rows.set(CONVERSATION, [
-      { ID: mine, UserID: user.ID, ExternalID: 'mj-forms:home', Name: 'Mine', IsArchived: false, IsTemplate: false },
+      { ID: mine, UserID: user.ID, ExternalID: 'mj-forms:home', Name: 'Mine', IsArchived: false },
     ]);
     const { out } = await turn('carry on', { ConversationID: mine });
     expect(out('ConversationID')).toBe(mine);

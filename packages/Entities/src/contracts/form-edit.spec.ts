@@ -479,7 +479,9 @@ describe('planEdits — a choice question needs choices', () => {
    * type arriving with none. It resolved, persisted, and the reply said `added "Department?"
    * (Dropdown)` — while the respondent got an empty select they could not answer, and could not
    * submit the form at all if it was required. The rest of the pipeline guards exactly this:
-   * `staged-authoring` degrades a whole page rather than ship "an empty, unanswerable control".
+   * Nothing downstream catches it either — the blueprint schema has no minimum, `createOptions`
+   * silently writes none, and submit-time validation declines to check an empty list. This gate is
+   * the only thing between the model and an unanswerable question.
    */
   it('refuses a choice question with no options', () => {
     const plan = planEdits(snapshot(), [
@@ -521,6 +523,56 @@ describe('planEdits — a choice question needs choices', () => {
   it('accepts a plain question with no options', () => {
     const plan = planEdits(snapshot(), [
       { op: 'addQuestion', handle: 'p1', type: 'ShortText', prompt: 'Name' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+});
+
+describe('planEdits — retyping is the same decision as adding', () => {
+  /**
+   * The `addQuestion` gate covered half the ways a choice question can end up with no choices.
+   * `updateQuestion` is the other half, and `updateQuestionSchema` has no `options` field — so a
+   * retype cannot supply them even in principle. "Make the name field a dropdown" produced an
+   * empty select the respondent could not answer, and could not submit past if it was required.
+   */
+  const withChoices = () =>
+    buildFormSnapshot({
+      formId: 'form-1', name: 'A', status: 'Draft', responseCount: 0, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'One', questions: [
+        { id: 'q-plain', type: 'ShortText', prompt: 'Name', isRequired: false, answerCount: 0, options: [] },
+        { id: 'q-choice', type: 'Dropdown', prompt: 'Team', isRequired: false, answerCount: 0,
+          options: [{ id: 'o-1', label: 'Ops' }, { id: 'o-2', label: 'Eng' }] },
+      ] }],
+      screens: [],
+    });
+
+  it('refuses retyping a plain question INTO a choice type it has no choices for', () => {
+    const plan = planEdits(withChoices(), [{ op: 'updateQuestion', handle: 'q1', type: 'Dropdown' }]);
+
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/choices/i);
+  });
+
+  it('allows retyping BETWEEN choice types, where the choices carry over', () => {
+    const plan = planEdits(withChoices(), [
+      { op: 'updateQuestion', handle: 'q2', type: 'MultiChoice' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+
+  it('allows retyping AWAY from a choice type, whose choices stop meaning anything', () => {
+    const plan = planEdits(withChoices(), [
+      { op: 'updateQuestion', handle: 'q2', type: 'ShortText' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+
+  it('leaves a retype that changes no type alone', () => {
+    const plan = planEdits(withChoices(), [
+      { op: 'updateQuestion', handle: 'q1', prompt: 'Your name' },
     ]);
     expect(plan.refused).toHaveLength(0);
     expect(plan.resolved).toHaveLength(1);

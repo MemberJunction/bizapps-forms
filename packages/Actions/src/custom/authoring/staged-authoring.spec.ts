@@ -338,6 +338,15 @@ describe('runStagedAuthoring — the progress bar does not finish early', () => 
     expect(painting).toBeDefined();
     expect(painting!.step).toBeLessThan(painting!.total);
 
+    // The same shape in the media stage, which announced "Making N pictures" at its own completed
+    // step and then made them — the longest call in the build. Outline and page events legitimately
+    // publish AT their step, because they publish after the work; these two publish before it.
+    const starting = events.filter((e) => /^Making |^Painting the theme$/.test(e.label));
+    expect(starting.length).toBeGreaterThan(0);
+    for (const event of starting) {
+      expect(event.step).toBeLessThan(event.total);
+    }
+
     // And the stage still reports itself finished when it is.
     const finished = events.filter((e) => e.stage === 'theme').at(-1);
     expect(finished!.step).toBe(finished!.total);

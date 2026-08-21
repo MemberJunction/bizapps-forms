@@ -369,6 +369,41 @@ describe('applyEdits — naming the style row a layout change touched', () => {
   });
 });
 
+describe('applyEdits — saying what was dropped', () => {
+  it('tells the author when choices were discarded, rather than only that the question landed', async () => {
+    // The "drop rather than refuse" trade is only honest if the author hears about it. Reporting
+    // just `added "Name" (ShortText)` means part of the request went nowhere and nothing said so.
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'ShortText', prompt: 'Name', options: ['A', 'B'] },
+    ]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied[0]).toMatch(/dropped/i);
+    // And no option rows were written for it.
+    const added = (rows.get('MJ_BizApps_Forms: Form Questions') ?? []).find((q) => q.Prompt === 'Name');
+    expect((rows.get('MJ_BizApps_Forms: Form Question Options') ?? []).filter((o) => o.QuestionID === added?.ID)).toHaveLength(0);
+  });
+});
+
+describe('applyEdits — a style that parses to something that is not a map', () => {
+  it('refuses rather than overwriting a palette it cannot read', async () => {
+    // `"a string"` is valid JSON. Returning an empty map for it fed the same merge that rewrote the
+    // row to only the new layout tokens — the identical loss the unparseable case refuses.
+    rows.set('MJ_BizApps_Forms: Form Styles', [
+      { ID: STYLE, Name: 'theme', CSSVariables: '"just a string"' },
+    ]);
+    const plan = planEdits(snapshot(), [
+      { op: 'setLayout', tokens: { '--mjf-question-size': '1.25rem' } },
+    ]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied).toHaveLength(0);
+    expect((rows.get('MJ_BizApps_Forms: Form Styles') ?? [])[0].CSSVariables).toBe('"just a string"');
+  });
+});
+
 describe('applyEdits — a style whose tokens will not parse', () => {
   it('refuses the layout change rather than overwriting the palette it cannot read', async () => {
     // Returning an empty map here fed a merge documented as "MERGED, never replaced" — and one

@@ -163,7 +163,10 @@ async function applyOne(
       await saveRow(option, 'FormQuestionOption (added)', { formId });
     }
     const choices = (edit.options ?? []).length;
-    return `added "${edit.prompt}" (${edit.type}${choices ? `, ${choices} choices` : ''})`;
+    // The dropped-options note is not decoration: the plan discards choices a plain type cannot
+    // show, and an author who is not told that never learns part of their request went nowhere.
+    const dropped = edit.droppedOptions ? ' — the choices sent with it were dropped, since that type does not show any' : '';
+    return `added "${edit.prompt}" (${edit.type}${choices ? `, ${choices} choices` : ''})${dropped}`;
   }
 
   if (edit.op === 'updateOption') {
@@ -422,14 +425,26 @@ async function renumberPages(
   }
 }
 
-/** A style's tokens. Empty when it has none; THROWS when they will not parse — see the catch. */
+/**
+ * A style's tokens.
+ *
+ * Empty only when the column is genuinely empty. THROWS when the text will not parse AND when it
+ * parses to something that is not an object — both are "we cannot read this palette", and both
+ * reach a merge that would otherwise overwrite it.
+ */
 function readTokens(raw: string | null): Record<string, string> {
   if (!raw) {
     return {};
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string>) : {};
+    if (typeof parsed !== 'object' || parsed === null) {
+      // PARSES, and is still not a token map. `"a string"`, `123`, `true` and `null` are all valid
+      // JSON, and returning `{}` for them fed the same merge that then rewrote the row to just the
+      // new layout tokens — the identical data loss the catch below refuses, one line up.
+      throw new Error(`its tokens are ${typeof parsed}, not a map of CSS variables`);
+    }
+    return parsed as Record<string, string>;
   } catch (error) {
     // REFUSE, rather than write over it. Returning `{}` here fed a merge whose own comment says
     // "MERGED, never replaced. A full write would take the palette with it" — and that is exactly

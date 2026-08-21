@@ -187,8 +187,19 @@ const HANDLE_KIND: Record<HandleBoundOperation['op'], SnapshotTarget['kind']> = 
 
 export type EditOperation = z.infer<typeof editOperationSchema>;
 
-/** An operation with its handle turned into the real row id. */
-export type ResolvedEdit = EditOperation & { id: string; afterId?: string; toPageId?: string };
+/**
+ * An operation with its handle turned into the real row id.
+ *
+ * `droppedOptions` records that the plan discarded choices a plain question type could not show,
+ * so the applier can say so. Without it the author is told the question was added and never learns
+ * that part of what the model proposed went nowhere.
+ */
+export type ResolvedEdit = EditOperation & {
+  id: string;
+  afterId?: string;
+  toPageId?: string;
+  droppedOptions?: boolean;
+};
 
 /** An operation that will not be attempted, and why — in words the reply can use. */
 export interface RefusedEdit {
@@ -297,6 +308,21 @@ export function planEdits(
         });
         continue;
       }
+      // THE SAME DECISION `addQuestion` MAKES, and it was only made there. `updateQuestionSchema`
+      // carries no `options` field, so a retype cannot supply choices even in principle — "make
+      // the name field a dropdown" produced an empty select nobody could answer, and nobody could
+      // submit past if it was required. Retyping BETWEEN choice types is fine: the existing
+      // choices carry over untouched.
+      if (questionTypeHasOptions(operation.type) && target.options.length === 0) {
+        plan.refused.push({
+          op: operation.op,
+          handle: operation.handle,
+          reason:
+            `"${target.prompt}" has no choices, and changing its type cannot add any — add a new ` +
+            `${operation.type} question with its choices instead, and remove this one`,
+        });
+        continue;
+      }
     }
     if (operation.op === 'moveQuestion') {
       if (operation.after === operation.handle) {
@@ -345,8 +371,13 @@ export function planEdits(
       // TYPE AND OPTIONS ARE ONE DECISION, not two independent fields. Nothing coupled them, so a
       // choice type could arrive with no choices: it resolved, persisted, and the reply announced
       // it, while the respondent got an empty select — and could not submit the form at all if it
-      // was required. The mirror case writes option rows onto a type that renders none, where they
-      // are invisible and permanent. The rest of the pipeline already refuses both.
+      // was required.
+      //
+      // THIS IS THE ONLY PLACE THAT REFUSES IT. An earlier version of this comment said "the rest
+      // of the pipeline already refuses both", which is not true of any layer: the blueprint
+      // schema has no `.min(1)` and no type/option coupling, `createOptions` silently returns zero
+      // for a choice type with no options, and `offeredValues` returns null for an empty list and
+      // declines to check at submit time. Nothing downstream will catch what passes here.
       const wantsOptions = questionTypeHasOptions(operation.type);
       const given = operation.options?.length ?? 0;
       if (wantsOptions && given === 0) {
@@ -361,15 +392,18 @@ export function planEdits(
       // built at all, so it is refused. A plain type carrying stray options is a question the
       // author genuinely asked for, plus rows that would never render — refusing it would cost
       // them the question over a quirk of the model's output they never saw. The options are
-      // dropped instead and the applier says so, which is "change what they asked for and not
-      // more" rather than "do nothing because part of the request was odd".
+      // dropped instead, which is "change what they asked for and not more" rather than "do
+      // nothing because part of the request was odd". The plan records that it happened so the
+      // reply can say so — silently discarding part of a request is what makes the trade dishonest,
+      // and an earlier version of this comment claimed the applier reported it when nothing did.
       const placement = resolvePlacement(snapshot, operation, target.id, doomed, movedTo);
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
       }
+      const droppedOptions = !wantsOptions && given > 0;
       const options = wantsOptions ? operation.options : undefined;
-      plan.resolved.push({ ...operation, options, id: target.id, ...placement });
+      plan.resolved.push({ ...operation, options, droppedOptions, id: target.id, ...placement });
       continue;
     }
     // THE DELETION GATE. `FormResponseAnswer.QuestionID` points at this row, so removing it
