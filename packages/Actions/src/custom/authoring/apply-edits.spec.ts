@@ -404,6 +404,24 @@ describe('applyEdits — a style that parses to something that is not a map', ()
   });
 });
 
+describe('applyEdits — a style whose tokens are a JSON list', () => {
+  it('refuses, because `typeof [] === "object"` slips past the object check', async () => {
+    // The guard added for `"a string"` let arrays through: `["#fff","#000"]` merged as
+    // `{"0":"#fff","1":"#000", …}` — the same total replacement, wearing index keys.
+    rows.set('MJ_BizApps_Forms: Form Styles', [
+      { ID: STYLE, Name: 'theme', CSSVariables: '["#ffffff","#000000"]' },
+    ]);
+    const plan = planEdits(snapshot(), [
+      { op: 'setLayout', tokens: { '--mjf-question-size': '1.25rem' } },
+    ]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied).toHaveLength(0);
+    expect((rows.get('MJ_BizApps_Forms: Form Styles') ?? [])[0].CSSVariables).toBe('["#ffffff","#000000"]');
+  });
+});
+
 describe('applyEdits — a style whose tokens will not parse', () => {
   it('refuses the layout change rather than overwriting the palette it cannot read', async () => {
     // Returning an empty map here fed a merge documented as "MERGED, never replaced" — and one

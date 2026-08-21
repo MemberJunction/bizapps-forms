@@ -13,7 +13,7 @@
  * risky reasoning is never entangled with the I/O that makes it hard to exercise.
  */
 import { z } from 'zod';
-import { isFormQuestionType, questionTypeHasOptions } from './question-types';
+import { isFormQuestionType, questionTypeHasOptions, type FormQuestionType } from './question-types';
 import { resolveHandle, type FormSnapshot, type SnapshotTarget,
   ANSWER_COUNT_UNKNOWN,
   describeAnswerCount,
@@ -317,7 +317,20 @@ export function planEdits(
         plan.refused.push({
           op: operation.op,
           handle: operation.handle,
-          reason: `changing "${target.prompt}" into a ${operation.type} needs its choices split across rows and columns, which I cannot describe here — the builder's question panel can do it`,
+          reason: `changing "${target.prompt}" into a ${operation.type} needs its choices split across rows and columns, which I cannot describe here — and a question's type cannot be changed in the builder either, so remove this one and pick ${operation.type} from the question palette down the left`,
+        });
+        continue;
+      }
+      // AND THE SAME TYPE AS A SOURCE. A Matrix's options are rows AND columns, and the snapshot
+      // does not carry `MatrixAxis` — so they arrive here as one flat list, and retyping to a
+      // Dropdown turns "Venue, Catering, Poor, Great" into four peers on one menu. The gate
+      // guarded the destination and missed the origin, which is the same misreading of what
+      // `options` means for this type.
+      if (isFormQuestionType(target.type) && TYPES_THE_CHAT_CANNOT_BUILD.has(target.type)) {
+        plan.refused.push({
+          op: operation.op,
+          handle: operation.handle,
+          reason: `"${target.prompt}" is a ${target.type}, and its rows and columns do not become a plain list of choices — remove it and pick ${operation.type} from the question palette down the left`,
         });
         continue;
       }
@@ -390,7 +403,7 @@ export function planEdits(
         plan.refused.push({
           op: operation.op,
           handle: operation.handle,
-          reason: `a ${operation.type} question needs its choices split across rows and columns, which I cannot describe here — add it from the + button in the builder and I can reword it afterwards`,
+          reason: `a ${operation.type} question needs its choices split across rows and columns, which I cannot describe here — pick ${operation.type} from the question palette down the left of the builder, and I can reword it afterwards`,
         });
         continue;
       }
@@ -546,7 +559,7 @@ function resolvePlacement(
  * that failure at the field the blueprint route added to avoid it (`matrixAxis`); the edit
  * vocabulary has no equivalent, so the honest answer is to decline and name the builder.
  */
-const TYPES_THE_CHAT_CANNOT_BUILD: ReadonlySet<string> = new Set(['Matrix']);
+const TYPES_THE_CHAT_CANNOT_BUILD: ReadonlySet<FormQuestionType> = new Set<FormQuestionType>(['Matrix']);
 
 /** `an` before a vowel, `a` otherwise — `option` is the only vowel-initial handle kind. */
 function article(word: string): string {

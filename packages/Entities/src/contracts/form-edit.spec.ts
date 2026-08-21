@@ -613,6 +613,26 @@ describe('planEdits — a Matrix cannot be built from a flat list of choices', (
     expect(plan.refused[0].reason).toMatch(/matrix/i);
   });
 
+  it('refuses retyping a Matrix into anything else, whose options are not a pick-list', () => {
+    // The other direction, and the same mistake. A Matrix's options are rows AND columns; the
+    // snapshot does not carry `MatrixAxis`, so they read as one flat list of four "choices". Retyped
+    // to a Dropdown that becomes a menu offering "Venue, Catering, Poor, Great" as peers.
+    const withMatrix = buildFormSnapshot({
+      formId: 'form-1', name: 'A', status: 'Draft', responseCount: 0, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'One', questions: [
+        { id: 'q-mx', type: 'Matrix', prompt: 'Rate each', isRequired: false, answerCount: 0,
+          options: [{ id: 'o-1', label: 'Venue' }, { id: 'o-2', label: 'Catering' },
+                    { id: 'o-3', label: 'Poor' }, { id: 'o-4', label: 'Great' }] },
+      ] }],
+      screens: [],
+    });
+
+    const plan = planEdits(withMatrix, [{ op: 'updateQuestion', handle: 'q1', type: 'Dropdown' }]);
+
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/matrix/i);
+  });
+
   it('still allows the choice types the flat list CAN express', () => {
     const plan = planEdits(snapshot(), [
       { op: 'addQuestion', handle: 'p1', type: 'Ranking', prompt: 'Order these', options: ['A', 'B'] },

@@ -15,6 +15,14 @@ interface SavedRow {
 }
 
 const saved: SavedRow[] = [];
+/**
+ * Entities whose `Save()` reports failure, for the attach-failure paths.
+ *
+ * Cleared in a TOP-LEVEL `beforeEach` rather than inside one describe's: this file has six of
+ * them, so a per-describe reset leaks into every block that has its own.
+ */
+const saveFailsFor = new Set<string>();
+beforeEach(() => saveFailsFor.clear());
 
 /**
  * The fake database's current rows, by entity name.
@@ -49,6 +57,11 @@ class FakeEntity {
     return true;
   }
   async Save(): Promise<boolean> {
+    if (saveFailsFor.has(this.entityName)) {
+      // `applyGeneratedImage` treats a false Save as a failed attach, which is the case the
+      // finishing label has to count correctly — the bytes exist, only the row write did not.
+      return false;
+    }
     const isNew = !this.ID;
     if (isNew) {
       // A real GUID shape, because the Builder now refuses to interpolate anything else into a
@@ -256,6 +269,7 @@ describe('shouldStage', () => {
 describe('runStagedAuthoring', () => {
   beforeEach(() => {
     saved.length = 0;
+    saveFailsFor.clear();
     rows.clear();
     resetFormsProgressPublisher();
   });
@@ -778,6 +792,33 @@ describe('runStagedAuthoring — media', () => {
     const last = media.at(-1)!;
     expect(last.step).toBeGreaterThan(announced!.step);
     expect(media.filter((e) => e.step === last.step)).toHaveLength(1);
+  });
+
+  it('counts pictures ATTACHED, not pictures generated, in the finishing line', async () => {
+    // Three generated and none attached still read "3 pictures ready" over a form with no images
+    // on it. The degraded markers carried the truth; the line a person reads did not.
+    const events = recordingPublisher();
+    stubImageStore();
+    const model = stubModel({
+      outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_IMAGES)),
+      pageDetail: vi.fn(async () => PICTURE_DETAIL),
+    } as Partial<StagedAuthoringModel>);
+    // Armed from INSIDE the image model, which runs after the build. Setting it up front failed
+    // the welcome screen's creation instead, which is a different stage entirely — the case here
+    // is bytes that exist and a row write that does not.
+    const imageModel = stubImageModel({
+      generate: vi.fn(async () => {
+        saveFailsFor.add('MJ_BizApps_Forms: Form Screens');
+        saveFailsFor.add('MJ_BizApps_Forms: Form Question Options');
+        return { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' };
+      }),
+    });
+
+    await runStagedAuthoring('a venue picker', model, user, { ...options, imageModel });
+
+    const finished = events.filter((e) => e.stage === 'image').at(-1)!;
+    expect(finished.label).toMatch(/No pictures were added/);
+    expect(finished.label).not.toMatch(/\d+ pictures ready/);
   });
 
   it('makes a picture for every prompt and attaches each to its row', async () => {

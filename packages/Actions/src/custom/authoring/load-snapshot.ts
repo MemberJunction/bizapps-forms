@@ -138,12 +138,19 @@ async function readOptions(
     contextUser,
   );
   if (!view.Success) {
-    // FAIL THE SNAPSHOT, like every other read here. Returning an empty map made every question
-    // look like it had no choices — harmless while options were only handles for the model, and
-    // wrong the moment they started gating decisions: the retype gate would then refuse with
-    // "has no choices … add a new question instead, and remove this one", advising the author to
-    // delete a question that has both its choices and its answers. `readAnswerCounts` below fails
-    // closed for exactly this reason; this one was the outlier.
+    // FAIL THE SNAPSHOT. Returning an empty map made every question look like it had no choices —
+    // harmless while options were only handles for the model, and wrong the moment they started
+    // gating decisions: the retype gate would then refuse with "has no choices … add a new
+    // question instead, and remove this one", advising the author to delete a question that has
+    // both its choices and its answers.
+    //
+    // NOT BECAUSE THE OTHERS DO. An earlier version of this comment claimed `readAnswerCounts`
+    // fails the snapshot "for exactly this reason" and that options were "the outlier" — neither
+    // is true. `readAnswerCounts` returns a map of `ANSWER_COUNT_UNKNOWN` sentinels and the
+    // snapshot is still built, and `readStyleTokens` returns `{}` on a failed load. Each read
+    // degrades in whatever way is safe for what it feeds: a sentinel works for a count that only
+    // ever faces a `> 0` test, an empty palette is a legible theme, and there is no value for
+    // "choices we could not read" that a gate reading `.length` would interpret safely.
     LogError(`[Forms snapshot] Could not read options: ${view.ErrorMessage}`);
     throw new Error(`could not read this form's choices: ${view.ErrorMessage ?? 'unknown error'}`);
   }
