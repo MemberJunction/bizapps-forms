@@ -133,6 +133,11 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       // `entity_object` returns REAL entities in production — rows with Save() and Delete() on
       // them. A fake handing back plain objects cannot exercise a caller that mutates what it
       // read, which is exactly what the applier does.
+      // `count_only` returns NO rows and a total, which is the whole point of asking for it — a
+      // fake that hands back rows anyway cannot catch a caller that reads `.Results.length`.
+      if (params.ResultType === 'count_only') {
+        return { Success: true, Results: [], TotalRowCount: matched.length };
+      }
       if (params.ResultType === 'entity_object') {
         return {
           Success: true,
@@ -150,7 +155,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 }));
 
 import { UserInfo } from '@memberjunction/core';
-import { buildFormSnapshot, planEdits } from '@mj-biz-apps/forms-entities';
+import { buildFormSnapshot, describeFormSnapshot, planEdits } from '@mj-biz-apps/forms-entities';
 import { applyEdits } from './apply-edits';
 import { MAX_ANSWER_ROWS_SCANNED } from './limits';
 import { loadFormList, loadFormSnapshot } from './load-snapshot';
@@ -535,6 +540,21 @@ describe('loadFormSnapshot — the answer scan is bounded', () => {
     const plan = planEdits(snap!, [{ op: 'deleteQuestion', handle: 'q2' }]);
     expect(plan.resolved).toHaveLength(0);
     expect(plan.refused).toHaveLength(1);
+  });
+});
+
+describe('loadFormSnapshot — the response count', () => {
+  it('reports the true total, however many responses the form has', async () => {
+    // It used to fetch one row per response and take `.length`, then took `.length` of a CAPPED
+    // read — which turns a big number into a wrong one and prints it as a fact. A form with more
+    // responses than the old cap reported exactly the cap.
+    const responses = Array.from({ length: 20_050 }, (_, i) => ({ ID: guid(500000 + i), FormID: FORM }));
+    rows.set('MJ_BizApps_Forms: Form Responses', responses);
+
+    const snap = await loadFormSnapshot(FORM, user);
+
+    expect(snap!.responseCount).toBe(20_050);
+    expect(describeFormSnapshot(snap!)).toContain('20050 responses');
   });
 });
 

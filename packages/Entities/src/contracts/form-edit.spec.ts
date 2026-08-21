@@ -358,6 +358,77 @@ describe('planEdits — when the answer count could not be established', () => {
   });
 });
 
+describe('planEdits — the refusals read as English', () => {
+  /**
+   * These strings go to the author verbatim. `option` is the only vowel-initial handle kind, so
+   * the hardcoded "a" produced "o1 is a option" on exactly the refusal that exists to explain a
+   * handle-kind mix-up — the sentence undermining itself at the moment it has to be understood.
+   */
+  const twoKinds = (): FormSnapshot =>
+    buildFormSnapshot({
+      formId: 'form-1', name: 'A', status: 'Draft', responseCount: 0, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'One', questions: [
+        { id: 'q-a', type: 'SingleChoice', prompt: 'Pick', isRequired: false, answerCount: 0,
+          options: [{ id: 'o-1', label: 'Yes' }] },
+      ] }],
+      screens: [],
+    });
+
+  it('says "an option", never "a option", whichever side of the sentence it lands on', () => {
+    const reasons = [
+      ...planEdits(twoKinds(), [{ op: 'deleteQuestion', handle: 'o1' }]).refused,
+      ...planEdits(twoKinds(), [{ op: 'updateOption', handle: 'q1', label: 'x' }]).refused,
+      ...planEdits(twoKinds(), [{ op: 'moveQuestion', handle: 'q1', toPage: 'o1' }]).refused,
+      ...planEdits(twoKinds(), [{ op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'x', after: 'o1' }]).refused,
+    ].map((r) => r.reason);
+
+    expect(reasons.length).toBeGreaterThanOrEqual(4);
+    for (const reason of reasons) {
+      expect(reason).not.toMatch(/\ba option\b/);
+    }
+    expect(reasons.some((r) => /\ban option\b/.test(r))).toBe(true);
+  });
+});
+
+describe('planEdits — a position removed earlier in the same turn', () => {
+  /**
+   * The batch is resolved against ONE snapshot, so a `deleteQuestion` earlier in the turn can
+   * remove the very row a later `addQuestion` names as its position. The applier then cannot find
+   * the anchor among the siblings and appends — silently. The author asked for a slot, got the end
+   * of the page, and the reply said the operation succeeded. The prompt calls that "the worst
+   * answer available" in its own words, so it is refused here instead.
+   */
+  it('refuses a position whose question this turn already deleted', () => {
+    const plan = planEdits(snapshot(0), [
+      { op: 'deleteQuestion', handle: 'q1' },
+      { op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'How was it?', after: 'q1' },
+    ]);
+
+    expect(plan.resolved.map((r) => r.op)).toEqual(['deleteQuestion']);
+    expect(plan.refused).toHaveLength(1);
+    expect(plan.refused[0].reason).toMatch(/q1/);
+    expect(plan.refused[0].reason).toMatch(/remov|delet/i);
+  });
+
+  it('refuses a position on a page this turn already deleted', () => {
+    const plan = planEdits(snapshot(0), [
+      { op: 'deletePage', handle: 'p1' },
+      { op: 'moveQuestion', handle: 'q2', after: 'q1' },
+    ]);
+
+    expect(plan.refused.length).toBeGreaterThanOrEqual(1);
+    expect(plan.resolved.map((r) => r.op)).toEqual(['deletePage']);
+  });
+
+  it('leaves an untouched position alone', () => {
+    const plan = planEdits(snapshot(0), [
+      { op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'How was it?', after: 'q1' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+});
+
 describe('planEdits — pages', () => {
   it('adds a page', () => {
     const plan = planEdits(snapshot(), [{ op: 'addPage', title: 'Availability' }]);

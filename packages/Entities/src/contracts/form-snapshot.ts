@@ -163,7 +163,6 @@ export type SnapshotTarget =
   | ({ kind: 'option' } & SnapshotOption)
   | ({ kind: 'screen' } & SnapshotScreen);
 
-/** The thing this handle names, or undefined when the model made it up. */
 /**
  * The count a question carries when the answer scan could not establish a real number.
  *
@@ -200,6 +199,7 @@ export function describeAnswerers(count: number): string {
   return `${count} ${count === 1 ? 'person has' : 'people have'}`;
 }
 
+/** The thing this handle names, or undefined when the model made it up. */
 export function resolveHandle(snapshot: FormSnapshot, handle: string): SnapshotTarget | undefined {
   for (const page of snapshot.pages) {
     if (page.handle === handle) {

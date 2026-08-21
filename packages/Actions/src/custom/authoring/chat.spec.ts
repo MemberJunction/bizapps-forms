@@ -780,6 +780,12 @@ describe('an edit turn', () => {
   });
 
   it('does not name a style row when the edit changed no layout', async () => {
+    // The form MUST have a style for this to mean anything. With `StyleID: null` the answer is
+    // undefined whether the gate works or not, so the assertion passed with the gate removed —
+    // it asserted the fixture, not the behaviour.
+    const STYLE_ROW = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: STYLE_ROW }]);
+    rows.set(STYLE, [{ ID: STYLE_ROW, Name: 'theme', CSSVariables: '{}' }]);
     assistant({
       reply: 'Renamed the page.',
       action: 'edit',

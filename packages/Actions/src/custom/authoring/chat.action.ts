@@ -303,13 +303,12 @@ async function restyleForm(
   // colour the author had tuned in the Design tab — a full replace dressed up as a small change,
   // confirmed cheerfully and with no warning.
   //
-  // NOT `themeWithOverrides`, which is what this used to call. That helper DROPS every token in
-  // `THEME_LAYOUT_TOKENS` from its overrides, which is right when the overrides are a MODEL's
-  // proposal — sizing and alignment are `setLayout`'s business, not a restyle's — and exactly
-  // wrong when they are the AUTHOR's own persisted tokens. It reset their squared-off buttons to
+  // A PLAIN MERGE, and it has to stay one. This used to run the author's tokens through a helper
+  // that dropped every name in `THEME_LAYOUT_TOKENS` — which reset their squared-off buttons to
   // pill and their left-aligned title to centred on every "make it warmer", while the reply spoke
-  // only of colours. The model still cannot smuggle a layout token in here: `validateTheme` strips
-  // everything outside `THEME_TOKEN_NAMES`, and that list carries none of them.
+  // only of colours. (That helper is deleted; this was its last caller.) Nothing here needs to
+  // filter the author's own values, and the MODEL still cannot smuggle a layout token in:
+  // `validateTheme` strips everything outside `THEME_TOKEN_NAMES`, which carries none of them.
   const base = { ...DEFAULT_FORM_THEME, ...(await currentThemeTokens(form.StyleID, contextUser)) };
   const outcome = validateTheme({ cssVariables: response.cssVariables ?? {} }, base);
   await applyThemeTokens(formId, form.StyleID, outcome.cssVariables, contextUser);

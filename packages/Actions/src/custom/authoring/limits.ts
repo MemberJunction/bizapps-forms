@@ -129,10 +129,3 @@ export const MAX_BLUEPRINT_ENDINGS = 10;
  */
 export const MAX_ANSWER_ROWS_SCANNED = 20_000;
 
-/**
- * The most response rows one snapshot read will pull back, for the count in the context header.
- *
- * Cosmetic, unlike {@link MAX_ANSWER_ROWS_SCANNED} — nothing gates on it — so hitting the cap
- * renders as "20000+" rather than refusing anything.
- */
-export const MAX_RESPONSE_ROWS_SCANNED = 20_000;

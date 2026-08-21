@@ -47,6 +47,9 @@ export interface EditOutcome {
    * so it is exactly as undoable. The caller reported only the FORM it changed, and the undo path
    * keys on the STYLE, so "make the questions smaller" was silently the one theme change with no
    * way back. Absent when the turn changed no layout, which is the common case.
+   *
+   * Reported by the `setLayout` branch itself, which is already holding the id — an earlier
+   * version re-read the form afterwards to ask a question the applier had just answered.
    */
   styleId?: string;
 }
@@ -69,14 +72,11 @@ export async function applyEdits(
   };
   for (const edit of plan.resolved) {
     try {
-      const line = await applyOne(formId, edit, contextUser);
+      const line = await applyOne(formId, edit, contextUser, (styleId) => {
+        outcome.styleId ??= styleId;
+      });
       if (line) {
         outcome.applied.push(line);
-        if (edit.op === 'setLayout') {
-          // Read once, and only when a layout change actually landed — the id is the applier's to
-          // report because it is the only layer that knows which row it wrote.
-          outcome.styleId ??= await styleIdOf(formId, contextUser);
-        }
       }
     } catch (error) {
       LogError(`[Forms edit] ${edit.op} on ${edit.id} failed: ${errorText(error)}`);
@@ -86,11 +86,18 @@ export async function applyEdits(
   return outcome;
 }
 
-/** One operation. Returns the sentence describing it, or undefined when it changed nothing. */
+/**
+ * One operation. Returns the sentence describing it, or undefined when it changed nothing.
+ *
+ * `onStyleTouched` is how the one operation that writes a theme row reports WHICH row, without
+ * every other branch having to carry a return shape it has no use for. The alternative was
+ * re-reading the form afterwards to ask a question this function had already answered.
+ */
 async function applyOne(
   formId: string,
   edit: ResolvedEdit,
   contextUser: UserInfo,
+  onStyleTouched: (styleId: string) => void,
 ): Promise<string | undefined> {
   if (edit.op === 'updateQuestion') {
     const md = new Metadata();
@@ -307,6 +314,9 @@ async function applyOne(
     if (!(await form.Load(formId)) || !form.StyleID) {
       throw new Error('this form has no style to change');
     }
+    // Recorded for the caller here rather than re-read afterwards: this is the layer that knows
+    // which row it wrote, and it is already holding the id.
+    onStyleTouched(form.StyleID);
     const style = await md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(ENTITY.style, contextUser);
     if (!(await style.Load(form.StyleID))) {
       throw new Error(`style ${form.StyleID} could not be loaded`);
@@ -376,18 +386,6 @@ async function deleteInOneGo(
   }
 }
 
-/** The style row a form points at, or undefined when it has none. */
-async function styleIdOf(formId: string, contextUser: UserInfo): Promise<string | undefined> {
-  const form = await new Metadata().GetEntityObject<mjBizAppsFormsFormEntity>(
-    ENTITY.form,
-    contextUser,
-  );
-  if (!(await form.Load(formId))) {
-    LogError(`[Forms edits] Could not re-read form ${formId} to name the style it changed`);
-    return undefined;
-  }
-  return form.StyleID ?? undefined;
-}
 
 /** A form's pages, in display order. */
 async function pagesOf(

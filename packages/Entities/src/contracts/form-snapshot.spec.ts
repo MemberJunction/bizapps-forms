@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { THEME_LAYOUT_TOKENS } from './default-theme';
 import {
+  ANSWER_COUNT_UNKNOWN,
   buildFormSnapshot,
   describeFormSnapshot,
   resolveHandle,
@@ -221,6 +222,42 @@ describe('describeFormSnapshot — what the model can see it can act on', () => 
     const text = describeFormSnapshot(full);
     expect(text).toContain('12 responses');
     expect(text).toContain('12 answers');
+  });
+});
+
+describe('describeFormSnapshot — the fail-closed sentinel never reaches the prompt', () => {
+  /**
+   * The AUTHOR-facing half of this is covered in `form-edit.spec.ts`. This is the other half the
+   * fix claimed: the same sentinel is printed into the model's context beside every question, and
+   * reverting this one call site shipped `(required, 9007199254740991 answers)` into the prompt
+   * with a green build in both packages.
+   */
+  it('says "answers" rather than a sixteen-digit number when the count is unknown', () => {
+    const snapshot = buildFormSnapshot({
+      formId: 'f', name: 'Assessment', status: 'Live', responseCount: 3, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'Details', questions: [
+        { id: 'q-a', type: 'Email', prompt: 'Email', isRequired: true,
+          answerCount: ANSWER_COUNT_UNKNOWN, options: [] },
+      ] }],
+      screens: [],
+    });
+
+    const text = describeFormSnapshot(snapshot);
+
+    expect(text).not.toMatch(/\d{10,}/);
+    expect(text).toMatch(/answers/);
+  });
+
+  it('still prints a real count when there is one', () => {
+    const snapshot = buildFormSnapshot({
+      formId: 'f', name: 'Assessment', status: 'Live', responseCount: 3, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'Details', questions: [
+        { id: 'q-a', type: 'Email', prompt: 'Email', isRequired: true, answerCount: 4, options: [] },
+      ] }],
+      screens: [],
+    });
+
+    expect(describeFormSnapshot(snapshot)).toContain('4 answers');
   });
 });
 

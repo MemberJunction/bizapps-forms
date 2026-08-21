@@ -10,10 +10,10 @@
  * form would otherwise cost twenty-five round trips on EVERY chat turn, and the whole point of
  * this being cheap is that it ships with every message.
  */
-import { MAX_ANSWER_ROWS_SCANNED, MAX_RESPONSE_ROWS_SCANNED } from './limits';
+import { MAX_ANSWER_ROWS_SCANNED } from './limits';
 import { LogError, Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
-import {
+import { ANSWER_COUNT_UNKNOWN,
   buildFormList,
   buildFormSnapshot,
   isGuid,
@@ -58,7 +58,11 @@ export async function loadFormSnapshot(
         { EntityName: ENTITY.page, ExtraFilter: filter, OrderBy: 'DisplayOrder', ResultType: 'simple', Fields: ['ID', 'Title'] },
         { EntityName: ENTITY.question, ExtraFilter: filter, OrderBy: 'DisplayOrder', ResultType: 'simple', Fields: ['ID', 'PageID', 'QuestionType', 'Prompt', 'IsRequired'] },
         { EntityName: ENTITY.screen, ExtraFilter: filter, OrderBy: 'DisplayOrder', ResultType: 'simple', Fields: ['ID', 'ScreenType', 'Title', 'ConditionalRule'] },
-        { EntityName: ENTITY.response, ExtraFilter: filter, ResultType: 'simple', Fields: ['ID'], MaxRows: MAX_RESPONSE_ROWS_SCANNED },
+        // COUNTED, not fetched. This number is only ever printed, so pulling one row per response
+        // to measure its length was waste — and capping that read was worse, because a capped
+        // length is a WRONG number printed as a fact: a form with 75,000 responses reported 20,000.
+        // `count_only` is what the quota service already uses against this same entity.
+        { EntityName: ENTITY.response, ExtraFilter: filter, ResultType: 'count_only' },
       ],
       contextUser,
     );
@@ -84,7 +88,7 @@ export async function loadFormSnapshot(
       formId,
       name: form.Name,
       status: form.Status ?? 'Draft',
-      responseCount: (responses.Results ?? []).length,
+      responseCount: responses.TotalRowCount ?? 0,
       cssVariables: await readStyleTokens(form.StyleID, contextUser),
       pages: pageRows.map((page) => ({
         id: page.ID,
@@ -175,7 +179,7 @@ async function readAnswerCounts(
     // delete answered questions. Every question is treated as answered until proven otherwise.
     LogError(`[Forms snapshot] Could not count answers; treating every question as answered: ${view.ErrorMessage}`);
     for (const id of questionIds) {
-      counts.set(id, Number.MAX_SAFE_INTEGER);
+      counts.set(id, ANSWER_COUNT_UNKNOWN);
     }
     return counts;
   }
@@ -187,7 +191,7 @@ async function readAnswerCounts(
     LogError(
       `[Forms snapshot] Answer scan hit its ${MAX_ANSWER_ROWS_SCANNED}-row cap; treating every question as answered`,
     );
-    for (const id of questionIds) counts.set(id, Number.MAX_SAFE_INTEGER);
+    for (const id of questionIds) counts.set(id, ANSWER_COUNT_UNKNOWN);
     return counts;
   }
   for (const row of rows) {

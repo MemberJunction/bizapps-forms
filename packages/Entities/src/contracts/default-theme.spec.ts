@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { contrastRatio, parseCssColor } from './readable-ink';
-import { DEFAULT_FORM_THEME, THEME_LAYOUT_TOKENS, defaultThemeJSON, themeWithOverrides } from './default-theme';
+import { DEFAULT_FORM_THEME, THEME_LAYOUT_TOKENS, defaultThemeJSON } from './default-theme';
 
 const ratio = (a: string, b: string): number => {
   const ca = parseCssColor(a);
@@ -50,34 +50,3 @@ describe('the default form theme', () => {
   });
 });
 
-describe('themeWithOverrides', () => {
-  it('lets a generated palette replace colour and type', () => {
-    const merged = themeWithOverrides({ '--mjf-accent': '#aa0000', '--mjf-font-body': "'Inter', sans-serif" });
-    expect(merged['--mjf-accent']).toBe('#aa0000');
-    expect(merged['--mjf-font-body']).toBe("'Inter', sans-serif");
-  });
-
-  it('keeps every default a generated palette did not mention', () => {
-    const merged = themeWithOverrides({ '--mjf-accent': '#aa0000' });
-    expect(merged['--mjf-page-bg']).toBe('#ffffff');
-    expect(merged['--mjf-page-ink']).toBe('#373530');
-  });
-
-  it('refuses to let a generated palette touch layout', () => {
-    // Sizing, alignment and radius are decisions somebody makes by looking at a form. The theme
-    // stage's vocabulary already excludes them; this makes a future caller unable to widen that.
-    const merged = themeWithOverrides({
-      '--mjf-title-size': '5rem',
-      '--mjf-question-align': 'center',
-      '--mjf-btn-radius': '0px',
-    });
-    for (const layout of THEME_LAYOUT_TOKENS) {
-      expect(merged[layout], layout).toBe(DEFAULT_FORM_THEME[layout]);
-    }
-  });
-
-  it('does not mutate the frozen default', () => {
-    themeWithOverrides({ '--mjf-accent': '#aa0000' });
-    expect(DEFAULT_FORM_THEME['--mjf-accent']).toBe('#1b7fa8');
-  });
-});

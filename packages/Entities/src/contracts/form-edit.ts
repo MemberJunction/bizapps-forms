@@ -215,6 +215,11 @@ export function planEdits(
   operations: readonly EditOperation[],
 ): EditPlan {
   const plan: EditPlan = { resolved: [], refused: [] };
+  // Row ids this batch has already agreed to destroy. The whole batch is resolved against ONE
+  // snapshot, so without this a later operation can name a position that will not exist by the
+  // time it runs — and the applier cannot tell that apart from "no position given", so it appends
+  // silently and reports success.
+  const doomed = new Set<string>();
   for (const operation of operations) {
     if (isHandleFree(operation)) {
       const refusal = vetHandleFree(operation);
@@ -239,7 +244,7 @@ export function planEdits(
       plan.refused.push({
         op: operation.op,
         handle: operation.handle,
-        reason: `${operation.handle} is a ${target.kind}, and ${operation.op} needs ${article(wanted)} ${wanted}`,
+        reason: `${operation.handle} is ${article(target.kind)} ${target.kind}, and ${operation.op} needs ${article(wanted)} ${wanted}`,
       });
       continue;
     }
@@ -308,6 +313,7 @@ export function planEdits(
         snapshot,
         operation,
         page.toPageId ?? pageIdOfQuestion(snapshot, target.id),
+        doomed,
       );
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
@@ -327,7 +333,7 @@ export function planEdits(
         });
         continue;
       }
-      const placement = resolvePlacement(snapshot, operation, target.id);
+      const placement = resolvePlacement(snapshot, operation, target.id, doomed);
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
@@ -348,6 +354,15 @@ export function planEdits(
           'instead, which keeps both',
       });
       continue;
+    }
+    if (operation.op === 'deleteQuestion') {
+      doomed.add(target.id);
+    }
+    if (operation.op === 'deletePage' && target.kind === 'page') {
+      // A page takes its questions with it, so each of them stops being a usable position too.
+      for (const question of target.questions) {
+        doomed.add(question.id);
+      }
     }
     plan.resolved.push({ ...operation, id: target.id });
   }
@@ -383,7 +398,7 @@ function resolvePage(
     return { reason: `there is nothing called ${handle} to move it to` };
   }
   if (page.kind !== 'page') {
-    return { reason: `${handle} is a ${page.kind}, and a question moves onto a page` };
+    return { reason: `${handle} is ${article(page.kind)} ${page.kind}, and a question moves onto a page` };
   }
   return { toPageId: page.id };
 }
@@ -402,6 +417,7 @@ function resolvePlacement(
   snapshot: FormSnapshot,
   operation: { after?: string },
   destinationPageId: string | undefined,
+  doomed: ReadonlySet<string>,
 ): { afterId?: string } | { reason: string } {
   if (!operation.after) {
     return {};
@@ -410,8 +426,13 @@ function resolvePlacement(
   if (!anchor) {
     return { reason: `there is nothing called ${operation.after} to put it after` };
   }
+  if (doomed.has(anchor.id)) {
+    return {
+      reason: `${operation.after} is being removed by this same turn, so it cannot be a position — say where it should go instead, or ask for the position in a separate message`,
+    };
+  }
   if (anchor.kind !== 'question') {
-    return { reason: `${operation.after} is a ${anchor.kind}, so it cannot be a position` };
+    return { reason: `${operation.after} is ${article(anchor.kind)} ${anchor.kind}, so it cannot be a position` };
   }
   if (destinationPageId && pageIdOfQuestion(snapshot, anchor.id) !== destinationPageId) {
     return {

@@ -92,22 +92,6 @@ export const THEME_LAYOUT_TOKENS: readonly string[] = Object.freeze([
   '--mjf-btn-radius',
 ]);
 
-/**
- * The default with `overrides` applied — the shape actually persisted to `FormStyle.CSSVariables`.
- *
- * Layout tokens are taken from the default unconditionally, so an override that reaches for one is
- * ignored rather than honoured. That is belt-and-braces: the theme stage's own vocabulary already
- * excludes them, and this makes a future caller unable to widen that by accident.
- */
-export function themeWithOverrides(overrides: Readonly<Record<string, string>>): Record<string, string> {
-  const merged: Record<string, string> = { ...DEFAULT_FORM_THEME };
-  for (const [name, value] of Object.entries(overrides)) {
-    if (!THEME_LAYOUT_TOKENS.includes(name)) {
-      merged[name] = value;
-    }
-  }
-  return merged;
-}
 
 /** The default as the JSON string `FormStyle.CSSVariables` stores. */
 export function defaultThemeJSON(): string {

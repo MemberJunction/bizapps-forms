@@ -31,7 +31,10 @@
  *   - `FormID`, `FormVersionID`, `StyleID` (created ids)
  *   - `PageCount`, `QuestionCount`, `OptionCount`, `ScreenCount`
  *   - `Blueprint` (the validated blueprint object, for inspection/preview)
- *   - `Degraded` (string[]) — parts a staged build could not complete, named. Empty is the norm.
+ *   - `Degraded` (string[]) — parts of the requested form this run did not produce. TWO different
+ *     meanings share the field: on the STAGED route a stage failed, and empty is the norm; on the
+ *     SINGLE-SHOT route the image and theme stages are never run at all, so a blueprint asking for
+ *     either reports them here and empty is the exception. Neither is an error.
  *
  * Result codes: `SUCCESS`, `PARTIAL` (a reviewable half-built draft — `FormID` is still set),
  * `MISSING_PARAMETERS`, `DESIGN_FAILED`, `PERSIST_FAILED`, `FAILED`.
@@ -167,6 +170,20 @@ async function runSingleShot(
   // floor. That is a deliberate cost trade (image generation is billed per picture and a batch
   // caller did not ask to be billed), NOT an oversight, but a caller cannot tell those apart from
   // a result that reports nothing degraded. Naming them here is what makes the trade visible.
+  return { blueprint, built, degraded: singleShotOmissions(blueprint) };
+}
+
+/**
+ * What the single-shot route did NOT produce, in the words `Degraded` reports.
+ *
+ * Pure, and exported, so the decision is testable without running a model: the whole omission is
+ * a property of the blueprint, and it was previously buried inside `runSingleShot` where nothing
+ * could reach it. Deleting the entire list there left every test in this package green.
+ *
+ * Empty when the blueprint asked for neither pictures nor a palette — a form that wanted nothing
+ * extra is not degraded by a route that skips them.
+ */
+export function singleShotOmissions(blueprint: FormBlueprint): string[] {
   const skipped: string[] = [];
   if (blueprint.theme) {
     skipped.push('the requested colours — the form carries the house palette');
@@ -174,7 +191,7 @@ async function runSingleShot(
   if (countImagePrompts(blueprint) > 0) {
     skipped.push('the requested pictures — generate them from a channel-backed call');
   }
-  return { blueprint, built, degraded: skipped };
+  return skipped;
 }
 
 /**
