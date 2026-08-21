@@ -13,7 +13,7 @@
  * risky reasoning is never entangled with the I/O that makes it hard to exercise.
  */
 import { z } from 'zod';
-import { isFormQuestionType } from './question-types';
+import { isFormQuestionType, questionTypeHasOptions } from './question-types';
 import { resolveHandle, type FormSnapshot, type SnapshotTarget,
   ANSWER_COUNT_UNKNOWN,
   describeAnswerCount,
@@ -339,6 +339,29 @@ export function planEdits(
           op: operation.op,
           handle: operation.handle,
           reason: `${operation.type} is not a question type this form engine has`,
+        });
+        continue;
+      }
+      // TYPE AND OPTIONS ARE ONE DECISION, not two independent fields. Nothing coupled them, so a
+      // choice type could arrive with no choices: it resolved, persisted, and the reply announced
+      // it, while the respondent got an empty select — and could not submit the form at all if it
+      // was required. The mirror case writes option rows onto a type that renders none, where they
+      // are invisible and permanent. The rest of the pipeline already refuses both.
+      const wantsOptions = questionTypeHasOptions(operation.type);
+      const given = operation.options?.length ?? 0;
+      if (wantsOptions && given === 0) {
+        plan.refused.push({
+          op: operation.op,
+          handle: operation.handle,
+          reason: `a ${operation.type} question needs its choices — send them in "options", or ask for a question type that does not have any`,
+        });
+        continue;
+      }
+      if (!wantsOptions && given > 0) {
+        plan.refused.push({
+          op: operation.op,
+          handle: operation.handle,
+          reason: `${operation.type} does not show choices, so the options sent with it would never appear — use a choice type, or drop them`,
         });
         continue;
       }

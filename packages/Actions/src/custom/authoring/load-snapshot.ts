@@ -240,7 +240,14 @@ export async function loadFormList(contextUser: UserInfo): Promise<FormListEntry
       // `Status <> 'Closed'`, not `IsArchived = 0` — `Form` has no such column, and the invented
       // one made every list read fail. `Closed` is what the list calls "archived"; the union is
       // Draft | Published | Closed, per the generated entity.
-      ExtraFilter: `Status <> 'Closed'`,
+      //
+      // AND NOT TEMPLATES. A template is a `Form` row with `IsTemplate = 1` and `Status = 'Draft'`,
+      // so it passed the status filter and was offered to the author as one of "their forms" —
+      // `open` could then navigate the builder onto a template. The dashboard has excluded them
+      // all along, for the reason it states: a template in the forms list reads as a form somebody
+      // forgot to finish. Worse here, because the list is capped: a recently-touched batch of
+      // templates could push the author's real forms out of it entirely.
+      ExtraFilter: `Status <> 'Closed' AND IsTemplate = 0`,
       OrderBy: '__mj_UpdatedAt DESC',
       ResultType: 'simple',
       Fields: ['ID', 'Name', 'Status'],

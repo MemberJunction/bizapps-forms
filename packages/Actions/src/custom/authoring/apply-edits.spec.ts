@@ -116,19 +116,28 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       }
       const table = rows.get(params.EntityName) ?? [];
       const filter = (params.ExtraFilter ?? '').trim();
-      const eq = /^(\w+)='([^']*)'$/.exec(filter);
-      const notEq = /^(\w+)\s*<>\s*'([^']*)'$/.exec(filter);
-      const inList = /^(\w+) IN \(([^)]*)\)$/.exec(filter);
+      // Conjunctions are modelled, because production sends them — the form list filters on status
+      // AND template-ness. A fake that only reads one clause either throws on a real filter or,
+      // worse, quietly applies half of it.
+      const clauses = filter ? filter.split(/\s+AND\s+/) : [];
       let matched = table;
-      if (eq) {
-        matched = table.filter((r) => String(r[eq[1]]) === eq[2]);
-      } else if (notEq) {
-        matched = table.filter((r) => String(r[notEq[1]]) !== notEq[2]);
-      } else if (inList) {
-        const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
-        matched = table.filter((r) => allowed.has(String(r[inList[1]])));
-      } else if (filter) {
-        throw new Error(`the fake RunView does not understand this filter: ${filter}`);
+      for (const clause of clauses) {
+        const eq = /^(\w+)='([^']*)'$/.exec(clause);
+        const notEq = /^(\w+)\s*<>\s*'([^']*)'$/.exec(clause);
+        const numEq = /^(\w+)\s*=\s*(\d+)$/.exec(clause);
+        const inList = /^(\w+) IN \(([^)]*)\)$/.exec(clause);
+        if (eq) {
+          matched = matched.filter((r) => String(r[eq[1]]) === eq[2]);
+        } else if (notEq) {
+          matched = matched.filter((r) => String(r[notEq[1]]) !== notEq[2]);
+        } else if (numEq) {
+          matched = matched.filter((r) => Number(r[numEq[1]] ?? 0) === Number(numEq[2]));
+        } else if (inList) {
+          const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
+          matched = matched.filter((r) => allowed.has(String(r[inList[1]])));
+        } else {
+          throw new Error(`the fake RunView does not understand this filter: ${clause}`);
+        }
       }
       // `entity_object` returns REAL entities in production — rows with Save() and Delete() on
       // them. A fake handing back plain objects cannot exercise a caller that mutates what it
@@ -357,6 +366,27 @@ describe('applyEdits — naming the style row a layout change touched', () => {
 
     expect(outcome.applied).toHaveLength(1);
     expect(outcome.styleId).toBeUndefined();
+  });
+});
+
+describe('applyEdits — a style whose tokens will not parse', () => {
+  it('refuses the layout change rather than overwriting the palette it cannot read', async () => {
+    // Returning an empty map here fed a merge documented as "MERGED, never replaced" — and one
+    // malformed blob plus "make the questions bigger" rewrote the row to only the new tokens. The
+    // unreadable text was the sole record of what the author had chosen, and there is no undo.
+    rows.set('MJ_BizApps_Forms: Form Styles', [
+      { ID: STYLE, Name: 'theme', CSSVariables: '{ this is not json' },
+    ]);
+    const plan = planEdits(snapshot(), [
+      { op: 'setLayout', tokens: { '--mjf-question-size': '1.25rem' } },
+    ]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied).toHaveLength(0);
+    expect(outcome.refused[0]).toMatch(/could not be read|overwrite/i);
+    // The row is untouched, which is the whole point.
+    expect((rows.get('MJ_BizApps_Forms: Form Styles') ?? [])[0].CSSVariables).toBe('{ this is not json');
   });
 });
 
@@ -601,6 +631,21 @@ describe('loadFormList', () => {
      */
     const forms = await loadFormList(user);
     expect(forms.map((f) => f.name)).not.toContain('Old survey');
+  });
+
+  it('leaves out TEMPLATES, which are not the author\'s forms', async () => {
+    // A template is a `Form` row with `IsTemplate = 1` and `Status = 'Draft'`, so it passed the
+    // status filter and was offered as one of "their forms" — `open` could navigate the builder
+    // onto one. The dashboard has always excluded them; this list did not. It is capped at 25, so
+    // a recently-touched batch of templates could also push the real forms out of it entirely.
+    const table = rows.get('MJ_BizApps_Forms: Forms') ?? [];
+    table.push({ ID: guid(7001), Name: 'Contact us TEMPLATE', Status: 'Draft', IsTemplate: 1 });
+    rows.set('MJ_BizApps_Forms: Forms', table);
+
+    const forms = await loadFormList(user);
+
+    expect(forms.map((f) => f.name)).not.toContain('Contact us TEMPLATE');
+    expect(forms.map((f) => f.name)).toContain('Assessment');
   });
 
   it('degrades to an empty list rather than throwing', async () => {

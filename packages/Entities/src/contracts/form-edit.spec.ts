@@ -473,6 +473,57 @@ describe('planEdits — a position removed earlier in the same turn', () => {
   });
 });
 
+describe('planEdits — a choice question needs choices', () => {
+  /**
+   * `addQuestion` took `type` and `options` as independent fields, so nothing stopped a choice
+   * type arriving with none. It resolved, persisted, and the reply said `added "Department?"
+   * (Dropdown)` — while the respondent got an empty select they could not answer, and could not
+   * submit the form at all if it was required. The rest of the pipeline guards exactly this:
+   * `staged-authoring` degrades a whole page rather than ship "an empty, unanswerable control".
+   */
+  it('refuses a choice question with no options', () => {
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'Dropdown', prompt: 'Department?' },
+    ]);
+
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/choices|options/i);
+  });
+
+  it('refuses an empty options list, which is the same thing said differently', () => {
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'SingleChoice', prompt: 'Pick', options: [] },
+    ]);
+    expect(plan.resolved).toHaveLength(0);
+  });
+
+  it('refuses options on a type that cannot show them', () => {
+    // The mirror case: the rows persist, belong to nothing the widget renders, and are invisible.
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'ShortText', prompt: 'Name', options: ['A', 'B'] },
+    ]);
+
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/ShortText/);
+  });
+
+  it('accepts a choice question that has its choices', () => {
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'Dropdown', prompt: 'Department?', options: ['Ops', 'Eng'] },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+
+  it('accepts a plain question with no options', () => {
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'ShortText', prompt: 'Name' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+});
+
 describe('planEdits — pages', () => {
   it('adds a page', () => {
     const plan = planEdits(snapshot(), [{ op: 'addPage', title: 'Availability' }]);

@@ -422,7 +422,7 @@ async function renumberPages(
   }
 }
 
-/** A style's tokens, or an empty map when it has none or they will not parse. */
+/** A style's tokens. Empty when it has none; THROWS when they will not parse — see the catch. */
 function readTokens(raw: string | null): Record<string, string> {
   if (!raw) {
     return {};
@@ -430,11 +430,15 @@ function readTokens(raw: string | null): Record<string, string> {
   try {
     const parsed: unknown = JSON.parse(raw);
     return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string>) : {};
-  } catch {
-    // A style whose JSON will not parse should not block a layout change: the tokens being set are
-    // written regardless, and the unreadable ones were already not rendering.
-    LogError(`[Forms edit] style tokens for form did not parse; writing only the new ones.`);
-    return {};
+  } catch (error) {
+    // REFUSE, rather than write over it. Returning `{}` here fed a merge whose own comment says
+    // "MERGED, never replaced. A full write would take the palette with it" — and that is exactly
+    // what happened: one malformed blob plus "make the questions bigger" rewrote the row to just
+    // the new tokens, and the original text was the only record of what the author had. There is
+    // no undo. The layout change is worth less than the palette.
+    throw new Error(
+      `this form's style could not be read, so changing its layout would overwrite it: ${errorText(error)}`,
+    );
   }
 }
 

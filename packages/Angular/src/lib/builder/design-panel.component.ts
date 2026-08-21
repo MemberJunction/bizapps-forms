@@ -99,6 +99,16 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
   @Output() readonly formOpened = new EventEmitter<string>();
 
   /**
+   * A chat turn CREATED a form, which is a different event from opening one.
+   *
+   * Forwarded for the same reason `formOpened` is. This panel is the third host of the chat and
+   * was the one that dropped it: the server created the form and re-filed the thread onto it while
+   * the author stayed on the old one with no route to the new. Both other hosts wire this to the
+   * same handler, and the builder's own comment says the hosts are supposed to behave the same.
+   */
+  @Output() readonly formCreated = new EventEmitter<string>();
+
+  /**
    * The draft as a published-form definition, so the sample can be the REAL form.
    *
    * A hand-built mock of a couple of fake questions could not show what a theme does to

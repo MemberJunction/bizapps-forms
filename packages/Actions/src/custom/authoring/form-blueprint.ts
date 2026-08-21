@@ -502,7 +502,9 @@ export function declaredKeyPositions(blueprint: FormBlueprint): Map<string, KeyP
  * ONLY to questions something references, so the question doing the referencing is normally
  * keyless and has no ordinal here:
  *
- *   - KEYED: compare ordinals. Exact, and catches a same-page reference to a later sibling.
+ *   - KEYED, and the key names a row on THIS page: compare ordinals. Exact, and catches a
+ *     same-page reference to a later sibling. A key naming another page's row is NOT evidence of
+ *     where this question sits — `stubClaimer` ignores it too — so it falls to the tier below.
  *   - KEYLESS: compare PAGES. Its ordinal is unknown but its page is not — it is the page being
  *     detailed — so a reference to a LATER page is provably unreachable and refused.
  *
@@ -516,7 +518,12 @@ function checkDetailQuestionOrder(
   ctx: z.RefinementCtx,
 ): void {
   page.questions.forEach((question, questionIndex) => {
-    const mine = question.key ? ordering.positions.get(question.key) : undefined;
+    // A key is only evidence of WHERE this question is when it names a row on THIS page — which is
+    // exactly the rule `stubClaimer` applies when deciding what the question refines. A key
+    // belonging to another page falls through to a positional claim there, so trusting it here
+    // judged the question by a position it does not occupy. Treated as keyless instead.
+    const claimed = question.key ? ordering.positions.get(question.key) : undefined;
+    const mine = claimed?.pageIndex === ordering.pageIndex ? claimed : undefined;
     for (const condition of conditionsOf(question.conditionalRule)) {
       const target = ordering.positions.get(condition.questionKey);
       // An unknown key is the `knownKeys` check's business, not this one.

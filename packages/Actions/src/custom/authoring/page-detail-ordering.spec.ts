@@ -48,7 +48,8 @@ const gatedOn = (key: string) => ({
 describe('parsePageDetail — question rules are ordering-checked', () => {
   it('accepts a rule that references an EARLIER page', () => {
     const page = parsePageDetail(detail(gatedOn('first')), keys, {
-      positions: declaredKeyPositions(outline())
+      positions: declaredKeyPositions(outline()),
+      pageIndex: 1,
     });
     expect(page.questions).toHaveLength(1);
   });
@@ -58,7 +59,8 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     // respondent simply never sees it.
     expect(() =>
       parsePageDetail(detail(gatedOn('last')), keys, {
-        positions: declaredKeyPositions(outline())
+        positions: declaredKeyPositions(outline()),
+        pageIndex: 1,
       }),
     ).toThrow(/later|earlier/i);
   });
@@ -83,7 +85,8 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
       ],
     };
     const parsed = parsePageDetail(page, keys, {
-      positions: declaredKeyPositions(outline())
+      positions: declaredKeyPositions(outline()),
+      pageIndex: 1,
     });
     expect(parsed.questions).toHaveLength(2);
   });
@@ -102,7 +105,8 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     };
 
     const parsed = parsePageDetail(reordered, keys, {
-      positions: declaredKeyPositions(outline())
+      positions: declaredKeyPositions(outline()),
+      pageIndex: 1,
     });
 
     expect(parsed.questions).toHaveLength(2);
@@ -162,6 +166,22 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
       pageIndex: 1,
     });
     expect(parsed.questions).toHaveLength(1);
+  });
+
+  it('does not trust a key that belongs to ANOTHER page to locate this question', () => {
+    // `stubClaimer` only honours a key naming a stub on THIS page; anything else falls through to
+    // a positional claim. The checker looked the key up across the whole form, so a question
+    // wearing a page-2 key was judged as if it sat on page 2 — and a rule gating it on a page-1
+    // answer sailed through while the question actually landed on page 0, hidden forever.
+    const page = {
+      questions: [
+        { key: 'last', type: 'YesNo', prompt: 'Mislabelled?', conditionalRule: gatedOn('middle') },
+      ],
+    };
+
+    expect(() =>
+      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()), pageIndex: 0 }),
+    ).toThrow(/earlier/i);
   });
 
   it('REFUSES a question gated on its own answer', () => {
