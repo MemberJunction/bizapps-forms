@@ -14,7 +14,12 @@
  */
 import { z } from 'zod';
 import { isFormQuestionType } from './question-types';
-import { resolveHandle, type FormSnapshot, type SnapshotTarget } from './form-snapshot';
+import { resolveHandle, type FormSnapshot, type SnapshotTarget,
+  ANSWER_COUNT_UNKNOWN,
+  describeAnswerCount,
+  describeAnswerers,
+  isAnswerCountKnown,
+} from './form-snapshot';
 
 /** Reword or re-flag an existing question. Every field but the handle is optional. */
 export const updateQuestionSchema = z.object({
@@ -106,7 +111,6 @@ export const setLayoutSchema = z.object({
   tokens: z.record(z.string()),
 });
 
-/** The whole vocabulary. Grows one operation at a time, each with its own tests. */
 /**
  * Relabelling one choice.
  *
@@ -121,6 +125,7 @@ export const updateOptionSchema = z.object({
   label: z.string().min(1),
 });
 
+/** The whole vocabulary. Grows one operation at a time, each with its own tests. */
 export const editOperationSchema = z.discriminatedUnion('op', [
   updateOptionSchema,
   updateQuestionSchema,
@@ -234,7 +239,7 @@ export function planEdits(
       plan.refused.push({
         op: operation.op,
         handle: operation.handle,
-        reason: `${operation.handle} is a ${target.kind}, and ${operation.op} needs a ${wanted}`,
+        reason: `${operation.handle} is a ${target.kind}, and ${operation.op} needs ${article(wanted)} ${wanted}`,
       });
       continue;
     }
@@ -243,13 +248,17 @@ export function planEdits(
       // the page — otherwise it is bypassed by deleting the container instead of the contents.
       const answered = target.questions.filter((q) => q.answerCount > 0);
       if (answered.length > 0) {
-        const total = answered.reduce((n, q) => n + q.answerCount, 0);
+        // A sentinel in the sum poisons the whole total, so an unknown anywhere makes the total
+        // unknown — which is the honest answer, and the one `describeAnswerCount` renders.
+        const total = answered.some((q) => !isAnswerCountKnown(q.answerCount))
+          ? ANSWER_COUNT_UNKNOWN
+          : answered.reduce((n, q) => n + q.answerCount, 0);
         plan.refused.push({
           op: operation.op,
           handle: operation.handle,
           reason:
             `"${target.title ?? operation.handle}" holds ${answered.length} answered ` +
-            `${answered.length === 1 ? 'question' : 'questions'} with ${total} answers between ` +
+            `${answered.length === 1 ? 'question' : 'questions'} with ${describeAnswerCount(total)} between ` +
             'them, and deleting the page deletes those answers — move them off it first',
         });
         continue;
@@ -273,7 +282,7 @@ export function planEdits(
           op: operation.op,
           handle: operation.handle,
           reason:
-            `"${target.prompt}" already holds ${target.answerCount} answers, and changing its ` +
+            `"${target.prompt}" already holds ${describeAnswerCount(target.answerCount)}, and changing its ` +
             'type would leave them stored in a shape the new type cannot read',
         });
         continue;
@@ -334,7 +343,7 @@ export function planEdits(
         op: operation.op,
         handle: operation.handle,
         reason:
-          `${target.answerCount} ${target.answerCount === 1 ? 'person has' : 'people have'} ` +
+          `${describeAnswerers(target.answerCount)} ` +
           `answered "${target.prompt}", and deleting it deletes their answers — it can be hidden ` +
           'instead, which keeps both',
       });
@@ -410,6 +419,11 @@ function resolvePlacement(
     };
   }
   return { afterId: anchor.id };
+}
+
+/** `an` before a vowel, `a` otherwise — `option` is the only vowel-initial handle kind. */
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
 }
 
 /** The page holding a question, by row id. Undefined only if the id is not in the snapshot. */

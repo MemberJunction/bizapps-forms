@@ -164,6 +164,42 @@ export type SnapshotTarget =
   | ({ kind: 'screen' } & SnapshotScreen);
 
 /** The thing this handle names, or undefined when the model made it up. */
+/**
+ * The count a question carries when the answer scan could not establish a real number.
+ *
+ * `loadFormSnapshot` sets this when its answer read fails or hits its row cap, so that the delete
+ * gate treats the question as answered — failing closed, which is the only safe direction. It is
+ * `MAX_SAFE_INTEGER` because every gate here is a `> 0` comparison and a sentinel that compares
+ * correctly needs no special case at the point of decision.
+ *
+ * It DOES need one at the point of DISPLAY. Rendered raw it reached both the prompt and the
+ * author as "9007199254740991 answers", which is worse than saying nothing: it is a number, so it
+ * reads as a fact. {@link describeAnswerCount} and {@link describeAnswerers} are the only
+ * sanctioned way to put a count into text.
+ */
+export const ANSWER_COUNT_UNKNOWN = Number.MAX_SAFE_INTEGER;
+
+/** Whether a count is the fail-closed sentinel rather than a real number. */
+export function isAnswerCountKnown(count: number): boolean {
+  return count < ANSWER_COUNT_UNKNOWN;
+}
+
+/** `"3 answers"`, `"1 answer"`, or `"answers"` when the number could not be established. */
+export function describeAnswerCount(count: number): string {
+  if (!isAnswerCountKnown(count)) {
+    return 'answers';
+  }
+  return `${count} ${count === 1 ? 'answer' : 'answers'}`;
+}
+
+/** `"3 people have"`, `"1 person has"`, or `"people have"` when the number is unknown. */
+export function describeAnswerers(count: number): string {
+  if (!isAnswerCountKnown(count)) {
+    return 'people have';
+  }
+  return `${count} ${count === 1 ? 'person has' : 'people have'}`;
+}
+
 export function resolveHandle(snapshot: FormSnapshot, handle: string): SnapshotTarget | undefined {
   for (const page of snapshot.pages) {
     if (page.handle === handle) {
@@ -250,7 +286,7 @@ function describeFlags(question: SnapshotQuestion): string {
     flags.push('required');
   }
   if (question.answerCount > 0) {
-    flags.push(`${question.answerCount} answers`);
+    flags.push(describeAnswerCount(question.answerCount));
   }
   return flags.length > 0 ? `  (${flags.join(', ')})` : '';
 }

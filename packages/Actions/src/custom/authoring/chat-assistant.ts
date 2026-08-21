@@ -98,7 +98,12 @@ export async function loadChatHistory(
     {
       EntityName: ENTITY.ConversationDetail,
       ExtraFilter: `ConversationID='${conversationId}' AND HiddenToUser = 0`,
-      OrderBy: '__mj_CreatedAt',
+      // NEWEST first, bounded, then reversed below. Ascending with no bound read the WHOLE thread
+      // on every turn and threw all but the last ten away in memory — so the longer someone talked
+      // to a form, the more rows each message cost, for a window that never grows. `MaxRows`
+      // becomes `TOP n`, so the database returns ten rows however long the conversation is.
+      OrderBy: '__mj_CreatedAt DESC',
+      MaxRows: MAX_CHAT_HISTORY_TURNS,
       ResultType: 'simple',
       Fields: ['Role', 'Message', 'Error'],
     },
@@ -111,12 +116,15 @@ export async function loadChatHistory(
     LogError(`[Forms chat] Could not load history for ${conversationId}: ${view.ErrorMessage}`);
     return [];
   }
-  const turns = (view.Results ?? []).map((row) => ({
-    role: row.Role,
-    message: row.Message,
-    ...(row.Error ? { error: row.Error } : {}),
-  }));
-  return turns.slice(-MAX_CHAT_HISTORY_TURNS);
+  // Back to oldest-first, which is the order a transcript has to be read in.
+  const turns = (view.Results ?? [])
+    .map((row) => ({
+      role: row.Role,
+      message: row.Message,
+      ...(row.Error ? { error: row.Error } : {}),
+    }))
+    .reverse();
+  return turns;
 }
 
 /**
@@ -295,5 +303,3 @@ export async function askAssistant(
     return { reply, action: 'none' };
   }
 }
-
-/** Re-exported so the action and the prompt model share one renderer for the context block. */

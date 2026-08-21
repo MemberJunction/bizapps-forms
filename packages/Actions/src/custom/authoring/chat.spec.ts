@@ -27,6 +27,14 @@ let minted = 0;
  * protect, so it is the thing to look at.
  */
 const seenFilters: string[] = [];
+/**
+ * Every view the turn issued, so a test can assert on the QUERY and not only on its result.
+ *
+ * Needed because "read everything and keep the last ten" and "ask for ten" return byte-identical
+ * results — the difference is only visible in what was asked for, which is exactly the thing that
+ * costs money on a long thread.
+ */
+const seenViews: Array<{ entity: string; orderBy?: string; maxRows?: number }> = [];
 
 function fakeGuid(n: number): string {
   return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -108,7 +116,12 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       const one = new (this.constructor as never as { new (): { RunView(p: unknown): Promise<unknown> } })();
       return Promise.all(all.map((p) => one.RunView(p)));
     }
-    async RunView(params: { EntityName: string; ExtraFilter?: string }): Promise<{
+    async RunView(params: {
+      EntityName: string;
+      ExtraFilter?: string;
+      OrderBy?: string;
+      MaxRows?: number;
+    }): Promise<{
       Success: boolean;
       Results: unknown[];
     }> {
@@ -117,8 +130,19 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       if (params.ExtraFilter) {
         seenFilters.push(params.ExtraFilter);
       }
+      seenViews.push({ entity: params.EntityName, orderBy: params.OrderBy, maxRows: params.MaxRows });
       const table = rows.get(params.EntityName) ?? [];
-      return { Success: true, Results: table.filter((r) => matchesFilter(r, params.ExtraFilter)) };
+      let matched = table.filter((r) => matchesFilter(r, params.ExtraFilter));
+      // ORDER AND LIMIT ARE MODELLED, because a caller that reads the whole table and trims in
+      // memory is indistinguishable from one that asks the database for ten rows unless the fake
+      // enforces the difference. Rows are appended in creation order, so index IS `__mj_CreatedAt`.
+      if (params.OrderBy?.toUpperCase().includes('DESC')) {
+        matched = [...matched].reverse();
+      }
+      if (typeof params.MaxRows === 'number') {
+        matched = matched.slice(0, params.MaxRows);
+      }
+      return { Success: true, Results: matched };
     }
   },
   UserInfo: class {
@@ -183,6 +207,7 @@ beforeEach(() => {
   saved.length = 0;
   rows.clear();
   seenFilters.length = 0;
+  seenViews.length = 0;
   minted = 0;
   resetGeneratedImageStore();
   setChatAssistantModel({ respond: async () => JSON.stringify({ reply: 'ok', action: 'none' }) });
@@ -238,6 +263,35 @@ describe('a reply-only turn', () => {
     }
     const history = respond.mock.calls.at(-1)?.[0].history ?? [];
     expect(history.length).toBeLessThanOrEqual(MAX_CHAT_HISTORY_TURNS);
+  });
+
+  it('asks the database for the last few turns rather than the whole thread', async () => {
+    // The cap above is satisfied by reading everything and trimming in memory, which is what this
+    // did: a long-lived thread cost more rows on every message for a window that never grows.
+    // These assertions fail on an unbounded read, because the fake honours OrderBy and MaxRows.
+    const respond = assistant({ reply: 'ok', action: 'none' });
+    for (let i = 0; i < MAX_CHAT_HISTORY_TURNS + 6; i++) {
+      await turn(`message ${i}`);
+    }
+
+    // THE ASSERTION IS ON THE QUERY, deliberately. Reading the whole thread and slicing the last
+    // ten produces byte-identical `history` to asking for ten — same messages, same order — so an
+    // assertion about the result cannot tell the two apart, and one written that way passed with
+    // the bound removed. What differs is what was asked of the database.
+    const historyReads = seenViews.filter((v) => v.entity === 'MJ: Conversation Details' && v.maxRows !== 1);
+    expect(historyReads.length).toBeGreaterThan(0);
+    for (const read of historyReads) {
+      expect(read.maxRows).toBe(MAX_CHAT_HISTORY_TURNS);
+      expect(read.orderBy).toMatch(/DESC/i);
+    }
+
+    // And the window still reads oldest-first, holding the most recent turns.
+    const messages: string[] = (respond.mock.calls.at(-1)?.[0].history ?? []).map(
+      (t: { message: string }) => t.message,
+    );
+    expect(messages).not.toContain('message 0');
+    const numbered = messages.filter((m) => /^message \d+$/.test(m)).map((m) => Number(m.split(' ')[1]));
+    expect(numbered).toEqual([...numbered].sort((a, b) => a - b));
   });
 });
 
@@ -379,6 +433,31 @@ describe('a restyle turn', () => {
     expect(written['--mjf-invented']).toBeUndefined();
     expect(written['--mjf-btn-radius']).toBe('999px');
     expect(written['--mjf-title-align']).toBe('center');
+  });
+
+  it('KEEPS the sizing and alignment the author set in the Design tab', async () => {
+    // The assertions above fixture the palette as `{}`, so the house defaults are the only values
+    // available and they pass whether the code preserves the author's tokens or discards them.
+    // This is the case that separates the two: the author has already squared off the buttons and
+    // left-aligned the title, and asks only for a colour.
+    rows.set(STYLE, [{
+      ID: STYLE_ID, Name: 'RSVP theme',
+      CSSVariables: JSON.stringify({
+        '--mjf-btn-radius': '4px',
+        '--mjf-title-align': 'left',
+        '--mjf-question-size': '0.875rem',
+        '--mjf-accent': '#1b7fa8',
+      }),
+    }]);
+    assistant({ reply: 'Warmed it up.', action: 'restyle', cssVariables: { '--mjf-accent': '#c2410c' } });
+
+    await turn('make it warmer', { FormID: FORM_ID });
+
+    const written = JSON.parse(String(saved.filter((r) => r.entity === STYLE).at(-1)?.fields.CSSVariables));
+    expect(written['--mjf-accent']).toBe('#c2410c');
+    expect(written['--mjf-btn-radius']).toBe('4px');
+    expect(written['--mjf-title-align']).toBe('left');
+    expect(written['--mjf-question-size']).toBe('0.875rem');
   });
 
   it('warns in the reply when the palette cannot carry readable text', async () => {
@@ -632,10 +711,14 @@ describe('listing and opening forms', () => {
   });
 
   it('turns a handle into the id the client navigates to', async () => {
-    assistant({ reply: 'Opening Event RSVP.', action: 'open', openFormId: 'f2' });
-    const { out } = await turn('open my RSVP form');
+    // Handles follow the LIST's order, and `loadFormList` reads `__mj_UpdatedAt DESC` — so the
+    // most recently touched form is f1 and the row inserted first is f2. This used to expect the
+    // opposite because the fake ignored OrderBy and handed rows back in insertion order; it now
+    // honours it, which is what makes the history-window test able to fail.
+    assistant({ reply: 'Opening Assessment.', action: 'open', openFormId: 'f2' });
+    const { out } = await turn('open my other form');
     expect(out('Action')).toBe('open');
-    expect(out('OpenFormID')).toBe('99999999-8888-4777-8666-555555555555');
+    expect(out('OpenFormID')).toBe(FORM_ID);
   });
 
   it('says so when the handle names no form of theirs', async () => {

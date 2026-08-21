@@ -11,11 +11,12 @@
  * chosen by MemberJunction from the AI Prompt's metadata — there is no model or vendor
  * name in code (see {@link AIPromptFormDesignerModel}).
  *
- * TWO ROUTES TO THE SAME FORM, chosen by whether anyone is watching. With a `SessionID` the build
- * runs in STAGES and publishes progress, so the author sees a real form within seconds and watches
- * it fill in. Without one it is a single prompt — cheaper, fewer calls, identical output shape.
- * Staging buys time-to-first-paint and nothing else, so it is spent only where that is worth the
- * extra calls. See `shouldStage`.
+ * TWO ROUTES, AND THEY DO NOT PRODUCE THE SAME FORM. With a `SessionID` the build runs in STAGES
+ * and publishes progress, so the author sees a real form within seconds and watches it fill in.
+ * Without one it is a single prompt — cheaper and fewer calls, but the image and theme stages live
+ * inside the staged pipeline only, so that form carries the house palette and no pictures however
+ * hard the blueprint asked for them. This header used to claim "identical output shape"; it is
+ * not, the omissions are now reported in `Degraded`, and `shouldStage` carries the full note.
  *
  * Input params:
  *   - `Brief` (string, required) — the natural-language description, or the author's own list of

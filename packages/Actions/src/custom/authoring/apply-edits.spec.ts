@@ -15,6 +15,15 @@ let readFailsFor: string | null = null;
  * only path where a multi-row delete can destroy some rows and keep others.
  */
 let deleteFailsFor: string | null = null;
+/**
+ * Row id whose grouped `Delete()` refuses at QUEUE time rather than at submit.
+ *
+ * `BaseEntity.Delete()` reaches `ProviderToUse.Delete()` even when a TransactionGroup is set —
+ * that call is what enrols the row — and it returns `false` on a permission or provider refusal.
+ * A row that returns false was never queued, so `Submit()` then succeeds having silently skipped
+ * it. Distinct from `deleteFailsFor`, which models a failure the SUBMIT discovers.
+ */
+let queueRefusesFor: string | null = null;
 
 const guid = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -48,6 +57,9 @@ class FakeEntity {
   TransactionGroup: FakeTransactionGroup | null = null;
   async Delete(): Promise<boolean> {
     if (this.TransactionGroup) {
+      if (queueRefusesFor === this.ID) {
+        return false;
+      }
       this.TransactionGroup.queue(this);
       return true;
     }
@@ -167,7 +179,7 @@ const snapshot = (answerCount = 0) =>
   });
 
 beforeEach(() => {
-  saved.length = 0; deleted.length = 0; rows.clear(); minted = 0; readFailsFor = null; deleteFailsFor = null;
+  saved.length = 0; deleted.length = 0; rows.clear(); minted = 0; readFailsFor = null; deleteFailsFor = null; queueRefusesFor = null;
   rows.set('MJ_BizApps_Forms: Form Questions', [
     { ID: Q_NAME, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'Your name', DisplayOrder: 0, IsRequired: false },
     { ID: Q_MAIL, FormID: FORM, PageID: PAGE, QuestionType: 'Email', Prompt: 'Email', DisplayOrder: 1, IsRequired: true },
@@ -336,6 +348,22 @@ describe('applyEdits — a delete that fails partway', () => {
     expect(rows.get('MJ_BizApps_Forms: Form Pages') ?? []).toHaveLength(1);
     expect(outcome.applied).toHaveLength(0);
     expect(outcome.refused.join(' ')).toMatch(/could not be removed|Nothing was removed/i);
+  });
+
+  it('writes nothing when a row refuses to join the group in the first place', async () => {
+    // The failure the group cannot catch: a row whose Delete() returns false was never enrolled,
+    // so Submit() commits the REST of them and reports success. Discarding that boolean rebuilds
+    // the partial delete the group exists to prevent, one layer up.
+    queueRefusesFor = Q_MAIL;
+    const plan = planEdits(snapshot(0), [{ op: 'deletePage', handle: 'p1' }]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    const questions = rows.get('MJ_BizApps_Forms: Form Questions') ?? [];
+    expect(questions.map((q) => q.ID).sort()).toEqual([Q_NAME, Q_MAIL].sort());
+    expect(rows.get('MJ_BizApps_Forms: Form Pages') ?? []).toHaveLength(1);
+    expect(rows.get('MJ_BizApps_Forms: Form Question Options') ?? []).toHaveLength(1);
+    expect(outcome.applied).toHaveLength(0);
   });
 
   it('keeps a question usable when the question itself cannot be deleted', async () => {

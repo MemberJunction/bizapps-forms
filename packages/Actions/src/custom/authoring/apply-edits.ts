@@ -309,7 +309,6 @@ async function applyOne(
   return undefined;
 }
 
-/** A form's pages, in display order. */
 /** The shape `deleteInOneGo` needs: anything MJ can enlist in a transaction and delete. */
 type DeletableRow = {
   TransactionGroup: TransactionGroupBase;
@@ -344,7 +343,17 @@ async function deleteInOneGo(
   const group = await new Metadata().CreateTransactionGroup();
   for (const row of rows) {
     row.TransactionGroup = group;
-    await row.Delete();
+    // CHECK THE BOOLEAN EVEN THOUGH THIS ONLY QUEUES. `Delete()` still reaches
+    // `ProviderToUse.Delete()` when a group is set — that call is what enrols the row — and it
+    // returns false on a permission or provider refusal. A row that returns false was never
+    // enrolled, so `Submit()` would go on to commit the REST of them and report success: the
+    // partial delete this helper exists to prevent, rebuilt one layer up. Throwing here abandons
+    // the group unsubmitted, so nothing is written.
+    if (!(await row.Delete())) {
+      const why = row.LatestResult?.CompleteMessage ?? 'the row could not be queued for deletion';
+      LogError(`[Forms edits] ${describe} could not be removed for ${contextUser.ID}: ${why}`);
+      throw new Error(`${describe} could not be removed (${why}). Nothing was removed.`);
+    }
   }
   if (!(await group.Submit())) {
     const detail = rows[rows.length - 1]?.LatestResult?.CompleteMessage ?? 'the transaction was rolled back';
@@ -353,6 +362,7 @@ async function deleteInOneGo(
   }
 }
 
+/** A form's pages, in display order. */
 async function pagesOf(
   formId: string,
   contextUser: UserInfo,
@@ -467,10 +477,15 @@ function positionAfter(
   }
   const index = siblings.findIndex((q) => q.ID === afterId);
   if (index === -1) {
-    // Belt and braces: `planEdits` refuses a position that names a question on another page, so a
-    // resolved plan should never reach here. If one does, an unusable position is the same
-    // situation as no position at all — and answering it with `siblings.length` rather than the
-    // caller's default silently gave `moveQuestion` the append that `addQuestion` wanted.
+    // Reachable, despite the plan's check. `planEdits` refuses a position naming a question on
+    // another page, but it resolves the WHOLE batch against one snapshot — so a `deleteQuestion`
+    // earlier in the same turn can remove the very row a later `addQuestion` names, and by the
+    // time this runs the anchor is gone. An unusable position is then the same situation as no
+    // position at all, and answering it with `siblings.length` rather than the caller's default
+    // silently gave `moveQuestion` the append that `addQuestion` wanted.
+    //
+    // It is still SILENT, which is the part worth fixing next: the author asked for a slot and got
+    // the end of the page with no line saying so.
     return whenUnanchored === 'top' ? 0 : siblings.length;
   }
   return index + 1;

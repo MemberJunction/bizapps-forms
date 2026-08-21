@@ -8,9 +8,10 @@
  * exists as real rows within a couple of seconds and fills in while the author looks at it.
  *
  * The trade is honest and worth stating: 1 + N model calls instead of 1, so a staged build costs
- * more and its TOTAL time is no better. It buys time-to-first-paint, which only matters when
- * somebody is watching. That is exactly the split the caller expresses by supplying a session to
- * publish progress to — see {@link shouldStage}.
+ * more and its TOTAL time is no better. What it buys is time-to-first-paint — which only matters
+ * when somebody is watching — AND, since images and theming were added here and only here, the
+ * pictures and the palette. A caller with no session gets neither. See {@link shouldStage}, which
+ * carries the note about that second axis riding on one boolean.
  *
  * ── FAILURE IS PER-STAGE, AND ONLY ONE STAGE IS FATAL ────────────────────────────────────────
  * The outline is the form; without it there is nothing to persist and the action fails. Every

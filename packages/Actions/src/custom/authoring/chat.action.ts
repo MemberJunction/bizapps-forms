@@ -38,7 +38,7 @@ import {
   describeFormSnapshot,
   describeFormList,
   isGuid,
-  themeWithOverrides,
+  DEFAULT_FORM_THEME,
   type FormChatContext,
   type FormListEntry,
   type FormChatResponse,
@@ -295,14 +295,22 @@ async function restyleForm(
     return `${response.reply}\n\n**I could not apply that:** this form has no style to edit yet.`;
   }
   // Same validation and contrast gate a generated theme goes through: unknown tokens stripped,
-  // unreadable ink corrected, layout tokens left alone. A colour arriving by chat is no more
-  // trustworthy than one arriving from the theme prompt.
+  // unreadable ink corrected. A colour arriving by chat is no more trustworthy than one arriving
+  // from the theme prompt.
   //
   // THE BASE IS THE FORM'S OWN PALETTE, not the house one. Merging over the house defaults meant a
   // model correctly answering "make the buttons darker" with a single token reset every other
   // colour the author had tuned in the Design tab — a full replace dressed up as a small change,
   // confirmed cheerfully and with no warning.
-  const base = themeWithOverrides(await currentThemeTokens(form.StyleID, contextUser));
+  //
+  // NOT `themeWithOverrides`, which is what this used to call. That helper DROPS every token in
+  // `THEME_LAYOUT_TOKENS` from its overrides, which is right when the overrides are a MODEL's
+  // proposal — sizing and alignment are `setLayout`'s business, not a restyle's — and exactly
+  // wrong when they are the AUTHOR's own persisted tokens. It reset their squared-off buttons to
+  // pill and their left-aligned title to centred on every "make it warmer", while the reply spoke
+  // only of colours. The model still cannot smuggle a layout token in here: `validateTheme` strips
+  // everything outside `THEME_TOKEN_NAMES`, and that list carries none of them.
+  const base = { ...DEFAULT_FORM_THEME, ...(await currentThemeTokens(form.StyleID, contextUser)) };
   const outcome = validateTheme({ cssVariables: response.cssVariables ?? {} }, base);
   await applyThemeTokens(formId, form.StyleID, outcome.cssVariables, contextUser);
   setOutputParam(params, 'StyleID', form.StyleID);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { THEME_LAYOUT_TOKENS } from './default-theme';
-import { buildFormSnapshot, type FormSnapshot } from './form-snapshot';
+import { ANSWER_COUNT_UNKNOWN, buildFormSnapshot, type FormSnapshot } from './form-snapshot';
 import { planEdits } from './form-edit';
 
 const IDS = { page: 'p-1', name: 'q-name', email: 'q-email' };
@@ -309,6 +309,52 @@ describe('planEdits — relabelling a choice', () => {
     const plan = planEdits(snapshot(), [{ op: 'updateOption', handle: 'q1', label: 'Maybe' }]);
     expect(plan.resolved).toHaveLength(0);
     expect(plan.refused[0].reason).toMatch(/choice|option/i);
+  });
+});
+
+describe('planEdits — when the answer count could not be established', () => {
+  /**
+   * `loadFormSnapshot` fails CLOSED when its answer read fails or hits its row cap: every question
+   * is marked answered with `ANSWER_COUNT_UNKNOWN`. That is the right gate behaviour and the wrong
+   * thing to print — rendered raw it reached the author as "9007199254740991 people have answered",
+   * which is worse than saying nothing, because a number reads as a fact.
+   */
+  const unknown = (): FormSnapshot =>
+    buildFormSnapshot({
+      formId: 'form-1', name: 'Assessment', status: 'Live', responseCount: 0, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'Details', questions: [
+        { id: 'q-a', type: 'ShortText', prompt: 'Your name', isRequired: false,
+          answerCount: ANSWER_COUNT_UNKNOWN, options: [] },
+        { id: 'q-b', type: 'Email', prompt: 'Email', isRequired: true,
+          answerCount: ANSWER_COUNT_UNKNOWN, options: [] },
+      ] }],
+      screens: [],
+    });
+
+  it('still refuses the delete', () => {
+    const plan = planEdits(unknown(), [{ op: 'deleteQuestion', handle: 'q1' }]);
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused).toHaveLength(1);
+  });
+
+  it('never puts the sentinel in front of the author', () => {
+    const reasons = [
+      ...planEdits(unknown(), [{ op: 'deleteQuestion', handle: 'q1' }]).refused,
+      ...planEdits(unknown(), [{ op: 'updateQuestion', handle: 'q1', type: 'Email' }]).refused,
+      ...planEdits(unknown(), [{ op: 'deletePage', handle: 'p1' }]).refused,
+    ].map((r) => r.reason);
+
+    expect(reasons).toHaveLength(3);
+    for (const reason of reasons) {
+      expect(reason).not.toMatch(/9007199254740991/);
+      expect(reason).not.toMatch(/\d{10,}/);
+    }
+    expect(reasons[0]).toMatch(/people have answered/);
+  });
+
+  it('does not print a poisoned total for a page', () => {
+    const [refusal] = planEdits(unknown(), [{ op: 'deletePage', handle: 'p1' }]).refused;
+    expect(refusal.reason).toMatch(/2 answered questions with answers between/);
   });
 });
 
