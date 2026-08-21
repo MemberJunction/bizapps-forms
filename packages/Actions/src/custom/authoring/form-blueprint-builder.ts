@@ -629,7 +629,7 @@ export async function applyPageDetail(
     optionsSkipped: existingOptions.readFailed,
     optionImages: [],
   };
-  const claim = stubClaimer(stubs, idByKey);
+  const claim = stubClaimer(stubs, idByKey, detail.questions.map((q) => q.key));
   for (let i = 0; i < detail.questions.length; i++) {
     const detailed = detail.questions[i];
     const stub = claim(detailed.key);
@@ -661,15 +661,32 @@ export async function applyPageDetail(
  * Returns `undefined` when nothing is left to claim — the caller creates a new question, which is
  * the documented "more detailed questions than stubs" case.
  */
-function stubClaimer(
-  stubs: readonly mjBizAppsFormsFormQuestionEntity[],
+export function stubClaimer<T extends { ID: string }>(
+  stubs: readonly T[],
   idByKey: QuestionIdByKey,
-): (key: string | undefined) => mjBizAppsFormsFormQuestionEntity | undefined {
+  detailKeys: ReadonlyArray<string | undefined>,
+): (key: string | undefined) => T | undefined {
   const byId = new Map(stubs.map((stub) => [stub.ID, stub]));
-  const unclaimed = [...stubs];
 
-  const take = (stub: mjBizAppsFormsFormQuestionEntity): mjBizAppsFormsFormQuestionEntity => {
+  // RESERVED BEFORE ANYTHING IS HANDED OUT. Claiming used to be one pass in detail order, so an
+  // UNKEYED question earlier in the list took the front of the queue — including the stub a later
+  // KEYED question named. That keyed question then found its row already gone and fell through to
+  // whatever was left, so its key landed on another question's row and every `conditionalRule`
+  // naming it pointed at the wrong question. The model returning a page's questions in a different
+  // order was enough to cause it, and the docstring above promised keys prevented precisely this.
+  const reserved = new Set<string>();
+  for (const key of detailKeys) {
+    const id = key ? idByKey.get(key) : undefined;
+    if (id && byId.has(id)) {
+      reserved.add(id);
+    }
+  }
+  // Positional claims may only take what no key has spoken for.
+  const unclaimed = stubs.filter((stub) => !reserved.has(stub.ID));
+
+  const take = (stub: T): T => {
     byId.delete(stub.ID);
+    reserved.delete(stub.ID);
     const at = unclaimed.indexOf(stub);
     if (at !== -1) {
       unclaimed.splice(at, 1);
@@ -684,7 +701,13 @@ function stubClaimer(
     if (keyed) {
       return take(keyed);
     }
-    return unclaimed.length > 0 ? take(unclaimed[0]) : undefined;
+    if (unclaimed.length > 0) {
+      return take(unclaimed[0]);
+    }
+    // Nothing unreserved is left. A stub still held for a key nobody ended up claiming is better
+    // spent than wasted — the alternative is creating a duplicate question beside it.
+    const stranded = stubs.find((stub) => byId.has(stub.ID));
+    return stranded ? take(stranded) : undefined;
   };
 }
 
