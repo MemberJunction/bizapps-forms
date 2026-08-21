@@ -313,6 +313,14 @@ export function planEdits(
       // the name field a dropdown" produced an empty select nobody could answer, and nobody could
       // submit past if it was required. Retyping BETWEEN choice types is fine: the existing
       // choices carry over untouched.
+      if (TYPES_THE_CHAT_CANNOT_BUILD.has(operation.type)) {
+        plan.refused.push({
+          op: operation.op,
+          handle: operation.handle,
+          reason: `changing "${target.prompt}" into a ${operation.type} needs its choices split across rows and columns, which I cannot describe here — the builder's question panel can do it`,
+        });
+        continue;
+      }
       if (questionTypeHasOptions(operation.type) && target.options.length === 0) {
         plan.refused.push({
           op: operation.op,
@@ -378,6 +386,14 @@ export function planEdits(
       // schema has no `.min(1)` and no type/option coupling, `createOptions` silently returns zero
       // for a choice type with no options, and `offeredValues` returns null for an empty list and
       // declines to check at submit time. Nothing downstream will catch what passes here.
+      if (TYPES_THE_CHAT_CANNOT_BUILD.has(operation.type)) {
+        plan.refused.push({
+          op: operation.op,
+          handle: operation.handle,
+          reason: `a ${operation.type} question needs its choices split across rows and columns, which I cannot describe here — add it from the + button in the builder and I can reword it afterwards`,
+        });
+        continue;
+      }
       const wantsOptions = questionTypeHasOptions(operation.type);
       const given = operation.options?.length ?? 0;
       if (wantsOptions && given === 0) {
@@ -519,6 +535,18 @@ function resolvePlacement(
   }
   return { afterId: anchor.id };
 }
+
+/**
+ * Types the chat's flat `options: string[]` genuinely cannot build.
+ *
+ * `questionTypeHasOptions` answers "does this type show choices", which is NOT the same question
+ * and was used as though it were. A `Matrix` shows choices on TWO axes, and this vocabulary has no
+ * way to say which axis a choice belongs to — so every one lands as a Row, the grid gets no
+ * Columns, and the widget renders a table with nothing to click. `form-blueprint.ts` documents
+ * that failure at the field the blueprint route added to avoid it (`matrixAxis`); the edit
+ * vocabulary has no equivalent, so the honest answer is to decline and name the builder.
+ */
+const TYPES_THE_CHAT_CANNOT_BUILD: ReadonlySet<string> = new Set(['Matrix']);
 
 /** `an` before a vowel, `a` otherwise — `option` is the only vowel-initial handle kind. */
 function article(word: string): string {

@@ -517,9 +517,15 @@ async function runMediaStage(
   const attachFailures = await attachImages(built.formId, outcome.stored, contextUser, publishMedia);
   // The stage is over — say so. Without this the bar never counted media as finished, because
   // every other publish here is now an in-progress one and the skip path is the only terminal one.
-  const made = outcome.stored.length;
+  //
+  // ATTACHED, not made. `outcome.stored` counts pictures generated and stored; a picture that then
+  // failed to attach is on nobody's form. Counting those said "3 pictures ready" over a form with
+  // none on it — the degraded markers carried the truth, but the label a person reads did not.
+  const attached = outcome.stored.length - attachFailures.length;
   publishMedia(
-    made === 0 ? 'No pictures were made' : `${made === 1 ? 'Picture' : `${made} pictures`} ready`,
+    attached <= 0
+      ? 'No pictures were added'
+      : `${attached === 1 ? 'Picture' : `${attached} pictures`} ready`,
     undefined,
     true,
   );

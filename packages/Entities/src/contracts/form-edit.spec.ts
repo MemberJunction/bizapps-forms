@@ -579,6 +579,48 @@ describe('planEdits — retyping is the same decision as adding', () => {
   });
 });
 
+describe('planEdits — a Matrix cannot be built from a flat list of choices', () => {
+  /**
+   * `questionTypeHasOptions('Matrix')` is true, so both options gates counted it satisfied — but a
+   * matrix needs choices on TWO axes and `addQuestionSchema.options` is a flat `string[]` with no
+   * axis. Every option lands as a Row, the grid gets zero Columns, and the widget renders a table
+   * with nothing to click: unanswerable, and unsubmittable if required. `form-blueprint.ts`
+   * documents this failure exactly, which is how the blueprint route earned its `matrixAxis`
+   * field; the chat vocabulary has no equivalent.
+   */
+  it('refuses adding one, rather than shipping a grid with no columns', () => {
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'Matrix', prompt: 'Rate each', options: ['Never', 'Always'] },
+    ]);
+
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/matrix/i);
+  });
+
+  it('refuses retyping into one for the same reason', () => {
+    const withChoices = buildFormSnapshot({
+      formId: 'form-1', name: 'A', status: 'Draft', responseCount: 0, cssVariables: {},
+      pages: [{ id: 'p-1', title: 'One', questions: [
+        { id: 'q-choice', type: 'Dropdown', prompt: 'Team', isRequired: false, answerCount: 0,
+          options: [{ id: 'o-1', label: 'Ops' }, { id: 'o-2', label: 'Eng' }] },
+      ] }],
+      screens: [],
+    });
+
+    const plan = planEdits(withChoices, [{ op: 'updateQuestion', handle: 'q1', type: 'Matrix' }]);
+
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/matrix/i);
+  });
+
+  it('still allows the choice types the flat list CAN express', () => {
+    const plan = planEdits(snapshot(), [
+      { op: 'addQuestion', handle: 'p1', type: 'Ranking', prompt: 'Order these', options: ['A', 'B'] },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+  });
+});
+
 describe('planEdits — pages', () => {
   it('adds a page', () => {
     const plan = planEdits(snapshot(), [{ op: 'addPage', title: 'Availability' }]);

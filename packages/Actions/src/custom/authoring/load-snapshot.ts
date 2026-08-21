@@ -138,8 +138,14 @@ async function readOptions(
     contextUser,
   );
   if (!view.Success) {
+    // FAIL THE SNAPSHOT, like every other read here. Returning an empty map made every question
+    // look like it had no choices — harmless while options were only handles for the model, and
+    // wrong the moment they started gating decisions: the retype gate would then refuse with
+    // "has no choices … add a new question instead, and remove this one", advising the author to
+    // delete a question that has both its choices and its answers. `readAnswerCounts` below fails
+    // closed for exactly this reason; this one was the outlier.
     LogError(`[Forms snapshot] Could not read options: ${view.ErrorMessage}`);
-    return byQuestion;
+    throw new Error(`could not read this form's choices: ${view.ErrorMessage ?? 'unknown error'}`);
   }
   for (const row of view.Results ?? []) {
     const list = byQuestion.get(row.QuestionID) ?? [];

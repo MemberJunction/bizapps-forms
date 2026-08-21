@@ -438,11 +438,15 @@ function readTokens(raw: string | null): Record<string, string> {
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) {
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       // PARSES, and is still not a token map. `"a string"`, `123`, `true` and `null` are all valid
       // JSON, and returning `{}` for them fed the same merge that then rewrote the row to just the
       // new layout tokens — the identical data loss the catch below refuses, one line up.
-      throw new Error(`its tokens are ${typeof parsed}, not a map of CSS variables`);
+      // `typeof [] === 'object'`, so an array slipped through the first two checks and merged as
+      // `{"0": "#fff", "1": "#000", ...}` — the same total replacement, wearing index keys.
+      throw new Error(
+        `its tokens are ${Array.isArray(parsed) ? 'a list' : typeof parsed}, not a map of CSS variables`,
+      );
     }
     return parsed as Record<string, string>;
   } catch (error) {

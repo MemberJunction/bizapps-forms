@@ -603,6 +603,20 @@ describe('loadFormSnapshot', () => {
   });
 });
 
+describe('loadFormSnapshot — a failed option read', () => {
+  it('fails the snapshot rather than reporting every question as choiceless', async () => {
+    // Returning an empty map was harmless while options were only handles for the model. Once the
+    // retype gate started reading them, it turned a transient read failure into "has no choices —
+    // add a new question instead, and remove this one": advice to delete a question that has both
+    // its choices and its answers. Every other read here already fails the snapshot.
+    readFailsFor = 'MJ_BizApps_Forms: Form Question Options';
+
+    const snap = await loadFormSnapshot(FORM, user);
+
+    expect(snap).toBeUndefined();
+  });
+});
+
 describe('loadFormSnapshot — the answer scan is bounded', () => {
   it('treats every question as answered when the scan hits its cap', async () => {
     // A capped result is an arbitrary subset, so a question missing from it may still hold
