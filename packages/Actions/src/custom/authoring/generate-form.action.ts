@@ -78,10 +78,6 @@ export function setStagedAuthoringModel(model: StagedAuthoringModel): void {
   activeStagedModel = model;
 }
 
-/** Override the image generator (e.g. a deterministic stub in tests, or none at all). */
-export function setImageGenerationModel(model: ImageGenerationModel): void {
-  activeImageModel = model;
-}
 
 @RegisterClass(BaseAction, 'Forms: Generate Form From Brief')
 export class GenerateFormFromBriefAction extends BaseAction {

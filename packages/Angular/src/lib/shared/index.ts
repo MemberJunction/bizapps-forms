@@ -15,7 +15,6 @@ export { toDate } from './runview-dates';
 export {
   readActionOutput,
   readActionOutputString,
-  readActionOutputStrings,
   type ClientActionResult,
 } from './action-output';
 export { flattenQuestions } from './published-questions';

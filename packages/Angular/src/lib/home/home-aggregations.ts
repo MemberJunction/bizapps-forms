@@ -1,7 +1,6 @@
 /**
  * Pure transforms for the Forms home grid — no I/O, fully unit-testable.
  */
-import type { ActionParam } from '@memberjunction/actions-base';
 import { readActionOutputString, type ClientActionResult } from '../shared/action-output';
 import { toDate } from '../shared/runview-dates';
 import type {
@@ -69,27 +68,10 @@ export function sortByUpdatedDesc(rows: FormSummaryRow[]): FormSummaryRow[] {
 }
 
 /**
- * Extracts the `FormID` output parameter produced by the authoring/template
- * actions. Both actions set an output param named `FormID`.
- */
-export function readFormIdFromParams(
-  params: readonly ActionParam[] | undefined,
-): string | null {
-  if (!params) {
-    return null;
-  }
-  const hit = params.find(
-    (p) => p.Name === 'FormID' && (p.Type === 'Output' || p.Type === 'Both'),
-  );
-  const value = hit?.Value;
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-/**
  * The id of the form an authoring action just created.
  *
  * THE BUG THIS FIXED, kept because it is the kind that shipped once and would ship again.
- * `readFormIdFromParams` looked for `FormID` in `result.Params`, which can never contain it:
+ * The original helper looked for `FormID` in `result.Params`, which can never contain it:
  * `GraphQLActionClient.processActionResult` returns `Params: originalParams` — the inputs the
  * caller sent — and puts the action's output params in `Result`. So the lookup always came back
  * null, the "open the form I just made for you" step was skipped, and both "From template" and

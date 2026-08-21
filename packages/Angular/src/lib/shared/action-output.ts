@@ -57,14 +57,6 @@ export function readActionOutputString(
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-/** An output parameter's value when it is an array of strings, else `undefined`. */
-export function readActionOutputStrings(
-  result: ClientActionResult | undefined,
-  name: string,
-): readonly string[] | undefined {
-  const value = readActionOutput(result, name);
-  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : undefined;
-}
 
 /**
  * Find a named entry in either shape a param collection arrives in.
