@@ -11,6 +11,7 @@
  * kind never needs a database to reproduce.
  */
 import { LogError, Metadata, RunView } from '@memberjunction/core';
+import type { TransactionGroupBase } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import { isFormQuestionType, type EditPlan, type ResolvedEdit } from '@mj-biz-apps/forms-entities';
 import {
@@ -156,15 +157,14 @@ async function applyOne(
     const prompt = question.Prompt;
     const pageId = question.PageID;
     // Options first: `FormQuestionOption.QuestionID` is NOT NULL, so the parent delete fails on
-    // the constraint while any child survives.
-    for (const option of await optionsOf(edit.id, contextUser)) {
-      if (!(await option.Delete())) {
-        throw new Error(`option ${option.ID} could not be removed`);
-      }
-    }
-    if (!(await question.Delete())) {
-      throw new Error(`"${prompt}" could not be removed`);
-    }
+    // the constraint while any child survives. Both go in ONE group — see `deleteInOneGo`. Options
+    // carry no FK from `FormResponseAnswer`, so deleting them row-by-row succeeded even when the
+    // question could not be deleted, leaving a choice question with no choices to choose from.
+    await deleteInOneGo(
+      [...(await optionsOf(edit.id, contextUser)), question],
+      `"${prompt}"`,
+      contextUser,
+    );
     // A question with no page has no siblings to renumber; nothing to close up.
     if (pageId) {
       await renumber(await questionsOnPage(pageId, contextUser), contextUser, formId);
@@ -238,16 +238,16 @@ async function applyOne(
       throw new Error(`page ${edit.id} could not be loaded`);
     }
     const title = page.Title;
-    // The plan already proved nothing on it has answers; the rows still have to go in FK order.
+    // The plan already proved nothing on it has answers; the rows still have to go in FK order,
+    // and they all go in ONE group — see `deleteInOneGo`. Row-by-row, a question that picked up
+    // an answer after the snapshot was taken failed its delete while its siblings had already
+    // been destroyed, and the author was told the edit had not gone through.
+    const doomed: DeletableRow[] = [];
     for (const question of await questionsOnPage(edit.id, contextUser)) {
-      for (const option of await optionsOf(question.ID, contextUser)) {
-        await option.Delete();
-      }
-      await question.Delete();
+      doomed.push(...(await optionsOf(question.ID, contextUser)), question);
     }
-    if (!(await page.Delete())) {
-      throw new Error(`"${title}" could not be removed`);
-    }
+    doomed.push(page);
+    await deleteInOneGo(doomed, `"${title}"`, contextUser);
     await renumberPages(await pagesOf(formId, contextUser), contextUser, formId);
     return `removed the page "${title}"`;
   }
@@ -295,6 +295,49 @@ async function applyOne(
 }
 
 /** A form's pages, in display order. */
+/** The shape `deleteInOneGo` needs: anything MJ can enlist in a transaction and delete. */
+type DeletableRow = {
+  TransactionGroup: TransactionGroupBase;
+  Delete(): Promise<boolean>;
+  LatestResult?: { CompleteMessage?: string } | null;
+};
+
+/**
+ * Delete every row, in the order given, or delete none of them.
+ *
+ * WHY A GROUP. Row-by-row, each `Delete()` commits on its own, so a failure partway through left
+ * the earlier rows permanently gone while the edit reported a refusal — the author was told
+ * nothing happened, and had no way to find out what had actually gone missing. A delete has no
+ * undo, so "some of it" is the one outcome that must not be reachable. Two live races produce it:
+ * a question that picks up its first answer during the model round-trip (the plan's gate reads a
+ * snapshot taken before the model was called, so it cannot see that), and an option row, which
+ * carries no FK from `FormResponseAnswer` and therefore deletes happily even when the question it
+ * belongs to cannot.
+ *
+ * `Delete()` on a row holding a `TransactionGroup` QUEUES the work and returns without writing;
+ * `Submit()` executes the queue in the order it was built, which is why the caller's FK ordering
+ * still matters inside the group.
+ *
+ * Throws on failure — `applyEdits` turns that into a refusal line, which is now honest, because
+ * the rollback means nothing was written.
+ */
+async function deleteInOneGo(
+  rows: readonly DeletableRow[],
+  describe: string,
+  contextUser: UserInfo,
+): Promise<void> {
+  const group = await new Metadata().CreateTransactionGroup();
+  for (const row of rows) {
+    row.TransactionGroup = group;
+    await row.Delete();
+  }
+  if (!(await group.Submit())) {
+    const detail = rows[rows.length - 1]?.LatestResult?.CompleteMessage ?? 'the transaction was rolled back';
+    LogError(`[Forms edits] ${describe} could not be removed for ${contextUser.ID}: ${detail}`);
+    throw new Error(`${describe} could not be removed (${detail}). Nothing was removed.`);
+  }
+}
+
 async function pagesOf(
   formId: string,
   contextUser: UserInfo,
@@ -408,7 +451,14 @@ function positionAfter(
     return whenUnanchored === 'top' ? 0 : siblings.length;
   }
   const index = siblings.findIndex((q) => q.ID === afterId);
-  return index === -1 ? siblings.length : index + 1;
+  if (index === -1) {
+    // Belt and braces: `planEdits` refuses a position that names a question on another page, so a
+    // resolved plan should never reach here. If one does, an unusable position is the same
+    // situation as no position at all — and answering it with `siblings.length` rather than the
+    // caller's default silently gave `moveQuestion` the append that `addQuestion` wanted.
+    return whenUnanchored === 'top' ? 0 : siblings.length;
+  }
+  return index + 1;
 }
 
 /**

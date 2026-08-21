@@ -229,6 +229,68 @@ describe('planEdits — moving a question', () => {
   });
 });
 
+describe('planEdits — a position that names a question on another page', () => {
+  /**
+   * `after` names a ROW, but a position only means anything among siblings. Nothing stopped the
+   * model naming a question on a different page, and the applier could not tell that apart from
+   * "no position given" — it appended, silently, so the author saw the question somewhere they
+   * had not asked for and got no line explaining why.
+   */
+  const twoPages = (): FormSnapshot =>
+    buildFormSnapshot({
+      formId: 'form-1', name: 'Assessment', status: 'Draft', responseCount: 0, cssVariables: {},
+      pages: [
+        { id: 'p-1', title: 'One', questions: [
+          { id: 'q-a', type: 'ShortText', prompt: 'A', isRequired: false, answerCount: 0, options: [] },
+          { id: 'q-c', type: 'ShortText', prompt: 'C', isRequired: false, answerCount: 0, options: [] },
+        ] },
+        { id: 'p-2', title: 'Two', questions: [
+          { id: 'q-b', type: 'ShortText', prompt: 'B', isRequired: false, answerCount: 0, options: [] },
+        ] },
+      ],
+      screens: [],
+    });
+
+  it('refuses to add after a question that is not on the destination page', () => {
+    const plan = planEdits(twoPages(), [
+      { op: 'addQuestion', handle: 'p2', type: 'Rating', prompt: 'How was it?', after: 'q1' },
+    ]);
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/q1.*not on|different page|not on that page/i);
+  });
+
+  it('refuses to move after a question that is not on the destination page', () => {
+    // q2 stays on p1 while q1 moves to p2, so it cannot be a position on the destination.
+    const plan = planEdits(twoPages(), [
+      { op: 'moveQuestion', handle: 'q1', toPage: 'p2', after: 'q2' },
+    ]);
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/q2.*not on|different page|not on that page/i);
+  });
+
+  it('allows a move whose position is already on the destination page', () => {
+    const plan = planEdits(twoPages(), [
+      { op: 'moveQuestion', handle: 'q1', toPage: 'p2', after: 'q3' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+
+  it('allows a move within a page whose position is a sibling', () => {
+    const plan = planEdits(twoPages(), [{ op: 'moveQuestion', handle: 'q1', after: 'q2' }]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+
+  it('still allows a position naming a sibling on the same page', () => {
+    const plan = planEdits(twoPages(), [
+      { op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'How was it?', after: 'q1' },
+    ]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+  });
+});
+
 describe('planEdits — pages', () => {
   it('adds a page', () => {
     const plan = planEdits(snapshot(), [{ op: 'addPage', title: 'Availability' }]);

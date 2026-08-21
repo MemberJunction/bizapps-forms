@@ -272,14 +272,20 @@ export function planEdits(
         });
         continue;
       }
-      const placement = resolvePlacement(snapshot, operation);
-      if ('reason' in placement) {
-        plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
-        continue;
-      }
+      // The page is resolved FIRST because it is what the position is checked against: a move
+      // with no `toPage` stays where it is, so the destination is the question's current page.
       const page = resolvePage(snapshot, operation.toPage);
       if ('reason' in page) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: page.reason });
+        continue;
+      }
+      const placement = resolvePlacement(
+        snapshot,
+        operation,
+        page.toPageId ?? pageIdOfQuestion(snapshot, target.id),
+      );
+      if ('reason' in placement) {
+        plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
       }
       plan.resolved.push({ ...operation, id: target.id, ...placement, ...page });
@@ -296,7 +302,7 @@ export function planEdits(
         });
         continue;
       }
-      const placement = resolvePlacement(snapshot, operation);
+      const placement = resolvePlacement(snapshot, operation, target.id);
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
@@ -357,10 +363,20 @@ function resolvePage(
   return { toPageId: page.id };
 }
 
-/** The row a new question goes after, or the reason that reference does not work. */
+/**
+ * The row a new question goes after, or the reason that reference does not work.
+ *
+ * `destinationPageId` is what makes this a real check rather than a spelling check. A position
+ * only means anything among siblings, so an anchor on some OTHER page is not a position at all —
+ * and the applier cannot tell that case apart from "no position given", because both reach it as
+ * an id it fails to find among the destination's questions. It appended silently, which put the
+ * question somewhere the author had not asked for and produced no line saying so. Refusing here
+ * is the only place the two cases are still distinguishable.
+ */
 function resolvePlacement(
   snapshot: FormSnapshot,
   operation: { after?: string },
+  destinationPageId: string | undefined,
 ): { afterId?: string } | { reason: string } {
   if (!operation.after) {
     return {};
@@ -372,5 +388,15 @@ function resolvePlacement(
   if (anchor.kind !== 'question') {
     return { reason: `${operation.after} is a ${anchor.kind}, so it cannot be a position` };
   }
+  if (destinationPageId && pageIdOfQuestion(snapshot, anchor.id) !== destinationPageId) {
+    return {
+      reason: `${operation.after} is not on that page, so it cannot be a position there — name a question on the destination page, or leave the position out`,
+    };
+  }
   return { afterId: anchor.id };
+}
+
+/** The page holding a question, by row id. Undefined only if the id is not in the snapshot. */
+function pageIdOfQuestion(snapshot: FormSnapshot, questionId: string): string | undefined {
+  return snapshot.pages.find((page) => page.questions.some((q) => q.id === questionId))?.id;
 }

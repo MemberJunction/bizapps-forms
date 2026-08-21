@@ -43,6 +43,36 @@ describe('panelGeometry', () => {
     expect(at.width).toBeGreaterThan(RAIL.right - RAIL.left - PANEL_GUTTER * 2 - 1);
   });
 
+  /**
+   * The clamp, tested where it is the ONLY thing doing work.
+   *
+   * Every other case here places the pill centred in its pane, so the centring arithmetic already
+   * lands inside the pane and the clamp changes nothing — deleting the clamp outright left all of
+   * them green. An off-centre pill is what separates the two: the panel is far wider than the pill
+   * it hangs off, so centring alone throws it hundreds of pixels outside the pane.
+   */
+  it('pulls the panel back inside the pane when the pill sits near the right edge', () => {
+    const nearRight: AnchorBox = { left: 1500, width: 140, bottom: CANVAS.bottom - 14 };
+
+    const at = panelGeometry(nearRight, CANVAS, VIEW_HEIGHT, false);
+
+    expect(at.left + at.width).toBeLessThanOrEqual(CANVAS.right - PANEL_GUTTER);
+    expect(at.left).toBeGreaterThanOrEqual(CANVAS.left + PANEL_GUTTER);
+    // Centring alone would have put its right edge here, well outside the pane.
+    expect(nearRight.left + nearRight.width / 2 + at.width / 2).toBeGreaterThan(CANVAS.right);
+  });
+
+  it('pulls the panel back inside the pane when the pill sits near the left edge', () => {
+    const nearLeft: AnchorBox = { left: CANVAS.left + 10, width: 140, bottom: CANVAS.bottom - 14 };
+
+    const at = panelGeometry(nearLeft, CANVAS, VIEW_HEIGHT, false);
+
+    expect(at.left).toBeGreaterThanOrEqual(CANVAS.left + PANEL_GUTTER);
+    expect(at.left + at.width).toBeLessThanOrEqual(CANVAS.right - PANEL_GUTTER);
+    // Centring alone would have started the panel left of the pane entirely.
+    expect(nearLeft.left + nearLeft.width / 2 - at.width / 2).toBeLessThan(CANVAS.left);
+  });
+
   it('never reaches above the top of its pane, even with the pill scrolled up to it', () => {
     const scrolledUp: AnchorBox = { left: RAIL.left + 14, width: 340, bottom: RAIL.top + 4 };
 

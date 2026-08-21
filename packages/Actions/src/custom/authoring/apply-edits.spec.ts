@@ -7,6 +7,14 @@ const rows = new Map<string, Array<Record<string, unknown>>>();
 let minted = 0;
 /** Entity whose next read reports failure, for the fail-closed tests. */
 let readFailsFor: string | null = null;
+/**
+ * Row id whose `Delete()` reports failure.
+ *
+ * `BaseEntity.Delete()` returns `false` on a logical failure — an FK the caller did not expect,
+ * a permission denial — rather than throwing. A fake that always succeeds cannot exercise the
+ * only path where a multi-row delete can destroy some rows and keep others.
+ */
+let deleteFailsFor: string | null = null;
 
 const guid = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -32,7 +40,24 @@ class FakeEntity {
     else { table.push(fields); rows.set(this.entityName, table); }
     return true;
   }
+  /**
+   * Set by a caller that wants the delete queued rather than written. Mirrors `BaseEntity`:
+   * `Delete()` on an entity holding a group registers the work and returns without touching
+   * the database, and `Submit()` is what executes it.
+   */
+  TransactionGroup: FakeTransactionGroup | null = null;
   async Delete(): Promise<boolean> {
+    if (this.TransactionGroup) {
+      this.TransactionGroup.queue(this);
+      return true;
+    }
+    return this.deleteNow();
+  }
+  /** The write itself, so the group can run exactly what a groupless caller would have run. */
+  deleteNow(): boolean {
+    if (deleteFailsFor === this.ID) {
+      return false;
+    }
     deleted.push({ entity: this.entityName, id: this.ID });
     const table = rows.get(this.entityName) ?? [];
     rows.set(this.entityName, table.filter((r) => r.ID !== this.ID));
@@ -40,9 +65,33 @@ class FakeEntity {
   }
 }
 
+/**
+ * All-or-nothing, like the provider-side transaction it stands in for.
+ *
+ * `Submit()` first asks every queued row whether its delete would succeed; only if all of them
+ * would does it apply any. That is the property the production code depends on and the reason
+ * the applier uses a group at all.
+ */
+class FakeTransactionGroup {
+  private readonly pending: FakeEntity[] = [];
+  queue(entity: FakeEntity): void { this.pending.push(entity); }
+  async Submit(): Promise<boolean> {
+    if (this.pending.some((e) => deleteFailsFor === e.ID)) {
+      return false;
+    }
+    for (const entity of this.pending) {
+      entity.deleteNow();
+    }
+    return true;
+  }
+}
+
 vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
-  Metadata: class { async GetEntityObject(name: string) { return new FakeEntity(name); } },
+  Metadata: class {
+    async GetEntityObject(name: string) { return new FakeEntity(name); }
+    async CreateTransactionGroup() { return new FakeTransactionGroup(); }
+  },
   RunView: class {
     /** The batched form. Production issues these together; the applier and loader both use it. */
     async RunViews(all: Array<{ EntityName: string; ExtraFilter?: string; ResultType?: string }>) {
@@ -117,7 +166,7 @@ const snapshot = (answerCount = 0) =>
   });
 
 beforeEach(() => {
-  saved.length = 0; deleted.length = 0; rows.clear(); minted = 0; readFailsFor = null;
+  saved.length = 0; deleted.length = 0; rows.clear(); minted = 0; readFailsFor = null; deleteFailsFor = null;
   rows.set('MJ_BizApps_Forms: Form Questions', [
     { ID: Q_NAME, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'Your name', DisplayOrder: 0, IsRequired: false },
     { ID: Q_MAIL, FormID: FORM, PageID: PAGE, QuestionType: 'Email', Prompt: 'Email', DisplayOrder: 1, IsRequired: true },
@@ -242,6 +291,41 @@ describe('applyEdits — moving a question', () => {
     await applyEdits(FORM, plan, user);
     expect(orderOf(Q_MAIL)).toBe(0);
     expect(orderOf(Q_NAME)).toBe(1);
+  });
+});
+
+describe('applyEdits — a delete that fails partway', () => {
+  /**
+   * The property both of these pin: a multi-row delete either happens or does not. There is no
+   * third outcome where some rows are gone and the author is told the edit was refused, because
+   * a delete has no undo and the author has no way to discover what went missing.
+   */
+  it('destroys nothing on the page when one of its questions cannot be deleted', async () => {
+    // Q_MAIL picks up an answer between the snapshot and the write — the exact race the gate
+    // cannot close, because the gate reads a snapshot taken before the model was even called.
+    deleteFailsFor = Q_MAIL;
+    const plan = planEdits(snapshot(0), [{ op: 'deletePage', handle: 'p1' }]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    const questions = rows.get('MJ_BizApps_Forms: Form Questions') ?? [];
+    expect(questions.map((q) => q.ID).sort()).toEqual([Q_NAME, Q_MAIL].sort());
+    expect(rows.get('MJ_BizApps_Forms: Form Pages') ?? []).toHaveLength(1);
+    expect(outcome.applied).toHaveLength(0);
+    expect(outcome.refused.join(' ')).toMatch(/could not be removed|Nothing was removed/i);
+  });
+
+  it('keeps a question usable when the question itself cannot be deleted', async () => {
+    // Options carry no FK from FormResponseAnswer, so they delete happily even when the question
+    // they belong to cannot. Deleting them first leaves a choice question with no choices.
+    deleteFailsFor = Q_MAIL;
+    const plan = planEdits(snapshot(0), [{ op: 'deleteQuestion', handle: 'q2' }]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(rows.get('MJ_BizApps_Forms: Form Question Options') ?? []).toHaveLength(1);
+    expect((rows.get('MJ_BizApps_Forms: Form Questions') ?? []).some((q) => q.ID === Q_MAIL)).toBe(true);
+    expect(outcome.applied).toHaveLength(0);
   });
 });
 
