@@ -38,20 +38,61 @@ const builderTemplate = (): string =>
 const questionPanel = (): string =>
   read('packages', 'Angular', 'src', 'lib', 'builder', 'question-editor.component.html');
 
+/**
+ * The whole bullet containing `marker`, not just the line it sits on.
+ *
+ * THE UNIT OF INSPECTION HAS TO MATCH THE UNIT OF MEANING. A claim in this prompt is a BULLET; it
+ * wraps across as many lines as it needs. Matching per LINE made these assertions load-bearing on
+ * where the line breaks fell, and wrong in both directions: reflowing a correct bullet onto one
+ * line failed the test, and wrapping the stale bullet so its offer landed on a continuation line
+ * passed it — a false pass on the exact defect the test exists to catch. Both were reproduced
+ * before this helper existed.
+ *
+ * A bullet runs from its own `-` to the next `-` at the same-or-shallower indent, or a blank line.
+ */
+function bulletContaining(markdown: string, marker: string): string {
+  const lines = markdown.split('\n');
+  const hits = lines.filter((line) => line.includes(marker)).length;
+  // AN AMBIGUOUS MARKER IS THE SAME BUG ONE LEVEL DOWN. `'question palette'` appears twice — in the
+  // Matrix guidance and in the control list — and `findIndex` silently took the first, so this
+  // inspected the wrong paragraph and a + button planted in the real bullet went unseen. Fixing the
+  // unit of inspection is not enough if the unit of SELECTION can point at the wrong thing; a
+  // marker that is not unique is a bug in the test, so it fails rather than guessing.
+  if (hits !== 1) {
+    throw new Error(
+      `marker ${JSON.stringify(marker)} matches ${hits} lines; it must match exactly one bullet`,
+    );
+  }
+  const start = lines.findIndex((line) => line.includes(marker));
+  const collected = [lines[start]];
+  const indent = (lines[start].match(/^\s*/) ?? [''])[0].length;
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() === '') {
+      break;
+    }
+    const thisIndent = (line.match(/^\s*/) ?? [''])[0].length;
+    if (/^\s*[-*]\s/.test(line) && thisIndent <= indent) {
+      break;
+    }
+    collected.push(line);
+  }
+  return collected.join(' ');
+}
+
 describe('the chat prompt names controls the builder actually has', () => {
   it('does not promise a "+ button" for adding a question, because the palette uses type tiles', () => {
     // The palette's items are buttons carrying a type each — `fb-palette-item` — not a single add
     // button. If that ever becomes a `+`, this assertion is the thing that says so.
     expect(builderTemplate()).toContain('fb-palette-item');
 
-    // The prompt may DISCUSS the phrase — it now warns the model off it explicitly — so what is
-    // banned is telling the author to use one. Both orderings, since prose varies.
-    const claims = prompt()
-      .split('\n')
-      .filter((line) => /\+ ?button/i.test(line) && /question/i.test(line))
-      .filter((line) => !/there is no|not\b.*\+ ?button|add a section|adds a section/i.test(line));
+    // The BULLET that names the palette, whole. The prompt may discuss the phrase — it now warns
+    // the model off it explicitly — so what is banned is that bullet OFFERING one.
+    const palette = bulletContaining(prompt(), '**question palette**');
+    expect(palette, 'the prompt no longer names the question palette').not.toBe('');
 
-    expect(claims, 'the prompt tells the author to use a + button to add a question').toEqual([]);
+    const offersPlusButton =
+      /\+ ?button/i.test(palette) && !/there is no ["']?\+|no "\+ ?button"|add a section/i.test(palette);
+    expect(offersPlusButton, `the palette bullet offers a + button: ${palette}`).toBe(false);
   });
 
   it('does not claim the question panel changes a question type, because it cannot', () => {
@@ -62,20 +103,23 @@ describe('the chat prompt names controls the builder actually has', () => {
     const hasTypeControl = /<select[^>]*QuestionType|QuestionType"\s*\(change\)|\[\(ngModel\)\][^>]*QuestionType/.test(panel);
     expect(panel).toContain('mjf-type-pill');
 
+    const panelBullet = bulletContaining(prompt(), "question's own panel");
+    expect(panelBullet, 'the prompt no longer names the question panel').not.toBe('');
+
     if (hasTypeControl) {
-      // Someone added one. That is a fine thing to add — but the prompt currently tells authors it
-      // is impossible, and that sentence is now wrong.
+      // Someone added one. That is a fine thing to add — but the prompt tells authors it is
+      // impossible, and that sentence is now wrong.
       expect(
-        prompt(),
+        panelBullet,
         'the question panel can now change a type, so the prompt must stop saying it cannot',
-      ).not.toMatch(/cannot change|never its type|not its type/i);
+      ).not.toMatch(/cannot change|NOT its type|cannot be changed/i);
       return;
     }
 
-    // No control: the prompt must say so, because "the panel edits its type" is what it used to say.
+    // No control: the bullet must say so, because "the panel edits its type" is what it used to say.
     expect(
-      prompt(),
-      'the prompt must tell the model a question type cannot be changed in the builder',
+      panelBullet,
+      'the panel bullet must say a question type cannot be changed there',
     ).toMatch(/NOT its type|cannot change it|cannot be changed/i);
   });
 
@@ -87,17 +131,17 @@ describe('the chat prompt names controls the builder actually has', () => {
     // five layout tokens are a `setLayout`, and the Design tab alone owns only the logo and the
     // background image. So the guard was holding the stale half of a contradiction in place, which
     // is worse than not testing it: the next person to notice has to argue with a green test.
-    const designTabClaim = prompt()
-      .split('\n')
-      .filter((line) => /\*\*Design tab\*\*/.test(line))
-      .join(' ');
-    expect(designTabClaim, 'the prompt no longer names the Design tab at all').not.toBe('');
+    const designTab = bulletContaining(prompt(), '**Design tab**');
+    expect(designTab, 'the prompt no longer names the Design tab at all').not.toBe('');
 
-    // Every capability the chat has must be absent from what that line sends people away for.
+    // The bullet may HAND BACK a capability — saying "its colours are yours" is the correction, not
+    // the defect — so what is checked is the part that sends somebody away: everything before the
+    // sentence that returns them. Split on the hand-back, and inspect only the offer.
+    const offer = designTab.split(/which are the only|are all\s+yours|are yours/i)[0];
     for (const owned of ['colour', 'font', 'size', 'alignment', 'radius']) {
       expect(
-        designTabClaim.toLowerCase(),
-        `the Design tab line offers "${owned}", which the assistant can set itself`,
+        offer.toLowerCase(),
+        `the Design tab bullet offers "${owned}", which the assistant can set itself: ${offer}`,
       ).not.toContain(owned);
     }
   });
