@@ -40,6 +40,15 @@ export interface EditOutcome {
   applied: string[];
   /** One line per operation that did not, carrying the plan's own wording. */
   refused: string[];
+  /**
+   * The `FormStyle` row a `setLayout` in this turn wrote to, when one landed.
+   *
+   * `setLayout` merges into the same `CSSVariables` field a restyle replaces, on the same row —
+   * so it is exactly as undoable. The caller reported only the FORM it changed, and the undo path
+   * keys on the STYLE, so "make the questions smaller" was silently the one theme change with no
+   * way back. Absent when the turn changed no layout, which is the common case.
+   */
+  styleId?: string;
 }
 
 /**
@@ -63,6 +72,11 @@ export async function applyEdits(
       const line = await applyOne(formId, edit, contextUser);
       if (line) {
         outcome.applied.push(line);
+        if (edit.op === 'setLayout') {
+          // Read once, and only when a layout change actually landed — the id is the applier's to
+          // report because it is the only layer that knows which row it wrote.
+          outcome.styleId ??= await styleIdOf(formId, contextUser);
+        }
       }
     } catch (error) {
       LogError(`[Forms edit] ${edit.op} on ${edit.id} failed: ${errorText(error)}`);
@@ -360,6 +374,19 @@ async function deleteInOneGo(
     LogError(`[Forms edits] ${describe} could not be removed for ${contextUser.ID}: ${detail}`);
     throw new Error(`${describe} could not be removed (${detail}). Nothing was removed.`);
   }
+}
+
+/** The style row a form points at, or undefined when it has none. */
+async function styleIdOf(formId: string, contextUser: UserInfo): Promise<string | undefined> {
+  const form = await new Metadata().GetEntityObject<mjBizAppsFormsFormEntity>(
+    ENTITY.form,
+    contextUser,
+  );
+  if (!(await form.Load(formId))) {
+    LogError(`[Forms edits] Could not re-read form ${formId} to name the style it changed`);
+    return undefined;
+  }
+  return form.StyleID ?? undefined;
 }
 
 /** A form's pages, in display order. */

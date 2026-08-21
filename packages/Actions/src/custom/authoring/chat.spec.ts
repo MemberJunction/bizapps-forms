@@ -754,6 +754,44 @@ describe('an edit turn', () => {
     rows.set('MJ_BizApps_Forms: Form Response Answers', []);
   });
 
+  it('names the style row when the edit changed layout, so the change can be undone', async () => {
+    // `setLayout` merges into the same `CSSVariables` field on the same row a restyle replaces, so
+    // it is exactly as undoable — but the turn reported only `ChangedFormID`, and the undo path
+    // keys on `StyleID`. "Make the questions smaller" was the one theme change with no way back.
+    const STYLE_ROW = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: STYLE_ROW }]);
+    rows.set(STYLE, [
+      { ID: STYLE_ROW, Name: 'theme', CSSVariables: JSON.stringify({ '--mjf-accent': '#1b7fa8' }) },
+    ]);
+    assistant({
+      reply: 'Made the questions smaller.',
+      action: 'edit',
+      operations: [{ op: 'setLayout', tokens: { '--mjf-question-size': '0.875rem' } }],
+    });
+
+    const { out } = await turn('make the questions smaller', { FormID: FORM_ID });
+
+    expect(out('ChangedFormID')).toBe(FORM_ID);
+    expect(out('StyleID')).toBe(STYLE_ROW);
+    // And the palette is untouched, which is the whole reason setLayout is its own operation.
+    const written = JSON.parse(String(saved.filter((r) => r.entity === STYLE).at(-1)?.fields.CSSVariables));
+    expect(written['--mjf-question-size']).toBe('0.875rem');
+    expect(written['--mjf-accent']).toBe('#1b7fa8');
+  });
+
+  it('does not name a style row when the edit changed no layout', async () => {
+    assistant({
+      reply: 'Renamed the page.',
+      action: 'edit',
+      operations: [{ op: 'updatePage', handle: 'p1', title: 'About you' }],
+    });
+
+    const { out } = await turn('rename the page', { FormID: FORM_ID });
+
+    expect(out('ChangedFormID')).toBe(FORM_ID);
+    expect(out('StyleID')).toBeUndefined();
+  });
+
   it('adds the question the author asked for', async () => {
     assistant({
       reply: 'Added a rating question.',

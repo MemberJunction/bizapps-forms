@@ -422,6 +422,12 @@ async function editForm(
   const outcome = await applyEdits(formId, plan, contextUser);
 
   setOutputParam(params, 'ChangedFormID', formId);
+  if (outcome.styleId) {
+    // A `setLayout` writes the same `CSSVariables` field on the same row a restyle replaces, so it
+    // is exactly as undoable — and the client's undo keys on the STYLE, not the form. Without this
+    // "make the questions smaller" was the one theme change that offered no way back.
+    setOutputParam(params, 'StyleID', outcome.styleId);
+  }
   const parts = [response.reply];
   if (outcome.applied.length > 0) {
     parts.push(outcome.applied.map((line) => `- ${line}`).join('\n'));

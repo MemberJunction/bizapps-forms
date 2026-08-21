@@ -329,6 +329,32 @@ describe('applyEdits — relabelling a choice', () => {
   });
 });
 
+describe('applyEdits — naming the style row a layout change touched', () => {
+  it('reports the style id when setLayout landed, so the change can be undone', async () => {
+    // `setLayout` writes `FormStyle.CSSVariables` — the same row and the same field a restyle
+    // writes — so it is exactly as undoable. The turn only reported `ChangedFormID`, so the undo
+    // path, which keys on the style row, never saw it: "make the questions smaller" was silently
+    // the one theme change with no way back.
+    const plan = planEdits(snapshot(), [
+      { op: 'setLayout', tokens: { '--mjf-question-size': '0.9375rem' } },
+    ]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied).toHaveLength(1);
+    expect(outcome.styleId).toBe(STYLE);
+  });
+
+  it('reports no style id when the turn changed no layout', async () => {
+    const plan = planEdits(snapshot(), [{ op: 'updatePage', handle: 'p1', title: 'About you' }]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    expect(outcome.applied).toHaveLength(1);
+    expect(outcome.styleId).toBeUndefined();
+  });
+});
+
 describe('applyEdits — a delete that fails partway', () => {
   /**
    * The property both of these pin: a multi-row delete either happens or does not. There is no
