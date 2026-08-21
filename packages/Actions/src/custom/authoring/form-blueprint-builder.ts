@@ -701,13 +701,13 @@ export function stubClaimer<T extends { ID: string }>(
     if (keyed) {
       return take(keyed);
     }
-    if (unclaimed.length > 0) {
-      return take(unclaimed[0]);
-    }
-    // Nothing unreserved is left. A stub still held for a key nobody ended up claiming is better
-    // spent than wasted — the alternative is creating a duplicate question beside it.
-    const stranded = stubs.find((stub) => byId.has(stub.ID));
-    return stranded ? take(stranded) : undefined;
+    // Only what no key has spoken for. When this is empty, everything still live is reserved for a
+    // keyed claim that has not happened yet — reservations are built from the detail's own key
+    // list, so each one HAS a pending claimant. Spending one here to avoid "wasting" it guarantees
+    // that claimant finds nothing, which is the failure the reservation exists to prevent. The
+    // caller creates a new question instead, which is the documented "more detailed questions than
+    // stubs" case.
+    return unclaimed.length > 0 ? take(unclaimed[0]) : undefined;
   };
 }
 

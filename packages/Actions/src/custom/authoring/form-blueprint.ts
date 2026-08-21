@@ -481,44 +481,41 @@ export function declaredKeyPositions(blueprint: FormBlueprint): Map<string, KeyP
 /**
  * A question on a detail page may only be gated by an answer given before it.
  *
- * WHY THIS EXISTS SEPARATELY from `checkQuestionRules`. The form-level check needs the whole
- * blueprint; a detail page is one page in isolation. What it can still establish is the only thing
- * that matters: a referenced key is either on an EARLIER page (from the outline's positions) or
- * earlier on THIS page (from the detail's own order). Anything else names an answer the respondent
- * has not given yet, so the question can never be shown — and nothing logs it, which is why the
- * staged route could hide a question forever while reporting success.
+ * ORDER COMES FROM THE OUTLINE, NEVER FROM THE DETAIL ARRAY. `refineQuestion` does not touch
+ * `DisplayOrder`, and stubs are loaded `OrderBy: 'DisplayOrder'` — so what a respondent actually
+ * sees is the order the OUTLINE established, whatever order the model happened to return the
+ * detail in. An earlier version of this check used the detail array index and was wrong in both
+ * directions on a reordered page: it refused legal rules (burning every retry, then degrading the
+ * page to bare stubs) and accepted the illegal ones it exists to catch.
  *
- * Positions come from the outline, and the detail pass refines questions in place rather than
- * moving them, so a key's PAGE is stable even though its index on the page may not be.
+ * WHAT IT DELIBERATELY DOES NOT CHECK. A question with no key, or one whose key the outline never
+ * declared, has no position this function can establish — so its rule is left alone rather than
+ * guessed at. Skipping is the safe direction: a missed refusal costs a hidden question, while a
+ * wrong refusal costs the author the whole page. Keys are how a question becomes referenceable in
+ * the first place, so a rule worth checking almost always sits on a keyed question.
  */
 function checkDetailQuestionOrder(
   page: BlueprintPage,
   ordering: PageDetailOrdering,
   ctx: z.RefinementCtx,
 ): void {
-  const indexOnThisPage = new Map<string, number>();
-  page.questions.forEach((question, index) => {
-    if (question.key && !indexOnThisPage.has(question.key)) {
-      indexOnThisPage.set(question.key, index);
-    }
-  });
-
   page.questions.forEach((question, questionIndex) => {
+    const mine = question.key ? ordering.positions.get(question.key) : undefined;
+    if (!mine) {
+      return;
+    }
     for (const condition of conditionsOf(question.conditionalRule)) {
-      const key = condition.questionKey;
-      const here = indexOnThisPage.get(key);
-      const earlierHere = here !== undefined && here < questionIndex;
-      const earlierPage =
-        here === undefined && (ordering.positions.get(key)?.pageIndex ?? Infinity) < ordering.pageIndex;
-      if (earlierHere || earlierPage) {
+      const target = ordering.positions.get(condition.questionKey);
+      // An unknown key is the `knownKeys` check's business, not this one.
+      if (!target || target.ordinal < mine.ordinal) {
         continue;
       }
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['questions', questionIndex, 'conditionalRule'],
         message:
-          `Question "${question.prompt}" is shown based on "${key}", which is not asked earlier ` +
-          'in the form. A rule may only reference an earlier question.',
+          `Question "${question.prompt}" is shown based on "${condition.questionKey}", which is ` +
+          'not asked earlier in the form. A rule may only reference an earlier question.',
       });
     }
   });

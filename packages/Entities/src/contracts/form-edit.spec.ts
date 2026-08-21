@@ -450,6 +450,20 @@ describe('planEdits — a position removed earlier in the same turn', () => {
     expect(plan.resolved.map((r) => r.op)).toEqual(['moveQuestion', 'deletePage', 'addQuestion']);
   });
 
+  it('still dooms a question whose "move" kept it on the page being deleted', () => {
+    // `toPage` naming the page it is already on is a supported no-op move, and it recorded the
+    // question as "moved" — which then exempted it from the delete that really does take it. The
+    // map has to mean "moved OFF this page", not "a move mentioned it".
+    const plan = planEdits(spread(), [
+      { op: 'moveQuestion', handle: 'q1', toPage: 'p1' },
+      { op: 'deletePage', handle: 'p1' },
+      { op: 'addQuestion', handle: 'p2', type: 'Rating', prompt: 'How was it?', after: 'q1' },
+    ]);
+
+    expect(plan.refused).toHaveLength(1);
+    expect(plan.refused[0].reason).toMatch(/being removed by this same turn/i);
+  });
+
   it('leaves an untouched position alone', () => {
     const plan = planEdits(snapshot(0), [
       { op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'How was it?', after: 'q1' },

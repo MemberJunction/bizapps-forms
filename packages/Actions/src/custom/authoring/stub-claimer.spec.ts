@@ -46,6 +46,20 @@ describe('stubClaimer', () => {
     expect(claim(undefined)?.ID).toBe('B');
   });
 
+  it('never spends a stub that a later KEYED question is still going to name', () => {
+    // The regression the reservation itself introduced. Two stubs, one reserved for key "b", and
+    // three detailed questions with the keyed one LAST. After the two unkeyed claims `unclaimed`
+    // is empty — and everything still live is, by construction, reserved for a claim that has not
+    // happened yet. Spending one there guarantees the keyed question loses its row, which is the
+    // exact failure the reservation exists to prevent, one branch further down.
+    const claim = stubClaimer(stubs('A', 'B'), new Map([['b', 'B']]), [undefined, undefined, 'b']);
+
+    expect(claim(undefined)?.ID).toBe('A');
+    // No unreserved stub left: this question gets a NEW row rather than B's.
+    expect(claim(undefined)).toBeUndefined();
+    expect(claim('b')?.ID).toBe('B');
+  });
+
   it('returns undefined once every stub is claimed', () => {
     const claim = stubClaimer(stubs('A'), new Map(), [undefined, undefined]);
 

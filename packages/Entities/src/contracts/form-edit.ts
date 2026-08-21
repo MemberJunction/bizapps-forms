@@ -374,7 +374,10 @@ export function planEdits(
       // survives, and dooming it refused a legitimate position ("merge page 1 into page 2, then
       // drop page 1") with a reason that was simply untrue.
       for (const question of target.questions) {
-        if (!movedTo.has(question.id)) {
+        // "Moved" only counts when it moved OFF THIS PAGE. `toPage` naming the page a question is
+        // already on is a supported no-op move, and treating that as an escape exempted a question
+        // from the delete that does take it.
+        if (movedTo.get(question.id) === target.id || !movedTo.has(question.id)) {
           doomed.add(question.id);
         }
       }
