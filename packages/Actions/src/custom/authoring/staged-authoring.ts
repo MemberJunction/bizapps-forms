@@ -574,11 +574,19 @@ async function runThemeStage(
   total: number,
   step: number,
 ): Promise<string[]> {
-  const publishTheme = (label: string, styleId?: string): void =>
+  /**
+   * `step` means COMPLETED units of work, so the final one is only true when the stage is over.
+   *
+   * Announcing "Painting the theme" at the final step put the bar at 100% and left it there for
+   * the length of a model call — up to `STAGE_TIMEOUT_MS` of a finished-looking bar with work
+   * still running. In-progress labels report the work done BEFORE this stage; terminal ones report
+   * this stage as done.
+   */
+  const publishTheme = (label: string, styleId?: string, done = true): void =>
     publish(options.channel, {
       formId: built.formId,
       stage: 'theme',
-      step,
+      step: done ? step : step - 1,
       total,
       label,
       changed: styleId ? { styleId } : undefined,
@@ -603,7 +611,7 @@ async function runThemeStage(
     return [];
   }
 
-  publishTheme('Painting the theme');
+  publishTheme('Painting the theme', undefined, false);
   try {
     const outcome = validateTheme(
       await requestTheme(brief, model, outline, contextUser),

@@ -90,6 +90,8 @@ const FORM = guid(1);
 const PAGE = guid(2);
 const STUB_A = guid(10);
 const STUB_B = guid(11);
+const OTHER_PAGE = guid(20);
+const OTHER_PAGE_Q = guid(21);
 const QUESTION = 'MJ_BizApps_Forms: Form Questions';
 const user = new UserInfo();
 
@@ -99,6 +101,10 @@ beforeEach(() => {
   rows.set(QUESTION, [
     { ID: STUB_A, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'A', DisplayOrder: 0 },
     { ID: STUB_B, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'B', DisplayOrder: 1 },
+    // A SECOND PAGE, present in every case. With a single-page fixture the `PageID` filter is
+    // untestable: a query that lost it would match the same rows and every assertion would still
+    // pass. These rows exist to be left alone.
+    { ID: OTHER_PAGE_Q, FormID: FORM, PageID: OTHER_PAGE, QuestionType: 'ShortText', Prompt: 'elsewhere', DisplayOrder: 0 },
   ]);
   rows.set('MJ_BizApps_Forms: Form Question Options', []);
 });
@@ -127,7 +133,8 @@ describe('applyPageDetail — every question lands on its own row', () => {
     expect(result.questionsAdded).toBe(1);
     expect(result.questionsUpdated).toBe(2);
 
-    const orders = (rows.get(QUESTION) ?? []).map((q) => Number(q.DisplayOrder)).sort((a, b) => a - b);
+    const onPage = (rows.get(QUESTION) ?? []).filter((q) => q.PageID === PAGE);
+    const orders = onPage.map((q) => Number(q.DisplayOrder)).sort((a, b) => a - b);
     expect(orders).toEqual([0, 1, 2]);
     expect(new Set(orders).size).toBe(orders.length);
 
@@ -178,7 +185,8 @@ describe('applyPageDetail — every question lands on its own row', () => {
       user,
     );
 
-    const orders = (rows.get(QUESTION) ?? []).map((q) => Number(q.DisplayOrder)).sort((a, b) => a - b);
+    const onPage = (rows.get(QUESTION) ?? []).filter((q) => q.PageID === PAGE);
+    const orders = onPage.map((q) => Number(q.DisplayOrder)).sort((a, b) => a - b);
     expect(new Set(orders).size).toBe(3);
     expect(Math.max(...orders)).toBe(10);
   });
@@ -197,6 +205,65 @@ describe('applyPageDetail — every question lands on its own row', () => {
 
     expect(result.questionsAdded).toBe(0);
     expect(result.questionsUpdated).toBe(2);
-    expect(rows.get(QUESTION)).toHaveLength(2);
+    expect((rows.get(QUESTION) ?? []).filter((q) => q.PageID === PAGE)).toHaveLength(2);
+  });
+});
+
+describe('applyPageDetail — scope and ordering', () => {
+  it('touches only the page it was given', async () => {
+    await applyPageDetail(
+      FORM,
+      PAGE,
+      detail([{ type: 'ShortText', prompt: 'first' }, { type: 'ShortText', prompt: 'second' }]),
+      new Map(),
+      user,
+    );
+
+    const other = (rows.get(QUESTION) ?? []).find((q) => q.ID === OTHER_PAGE_Q);
+    expect(other?.Prompt).toBe('elsewhere');
+    expect((rows.get(QUESTION) ?? []).filter((q) => q.PageID === PAGE)).toHaveLength(2);
+  });
+
+  it('claims stubs in DisplayOrder, not in the order the rows happen to be stored', async () => {
+    // `loadPageQuestions` sorts by DisplayOrder, and the whole ordering contract rests on that.
+    // Stored back-to-front here, so a query that dropped its OrderBy would refine the wrong rows.
+    rows.set(QUESTION, [
+      { ID: STUB_B, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'B', DisplayOrder: 1 },
+      { ID: STUB_A, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'A', DisplayOrder: 0 },
+    ]);
+
+    await applyPageDetail(
+      FORM,
+      PAGE,
+      detail([{ type: 'ShortText', prompt: 'first' }, { type: 'ShortText', prompt: 'second' }]),
+      new Map(),
+      user,
+    );
+
+    expect((rows.get(QUESTION) ?? []).find((q) => q.ID === STUB_A)?.Prompt).toBe('first');
+    expect((rows.get(QUESTION) ?? []).find((q) => q.ID === STUB_B)?.Prompt).toBe('second');
+  });
+
+  it('numbers SEVERAL created questions consecutively, never twice on one number', async () => {
+    // One create can be right by accident. Two cannot: a `nextOrder` that does not advance puts
+    // both new rows on the same number, which is the tie nothing here renumbers away.
+    await applyPageDetail(
+      FORM,
+      PAGE,
+      detail([
+        { type: 'ShortText', prompt: 'one' },
+        { type: 'ShortText', prompt: 'two' },
+        { type: 'ShortText', prompt: 'three' },
+        { type: 'ShortText', prompt: 'four' },
+      ]),
+      new Map(),
+      user,
+    );
+
+    const orders = (rows.get(QUESTION) ?? [])
+      .filter((q) => q.PageID === PAGE)
+      .map((q) => Number(q.DisplayOrder))
+      .sort((a, b) => a - b);
+    expect(orders).toEqual([0, 1, 2, 3]);
   });
 });

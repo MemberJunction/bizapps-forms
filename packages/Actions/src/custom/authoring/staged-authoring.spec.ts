@@ -321,6 +321,29 @@ describe('runStagedAuthoring', () => {
   });
 });
 
+describe('runStagedAuthoring — the progress bar does not finish early', () => {
+  it('does not report the final step while the theme stage is still working', async () => {
+    // `step` means COMPLETED units of work. Announcing "Painting the theme" at the final step put
+    // the bar at 100% and left it there for the length of a model call — a finished-looking bar
+    // with work still running, for up to STAGE_TIMEOUT_MS.
+    const events = recordingPublisher();
+    const model = stubModel({
+      outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_LOOK)),
+      theme: vi.fn(async () => JSON.stringify({ cssVariables: { '--mjf-accent': '#0055aa' } })),
+    } as Partial<StagedAuthoringModel>);
+
+    await runStagedAuthoring('a warm RSVP', model, user, options);
+
+    const painting = events.find((e) => e.label === 'Painting the theme');
+    expect(painting).toBeDefined();
+    expect(painting!.step).toBeLessThan(painting!.total);
+
+    // And the stage still reports itself finished when it is.
+    const finished = events.filter((e) => e.stage === 'theme').at(-1);
+    expect(finished!.step).toBe(finished!.total);
+  });
+});
+
 describe('runStagedAuthoring — degradation', () => {
   beforeEach(() => {
     saved.length = 0;
