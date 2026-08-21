@@ -16,6 +16,12 @@
  */
 import { z } from 'zod';
 import {
+  MAX_BLUEPRINT_ENDINGS,
+  MAX_BLUEPRINT_OPTIONS,
+  MAX_BLUEPRINT_PAGES,
+  MAX_BLUEPRINT_QUESTIONS_PER_PAGE,
+} from './limits';
+import {
   conditionalConditionSchema,
   conditionalGroupSchema,
   FORM_QUESTION_TYPES,
@@ -158,7 +164,7 @@ export const blueprintQuestionSchema = z.object({
   helpText: z.string().optional(),
   isRequired: z.boolean().optional(),
   /** Choice-style only; ignored (and warned) for other types. */
-  options: z.array(blueprintOptionSchema).optional(),
+  options: z.array(blueprintOptionSchema).max(MAX_BLUEPRINT_OPTIONS).optional(),
   /** Per-type open settings, e.g. `{ "min": 0, "max": 10 }`. */
   settings: z.record(z.unknown()).optional(),
   /**
@@ -176,7 +182,7 @@ export const blueprintQuestionSchema = z.object({
 export const blueprintPageSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
-  questions: z.array(blueprintQuestionSchema).min(1),
+  questions: z.array(blueprintQuestionSchema).min(1).max(MAX_BLUEPRINT_QUESTIONS_PER_PAGE),
   /** Page-level show/hide logic. May only reference questions on EARLIER pages. */
   conditionalRule: blueprintConditionalRuleSchema.optional(),
 });
@@ -221,7 +227,7 @@ export const blueprintScreensSchema = z.object({
    * Optional rather than defaulted to `[]`, so the inferred type has no input/output split and a
    * hand-written blueprint (the starter templates) does not have to spell out an empty list.
    */
-  endings: z.array(blueprintEndingScreenSchema).optional(),
+  endings: z.array(blueprintEndingScreenSchema).max(MAX_BLUEPRINT_ENDINGS).optional(),
 });
 
 /**
@@ -250,7 +256,7 @@ export const formBlueprintObjectSchema = z.object({
   description: z.string().optional(),
   renderMode: formRenderModeSchema.optional(),
   confirmationMessage: z.string().optional(),
-  pages: z.array(blueprintPageSchema).min(1),
+  pages: z.array(blueprintPageSchema).min(1).max(MAX_BLUEPRINT_PAGES),
   screens: blueprintScreensSchema.optional(),
   theme: blueprintThemeSchema.optional(),
 });

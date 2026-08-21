@@ -91,3 +91,25 @@ export const COLUMN_LIMITS = {
   /** `FormStyle.Name NVARCHAR(255)` — also the column carrying `UQ_FormStyle_Name`. */
   styleName: 255,
 } as const;
+
+/**
+ * The most pages one generated form may have.
+ *
+ * A COST cap, like {@link MAX_GENERATED_IMAGES}, and the one that was missing. The blueprint
+ * schema bounded no array at all, and the staged pipeline runs one detail stage per page — each
+ * able to burn {@link MAX_DESIGNER_ATTEMPTS} model calls. A model that answered a vague brief with
+ * a 400-page outline would have queued 1,200 prompt runs with no ceiling and no way to stop it;
+ * `PAGE_DETAIL_CONCURRENCY` bounds how many run at once, not how many run.
+ *
+ * Twenty-five is far past any form a person fills in willingly, so it only ever catches a runaway.
+ */
+export const MAX_BLUEPRINT_PAGES = 25;
+
+/** The most questions one page may carry, for the same reason. */
+export const MAX_BLUEPRINT_QUESTIONS_PER_PAGE = 50;
+
+/** The most choices one question may offer. Beyond this a list stops being answerable anyway. */
+export const MAX_BLUEPRINT_OPTIONS = 50;
+
+/** The most ending screens one form may have. Each is a conditional branch a respondent can reach. */
+export const MAX_BLUEPRINT_ENDINGS = 10;
