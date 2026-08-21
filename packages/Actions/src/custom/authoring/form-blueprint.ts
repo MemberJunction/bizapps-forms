@@ -452,13 +452,20 @@ export function parseFormBlueprint(input: string | object): FormBlueprint {
  */
 
 /**
- * Where every key the outline declared sits, for the ordering check.
+ * Where this page sits, and where every key the outline declared sits.
  *
- * Positions only. This carried a `pageIndex` while the check compared pages; judging on ordinals
- * made it dead, and a required field nobody reads is a lie about what the function needs.
+ * BOTH fields are load-bearing, and the reason is worth stating because it was got wrong twice.
+ * `positions` gives the precise ordinal comparison for a question that HAS a key. `pageIndex` is
+ * what makes the check work for one that does not — and that is the common case, because the
+ * outline prompt hands out keys only to questions a rule REFERENCES, never to the questions doing
+ * the referencing. A version of this judged keyed questions only, which made the whole check inert
+ * on the normal path; `pageIndex` was then deleted as unused, when it was unread only because of
+ * that. Unused is not the same as unneeded.
  */
 export interface PageDetailOrdering {
   positions: ReadonlyMap<string, KeyPosition>;
+  /** This page's index in the outline. */
+  pageIndex: number;
 }
 
 /**
@@ -491,11 +498,17 @@ export function declaredKeyPositions(blueprint: FormBlueprint): Map<string, KeyP
  * directions on a reordered page: it refused legal rules (burning every retry, then degrading the
  * page to bare stubs) and accepted the illegal ones it exists to catch.
  *
- * WHAT IT DELIBERATELY DOES NOT CHECK. A question with no key, or one whose key the outline never
- * declared, has no position this function can establish — so its rule is left alone rather than
- * guessed at. Skipping is the safe direction: a missed refusal costs a hidden question, while a
- * wrong refusal costs the author the whole page. Keys are how a question becomes referenceable in
- * the first place, so a rule worth checking almost always sits on a keyed question.
+ * TWO TIERS, because most questions carrying a rule have no key. The outline prompt gives a key
+ * ONLY to questions something references, so the question doing the referencing is normally
+ * keyless and has no ordinal here:
+ *
+ *   - KEYED: compare ordinals. Exact, and catches a same-page reference to a later sibling.
+ *   - KEYLESS: compare PAGES. Its ordinal is unknown but its page is not — it is the page being
+ *     detailed — so a reference to a LATER page is provably unreachable and refused.
+ *
+ * WHAT IS STILL NOT CHECKED, deliberately: a keyless question referencing a key on its OWN page.
+ * That may be legal or not and nothing here can tell, so refusing would cost the author the whole
+ * page on a guess. The form-level validator covers it on the single-shot route.
  */
 function checkDetailQuestionOrder(
   page: BlueprintPage,
@@ -504,13 +517,16 @@ function checkDetailQuestionOrder(
 ): void {
   page.questions.forEach((question, questionIndex) => {
     const mine = question.key ? ordering.positions.get(question.key) : undefined;
-    if (!mine) {
-      return;
-    }
     for (const condition of conditionsOf(question.conditionalRule)) {
       const target = ordering.positions.get(condition.questionKey);
       // An unknown key is the `knownKeys` check's business, not this one.
-      if (!target || target.ordinal < mine.ordinal) {
+      if (!target) {
+        continue;
+      }
+      const reachable = mine
+        ? target.ordinal < mine.ordinal
+        : target.pageIndex <= ordering.pageIndex;
+      if (reachable) {
         continue;
       }
       ctx.addIssue({

@@ -600,7 +600,11 @@ export interface PageDetailResult {
  * the model rewords a prompt, which it is explicitly allowed to do. The two ways position can
  * disagree are both handled without losing anything:
  *
- *   - MORE detailed questions than stubs: the extras are appended as new questions. A model that
+ *   - MORE detailed questions than stubs: the surplus is appended as new questions, past every
+ *     stub's `DisplayOrder`. Which of the detailed questions gets created is not necessarily the
+ *     last one — it is whichever UNKEYED question first finds no unreserved stub left, because
+ *     keyed questions hold their rows. The count is what the invariant is about: a create happens
+ *     exactly as often as the detail exceeds the stubs. A model that
  *     decided a page needed one more question has made an authoring judgement, and discarding it
  *     silently would be worse than keeping it.
  *   - FEWER: the un-detailed stubs are left exactly as the outline made them. A stub is already a
@@ -630,12 +634,20 @@ export async function applyPageDetail(
     optionImages: [],
   };
   const claim = stubClaimer(stubs, idByKey, detail.questions.map((q) => q.key));
+  // APPENDED, past every stub. `createQuestion` stamps the `DisplayOrder` it is handed, and stubs
+  // already hold 0..n-1 — so passing the DETAIL index put a new row on a number a stub still has.
+  // That was unreachable while a create only happened after every stub was spent; it became
+  // reachable when claiming started reserving stubs for keyed questions, since a create can now
+  // occur while reserved stubs are still live. Nothing renumbers this page afterwards, and every
+  // reader sorts on this column alone, so a tie is decided by the query plan and then frozen into
+  // the published snapshot — the same intermittent reordering `apply-edits.ts` documents.
+  let nextOrder = stubs.length;
   for (let i = 0; i < detail.questions.length; i++) {
     const detailed = detail.questions[i];
     const stub = claim(detailed.key);
     const question = stub
       ? await refineQuestion(stub, detailed, idByKey, formId)
-      : await createQuestion(md, formId, pageId, detailed, i, idByKey, contextUser);
+      : await createQuestion(md, formId, pageId, detailed, nextOrder++, idByKey, contextUser);
     if (stub) {
       result.questionsUpdated++;
     } else {
@@ -686,7 +698,6 @@ export function stubClaimer<T extends { ID: string }>(
 
   const take = (stub: T): T => {
     byId.delete(stub.ID);
-    reserved.delete(stub.ID);
     const at = unclaimed.indexOf(stub);
     if (at !== -1) {
       unclaimed.splice(at, 1);

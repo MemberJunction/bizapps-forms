@@ -71,7 +71,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
       ],
     };
     expect(() =>
-      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()) }),
+      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()), pageIndex: 1 }),
     ).toThrow(/earlier/i);
   });
 
@@ -119,8 +119,49 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     };
 
     expect(() =>
-      parsePageDetail(reordered, keys, { positions: declaredKeyPositions(outline()) }),
+      parsePageDetail(reordered, keys, { positions: declaredKeyPositions(outline()), pageIndex: 1 }),
     ).toThrow(/earlier/i);
+  });
+
+  it('REFUSES a KEYLESS question gated on a later page — the normal shape', () => {
+    // The case that matters most, and the one an earlier version of this check skipped entirely.
+    // The outline prompt gives a key ONLY to questions a rule REFERENCES, so the question CARRYING
+    // a rule is normally keyless. Judging only keyed questions made the check inert on the common
+    // path: a page-0 question gated on a page-2 answer persisted and was hidden forever.
+    const page = {
+      questions: [{ type: 'YesNo', prompt: 'Unkeyed?', conditionalRule: gatedOn('last') }],
+    };
+
+    expect(() =>
+      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()), pageIndex: 0 }),
+    ).toThrow(/earlier/i);
+  });
+
+  it('accepts a KEYLESS question gated on an EARLIER page', () => {
+    const page = {
+      questions: [{ type: 'YesNo', prompt: 'Unkeyed?', conditionalRule: gatedOn('first') }],
+    };
+
+    const parsed = parsePageDetail(page, keys, {
+      positions: declaredKeyPositions(outline()),
+      pageIndex: 1,
+    });
+    expect(parsed.questions).toHaveLength(1);
+  });
+
+  it('leaves a KEYLESS question gated on its OWN page alone, rather than guessing', () => {
+    // Its position on the page is unknowable here — it has no ordinal — so the reference may be
+    // legal or not. Refusing would cost the author the whole page on a guess; the form-level
+    // validator still covers it on the single-shot route.
+    const page = {
+      questions: [{ type: 'YesNo', prompt: 'Unkeyed?', conditionalRule: gatedOn('middle') }],
+    };
+
+    const parsed = parsePageDetail(page, keys, {
+      positions: declaredKeyPositions(outline()),
+      pageIndex: 1,
+    });
+    expect(parsed.questions).toHaveLength(1);
   });
 
   it('REFUSES a question gated on its own answer', () => {
@@ -131,7 +172,7 @@ describe('parsePageDetail — question rules are ordering-checked', () => {
     };
 
     expect(() =>
-      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()) }),
+      parsePageDetail(page, keys, { positions: declaredKeyPositions(outline()), pageIndex: 1 }),
     ).toThrow(/earlier/i);
   });
 
