@@ -475,6 +475,7 @@
           <mjf-form-chat
             [formId]="record.ID"
             (formCreated)="onChatCreatedForm($event)"
+            (formOpened)="onChatCreatedForm($event)"
             (formRestyled)="onChatRestyled()"
             (formChanged)="onChatChangedForm()"
           />
@@ -510,6 +511,7 @@
         [definition]="designPreviewDefinition"
         (styleApplied)="onStyleApplied()"
         (formChanged)="onChatChangedForm()"
+        (formOpened)="onChatCreatedForm($event)"
       ></mjf-design-panel>
     </div>
   } @else if (activeTab === 'distribute') {

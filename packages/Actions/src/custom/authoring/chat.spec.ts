@@ -82,6 +82,8 @@ function matchesFilter(row: Record<string, unknown>, filter: string | undefined)
   return conj.every((clause) => {
     const eq = /^(\w+)='([^']*)'$/.exec(clause);
     if (eq) return String(row[eq[1]] ?? '') === eq[2];
+    const notEq = /^(\w+)\s*<>\s*'([^']*)'$/.exec(clause);
+    if (notEq) return String(row[notEq[1]] ?? '') !== notEq[2];
     const inList = /^(\w+) IN \(([^)]*)\)$/.exec(clause);
     if (inList) {
       const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));

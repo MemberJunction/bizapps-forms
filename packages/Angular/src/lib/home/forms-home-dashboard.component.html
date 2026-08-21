@@ -147,6 +147,10 @@
   <!-- The AI surface. Centred at the bottom, always present: an author does not have to find a
        button and open a panel to start, and the thread they left is still here when they return. -->
   <div class="home-chat">
-    <mjf-form-chat [formId]="null" (formCreated)="onChatCreatedForm($event)" />
+    <mjf-form-chat
+      [formId]="null"
+      (formCreated)="onChatCreatedForm($event)"
+      (formOpened)="onChatCreatedForm($event)"
+    />
   </div>
 </div>

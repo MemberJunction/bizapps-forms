@@ -183,6 +183,7 @@
         [formId]="form.ID"
         (formRestyled)="onChatRestyled()"
         (formChanged)="formChanged.emit()"
+        (formOpened)="formOpened.emit($event)"
       />
     </div>
   </div>

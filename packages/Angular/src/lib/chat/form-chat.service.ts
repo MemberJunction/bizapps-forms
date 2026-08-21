@@ -29,7 +29,7 @@ import { watchGenerationProgress } from '../shared/generation-progress-stream';
 /** What one send produced. */
 export interface ChatSendResult {
   reply: string;
-  /** `none` | `create` | `restyle` | `image` | `unsupported` — what the server actually did. */
+  /** `none` | `create` | `restyle` | `image` | `edit` | `open` | `unsupported`. */
   action: string;
   /** Set when the turn created a form, so the host can open it. */
   createdFormId: string | null;
@@ -37,6 +37,10 @@ export interface ChatSendResult {
   restyledStyleId: string | null;
   /** Set when the turn put a picture on a screen, so the host can reload what it is showing. */
   imagedScreenId: string | null;
+  /** Set when the turn changed the form's structure, so the host reloads its tree. */
+  changedFormId: string | null;
+  /** Set when the turn asked to navigate to another form. Navigation only — nothing was written. */
+  openFormId: string | null;
   ok: boolean;
 }
 
@@ -163,6 +167,8 @@ export class FormChatService {
         createdFormId: null,
         restyledStyleId: null,
         imagedScreenId: null,
+        changedFormId: null,
+        openFormId: null,
         ok: false,
       };
     }
@@ -194,6 +200,8 @@ export class FormChatService {
       createdFormId: null,
       restyledStyleId: null,
       imagedScreenId: null,
+      changedFormId: null,
+      openFormId: null,
       ok: false,
     });
     try {
@@ -234,6 +242,8 @@ export class FormChatService {
         createdFormId: readActionOutputString(result, 'FormID'),
         restyledStyleId: readActionOutputString(result, 'StyleID'),
         imagedScreenId: readActionOutputString(result, 'ScreenID'),
+        changedFormId: readActionOutputString(result, 'ChangedFormID'),
+        openFormId: readActionOutputString(result, 'OpenFormID'),
         ok: true,
       };
     } catch (error) {

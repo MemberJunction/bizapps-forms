@@ -276,7 +276,21 @@ export const FORM_CHAT_STYLES = /* css */ `
 }
 
 /* the author's own turns: compact, right, tinted with the brand so the two voices differ */
-.fc-said { display: flex; justify-content: flex-end; }
+/* Who said it. The mark alone identified the assistant's voice, but nothing named the author's,
+   and a thread you come back to a week later should not need decoding. */
+.fc-who {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mj-text-muted);
+}
+.fc-who--mine { text-align: right; }
+.fc-reply--failed .fc-who { color: var(--mj-status-error, var(--mj-color-error-600)); }
+
+.fc-said { display: flex; flex-direction: column; align-items: flex-end; }
 .fc-said + .fc-reply { margin-top: 2px; }
 .fc-reply + .fc-said { margin-top: 12px; }
 .fc-bubble {
@@ -315,7 +329,26 @@ export const FORM_CHAT_STYLES = /* css */ `
 }
 
 /* --- working --------------------------------------------------------------------- */
-.fc-working { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1 1 auto; padding-top: 2px; }
+.fc-working { display: flex; flex-direction: column; gap: 8px; min-width: 0; flex: 1 1 auto; }
+
+/* The whole job, not just how far through it. Four visible steps make a fifty-second wait feel
+   finite; a bar on its own answers "how far" and never "at what". */
+.fc-steps { display: flex; flex-direction: column; gap: 5px; }
+.fc-step { display: flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--mj-text-muted); }
+.fc-step-tick { width: 12px; font-size: 0.5rem; text-align: center; opacity: 0.5; }
+.fc-step--done { color: var(--mj-text-secondary); }
+.fc-step--done .fc-step-tick { color: var(--mj-brand-primary); opacity: 1; font-size: 0.6875rem; }
+.fc-step--now { color: var(--mj-text-primary); font-weight: 600; }
+.fc-step--now .fc-step-tick {
+  color: var(--mj-brand-primary);
+  opacity: 1;
+  font-size: 0.6875rem;
+  animation: fc-spin 1.1s linear infinite;
+}
+@keyframes fc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .fc-step--now .fc-step-tick { animation: none; }
+}
 .fc-working-line { font-size: 0.875rem; color: var(--mj-text-secondary); }
 /* A bar, not just dots, once the server says how far along it is. A build runs the better part
    of a minute; a length that visibly grows is the difference between waiting and giving up. */

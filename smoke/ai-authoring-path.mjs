@@ -330,6 +330,64 @@ async function main() {
     }
   }
 
+  // (f) STRUCTURAL EDITING — the thing the assistant refused twice in the transcript that
+  //     prompted this work. Real model, real handles, real rows.
+  if (chatFormId) {
+    section('8. Structural editing — real handles, real rows');
+
+    const before = await q('MJ_BizApps_Forms: Form Questions', `FormID='${chatFormId}'`, ['ID', 'Prompt', 'QuestionType', 'DisplayOrder']);
+    console.log(`  form has ${before.length} question(s) to start`);
+
+    const added = await chat('Add a 1-5 rating question asking how likely they are to recommend us.', { FormID: chatFormId });
+    console.log(`  Q: add a rating question   [action=${added.get('Action')}]`);
+    console.log(`  A: ${String(added.get('Reply')).slice(0, 220).replace(/\n/g, ' ')}…`);
+    check(added.get('Action') === 'edit', `asking to add a question edits (action=${added.get('Action')})`,
+      String(added.get('Reply')).slice(0, 300));
+
+    const after = await q('MJ_BizApps_Forms: Form Questions', `FormID='${chatFormId}'`, ['ID', 'Prompt', 'QuestionType', 'DisplayOrder']);
+    check(after.length === before.length + 1, `a question was actually added (${before.length} -> ${after.length})`);
+    const rating = after.find((x) => !before.some((b) => b.ID === x.ID));
+    console.log(`     new question: [${rating?.QuestionType}] ${rating?.Prompt}`);
+    check(!!rating, 'the new row exists');
+    check(/rating|opinionscale|nps/i.test(String(rating?.QuestionType)), `it is a rating-shaped type (${rating?.QuestionType})`);
+
+    // DisplayOrder must stay unique WITHIN A PAGE — it is per page, not per form, so checking it
+    // across the whole form both passes when it should not and fails when it should not.
+    const withPages = await q('MJ_BizApps_Forms: Form Questions', `FormID='${chatFormId}'`, ['ID', 'PageID', 'DisplayOrder']);
+    const byPage = new Map();
+    for (const row of withPages) {
+      byPage.set(row.PageID, [...(byPage.get(row.PageID) ?? []), row.DisplayOrder]);
+    }
+    let clashes = 0;
+    for (const [pageId, orders] of byPage) {
+      if (new Set(orders).size !== orders.length) {
+        clashes++;
+        console.log(`     page ${pageId}: ${orders.join(',')}`);
+      }
+    }
+    check(clashes === 0, `display order is unique within every page (${byPage.size} page(s))`);
+
+    // Rewording — the safe edit, and the one that must work on an answered question too.
+    const reworded = await chat('Reword the email question to "Your email address".', { FormID: chatFormId });
+    console.log(`  Q: reword the email question   [action=${reworded.get('Action')}]`);
+    const afterReword = await q('MJ_BizApps_Forms: Form Questions', `FormID='${chatFormId}'`, ['ID', 'Prompt']);
+    check(afterReword.some((x) => /your email address/i.test(String(x.Prompt))),
+      'the reword landed on a real question',
+      afterReword.map((x) => x.Prompt).join(' | '));
+
+    // The capability the transcript was refused. It must not refuse now.
+    check(!/can'?t (add|adjust|change)/i.test(String(added.get('Reply'))),
+      'it no longer says it cannot add questions');
+  }
+
+  // (g) The form list and navigation.
+  section('9. Knowing which forms exist');
+  const listed = await chat('What forms do I have? Just name a few.');
+  console.log(`  A: ${String(listed.get('Reply')).slice(0, 200).replace(/\n/g, ' ')}…`);
+  check(listed.r.Success, 'it can answer what forms exist');
+  check(!/only see the form you have open|cannot see/i.test(String(listed.get('Reply'))),
+    'it no longer claims it can only see the open form');
+
   section(failures === 0 ? '✅ ALL CHECKS PASSED' : `❌ ${failures} CHECK(S) FAILED`);
   console.log(`generated forms: ${formId} , ${f2}`);
   await pool.close();

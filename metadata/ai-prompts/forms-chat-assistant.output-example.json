@@ -7,5 +7,15 @@
     "--mjf-on-accent": "#152a63"
   },
   "imagePrompt?": "a sunlit conference hall with rows of empty chairs",
-  "imageTarget?": "welcome"
+  "imageTarget?": "welcome",
+  "operations?": [
+    {
+      "op": "addQuestion",
+      "handle": "p1",
+      "type": "Rating",
+      "prompt": "How likely are you to recommend us?",
+      "after": "q2"
+    }
+  ],
+  "openFormId?": "f2"
 }

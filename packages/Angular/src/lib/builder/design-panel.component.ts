@@ -95,6 +95,9 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
    */
   @Output() readonly formChanged = new EventEmitter<void>();
 
+  /** Forwarded: the builder above owns navigation. */
+  @Output() readonly formOpened = new EventEmitter<string>();
+
   /**
    * The draft as a published-form definition, so the sample can be the REAL form.
    *

@@ -19,8 +19,8 @@
           "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F64"
         },
         "sync": {
-          "lastModified": "2026-08-20T23:31:16.678Z",
-          "checksum": "f3c2ffe617dc122e05c0bd7c1d8d73e12eb345b423ed3af43058c99147b575ce"
+          "lastModified": "2026-08-21T02:50:43.169Z",
+          "checksum": "a19081fae518962849a466772c183bd493ab13ebbb0206c9e1443fdf445e12c2"
         }
       }
     ],
@@ -37,7 +37,7 @@
           "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E90"
         },
         "sync": {
-          "lastModified": "2026-08-20T23:31:15.083Z",
+          "lastModified": "2026-08-21T02:50:41.163Z",
           "checksum": "422ec4c9b1bd0da6aa4acb454c664150694cbd079076cbd4817c0d57dd226959"
         }
       },
@@ -53,7 +53,7 @@
           "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E91"
         },
         "sync": {
-          "lastModified": "2026-08-20T23:31:15.096Z",
+          "lastModified": "2026-08-21T02:50:41.255Z",
           "checksum": "3cf4bc201253bfb16fefb43c25b663e1439c30a2bf50bbf40a4acbd41fed0acf"
         }
       },
@@ -69,7 +69,7 @@
           "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E92"
         },
         "sync": {
-          "lastModified": "2026-08-20T23:31:15.123Z",
+          "lastModified": "2026-08-21T02:50:41.185Z",
           "checksum": "78190baf7ac7a4a7801c4109e6d2a8cdb328c40ff1553dccdb4dd927e38e3d24"
         }
       },
@@ -85,7 +85,7 @@
           "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E93"
         },
         "sync": {
-          "lastModified": "2026-08-20T23:31:15.110Z",
+          "lastModified": "2026-08-21T02:50:41.203Z",
           "checksum": "2995c043f2b95f7875d6c075e7e1cbd33778ace8e387d6d066104a3b8f3c7213"
         }
       },
@@ -101,8 +101,24 @@
           "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E94"
         },
         "sync": {
-          "lastModified": "2026-08-20T23:31:15.145Z",
+          "lastModified": "2026-08-21T02:50:41.232Z",
           "checksum": "c9619882ef19e8dbbe0a05619a0dc4e609b942c0d3392acc1634f947acb98939"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "FormList",
+          "Description": "The author's own forms, by handle, so the assistant can name one to open. Read-only — opening navigates, it never writes.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E95"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.269Z",
+          "checksum": "1f2b8192fd7e95223169cd04d26366b8c7e847636162e9a8247d44c5cfa2f437"
         }
       }
     ]

@@ -56,10 +56,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       const table = rows.get(params.EntityName) ?? [];
       const filter = (params.ExtraFilter ?? '').trim();
       const eq = /^(\w+)='([^']*)'$/.exec(filter);
+      const notEq = /^(\w+)\s*<>\s*'([^']*)'$/.exec(filter);
       const inList = /^(\w+) IN \(([^)]*)\)$/.exec(filter);
       let matched = table;
       if (eq) {
         matched = table.filter((r) => String(r[eq[1]]) === eq[2]);
+      } else if (notEq) {
+        matched = table.filter((r) => String(r[notEq[1]]) !== notEq[2]);
       } else if (inList) {
         const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
         matched = table.filter((r) => allowed.has(String(r[inList[1]])));
@@ -88,7 +91,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 import { UserInfo } from '@memberjunction/core';
 import { buildFormSnapshot, planEdits } from '@mj-biz-apps/forms-entities';
 import { applyEdits } from './apply-edits';
-import { loadFormSnapshot } from './load-snapshot';
+import { loadFormList, loadFormSnapshot } from './load-snapshot';
 
 const FORM = '11111111-2222-4333-8444-555555555555';
 const PAGE = '22222222-3333-4444-8555-666666666666';
@@ -348,5 +351,39 @@ describe('loadFormSnapshot', () => {
 
   it('is undefined for a form that does not exist', async () => {
     expect(await loadFormSnapshot('99999999-9999-4999-8999-999999999999', user)).toBeUndefined();
+  });
+});
+
+describe('loadFormList', () => {
+  beforeEach(() => {
+    rows.set('MJ_BizApps_Forms: Forms', [
+      { ID: FORM, Name: 'Assessment', Status: 'Draft' },
+      { ID: '88888888-9999-4aaa-8bbb-cccccccccccc', Name: 'Old survey', Status: 'Closed' },
+      { ID: '99999999-aaaa-4bbb-8ccc-dddddddddddd', Name: 'Event RSVP', Status: 'Published' },
+    ]);
+  });
+
+  it('lists the forms with handles', async () => {
+    const forms = await loadFormList(user);
+    expect(forms.map((f) => f.handle)).toEqual(['f1', 'f2']);
+    expect(forms.map((f) => f.name).sort()).toEqual(['Assessment', 'Event RSVP']);
+  });
+
+  it("leaves out the ones the list calls archived", async () => {
+    /**
+     * THE BUG THIS GUARDS. The filter was `IsArchived = 0`, a column `Form` does not have — so
+     * every list read failed with "Invalid column name" and degraded to an empty list. The
+     * assistant then told the author it could not see their forms, which is exactly the answer
+     * this feature exists to stop it giving. Archived is `Status = 'Closed'`; the union is
+     * Draft | Published | Closed, and the generated entity is the ground truth for that.
+     */
+    const forms = await loadFormList(user);
+    expect(forms.map((f) => f.name)).not.toContain('Old survey');
+  });
+
+  it('degrades to an empty list rather than throwing', async () => {
+    // An assistant that cannot list forms can still answer and still edit the one on screen.
+    readFailsFor = 'MJ_BizApps_Forms: Forms';
+    expect(await loadFormList(user)).toEqual([]);
   });
 });

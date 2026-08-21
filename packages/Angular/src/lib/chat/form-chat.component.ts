@@ -12,7 +12,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { isThreadWarm } from '@mj-biz-apps/forms-entities';
+import { isThreadWarm, type GenerateFormStage } from '@mj-biz-apps/forms-entities';
 import { FormChatService } from './form-chat.service';
 import { parseChatMarkdown } from './chat-markdown';
 import { FORM_CHAT_STYLES } from './form-chat.styles';
@@ -125,6 +125,7 @@ import { FORM_CHAT_STYLES } from './form-chat.styles';
           @for (turn of chat.turns(); track $index) {
             @if (turn.role === 'User') {
               <div class="fc-said">
+                <span class="fc-who fc-who--mine">You</span>
                 <div class="fc-bubble">{{ turn.message }}</div>
               </div>
             } @else {
@@ -137,6 +138,7 @@ import { FORM_CHAT_STYLES } from './form-chat.styles';
                   ></i>
                 </span>
                 <div class="fc-prose">
+                  <span class="fc-who">{{ turn.role === 'Error' ? 'Form assistant — failed' : 'Form assistant' }}</span>
                   @for (block of blocksFor(turn.message); track $index) {
                     @if (block.kind === 'paragraph') {
                       <p class="fc-p">
@@ -170,12 +172,33 @@ import { FORM_CHAT_STYLES } from './form-chat.styles';
                 <i class="fa-solid fa-wand-magic-sparkles"></i>
               </span>
               <div class="fc-working">
-                <span class="fc-working-line">{{ workingLine() }}</span>
+                <span class="fc-who">Form assistant</span>
                 @if (chat.progress(); as p) {
-                  <span class="fc-meter" role="progressbar" [attr.aria-valuenow]="p.percent">
+                  <div class="fc-steps">
+                    @for (step of buildSteps(p.stage); track step.key) {
+                      <div class="fc-step" [class.fc-step--done]="step.done" [class.fc-step--now]="step.now">
+                        <i
+                          class="fa-solid fc-step-tick"
+                          [class.fa-check]="step.done"
+                          [class.fa-circle-notch]="step.now"
+                          [class.fa-circle]="!step.done && !step.now"
+                          aria-hidden="true"
+                        ></i>
+                        <span class="fc-step-name">{{ step.label }}</span>
+                      </div>
+                    }
+                  </div>
+                  <span class="fc-working-line">{{ p.label }}</span>
+                  <span
+                    class="fc-meter"
+                    role="progressbar"
+                    [attr.aria-valuenow]="p.percent"
+                    [attr.aria-valuetext]="p.label"
+                  >
                     <span class="fc-meter-fill" [style.width.%]="p.percent"></span>
                   </span>
                 } @else {
+                  <span class="fc-working-line">{{ workingLine() }}</span>
                   <span class="fc-dots" aria-hidden="true">
                     <span class="fc-dot"></span><span class="fc-dot"></span><span class="fc-dot"></span>
                   </span>
@@ -226,8 +249,16 @@ export class FormChatComponent {
   /** Fired when a turn restyled the open form, so the host can reload its style. */
   public readonly formRestyled = output<string>();
 
-  /** Fired when a turn changed the form's content — today, a picture on a screen. */
+  /** Fired when a turn changed the form's content — a picture, or a structural edit. */
   public readonly formChanged = output<void>();
+
+  /**
+   * Fired when a turn asked to open a different form.
+   *
+   * Navigation only: the server wrote nothing to it. The host moves, and the next turn's snapshot
+   * is the form the author arrived at — which is what keeps every write on something visible.
+   */
+  public readonly formOpened = output<string>();
 
   protected draft = '';
   private readonly _expanded = signal(false);
@@ -325,6 +356,23 @@ export class FormChatComponent {
     });
   }
 
+  /**
+   * The build's stages, with the one running now marked.
+   *
+   * A bar alone answers "how far" and not "at what", which is the question somebody staring at a
+   * fifty-second build actually has — and the server already names every stage it enters. Showing
+   * the whole list also makes the wait finite-looking: four steps you can see is a different
+   * feeling from a bar that could stop anywhere.
+   */
+  protected buildSteps(stage: GenerateFormStage): readonly BuildStep[] {
+    const at = BUILD_STAGES.findIndex((s) => s.key === stage);
+    return BUILD_STAGES.map((s, i) => ({
+      ...s,
+      done: at > i || stage === 'complete',
+      now: at === i && stage !== 'complete',
+    }));
+  }
+
   protected blocksFor(message: string): ReturnType<typeof parseChatMarkdown> {
     return parseChatMarkdown(message);
   }
@@ -400,8 +448,11 @@ export class FormChatComponent {
     if (result.restyledStyleId) {
       this.formRestyled.emit(result.restyledStyleId);
     }
-    if (result.imagedScreenId) {
+    if (result.imagedScreenId || result.changedFormId) {
       this.formChanged.emit();
+    }
+    if (result.openFormId) {
+      this.formOpened.emit(result.openFormId);
     }
   }
 
@@ -484,6 +535,28 @@ export class FormChatComponent {
     panel.style.maxHeight = `${Math.round(Math.max(minHeight, maxHeight))}px`;
   }
 }
+
+/** One stage of a build, as the panel shows it. */
+interface BuildStep {
+  key: GenerateFormStage;
+  label: string;
+  done: boolean;
+  now: boolean;
+}
+
+/**
+ * The stages a staged build moves through, in order, named for an author rather than for the code.
+ *
+ * `complete` is deliberately absent: it is the state where all four are done, not a fifth thing to
+ * wait for. The server's own per-event label ("Filled in Travel") shows underneath and says which
+ * page — this list is the shape of the whole job.
+ */
+const BUILD_STAGES: ReadonlyArray<{ key: GenerateFormStage; label: string }> = [
+  { key: 'outline', label: 'Planning the questions' },
+  { key: 'page', label: 'Writing each page' },
+  { key: 'image', label: 'Making pictures' },
+  { key: 'theme', label: 'Choosing colours' },
+];
 
 /** Breathing room kept between the panel and every viewport edge. */
 const PANEL_GUTTER = 12;

@@ -220,7 +220,10 @@ export async function loadFormList(contextUser: UserInfo): Promise<FormListEntry
   const view = await new RunView().RunView<{ ID: string; Name: string; Status: string }>(
     {
       EntityName: 'MJ_BizApps_Forms: Forms',
-      ExtraFilter: 'IsArchived = 0',
+      // `Status <> 'Closed'`, not `IsArchived = 0` — `Form` has no such column, and the invented
+      // one made every list read fail. `Closed` is what the list calls "archived"; the union is
+      // Draft | Published | Closed, per the generated entity.
+      ExtraFilter: `Status <> 'Closed'`,
       OrderBy: '__mj_UpdatedAt DESC',
       ResultType: 'simple',
       Fields: ['ID', 'Name', 'Status'],
