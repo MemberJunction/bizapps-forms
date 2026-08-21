@@ -231,7 +231,10 @@ Update `metadata/templates/templates/forms-form-designer.template.md` +
 
 - The two **input modes**: template receives `InputMode` (`'brief' | 'questions'`). For `questions`
   (author pasted a raw list), instruct: *preserve pasted question wording verbatim; only infer types,
-  options, ordering, and grouping* — the Typeform "import questions" distinction.
+  options, ordering, and grouping* — the Typeform "import questions" distinction. NOTE
+  (2026-08-21): this is now the ONLY paste-a-list path in the product — the builder's own
+  Import questions parser was removed in favour of the assistant — and it still has no UI
+  caller. See FORMS_ELEMENT_PARITY "Found on the way".
 - Guidance on when to emit `imagePrompt` (PictureChoice options; a Welcome hero when the form's subject is
   visual; **never** decorative images on every question) and on conditional logic (*only when the brief
   implies it — never invent branching*).

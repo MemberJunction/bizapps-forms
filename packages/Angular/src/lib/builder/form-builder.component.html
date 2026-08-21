@@ -193,21 +193,16 @@
     <div class="fb-body">
       <!-- LEFT: palette -->
       <nav class="fb-pane fb-pane--left" aria-label="Add question palette">
-        <div class="fb-palette-tools">
-          <div class="fb-palette-search">
-            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-            <input
-              type="search"
-              class="mjf-input"
-              placeholder="Search form elements"
-              aria-label="Search form elements"
-              [value]="paletteQuery"
-              (input)="setPaletteQuery($any($event.target).value)"
-            />
-          </div>
-          <button type="button" class="fb-palette-import" [disabled]="busy" (click)="openImport()">
-            <i class="fa-solid fa-file-import" aria-hidden="true"></i> Import questions
-          </button>
+        <div class="fb-palette-search">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input
+            type="search"
+            class="mjf-input"
+            placeholder="Search form elements"
+            aria-label="Search form elements"
+            [value]="paletteQuery"
+            (input)="setPaletteQuery($any($event.target).value)"
+          />
         </div>
 
         @for (group of paletteGroups; track group) {
@@ -519,10 +514,6 @@
     <div class="fb-distribute">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>
-  }
-
-  @if (importOpen) {
-    <mjf-import-questions (imported)="onImported($event)" (cancelled)="closeImport()" />
   }
 
   @if (previewDef) {
