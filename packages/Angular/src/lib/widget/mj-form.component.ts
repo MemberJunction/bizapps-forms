@@ -55,6 +55,7 @@ import { FormOneQuestionComponent } from './components/form-one-question.compone
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
 import type { WidgetPhase } from './core/submit-phase';
 import { shouldReloadOnDefinitionChange } from './definition-change';
+import { MjfIconComponent } from './components/mjf-icon.component';
 
 @Component({
   selector: 'mj-form',
@@ -65,6 +66,7 @@ import { shouldReloadOnDefinitionChange } from './definition-change';
     FormScrollComponent,
     FormOneQuestionComponent,
     TurnstileChallengeComponent,
+    MjfIconComponent,
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
