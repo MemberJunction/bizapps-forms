@@ -297,3 +297,31 @@ describe('validateTheme — a colour it cannot read is stripped, not skipped', (
     expect(result.cssVariables['--mjf-font-body']).toBe("'Inter', system-ui, sans-serif");
   });
 });
+
+describe('validateTheme — the non-text bar is 3:1, not 4.5:1', () => {
+  /**
+   * WCAG 1.4.11 holds a non-text element — a button fill, a focus ring — to 3:1, while body text
+   * is held to 4.5:1. `--mjf-accent` on the page is the non-text pair, and nothing pinned which
+   * bar it uses: raising the constant to 4.5 left every test in this file green, which would have
+   * started reporting perfectly conformant brand colours as unreadable.
+   */
+  it('accepts an accent between 3:1 and 4.5:1 against the page', () => {
+    // #767676 on white is 4.54:1; #949494 is 3.06:1 — over the non-text bar, under the text one.
+    const result = validateTheme(
+      { cssVariables: { '--mjf-accent': '#949494', '--mjf-page-bg': '#ffffff' } },
+      { '--mjf-page-ink': '#1a1d21' },
+    );
+
+    expect(result.unreadablePairs).not.toContain('--mjf-accent on --mjf-page-bg');
+  });
+
+  it('reports an accent that cannot even clear the non-text bar', () => {
+    // #d8d8d8 on white is 1.37:1 — a button nobody can find.
+    const result = validateTheme(
+      { cssVariables: { '--mjf-accent': '#d8d8d8', '--mjf-page-bg': '#ffffff' } },
+      { '--mjf-page-ink': '#1a1d21' },
+    );
+
+    expect(result.unreadablePairs).toContain('--mjf-accent on --mjf-page-bg');
+  });
+});

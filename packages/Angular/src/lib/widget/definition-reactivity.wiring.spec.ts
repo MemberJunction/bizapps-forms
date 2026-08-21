@@ -3,9 +3,16 @@
  *
  * `MjFormComponent` uses `inject()` and cannot be instantiated in this suite's node environment
  * (see `vitest.config.ts` — Angular component classes are exercised by the Explorer ngc build, not
- * here), so what is checkable is the source. That is a real limit and worth stating: this proves
- * the lifecycle hook exists and is wired to the reload path; it does not prove Angular calls it.
- * The manual builder smoke is what proves the latter.
+ * here), so what is checkable HERE is the source. That is a real limit and worth stating: this
+ * proves the lifecycle hook exists and is wired to the reload path; it does not prove Angular
+ * calls it. The manual builder smoke is what proves the latter.
+ *
+ * WHAT THIS FILE NO LONGER TRIES TO DO. The reload DECISION — first change, wrong input key —
+ * moved to `definition-change.ts` and is tested for real in `definition-change.spec.ts`. It used
+ * to be asserted here as `expect(body).toMatch(/firstChange/)`, which is a test that the word
+ * appears: inverting the guard so it never reloaded left the word in place and this file green.
+ * A regex over source can check that two things are CONNECTED; it cannot check what either does.
+ * Everything below is the connection, and nothing below is the behaviour.
  *
  * WHAT WENT WRONG, so a future edit does not quietly undo it. The `definition` input was read
  * exactly once, inside `ngOnInit`. The Preview modal never showed the bug because `@if (previewDef)`
@@ -39,20 +46,13 @@ describe('the definition input is the CURRENT definition, not the initial one', 
     expect(body).toMatch(/this\.load\(\)/);
   });
 
-  it('keys the change off the PROPERTY name, not the `definition` alias', () => {
-    // SimpleChanges is keyed by the declared property. Reading `changes['definition']` compiles,
-    // is always undefined, and turns this into a hook that never fires — the exact failure it
-    // was added to fix, wearing a passing build.
+  it('delegates the decision to the predicate that is actually tested', () => {
+    // Both facts this used to assert as text — key off `definitionInput`, skip the first change —
+    // are branches of `shouldReloadOnDefinitionChange`, covered in `definition-change.spec.ts`.
+    // What is left to check here is that the component asks it rather than re-deciding inline.
     const body = /ngOnChanges\([\s\S]*?\n  \}/.exec(source())?.[0] ?? '';
-    expect(body).toMatch(/changes\['definitionInput'\]/);
-    expect(body).not.toMatch(/changes\['definition'\]/);
-  });
-
-  it('skips the first change, so a fresh component loads once and not twice', () => {
-    // ngOnChanges fires before the first ngOnInit. Without this guard every mount loads twice,
-    // minting two client response ids for one form.
-    const body = /ngOnChanges\([\s\S]*?\n  \}/.exec(source())?.[0] ?? '';
-    expect(body).toMatch(/firstChange/);
+    expect(body).toMatch(/shouldReloadOnDefinitionChange\(changes\)/);
+    expect(body, 'the decision must not be re-implemented here').not.toMatch(/firstChange/);
   });
 
   it('still loads once from ngOnInit, so a slug-driven respondent is unaffected', () => {

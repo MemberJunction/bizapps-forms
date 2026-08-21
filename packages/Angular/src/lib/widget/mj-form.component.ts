@@ -54,6 +54,7 @@ import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
 import type { WidgetPhase } from './core/submit-phase';
+import { shouldReloadOnDefinitionChange } from './definition-change';
 
 @Component({
   selector: 'mj-form',
@@ -266,8 +267,10 @@ export class MjFormComponent implements OnInit, OnChanges, OnDestroy {
    * `SimpleChanges` is keyed by the PROPERTY name, not the `definition` alias the host writes.
    */
   public async ngOnChanges(changes: SimpleChanges): Promise<void> {
-    const change = changes['definitionInput'];
-    if (!change || change.firstChange) {
+    // The decision itself lives in `definition-change.ts`, where it can be tested without a DOM.
+    // It used to live here, and the only test that could reach it was a regex over this file —
+    // which passed just as happily with the guard inverted.
+    if (!shouldReloadOnDefinitionChange(changes)) {
       return;
     }
     await this.load();

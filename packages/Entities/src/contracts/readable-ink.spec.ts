@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { contrastRatio, inkRepair, parseCssColor, readableInk } from './readable-ink';
+import { contrastRatio, inkRepair, parseCssColor, readableInk, type Rgb } from './readable-ink';
 
 describe('parseCssColor', () => {
   it('reads the two shapes getComputedStyle actually returns', () => {
@@ -26,6 +26,22 @@ describe('readableInk', () => {
     const fixed = readableInk([160, 39, 39], [60, 137, 226]);
 
     expect(contrastRatio([160, 39, 39], fixed)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  /**
+   * The DARK half of the choice.
+   *
+   * Both cases above are rescued by white, so replacing the whole comparison with `return light`
+   * left every test green — nothing proved the function ever picks the dark ink at all. A pale
+   * page is what separates them: white on it is unreadable, and only near-black will do.
+   */
+  it('picks the dark ink on a pale page, where white would be unreadable', () => {
+    const paleYellow: Rgb = [255, 235, 130];
+
+    const fixed = readableInk(paleYellow, [255, 255, 255]);
+
+    expect(fixed).toEqual([26, 29, 33]);
+    expect(contrastRatio(paleYellow, fixed)).toBeGreaterThanOrEqual(4.5);
   });
 });
 

@@ -255,10 +255,18 @@ describe('applyEdits — adding a question', () => {
     ]);
     await applyEdits(FORM, plan, user);
 
-    const labels = (rows.get('MJ_BizApps_Forms: Form Question Options') ?? [])
-      .filter((o) => o.Label === 'A' || o.Label === 'B')
-      .map((o) => o.Label);
-    expect(labels.sort()).toEqual(['A', 'B']);
+    // Matching by LABEL alone said nothing about what the choices were attached to: pointing
+    // `option.QuestionID` at a constant wrong id left this green, and an orphaned choice renders
+    // as a dropdown with nothing in it. The FK is the assertion that matters here.
+    const added = (rows.get('MJ_BizApps_Forms: Form Questions') ?? []).find((q) => q.Prompt === 'Pick');
+    expect(added).toBeDefined();
+
+    const choices = (rows.get('MJ_BizApps_Forms: Form Question Options') ?? [])
+      .filter((o) => o.QuestionID === added!.ID)
+      .sort((a, b) => Number(a.DisplayOrder) - Number(b.DisplayOrder));
+
+    expect(choices.map((o) => o.Label)).toEqual(['A', 'B']);
+    expect(choices.map((o) => o.DisplayOrder)).toEqual([0, 1]);
   });
 });
 
