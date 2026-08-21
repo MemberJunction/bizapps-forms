@@ -79,8 +79,26 @@ describe('the chat prompt names controls the builder actually has', () => {
     ).toMatch(/NOT its type|cannot change it|cannot be changed/i);
   });
 
-  it('sends colour, size and radius to the Design tab, which is where they live', () => {
-    // The one control claim that was right all along, pinned so it stays that way.
-    expect(prompt()).toMatch(/\*\*Design tab\*\*/);
+  it('does not send an author to the Design tab for anything the assistant can do itself', () => {
+    // THIS ASSERTION USED TO PIN THE OPPOSITE, and was wrong. It read "sends colour, size and
+    // radius to the Design tab, which is where they live" and called that "the one control claim
+    // that was right all along" — while the same prompt says a size request IS a `setLayout` and
+    // tells the model not to answer one with `unsupported`. Colours and fonts are a `restyle`, the
+    // five layout tokens are a `setLayout`, and the Design tab alone owns only the logo and the
+    // background image. So the guard was holding the stale half of a contradiction in place, which
+    // is worse than not testing it: the next person to notice has to argue with a green test.
+    const designTabClaim = prompt()
+      .split('\n')
+      .filter((line) => /\*\*Design tab\*\*/.test(line))
+      .join(' ');
+    expect(designTabClaim, 'the prompt no longer names the Design tab at all').not.toBe('');
+
+    // Every capability the chat has must be absent from what that line sends people away for.
+    for (const owned of ['colour', 'font', 'size', 'alignment', 'radius']) {
+      expect(
+        designTabClaim.toLowerCase(),
+        `the Design tab line offers "${owned}", which the assistant can set itself`,
+      ).not.toContain(owned);
+    }
   });
 });
