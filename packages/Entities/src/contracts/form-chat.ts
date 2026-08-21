@@ -11,12 +11,20 @@
  * So the model returns a REPLY plus a declared ACTION, and deterministic code performs the action.
  * The model never touches the database — the same split the whole authoring pipeline uses.
  *
- * ── WHAT IT CANNOT DO YET, STATED PLAINLY. ───────────────────────────────────────────────────
- * `restyle` and `image` are the only edits to an existing form. Structural changes — add a question, reword one,
- * split a page — need the form read back OUT as a blueprint so the model can propose a delta
- * against it, which is a genuinely separate piece of work (the reverse mapping). Asking for one
- * gets an honest "I can't do that yet" rather than a confident nothing, because a chat that
- * silently ignores half its instructions is worse than one with a stated boundary.
+ * ── WHAT IT CANNOT DO, STATED PLAINLY. ───────────────────────────────────────────────────────
+ * Structural change arrived with `edit`: the form is read back OUT as a blueprint, the model
+ * proposes a delta against the snapshot it was shown, and `planEdits` refuses anything that would
+ * strand an answer. Sizing and alignment came with it, as `setLayout`. What is still outside the
+ * boundary is publishing, share links, conditional show/hide rules, and adding or removing a
+ * choice — those get `unsupported`, an honest "I can't do that" and the name of the control that
+ * can, because a chat that silently ignores half its instructions is worse than one with a stated
+ * boundary.
+ *
+ * The same boundary is spoken in one other place — the prompt template, which is metadata and
+ * ships in a migration, so no import can reach it. {@link ASSISTANT_CAN} and
+ * {@link ASSISTANT_CANNOT} below are what the panel shows the author, and they live here so that
+ * at least the contract and the UI cannot drift apart; keeping them in step with the template is
+ * still a manual act, and it has already gone stale twice.
  */
 import { z } from 'zod';
 import { editOperationSchema } from './form-edit';
@@ -44,6 +52,114 @@ export interface FormChatTurn {
    * state to keep in sync, and it decays on its own.
    */
   at?: Date;
+  /**
+   * The message that produced this turn, when the turn is a failure the author can retry.
+   *
+   * Client-only, like `at`. A failed send used to lose what was typed — the draft is cleared the
+   * moment a message goes, so a network blip cost the author the whole sentence and their only
+   * recourse was to remember it. Keeping it ON the failure is what lets the failure carry its own
+   * way out, rather than a Retry button somewhere else having to guess which message it means.
+   */
+  retryOf?: string;
+  /**
+   * What this turn changed, and what it changed it from. Client-only.
+   *
+   * Read back from `MJ: Record Changes` after the turn lands, so it is what the database actually
+   * recorded rather than what the assistant claims it did. It is the whole of undo: an author who
+   * asked for "warmer" and got fuchsia needs the previous value, not an apology.
+   */
+  change?: FormChatTurnChange;
+}
+
+/** What one turn changed on one record, and the value that was there before it. */
+export interface FormChatTurnChange {
+  /**
+   * Which of the two single-field edits this was.
+   *
+   * Only these two are undoable, and the honesty matters more than the coverage: both are one
+   * field on one record, so putting them back is a write of a value we hold. A structural edit
+   * spans pages, questions and options — reversing it correctly is version restore, not an undo
+   * button, and offering one that half-works is worse than offering none.
+   */
+  kind: 'style' | 'image';
+  /** The `Form Styles` or `Form Screens` row that changed. */
+  recordId: string;
+  /** What changed, in the author's words: "Accent, Page background" or "Welcome screen image". */
+  summary: string;
+  /** The value to write back. Empty string is a real value here — it means "there was none". */
+  previous: string;
+  /** Set once the author has taken it back, so the offer is not made twice. */
+  undone?: boolean;
+}
+
+/**
+ * What the assistant can do, in the author's words, for the panel's empty state.
+ *
+ * Deliberately a sentence rather than a list of operation names: an author does not think in
+ * `updateOption`, and a capability list that enumerates the schema goes stale on every schema
+ * change. It must stay true against the template's own "WHAT YOU STILL CANNOT DO" block — a list
+ * that overstates is worse than no list, because the author spends a turn finding out.
+ */
+export const ASSISTANT_CAN =
+  'build a form, change its questions and pages, reword a choice, restyle it, change sizes and alignment, add pictures, and open another of your forms';
+
+/**
+ * And what it cannot, with where the author can.
+ *
+ * Adding or removing a choice is the one that looks arbitrary and is not: `FormResponseAnswer`
+ * stores the OPTION's id, so rewriting a question's option list would delete and recreate the rows
+ * and every answer already naming that choice would stop resolving. Rewording keeps the id, and
+ * therefore keeps the answers.
+ */
+export const ASSISTANT_CANNOT =
+  'publish, make share links, set conditional show/hide rules, or add and remove choices — it will say where you can';
+
+/**
+ * How an attached picture travels with the message.
+ *
+ * In the message text, not in a new action parameter: a parameter is metadata, and metadata ships
+ * in a migration — a marker in a string the action already receives makes the same feature work on
+ * an instance that has not been re-seeded. It is also the honest representation of what happens,
+ * because the assistant genuinely sees it: the line is part of the prompt, so a model asked to
+ * "put this on the start screen" can tell that a "this" was supplied.
+ *
+ * Both halves live here rather than one in the client and one in the action, because a marker
+ * written by one and parsed by the other is a contract whether or not anybody writes it down.
+ */
+export const ATTACHED_IMAGE_MARKER = '[attached image]';
+
+/** The message with the attachment appended, in the form {@link attachedImageUrl} reads back. */
+export function withAttachedImage(message: string, url: string): string {
+  return `${message}\n\n${ATTACHED_IMAGE_MARKER} ${url.trim()}`;
+}
+
+/**
+ * The picture attached to this message, if there is one and it is safe to store.
+ *
+ * `http`/`https` only. The URL is written to a screen's `MediaURL` and rendered into an `<img>`
+ * on a public page, so a `javascript:` or `data:` value arriving from a client that decided to
+ * write its own marker must not survive this function. It is the same rule the author-facing URL
+ * box applies to a pasted link — this is a second door into the same field, not a looser one.
+ */
+export function attachedImageUrl(message: string | undefined | null): string | undefined {
+  if (!message) {
+    return undefined;
+  }
+  const at = message.lastIndexOf(ATTACHED_IMAGE_MARKER);
+  if (at < 0) {
+    return undefined;
+  }
+  const candidate = message.slice(at + ATTACHED_IMAGE_MARKER.length).trim().split(/\s/)[0];
+  if (!candidate) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? candidate : undefined;
+  } catch {
+    // Not a URL at all — the author typed the words themselves, or the marker was truncated.
+    return undefined;
+  }
 }
 
 /**

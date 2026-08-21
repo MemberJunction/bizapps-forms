@@ -33,6 +33,7 @@ import {
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
+  attachedImageUrl,
   guidOrUndefined,
   planEdits,
   describeFormSnapshot,
@@ -351,6 +352,18 @@ async function addScreenImage(
       `${response.reply}\n\n**I could not add that:** this form has no ${wanted} screen yet. ` +
       'Add one in the builder and ask me again.'
     );
+  }
+
+  // The author supplied the picture themselves. Use it and generate nothing: they have already
+  // chosen, and a model's idea of "a photo of a conference hall" is not an improvement on the
+  // photograph of their own conference hall. It reaches storage the same way any other upload
+  // does — the picker put it there before the message was sent — so this only writes the URL.
+  const attached = attachedImageUrl(getStringParam(params, 'Message'));
+  if (attached) {
+    await applyGeneratedImage(formId, { kind: 'screen', screenId: screen.ID }, attached, contextUser);
+    setOutputParam(params, 'ScreenID', screen.ID);
+    setOutputParam(params, 'ImageURL', attached);
+    return response.reply;
   }
 
   const outcome = await runImageStage(

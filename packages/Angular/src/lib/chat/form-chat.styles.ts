@@ -427,6 +427,148 @@ export const FORM_CHAT_STYLES = /* css */ `
   .fc-composer { transition: none; }
 }
 
+/* --- what a turn says about itself ------------------------------------------------ */
+
+/* The day, once, where it changes. A rule rather than a heading: it separates, it does not
+   introduce. */
+.fc-day {
+  margin: 10px 0 2px;
+  text-align: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mj-text-muted);
+}
+
+/* Quiet enough to ignore while reading, present enough to answer "when was this". */
+.fc-at {
+  margin-left: 6px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--mj-text-muted);
+}
+
+/* What the turn changed, and the way back. Its own row rather than a line in the prose, because
+   it is a fact about the turn rather than something the assistant said. */
+.fc-did {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 0.8125rem;
+  color: var(--mj-text-secondary);
+  background: var(--fc-inset);
+  border: 1px solid var(--fc-hairline);
+  border-radius: var(--mj-radius-md, 8px);
+}
+.fc-did-what { flex: 1 1 auto; min-width: 0; color: var(--mj-text-primary); }
+.fc-did-done { color: var(--mj-text-muted); font-style: italic; }
+
+/* Revealed on hover, present always for a keyboard: an action that only exists on hover is an
+   action a keyboard user does not have. */
+.fc-turn-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.fc-reply:hover .fc-turn-actions,
+.fc-turn-actions:focus-within { opacity: 1; }
+
+.fc-turn-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--mj-text-secondary);
+  background: transparent;
+  border: 1px solid var(--fc-hairline);
+  border-radius: var(--mj-radius-md, 8px);
+  cursor: pointer;
+}
+.fc-turn-btn:hover:not(:disabled) { color: var(--mj-brand-primary); border-color: var(--mj-brand-primary); }
+.fc-turn-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* --- the boundary, in the empty state --------------------------------------------- */
+
+.fc-can {
+  margin: 12px 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--mj-text-muted);
+}
+.fc-can dt { font-weight: 600; color: var(--mj-text-secondary); }
+.fc-can dd { margin: 0; }
+
+/* --- what is going with the next message ------------------------------------------ */
+
+.fc-attached {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 8px;
+  padding: 6px 8px;
+  font-size: 0.75rem;
+  color: var(--mj-text-secondary);
+  background: var(--fc-inset);
+  border: 1px solid var(--fc-hairline);
+  border-radius: var(--mj-radius-md, 8px);
+}
+.fc-attached-thumb {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--fc-hairline);
+}
+.fc-attached-label { flex: 1 1 auto; min-width: 0; }
+
+/* The paperclip sits at the composer's leading edge, where the padding already is. */
+.fc-attach { align-self: flex-end; margin-left: -8px; }
+
+/* --- getting back to the newest turn ---------------------------------------------- */
+
+/* Sits just above the composer, only while the author has scrolled away from the bottom. */
+.fc-jump {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 auto 8px;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--mj-text-secondary);
+  background: var(--mj-bg-surface);
+  border: 1px solid var(--fc-hairline);
+  border-radius: var(--mj-radius-full, 999px);
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--mj-text-primary) 25%, transparent);
+  cursor: pointer;
+}
+.fc-jump:hover { color: var(--mj-brand-primary); border-color: var(--mj-brand-primary); }
+
+/* Sits between the text and the send button, so a long message pushes past it rather than
+   under it. */
+.fc-count {
+  flex: none;
+  align-self: flex-end;
+  padding-bottom: 9px;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--mj-text-muted);
+}
+.fc-count--full { color: var(--mj-status-error-text, var(--mj-text-secondary)); }
+
 /* A textarea that starts one line tall and grows with the message (see fitToDraft).
 
    resize: none because the drag handle would fight the automatic sizing and can pull the box over
@@ -451,7 +593,6 @@ export const FORM_CHAT_STYLES = /* css */ `
 }
 .fc-input::placeholder { color: var(--mj-text-muted); }
 .fc-input:focus { outline: none; }
-.fc-input:disabled { cursor: progress; }
 
 .fc-go {
   flex: none;
@@ -491,7 +632,10 @@ export const FORM_CHAT_STYLES = /* css */ `
   .fc-thread { padding: 14px 12px 16px; }
   .fc-bubble { max-width: 88%; }
   .fc-chip { padding: 10px 14px; font-size: 0.875rem; }
-  .fc-go, .fc-icon-btn { width: 40px; height: 40px; }
+  /* 44px on a touch screen — the number the respondent widget holds itself to, and the reason is
+     the same here: the desktop sizes are drawn for a cursor with a pixel of precision, and a thumb
+     has none. Was 40; the four pixels are free and the argument is not worth having twice. */
+  .fc-go, .fc-icon-btn { width: 44px; height: 44px; }
   .fc-composer { margin: 0 10px 10px; padding: 4px 4px 4px 14px; }
 }
 `;

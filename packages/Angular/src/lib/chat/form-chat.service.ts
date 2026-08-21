@@ -1,11 +1,13 @@
 import { Injectable, signal } from '@angular/core';
 import { Metadata, RunView, LogError } from '@memberjunction/core';
+import type { MJConversationEntity } from '@memberjunction/core-entities';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import type { ActionParam } from '@memberjunction/actions-base';
 import {
   guidOrUndefined,
   isGuid,
   type FormChatTurn,
+  type FormChatTurnChange,
   type GenerationProgress,
 } from '@mj-biz-apps/forms-entities';
 import { readActionOutputString } from '../shared/action-output';
@@ -33,7 +35,12 @@ export interface ChatSendResult {
   action: string;
   /** Set when the turn created a form, so the host can open it. */
   createdFormId: string | null;
-  /** Set when the turn restyled the open form, so the host can reload its style. */
+  /**
+   * The style row this turn wrote, so the host can reload it and the author can undo it.
+   *
+   * Set by a `restyle` and, since `setLayout` writes the same `CSSVariables` field on the same
+   * row, by a layout edit as well — in which case `changedFormId` is set too and both fire.
+   */
   restyledStyleId: string | null;
   /** Set when the turn put a picture on a screen, so the host can reload what it is showing. */
   imagedScreenId: string | null;
@@ -45,6 +52,11 @@ export interface ChatSendResult {
 }
 
 const CHAT_ACTION = 'Forms: Chat';
+/** What the author sees when they stop waiting; the work itself is already with the server. */
+const STOPPED_WAITING =
+  'Stopped waiting. The server may still finish this — the reply will appear here if it does.';
+/** Marks a reply that arrived after the author stopped waiting for it. */
+const STOPPED_PREFIX = '(finished after you stopped waiting)\n\n';
 const ENTITY = {
   conversation: 'MJ: Conversations',
   detail: 'MJ: Conversation Details',
@@ -80,6 +92,12 @@ export class FormChatService {
    * with database rows that did not include it yet. The reply then landed under no question.
    */
   private loadToken = 0;
+
+  /**
+   * Which send is the current one. Bumped by {@link stop}, so a reply that arrives after the
+   * author gave up can tell that it did.
+   */
+  private sendToken = 0;
 
   private readonly _busy = signal(false);
   /** True while a message is in flight, so the input can disable and show a pending state. */
@@ -173,18 +191,109 @@ export class FormChatService {
       };
     }
     this._turns.update((t) => [...t, { role: 'User', message: trimmed, at: new Date() }]);
+    const sendToken = ++this.sendToken;
     this._busy.set(true);
     this._progress.set(null);
     try {
       const result = await this.runChatAction(trimmed, formId);
+      // A stopped turn is not a silent one. The reply still lands — the server finished the work
+      // whatever the author's patience did — but it is marked so the thread does not read as if
+      // the wait had simply been shorter than it was.
+      const stopped = sendToken !== this.sendToken;
       this._turns.update((t) => [
         ...t,
-        { role: result.ok ? 'AI' : 'Error', message: result.reply, at: new Date() },
+        {
+          role: result.ok ? 'AI' : 'Error',
+          message: stopped ? `${STOPPED_PREFIX}${result.reply}` : result.reply,
+          at: new Date(),
+          // Only a failure carries its own retry; a reply has nothing to retry.
+          ...(result.ok ? {} : { retryOf: trimmed }),
+        },
       ]);
       return result;
     } finally {
-      this._busy.set(false);
-      this._progress.set(null);
+      if (sendToken === this.sendToken) {
+        this._busy.set(false);
+        this._progress.set(null);
+      }
+    }
+  }
+
+  /**
+   * Record that the author took back what a turn changed, so the offer is not made twice.
+   *
+   * The turn keeps its summary — "Accent, Page background" is still what happened, and a thread
+   * that erases its own history the moment something is reversed is harder to follow, not easier.
+   */
+  public markUndone(index: number): void {
+    this._turns.update((turns) =>
+      turns.map((turn, i) =>
+        i === index && turn.change ? { ...turn, change: { ...turn.change, undone: true } } : turn,
+      ),
+    );
+  }
+
+  /** Attach what a turn changed to the newest turn, once it has been read back. */
+  public attachChange(change: FormChatTurnChange): void {
+    this._turns.update((turns) =>
+      turns.map((turn, i) => (i === turns.length - 1 ? { ...turn, change } : turn)),
+    );
+  }
+
+  /**
+   * Stop waiting for the turn in flight.
+   *
+   * It stops the WAIT, not the work: `GraphQLActionClient.RunAction` takes no abort signal, so the
+   * request is already with the server and the server will finish it. Pretending otherwise would
+   * be the worse lie — the form would change under an author who believed they had cancelled. So
+   * the composer is handed back immediately, and when the reply does arrive it is appended with
+   * {@link STOPPED_PREFIX} in front of it and the host still refreshes, which keeps what is on
+   * screen equal to what is in the database.
+   */
+  public stop(): void {
+    if (!this._busy()) {
+      return;
+    }
+    this.sendToken++;
+    this._busy.set(false);
+    this._progress.set(null);
+    this._turns.update((t) => [
+      ...t,
+      { role: 'AI', message: STOPPED_WAITING, at: new Date() },
+    ]);
+  }
+
+  /**
+   * Put this thread away and start an empty one.
+   *
+   * Archived rather than deleted, and archived server-side rather than only cleared here: the
+   * thread is loaded back out of `MJ: Conversations` on every mount, so a purely local clear would
+   * reappear in full the next time the panel opened. `IsArchived` is already what the load filter
+   * excludes, which is why nothing else has to change for this to work.
+   */
+  public async startNewThread(formId: string | null): Promise<boolean> {
+    const conversationId = guidOrUndefined(await this.findConversation(formId));
+    if (!conversationId) {
+      this._turns.set([]);
+      return true;
+    }
+    try {
+      const md = new Metadata();
+      const conversation = await md.GetEntityObject<MJConversationEntity>(ENTITY.conversation);
+      if (!(await conversation.Load(conversationId))) {
+        LogError(`[Forms chat] Could not load conversation ${conversationId} to archive it.`);
+        return false;
+      }
+      conversation.IsArchived = true;
+      if (!(await conversation.Save())) {
+        LogError(`[Forms chat] Could not archive the thread: ${conversation.LatestResult?.CompleteMessage}`);
+        return false;
+      }
+      this._turns.set([]);
+      return true;
+    } catch (error) {
+      LogError(`[Forms chat] Could not archive the thread: ${asText(error)}`);
+      return false;
     }
   }
 

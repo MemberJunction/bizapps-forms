@@ -12,8 +12,18 @@ import {
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { isThreadWarm, type GenerateFormStage } from '@mj-biz-apps/forms-entities';
-import { FormChatService } from './form-chat.service';
+import { LogError } from '@memberjunction/core';
+import { ImagePickerDialogComponent } from '../builder/image-picker-dialog.component';
+import {
+  ASSISTANT_CAN,
+  ASSISTANT_CANNOT,
+  isThreadWarm,
+  withAttachedImage,
+  type FormChatTurn,
+  type GenerateFormStage,
+} from '@mj-biz-apps/forms-entities';
+import { FormChatService, type ChatSendResult } from './form-chat.service';
+import { TurnChangesService } from './turn-changes.service';
 import { parseChatMarkdown } from './chat-markdown';
 import { FORM_CHAT_STYLES } from './form-chat.styles';
 import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
@@ -51,7 +61,8 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
   selector: 'mjf-form-chat',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule],
+  imports: [FormsModule, ImagePickerDialogComponent],
+  providers: [TurnChangesService],
   styles: [FORM_CHAT_STYLES],
   template: `
     <div class="fc">
@@ -64,15 +75,20 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
         [class.fc-pill--covered]="expanded()"
         [class.fc-pill--drafting]="!!draft.trim()"
         [attr.aria-expanded]="expanded()"
-        [attr.aria-label]="placeholder() + ' — open the form assistant'"
+        [attr.aria-controls]="panelId"
+        [attr.aria-label]="pillLabel()"
         (click)="expand()"
       >
         <span class="fc-mark" aria-hidden="true">
           <i class="fa-solid fa-wand-magic-sparkles"></i>
         </span>
         <span class="fc-pill-text">{{ draft.trim() || placeholder() }}</span>
+        <!-- aria-hidden, and the count said in the button's own label instead: an aria-label on a
+             <span> is on an element with no role and is ignored, and the button's label replaces
+             its descendants in the name computation regardless. The badge was therefore visible
+             only to people who could see it — which is not who it is for. -->
         @if (unread()) {
-          <span class="fc-unread" aria-label="New reply">1</span>
+          <span class="fc-unread" aria-hidden="true">1</span>
         }
         <span class="fc-go fc-go--ghost" aria-hidden="true">
           <i class="fa-solid fa-arrow-up"></i>
@@ -82,6 +98,7 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
       <div
         class="fc-panel"
         #panel
+        [id]="panelId"
         popover="auto"
         role="dialog"
         aria-label="Form assistant"
@@ -94,6 +111,20 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
           </span>
           <h2 class="fc-title">Form assistant</h2>
           <span class="fc-badge">Beta</span>
+          <!-- Put the thread away rather than delete it: it is archived, so it is still there for
+               anyone who needs to know what was asked, just not in front of the author. -->
+          @if (chat.turns().length > 0) {
+            <button
+              type="button"
+              class="fc-icon-btn"
+              [disabled]="chat.busy()"
+              (click)="newThread()"
+              aria-label="Start a new conversation"
+              title="New conversation"
+            >
+              <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+            </button>
+          }
           <button
             type="button"
             class="fc-icon-btn"
@@ -112,6 +143,7 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
           role="log"
           aria-live="polite"
           aria-label="Conversation"
+          (scroll)="onThreadScroll()"
         >
           @if (chat.turns().length === 0) {
             <div class="fc-blank">
@@ -124,12 +156,28 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
                   </button>
                 }
               </div>
+              <!-- The boundary, stated before it is hit. An author who asks for a share link and
+                   is told "I can't do that yet" has spent a turn finding out something the panel
+                   could have said for free — and every dead end costs a little more trust than the
+                   one before it. -->
+              <dl class="fc-can">
+                <dt>I can</dt>
+                <dd>{{ canDo }}</dd>
+                <dt>I can't</dt>
+                <dd>{{ cannotDo }}</dd>
+              </dl>
             </div>
           }
           @for (turn of chat.turns(); track $index) {
+            <!-- A day only, and only when it changes. A thread here spans weeks — the panel
+                 reopens on a form months later — so "was this yesterday or in March" is a real
+                 question, while a date on every turn is noise nobody reads. -->
+            @if (dayBreakBefore($index); as day) {
+              <p class="fc-day" role="separator">{{ day }}</p>
+            }
             @if (turn.role === 'User') {
               <div class="fc-said">
-                <span class="fc-who fc-who--mine">You</span>
+                <span class="fc-who fc-who--mine">You <time class="fc-at">{{ timeOf(turn) }}</time></span>
                 <div class="fc-bubble">{{ turn.message }}</div>
               </div>
             } @else {
@@ -142,7 +190,10 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
                   ></i>
                 </span>
                 <div class="fc-prose">
-                  <span class="fc-who">{{ turn.role === 'Error' ? 'Form assistant — failed' : 'Form assistant' }}</span>
+                  <span class="fc-who"
+                    >{{ turn.role === 'Error' ? 'Form assistant — failed' : 'Form assistant' }}
+                    <time class="fc-at">{{ timeOf(turn) }}</time></span
+                  >
                   @for (block of blocksFor(turn.message); track $index) {
                     @if (block.kind === 'paragraph') {
                       <p class="fc-p">
@@ -166,6 +217,42 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
                       </ul>
                     }
                   }
+
+                  <!--
+                    What the turn did, and the way back out of it. Read from the database's own
+                    record of the change rather than from the reply above it, so "Accent, Page
+                    background" is what was written and not what was claimed.
+                  -->
+                  @if (turn.change; as change) {
+                    <div class="fc-did">
+                      <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+                      <span class="fc-did-what">{{ change.summary }}</span>
+                      @if (change.undone) {
+                        <span class="fc-did-done">Undone</span>
+                      } @else {
+                        <button type="button" class="fc-turn-btn" [disabled]="undoing()" (click)="undo($index)">
+                          Undo
+                        </button>
+                      }
+                    </div>
+                  }
+
+                  <div class="fc-turn-actions">
+                    @if (turn.retryOf; as failed) {
+                      <button type="button" class="fc-turn-btn" [disabled]="chat.busy()" (click)="retry(failed)">
+                        <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Try again
+                      </button>
+                    }
+                    <button
+                      type="button"
+                      class="fc-turn-btn"
+                      (click)="copy($index, turn.message)"
+                      [attr.aria-label]="'Copy this reply'"
+                    >
+                      <i class="fa-solid" [class.fa-copy]="copied() !== $index" [class.fa-check]="copied() === $index" aria-hidden="true"></i>
+                      {{ copied() === $index ? 'Copied' : 'Copy' }}
+                    </button>
+                  </div>
                 </div>
               </div>
             }
@@ -195,6 +282,7 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
                   <span class="fc-working-line">{{ p.label }}</span>
                   <span
                     class="fc-meter"
+                    [attr.aria-label]="'Build progress'"
                     role="progressbar"
                     [attr.aria-valuenow]="p.percent"
                     [attr.aria-valuetext]="p.label"
@@ -212,7 +300,41 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
           }
         </div>
 
+        <!-- Only when the author has scrolled away from the newest turn. It is the other half of
+             not auto-scrolling: reading is never interrupted, and getting back is one click. -->
+        @if (!atNewest()) {
+          <button type="button" class="fc-jump" (click)="jumpToNewest()">
+            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i> Latest
+          </button>
+        }
+
+        <!-- What is going with the next message. Shown above the box rather than inside it so a
+             long message does not push it out of sight. -->
+        @if (attached(); as image) {
+          <div class="fc-attached">
+            <img class="fc-attached-thumb" [src]="image" alt="" />
+            <span class="fc-attached-label">Picture attached</span>
+            <button type="button" class="fc-turn-btn" (click)="clearAttachment()" aria-label="Remove the attached picture">
+              Remove
+            </button>
+          </div>
+        }
+
         <div class="fc-composer">
+          <!-- Only where a picture has somewhere to go: on the forms list there is no form yet,
+               so there is no screen to put one on. -->
+          @if (formId()) {
+            <button
+              type="button"
+              class="fc-go fc-go--ghost fc-attach"
+              [disabled]="chat.busy()"
+              (click)="picking = true"
+              aria-label="Attach a picture"
+              title="Attach a picture"
+            >
+              <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+            </button>
+          }
           <!--
             A textarea, not a one-line input, so a message can have more than one line in it.
             Enter still sends — that is the gesture people arrive with — and Shift+Enter breaks the
@@ -232,25 +354,55 @@ import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
             autocomplete="off"
             [placeholder]="placeholder()"
             [(ngModel)]="draft"
-            [disabled]="chat.busy()"
+            [maxlength]="MAX_MESSAGE"
             (input)="fitToDraft()"
             (keydown.enter)="onEnter($event)"
             (keydown.escape)="collapse()"
             [attr.aria-label]="placeholder()"
           ></textarea>
-          <button
-            type="button"
-            class="fc-go fc-go--solid"
-            [disabled]="!draft.trim() || chat.busy()"
-            (click)="send()"
-            aria-label="Send"
-            title="Send"
-          >
-            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-          </button>
+          <!-- Silent until it is nearly relevant. A counter on an empty box is a rule being
+               waved at someone who has not broken it. -->
+          @if (draft.length >= COUNTER_FROM) {
+            <span class="fc-count" [class.fc-count--full]="draft.length >= MAX_MESSAGE" aria-live="polite">
+              {{ draft.length }}/{{ MAX_MESSAGE }}
+            </span>
+          }
+          <!-- One button, two jobs: while a turn is in flight it stops waiting for it. Send and
+               Stop are never both available, so there is never a question of which one acts. -->
+          @if (chat.busy()) {
+            <button
+              type="button"
+              class="fc-go fc-go--solid"
+              (click)="chat.stop()"
+              aria-label="Stop waiting for the reply"
+              title="Stop"
+            >
+              <i class="fa-solid fa-stop" aria-hidden="true"></i>
+            </button>
+          } @else {
+            <button
+              type="button"
+              class="fc-go fc-go--solid"
+              [disabled]="!draft.trim()"
+              (click)="send()"
+              aria-label="Send"
+              title="Send"
+            >
+              <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+            </button>
+          }
         </div>
       </div>
     </div>
+
+    @if (picking) {
+      <mjf-image-picker-dialog
+        subject="a picture for this form"
+        [formId]="formId() ?? ''"
+        (picked)="onPicked($event)"
+        (closed)="picking = false"
+      />
+    }
   `,
 })
 export class FormChatComponent {
@@ -334,6 +486,70 @@ export class FormChatComponent {
       : ['A contact form', 'An event RSVP with dietary needs', 'A customer feedback survey'],
   );
 
+  /** Longest message the box accepts. Six or seven sentences — past that it is a brief, not a chat. */
+  protected readonly MAX_MESSAGE = 2000;
+  /** Where the counter starts showing: close enough to the cap for it to be information. */
+  protected readonly COUNTER_FROM = 1600;
+
+  /**
+   * What this assistant can and cannot do, said before the author finds out by being refused.
+   *
+   * From the contract, not written here: the boundary is a property of the assistant, not of this
+   * panel, and it was stale within a day of being stated in two places. The prompt template holds
+   * the third copy and no import can reach it — see the note in `form-chat.ts`.
+   */
+  protected readonly canDo = ASSISTANT_CAN;
+  protected readonly cannotDo = ASSISTANT_CANNOT;
+
+  /** Ties the pill's `aria-controls` to the panel it opens. */
+  protected readonly panelId = `fc-panel-${nextPanelId++}`;
+
+  /**
+   * The pill's accessible name, carrying the unread state.
+   *
+   * The badge cannot say it — a button's own label replaces its descendants when a screen reader
+   * computes the name — so the one place it can be said is here.
+   */
+  protected readonly pillLabel = computed(() =>
+    this.unread()
+      ? `${this.placeholder()} — open the form assistant, 1 new reply`
+      : `${this.placeholder()} — open the form assistant`,
+  );
+
+  /** Open while the author is choosing a picture. */
+  protected picking = false;
+
+  /**
+   * The picture that will travel with the next message, if any.
+   *
+   * It goes out INSIDE the message ({@link withAttachedImage}) rather than as a new action
+   * parameter, because a parameter is metadata and metadata ships in a migration — this works on
+   * an instance that has not been re-seeded, and the assistant can see the attachment for itself.
+   */
+  private readonly _attached = signal<string | null>(null);
+  protected readonly attached = this._attached.asReadonly();
+
+  /** Which reply's Copy button has just been pressed, so it can say so for a moment. */
+  private readonly _copied = signal<number | null>(null);
+  protected readonly copied = this._copied.asReadonly();
+  private copiedTimer?: ReturnType<typeof setTimeout>;
+
+  /** True while an undo is being written, so the button cannot be pressed twice. */
+  private readonly _undoing = signal(false);
+  protected readonly undoing = this._undoing.asReadonly();
+
+  /**
+   * Whether the thread is scrolled to the newest turn.
+   *
+   * It gates the auto-scroll. Following the newest turn is right when the author is AT the newest
+   * turn and an interruption when they are not: scrolling up to re-read what was said two turns
+   * ago during a fifty-second build used to be undone by the next progress tick, once a second.
+   */
+  private readonly _atNewest = signal(true);
+  protected readonly atNewest = this._atNewest.asReadonly();
+
+  private readonly changes = inject(TurnChangesService);
+
   constructor() {
     // Re-load the thread whenever the host points us at a different form. Reading history from the
     // database rather than carrying it means switching forms shows that form's conversation.
@@ -348,7 +564,9 @@ export class FormChatComponent {
       this.chat.turns();
       this.chat.busy();
       this.chat.progress();
-      requestAnimationFrame(() => this.scrollToNewest());
+      if (this._atNewest()) {
+        requestAnimationFrame(() => this.scrollToNewest());
+      }
     });
 
     // The panel is positioned from the pill's box, so anything that moves the pill has to move the
@@ -393,7 +611,21 @@ export class FormChatComponent {
     return parseChatMarkdown(message);
   }
 
+  /** Open the panel because the author asked for it, and put them in the box to type. */
   protected expand(): void {
+    this.open(true);
+  }
+
+  /**
+   * Open the panel, taking the caret only when the author asked for it.
+   *
+   * The distinction is the whole of WCAG 3.2.1: this component also opens itself when it finds a
+   * thread that is still warm, and that happens a network round-trip after the form loaded — long
+   * enough that the author has started typing the form's title. Moving focus into the composer
+   * then takes the rest of their sentence with it. Opening uninvited is fine; the popover is
+   * non-modal and sits beside what they are doing. Grabbing the caret uninvited is not.
+   */
+  private open(takeFocus: boolean): void {
     const panel = this.panel().nativeElement;
     if (!panel.matches(':popover-open')) {
       panel.showPopover();
@@ -404,7 +636,9 @@ export class FormChatComponent {
     // After layout, not merely after the microtask queue: the panel has just been moved into the
     // top layer and given its size, and scrolling a box that has not been laid out does nothing.
     requestAnimationFrame(() => {
-      this.box()?.nativeElement.focus();
+      if (takeFocus) {
+        this.box()?.nativeElement.focus();
+      }
       this.scrollToNewest();
     });
   }
@@ -417,7 +651,12 @@ export class FormChatComponent {
     this._expanded.set(false);
     // Focus returns to the control that opened it — a keyboard user who closes the panel would
     // otherwise be dropped at the top of the document.
-    this.anchor().nativeElement.focus();
+    //
+    // After the frame, for the same reason expand() defers: the pill is `visibility: hidden` while
+    // `expanded()` is true, a hidden element cannot take focus, and OnPush has not yet removed the
+    // class at the moment this line runs. Focusing here directly did nothing at all — the comment
+    // above described a behaviour the code was not producing.
+    requestAnimationFrame(() => this.anchor().nativeElement.focus());
   }
 
   /**
@@ -449,6 +688,13 @@ export class FormChatComponent {
    * the newline as well and leave it sitting in a box that has just been emptied and sent.
    */
   protected onEnter(event: Event): void {
+    // Not while an IME is mid-composition. A Japanese, Chinese or Korean author presses Enter to
+    // CONFIRM the candidate the IME is offering; that keypress is not a send, and treating it as
+    // one fires off a half-finished word and empties the box under them. `isComposing` is true for
+    // exactly that keystroke.
+    if (event instanceof KeyboardEvent && event.isComposing) {
+      return;
+    }
     event.preventDefault();
     void this.send();
   }
@@ -474,15 +720,137 @@ export class FormChatComponent {
     box.style.height = `${Math.min(box.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
   }
 
-  protected async send(): Promise<void> {
-    const message = this.draft.trim();
-    if (!message || this.chat.busy()) {
+  /** Remember whether the author is at the newest turn, which is what gates the auto-scroll. */
+  protected onThreadScroll(): void {
+    const el = this.thread()?.nativeElement;
+    if (el) {
+      this._atNewest.set(el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX);
+    }
+  }
+
+  protected jumpToNewest(): void {
+    this._atNewest.set(true);
+    this.scrollToNewest();
+  }
+
+  /** The time of a turn, or '' for one that predates timestamps being read back. */
+  protected timeOf(turn: FormChatTurn): string {
+    return turn.at ? turn.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  }
+
+  /**
+   * The day to announce before turn `index`, or '' when it falls on the same day as the one
+   * before it. Today and yesterday are named rather than dated — a date is a lookup, a name is not.
+   */
+  protected dayBreakBefore(index: number): string {
+    const turns = this.chat.turns();
+    const at = turns[index]?.at;
+    if (!at) {
+      return '';
+    }
+    const previous = index > 0 ? turns[index - 1]?.at : undefined;
+    if (previous && sameDay(previous, at)) {
+      return '';
+    }
+    const today = new Date();
+    if (sameDay(at, today)) {
+      return 'Today';
+    }
+    const yesterday = new Date(today.getTime() - DAY_MS);
+    return sameDay(at, yesterday)
+      ? 'Yesterday'
+      : at.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  /**
+   * Send a message that failed, again.
+   *
+   * Straight past the draft, not through it: the author may well have started typing something
+   * else while the failure sat there, and a Retry button that silently replaces what is in the box
+   * loses a second message while recovering the first.
+   */
+  protected retry(message: string): void {
+    void this.sendMessage(message, null);
+  }
+
+  protected async copy(index: number, message: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(message);
+    } catch (error) {
+      // Clipboard access is refused in some embeddings and over plain http. Saying nothing would
+      // leave the author believing they had copied it.
+      LogError(`[Forms chat] Copy failed: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
+    this._copied.set(index);
+    clearTimeout(this.copiedTimer);
+    this.copiedTimer = setTimeout(() => this._copied.set(null), COPIED_FOR_MS);
+  }
+
+  /** Put back what the turn at `index` changed, and tell the host to reload what it is showing. */
+  protected async undo(index: number): Promise<void> {
+    const turn = this.chat.turns()[index];
+    const change = turn?.change;
+    if (!change || change.undone || this._undoing()) {
+      return;
+    }
+    this._undoing.set(true);
+    try {
+      if (!(await this.changes.undo(change))) {
+        return;
+      }
+      this.chat.markUndone(index);
+      // The same events the change itself raised: whatever reloaded to show it reloads to unshow it.
+      if (change.kind === 'style') {
+        this.formRestyled.emit(change.recordId);
+      } else {
+        this.formChanged.emit();
+      }
+    } finally {
+      this._undoing.set(false);
+    }
+  }
+
+  protected onPicked(url: string): void {
+    this.picking = false;
+    this._attached.set(url);
+    this.box()?.nativeElement.focus();
+  }
+
+  protected clearAttachment(): void {
+    this._attached.set(null);
+  }
+
+  /** Archive this thread and start an empty one. */
+  protected async newThread(): Promise<void> {
+    await this.chat.startNewThread(this.formId());
+    this._atNewest.set(true);
+    this.box()?.nativeElement.focus();
+  }
+
+  protected async send(): Promise<void> {
+    const typed = this.draft.trim();
+    if (!typed || this.chat.busy()) {
+      return;
+    }
+    const image = this._attached();
     this.draft = '';
+    this._attached.set(null);
     // The box grew with the message; emptying `draft` does not shrink it back on its own.
     this.fitToDraft();
+    await this.sendMessage(typed, image);
+  }
+
+  /** The one path a message takes, whether it was typed, suggested, or retried after a failure. */
+  private async sendMessage(typed: string, image: string | null): Promise<void> {
+    if (this.chat.busy()) {
+      return;
+    }
+    const message = image ? withAttachedImage(typed, image) : typed;
     this.expand();
+    // Noted BEFORE the send: it is the floor for "changed by this turn", and a clock read after a
+    // fifty-second build would exclude the very change it is looking for.
+    const sentAt = new Date();
     const result = await this.chat.send(message, this.formId());
     // An image turn runs for the better part of a minute, and the Build tab's chat is destroyed by
     // the tab switch. `OutputEmitterRef.emit` on a destroyed component DISCARDS the value in
@@ -505,6 +873,38 @@ export class FormChatComponent {
     if (result.openFormId) {
       this.formOpened.emit(result.openFormId);
     }
+    await this.noteWhatChanged(result, sentAt);
+  }
+
+  /**
+   * Read back what the turn actually wrote, and hang it on the reply.
+   *
+   * After the host events, not before: reloading the form is what the author is waiting for, and
+   * this is a second round trip whose only job is to caption a turn that has already landed. A
+   * failure to read it leaves the reply uncaptioned, which is exactly what it was before.
+   */
+  private async noteWhatChanged(result: ChatSendResult, sentAt: Date): Promise<void> {
+    const target = result.restyledStyleId
+      ? ({ kind: 'style', id: result.restyledStyleId } as const)
+      : result.imagedScreenId
+        ? ({ kind: 'image', id: result.imagedScreenId } as const)
+        : undefined;
+    if (!target) {
+      return;
+    }
+    const change = await this.changes.describe(target.kind, target.id, sentAt);
+    if (!change || this.destroyed) {
+      return;
+    }
+    // A `setLayout` arrives as an EDIT, so the same turn may also have added a question or moved a
+    // page — and those are not coming back. Undo writes one field on the style row, which is the
+    // honest whole of what it does; a bare "Undo" sitting under a reply that lists five structural
+    // changes reads as an offer to reverse all five.
+    const scoped =
+      result.changedFormId && target.kind === 'style'
+        ? { ...change, summary: `${change.summary} — undo puts the theme back, not the wording` }
+        : change;
+    this.chat.attachChange(scoped);
   }
 
   /** Load this scope's thread, and open the panel if the author is plainly still in it. */
@@ -516,7 +916,8 @@ export class FormChatComponent {
       return;
     }
     if (isThreadWarm(this.chat.turns(), Date.now())) {
-      this.expand();
+      // Shown, not seized: the author did not ask for this panel, so it does not take their caret.
+      this.open(false);
     }
   }
 
@@ -591,6 +992,22 @@ export class FormChatComponent {
  * is a worse failure than one that scrolls a long message.
  */
 const COMPOSER_MAX_HEIGHT = 160;
+
+/** Distinguishes two chats on one page — the builder mounts one per surface. */
+let nextPanelId = 0;
+
+/** Within this many pixels of the bottom counts as "at the newest turn". */
+const NEAR_BOTTOM_PX = 48;
+/** How long a Copy button says "Copied" before going back to saying what it does. */
+const COPIED_FOR_MS = 1600;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whether two moments fall on the same calendar day, in the reader's own timezone. */
+function sameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  );
+}
 
 /** One stage of a build, as the panel shows it. */
 interface BuildStep {
