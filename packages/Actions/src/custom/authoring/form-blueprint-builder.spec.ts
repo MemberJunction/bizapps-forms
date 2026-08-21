@@ -482,11 +482,19 @@ describe('buildFormFromBlueprint — partial failures', () => {
   it('carries the form id on a failure after the form was created', async () => {
     // Without the id the Draft row is an orphan nobody can find. With it the caller can report a
     // reviewable partial draft, which is the whole point of leaving the row in place.
+    //
+    // The id is read AFTER the rejection, not inside the matcher. Written as
+    // `formId: byEntity(...)[0]?.fields.ID ?? expect.any(String)` the lookup ran while the build
+    // was still in flight — `saved` was empty, the left side was undefined, and the assertion
+    // silently degraded to "any string". Hardcoding a wrong id on every FormPersistError left the
+    // whole suite green, so the contract this test exists for was never checked at all.
     failOn = ENTITY_NAME.question;
-    await expect(buildFormFromBlueprint(blueprint, user)).rejects.toMatchObject({
-      name: 'FormPersistError',
-      formId: byEntity(ENTITY_NAME.form)[0]?.fields.ID ?? expect.any(String),
-    });
+
+    const thrown: unknown = await buildFormFromBlueprint(blueprint, user).catch((e: unknown) => e);
+
+    const createdFormId = byEntity(ENTITY_NAME.form)[0]?.fields.ID;
+    expect(createdFormId, 'the Draft row must exist for its id to be worth carrying').toBeTruthy();
+    expect(thrown).toMatchObject({ name: 'FormPersistError', formId: createdFormId });
   });
 });
 
