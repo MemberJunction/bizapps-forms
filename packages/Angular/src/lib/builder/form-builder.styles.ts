@@ -176,7 +176,14 @@ const LAYOUT_CSS = /* css */ `
 .fb-body { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 340px; min-height: 0; overflow: hidden; }
 .fb-pane { overflow-y: auto; padding: var(--mjf-stack); }
 .fb-pane--left { border-right: 1px solid var(--mjf-rule); background: var(--mj-bg-surface); }
-.fb-pane--center { background: var(--mj-bg-page); padding: var(--mjf-stack) var(--mjf-gutter) 96px; }
+/* No reserved strip at the foot of the canvas. The 96px that used to sit here was meant to keep
+   the sticky chat clear of the last question, but the chat IS the last child — so the padding was
+   dead space BELOW it, and, being part of the pane rather than the canvas, it ended the chat's
+   containing block 96px above the pane's bottom edge. Sticky cannot pin an element past its own
+   containing block, so the chat hung ~96px up with the form scrolling through the gap underneath
+   it, reading as a box floating in the middle of the canvas. Nothing needs reserving: when the
+   author scrolls to the end, the chat is at its static position after the last question. */
+.fb-pane--center { background: var(--mj-bg-page); padding: var(--mjf-stack) var(--mjf-gutter); }
 .fb-pane--right { border-left: 1px solid var(--mjf-rule); background: var(--mj-bg-surface); }
 
 /* ------------------------------------------------------------------- palette */
@@ -638,14 +645,24 @@ const LAYOUT_CSS = /* css */ `
 // of those live in this component's template.
 export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${FORMS_VIZ_CSS}\n${LAYOUT_CSS}
 
-/* The AI surface under the canvas. Sticky so it stays reachable while a long form scrolls, and
-   gradient-backed so the last question does not appear to run into it. */
+/* The canvas column fills its pane even when the form is short, so the auto margin below has
+   free space to push the chat into. */
+.fb-canvas { min-height: 100%; }
+
+/* The AI surface under the canvas, held at the BOTTOM of the pane.
+
+   Sticky keeps it reachable while a long form scrolls past, and gradient-backed so the last
+   question does not appear to run into it — but sticky does nothing until the element would
+   otherwise leave the scrollport, so on a two-question form it sat wherever the list ended,
+   floating in the middle of the canvas. margin-top: auto is what puts it at the bottom in that
+   case: the canvas is a flex column, so the auto margin absorbs the leftover height. Same pair as
+   .home-chat on the forms list, for the same reason. */
 .fb-chat {
   position: sticky;
   bottom: 0;
   z-index: 4;
   padding: 16px 0 12px;
-  margin-top: 8px;
+  margin-top: auto;
   background: linear-gradient(to top, var(--mj-bg-page, var(--mj-bg-surface)) 72%, transparent);
 }
 `;

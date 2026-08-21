@@ -16,6 +16,7 @@ import { isThreadWarm, type GenerateFormStage } from '@mj-biz-apps/forms-entitie
 import { FormChatService } from './form-chat.service';
 import { parseChatMarkdown } from './chat-markdown';
 import { FORM_CHAT_STYLES } from './form-chat.styles';
+import { PHONE_WIDTH, ownerArea, panelGeometry } from './panel-geometry';
 
 /**
  * "Chat to create" — the one way AI authoring is reached.
@@ -26,12 +27,15 @@ import { FORM_CHAT_STYLES } from './form-chat.styles';
  * remembers what you said is a different affordance — the second message ("make it warmer", "what
  * goes with navy?") is the one the old surface could not accept at all.
  *
- * ── THE PANEL IS IN THE TOP LAYER, NOT IN THE HOST'S BOX. ────────────────────────────────────
- * It opens as a popover, positioned over the pill it grew from. That is not decoration: all three
- * hosts sit inside `overflow: hidden` containers — the Design tab's rail is 340px wide and clips
- * everything — so a panel drawn in normal flow is either cropped or forced to be as narrow as its
- * narrowest home. The top layer escapes every ancestor's clipping and stacking context at once,
- * which is the only reason one component can be the same size in all three places.
+ * ── THE PANEL IS IN THE TOP LAYER, BUT IT STILL BELONGS TO ITS PANE. ────────────────────────
+ * It opens as a popover, positioned over the pill it grew from. The top layer is what lets it
+ * paint over the panes around it — all three hosts sit inside clipping containers, so a panel in
+ * normal flow would be cropped by its own rail — but escaping the clip is NOT permission to
+ * ignore where it came from. {@link ownerArea} measures the pane holding the pill and the panel
+ * is sized and placed inside that box, so it reads as that pane opening up rather than as a
+ * dialog that happens to have been launched from it. The Design rail is where the difference is
+ * unmissable: 380px of controls beside a live preview, and a viewport-sized panel lands straight
+ * across the preview the author opened it to talk about.
  *
  * The panel covers the pill and carries its own composer in the same spot, so the box you were
  * typing in stays where your eyes already are and the conversation grows upward out of it.
@@ -209,19 +213,31 @@ import { FORM_CHAT_STYLES } from './form-chat.styles';
         </div>
 
         <div class="fc-composer">
-          <input
+          <!--
+            A textarea, not a one-line input, so a message can have more than one line in it.
+            Enter still sends — that is the gesture people arrive with — and Shift+Enter breaks the
+            line, which an <input> cannot do at all no matter what you bind to it.
+
+            The (keydown.enter) binding fires only for an UNMODIFIED Enter: Angular builds the key
+            name from
+            the event's modifiers, so a shifted press does not match this binding and falls through
+            to the browser, which inserts the newline itself. The preventDefault in onEnter is what
+            stops a plain Enter doing both — sending AND leaving a stray newline behind in the box.
+          -->
+          <textarea
             #box
-            type="text"
+            rows="1"
             class="fc-input"
             enterkeyhint="send"
             autocomplete="off"
             [placeholder]="placeholder()"
             [(ngModel)]="draft"
             [disabled]="chat.busy()"
-            (keydown.enter)="send()"
+            (input)="fitToDraft()"
+            (keydown.enter)="onEnter($event)"
             (keydown.escape)="collapse()"
             [attr.aria-label]="placeholder()"
-          />
+          ></textarea>
           <button
             type="button"
             class="fc-go fc-go--solid"
@@ -280,7 +296,7 @@ export class FormChatComponent {
   private readonly anchor = viewChild.required<ElementRef<HTMLElement>>('anchor');
   private readonly panel = viewChild.required<ElementRef<HTMLElement>>('panel');
   private readonly thread = viewChild<ElementRef<HTMLElement>>('thread');
-  private readonly box = viewChild<ElementRef<HTMLInputElement>>('box');
+  private readonly box = viewChild<ElementRef<HTMLTextAreaElement>>('box');
 
   protected readonly placeholder = computed(() =>
     this.formId() ? 'Chat to change' : 'Chat to create',
@@ -425,12 +441,47 @@ export class FormChatComponent {
     void this.send();
   }
 
+  /**
+   * Enter sends; the newline belongs to Shift+Enter.
+   *
+   * Only reached for an unmodified Enter — Angular's key bindings carry the modifier set, so a
+   * shifted press never arrives here. Default prevented, because a textarea would otherwise insert
+   * the newline as well and leave it sitting in a box that has just been emptied and sent.
+   */
+  protected onEnter(event: Event): void {
+    event.preventDefault();
+    void this.send();
+  }
+
+  /**
+   * Grow the box to the message, up to the point where it would eat the thread above it.
+   *
+   * Height is reset to `auto` first: `scrollHeight` is the content's height OR the current height,
+   * whichever is larger, so measuring without the reset makes a box that only ever grows — delete
+   * three lines and it stays three lines tall. Past the cap the textarea scrolls, which is the
+   * right trade for a composer that has to leave the conversation visible.
+   *
+   * Done in script rather than with `field-sizing: content`, which does exactly this natively but
+   * is not in Safari or Firefox yet; a composer that only grows in Chrome is worse than one that
+   * grows everywhere.
+   */
+  protected fitToDraft(): void {
+    const box = this.box()?.nativeElement;
+    if (!box) {
+      return;
+    }
+    box.style.height = 'auto';
+    box.style.height = `${Math.min(box.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
+  }
+
   protected async send(): Promise<void> {
     const message = this.draft.trim();
     if (!message || this.chat.busy()) {
       return;
     }
     this.draft = '';
+    // The box grew with the message; emptying `draft` does not shrink it back on its own.
+    this.fitToDraft();
     this.expand();
     const result = await this.chat.send(message, this.formId());
     // An image turn runs for the better part of a minute, and the Build tab's chat is destroyed by
@@ -477,23 +528,34 @@ export class FormChatComponent {
   }
 
   /**
-   * Put the panel over the pill.
+   * Put the panel over the pill, inside the pane that owns it.
    *
-   * ── AT LEAST AS WIDE AS THE BOX IT GREW OUT OF, AND WIDER ON A BIG SCREEN. ─────────────────
+   * ── IT OPENS WHERE IT LIVES. ───────────────────────────────────────────────────────────────
+   * Every measurement is taken against {@link ownerArea} — the scrolling pane the pill sits in —
+   * and not against the window. The Design tab is what makes the difference visible: its pill is
+   * in a 380px rail beside a live preview, and a panel sized off the viewport opened 1040px wide
+   * and most of the window tall, straight across the preview it was there to help the author
+   * judge. A panel that big is not "the rail's assistant expanded", it is a takeover that happens
+   * to have been launched from the rail. Bounded by the pane, the same component opens as the
+   * rail widening on the forms list, as the canvas column in Build, and as the rail itself in
+   * Design — one rule, three surfaces, no per-surface flag.
+   *
+   * ── AT LEAST AS WIDE AS THE BOX IT GREW OUT OF, AND WIDER WHEN THE PANE ALLOWS. ────────────
    * The pill is the affordance the author clicked; a panel narrower than it reads as a tooltip
    * that happened to appear nearby rather than as that box opening up. So the anchor's width is a
-   * FLOOR, not the answer — the pill itself stops growing at 720px, and on a 2560px display a
-   * 720px panel is a postage stamp in the middle of the screen. Above that the width tracks the
-   * viewport instead, up to a cap where a line of chat stops being comfortable to read back.
+   * FLOOR, not the answer — the pill itself stops growing at 720px, and in a 2000px-wide pane a
+   * 720px panel is a postage stamp. Above that the width tracks the pane, up to a cap where a
+   * line of chat stops being comfortable to read back. In a pane narrower than the readable
+   * minimum, the pane wins: overflowing the rail is the bug being fixed.
    *
    * ── AND TALL ENOUGH TO BE A CONVERSATION. ──────────────────────────────────────────────────
    * Sized to its content, a two-turn thread produced a box a few lines high — fine for a
    * notification and wrong for something you are meant to read and reply in. A floor of two
-   * thirds of the viewport means there is always room, and the empty state centres itself rather
+   * thirds of the pane means there is always room, and the empty state centres itself rather
    * than clinging to the top of an empty box.
    *
-   * Everything is measured against `visualViewport` where it exists: on a phone that is the part
-   * of the page NOT covered by the keyboard, which is the only rectangle the composer may sit in.
+   * The pane is clipped to `visualViewport` where it exists: on a phone that is the part of the
+   * page NOT covered by the keyboard, which is the only rectangle the composer may sit in.
    */
   private positionPanel(): void {
     const panel = this.panel().nativeElement;
@@ -503,38 +565,32 @@ export class FormChatComponent {
     const view = window.visualViewport;
     const viewWidth = view?.width ?? window.innerWidth;
     const viewHeight = view?.height ?? window.innerHeight;
-    const box = this.anchor().nativeElement.getBoundingClientRect();
+    const anchor = this.anchor().nativeElement;
     const phone = viewWidth <= PHONE_WIDTH;
 
-    // --- width: the anchor's, or a share of a big screen, whichever is more generous ----------
-    const widthRoom = viewWidth - PANEL_GUTTER * 2;
-    const roomy = Math.max(box.width, viewWidth * WIDTH_SHARE, PANEL_MIN_WIDTH);
-    const width = phone ? widthRoom : Math.min(roomy, PANEL_MAX_WIDTH, widthRoom);
-    // Centred on the anchor, then pulled back inside the viewport if that pushed it out.
-    const centred = box.left + box.width / 2 - width / 2;
-    const left = Math.max(PANEL_GUTTER, Math.min(centred, viewWidth - width - PANEL_GUTTER));
+    // On a phone the panel is a sheet and the screen IS the pane; anywhere else it belongs to the
+    // pane that holds the pill.
+    const area = phone
+      ? { left: 0, top: 0, right: viewWidth, bottom: viewHeight }
+      : ownerArea(anchor, viewWidth, viewHeight);
+    const at = panelGeometry(anchor.getBoundingClientRect(), area, viewHeight, phone);
 
-    // --- height: at least half the screen, never more than the room above the anchor -----------
-    // The anchor can be scrolled almost out of its own pane — the capture-phase scroll listener
-    // exists precisely because those panes scroll. Clamped so the panel never becomes a sliver or
-    // gets positioned off the top of the window, where the pill is `visibility:hidden` behind it
-    // and the author can see neither and has to guess at Escape.
-    const room = viewHeight - PANEL_GUTTER * 2;
-    const rawBottom = Math.max(PANEL_GUTTER, viewHeight - box.bottom);
-    const bottom = Math.min(rawBottom, Math.max(PANEL_GUTTER, room - PANEL_MIN_HEIGHT));
-    const available = Math.max(PANEL_MIN_HEIGHT, viewHeight - bottom - PANEL_GUTTER);
-    const share = phone ? PHONE_HEIGHT_SHARE : MIN_HEIGHT_SHARE;
-    const minHeight = Math.min(Math.max(PANEL_MIN_HEIGHT, viewHeight * share), available);
-    const maxHeight = Math.min(available, viewHeight * MAX_HEIGHT_SHARE);
-
-    panel.style.left = `${Math.round(left)}px`;
-    panel.style.width = `${Math.round(width)}px`;
-    panel.style.bottom = `${Math.round(bottom)}px`;
-    panel.style.minHeight = `${Math.round(minHeight)}px`;
-    // Never below the floor: a max under the min would collapse the panel on a very short window.
-    panel.style.maxHeight = `${Math.round(Math.max(minHeight, maxHeight))}px`;
+    panel.style.left = `${at.left}px`;
+    panel.style.width = `${at.width}px`;
+    panel.style.bottom = `${at.bottom}px`;
+    panel.style.minHeight = `${at.minHeight}px`;
+    panel.style.maxHeight = `${at.maxHeight}px`;
   }
 }
+
+/**
+ * How tall the composer may grow before it starts scrolling instead, in pixels.
+ *
+ * Roughly six lines. The panel's height is fixed while it is open, so every pixel the composer
+ * takes is one the conversation loses — and a composer that can swallow the thread it belongs to
+ * is a worse failure than one that scrolls a long message.
+ */
+const COMPOSER_MAX_HEIGHT = 160;
 
 /** One stage of a build, as the panel shows it. */
 interface BuildStep {
@@ -557,33 +613,3 @@ const BUILD_STAGES: ReadonlyArray<{ key: GenerateFormStage; label: string }> = [
   { key: 'image', label: 'Making pictures' },
   { key: 'theme', label: 'Choosing colours' },
 ];
-
-/** Breathing room kept between the panel and every viewport edge. */
-const PANEL_GUTTER = 12;
-/** At or below this the panel becomes a full-width sheet. Matches the CSS breakpoint. */
-const PHONE_WIDTH = 640;
-/** Narrower than this and a reply with a bullet list stops being readable. */
-const PANEL_MIN_WIDTH = 380;
-/**
- * How much of a wide screen the panel takes, once the anchor has stopped growing.
- *
- * The pill caps at 720px (`.fc { max-width }`), so past roughly a 1400px viewport the anchor stops
- * being a useful measure and this takes over.
- */
-const WIDTH_SHARE = 0.52;
-/**
- * Widest the panel goes.
- *
- * Not a layout limit but a reading one: much past this a line of chat is long enough that the eye
- * loses the start of the next one, which is the thing every measure of body text is chosen to
- * avoid. The thread's own content stays comfortable because the panel never exceeds it.
- */
-const PANEL_MAX_WIDTH = 1040;
-/** The floor, for a window too short for a share of it to mean anything. */
-const PANEL_MIN_HEIGHT = 320;
-/** Two thirds of the viewport, so a conversation always has room to be one. */
-const MIN_HEIGHT_SHARE = 0.66;
-/** Above this a panel stops reading as a panel and starts reading as a takeover. */
-const MAX_HEIGHT_SHARE = 0.86;
-/** On a phone there is nothing behind worth preserving, so the sheet takes most of the screen. */
-const PHONE_HEIGHT_SHARE = 0.76;

@@ -75,16 +75,34 @@ export const FORM_CHAT_STYLES = /* css */ `
   background: var(--mj-bg-surface);
   border: 1px solid color-mix(in srgb, var(--mj-brand-primary) 30%, var(--mj-border-default));
   border-radius: var(--mj-radius-full, 999px);
-  /* A ring rather than a drop shadow, so nothing shifts when the panel takes its place. */
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--mj-brand-primary) 9%, transparent);
+  /* TWO boxes, drawn as stacked rings rather than as a wrapper element: a soft brand-tinted halo
+     around the pill, then a hairline at its outer edge that closes the halo into a second box.
+     That outer line is what makes the control read as a deliberate object on a large empty page
+     instead of an input someone forgot to fill in.
+
+     Rings rather than a drop shadow or an extra <div>, for the reason the single ring was already
+     here: the expanded panel is positioned from this element's box, so anything that changed its
+     size would move the panel with it. A box-shadow paints outside the border box and takes up no
+     layout at all. */
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--mj-brand-primary) 9%, transparent),
+    0 0 0 7px color-mix(in srgb, var(--mj-brand-primary) 26%, transparent);
   transition: box-shadow 140ms ease, border-color 140ms ease;
 }
-.fc-pill:hover { border-color: var(--mj-brand-primary); }
+/* Hover deepens both rings together, so the halo and its edge stay one object. */
+.fc-pill:hover {
+  border-color: var(--mj-brand-primary);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--mj-brand-primary) 14%, transparent),
+    0 0 0 7px color-mix(in srgb, var(--mj-brand-primary) 40%, transparent);
+}
 .fc-pill--drafting .fc-pill-text { color: var(--mj-text-primary); }
 .fc-pill:focus-visible {
   outline: none;
   border-color: var(--mj-brand-primary);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--mj-brand-primary) 22%, transparent);
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--mj-brand-primary) 22%, transparent),
+    0 0 0 7px var(--mj-brand-primary);
 }
 /* Hidden, not removed: the panel is positioned from this element's box, and the host's layout
    must not jump by the height of a pill every time the assistant is opened. */
@@ -384,16 +402,21 @@ export const FORM_CHAT_STYLES = /* css */ `
 }
 
 /* --- the composer ----------------------------------------------------------------- */
+/* flex-end, and a stated radius rather than the full-round token, because the box inside this one
+   GROWS (see .fc-input). Centred, the send button drifted to the middle of a three-line message
+   instead of staying with the last line the author typed. And a 999px radius is clamped to half
+   the box, so on a tall composer it curves so hard that the first characters of each line sit in
+   the bend — 22px is a capsule at one line and a rounded rectangle at six. */
 .fc-composer {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   margin: 0 14px 14px;
   padding: 5px 5px 5px 16px;
   background: var(--fc-inset);
   border: 1px solid var(--fc-hairline);
-  border-radius: var(--mj-radius-full, 999px);
+  border-radius: 22px;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .fc-composer:focus-within {
@@ -404,6 +427,11 @@ export const FORM_CHAT_STYLES = /* css */ `
   .fc-composer { transition: none; }
 }
 
+/* A textarea that starts one line tall and grows with the message (see fitToDraft).
+
+   resize: none because the drag handle would fight the automatic sizing and can pull the box over
+   the thread above it; the growth is the affordance. overflow-y: auto so a message past the cap
+   scrolls inside the composer instead of pushing it up through the conversation. */
 .fc-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -412,8 +440,14 @@ export const FORM_CHAT_STYLES = /* css */ `
   font: inherit;
   /* 16px exactly: iOS Safari zooms the page for anything smaller the moment it gets focus. */
   font-size: 1rem;
+  line-height: 1.4;
   color: var(--mj-text-primary);
   padding: 7px 0;
+  resize: none;
+  overflow-y: auto;
+  /* Matches rows="1" plus the padding, so the composer is the same height as the input it
+     replaced until the author actually writes a second line. */
+  min-height: 36px;
 }
 .fc-input::placeholder { color: var(--mj-text-muted); }
 .fc-input:focus { outline: none; }
