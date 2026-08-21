@@ -185,7 +185,17 @@ export async function ensureConversation(
     },
     contextUser,
   );
-  if (found.Success && found.Results?.[0]) {
+  if (!found.Success) {
+    // A FAILED read is not an empty one. Falling through to "create" here lost the author's
+    // history mid-conversation with nothing logged, and minted a duplicate Conversation row that
+    // the next lookup then had to disambiguate — two bad outcomes chosen silently on a blip that
+    // is very often transient. Failing the turn is recoverable; forking the thread is not.
+    LogError(
+      `[Forms chat] Could not read the conversation for ${externalId}: ${found.ErrorMessage ?? 'unknown error'}`,
+    );
+    throw new Error('Could not open this conversation just now — try that again in a moment.');
+  }
+  if (found.Results?.[0]) {
     return found.Results[0];
   }
 

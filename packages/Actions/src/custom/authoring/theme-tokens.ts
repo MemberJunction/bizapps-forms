@@ -188,8 +188,13 @@ const NON_TEXT_MIN = 3;
  * accent two entries earlier and passed. Button labels sit on the accent, so the accent is a
  * background, and the invariant below already said backgrounds do not move.
  *
- * With that entry non-repairing, no pair mutates a token another pair reads as a background — so
- * the order of this list stops being load-bearing rather than being load-bearing and undocumented.
+ * With that entry non-repairing, no pair mutates a token another pair reads as a background.
+ *
+ * ORDER IS STILL LOAD-BEARING, and this comment used to claim it was not. Backgrounds do not move,
+ * but the first two entries share a REPAIR TARGET — both write `--mjf-page-ink` — so the later one
+ * silently overwrites the earlier one's result. That is why `enforceReadability` ends with a
+ * verification pass over the finished map instead of trusting what each iteration concluded: the
+ * order still decides which ink you end up with, and the final pass decides what you are TOLD.
  */
 const INK_PAIRS: ReadonlyArray<{
   foreground: ThemeTokenName;
@@ -257,6 +262,27 @@ function enforceReadability(tokens: Record<string, string>): {
       }
     }
     if (contrastRatio(background, repaired) < pair.min) {
+      unreadablePairs.push(name);
+    }
+  }
+
+  // A FINAL PASS OVER THE FINISHED MAP, because a repair is not necessarily still true when the
+  // loop ends. Two pairs share `--mjf-page-ink` as their repair target: the page pair moves it to
+  // suit the page background, then the card pair moves the SAME token back to suit the card, and
+  // the page pair never re-checks. A dark page with the default light card produced exactly that —
+  // ink at 1.05:1 on the page, `unreadablePairs` empty, and the author told the theme applied.
+  //
+  // This does not attempt to satisfy both; one ink cannot serve two backgrounds that far apart,
+  // and inventing a third value is not this gate's job. It reports what the form will actually
+  // render, which is the difference between a hard theme and a lie about an easy one.
+  for (const pair of INK_PAIRS) {
+    const background = parseCssColor(cssVariables[pair.background] ?? '');
+    const foreground = parseCssColor(cssVariables[pair.foreground] ?? '');
+    if (!background || !foreground || contrastRatio(background, foreground) >= pair.min) {
+      continue;
+    }
+    const name = `${pair.foreground} on ${pair.background}`;
+    if (!unreadablePairs.includes(name)) {
       unreadablePairs.push(name);
     }
   }

@@ -35,6 +35,14 @@ const seenFilters: string[] = [];
  * costs money on a long thread.
  */
 const seenViews: Array<{ entity: string; orderBy?: string; maxRows?: number }> = [];
+/**
+ * Entity whose next read reports failure.
+ *
+ * A failed read is NOT an empty read, and the two are only distinguishable if the fake can
+ * produce the first. Without this, "no conversation yet" and "the conversation query broke" look
+ * identical to every test in this file.
+ */
+let viewFailsFor: string | null = null;
 
 function fakeGuid(n: number): string {
   return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -131,6 +139,10 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
         seenFilters.push(params.ExtraFilter);
       }
       seenViews.push({ entity: params.EntityName, orderBy: params.OrderBy, maxRows: params.MaxRows });
+      if (viewFailsFor === params.EntityName) {
+        viewFailsFor = null;
+        return { Success: false, ErrorMessage: 'connection reset', Results: [] };
+      }
       const table = rows.get(params.EntityName) ?? [];
       let matched = table.filter((r) => matchesFilter(r, params.ExtraFilter));
       // ORDER AND LIMIT ARE MODELLED, because a caller that reads the whole table and trims in
@@ -208,6 +220,7 @@ beforeEach(() => {
   rows.clear();
   seenFilters.length = 0;
   seenViews.length = 0;
+  viewFailsFor = null;
   minted = 0;
   resetGeneratedImageStore();
   setChatAssistantModel({ respond: async () => JSON.stringify({ reply: 'ok', action: 'none' }) });
@@ -903,6 +916,23 @@ describe('an action declared without the payload it needs', () => {
     assistant({ reply: 'Navy pairs well with off-white.', action: 'none' });
     const { out } = await turn('what goes with navy?');
     expect(out('Reply')).toBe('Navy pairs well with off-white.');
+  });
+});
+
+describe('a conversation read that fails', () => {
+  it('does not silently start a new thread, losing the one that exists', async () => {
+    // Falling through to "create" on a FAILED read is the worst of both: the author's history
+    // disappears mid-conversation with nothing logged, AND a duplicate Conversation row is minted
+    // that the next lookup has to disambiguate. An empty read means no thread; a failed read means
+    // we do not know.
+    assistant({ reply: 'ok', action: 'none' });
+    viewFailsFor = 'MJ: Conversations';
+
+    // It throws, and `InternalRunAction` turns that into a failed action result for the client.
+    // What this pins is the part that outlives the turn: no thread was forked.
+    await expect(turn('what can you do?')).rejects.toThrow(/could not open this conversation/i);
+
+    expect(saved.filter((r) => r.entity === 'MJ: Conversations')).toHaveLength(0);
   });
 });
 

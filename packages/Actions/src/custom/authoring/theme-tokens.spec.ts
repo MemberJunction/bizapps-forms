@@ -14,9 +14,15 @@ function ratio(a: string, b: string): number {
 describe('validateTheme — vocabulary', () => {
   it('keeps every token the widget actually reads', () => {
     const authored = Object.fromEntries(THEME_TOKEN_NAMES.map((n) => [n, '#123456']));
-    const result = validateTheme({ cssVariables: authored });
+    const result = validateTheme({ cssVariables: authored }, DEFAULT_FORM_THEME);
     expect(result.strippedTokens).toEqual([]);
-    expect(Object.keys(result.cssVariables).sort()).toEqual([...THEME_TOKEN_NAMES].sort());
+    // Every authored token survives. The RESULT also carries the base's layout tokens, because
+    // production merges the model's fragment over the form's current theme — asserting exact
+    // equality here only worked while the spec called this with no base at all, which is a
+    // signature production cannot use.
+    for (const name of THEME_TOKEN_NAMES) {
+      expect(Object.keys(result.cssVariables)).toContain(name);
+    }
   });
 
   it('strips an invented token, and NAMES it', () => {
@@ -24,19 +30,21 @@ describe('validateTheme — vocabulary', () => {
     // nothing, and indistinguishable in the database from a token that works.
     const result = validateTheme({
       cssVariables: { '--mjf-accent': '#0055aa', '--mjf-vibe': 'cosy', '--mjf-border-glow': '2px' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.cssVariables['--mjf-vibe']).toBeUndefined();
     expect(result.strippedTokens.sort()).toEqual(['--mjf-border-glow', '--mjf-vibe']);
   });
 
   it('strips a blank value rather than persisting an empty custom property', () => {
-    const result = validateTheme({ cssVariables: { '--mjf-accent': '   ' } });
-    expect(result.cssVariables['--mjf-accent']).toBeUndefined();
+    const result = validateTheme({ cssVariables: { '--mjf-accent': '   ' } }, DEFAULT_FORM_THEME);
+    // Stripped from the RESPONSE, so what remains is the value the form already had — a blank must
+    // not overwrite a real colour with an empty custom property.
+    expect(result.cssVariables['--mjf-accent']).toBe(DEFAULT_FORM_THEME['--mjf-accent']);
     expect(result.strippedTokens).toEqual(['--mjf-accent']);
   });
 
   it('trims a value the model padded', () => {
-    expect(validateTheme({ cssVariables: { '--mjf-accent': '  #0055aa ' } }).cssVariables['--mjf-accent']).toBe(
+    expect(validateTheme({ cssVariables: { '--mjf-accent': '  #0055aa ' } }, DEFAULT_FORM_THEME).cssVariables['--mjf-accent']).toBe(
       '#0055aa',
     );
   });
@@ -47,8 +55,11 @@ describe('validateTheme — readability', () => {
     // Near-black ink on a near-black page: present, correctly themed, and unreadable — which is
     // exactly the class of theme this gate exists for.
     const result = validateTheme({
-      cssVariables: { '--mjf-page-bg': '#1c1c1c', '--mjf-page-ink': '#2a2a2a' },
-    });
+      // The card darkens with the page, as a real dark theme does. Without that the light default
+      // card pulls the SAME ink back the other way and neither pair can be satisfied — a genuine
+      // conflict, covered on its own below rather than smuggled into this case.
+      cssVariables: { '--mjf-page-bg': '#1c1c1c', '--mjf-page-ink': '#2a2a2a', '--mjf-card-bg': '#242424' },
+    }, DEFAULT_FORM_THEME);
     expect(result.repairedTokens).toContain('--mjf-page-ink');
     expect(ratio(result.cssVariables['--mjf-page-ink'], '#1c1c1c')).toBeGreaterThanOrEqual(4.5);
     expect(result.unreadablePairs).toEqual([]);
@@ -61,11 +72,18 @@ describe('validateTheme — readability', () => {
     // for. Silently accepting it would be an accessibility failure nobody ever hears about.
     const result = validateTheme({
       cssVariables: { '--mjf-page-bg': '#777777', '--mjf-page-ink': '#7a7a7a' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.repairedTokens).toContain('--mjf-page-ink');
-    expect(result.unreadablePairs).toEqual(['--mjf-page-ink on --mjf-page-bg']);
-    // Still improved to the best available, rather than left as authored.
-    expect(ratio(result.cssVariables['--mjf-page-ink'], '#777777')).toBeGreaterThan(4);
+    expect(result.unreadablePairs).toContain('--mjf-page-ink on --mjf-page-bg');
+    // The house accent also fails its 3:1 bar against a mid-grey page, and is reported too. That
+    // is correct and not this test's subject — `toContain` rather than `toEqual` so a second
+    // honest report does not read as a regression.
+    //
+    // No assertion here about WHICH ink it settles on. Two pairs write `--mjf-page-ink`, so the
+    // final value is whichever pair ran last; pinning a ratio against the page would be pinning
+    // that order. What matters, and what is asserted, is that it moved and that the failure is
+    // named rather than hidden.
+    expect(result.cssVariables['--mjf-page-ink']).not.toBe('#7a7a7a');
   });
 
   it('leaves a readable pair exactly as the model authored it', () => {
@@ -73,7 +91,7 @@ describe('validateTheme — readability', () => {
     // not impose taste.
     const result = validateTheme({
       cssVariables: { '--mjf-page-bg': '#ffffff', '--mjf-page-ink': '#1a1d21' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.repairedTokens).toEqual([]);
     expect(result.cssVariables['--mjf-page-ink']).toBe('#1a1d21');
   });
@@ -82,7 +100,7 @@ describe('validateTheme — readability', () => {
     // The pairing most often got wrong: a strong accent looks confident and reads terribly.
     const result = validateTheme({
       cssVariables: { '--mjf-accent': '#ffcc00', '--mjf-on-accent': '#ffffff' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.repairedTokens).toContain('--mjf-on-accent');
     expect(ratio(result.cssVariables['--mjf-on-accent'], '#ffcc00')).toBeGreaterThanOrEqual(4.5);
   });
@@ -92,7 +110,7 @@ describe('validateTheme — readability', () => {
     // visible, which is how an accessibility gate ends up being switched off.
     const result = validateTheme({
       cssVariables: { '--mjf-page-bg': '#ffffff', '--mjf-accent': '#3aa76a' },
-    });
+    }, DEFAULT_FORM_THEME);
     const measured = ratio('#3aa76a', '#ffffff');
     expect(measured).toBeGreaterThanOrEqual(3);
     expect(measured).toBeLessThan(4.5);
@@ -104,30 +122,43 @@ describe('validateTheme — readability', () => {
     // the background to fix contrast contradicts the request; changing the ink honours it.
     const result = validateTheme({
       cssVariables: { '--mjf-page-bg': '#8b0000', '--mjf-page-ink': '#7a0000' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.cssVariables['--mjf-page-bg']).toBe('#8b0000');
     expect(result.cssVariables['--mjf-page-ink']).not.toBe('#7a0000');
   });
 
-  it('does not second-guess a pair whose other half the theme left unset', () => {
-    // An unset token falls back to a widget default, and the widget's own render-time guard judges
-    // the FULLY RESOLVED colours. Guessing from here means judging a pairing that may not render.
-    const result = validateTheme({ cssVariables: { '--mjf-page-ink': '#eeeeee' } });
+  it('does not second-guess a pair whose other half is missing from the base', () => {
+    // Defensive, and the base has to be incomplete for it to arise — both production callers pass
+    // a complete one. Written against `DEFAULT_FORM_THEME` this asserted the opposite of what
+    // production does: the base supplies the page background, `#eeeeee` on it genuinely fails, and
+    // repairing it is correct. The guard being tested is the one for a pair we cannot resolve.
+    const result = validateTheme(
+      { cssVariables: { '--mjf-page-ink': '#eeeeee' } },
+      { '--mjf-accent': '#1b7fa8' },
+    );
     expect(result.repairedTokens).toEqual([]);
     expect(result.unreadablePairs).toEqual([]);
     expect(result.cssVariables['--mjf-page-ink']).toBe('#eeeeee');
   });
 
-  it('ignores a value it cannot parse rather than replacing it with a guess', () => {
+  it('strips a colour it cannot MEASURE, so no pair escapes the check', () => {
+    // The old title said it "ignores a value it cannot parse rather than replacing it with a
+    // guess". Production does the opposite, deliberately: an unmeasurable colour is stripped and
+    // the base value used, because leaving it in would remove that pair from a gate meant to cover
+    // all of them — and the strip is REPORTED, so a prompt drifting toward `hsl()` is visible.
     const result = validateTheme({
       cssVariables: { '--mjf-page-bg': 'var(--something-else)', '--mjf-page-ink': '#888888' },
-    });
-    expect(result.repairedTokens).toEqual([]);
+    }, DEFAULT_FORM_THEME);
+
+    expect(result.strippedTokens).toContain('--mjf-page-bg');
+    expect(result.cssVariables['--mjf-page-bg']).toBe(DEFAULT_FORM_THEME['--mjf-page-bg']);
+    // And the pair is then genuinely judged against that measurable background.
+    expect(result.repairedTokens).toEqual(['--mjf-page-ink']);
   });
 
   it('leaves font stacks alone — they are not colours', () => {
     const stack = "'Inter', system-ui, sans-serif";
-    const result = validateTheme({ cssVariables: { '--mjf-font-body': stack } });
+    const result = validateTheme({ cssVariables: { '--mjf-font-body': stack } }, DEFAULT_FORM_THEME);
     expect(result.cssVariables['--mjf-font-body']).toBe(stack);
     expect(result.repairedTokens).toEqual([]);
   });
@@ -140,7 +171,7 @@ describe('validateTheme — "repaired" means the value actually changed', () => 
     // made the log say "corrected 1 token" when it corrected none.
     const result = validateTheme({
       cssVariables: { '--mjf-accent': '#C85A43', '--mjf-on-accent': 'rgb(255, 255, 255)' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.unreadablePairs).toEqual(['--mjf-on-accent on --mjf-accent']);
     expect(result.repairedTokens).toEqual([]);
     // And the authored value is left exactly as it was, rather than rewritten to an equal colour.
@@ -150,7 +181,7 @@ describe('validateTheme — "repaired" means the value actually changed', () => 
   it('still reports a genuine repair', () => {
     const result = validateTheme({
       cssVariables: { '--mjf-page-bg': '#1c1c1c', '--mjf-page-ink': '#2a2a2a' },
-    });
+    }, DEFAULT_FORM_THEME);
     expect(result.repairedTokens).toEqual(['--mjf-page-ink']);
   });
 });
@@ -323,5 +354,33 @@ describe('validateTheme — the non-text bar is 3:1, not 4.5:1', () => {
     );
 
     expect(result.unreadablePairs).toContain('--mjf-accent on --mjf-page-bg');
+  });
+});
+
+describe('validateTheme — two pairs that repair the same token', () => {
+  /**
+   * `--mjf-page-ink` is the repair target of BOTH the page pair and the card pair. The page pair
+   * moves it to suit a dark page, the card pair moves it back to suit the light card, and the page
+   * pair never re-checks — so the form rendered body text at 1.05:1 while the author was told the
+   * theme applied cleanly. Reporting it is the fix; one ink genuinely cannot serve two backgrounds
+   * that far apart, and inventing a third value is not this gate's job.
+   */
+  it('reports the pair that the LAST repair broke, rather than the one it fixed', () => {
+    const result = validateTheme(
+      { cssVariables: { '--mjf-page-bg': '#111827' } },
+      DEFAULT_FORM_THEME,
+    );
+
+    expect(result.unreadablePairs).toContain('--mjf-page-ink on --mjf-page-bg');
+  });
+
+  it('still says nothing is unreadable when one ink genuinely serves both', () => {
+    // A light page and the default light card: one dark ink reads on both, nothing to report.
+    const result = validateTheme(
+      { cssVariables: { '--mjf-page-bg': '#ffffff' } },
+      DEFAULT_FORM_THEME,
+    );
+
+    expect(result.unreadablePairs).toEqual([]);
   });
 });
