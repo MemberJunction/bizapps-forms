@@ -36,6 +36,17 @@ export function watchGenerationProgress(
   current: () => GenerationProgress | null,
   onProgress: (progress: GenerationProgress) => void,
 ): ProgressSubscription | undefined {
+  /**
+   * The form this watcher has decided its run is about, latched from the first event it sees.
+   *
+   * `sessionId` is per BROWSER SESSION, not per run: it is read once at provider config time and
+   * every surface shares it. So a build started on the forms list and a restyle asked for in
+   * another form's chat subscribe to the same Subject, and without this the second surface
+   * rendered the first one's stages — "Making a picture… 83%" under a question about colours.
+   * `foldProgress` compares nothing, by design; the caller is the only one who knows which run is
+   * its own, and the first event to arrive after subscribing is it.
+   */
+  let ownFormId: string | undefined;
   try {
     return GraphQLDataProvider.Instance.PushStatusUpdates(sessionId).subscribe({
       next: (message: string) => {
@@ -43,6 +54,11 @@ export function watchGenerationProgress(
         if (!event) {
           // Not ours. The channel is shared with every other resolver, so this is the normal case
           // for most messages and deliberately silent.
+          return;
+        }
+        ownFormId ??= event.formId;
+        if (event.formId !== ownFormId) {
+          // Another surface's build, on the shared channel. Not ours to render.
           return;
         }
         onProgress(foldProgress(current() ?? undefined, event));

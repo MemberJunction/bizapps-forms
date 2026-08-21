@@ -243,6 +243,9 @@ export class FormChatComponent {
   private readonly _unread = signal(false);
   protected readonly unread = this._unread.asReadonly();
 
+  /** Set once the component is gone, so nothing awaited across its lifetime writes to a corpse. */
+  private destroyed = false;
+
   private readonly anchor = viewChild.required<ElementRef<HTMLElement>>('anchor');
   private readonly panel = viewChild.required<ElementRef<HTMLElement>>('panel');
   private readonly thread = viewChild<ElementRef<HTMLElement>>('thread');
@@ -305,6 +308,10 @@ export class FormChatComponent {
     // panel with it. Capture-phase scroll because the hosts that place this are themselves inside
     // scrolling panes, and a scroll event on those does not bubble to the window. `visualViewport`
     // is what fires when a mobile keyboard opens — without it the composer sits under the keyboard.
+    inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
+    });
+
     const reposition = (): void => this.positionPanel();
     window.addEventListener('resize', reposition);
     window.addEventListener('scroll', reposition, true);
@@ -378,6 +385,12 @@ export class FormChatComponent {
     this.draft = '';
     this.expand();
     const result = await this.chat.send(message, this.formId());
+    // An image turn runs for the better part of a minute, and the Build tab's chat is destroyed by
+    // the tab switch. `OutputEmitterRef.emit` on a destroyed component DISCARDS the value in
+    // silence, so the picture was written server-side and the host was never told to reload it.
+    if (this.destroyed) {
+      return;
+    }
     if (!this.panel().nativeElement.matches(':popover-open')) {
       this._unread.set(true);
     }
@@ -395,6 +408,11 @@ export class FormChatComponent {
   /** Load this scope's thread, and open the panel if the author is plainly still in it. */
   private async showThreadFor(formId: string | null): Promise<void> {
     await this.chat.load(formId);
+    // `viewChild.required` hands back a detached ElementRef after destroy, and `showPopover()` on
+    // a disconnected node throws InvalidStateError as an unhandled rejection.
+    if (this.destroyed) {
+      return;
+    }
     if (isThreadWarm(this.chat.turns(), Date.now())) {
       this.expand();
     }
@@ -438,16 +456,22 @@ export class FormChatComponent {
     const phone = viewWidth <= PHONE_WIDTH;
 
     // --- width: the anchor's, or a share of a big screen, whichever is more generous ----------
-    const room = viewWidth - PANEL_GUTTER * 2;
+    const widthRoom = viewWidth - PANEL_GUTTER * 2;
     const roomy = Math.max(box.width, viewWidth * WIDTH_SHARE, PANEL_MIN_WIDTH);
-    const width = phone ? room : Math.min(roomy, PANEL_MAX_WIDTH, room);
+    const width = phone ? widthRoom : Math.min(roomy, PANEL_MAX_WIDTH, widthRoom);
     // Centred on the anchor, then pulled back inside the viewport if that pushed it out.
     const centred = box.left + box.width / 2 - width / 2;
-    const left = Math.min(Math.max(centred, PANEL_GUTTER), viewWidth - width - PANEL_GUTTER);
+    const left = Math.max(PANEL_GUTTER, Math.min(centred, viewWidth - width - PANEL_GUTTER));
 
     // --- height: at least half the screen, never more than the room above the anchor -----------
-    const bottom = Math.max(PANEL_GUTTER, viewHeight - box.bottom);
-    const available = viewHeight - bottom - PANEL_GUTTER;
+    // The anchor can be scrolled almost out of its own pane — the capture-phase scroll listener
+    // exists precisely because those panes scroll. Clamped so the panel never becomes a sliver or
+    // gets positioned off the top of the window, where the pill is `visibility:hidden` behind it
+    // and the author can see neither and has to guess at Escape.
+    const room = viewHeight - PANEL_GUTTER * 2;
+    const rawBottom = Math.max(PANEL_GUTTER, viewHeight - box.bottom);
+    const bottom = Math.min(rawBottom, Math.max(PANEL_GUTTER, room - PANEL_MIN_HEIGHT));
+    const available = Math.max(PANEL_MIN_HEIGHT, viewHeight - bottom - PANEL_GUTTER);
     const share = phone ? PHONE_HEIGHT_SHARE : MIN_HEIGHT_SHARE;
     const minHeight = Math.min(Math.max(PANEL_MIN_HEIGHT, viewHeight * share), available);
     const maxHeight = Math.min(available, viewHeight * MAX_HEIGHT_SHARE);
