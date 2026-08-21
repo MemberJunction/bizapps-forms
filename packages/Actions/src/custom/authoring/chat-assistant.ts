@@ -284,11 +284,27 @@ export async function appendTurn(
 }
 
 /**
+ * One assistant turn, and whether the thread already holds a record of it.
+ *
+ * `alreadyRecorded` is true only on the failure path, where an `Error` turn was written with the
+ * detail. Everywhere else the caller records the FINAL reply — the model's own is written before
+ * anything is attempted and is optimistic by construction.
+ */
+export interface AssistantTurn {
+  response: FormChatResponse;
+  alreadyRecorded: boolean;
+}
+
+/**
  * Ask the assistant, and record both sides of the exchange.
  *
  * The author's message is written BEFORE the model is called, so a turn that fails still leaves the
  * thread showing what was asked. A chat that loses your question when the answer errors is one you
  * stop trusting.
+ *
+ * ONLY THE USER TURN AND THE ERROR TURN ARE WRITTEN HERE. The assistant's own turn is written by
+ * the caller once the action has run, because only then is the reply true — see the note at the
+ * `respond` call.
  */
 export async function askAssistant(
   message: string,
@@ -298,18 +314,24 @@ export async function askAssistant(
   conversationId: string,
   contextUser: UserInfo,
   forms?: string,
-): Promise<FormChatResponse> {
+): Promise<AssistantTurn> {
   await appendTurn(conversationId, { role: 'User', message }, contextUser);
   try {
     const raw = await model.respond({ message, history, context, forms }, contextUser);
-    const response = parseFormChatResponse(raw);
-    await appendTurn(conversationId, { role: 'AI', message: response.reply }, contextUser);
-    return response;
+    // NOT PERSISTED HERE. The model writes its reply before anything has been attempted, so it is
+    // the OPTIMISTIC version: "Added a matrix question" even when the operation is then refused.
+    // Storing that made the transcript disagree with the form, and the transcript is what the next
+    // turn reads — so the model was told it had added a question the form never got, and would go
+    // on to reason about it. The caller persists the FINAL reply, refusals and all.
+    return { response: parseFormChatResponse(raw), alreadyRecorded: false };
   } catch (error) {
     const detail = errorText(error);
     LogError(`[Forms chat] Assistant failed on "${message.slice(0, 80)}": ${detail}`);
     const reply = 'Sorry — I could not answer that just now. Try again in a moment.';
     await appendTurn(conversationId, { role: 'Error', message: reply, error: detail }, contextUser);
-    return { reply, action: 'none' };
+    // RECORDED ALREADY, as an Error turn. The caller writes the assistant's turn for a normal run;
+    // without this it would write a second row carrying the same sentence, and both would replay
+    // into the next prompt's history — one exchange spending two of the ten turns it gets.
+    return { response: { reply, action: 'none' }, alreadyRecorded: true };
   }
 }

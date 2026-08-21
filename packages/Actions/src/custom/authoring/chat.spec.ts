@@ -756,6 +756,28 @@ describe('listing and opening forms', () => {
   });
 });
 
+describe('what the thread records', () => {
+  it('stores the reply the author saw, refusals and all — not the model\'s optimistic one', async () => {
+    // The model writes its reply before anything is attempted, so on a refused operation it reads
+    // "Added a matrix question" while the form got nothing. Persisting THAT made the transcript
+    // disagree with the form — and the transcript is the next turn's history, so the model would
+    // go on reasoning about a question that does not exist.
+    assistant({
+      reply: 'Added a matrix question.',
+      action: 'edit',
+      operations: [{ op: 'addQuestion', handle: 'p1', type: 'Matrix', prompt: 'Rate these', options: ['Poor', 'Good'] }],
+    });
+
+    const { out } = await turn('add a matrix', { FormID: FORM_ID });
+
+    const recorded = saved
+      .filter((r) => r.entity === 'MJ: Conversation Details' && r.fields.Role === 'AI')
+      .at(-1);
+    expect(String(recorded?.fields.Message)).toMatch(/could not/i);
+    expect(String(recorded?.fields.Message)).toBe(String(out('Reply')));
+  });
+});
+
 describe('an edit turn', () => {
   const PAGE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const Q1 = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';

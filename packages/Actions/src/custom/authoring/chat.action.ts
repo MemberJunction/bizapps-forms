@@ -114,7 +114,7 @@ export async function runChatTurn(
   // Listed on every turn: "what forms do I have" is a fair question, and `open` needs a handle to
   // name. Read-only — the scope decision is that every WRITE lands on the form on screen.
   const forms = await loadFormList(contextUser);
-  const response = await askAssistant(
+  const { response, alreadyRecorded } = await askAssistant(
     message,
     activeChatModel,
     history,
@@ -152,6 +152,12 @@ export async function runChatTurn(
   const created = guidOrUndefined(getStringParam(params, 'FormID'));
   if (response.action === 'create' && created && !formId) {
     await refileConversationToForm(conversation.ID, created, contextUser);
+  }
+  // THE REPLY THE AUTHOR ACTUALLY GETS, refusals included, is what the thread records. The model's
+  // own reply is written before anything is attempted, so persisting that left a transcript
+  // claiming work the form never received — and the transcript is the next turn's history.
+  if (!alreadyRecorded) {
+    await appendTurn(conversation.ID, { role: 'AI', message: outcome.reply }, contextUser);
   }
   setOutputParam(params, 'Reply', outcome.reply);
   return { Success: true, ResultCode: 'SUCCESS', Message: outcome.reply };
