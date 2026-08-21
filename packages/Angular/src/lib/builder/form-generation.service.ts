@@ -1,13 +1,10 @@
 import { Injectable, signal } from '@angular/core';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import type { ActionParam, ActionResult } from '@memberjunction/actions-base';
-import { LogError, LogStatus } from '@memberjunction/core';
-import {
-  foldProgress,
-  parseGenerationProgress,
-  type GenerationProgress,
-} from '@mj-biz-apps/forms-entities';
+import { LogError } from '@memberjunction/core';
+import type { GenerationProgress } from '@mj-biz-apps/forms-entities';
 import { readActionOutputString, readActionOutputStrings } from '../shared/action-output';
+import { watchGenerationProgress, type ProgressSubscription } from '../shared/generation-progress-stream';
 
 /**
  * Drives one AI form generation and reports what the server is doing while it does it.
@@ -105,38 +102,9 @@ export class FormGenerationService {
     this._progress.set(null);
   }
 
-  /**
-   * Subscribe to this session's pushes and fold ours into {@link progress}.
-   *
-   * Returns undefined when the subscription cannot be opened at all. That is logged and otherwise
-   * ignored: a build with no progress channel is the documented degraded case, not a failure.
-   */
-  private watch(sessionId: string): { unsubscribe: () => void } | undefined {
-    try {
-      return GraphQLDataProvider.Instance.PushStatusUpdates(sessionId).subscribe({
-        next: (message: string) => {
-          const event = parseGenerationProgress(message);
-          if (!event) {
-            // Not ours. The channel is shared with every other resolver, so this is the normal
-            // case for most messages and deliberately silent.
-            return;
-          }
-          this._progress.set(foldProgress(this._progress() ?? undefined, event));
-        },
-        error: (error: unknown) => {
-          // Never rethrown into the build: the action is still running and will still return.
-          LogError(
-            `[Forms] Progress stream for session ${sessionId} failed; the form is still being ` +
-              `generated and will appear when it is done. ${asText(error)}`,
-          );
-        },
-      });
-    } catch (error) {
-      LogStatus(
-        `[Forms] Could not open a progress stream (${asText(error)}); generating without live progress.`,
-      );
-      return undefined;
-    }
+  /** Subscribe to this session's pushes and fold ours into {@link progress}. */
+  private watch(sessionId: string): ProgressSubscription | undefined {
+    return watchGenerationProgress(sessionId, () => this._progress(), (p) => this._progress.set(p));
   }
 
   /**
