@@ -347,6 +347,23 @@ describe('runStagedAuthoring — the progress bar does not finish early', () => 
       expect(event.step).toBeLessThan(event.total);
     }
 
+    // AND EVERY STAGE ADVANCES WHEN IT FINISHES. Only the last stage reaches `total`; media
+    // completes at `total - 1`. What holds for both is that the final event of a stage sits a step
+    // above the one that announced it — a stage with no terminal publish leaves the bar short
+    // forever, which is what media did before it gained one.
+    for (const stage of ['image', 'theme']) {
+      const forStage = events.filter((e) => e.stage === stage);
+      const last = forStage.at(-1);
+      expect(last, `${stage} published nothing`).toBeDefined();
+      // Exactly one event marks this stage complete, and it is the last one.
+      const completing = forStage.filter((e) => e.step === last!.step);
+      expect(completing).toHaveLength(1);
+      // Everything before it was announced a step lower.
+      for (const earlier of forStage.slice(0, -1)) {
+        expect(earlier.step).toBeLessThan(last!.step);
+      }
+    }
+
     // And the stage still reports itself finished when it is.
     const finished = events.filter((e) => e.stage === 'theme').at(-1);
     expect(finished!.step).toBe(finished!.total);
@@ -739,6 +756,28 @@ describe('runStagedAuthoring — media', () => {
     rows.clear();
     resetFormsProgressPublisher();
     resetGeneratedImageStore();
+  });
+
+  it('reports the media stage finished once the pictures are actually made', async () => {
+    // The media stage had no terminal publish at all: it announced "Making N pictures" and then
+    // never said it was done, so the bar stopped a step short for the rest of the build. The
+    // theme-progress test cannot catch this — its outline asks for no pictures, so the media stage
+    // takes the skip path, which always had a terminal publish of its own.
+    const events = recordingPublisher();
+    stubImageStore();
+    const model = stubModel({
+      outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_IMAGES)),
+      pageDetail: vi.fn(async () => PICTURE_DETAIL),
+    } as Partial<StagedAuthoringModel>);
+
+    await runStagedAuthoring('a venue picker', model, user, { ...options, imageModel: stubImageModel() });
+
+    const media = events.filter((e) => e.stage === 'image');
+    const announced = media.find((e) => /^Making /.test(e.label));
+    expect(announced).toBeDefined();
+    const last = media.at(-1)!;
+    expect(last.step).toBeGreaterThan(announced!.step);
+    expect(media.filter((e) => e.step === last.step)).toHaveLength(1);
   });
 
   it('makes a picture for every prompt and attaches each to its row', async () => {

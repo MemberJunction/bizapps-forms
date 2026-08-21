@@ -606,8 +606,13 @@ async function runThemeStage(
    * the length of a model call — up to `STAGE_TIMEOUT_MS` of a finished-looking bar with work
    * still running. In-progress labels report the work done BEFORE this stage; terminal ones report
    * this stage as done.
+   *
+   * `done` DEFAULTS TO FALSE, matching `publishMedia`. The two helpers briefly had opposite
+   * defaults, which is the sort of asymmetry a new call site gets wrong silently. False is also
+   * the safer default of the two: forgetting it makes the bar lag by one step, where forgetting a
+   * `true` default makes it claim work that has not happened.
    */
-  const publishTheme = (label: string, styleId?: string, done = true): void =>
+  const publishTheme = (label: string, styleId?: string, done = false): void =>
     publish(options.channel, {
       formId: built.formId,
       stage: 'theme',
@@ -619,7 +624,7 @@ async function runThemeStage(
 
   if (!built.styleId) {
     // The Builder could not create a style row, and said so at the time. Nothing to write onto.
-    publishTheme('Using the default look');
+    publishTheme('Using the default look', undefined, true);
     return ['theme:no style row to write onto'];
   }
 
@@ -632,11 +637,11 @@ async function runThemeStage(
   // signal rather than a guess.
   const adjectives = outline.theme?.brandAdjectives ?? [];
   if (adjectives.length === 0) {
-    publishTheme('Using the standard look', built.styleId);
+    publishTheme('Using the standard look', built.styleId, true);
     return [];
   }
 
-  publishTheme('Painting the theme', undefined, false);
+  publishTheme('Painting the theme');
   try {
     const outcome = validateTheme(
       await requestTheme(brief, model, outline, contextUser),
@@ -647,13 +652,13 @@ async function runThemeStage(
     // `outcome.cssVariables` IS the merged palette — the gate judged exactly this map, so there
     // is nothing left to merge and no second step that can disagree with the first.
     await applyThemeTokens(built.formId, built.styleId, outcome.cssVariables, contextUser);
-    publishTheme('Theme applied', built.styleId);
+    publishTheme('Theme applied', built.styleId, true);
     return reportThemeOutcome(outcome, built.formId);
   } catch (error) {
     LogError(
       `[Forms authoring] Could not theme form ${built.formId}; it will use the standard look. ${errorText(error)}`,
     );
-    publishTheme('Kept the standard look');
+    publishTheme('Kept the standard look', undefined, true);
     return ['theme:could not be generated'];
   }
 }
