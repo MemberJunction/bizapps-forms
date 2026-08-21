@@ -18,11 +18,16 @@ const AUTHORING_ACTION_NAMES = [
   'Forms: Generate Form From Brief',
   'Forms: Create Form From Template',
   'Forms: Bind Response To Entity',
+  // The chat's action. Resolved BY NAME from the client, so a rename that only touches the class
+  // would leave the box in the UI talking to nothing — which is what this list is here to catch.
+  'Forms: Chat',
 ] as const;
 
 describe('action registration', () => {
-  it('LoadFormsActions reports all seven action classes', () => {
-    expect(LoadFormsActions()).toBe(7);
+  it('LoadFormsActions reports every action class', () => {
+    // Derived from the two name lists rather than pinned to a literal: a count that has to be
+    // hand-updated is a count somebody eventually updates without checking what changed.
+    expect(LoadFormsActions()).toBe(S3_ACTION_NAMES.length + AUTHORING_ACTION_NAMES.length);
   });
 
   it.each([...S3_ACTION_NAMES, ...AUTHORING_ACTION_NAMES])(

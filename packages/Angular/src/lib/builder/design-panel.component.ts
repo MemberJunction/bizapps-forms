@@ -42,6 +42,7 @@ import { DESIGN_PANEL_STYLES } from './design-panel.styles';
 import { ColorPickerComponent } from './color-picker.component';
 import { FormPreviewStageComponent } from './form-preview-stage.component';
 import { ImageFieldComponent } from './image-field.component';
+import { FormChatComponent, FormChatService } from '../chat';
 
 /**
  * The builder "Design" tab: edit this form's look directly, with a live preview beside it.
@@ -69,10 +70,11 @@ const SAVE_DEBOUNCE_MS = 600;
     ColorPickerComponent,
     FormPreviewStageComponent,
     ImageFieldComponent,
+    FormChatComponent,
   ],
   // The widget's own providers (and the empty graphqlUrl that selects the mock transports, so a
   // trial answer writes nothing) belong to the stage, not to this panel.
-  providers: [DesignStateService],
+  providers: [DesignStateService, FormChatService],
   templateUrl: './design-panel.component.html',
   styles: [FORMS_UI_CSS, DESIGN_PANEL_STYLES],
 })
@@ -86,6 +88,25 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
 
   /** Emitted after the form's StyleID changes so the parent can persist/refresh. */
   @Output() readonly styleApplied = new EventEmitter<string | null>();
+
+  /**
+   * A chat turn changed the form's content. Forwarded rather than handled: the definition this
+   * panel previews is an `@Input`, so the builder above owns re-reading it.
+   */
+  @Output() readonly formChanged = new EventEmitter<void>();
+
+  /** Forwarded: the builder above owns navigation. */
+  @Output() readonly formOpened = new EventEmitter<string>();
+
+  /**
+   * A chat turn CREATED a form, which is a different event from opening one.
+   *
+   * Forwarded for the same reason `formOpened` is. This panel is the third host of the chat and
+   * was the one that dropped it: the server created the form and re-filed the thread onto it while
+   * the author stayed on the old one with no route to the new. Both other hosts wire this to the
+   * same handler, and the builder's own comment says the hosts are supposed to behave the same.
+   */
+  @Output() readonly formCreated = new EventEmitter<string>();
 
   /**
    * The draft as a published-form definition, so the sample can be the REAL form.
@@ -234,6 +255,34 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
     this.saveState = '';
     this.cdr.markForCheck();
     this.applyPreview();
+  }
+
+  /**
+   * A chat turn restyled this form — re-read the style and refresh every control.
+   *
+   * The chat wrote straight to the row, so the panel's in-memory copy is now stale and its swatches
+   * would keep showing the colours the author just replaced. Reloading is the same reconcile the
+   * rest of this feature uses: the database is the truth.
+   */
+  protected async onChatRestyled(): Promise<void> {
+    if (!this.style) {
+      return;
+    }
+    const reloaded = await this.design.loadStyleById(this.style.ID);
+    if (!reloaded) {
+      this.loadError = 'The theme changed but could not be re-read. Reopen the Design tab to see it.';
+      this.cdr.markForCheck();
+      return;
+    }
+    this.style = reloaded;
+    this.syncFromStyle();
+    this.cdr.markForCheck();
+    this.applyPreview();
+    // The builder caches the applied style to compute the publish fingerprint, so a restyle it is
+    // never told about leaves `dirty` false against tokens that have already changed — the author
+    // sees the new colours and the Publish button insists there is nothing to publish. Every other
+    // path that writes this row emits the same event; this one did not.
+    this.styleApplied.emit(this.style.ID);
   }
 
   /** Read every control's value out of the style's stored tokens. */

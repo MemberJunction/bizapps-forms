@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Theme Designer",
+      "Description": "Final pass of a staged AI form build. Turns the brief plus the outline's brand adjectives into a --mjf-* token map. Deliberately does NOT judge its own accessibility: unknown tokens are stripped and unreadable ink is corrected by arithmetic before persist, because re-prompting a model that produced one unreadable pair is a round trip for a coin flip. Model selection is metadata-driven.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Theme Designer",
+      "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
+      "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
+      "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
+      "Status": "Active",
+      "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-theme-designer.output-example.json",
+      "SelectionStrategy": "Specific",
+      "PowerPreference": "Highest",
+      "PromptRole": "System",
+      "PromptPosition": "First",
+      "ParallelizationMode": "None",
+      "ValidationBehavior": "Strict",
+      "MaxRetries": 2,
+      "EffortLevel": null
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": [
+        {
+          "fields": {
+            "PromptID": "@parent:ID",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.6 Flash",
+            "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718296"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T22:45:12.607Z",
+            "checksum": "e5db75362dab2734b7237909bdcb8efb0b21cce10f7fd4b599194df951e12c88"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829307"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T20:59:34.849Z",
+      "checksum": "7c654ee0659da96fdf8d8562252329107828ea94a4a46ae464bc80cb7fa48ef7"
+    }
+  }
+]

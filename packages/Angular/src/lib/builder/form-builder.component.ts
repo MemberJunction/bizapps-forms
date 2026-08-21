@@ -29,8 +29,6 @@ import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
-import { ImportQuestionsComponent } from './import-questions.component';
-import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
@@ -46,6 +44,7 @@ import type { ResponseRecordLink } from '../responses/response-models';
 import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
+import { CachedDefinition } from './cached-definition';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
@@ -58,6 +57,7 @@ import {
   type QuestionTypeMeta,
 } from './question-type-catalog';
 import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
+import { FormChatComponent, FormChatService } from '../chat';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
   definitionFingerprint,
@@ -129,15 +129,15 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     CdkDragPreview,
     QuestionEditorComponent,
     ScreenEditorComponent,
-    ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
     FormPreviewModalComponent,
     AutomationTabComponent,
     ResponsesTabComponent,
     SaveAsTemplateDialogComponent,
+    FormChatComponent,
   ],
-  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
+  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService, FormChatService],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
@@ -169,7 +169,6 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
   /** Whether the paste-to-import dialog is open. */
-  protected importOpen = false;
   protected activeTab: BuilderTab = 'build';
   protected busy = false;
   protected statusMessage = '';
@@ -312,6 +311,8 @@ export class FormBuilderComponent extends BaseFormComponent {
    * instead of latching it, so an edit that restores the published state reports clean.
    */
   private markDirty(): void {
+    // The Design tab's preview rides on this same signal — see `designPreviewDefinition`.
+    this.designPreview.invalidate();
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
           buildPublishedDefinition(
@@ -330,12 +331,23 @@ export class FormBuilderComponent extends BaseFormComponent {
    *
    * Same builder as publish and as Preview, so the Design tab shows the actual form rather
    * than a stand-in — the whole point of styling it is seeing your own questions.
+   *
+   * CACHED, and that is not an optimisation. Building on every read handed `<mj-form>` a new
+   * object identity per change-detection tick; Angular diffs inputs with `Object.is` and the
+   * widget reloads from `ngOnChanges`, so the preview tore itself down continuously — Start did
+   * nothing, trial answers vanished, and a colour drag reverted mid-drag to the saved style. The
+   * cache is invalidated by `markDirty()`, the same signal the Publish button's `dirty` flag
+   * already rides on.
    */
   protected get designPreviewDefinition(): PublishedFormDefinition | null {
-    return this.tree
-      ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
-      : null;
+    return this.designPreview.read(() =>
+      this.tree
+        ? buildPublishedDefinition(this.tree, this.appliedStyle, FINGERPRINT_VERSION_ID, [])
+        : null,
+    );
   }
+
+  private readonly designPreview = new CachedDefinition<PublishedFormDefinition>();
 
   /** Read the live snapshot and the current draft, so `dirty` has both sides to compare. */
   private async refreshPublishState(): Promise<void> {
@@ -650,95 +662,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     return this.tree.pages.flatMap((page) =>
       page.questions.map((q) => ({ id: q.entity.ID, prompt: q.entity.Prompt })),
     );
-  }
-
-  // -- import ---------------------------------------------------------------
-
-  protected openImport(): void {
-    this.importOpen = true;
-    this.cdr.markForCheck();
-  }
-
-  protected closeImport(): void {
-    this.importOpen = false;
-    this.cdr.markForCheck();
-  }
-
-  /**
-   * Create the pages and questions a paste described.
-   *
-   * Appends rather than replaces. Import is used to ADD a section far more often than to start
-   * over, and an import that silently wiped an existing form would be unrecoverable — there is
-   * no undo here.
-   */
-  protected async onImported(result: ImportResult): Promise<void> {
-    if (!this.tree || this.busy) {
-      return;
-    }
-    this.importOpen = false;
-    this.busy = true;
-    try {
-      for (const importedPage of result.pages) {
-        const page = await this.pageForImport(importedPage.title);
-        if (!page) {
-          continue;
-        }
-        for (const q of importedPage.questions) {
-          await this.createImportedQuestion(page, q);
-        }
-      }
-      this.markDirty();
-    } finally {
-      this.busy = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  /**
-   * The page an imported block goes on: a new one when the paste named it, else the last
-   * existing page so an untitled paste extends the form the author is already looking at.
-   */
-  private async pageForImport(title: string | undefined): Promise<PageNode | undefined> {
-    if (!this.tree) {
-      return undefined;
-    }
-    if (title) {
-      const created = await this.state.addPage(this.tree, title);
-      if (created) {
-        this.tree.pages.push(created);
-      }
-      return created;
-    }
-    return this.tree.pages[this.tree.pages.length - 1];
-  }
-
-  private async createImportedQuestion(page: PageNode, imported: ImportedQuestion): Promise<void> {
-    if (!this.tree) {
-      return;
-    }
-    const node = await this.state.addQuestion(this.tree, page, imported.type, imported.prompt);
-    if (!node) {
-      return;
-    }
-    if (imported.isRequired) {
-      node.entity.IsRequired = true;
-      await this.state.save(node.entity);
-    }
-    if (imported.options.length > 0) {
-      // The seeded "Option 1 / Option 2" pair is a placeholder for an author who will edit it;
-      // a paste that named its options has already done that, so the placeholders go.
-      for (const seeded of [...node.options]) {
-        await this.state.deleteOption(seeded);
-      }
-      node.options = [];
-      for (const label of imported.options) {
-        const option = await this.state.addOption(node, label);
-        if (option) {
-          node.options.push(option);
-        }
-      }
-    }
-    page.questions.push(node);
   }
 
   protected get selectedNode(): QuestionNode | null {
@@ -1129,6 +1052,47 @@ export class FormBuilderComponent extends BaseFormComponent {
       : undefined;
     // No automations: Preview renders the form, it never runs a submission's side effects.
     this.previewDef = buildPublishedDefinition(this.tree, style, 'draft-preview', []);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * A chat turn restyled this form — re-read what we are showing.
+   *
+   * The chat wrote straight to the style row, so nothing in this component knows yet. Reloading is
+   * cheap and is the same reconcile the streaming build does: the database is the truth, and the
+   * alternative is patching a style we did not write.
+   */
+  protected async onChatRestyled(): Promise<void> {
+    await this.refreshPublishState();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * A chat turn built a NEW form — open it, the way the forms list does.
+   *
+   * Without this the turn was a dead end: the form was created and persisted, and the author was
+   * left looking at the one they started from with no way to reach it except by going back to the
+   * list and finding it. The dashboard wired this from the start; the builder did not, and the two
+   * hosts are supposed to behave the same.
+   */
+  protected onChatCreatedForm(formId: string): void {
+    this.Navigate.emit({
+      Kind: 'record',
+      EntityName: FORMS_ENTITY.Form,
+      PrimaryKey: CompositeKey.FromID(formId),
+    });
+  }
+
+  /**
+   * A chat turn changed the form's CONTENT — today, a picture landing on a screen.
+   *
+   * Distinct from a restyle because they touch different rows: a restyle rewrites the style's
+   * tokens, which the Design tab re-reads on its own, while this writes a Screen and is only
+   * visible once the tree is read back.
+   */
+  protected async onChatChangedForm(): Promise<void> {
+    this.tree = await this.state.loadTree(this.record);
+    await this.refreshPublishState();
     this.cdr.markForCheck();
   }
 

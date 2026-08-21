@@ -1,39 +1,105 @@
 {
   "name": "Event RSVP",
-  "description": "Let us know if you can make it.",
-  "renderMode": "Scroll",
-  "confirmationMessage": "Thanks — your RSVP has been recorded.",
+  "description?": "Let us know if you can make it.",
+  "renderMode?": "Scroll",
+  "confirmationMessage?": "Thanks — your RSVP has been recorded.",
   "pages": [
     {
-      "title": "Your details",
-      "description": "A few quick questions.",
+      "title?": "Your details",
+      "description?": "A few quick questions.",
+      "conditionalRule?": {
+        "show": {
+          "all": [
+            {
+              "questionKey": "attending",
+              "op": "equals",
+              "value": "yes"
+            }
+          ]
+        }
+      },
       "questions": [
         {
-          "type": "ShortText",
-          "prompt": "Your name",
-          "helpText": "First and last name.",
-          "isRequired": true
-        },
-        {
-          "type": "Email",
-          "prompt": "Email address",
-          "isRequired": true
-        },
-        {
+          "key?": "attending",
           "type": "SingleChoice",
           "prompt": "Will you attend?",
-          "isRequired": true,
-          "options": [
-            { "label": "Yes", "value": "yes", "isDefault": true },
-            { "label": "No", "value": "no" }
-          ]
-        },
-        {
-          "type": "Number",
-          "prompt": "How many guests are you bringing?",
-          "settings": { "min": 0, "max": 5 }
+          "helpText?": "Pick one.",
+          "isRequired?": true,
+          "options?": [
+            {
+              "label": "Yes",
+              "value?": "yes",
+              "isDefault?": true,
+              "imagePrompt?": "a lit function room",
+              "imageURL?": "https://cdn.example.com/yes.png",
+              "matrixAxis?": "Row"
+            },
+            {
+              "label": "No",
+              "value?": "no"
+            }
+          ],
+          "settings?": {
+            "min": 0,
+            "max": 5
+          },
+          "validationRule?": {
+            "minLength?": 2,
+            "maxLength?": 200,
+            "min?": 0,
+            "max?": 5,
+            "pattern?": "^[A-Z]{3}$",
+            "patternMessage?": "Use three capital letters."
+          },
+          "conditionalRule?": {
+            "show": {
+              "all": [
+                {
+                  "questionKey": "attending",
+                  "op": "equals",
+                  "value": "yes"
+                }
+              ]
+            }
+          }
         }
       ]
     }
-  ]
+  ],
+  "screens?": {
+    "welcome?": {
+      "title": "You're invited",
+      "body?": "Two minutes.",
+      "buttonLabel?": "RSVP",
+      "imagePrompt?": "a long table set for dinner, warm evening light"
+    },
+    "endings?": [
+      {
+        "title": "See you there",
+        "body?": "We'll email the details.",
+        "buttonLabel?": "Done",
+        "redirectURL?": "https://example.com",
+        "isDefault?": true,
+        "imagePrompt?": "confetti on a dark background",
+        "conditionalRule?": {
+          "show": {
+            "all": [
+              {
+                "questionKey": "attending",
+                "op": "equals",
+                "value": "yes"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "theme?": {
+    "brandAdjectives?": [
+      "warm",
+      "welcoming"
+    ],
+    "brandURL?": "https://example.com"
+  }
 }

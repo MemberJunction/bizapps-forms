@@ -76,6 +76,10 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex" />
+  <!-- An empty icon, declared only to stop the browser requesting /favicon.ico on its own: MJAPI
+       answers that with 401, so every anonymous respondent got a console error on a page that was
+       working. This page ships no assets, so there is nothing to point at. -->
+  <link rel="icon" href="data:," />
   <title>${title}</title>
   <style>${PAGE_CSS}</style>
 </head>
@@ -115,6 +119,10 @@ export function renderRespondentHostErrorPage(options: RespondentHostErrorOption
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex" />
+  <!-- An empty icon, declared only to stop the browser requesting /favicon.ico on its own: MJAPI
+       answers that with 401, so every anonymous respondent got a console error on a page that was
+       working. This page ships no assets, so there is nothing to point at. -->
+  <link rel="icon" href="data:," />
   <title>${title}</title>
   <style>${PAGE_CSS}</style>
 </head>

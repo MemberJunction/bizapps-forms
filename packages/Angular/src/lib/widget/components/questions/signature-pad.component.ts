@@ -19,6 +19,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { MjfIconComponent } from '../mjf-icon.component';
 
 /**
  * Bitmap resolution of the exported signature, independent of the CSS size the pad is drawn at.
@@ -89,6 +90,7 @@ const SIGNATURE_PAD_CSS = /* css */ `
 @Component({
   selector: 'mjf-signature-pad',
   standalone: true,
+  imports: [MjfIconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [SIGNATURE_PAD_CSS],
   template: `
@@ -109,7 +111,7 @@ const SIGNATURE_PAD_CSS = /* css */ `
       <div class="mjf-sig__bar">
         <p class="mjf-sig__hint">{{ hasInk() ? 'Signed.' : 'Draw your signature above.' }}</p>
         <button type="button" class="mjf-sig__clear" [disabled]="!hasInk()" (click)="clear()">
-          <i class="fa-solid fa-eraser" aria-hidden="true"></i> Clear
+          <mjf-icon name="eraser" /> Clear
         </button>
       </div>
     </div>

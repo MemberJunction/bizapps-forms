@@ -1,0 +1,133 @@
+{
+  "fields": {
+    "Name": "MJ_BizApps_Forms: Chat Assistant",
+    "Description": "The authoring chat. Given the conversation so far, the form on screen and the author's new message, replies and declares what should be done about it: nothing, create a form, restyle the open one, put a picture on a screen, change the open form's structure, open another of the author's forms, or say plainly that the change is not supported yet.",
+    "UserID": "@lookup:MJ: Users.Name=System",
+    "IsActive": true
+  },
+  "relatedEntities": {
+    "MJ: Template Contents": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "TypeID": "@lookup:MJ: Template Content Types.Name=Text",
+          "TemplateText": "@file:templates/forms-chat-assistant.template.md",
+          "Priority": 100,
+          "IsActive": true
+        },
+        "primaryKey": {
+          "ID": "8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F64"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:43.169Z",
+          "checksum": "a19081fae518962849a466772c183bd493ab13ebbb0206c9e1443fdf445e12c2"
+        }
+      }
+    ],
+    "MJ: Template Params": [
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Message",
+          "Description": "What the author just typed.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E90"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.163Z",
+          "checksum": "422ec4c9b1bd0da6aa4acb454c664150694cbd079076cbd4817c0d57dd226959"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "History",
+          "Description": "The prior turns as a plain transcript, oldest first and capped, so the prompt does not grow without bound.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E91"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.255Z",
+          "checksum": "3cf4bc201253bfb16fefb43c25b663e1439c30a2bf50bbf40a4acbd41fed0acf"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "FormContext",
+          "Description": "A compact description of the form on screen: its name, its questions and its current tokens.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E92"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.185Z",
+          "checksum": "78190baf7ac7a4a7801c4109e6d2a8cdb328c40ff1553dccdb4dd927e38e3d24"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "HasOpenForm",
+          "Description": "'yes' when a form is open, so the prompt can drop the restyle affordance when there is nothing to restyle.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E93"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.203Z",
+          "checksum": "2995c043f2b95f7875d6c075e7e1cbd33778ace8e387d6d066104a3b8f3c7213"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "Tokens",
+          "Description": "The --mjf-* vocabulary, supplied by the code that owns it so the prompt and the validator cannot disagree.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E94"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.232Z",
+          "checksum": "c9619882ef19e8dbbe0a05619a0dc4e609b942c0d3392acc1634f947acb98939"
+        }
+      },
+      {
+        "fields": {
+          "TemplateID": "@parent:ID",
+          "Name": "FormList",
+          "Description": "The author's own forms, by handle, so the assistant can name one to open. Read-only — opening navigates, it never writes.",
+          "Type": "Scalar",
+          "IsRequired": true
+        },
+        "primaryKey": {
+          "ID": "1C2D3E4F-5A6B-4C7D-8E9F-0A1B2C3D4E95"
+        },
+        "sync": {
+          "lastModified": "2026-08-21T02:50:41.269Z",
+          "checksum": "1f2b8192fd7e95223169cd04d26366b8c7e847636162e9a8247d44c5cfa2f437"
+        }
+      }
+    ]
+  },
+  "primaryKey": {
+    "ID": "7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F65"
+  },
+  "sync": {
+    "lastModified": "2026-08-20T23:01:08.984Z",
+    "checksum": "441fa54a77a2da22f1f81ebabab065c9edeb1e81c2614b5db29af3f3489e3dd9"
+  }
+}

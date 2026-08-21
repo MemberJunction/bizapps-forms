@@ -42,12 +42,15 @@ const IMAGE_FIELD_CSS = /* css */ `
   gap: var(--mjf-gap-sm);
   min-height: 32px;
 }
+/* Same three declarations as .mjf-field-label, including the token — this label sits in a column
+   of them (Title, Body, Button label, Image) and a fourth one in a different ink read as a
+   heading for the rows above it rather than the label for the control below. */
 .imf-head-label {
   flex: 1 1 auto;
   min-width: 0;
   font-size: var(--mjf-meta);
   font-weight: 600;
-  color: var(--mj-text-primary);
+  color: var(--mj-text-secondary);
 }
 .imf-add {
   flex: none;
@@ -110,6 +113,13 @@ const IMAGE_FIELD_CSS = /* css */ `
   template: `
     <div class="imf">
       @if (value.trim()) {
+        <!-- The label stays put once there IS an image. It used to render only in the empty
+             state, so choosing a picture deleted the one word that said what the picture was
+             for: the properties panel went Title / Body / Button label / <a file GUID>, with a
+             gap where the fourth label belonged. -->
+        @if (label) {
+          <span class="imf-head-label">{{ label }}</span>
+        }
         <div class="imf-filled">
           <img class="imf-thumb" [src]="value" alt="" (error)="onPreviewError()" />
           <div class="imf-meta">

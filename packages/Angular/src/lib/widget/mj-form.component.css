@@ -182,11 +182,17 @@
 /* A wrapper carries the alignment because .mjf-shell is a flex COLUMN, where text-align does
    nothing to its items and align-self cannot branch on a token value. Inside a plain block,
    text-align moves an inline-block image exactly as it moves the titles — one token, one
-   behaviour, so the logo and the headline never disagree about where the form starts. */
+   behaviour, so the logo and the headline never disagree about where the form starts.
+
+   Every fallback for this token in the widget is `center`, matching both DEFAULT_FORM_THEME and
+   the builder control's own default for the title target. They used to disagree: the logo bar and
+   .mjf-header fell back to left while the welcome/ending screens fell back to centre, so a form
+   saved before it had a theme drew a left logo above a centred hero, and the alignment control
+   said "center" over a header that was rendering left. */
 .mjf-logo-bar {
   flex: none;
   margin-bottom: 1.25rem;
-  text-align: var(--mjf-title-align, left);
+  text-align: var(--mjf-title-align, center);
 }
 
 /* Capped in BOTH directions with object-fit: contain, so the widget cannot be wrecked by
@@ -215,14 +221,14 @@
   margin: 0 0 0.25rem;
   font-family: var(--mjf-font-display);
   font-size: var(--mjf-title-size);
-  text-align: var(--mjf-title-align, left);
+  text-align: var(--mjf-title-align, center);
   line-height: 1.2;
   color: var(--mjf-page-ink);
 }
 
 .mjf-header__desc {
   margin: 0;
-  text-align: var(--mjf-title-align, left);
+  text-align: var(--mjf-title-align, center);
   color: var(--mjf-page-ink-muted);
 }
 
@@ -285,25 +291,39 @@
 }
 
 /* The built-in confirmation is an ENDING — the one a form gets when the author configured no
-   ending screen — so it follows the same alignment as the authored ones. Block flow rather than
-   the shared flex centring, because align-items would keep centring the boxes whatever the text
-   did. Loading and error keep .mjf-state's centring untouched: those are the widget's own voice,
-   not the author's content, and an author's left-aligned brand should not move a spinner. */
+   ending screen — so it looks like one: the same hero that mjf-form-screen draws, filling the
+   height and centring in it, with the same icon, the same body type and the same alignment
+   token. It used to be a short block pinned under .mjf-state's 3rem of padding, so whether a
+   respondent got a hero or a stranded paragraph at the end depended on a setting they cannot
+   see. Loading and error keep .mjf-state's own flex centring untouched: those are the widget's
+   voice, not the author's content, and an author's left-aligned brand should not move a spinner.
+
+   It keeps .mjf-state's flex column (that is what centres it vertically once it is allowed to
+   grow) but stretches its items instead of centring them, so each child is a full-width block
+   and the ONE alignment token inside it decides where the glyph and the sentence sit. Centring
+   the flex items instead would place the boxes itself and ignore a left-aligned brand. */
 .mjf-state--done {
-  display: block;
+  flex: 1;
+  justify-content: center;
+  align-items: stretch;
+  gap: 0;
+  padding: 2.5rem 1.25rem;
   text-align: var(--mjf-title-align, center);
 }
 
 .mjf-done__icon {
-  display: inline-block;
+  display: block;
   margin-bottom: 1rem;
   font-size: 2.5rem;
+  line-height: 1;
   color: var(--mjf-accent);
 }
 
 .mjf-done__msg {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--mjf-page-ink-soft);
 }
 
 .mjf-retry {

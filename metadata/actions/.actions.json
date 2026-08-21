@@ -2,7 +2,7 @@
   {
     "fields": {
       "Name": "Forms: Generate Form From Brief",
-      "Description": "AI form authoring — turns a natural-language brief (for example 'a 5-question event RSVP with dietary restrictions and a +1 count') into a draft Form with pages, questions, and options, using the highest-power Claude model with a zod-validated blueprint.",
+      "Description": "AI form authoring — turns a natural-language brief (for example 'a 5-question event RSVP with dietary restrictions and a +1 count'), or a list of questions the author already wrote, into a draft Form with pages, questions, options, screens, conditional logic and a per-form style. With a SessionID the build runs in stages and publishes live progress; without one it is a single prompt. The model is metadata-driven in both cases — see the Forms AI Prompts.",
       "DriverClass": "Forms: Generate Form From Brief",
       "Type": "Custom",
       "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
@@ -46,6 +46,42 @@
             "lastModified": "2026-08-08T18:25:28.337Z",
             "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
           }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "InputMode",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "'brief' (default) to design a form from a description, or 'questions' to structure a list of questions the author already wrote, preserving their wording."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000003"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T20:23:55.807Z",
+            "checksum": "c583c6b86c2646574457c2770a022f664d18020d183ba188a727aed51206d7cb"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "SessionID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "The caller's push-channel session id. Supplying it switches the build to the staged route and publishes live progress to that session; omit it for a cheaper single-shot build with no events."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000004"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T20:23:55.835Z",
+            "checksum": "43fb6721cdac5d555f4b88ef6ac9f62b8393e616419e9d44d751aa5aa0c42d82"
+          }
         }
       ]
     },
@@ -53,8 +89,8 @@
       "ID": "7F0A0001-A1B2-4C3D-8E4F-000000000001"
     },
     "sync": {
-      "lastModified": "2026-08-08T18:25:28.159Z",
-      "checksum": "3bbc440d4269a866153444ac43d524cb2ee863d815575adccec6b1319960ea8b"
+      "lastModified": "2026-08-20T20:23:55.761Z",
+      "checksum": "8c7253cc53185e663eaaf856230a94924ede25b36616192f73f7039392cbf40e"
     }
   },
   {
@@ -291,6 +327,100 @@
     "sync": {
       "lastModified": "2026-08-08T18:25:28.262Z",
       "checksum": "d5c7c78d1c9f165e890353bed24286a17c3fc0fe3ee265f694c98f0319ef9bd9"
+    }
+  },
+  {
+    "fields": {
+      "Name": "Forms: Chat",
+      "Description": "The authoring chat. Takes one message plus the thread it belongs to, replies, and performs whatever the assistant declared: create a form, restyle the open one, or nothing. Turns persist in MJ: Conversations so an author returning to a form finds the conversation they left.",
+      "DriverClass": "Forms: Chat",
+      "Type": "Custom",
+      "CategoryID": "@lookup:MJ: Action Categories.Name=Forms",
+      "Status": "Active",
+      "IconClass": "fa-solid fa-comments"
+    },
+    "relatedEntities": {
+      "MJ: Action Params": [
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Message",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": true,
+            "Description": "What the author typed."
+          },
+          "primaryKey": {
+            "ID": "7F0B0007-A1B2-4C3D-8E4F-000000000001"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T23:01:11.443Z",
+            "checksum": "1a46f25e9898ed51f77e4f81fda1d831facfb3aaf15387be1a17fd7969a472c9"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "FormID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "The form on screen. Scopes the thread and gives the assistant something to answer about."
+          },
+          "primaryKey": {
+            "ID": "7F0B0007-A1B2-4C3D-8E4F-000000000002"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T23:01:11.473Z",
+            "checksum": "94fe4bb6a9d7c98b4e0bf26b8938659f3ef238e847fef2aa7d730e7240f792b3"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "ConversationID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Continue a specific thread. Omit and the thread for this user and form is found or started."
+          },
+          "primaryKey": {
+            "ID": "7F0B0007-A1B2-4C3D-8E4F-000000000003"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T23:01:11.495Z",
+            "checksum": "76bf70466aa00962df4d682ce5dd0b207390a0a02b0d91930006f4f4f32830fe"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "SessionID",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Push-channel session, so a turn that generates a form streams its progress."
+          },
+          "primaryKey": {
+            "ID": "7F0B0007-A1B2-4C3D-8E4F-000000000004"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T23:01:11.516Z",
+            "checksum": "4b5bc2e1d805e6220a740df7be0c70526401889003d3f4a6c6dc8aee0c994e93"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "7F0A0007-A1B2-4C3D-8E4F-000000000007"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T23:01:11.399Z",
+      "checksum": "775f2407ff094aec665c4f2e64441c9ac9c0c3124d9c870d30b40c8d7bd8b656"
     }
   }
 ]

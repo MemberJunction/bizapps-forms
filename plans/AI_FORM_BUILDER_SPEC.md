@@ -231,7 +231,10 @@ Update `metadata/templates/templates/forms-form-designer.template.md` +
 
 - The two **input modes**: template receives `InputMode` (`'brief' | 'questions'`). For `questions`
   (author pasted a raw list), instruct: *preserve pasted question wording verbatim; only infer types,
-  options, ordering, and grouping* — the Typeform "import questions" distinction.
+  options, ordering, and grouping* — the Typeform "import questions" distinction. NOTE
+  (2026-08-21): this is now the ONLY paste-a-list path in the product — the builder's own
+  Import questions parser was removed in favour of the assistant — and it still has no UI
+  caller. See FORMS_ELEMENT_PARITY "Found on the way".
 - Guidance on when to emit `imagePrompt` (PictureChoice options; a Welcome hero when the form's subject is
   visual; **never** decorative images on every question) and on conditional logic (*only when the brief
   implies it — never invent branching*).
@@ -375,6 +378,29 @@ that a deliberately unreadable palette is corrected to AA before persist.
 ---
 
 ## 8. Workstream D — Client: streaming build UX (closes G5 client half)
+
+> **NOT BUILT — traded for the chat, 2026-08-21. This section describes a design that was
+> superseded, not one that is pending.**
+>
+> The PR that implemented this spec replaced the whole authoring surface with a conversational
+> panel. `authorWithAI()` and the brief textarea D1 was written against were deleted, so D1's
+> `FormGenerationService` had nothing left to call it and D2's builder "cooking mode" had no
+> entry point. The service shipped as 147 lines of dead code — no import, no `providers:` entry,
+> no test — and has now been deleted; recover it from git history if this is revived.
+>
+> **What the author actually gets today**, and how it differs from what is described below: the
+> form assembles behind a determinate progress bar inside the chat bubble on the forms list, and
+> the author is navigated to the builder when the whole action resolves. What D2 specified was
+> navigating on the FIRST `outline` event and watching the tree fill in inside the builder, with
+> disabled edit controls and skeleton shimmer on the screen strip. The staged server pipeline that
+> makes that possible (Workstream B, §5) IS built and does emit per-stage events — so this is a
+> client-side gap, not an architectural one, and the events are there whenever someone wants it.
+>
+> **The trade was never recorded until now**, which is the actual defect an adversarial review
+> found: a reader of this document would reasonably conclude the headline "watch your form
+> assemble in the builder" experience shipped. It did not. Decide deliberately whether to build
+> D2 on top of the existing events or to strike this section; do not treat its presence as a
+> backlog item that someone is already on.
 
 **Package:** `packages/Angular`. Follow rule #4 (standalone leaf components, `@if`/`@for`, `inject()`).
 

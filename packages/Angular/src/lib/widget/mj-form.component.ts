@@ -14,9 +14,11 @@ import {
   ElementRef,
   inject,
   input,
+  OnChanges,
   OnDestroy,
   OnInit,
   signal,
+  SimpleChanges,
   viewChild,
 } from '@angular/core';
 import {
@@ -52,6 +54,8 @@ import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
 import type { WidgetPhase } from './core/submit-phase';
+import { shouldReloadOnDefinitionChange } from './definition-change';
+import { MjfIconComponent } from './components/mjf-icon.component';
 
 @Component({
   selector: 'mj-form',
@@ -62,18 +66,25 @@ import type { WidgetPhase } from './core/submit-phase';
     FormScrollComponent,
     FormOneQuestionComponent,
     TurnstileChallengeComponent,
+    MjfIconComponent,
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
 })
-export class MjFormComponent implements OnInit, OnDestroy {
+export class MjFormComponent implements OnInit, OnChanges, OnDestroy {
   /** Distribution slug identifying which published form to load (element attribute). */
   public readonly distributionSlug = input<string>('', { alias: 'slug' });
 
   /**
-   * Pre-built definition to render directly, bypassing the API fetch. Used by the
-   * builder's WYSIWYG Preview to render the unpublished draft (fillable, themed) with no
-   * publish/DB round-trip. When set, {@link load} skips `loadPublishedForm`.
+   * THE CURRENT definition to render directly, bypassing the API fetch. Used by the builder's
+   * WYSIWYG Preview to render the unpublished draft (fillable, themed) with no publish/DB
+   * round-trip. When set, {@link load} skips `loadPublishedForm`.
+   *
+   * "Current", not "initial", and that is a recent correction. This was read exactly once, in
+   * `ngOnInit`, so a host that re-derived the definition — which the Design tab does on every
+   * structural edit — kept showing the form as it was when the stage was first created. The
+   * Preview modal never noticed because `@if` destroys and recreates it per open; the Design tab's
+   * stage lives as long as the tab does. See {@link ngOnChanges}.
    */
   public readonly definitionInput = input<PublishedFormDefinition | null>(null, { alias: 'definition' });
 
@@ -238,6 +249,32 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private bankedSubmitPoints = new Set<string>();
 
   public async ngOnInit(): Promise<void> {
+    await this.load();
+  }
+
+  /**
+   * Re-render when the host hands us a different definition.
+   *
+   * Signal inputs still report through `ngOnChanges`, and using it rather than an `effect` is
+   * what makes the ordering legible: `ngOnChanges` fires BEFORE the first `ngOnInit`, so skipping
+   * `firstChange` leaves exactly one load per definition instead of the double-load an effect
+   * would produce by firing after init with the value init just used.
+   *
+   * A full {@link load} is the right response, not a partial patch: a new definition is a
+   * structurally different form, so its runtime, phase and response identity all have to be
+   * rebuilt. Trial answers in the builder's preview are discarded with it, which is correct — they
+   * were answers to different questions. A real respondent never reaches this: they are driven by
+   * `slug`, and `definition` stays null for the component's whole life.
+   *
+   * `SimpleChanges` is keyed by the PROPERTY name, not the `definition` alias the host writes.
+   */
+  public async ngOnChanges(changes: SimpleChanges): Promise<void> {
+    // The decision itself lives in `definition-change.ts`, where it can be tested without a DOM.
+    // It used to live here, and the only test that could reach it was a regex over this file —
+    // which passed just as happily with the guard inverted.
+    if (!shouldReloadOnDefinitionChange(changes)) {
+      return;
+    }
     await this.load();
   }
 

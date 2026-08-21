@@ -117,7 +117,7 @@ describe('AIPromptFormDesignerModel', () => {
   it('runs the named prompt and returns its raw JSON output', async () => {
     execMock.mockResolvedValue({ success: true, rawResult: VALID_JSON });
     const model = new AIPromptFormDesignerModel();
-    const raw = await model.design({ Brief: 'an RSVP' }, fakeUser);
+    const raw = await model.design({ Brief: 'an RSVP', InputMode: 'brief' }, fakeUser);
     expect(raw).toBe(VALID_JSON);
     // The named prompt was passed to the runner with the Brief as data.
     const params = execMock.mock.calls[0][0] as { prompt: { Name: string }; data: FormDesignerPromptData };
@@ -128,7 +128,7 @@ describe('AIPromptFormDesignerModel', () => {
   it('re-stringifies a parsed JSON result when no raw text is present', async () => {
     execMock.mockResolvedValue({ success: true, result: VALID_BLUEPRINT });
     const model = new AIPromptFormDesignerModel();
-    const raw = await model.design({ Brief: 'an RSVP' }, fakeUser);
+    const raw = await model.design({ Brief: 'an RSVP', InputMode: 'brief' }, fakeUser);
     const parsed = JSON.parse(raw) as { name: string };
     expect(parsed.name).toBe('Event RSVP');
   });
@@ -136,13 +136,30 @@ describe('AIPromptFormDesignerModel', () => {
   it('throws clearly when the prompt is not found in metadata', async () => {
     promptsRef.value = [];
     const model = new AIPromptFormDesignerModel();
-    await expect(model.design({ Brief: 'x' }, fakeUser)).rejects.toThrow(/was not found/);
+    await expect(model.design({ Brief: 'x', InputMode: 'brief' }, fakeUser)).rejects.toThrow(/was not found/);
     expect(execMock).not.toHaveBeenCalled();
   });
 
   it('throws when the prompt run fails (no silent fallback)', async () => {
     execMock.mockResolvedValue({ success: false, errorMessage: 'no active model' });
     const model = new AIPromptFormDesignerModel();
-    await expect(model.design({ Brief: 'x' }, fakeUser)).rejects.toThrow(/no active model/);
+    await expect(model.design({ Brief: 'x', InputMode: 'brief' }, fakeUser)).rejects.toThrow(/no active model/);
+  });
+});
+
+describe('input mode', () => {
+  it('tells the prompt it is designing from a brief by default', async () => {
+    const model = sequenceModel([VALID_JSON]);
+    await designFormFromBrief('an RSVP', model, fakeUser);
+    expect((model.design.mock.calls[0][0] as FormDesignerPromptData).InputMode).toBe('brief');
+  });
+
+  it('carries the questions mode through, including on a retry', async () => {
+    // The mode has to survive the retry or a second attempt silently reverts to rewriting the
+    // author's questions — which is the one thing this mode exists to prevent.
+    const model = sequenceModel(['not json', VALID_JSON]);
+    await designFormFromBrief('Q1\nQ2', model, fakeUser, 'questions');
+    expect((model.design.mock.calls[0][0] as FormDesignerPromptData).InputMode).toBe('questions');
+    expect((model.design.mock.calls[1][0] as FormDesignerPromptData).InputMode).toBe('questions');
   });
 });

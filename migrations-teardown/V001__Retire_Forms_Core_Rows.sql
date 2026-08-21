@@ -10,11 +10,12 @@
 -- remove, and the next install re-INSERTs the same fixed UUIDs and fails on a primary-key
 -- collision. That is the whole reason the file exists.
 --
--- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Twenty-two rows — the ones this app's migrations create
--- that nothing else creates: nineteen from the metadata seed, plus the three row-level-security
+-- WHAT IS LISTED BELOW IS ONLY THE ROOTS. Thirty-one rows — the ones this app's migrations create
+-- that nothing else creates: twenty-eight from the metadata seed, plus the three row-level-security
 -- filters V202608131600 adds for #39. (This line said "Eighteen" while the list held nineteen, from
--- the file's first revision until 2026-08-13. Recounted rather than incremented, which is how the
--- off-by-one was found; if you add a row here, count the list again instead of trusting this number.) Their children are NOT listed, because listing them is what breaks: a static
+-- the file's first revision until 2026-08-13, then "Twenty-two" while the list held thirty-one,
+-- after the AI form builder added nine. Recounted rather than incremented, both times; if you add a
+-- row here, count the list again instead of trusting this number.) Their children are NOT listed, because listing them is what breaks: a static
 -- delete list only orders rows the SEED made, while a real installation also holds runtime
 -- children (action execution logs, prompt runs, user-application grants, dashboard state) that a
 -- pristine canary database does not. bizapps-caliber shipped the static version first and had 11
@@ -81,21 +82,34 @@ INSERT INTO #FormsDoomed (SchemaName, TableName, RowID, Depth) VALUES
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Respondent Gate Only, Never A Writer
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Respondent Own Distribution
     ('${mjSchema}', 'RowLevelSecurityFilter', '7F0E0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Respondent Own Form Versions
-    -- Actions (ActionParam.ActionID is NOT NULL, so the 9 params follow automatically).
+    -- Actions (ActionParam.ActionID is NOT NULL, so the 15 params follow automatically). Counted,
+    -- not incremented — it said 9 while the migrations created 15, after the AI builder added its
+    -- own. Same instruction as the header: recount rather than trust the number.
     ('${mjSchema}', 'Action',            '7F0A0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Generate Form From Brief
     ('${mjSchema}', 'Action',            '7F0A0002-A1B2-4C3D-8E4F-000000000002', 0),  -- Create Form From Template
     ('${mjSchema}', 'Action',            '7F0A0003-A1B2-4C3D-8E4F-000000000003', 0),  -- Upsert Respondent Person
     ('${mjSchema}', 'Action',            '7F0A0004-A1B2-4C3D-8E4F-000000000004', 0),  -- Send Confirmation Email
     ('${mjSchema}', 'Action',            '7F0A0005-A1B2-4C3D-8E4F-000000000005', 0),  -- Create Followup Task
     ('${mjSchema}', 'Action',            '7F0A0006-A1B2-4C3D-8E4F-000000000006', 0),  -- Analyze Written Responses
+    ('${mjSchema}', 'Action',            '7F0A0007-A1B2-4C3D-8E4F-000000000007', 0),  -- Chat
     ('${mjSchema}', 'ActionCategory',    '7F0C0001-A1B2-4C3D-8E4F-000000000001', 0),  -- Forms
     -- AI prompts (AIPromptModel.PromptID is NOT NULL) and their category.
     ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829304', 0),  -- Forms: Form Designer
     ('${mjSchema}', 'AIPrompt',          'B2C3D4E5-F6A7-4B8C-9D0E-1F2A3B4C5D6E', 0),  -- Forms: Response Analyzer
+    -- The staged authoring pipeline's four prompts, added with the AI form builder.
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829305', 0),  -- Forms: Form Outline
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829306', 0),  -- Forms: Page Detail
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829307', 0),  -- Forms: Theme Designer
+    ('${mjSchema}', 'AIPrompt',          '6B7C8D9E-0F1A-4B2C-3D4E-5F6071829308', 0),  -- Forms: Chat Assistant
     ('${mjSchema}', 'AIPromptCategory',  '4F5A6B7C-8D9E-4F0A-1B2C-3D4E5F607182', 0),  -- MJ_BizApps_Forms
     -- Templates (TemplateContent and TemplateParam are NOT NULL children).
     ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61', 0),  -- Form Designer
     ('${mjSchema}', 'Template',          'F6A7B8C9-D0E1-4F2A-3B4C-5D6E7F809102', 0),  -- Response Analyzer
+    -- The four templates those prompts render.
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F62', 0),  -- Form Outline
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F63', 0),  -- Page Detail
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F64', 0),  -- Theme Designer
+    ('${mjSchema}', 'Template',          '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F65', 0),  -- Chat Assistant
     -- The Forms application (ApplicationEntity / ApplicationRole / UserApplication are NOT NULL).
     ('${mjSchema}', 'Application',       'BFB97C57-4552-4643-8933-A0B2D76544D8', 0),  -- Forms
     -- Dashboards. Listed explicitly rather than left to the Application cascade, because

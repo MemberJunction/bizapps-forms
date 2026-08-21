@@ -34,6 +34,19 @@ describe('renderRespondentHostPage', () => {
     expect(html()).toContain('name="robots" content="noindex"');
   });
 
+  it('declares an icon so the browser does not request /favicon.ico', () => {
+    // Without this the browser asks for /favicon.ico on its own, MJAPI's auth middleware answers
+    // 401, and every anonymous respondent gets a red console error on a page that is working
+    // perfectly. Both pages get it: the error page is what someone sees when a link has expired,
+    // which is exactly when a stray 401 is most likely to be misread as the cause.
+    for (const out of [html(), renderRespondentHostErrorPage({ message: 'nope' })]) {
+      expect(out).toContain('rel="icon"');
+      // An empty data: URI, not a real file — the respondent page ships no assets, and the point
+      // is to stop the request rather than to serve an icon.
+      expect(out).toContain('href="data:,"');
+    }
+  });
+
   it('reads both the query string and the fragment for slug + token', () => {
     const out = html();
     expect(out).toContain('window.location.search');

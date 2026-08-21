@@ -44,7 +44,7 @@
         <mjf-form-screen [screen]="es" />
       } @else {
         <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
-          <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
+          <mjf-icon name="circle-check" class="mjf-done__icon" />
           <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
         </div>
       }
@@ -126,7 +126,7 @@
             />
           } @else if (captchaConfigGap()) {
             <p class="mjf-captcha-gap" role="alert">
-              <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+              <mjf-icon name="shield-halved" />
               This form requires a security challenge, but it has not been configured yet.
               It can't be submitted until the site owner adds a Turnstile site key.
             </p>
@@ -135,12 +135,12 @@
           @switch (autosaveStatus()) {
             @case ('saving') {
               <p class="mjf-autosave" aria-live="polite">
-                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Saving…
+                <mjf-icon name="cloud-arrow-up" /> Saving…
               </p>
             }
             @case ('saved') {
               <p class="mjf-autosave" aria-live="polite">
-                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i> Progress saved
+                <mjf-icon name="cloud-arrow-up" /> Progress saved
               </p>
             }
           }

@@ -138,8 +138,13 @@ export class FormsHomeService {
     };
   }
 
-  /** Looks up the Action record id by its registered name. */
-  private async resolveActionId(actionName: string): Promise<string | null> {
+  /**
+   * Looks up the Action record id by its registered name.
+   *
+   * Public because the streaming generation path resolves the same action through the same lookup
+   * — a second copy of this query is a second place for the action's name to be wrong.
+   */
+  public async resolveActionId(actionName: string): Promise<string | null> {
     const res = (await this.rv.RunView({
       EntityName: HOME_ENTITY.actions,
       ResultType: 'simple',

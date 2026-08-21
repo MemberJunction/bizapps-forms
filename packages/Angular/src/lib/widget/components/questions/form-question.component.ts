@@ -51,6 +51,7 @@ import {
 } from './input-mode';
 import { SignaturePadComponent } from './signature-pad.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
+import { MjfIconComponent } from '../mjf-icon.component';
 
 /** How long a reordered row takes to travel to its new place. */
 const RANK_TRAVEL_MS = 220;
@@ -79,7 +80,7 @@ type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
   selector: 'mjf-form-question',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, SignaturePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
+  imports: [NgTemplateOutlet, SignaturePadComponent, MjfIconComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
   templateUrl: './form-question.component.html',
   styleUrls: ['./form-question.component.css'],
 })

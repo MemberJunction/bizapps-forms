@@ -40,7 +40,30 @@ export const FORMS_HOME_CSS = /* css */ `
 /* --- Authoring panels --- */
 
 .home-panel { display: flex; flex-direction: column; gap: var(--mjf-gap); }
+
+/* The page column fills the scrollport even when the list is short. Without this it is only as
+   tall as its content, and margin-top: auto below has no free space to push into. */
+.mjf-page { min-height: 100%; }
+
+/* The chat sits at the BOTTOM of the page, centred and always present.
+
+   Two mechanisms, because one of them alone is only half the behaviour. position: sticky pins
+   it to the bottom edge while a long list scrolls past — but sticky does nothing at all until
+   the element would otherwise leave the scrollport, so on a short list (six forms in a tall
+   window) it never engaged and the box sat wherever the list happened to end, floating in the
+   middle of the page. margin-top: auto is what puts it at the bottom in that case: the page is
+   a flex column, so the auto margin absorbs every pixel of leftover height. Long list: sticky
+   does the work. Short list: the margin does. */
+.home-chat {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: var(--mjf-gap) 0 var(--mjf-gap-sm);
+  margin-top: auto;
+  background: linear-gradient(to top, var(--mj-bg-page, var(--mj-bg-surface)) 72%, transparent);
+}
 .home-panel-actions { display: flex; gap: var(--mjf-gap-sm); }
+
 .home-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--mjf-gap-sm); }
 
 /* --- Small screens ---

@@ -13,7 +13,7 @@ flow** into their own abstraction.
 | 3 | Widget: render the 10 new types | ✅ |
 | 4 | Widget: Welcome / Ending screen phases | ✅ |
 | 5 | Server: parse, validate, persist, select ending | ✅ |
-| 6 | Builder: palette, per-type editors, Screens editor, Import questions | ✅ |
+| 6 | Builder: palette, per-type editors, Screens editor | ✅ |
 | 7 | Reporting / responses / export / AI authoring | ✅ |
 
 ## Found on the way
@@ -58,8 +58,22 @@ persist → aggregate → export):
 **Two new screen kinds** — `Welcome` and `Ending` — modelled as a separate `FormScreen`
 entity, not as question types. See §3.
 
-**Two structural additions**: `FormPage.IsPartialSubmitPoint` (reaching the page banks a
-partial response) and **Import questions** in the builder (paste lines → questions).
+**One structural addition**: `FormPage.IsPartialSubmitPoint` (reaching the page banks a
+partial response).
+
+**Import questions was built here and has since been removed** (2026-08-21, at the product
+owner's call). It was a builder-side parser turning pasted lines into questions — its own
+dialog, a 200-question cap, and heuristics for inferring type and options from punctuation.
+The AI assistant now covers the same job and covers it better: it reads intent rather than
+punctuation, and it can place, type, and group in one turn. Keeping a second, dumber path to
+the same outcome meant two code paths for "add a batch of questions", one of which nobody
+would choose. Removed rather than deprecated because it had no data model of its own — the
+parser was pure, so nothing published depends on it.
+
+What this leaves open, deliberately: the AI prompt still has `InputMode: 'questions'` — the
+"preserve the pasted wording verbatim, only infer types and grouping" mode described in
+AI_FORM_BUILDER_SPEC §8 — and it has **no UI caller at all** now that the builder's own paste
+box is gone. Wiring it to the chat is the natural home for paste-a-list if it comes back.
 
 **Already covered, no work**: Question Group (= `FormPage`), Redirect to URL
 (`FormSettings.redirectUrl`, now also per-ending), Create with AI (`generate-form.action`).

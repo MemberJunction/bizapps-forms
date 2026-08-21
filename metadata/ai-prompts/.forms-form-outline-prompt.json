@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Form Outline",
+      "Description": "First pass of a staged AI form build. Sketches the SHAPE of a form — pages, question stubs, screens and a theme brief — from a brief or a pasted question list. Kept small and fast because it gates how quickly the author sees a real form; the 'Forms: Page Detail' prompt fills each page in afterwards. Model selection is metadata-driven (SelectionStrategy=Specific pins the AI Prompt Model row below), so this stage can be pointed at a faster model than the detail stage without a code change.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Form Outline",
+      "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
+      "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
+      "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
+      "Status": "Active",
+      "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-form-outline.output-example.json",
+      "SelectionStrategy": "Specific",
+      "PowerPreference": "Highest",
+      "PromptRole": "System",
+      "PromptPosition": "First",
+      "ParallelizationMode": "None",
+      "ValidationBehavior": "Strict",
+      "MaxRetries": 2,
+      "EffortLevel": null
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": [
+        {
+          "fields": {
+            "PromptID": "@parent:ID",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.6 Flash",
+            "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718294"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T22:45:12.550Z",
+            "checksum": "e5db75362dab2734b7237909bdcb8efb0b21cce10f7fd4b599194df951e12c88"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829305"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T20:59:34.782Z",
+      "checksum": "6ba39b21e68fe5f70b86b584d55781a3116916d7253ceb2ebcb9ff84b616cb6e"
+    }
+  }
+]
