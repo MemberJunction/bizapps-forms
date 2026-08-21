@@ -357,20 +357,19 @@ export function planEdits(
         });
         continue;
       }
-      if (!wantsOptions && given > 0) {
-        plan.refused.push({
-          op: operation.op,
-          handle: operation.handle,
-          reason: `${operation.type} does not show choices, so the options sent with it would never appear — use a choice type, or drop them`,
-        });
-        continue;
-      }
+      // The MIRROR case is not symmetrical, deliberately. A choice type with no choices cannot be
+      // built at all, so it is refused. A plain type carrying stray options is a question the
+      // author genuinely asked for, plus rows that would never render — refusing it would cost
+      // them the question over a quirk of the model's output they never saw. The options are
+      // dropped instead and the applier says so, which is "change what they asked for and not
+      // more" rather than "do nothing because part of the request was odd".
       const placement = resolvePlacement(snapshot, operation, target.id, doomed, movedTo);
       if ('reason' in placement) {
         plan.refused.push({ op: operation.op, handle: operation.handle, reason: placement.reason });
         continue;
       }
-      plan.resolved.push({ ...operation, id: target.id, ...placement });
+      const options = wantsOptions ? operation.options : undefined;
+      plan.resolved.push({ ...operation, options, id: target.id, ...placement });
       continue;
     }
     // THE DELETION GATE. `FormResponseAnswer.QuestionID` points at this row, so removing it

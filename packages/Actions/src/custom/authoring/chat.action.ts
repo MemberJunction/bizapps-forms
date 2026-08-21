@@ -534,24 +534,3 @@ async function describeOpenForm(
   };
 }
 
-/** Parse a stored token map, treating anything unreadable as "no tokens" rather than throwing. */
-function readTokens(raw: string | null): Record<string, string> {
-  if (!raw) {
-    return {};
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) {
-      return {};
-    }
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === 'string') {
-        out[k] = v;
-      }
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}

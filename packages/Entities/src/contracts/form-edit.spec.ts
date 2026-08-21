@@ -497,14 +497,17 @@ describe('planEdits — a choice question needs choices', () => {
     expect(plan.resolved).toHaveLength(0);
   });
 
-  it('refuses options on a type that cannot show them', () => {
-    // The mirror case: the rows persist, belong to nothing the widget renders, and are invisible.
+  it('DROPS options a plain type cannot show, rather than refusing the question', () => {
+    // Not symmetrical with the case above, on purpose. The author asked for a short-text question;
+    // the stray options are a quirk of the model's output they never saw. Refusing would cost them
+    // the question over it. The options would render nowhere, so they simply do not get written.
     const plan = planEdits(snapshot(), [
       { op: 'addQuestion', handle: 'p1', type: 'ShortText', prompt: 'Name', options: ['A', 'B'] },
     ]);
 
-    expect(plan.resolved).toHaveLength(0);
-    expect(plan.refused[0].reason).toMatch(/ShortText/);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved).toHaveLength(1);
+    expect((plan.resolved[0] as { options?: string[] }).options).toBeUndefined();
   });
 
   it('accepts a choice question that has its choices', () => {
