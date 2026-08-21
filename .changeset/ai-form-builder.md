@@ -1,0 +1,20 @@
+---
+"@mj-biz-apps/forms-entities": minor
+"@mj-biz-apps/forms-actions": minor
+"@mj-biz-apps/forms-server": minor
+"@mj-biz-apps/forms-ng": minor
+---
+
+An author types "an RSVP with dietary needs" and gets a review-ready draft: pages, typed questions with options and validation, conditional logic, a welcome and an ending screen, generated pictures and a theme — built in stages they watch happen, landing in the ordinary editable builder. Then they keep talking to it: "make it warmer", "add a photo of a conference hall to the start screen", "what should I ask next?"
+
+**Staged, not single-shot.** The pipeline is outline → per-page detail → media → theme, each stage persisted as it completes. That is what makes the progress determinate and what makes an interrupted build a reviewable draft instead of a rollback. Every stage returns JSON that is schema-validated before anything reaches the database, and no stage can reach `Metadata` or `RunView` itself — a malformed blueprint costs a retry, not a corrupted form. The chat's five actions (`none` / `create` / `restyle` / `image` / `unsupported`) are a closed set for the same reason: the model decides, deterministic code acts.
+
+**No model name in code.** Stages resolve their model from an `MJ: AI Prompt Models` row with `SelectionStrategy='Specific'`, so re-tiering authoring is a metadata operation and not a deploy. Authoring runs on Gemini 3.6 Flash; `Forms: Response Analyzer` is deliberately left on Gemini 3.1 Pro.
+
+**No new tables.** Chat turns live in MJ's own `MJ: Conversations` / `MJ: Conversation Details`, with `ExternalID` scoping a thread to one form. Generated images go through `runAssetUpload` — the same path a human upload takes — so they inherit the size cap, the raster-only allowlist, the public prefix and the cache headers. An AI-generated file is not more trustworthy than an uploaded one.
+
+**Security.** A client-supplied `FormID` reached a `RunView.ExtraFilter` unescaped, where `AND` binding tighter than `OR` turned the caller's own user id into no constraint at all and would have loaded another user's conversation. Fixed at five sinks behind one shared `isGuid` guard.
+
+Five metadata migrations, in order: `V202608211700` (the three staged prompts, their templates and the extended Form Designer blueprint), `V202608211800` (`?`-marks the optional keys in four `OutputExample`s — MJ treats every unsuffixed key as required, which was burning all three retries on every generation), `V202608211900` (pins the four authoring prompts to Gemini 3.6 Flash), `V202608212000` (the chat action, prompt and template) and `V202608212100` (the chat's `image` action). Apply them before deploying the code: the client resolves `Forms: Chat` by name, so the name is a contract.
+
+Also fixes the welcome and ending screens' layout. Their image, body and button are inline-level boxes so that the author's alignment setting moves the box rather than only the text — but inline boxes share a line when they fit, so a short body and the Start button rendered side by side. Each element now sits in a row of its own. `--mjf-title-align` also fell back to `left` for the logo and header while the screens fell back to `center`, so an unthemed form drew a left logo above a centred hero; every fallback is now `center`, matching the default theme and the builder control. The built-in confirmation (what a form shows when no ending screen is configured) is now the same full-height hero an authored ending is, and the image field keeps its label once it holds an image.
