@@ -2,8 +2,14 @@ import { Injectable, signal } from '@angular/core';
 import { Metadata, RunView, LogError } from '@memberjunction/core';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
 import type { ActionParam } from '@memberjunction/actions-base';
-import { guidOrUndefined, isGuid, type FormChatTurn } from '@mj-biz-apps/forms-entities';
+import {
+  guidOrUndefined,
+  isGuid,
+  type FormChatTurn,
+  type GenerationProgress,
+} from '@mj-biz-apps/forms-entities';
 import { readActionOutputString } from '../shared/action-output';
+import { watchGenerationProgress } from '../shared/generation-progress-stream';
 
 /**
  * The authoring chat's client half: load a thread, send a message, surface what came back.
@@ -23,12 +29,14 @@ import { readActionOutputString } from '../shared/action-output';
 /** What one send produced. */
 export interface ChatSendResult {
   reply: string;
-  /** `none` | `create` | `restyle` | `unsupported` — what the server actually did. */
+  /** `none` | `create` | `restyle` | `image` | `unsupported` — what the server actually did. */
   action: string;
   /** Set when the turn created a form, so the host can open it. */
   createdFormId: string | null;
   /** Set when the turn restyled the open form, so the host can reload its style. */
   restyledStyleId: string | null;
+  /** Set when the turn put a picture on a screen, so the host can reload what it is showing. */
+  imagedScreenId: string | null;
   ok: boolean;
 }
 
@@ -62,6 +70,17 @@ export class FormChatService {
   /** True while a message is in flight, so the input can disable and show a pending state. */
   public readonly busy = this._busy.asReadonly();
 
+  private readonly _progress = signal<GenerationProgress | null>(null);
+  /**
+   * What the server is doing right now, or null when it is not building a form.
+   *
+   * A turn that creates a form runs for the better part of a minute. Three pulsing dots for that
+   * long do not read as "working", they read as "stuck" — long enough that an author cancels and
+   * tries again, which starts a second build. The stages are already published for the forms
+   * list's progress bar; the chat listens to the same stream and says what is happening.
+   */
+  public readonly progress = this._progress.asReadonly();
+
   /**
    * Load the thread for this scope.
    *
@@ -76,19 +95,29 @@ export class FormChatService {
         this._turns.set([]);
         return;
       }
-      const details = await this.rv.RunView<{ Role: FormChatTurn['role']; Message: string }>({
+      const details = await this.rv.RunView<{
+        Role: FormChatTurn['role'];
+        Message: string;
+        __mj_CreatedAt: string | Date;
+      }>({
         EntityName: ENTITY.detail,
         ExtraFilter: `ConversationID='${conversationId}' AND HiddenToUser = 0`,
         OrderBy: '__mj_CreatedAt',
         ResultType: 'simple',
-        Fields: ['Role', 'Message'],
+        Fields: ['Role', 'Message', '__mj_CreatedAt'],
       });
       if (!details.Success) {
         LogError(`[Forms chat] Could not load the thread: ${details.ErrorMessage}`);
         this._turns.set([]);
         return;
       }
-      this._turns.set((details.Results ?? []).map((d) => ({ role: d.Role, message: d.Message })));
+      this._turns.set(
+        (details.Results ?? []).map((d) => ({
+          role: d.Role,
+          message: d.Message,
+          at: new Date(d.__mj_CreatedAt),
+        })),
+      );
     } catch (error) {
       LogError(`[Forms chat] Could not load the thread: ${asText(error)}`);
       this._turns.set([]);
@@ -105,16 +134,28 @@ export class FormChatService {
   public async send(message: string, formId: string | null): Promise<ChatSendResult> {
     const trimmed = message.trim();
     if (!trimmed || this._busy()) {
-      return { reply: '', action: 'none', createdFormId: null, restyledStyleId: null, ok: false };
+      return {
+        reply: '',
+        action: 'none',
+        createdFormId: null,
+        restyledStyleId: null,
+        imagedScreenId: null,
+        ok: false,
+      };
     }
-    this._turns.update((t) => [...t, { role: 'User', message: trimmed }]);
+    this._turns.update((t) => [...t, { role: 'User', message: trimmed, at: new Date() }]);
     this._busy.set(true);
+    this._progress.set(null);
     try {
       const result = await this.runChatAction(trimmed, formId);
-      this._turns.update((t) => [...t, { role: result.ok ? 'AI' : 'Error', message: result.reply }]);
+      this._turns.update((t) => [
+        ...t,
+        { role: result.ok ? 'AI' : 'Error', message: result.reply, at: new Date() },
+      ]);
       return result;
     } finally {
       this._busy.set(false);
+      this._progress.set(null);
     }
   }
 
@@ -129,6 +170,7 @@ export class FormChatService {
       action: 'none',
       createdFormId: null,
       restyledStyleId: null,
+      imagedScreenId: null,
       ok: false,
     });
     try {
@@ -145,7 +187,19 @@ export class FormChatService {
       if (formId) {
         inputs.push({ Name: 'FormID', Value: formId, Type: 'Input' });
       }
-      const result = await new GraphQLActionClient(provider).RunAction(actionId, inputs);
+      // Subscribed BEFORE the mutation: a create turn's outline event fires seconds in, and a
+      // subscription opened afterwards misses the one event that supplies the total.
+      const stream = watchGenerationProgress(
+        provider.sessionId,
+        () => this._progress(),
+        (p) => this._progress.set(p),
+      );
+      let result;
+      try {
+        result = await new GraphQLActionClient(provider).RunAction(actionId, inputs);
+      } finally {
+        stream?.unsubscribe();
+      }
       if (!result.Success) {
         return failure(result.Message || 'The chat could not respond.');
       }
@@ -156,6 +210,7 @@ export class FormChatService {
         action: readActionOutputString(result, 'Action') ?? 'none',
         createdFormId: readActionOutputString(result, 'FormID'),
         restyledStyleId: readActionOutputString(result, 'StyleID'),
+        imagedScreenId: readActionOutputString(result, 'ScreenID'),
         ok: true,
       };
     } catch (error) {

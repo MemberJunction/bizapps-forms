@@ -90,6 +90,12 @@ export class DesignPanelComponent implements AfterViewInit, OnDestroy {
   @Output() readonly styleApplied = new EventEmitter<string | null>();
 
   /**
+   * A chat turn changed the form's content. Forwarded rather than handled: the definition this
+   * panel previews is an `@Input`, so the builder above owns re-reading it.
+   */
+  @Output() readonly formChanged = new EventEmitter<void>();
+
+  /**
    * The draft as a published-form definition, so the sample can be the REAL form.
    *
    * A hand-built mock of a couple of fake questions could not show what a theme does to

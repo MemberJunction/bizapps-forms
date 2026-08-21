@@ -336,6 +336,13 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   /**
    * A chat turn created a form — open it, exactly as the old Generate button did.
    *
+   * THE CONVERSATION COMES WITH THEM. Opening the form used to end the exchange mid-sentence: the
+   * server had filed the thread under the forms-list key, so the builder looked for that form's
+   * thread, found nothing, and showed an empty box — the reply the author was waiting for only
+   * reappeared if they navigated back here. The server now re-files the thread onto the form it
+   * made, and the builder's panel opens itself on a thread this recent, so the reply is on screen
+   * when they land. Nothing needs to be handed across the navigation for that to work.
+   *
    * The list is refreshed too: the author is leaving it, but they come back to it, and a list that
    * is missing the form they just made is the same bug the old path shipped with.
    */

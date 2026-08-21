@@ -1146,6 +1146,19 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.cdr.markForCheck();
   }
 
+  /**
+   * A chat turn changed the form's CONTENT — today, a picture landing on a screen.
+   *
+   * Distinct from a restyle because they touch different rows: a restyle rewrites the style's
+   * tokens, which the Design tab re-reads on its own, while this writes a Screen and is only
+   * visible once the tree is read back.
+   */
+  protected async onChatChangedForm(): Promise<void> {
+    this.tree = await this.state.loadTree(this.record);
+    await this.refreshPublishState();
+    this.cdr.markForCheck();
+  }
+
   protected closePreview(): void {
     this.previewDef = null;
     this.cdr.markForCheck();

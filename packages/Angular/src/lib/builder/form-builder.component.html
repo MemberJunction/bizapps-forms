@@ -472,7 +472,11 @@
              list; only the placement differs, and it is scoped to THIS form so the assistant can
              answer about it and the thread is this form's. -->
         <div class="fb-chat">
-          <mjf-form-chat [formId]="record.ID" (formRestyled)="onChatRestyled()" />
+          <mjf-form-chat
+            [formId]="record.ID"
+            (formRestyled)="onChatRestyled()"
+            (formChanged)="onChatChangedForm()"
+          />
         </div>
       </section>
 
@@ -504,6 +508,7 @@
         [form]="record"
         [definition]="designPreviewDefinition"
         (styleApplied)="onStyleApplied()"
+        (formChanged)="onChatChangedForm()"
       ></mjf-design-panel>
     </div>
   } @else if (activeTab === 'distribute') {
