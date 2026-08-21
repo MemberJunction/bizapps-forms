@@ -47,12 +47,32 @@ export function parseCssColor(value: string): Rgb | undefined {
         : parseInt(digits.slice(i * 2, i * 2 + 2), 16);
     return [pair(0), pair(1), pair(2)];
   }
-  const numbers = text.match(/-?\d*\.?\d+/g);
+  // Only the two numeric forms this function can actually READ. It used to take the first three
+  // numbers out of any string, which meant `hsl(210 50% 40%)` came back as the RGB triple
+  // 210,50,40 — a confident wrong answer, and the worst kind for a contrast gate, because a wrong
+  // ratio is acted on where a missing one is at least skipped. Named colours (`navy`) and
+  // `var(--x)` yielded fewer than three numbers and returned undefined by accident rather than by
+  // decision. Anything outside these two forms is now refused on purpose, and the theme gate
+  // strips a colour token it cannot measure rather than leaving its pair unchecked.
+  const functional = /^(rgba?|color)\(([^)]*)\)$/i.exec(text);
+  if (!functional) {
+    return undefined;
+  }
+  const isColorFn = functional[1].toLowerCase() === 'color';
+  // `color()` names its space first — only sRGB is a plain 0..1 triple we can scale.
+  if (isColorFn && !/^\s*srgb\b/i.test(functional[2])) {
+    return undefined;
+  }
+  const numbers = functional[2].match(/-?\d*\.?\d+/g);
   if (!numbers || numbers.length < 3) {
     return undefined;
   }
+  // A percentage inside rgb() is a different scale, and mixing them is not worth guessing at.
+  if (!isColorFn && functional[2].includes('%')) {
+    return undefined;
+  }
   const [r, g, b] = numbers.slice(0, 3).map(Number);
-  const scale = text.includes('color(') ? 255 : 1;
+  const scale = isColorFn ? 255 : 1;
   const clamp = (n: number): number => Math.max(0, Math.min(255, Math.round(n * scale)));
   return [clamp(r), clamp(g), clamp(b)];
 }

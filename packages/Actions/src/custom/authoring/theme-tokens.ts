@@ -31,6 +31,25 @@ import { contrastRatio, parseCssColor, readableInk, toCssRgb } from '@mj-biz-app
  * guess from a brief. What is here is colour and type FAMILY, which is what "make it feel warm"
  * actually means.
  */
+/**
+ * The tokens whose value must be a colour this codebase can actually measure.
+ *
+ * Everything else in the vocabulary is a font stack, which is a string and is passed through as
+ * authored. Split out because the contrast gate can only judge what {@link parseCssColor} reads,
+ * and a value it cannot read used to make the gate SKIP that pair in silence.
+ */
+export const THEME_COLOR_TOKEN_NAMES = [
+  '--mjf-accent',
+  '--mjf-accent-strong',
+  '--mjf-page-bg',
+  '--mjf-card-bg',
+  '--mjf-page-ink',
+  '--mjf-on-accent',
+  '--mjf-choice-selected-bg',
+] as const;
+
+const THEME_COLOR_TOKEN_SET: ReadonlySet<string> = new Set(THEME_COLOR_TOKEN_NAMES);
+
 export const THEME_TOKEN_NAMES = [
   '--mjf-accent',
   '--mjf-accent-strong',
@@ -131,8 +150,20 @@ function stripUnknownTokens(raw: Record<string, string>): {
   const kept: Record<string, string> = {};
   const strippedTokens: string[] = [];
   for (const [name, value] of Object.entries(raw)) {
-    if (THEME_TOKEN_SET.has(name) && typeof value === 'string' && value.trim().length > 0) {
-      kept[name] = value.trim();
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    // A colour token whose value cannot be MEASURED is dropped like an invented token name is.
+    // `parseCssColor` reads hex and rgb(); it misreads `hsl(210 50% 40%)` as the RGB triple
+    // 210,50,40, and returns undefined for `navy` or `var(--brand)` — which made
+    // `enforceReadability` skip that pair entirely. Since the gate now judges the whole merged
+    // palette, one unreadable value would silently remove a pair from a check that is supposed to
+    // cover all of them. Stripping falls back to the house default, which IS measurable, and the
+    // strip is reported so a prompt drifting toward `hsl()` is visible rather than invisible.
+    const usable =
+      THEME_TOKEN_SET.has(name) &&
+      trimmed.length > 0 &&
+      (!THEME_COLOR_TOKEN_SET.has(name) || parseCssColor(trimmed) !== undefined);
+    if (usable) {
+      kept[name] = trimmed;
     } else {
       strippedTokens.push(name);
     }

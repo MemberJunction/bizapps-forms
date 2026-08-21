@@ -251,3 +251,49 @@ describe('validateTheme — the accent is a background, so it never moves', () =
     ).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+describe('validateTheme — a colour it cannot read is stripped, not skipped', () => {
+  /**
+   * THE BUG THIS GUARDS. `parseCssColor` handles hex and falls back to "take the first three
+   * numbers", so `hsl(210 50% 40%)` is read as the RGB triple 210,50,40 — a confident wrong
+   * verdict — and `navy` or `var(--brand)` yields fewer than three numbers, comes back undefined,
+   * and makes `enforceReadability` SKIP that pair entirely. The theme schema is
+   * `z.record(z.string())`, so nothing stopped any of them arriving.
+   *
+   * Skipping got much worse when the gate started judging the merged palette: one unreadable value
+   * silently removes a pair from a check that is now supposed to cover every pair. A value the
+   * gate cannot judge is stripped instead, so the house default applies and the pair IS checked —
+   * and the strip is reported, which is how an operator sees a prompt drifting.
+   */
+  it('strips a named colour and falls back to the house value', () => {
+    const result = validateTheme({ cssVariables: { '--mjf-page-bg': 'navy' } }, DEFAULT_FORM_THEME);
+    expect(result.strippedTokens).toContain('--mjf-page-bg');
+    expect(result.cssVariables['--mjf-page-bg']).toBe(DEFAULT_FORM_THEME['--mjf-page-bg']);
+  });
+
+  it('strips an hsl() it would otherwise misread as rgb', () => {
+    const result = validateTheme(
+      { cssVariables: { '--mjf-accent': 'hsl(210 50% 40%)' } },
+      DEFAULT_FORM_THEME,
+    );
+    expect(result.strippedTokens).toContain('--mjf-accent');
+  });
+
+  it('keeps rgb() and hex, which it reads correctly', () => {
+    const result = validateTheme(
+      { cssVariables: { '--mjf-accent': 'rgb(26, 29, 33)', '--mjf-card-bg': '#FFF' } },
+      DEFAULT_FORM_THEME,
+    );
+    expect(result.strippedTokens).toEqual([]);
+    expect(result.cssVariables['--mjf-accent']).toBe('rgb(26, 29, 33)');
+  });
+
+  it('leaves font stacks alone — they are not colours', () => {
+    const result = validateTheme(
+      { cssVariables: { '--mjf-font-body': "'Inter', system-ui, sans-serif" } },
+      DEFAULT_FORM_THEME,
+    );
+    expect(result.strippedTokens).toEqual([]);
+    expect(result.cssVariables['--mjf-font-body']).toBe("'Inter', system-ui, sans-serif");
+  });
+});
