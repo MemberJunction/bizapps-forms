@@ -33,6 +33,10 @@ import '@memberjunction/server-bootstrap/mj-class-registrations';
 import { LoadGeneratedEntities as LoadFormsEntities } from '@mj-biz-apps/forms-entities';
 import { LoadGeneratedEntities as LoadCommonEntities } from '@mj-biz-apps/common-entities';
 import { LoadFormsActions, runAuthoring, runChatTurn, setFormsProgressPublisher } from '@mj-biz-apps/forms-actions';
+// Side-effect import, exactly as MJAPI does it: the package installs the generated-image store at
+// MODULE LOAD (index.ts:77), because MJAPI imports it for RESOLVER_PATHS without ever calling its
+// init function. Importing a named symbol here would test a different wiring than production uses.
+import '@mj-biz-apps/forms-server';
 
 let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
@@ -57,7 +61,9 @@ async function main() {
   LoadFormsEntities();
   LoadCommonEntities();
   LoadFormsActions();
-  pass('provider up, Forms entities + actions registered');
+  // The same registration MJAPI performs at module load. Without it every image request degrades
+  // with "no store configured", which is honest but proves nothing about the path.
+  pass('provider up, Forms entities + actions registered, image store installed');
 
   const md = new Metadata();
   const provider = Metadata.Provider;
@@ -249,10 +255,14 @@ async function main() {
   console.log(`  Q: and the buttons?`);
   console.log(`  A: ${String(followUp.get('Reply')).slice(0, 160).replace(/\n/g, ' ')}…`);
 
+  // Counts are RELATIVE, not absolute: the forms-list thread is keyed on `mj-forms:home` and is
+  // deliberately reused, so a second run of this script joins the thread the first one left. An
+  // `=== 2` here passed once and then failed forever, which is a fixture bug wearing a defect's hat.
   const stored = await q('MJ: Conversation Details', `ConversationID='${threadId}'`, ['Role', 'Message']);
-  check(stored.length >= 4, `every turn is persisted (${stored.length} rows for 2 exchanges)`);
-  check(stored.filter((t) => t.Role === 'User').length === 2, 'both questions were recorded');
-  check(stored.filter((t) => t.Role === 'AI').length >= 2, 'both answers were recorded');
+  check(stored.length >= 4, `every turn is persisted (${stored.length} rows in this thread)`);
+  const asked2 = stored.filter((t) => t.Message === 'And what about the buttons?');
+  check(asked2.length >= 1 && asked2.at(-1).Role === 'User', 'this run\'s question was recorded verbatim');
+  check(stored.filter((t) => t.Role === 'AI').length >= 2, 'answers were recorded');
 
   // (c) Asking for a form actually builds one.
   const built = await chat('Build me a short volunteer sign-up form: name, email, and which shift they want.');
@@ -260,6 +270,21 @@ async function main() {
   console.log(`  A: ${String(built.get('Reply')).slice(0, 160).replace(/\n/g, ' ')}…  [action=${built.get('Action')}]`);
   check(built.get('Action') === 'create', `asking for a form creates one (action=${built.get('Action')})`);
   check(!!built.get('FormID'), 'the new form id comes back so the client can open it');
+
+  // (c2) THE THREAD FOLLOWS THE FORM. Asked for on the forms list, the exchange is re-filed onto
+  // the form that came out of it — otherwise the author is carried into a builder whose chat panel
+  // looks empty, and the conversation they were mid-way through reads as discarded.
+  const builtThread = built.get('ConversationID');
+  const [refiled] = await q('MJ: Conversations', `ID='${builtThread}'`, ['ID', 'ExternalID']);
+  console.log(`     thread is now filed under ${refiled?.ExternalID}`);
+  check(refiled?.ExternalID === `mj-forms:form:${built.get('FormID')}`,
+    'the thread was re-filed onto the form it created',
+    `expected mj-forms:form:${built.get('FormID')}, got ${refiled?.ExternalID}`);
+
+  // And the builder's own lookup — the query the Angular panel runs — finds it there.
+  const asBuilderSees = await q('MJ: Conversations',
+    `UserID='${user.ID}' AND ExternalID='mj-forms:form:${built.get('FormID')}' AND IsArchived = 0`, ['ID']);
+  check(asBuilderSees.length === 1, 'the builder finds that thread by the key it looks under');
 
   // (d) Restyling the form we just made.
   const chatFormId = built.get('FormID');
@@ -276,6 +301,33 @@ async function main() {
     // The house layout survives a chat restyle, exactly as it survives a generated theme.
     check(tokens['--mjf-btn-radius'] === '999px', 'the house corner radius survived the restyle');
     check(tokens['--mjf-title-align'] === 'center', 'the house title alignment survived the restyle');
+  }
+
+  // (e) A picture on the form's start screen — the capability the prompt used to deny having.
+  if (chatFormId) {
+    const before = await q('MJ_BizApps_Forms: Form Screens',
+      `FormID='${chatFormId}' AND ScreenType='Welcome'`, ['ID', 'MediaURL']);
+    const imaged = await chat('Add a photo of volunteers sorting boxes in a community hall to the start screen.',
+      { FormID: chatFormId });
+    console.log(`  Q: add a photo to the start screen   [action=${imaged.get('Action')}]`);
+    console.log(`  A: ${String(imaged.get('Reply')).slice(0, 200).replace(/\n/g, ' ')}…`);
+    check(imaged.get('Action') === 'image',
+      `asking for a picture takes the image action (action=${imaged.get('Action')})`,
+      String(imaged.get('Reply')).slice(0, 300));
+    check(!/can(?:'|not|\u2019t)?\s*(?:not\s+)?(?:generate|add|make|create)\s+(?:an?\s+)?(?:image|picture|photo)/i
+      .test(String(imaged.get('Reply'))),
+      'the assistant no longer claims it cannot make images');
+    if (before[0]) {
+      const [after] = await q('MJ_BizApps_Forms: Form Screens', `ID='${before[0].ID}'`, ['ID', 'MediaURL']);
+      console.log(`     start screen media: ${before[0].MediaURL ?? '(none)'} -> ${after?.MediaURL ?? '(none)'}`);
+      check(!!after?.MediaURL && after.MediaURL !== before[0].MediaURL,
+        'the picture landed on the start screen row',
+        `MediaURL is still ${after?.MediaURL ?? 'null'} — reply was: ${String(imaged.get('Reply')).slice(0, 200)}`);
+      check(imaged.get('ScreenID') === before[0].ID, 'the turn reports which screen it changed');
+      check(String(imaged.get('ImageURL') ?? '').startsWith('http'), 'the turn reports the stored URL');
+    } else {
+      fail('the generated form has a welcome screen to put a picture on');
+    }
   }
 
   section(failures === 0 ? '✅ ALL CHECKS PASSED' : `❌ ${failures} CHECK(S) FAILED`);
