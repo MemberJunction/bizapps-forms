@@ -82,6 +82,11 @@ function matchesFilter(row: Record<string, unknown>, filter: string | undefined)
   return conj.every((clause) => {
     const eq = /^(\w+)='([^']*)'$/.exec(clause);
     if (eq) return String(row[eq[1]] ?? '') === eq[2];
+    const inList = /^(\w+) IN \(([^)]*)\)$/.exec(clause);
+    if (inList) {
+      const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
+      return allowed.has(String(row[inList[1]] ?? ''));
+    }
     const num = /^(\w+)\s*=\s*(\d+)$/.exec(clause);
     if (num) return String(row[num[1]] ?? '') === String(Boolean(Number(num[2])));
     throw new Error(`fake RunView cannot read filter clause: ${clause}`);
@@ -96,6 +101,11 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
     }
   },
   RunView: class {
+    /** The batched form. `loadFormSnapshot` issues its six reads together, as production does. */
+    async RunViews(all: Array<{ EntityName: string; ExtraFilter?: string }>): Promise<unknown[]> {
+      const one = new (this.constructor as never as { new (): { RunView(p: unknown): Promise<unknown> } })();
+      return Promise.all(all.map((p) => one.RunView(p)));
+    }
     async RunView(params: { EntityName: string; ExtraFilter?: string }): Promise<{
       Success: boolean;
       Results: unknown[];
@@ -387,14 +397,23 @@ describe('a restyle turn', () => {
   });
 
   it('gives the assistant the form on screen to talk about', async () => {
+    // The context is the SNAPSHOT now — a rendered description carrying handles, plus the
+    // structure those handles resolve against. It used to be a bare list of `[type] prompt`
+    // strings, which is enough to discuss a form and not enough to change one.
+    const page = 'cccccccc-dddd-4eee-8fff-111111111111';
+    rows.set('MJ_BizApps_Forms: Form Pages', [
+      { ID: page, FormID: FORM_ID, Title: 'Details', DisplayOrder: 0 },
+    ]);
     rows.set('MJ_BizApps_Forms: Form Questions', [
-      { ID: 'q1', FormID: FORM_ID, QuestionType: 'Email', Prompt: 'Your email' },
+      { ID: 'dddddddd-eeee-4fff-8aaa-222222222222', FormID: FORM_ID, PageID: page, QuestionType: 'Email', Prompt: 'Your email', DisplayOrder: 0, IsRequired: false },
     ]);
     const respond = assistant({ reply: 'ok', action: 'none' });
     await turn('what do you think?', { FormID: FORM_ID });
     const context = respond.mock.calls.at(-1)?.[0].context;
     expect(context?.name).toBe('RSVP');
-    expect(context?.questions).toContain('[Email] Your email');
+    expect(context?.description).toContain('[Email] Your email');
+    expect(context?.description).toContain('q1');
+    expect(context?.snapshot.pages[0].questions[0].handle).toBe('q1');
   });
 });
 
@@ -583,6 +602,127 @@ describe('ids that reach a SQL filter', () => {
     expect(saved.find((r) => r.entity === CONVERSATION)?.fields.ExternalID).toBe(
       `mj-forms:form:${realId}`,
     );
+  });
+});
+
+describe('listing and opening forms', () => {
+  beforeEach(() => {
+    rows.set('MJ_BizApps_Forms: Forms', [
+      { ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: null, IsArchived: false },
+      { ID: '99999999-8888-4777-8666-555555555555', Name: 'Event RSVP', Status: 'Published', StyleID: null, IsArchived: false },
+    ]);
+  });
+
+  it('tells the assistant which forms exist, by handle', async () => {
+    const respond = assistant({ reply: 'ok', action: 'none' });
+    await turn('what forms do I have?');
+    const forms = respond.mock.calls.at(-1)?.[0].forms;
+    expect(forms).toContain('Assessment');
+    expect(forms).toContain('Event RSVP');
+    expect(forms).toMatch(/f1|f2/);
+  });
+
+  it('never shows the assistant a raw form id', async () => {
+    // Same reason questions get handles: an id the model can see is an id it can guess at.
+    const respond = assistant({ reply: 'ok', action: 'none' });
+    await turn('what forms do I have?');
+    expect(respond.mock.calls.at(-1)?.[0].forms).not.toContain(FORM_ID);
+  });
+
+  it('turns a handle into the id the client navigates to', async () => {
+    assistant({ reply: 'Opening Event RSVP.', action: 'open', openFormId: 'f2' });
+    const { out } = await turn('open my RSVP form');
+    expect(out('Action')).toBe('open');
+    expect(out('OpenFormID')).toBe('99999999-8888-4777-8666-555555555555');
+  });
+
+  it('says so when the handle names no form of theirs', async () => {
+    assistant({ reply: 'Opening it.', action: 'open', openFormId: 'f9' });
+    const { result, out } = await turn('open my budget form');
+    expect(result.Success).toBe(true);
+    expect(out('OpenFormID')).toBeUndefined();
+    expect(String(out('Reply'))).toMatch(/could not/i);
+  });
+
+  it('opening writes nothing to any form', async () => {
+    // Navigation only. The scope decision is that every WRITE lands on what is on screen, so this
+    // path must not be a way to reach a form the author is not looking at.
+    assistant({ reply: 'Opening it.', action: 'open', openFormId: 'f2' });
+    await turn('open my RSVP');
+    expect(saved.filter((r) => r.entity.startsWith('MJ_BizApps_Forms:'))).toEqual([]);
+  });
+});
+
+describe('an edit turn', () => {
+  const PAGE = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const Q1 = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+
+  beforeEach(() => {
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'Assessment', Status: 'Draft', StyleID: null }]);
+    rows.set('MJ_BizApps_Forms: Form Pages', [{ ID: PAGE, FormID: FORM_ID, Title: 'Details', DisplayOrder: 0 }]);
+    rows.set('MJ_BizApps_Forms: Form Questions', [
+      { ID: Q1, FormID: FORM_ID, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'Your name', DisplayOrder: 0, IsRequired: false },
+    ]);
+    rows.set('MJ_BizApps_Forms: Form Question Options', []);
+    rows.set('MJ_BizApps_Forms: Form Screens', []);
+    rows.set('MJ_BizApps_Forms: Form Responses', []);
+    rows.set('MJ_BizApps_Forms: Form Response Answers', []);
+  });
+
+  it('adds the question the author asked for', async () => {
+    assistant({
+      reply: 'Added a rating question.',
+      action: 'edit',
+      operations: [{ op: 'addQuestion', handle: 'p1', type: 'Rating', prompt: 'How likely to recommend?' }],
+    });
+
+    const { result, out } = await turn('add a rating question', { FormID: FORM_ID });
+
+    expect(result.Success).toBe(true);
+    expect(out('Action')).toBe('edit');
+    const added = saved.filter((r) => r.entity === 'MJ_BizApps_Forms: Form Questions').at(-1);
+    expect(added?.fields.Prompt).toBe('How likely to recommend?');
+    expect(added?.fields.QuestionType).toBe('Rating');
+  });
+
+  it('tells the author what it changed, in the reply', async () => {
+    assistant({
+      reply: 'Done.',
+      action: 'edit',
+      operations: [{ op: 'updateQuestion', handle: 'q1', prompt: 'What is your full name?' }],
+    });
+    const { out } = await turn('reword the name question', { FormID: FORM_ID });
+    expect(String(out('Reply'))).toContain('full name');
+  });
+
+  it('carries a refusal into the reply rather than failing the turn', async () => {
+    assistant({
+      reply: 'Removing it.',
+      action: 'edit',
+      operations: [{ op: 'deleteQuestion', handle: 'q9' }],
+    });
+    const { result, out } = await turn('drop the phone question', { FormID: FORM_ID });
+    expect(result.Success).toBe(true);
+    expect(String(out('Reply'))).toContain('q9');
+  });
+
+  it('shows the assistant the form with handles it can point at', async () => {
+    const respond = assistant({ reply: 'ok', action: 'none' });
+    await turn('what is on this form?', { FormID: FORM_ID });
+    const context = respond.mock.calls.at(-1)?.[0].context;
+    expect(context?.description).toContain('q1');
+    expect(context?.description).toContain('Your name');
+  });
+
+  it('will not edit when no form is open', async () => {
+    assistant({
+      reply: 'Sure.',
+      action: 'edit',
+      operations: [{ op: 'updateQuestion', handle: 'q1', prompt: 'x' }],
+    });
+    const { result, out } = await turn('reword it');
+    expect(result.Success).toBe(true);
+    expect(String(out('Reply'))).toMatch(/open a form first/i);
   });
 });
 

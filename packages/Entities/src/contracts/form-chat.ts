@@ -19,6 +19,8 @@
  * silently ignores half its instructions is worse than one with a stated boundary.
  */
 import { z } from 'zod';
+import { editOperationSchema } from './form-edit';
+import type { FormSnapshot } from './form-snapshot';
 
 /**
  * Who said it. Mirrors `MJ: Conversation Details`.`Role` exactly, because that is where turns are
@@ -65,16 +67,29 @@ export function isThreadWarm(turns: readonly FormChatTurn[], now: number): boole
  * - `create` — build a new form from `brief`, through the existing generation pipeline.
  * - `restyle` — apply `cssVariables` to the form currently open.
  * - `image` — generate a picture from `imagePrompt` and put it on a screen of the open form.
+ * - `edit` — change the STRUCTURE of the open form: add, reword, retype, move or remove questions
+ *   and pages, reword a screen, set a layout token. Carried as `operations`, a delta against the
+ *   handles the assistant was shown.
+ * - `open` — take the author to another of their forms, named by `openFormId`. Navigation only:
+ *   every WRITE still lands on whatever is on screen, so nothing changes that the author cannot
+ *   see changing.
  * - `unsupported` — the author asked for something real that is not built yet. Distinct from
  *   `none` so the reply can say so and so the gap is countable rather than invisible.
  */
-export type FormChatAction = 'none' | 'create' | 'restyle' | 'image' | 'unsupported';
+export type FormChatAction =
+  | 'none'
+  | 'create'
+  | 'restyle'
+  | 'image'
+  | 'edit'
+  | 'open'
+  | 'unsupported';
 
 /** The shape the chat prompt returns. Validated before anything acts on it. */
 export const formChatResponseSchema = z.object({
   /** Markdown shown to the author. Always present, whatever the action. */
   reply: z.string().min(1),
-  action: z.enum(['none', 'create', 'restyle', 'image', 'unsupported']),
+  action: z.enum(['none', 'create', 'restyle', 'image', 'edit', 'open', 'unsupported']),
   /** `create` only: the brief handed to the generation pipeline. */
   brief: z.string().min(1).optional(),
   /** `restyle` only: `--mjf-*` overrides, validated against the theme vocabulary before persist. */
@@ -89,6 +104,16 @@ export const formChatResponseSchema = z.object({
    * author almost always means and the only one a respondent sees before deciding to start.
    */
   imageTarget: z.enum(['welcome', 'ending']).optional(),
+  /**
+   * `edit` only: the delta, in the order it should be applied.
+   *
+   * Deliberately not validated against the FORM here — this schema only knows shape. Whether a
+   * handle names anything, and whether the change is safe, is `planEdits`' job, and it needs the
+   * snapshot to answer either.
+   */
+  operations: z.array(editOperationSchema).min(1).optional(),
+  /** `open` only: which form to take the author to. One of the ids the assistant was listed. */
+  openFormId: z.string().min(1).optional(),
 });
 
 export type FormChatResponse = z.infer<typeof formChatResponseSchema>;
@@ -131,10 +156,17 @@ export function parseFormChatResponse(raw: string): FormChatResponse {
 export interface FormChatContext {
   formId: string;
   name: string;
-  /** `[type] prompt` per question, in document order. */
-  questions: string[];
-  /** The form's current `--mjf-*` tokens, so colour advice can be about the actual palette. */
-  cssVariables: Record<string, string>;
+  /**
+   * The form as the assistant reads it — pages, questions with handles, screens, colours.
+   *
+   * Rendered once here rather than assembled in the prompt template, so the thing the model sees
+   * and the thing {@link planEdits} resolves against are built from ONE object. A template that
+   * formatted this itself could drift from the handles the applier understands, and the failure
+   * would be an edit landing on the wrong row.
+   */
+  description: string;
+  /** The same form, structured — what an `edit` turn's handles are resolved against. */
+  snapshot: FormSnapshot;
 }
 
 /** Render {@link FormChatContext} as the plain text the prompt template interpolates. */
@@ -142,16 +174,5 @@ export function describeFormForChat(context: FormChatContext | undefined): strin
   if (!context) {
     return 'The author is not looking at a form right now.';
   }
-  const palette = Object.entries(context.cssVariables)
-    .map(([k, v]) => `  ${k}: ${v}`)
-    .join('\n');
-  return [
-    `The author is looking at a form called "${context.name}".`,
-    '',
-    'Its questions, in order:',
-    ...context.questions.map((q) => `  - ${q}`),
-    '',
-    'Its current colours and type:',
-    palette || '  (none set)',
-  ].join('\n');
+  return context.description;
 }

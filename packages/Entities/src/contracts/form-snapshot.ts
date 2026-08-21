@@ -254,3 +254,40 @@ function describeFlags(question: SnapshotQuestion): string {
   }
   return flags.length > 0 ? `  (${flags.join(', ')})` : '';
 }
+
+/** One of the author's forms, as the assistant is shown it. */
+export interface FormListEntry {
+  handle: string;
+  id: string;
+  name: string;
+  status: string;
+}
+
+/**
+ * Mint handles for the author's forms.
+ *
+ * Same reasoning as questions: a raw id in front of the model is an id it can guess at, and the
+ * `open` action turns a handle back into one exactly once, server-side. `f1`, `f2` — a separate
+ * letter from pages and questions so a handle can never be ambiguous about what it names.
+ */
+export function buildFormList(
+  forms: ReadonlyArray<{ id: string; name: string; status: string }>,
+): FormListEntry[] {
+  return forms.map((form, index) => ({
+    handle: `f${index + 1}`,
+    id: form.id,
+    name: form.name,
+    status: form.status,
+  }));
+}
+
+/** Render the list as the plain text the prompt interpolates. */
+export function describeFormList(forms: readonly FormListEntry[]): string {
+  if (forms.length === 0) {
+    return 'They have no forms yet.';
+  }
+  return [
+    'Their forms — name one of these handles in `openFormId` to take them to it:',
+    ...forms.map((f) => `  ${f.handle} "${f.name}" (${f.status})`),
+  ].join('\n');
+}

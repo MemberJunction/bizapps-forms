@@ -5,6 +5,8 @@ const saved: SavedRow[] = [];
 const deleted: Array<{ entity: string; id: string }> = [];
 const rows = new Map<string, Array<Record<string, unknown>>>();
 let minted = 0;
+/** Entity whose next read reports failure, for the fail-closed tests. */
+let readFailsFor: string | null = null;
 
 const guid = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
@@ -42,10 +44,28 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
   Metadata: class { async GetEntityObject(name: string) { return new FakeEntity(name); } },
   RunView: class {
+    /** The batched form. Production issues these together; the applier and loader both use it. */
+    async RunViews(all: Array<{ EntityName: string; ExtraFilter?: string; ResultType?: string }>) {
+      return Promise.all(all.map((p) => new (this.constructor as never as { new (): { RunView(p: unknown): Promise<unknown> } })().RunView(p)));
+    }
     async RunView(params: { EntityName: string; ExtraFilter?: string; ResultType?: string }) {
+      if (readFailsFor === params.EntityName) {
+        readFailsFor = null;
+        return { Success: false, ErrorMessage: 'connection reset', Results: [] };
+      }
       const table = rows.get(params.EntityName) ?? [];
-      const eq = /^(\w+)='([^']*)'$/.exec((params.ExtraFilter ?? '').trim());
-      const matched = eq ? table.filter((r) => String(r[eq[1]]) === eq[2]) : table;
+      const filter = (params.ExtraFilter ?? '').trim();
+      const eq = /^(\w+)='([^']*)'$/.exec(filter);
+      const inList = /^(\w+) IN \(([^)]*)\)$/.exec(filter);
+      let matched = table;
+      if (eq) {
+        matched = table.filter((r) => String(r[eq[1]]) === eq[2]);
+      } else if (inList) {
+        const allowed = new Set([...inList[2].matchAll(/'([^']*)'/g)].map((m) => m[1]));
+        matched = table.filter((r) => allowed.has(String(r[inList[1]])));
+      } else if (filter) {
+        throw new Error(`the fake RunView does not understand this filter: ${filter}`);
+      }
       // `entity_object` returns REAL entities in production — rows with Save() and Delete() on
       // them. A fake handing back plain objects cannot exercise a caller that mutates what it
       // read, which is exactly what the applier does.
@@ -68,6 +88,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 import { UserInfo } from '@memberjunction/core';
 import { buildFormSnapshot, planEdits } from '@mj-biz-apps/forms-entities';
 import { applyEdits } from './apply-edits';
+import { loadFormSnapshot } from './load-snapshot';
 
 const FORM = '11111111-2222-4333-8444-555555555555';
 const PAGE = '22222222-3333-4444-8555-666666666666';
@@ -93,7 +114,7 @@ const snapshot = (answerCount = 0) =>
   });
 
 beforeEach(() => {
-  saved.length = 0; deleted.length = 0; rows.clear(); minted = 0;
+  saved.length = 0; deleted.length = 0; rows.clear(); minted = 0; readFailsFor = null;
   rows.set('MJ_BizApps_Forms: Form Questions', [
     { ID: Q_NAME, FormID: FORM, PageID: PAGE, QuestionType: 'ShortText', Prompt: 'Your name', DisplayOrder: 0, IsRequired: false },
     { ID: Q_MAIL, FormID: FORM, PageID: PAGE, QuestionType: 'Email', Prompt: 'Email', DisplayOrder: 1, IsRequired: true },
@@ -266,5 +287,66 @@ describe('applyEdits — pages, screens and layout', () => {
     const outcome = await applyEdits(FORM, plan, user);
     expect(outcome.applied).toHaveLength(2);
     expect(outcome.applied.join(' ')).toContain('About you');
+  });
+});
+
+describe('loadFormSnapshot', () => {
+  beforeEach(() => {
+    rows.set('MJ_BizApps_Forms: Form Responses', [
+      { ID: 'r1', FormID: FORM, Status: 'Complete' },
+      { ID: 'r2', FormID: FORM, Status: 'Complete' },
+    ]);
+    rows.set('MJ_BizApps_Forms: Form Response Answers', [
+      { ID: 'a1', ResponseID: 'r1', QuestionID: Q_NAME },
+      { ID: 'a2', ResponseID: 'r2', QuestionID: Q_NAME },
+      { ID: 'a3', ResponseID: 'r1', QuestionID: Q_MAIL },
+    ]);
+  });
+
+  it('reads the form back out with handles the assistant can use', async () => {
+    const snap = await loadFormSnapshot(FORM, user);
+    expect(snap?.name).toBe('Assessment');
+    expect(snap?.pages[0].questions.map((q) => q.handle)).toEqual(['q1', 'q2']);
+    expect(snap?.pages[0].questions[0].prompt).toBe('Your name');
+  });
+
+  it('counts answers PER QUESTION, not per form', async () => {
+    // The number the deletion gate turns on. A form-wide count would refuse a brand-new question
+    // on a busy form and permit an answered one on a quiet form — wrong in both directions.
+    const snap = await loadFormSnapshot(FORM, user);
+    const [name, email] = snap!.pages[0].questions;
+    expect(name.answerCount).toBe(2);
+    expect(email.answerCount).toBe(1);
+  });
+
+  it('reports zero for a question nobody has reached', async () => {
+    rows.set('MJ_BizApps_Forms: Form Response Answers', []);
+    const snap = await loadFormSnapshot(FORM, user);
+    expect(snap!.pages[0].questions.every((q) => q.answerCount === 0)).toBe(true);
+  });
+
+  it('carries the style tokens through, so a restyle sees what is there', async () => {
+    const snap = await loadFormSnapshot(FORM, user);
+    expect(snap?.cssVariables['--mjf-accent']).toBe('#1b7fa8');
+  });
+
+  it('treats every question as answered when the count cannot be read', async () => {
+    /**
+     * FAIL CLOSED. `RunView` does not throw, so an unchecked failure reads as "no answers" — and
+     * "no answers" is precisely the condition that PERMITS deletion. A dropped connection would
+     * have become permission to delete every answered question on the form, silently, with no
+     * undo. Wrong in the one direction that cannot be walked back.
+     */
+    readFailsFor = 'MJ_BizApps_Forms: Form Response Answers';
+    const snap = await loadFormSnapshot(FORM, user);
+    expect(snap!.pages[0].questions.every((q) => q.answerCount > 0)).toBe(true);
+
+    // And the gate downstream actually refuses on it.
+    const plan = planEdits(snap!, [{ op: 'deleteQuestion', handle: 'q1' }]);
+    expect(plan.resolved).toEqual([]);
+  });
+
+  it('is undefined for a form that does not exist', async () => {
+    expect(await loadFormSnapshot('99999999-9999-4999-8999-999999999999', user)).toBeUndefined();
   });
 });

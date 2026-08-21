@@ -57,7 +57,13 @@ export interface ChatScope {
 export interface ChatAssistantModel {
   /** Returns RAW TEXT; parsing and validation happen here, as with every other stage. */
   respond(
-    input: { message: string; history: readonly FormChatTurn[]; context?: FormChatContext },
+    input: {
+      message: string;
+      history: readonly FormChatTurn[];
+      context?: FormChatContext;
+      /** The author's other forms, rendered — what `open` names a handle from. */
+      forms?: string;
+    },
     contextUser: UserInfo,
   ): Promise<string>;
 }
@@ -274,10 +280,11 @@ export async function askAssistant(
   context: FormChatContext | undefined,
   conversationId: string,
   contextUser: UserInfo,
+  forms?: string,
 ): Promise<FormChatResponse> {
   await appendTurn(conversationId, { role: 'User', message }, contextUser);
   try {
-    const raw = await model.respond({ message, history, context }, contextUser);
+    const raw = await model.respond({ message, history, context, forms }, contextUser);
     const response = parseFormChatResponse(raw);
     await appendTurn(conversationId, { role: 'AI', message: response.reply }, contextUser);
     return response;
@@ -288,16 +295,6 @@ export async function askAssistant(
     await appendTurn(conversationId, { role: 'Error', message: reply, error: detail }, contextUser);
     return { reply, action: 'none' };
   }
-}
-
-/** Build the context block describing the open form, or `undefined` when there is none. */
-export function chatContextFor(
-  formId: string | undefined,
-  name: string,
-  questions: readonly string[],
-  cssVariables: Record<string, string>,
-): FormChatContext | undefined {
-  return formId ? { formId, name, questions: [...questions], cssVariables } : undefined;
 }
 
 /** Re-exported so the action and the prompt model share one renderer for the context block. */

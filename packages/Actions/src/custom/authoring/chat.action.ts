@@ -34,9 +34,13 @@ import {
   mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
   guidOrUndefined,
+  planEdits,
+  describeFormSnapshot,
+  describeFormList,
   isGuid,
   themeWithOverrides,
   type FormChatContext,
+  type FormListEntry,
   type FormChatResponse,
 } from '@mj-biz-apps/forms-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
@@ -44,6 +48,8 @@ import { errorText } from '../shared/error-text';
 import { runAuthoring } from './generate-form.action';
 import { reasonFromDegradation, runImageStage, type ImageGenerationModel } from './image-stage';
 import { CoreActionImageGenerationModel } from './generate-image-model';
+import { loadFormList, loadFormSnapshot } from './load-snapshot';
+import { applyEdits } from './apply-edits';
 import { applyGeneratedImage, applyThemeTokens } from './form-blueprint-builder';
 import { validateTheme } from './theme-tokens';
 import {
@@ -105,6 +111,9 @@ export async function runChatTurn(
   const history = await loadChatHistory(conversation.ID, contextUser);
   const context = await describeOpenForm(formId, contextUser);
 
+  // Listed on every turn: "what forms do I have" is a fair question, and `open` needs a handle to
+  // name. Read-only — the scope decision is that every WRITE lands on the form on screen.
+  const forms = await loadFormList(contextUser);
   const response = await askAssistant(
     message,
     activeChatModel,
@@ -112,12 +121,21 @@ export async function runChatTurn(
     context,
     conversation.ID,
     contextUser,
+    describeFormList(forms),
   );
 
   setOutputParam(params, 'ConversationID', conversation.ID);
   setOutputParam(params, 'Action', response.action);
 
-  const outcome = await performAction(response, params, formId, contextUser, conversation.ID);
+  const outcome = await performAction(
+    response,
+    params,
+    formId,
+    contextUser,
+    conversation.ID,
+    context,
+    forms,
+  );
   // A turn made ON THE FORMS LIST that produced a form moves the thread onto it, so the
   // conversation is where the author is taken next rather than back on the list they just left.
   //
@@ -152,15 +170,19 @@ export async function runChatTurn(
  */
 const REQUIRED_PAYLOAD: Partial<Record<FormChatResponse['action'], string>> = {
   create: 'what the form should contain',
+  open: 'which form to open',
   restyle: 'which colours to change',
   image: 'what the picture should show',
+  edit: 'which changes to make',
 };
 
 /** Verb for the apology, so it names the thing the author actually asked for. */
 const VERB: Partial<Record<FormChatResponse['action'], string>> = {
   create: 'build that form',
+  open: 'open that form',
   restyle: 'restyle it',
   image: 'add that picture',
+  edit: 'change the form',
 };
 
 /** The missing payload's description, or undefined when this turn has everything it needs. */
@@ -174,7 +196,11 @@ function missingPayloadFor(response: FormChatResponse): string | undefined {
       ? Boolean(response.brief?.trim())
       : response.action === 'image'
         ? Boolean(response.imagePrompt?.trim())
-        : Object.keys(response.cssVariables ?? {}).length > 0;
+        : response.action === 'open'
+        ? Boolean(response.openFormId?.trim())
+        : response.action === 'edit'
+          ? (response.operations ?? []).length > 0
+          : Object.keys(response.cssVariables ?? {}).length > 0;
   return present ? undefined : needed;
 }
 
@@ -185,6 +211,8 @@ async function performAction(
   formId: string | undefined,
   contextUser: UserInfo,
   conversationId: string,
+  context: FormChatContext | undefined,
+  forms: readonly FormListEntry[],
 ): Promise<{ reply: string }> {
   try {
     const missing = missingPayloadFor(response);
@@ -206,6 +234,12 @@ async function performAction(
     }
     if (response.action === 'image') {
       return { reply: await addScreenImage(response, params, formId, contextUser) };
+    }
+    if (response.action === 'edit') {
+      return { reply: await editForm(response, params, formId, context, contextUser) };
+    }
+    if (response.action === 'open') {
+      return { reply: openForm(response, params, forms) };
     }
     return { reply: response.reply };
   } catch (error) {
@@ -335,6 +369,65 @@ async function addScreenImage(
 }
 
 /**
+ * Take the author to another of their forms.
+ *
+ * NAVIGATION ONLY, and that is the design decision rather than an omission: every write lands on
+ * whatever is on screen, so nothing changes that the author cannot watch changing. This resolves a
+ * handle to an id and hands it to the client; the client moves, and the next turn's snapshot is
+ * the form they arrived at.
+ */
+function openForm(
+  response: FormChatResponse,
+  params: RunActionParams,
+  forms: readonly FormListEntry[],
+): string {
+  const wanted = forms.find((f) => f.handle === response.openFormId);
+  if (!wanted) {
+    return `${response.reply}\n\n**I could not open that:** I do not have a form called ${response.openFormId}.`;
+  }
+  setOutputParam(params, 'OpenFormID', wanted.id);
+  return response.reply;
+}
+
+/**
+ * Change the structure of the form on screen.
+ *
+ * Two steps, and deliberately two objects: `planEdits` DECIDES — resolving handles against the
+ * snapshot the model was actually shown, refusing what would strand answers — and `applyEdits`
+ * writes what survived. Nothing here re-decides anything, which is why a refusal reaches the reply
+ * in the words the plan chose rather than in a second, subtly different wording.
+ *
+ * The snapshot is the one the assistant was given THIS turn. Re-reading the form here would open a
+ * window in which the handles it named and the rows they resolve to came from different reads.
+ */
+async function editForm(
+  response: FormChatResponse,
+  params: RunActionParams,
+  formId: string | undefined,
+  context: FormChatContext | undefined,
+  contextUser: UserInfo,
+): Promise<string> {
+  if (!isGuid(formId) || !context) {
+    return `${response.reply}\n\n**I could not change that:** open a form first and I will edit it.`;
+  }
+  const plan = planEdits(context.snapshot, response.operations ?? []);
+  const outcome = await applyEdits(formId, plan, contextUser);
+
+  setOutputParam(params, 'ChangedFormID', formId);
+  const parts = [response.reply];
+  if (outcome.applied.length > 0) {
+    parts.push(outcome.applied.map((line) => `- ${line}`).join('\n'));
+  }
+  if (outcome.refused.length > 0) {
+    parts.push(
+      `**${outcome.applied.length > 0 ? 'What I could not do' : 'I could not do that'}:** ` +
+        outcome.refused.join('; '),
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/**
  * The form's welcome or first ending screen, or undefined when it has none of that kind.
  *
  * A FAILED read and an ABSENT screen are different answers and used to collapse into the same
@@ -411,60 +504,21 @@ async function describeOpenForm(
   formId: string | undefined,
   contextUser: UserInfo,
 ): Promise<FormChatContext | undefined> {
-  // Belt and braces: the caller already validated, and this is the function that interpolates.
-  // `isGuid` is a type predicate, so this narrows `formId` too — the guard and the narrowing are
-  // the same statement, which is what stops a later edit from using the unvalidated value.
+  // Belt and braces: the caller already validated, and `loadFormSnapshot` validates again — this
+  // is the function that decides whether a form is addressable at all.
   if (!isGuid(formId)) {
     return undefined;
   }
-  try {
-    const md = new Metadata();
-    const form = await md.GetEntityObject<mjBizAppsFormsFormEntity>('MJ_BizApps_Forms: Forms', contextUser);
-    if (!(await form.Load(formId))) {
-      return undefined;
-    }
-    const rv = new RunView();
-    const questions = await rv.RunView<mjBizAppsFormsFormQuestionEntity>(
-      {
-        EntityName: 'MJ_BizApps_Forms: Form Questions',
-        ExtraFilter: `FormID='${formId}'`,
-        OrderBy: 'DisplayOrder',
-        ResultType: 'simple',
-        Fields: ['QuestionType', 'Prompt'],
-      },
-      contextUser,
-    );
-    if (!questions.Success) {
-      // Fail the whole description rather than describing a form with no questions. `RunView` does
-      // not throw, so an unchecked read here handed the assistant an empty question list and it
-      // confidently advised an author to add the name and email fields already on their form.
-      LogError(
-        `[Forms chat] Could not read questions for form ${formId}, so the assistant was given no ` +
-          `context rather than a form that looks empty: ${questions.ErrorMessage}`,
-      );
-      return undefined;
-    }
-
-    let cssVariables: Record<string, string> = {};
-    if (form.StyleID) {
-      const style = await md.GetEntityObject<mjBizAppsFormsFormStyleEntity>(
-        'MJ_BizApps_Forms: Form Styles',
-        contextUser,
-      );
-      if (await style.Load(form.StyleID)) {
-        cssVariables = readTokens(style.CSSVariables);
-      }
-    }
-    return {
-      formId,
-      name: form.Name,
-      questions: (questions.Results ?? []).map((q) => `[${q.QuestionType}] ${q.Prompt}`),
-      cssVariables,
-    };
-  } catch (error) {
-    LogError(`[Forms chat] Could not describe form ${formId}; answering without it. ${errorText(error)}`);
+  const snapshot = await loadFormSnapshot(formId, contextUser);
+  if (!snapshot) {
     return undefined;
   }
+  return {
+    formId,
+    name: snapshot.name,
+    description: describeFormSnapshot(snapshot),
+    snapshot,
+  };
 }
 
 /** Parse a stored token map, treating anything unreadable as "no tokens" rather than throwing. */

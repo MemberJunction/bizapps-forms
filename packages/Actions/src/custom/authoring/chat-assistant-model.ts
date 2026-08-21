@@ -20,7 +20,12 @@ export const CHAT_ASSISTANT_PROMPT_NAME = 'Forms: Chat Assistant';
 /** Runs the chat prompt. Fails loudly; the caller turns a failure into an in-thread message. */
 export class AIPromptChatAssistantModel implements ChatAssistantModel {
   async respond(
-    input: { message: string; history: readonly FormChatTurn[]; context?: FormChatContext },
+    input: {
+      message: string;
+      history: readonly FormChatTurn[];
+      context?: FormChatContext;
+      forms?: string;
+    },
     contextUser: UserInfo,
   ): Promise<string> {
     const engine = AIEngine.Instance;
@@ -45,6 +50,7 @@ export class AIPromptChatAssistantModel implements ChatAssistantModel {
       FormContext: describeFormForChat(input.context),
       HasOpenForm: input.context ? 'yes' : 'no',
       Tokens: THEME_TOKEN_NAMES.join('\n'),
+      FormList: input.forms ?? 'They have no forms yet.',
     };
     params.attemptJSONRepair = true;
     params.cancellationToken = AbortSignal.timeout(STAGE_TIMEOUT_MS);
