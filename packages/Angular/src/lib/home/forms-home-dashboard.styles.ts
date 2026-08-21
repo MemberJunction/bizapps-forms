@@ -53,29 +53,6 @@ export const FORMS_HOME_CSS = /* css */ `
 }
 .home-panel-actions { display: flex; gap: var(--mjf-gap-sm); }
 
-/* Live build progress. Every colour is a token — a hardcoded one here breaks dark mode, which
-   is the mode this bar most often appears in. */
-.home-gen { display: flex; flex-direction: column; gap: 6px; }
-.home-gen-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--mjf-gap-sm); }
-.home-gen-label { font-size: 0.875rem; color: var(--mj-text-secondary); }
-.home-gen-count { font-size: 0.8125rem; font-variant-numeric: tabular-nums; color: var(--mj-text-muted); }
-.home-gen-track {
-  height: 6px;
-  border-radius: var(--mj-radius-full, 999px);
-  background: var(--mj-bg-surface-hover, var(--mj-bg-surface));
-  overflow: hidden;
-}
-.home-gen-fill {
-  height: 100%;
-  background: var(--mj-brand-primary);
-  border-radius: inherit;
-  /* Eased rather than instant, so a jump from 25% to 75% still reads as progress rather than as
-     the bar being redrawn. Disabled for anyone who asked for less motion. */
-  transition: width 240ms ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .home-gen-fill { transition: none; }
-}
 .home-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--mjf-gap-sm); }
 
 /* --- Small screens ---

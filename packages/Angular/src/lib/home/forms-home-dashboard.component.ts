@@ -23,9 +23,7 @@ import {
 } from './home-models';
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
 import { FormCloneService } from '../templates/form-clone.service';
-import { FormGenerationService } from '../builder/form-generation.service';
 import { FormChatComponent, FormChatService } from '../chat';
-import type { GenerationProgress } from '@mj-biz-apps/forms-entities';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -63,7 +61,7 @@ function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /** Which authoring panel (if any) is open. */
-type AuthoringPanel = 'none' | 'ai' | 'template';
+type AuthoringPanel = 'none' | 'template';
 
 /**
  * Forms home / studio — the first-class MJExplorer "Forms" surface
@@ -89,7 +87,7 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService, FormCloneService, FormGenerationService, FormChatService],
+  providers: [FormsHomeService, FormCloneService, FormChatService],
   imports: [FormsModule, DatePipe, TemplatesGalleryComponent, FormChatComponent],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
@@ -97,7 +95,6 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
 export class FormsHomeDashboardComponent extends BaseDashboard {
   private readonly data = inject(FormsHomeService);
   private readonly clone = inject(FormCloneService);
-  private readonly generation = inject(FormGenerationService);
   private readonly cdr = inject(ChangeDetectorRef);
 
   public loading = false;
@@ -111,7 +108,6 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   /** Archived forms are hidden by default; the toolbar toggles them back in. */
   public showArchived = false;
   public panel: AuthoringPanel = 'none';
-  public brief = '';
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
   private formChanges?: EventSubscription;
@@ -292,47 +288,6 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  /** Runs the AI authoring action from the entered brief. */
-  public async authorWithAI(): Promise<void> {
-    const brief = this.brief.trim();
-    if (!brief) {
-      this.errorMessage = 'Enter a brief describing the form you want.';
-      this.cdr.markForCheck();
-      return;
-    }
-    this.busy = true;
-    this.errorMessage = null;
-    this.cdr.markForCheck();
-    try {
-      const outcome = await this.generation.generate(brief, 'brief', (name) =>
-        this.data.resolveActionId(name),
-      );
-      // A PARTIAL build failed AND left a reviewable draft. Opening it is right — the author can
-      // see what did get made and finish it — but the message has to say so, because a form that
-      // opens looks finished and this one is not.
-      if (!outcome.formId) {
-        this.errorMessage = outcome.message;
-        return;
-      }
-      if (outcome.partial || outcome.degraded.length > 0) {
-        this.errorMessage = outcome.message;
-      }
-      this.closePanel();
-      this.brief = '';
-      this.OpenEntityRecord.emit({
-        EntityName: HOME_ENTITY.forms,
-        RecordPKey: CompositeKey.FromID(outcome.formId),
-      });
-      await this.loadForms();
-    } catch (err) {
-      this.fail(err, 'The form could not be generated.');
-    } finally {
-      this.generation.reset();
-      this.busy = false;
-      this.cdr.markForCheck();
-    }
-  }
-
   /**
    * A chat turn created a form — open it, exactly as the old Generate button did.
    *
@@ -352,11 +307,6 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
       RecordPKey: CompositeKey.FromID(formId),
     });
     await this.loadForms();
-  }
-
-  /** Live build progress for the panel's bar, or null when nothing is generating. */
-  protected get generationProgress(): GenerationProgress | null {
-    return this.generation.progress();
   }
 
   /**
@@ -429,7 +379,6 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
         return;
       }
       this.closePanel();
-      this.brief = '';
       if (result.formId) {
         this.OpenEntityRecord.emit({
           EntityName: HOME_ENTITY.forms,
