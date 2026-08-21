@@ -48,8 +48,24 @@ const FORM_SCREEN_CSS = /* css */ `
   text-align: var(--mjf-title-align, center);
 }
 
-/* Each child is inline-level so text-align positions the BOX, not just the text inside it —
-   otherwise a left-aligned screen would still show a centred image and a centred button. */
+/* One element per row, and the row is what text-align places.
+
+   The elements themselves are inline-level so text-align positions the BOX and not merely the
+   text inside it — otherwise a left-aligned screen would still show a centred image and a
+   centred button. But inline-level boxes SHARE a line when they fit on one, which is how a
+   welcome screen with a short body ended up drawing the body and the Start button side by side
+   like a two-column banner. Wrapping each in a block row keeps the box placement and restores
+   the stack: image, headline, body, button, socials, each on its own line, in that order.
+
+   line-height: 0 on the row, because the row is a line box whose strut would otherwise add a
+   descender's worth of space under an image or a button that has no text below its baseline —
+   a gap that varies with the inherited font and shows up as uneven spacing between the rows.
+   Anything inside a row that renders text sets its own line-height back. */
+.mjf-screen__row {
+  display: block;
+  line-height: 0;
+}
+
 .mjf-screen__media {
   display: inline-block;
   max-width: min(100%, 22rem);
@@ -99,6 +115,7 @@ const FORM_SCREEN_CSS = /* css */ `
   font: inherit;
   font-size: 1.0625rem;
   font-weight: 600;
+  line-height: 1.2;
   color: var(--mjf-on-accent);
   background: var(--mjf-accent);
   border: none;
@@ -113,6 +130,7 @@ const FORM_SCREEN_CSS = /* css */ `
   display: inline-block;
   margin-bottom: 1rem;
   font-size: 2.5rem;
+  line-height: 1;
   color: var(--mjf-accent);
 }
 
@@ -210,42 +228,51 @@ const FORM_SCREEN_CSS = /* css */ `
       <!--
         The wrapper exists so ONE token can place everything. .mjf-screen stays a flex column
         because that is what centres the block vertically in whatever height the widget gets;
-        inside it, ordinary flow plus text-align places the image, the headline, the body, the
-        button and the social row together. Aligning flex ITEMS instead would need a second,
+        inside it, ordinary block flow plus text-align places the image, the headline, the body,
+        the button and the social row together. Aligning flex ITEMS instead would need a second,
         flex-flavoured copy of the same author choice (flex-start beside left), and two
         spellings of one decision is how they end up disagreeing.
+
+        Each element gets a row of its own because the elements are inline-level (that is what
+        makes text-align place the BOX rather than only the text in it) and inline-level boxes
+        share a line whenever they fit on one — which is how a short body and the Start button
+        ended up sitting side by side.
       -->
       <div class="mjf-screen__inner">
       @if (s.mediaURL) {
-        <img class="mjf-screen__media" [src]="s.mediaURL" alt="" />
+        <div class="mjf-screen__row"><img class="mjf-screen__media" [src]="s.mediaURL" alt="" /></div>
       } @else if (!isWelcome()) {
-        <i class="fa-solid fa-circle-check mjf-screen__done-icon" aria-hidden="true"></i>
+        <div class="mjf-screen__row"><i class="fa-solid fa-circle-check mjf-screen__done-icon" aria-hidden="true"></i></div>
       }
 
-      <h1 class="mjf-screen__title">{{ s.title }}</h1>
+      <div class="mjf-screen__row"><h1 class="mjf-screen__title">{{ s.title }}</h1></div>
 
       @if (s.body) {
-        <p class="mjf-screen__body">{{ s.body }}</p>
+        <div class="mjf-screen__row"><p class="mjf-screen__body">{{ s.body }}</p></div>
       }
 
       @if (buttonLabel(); as label) {
-        <button type="button" class="mjf-screen__cta" (click)="activated.emit()">{{ label }}</button>
+        <div class="mjf-screen__row">
+          <button type="button" class="mjf-screen__cta" (click)="activated.emit()">{{ label }}</button>
+        </div>
       }
 
       @if (socialLinks().length > 0) {
-        <nav class="mjf-screen__social" aria-label="Follow us">
-          @for (link of socialLinks(); track link.platform) {
-            <a
-              class="mjf-screen__social-link"
-              [class]="'mjf-screen__social-link is-' + link.platform"
-              [href]="link.url"
-              target="_blank"
-              rel="noopener noreferrer external"
-              [attr.aria-label]="link.label"
-              [attr.title]="link.label"
-            ><svg class="mjf-screen__social-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path [attr.d]="link.svgPath" /></svg></a>
-          }
-        </nav>
+        <div class="mjf-screen__row">
+          <nav class="mjf-screen__social" aria-label="Follow us">
+            @for (link of socialLinks(); track link.platform) {
+              <a
+                class="mjf-screen__social-link"
+                [class]="'mjf-screen__social-link is-' + link.platform"
+                [href]="link.url"
+                target="_blank"
+                rel="noopener noreferrer external"
+                [attr.aria-label]="link.label"
+                [attr.title]="link.label"
+              ><svg class="mjf-screen__social-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path [attr.d]="link.svgPath" /></svg></a>
+            }
+          </nav>
+        </div>
       }
       </div>
     </div>
