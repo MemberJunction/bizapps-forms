@@ -5,5 +5,7 @@
   "cssVariables?": {
     "--mjf-accent": "#ffffff",
     "--mjf-on-accent": "#152a63"
-  }
+  },
+  "imagePrompt?": "a sunlit conference hall with rows of empty chairs",
+  "imageTarget?": "welcome"
 }

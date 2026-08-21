@@ -181,6 +181,45 @@ export function chatExternalId(formId: string | undefined): string {
   return isGuid(formId) ? `mj-forms:form:${formId}` : 'mj-forms:home';
 }
 
+/**
+ * Re-file a thread under the form it just created.
+ *
+ * THE CONVERSATION FOLLOWS THE FORM. An author on the forms list types "create a form that collects
+ * name, email and address", the form is made, and they are taken to it — at which point the builder
+ * looks for that form's thread and finds nothing, because the exchange that produced the form was
+ * filed under the forms-list key. The conversation they were just having appeared to vanish, and
+ * came back only when they returned to the list.
+ *
+ * Moving the thread is the right fix rather than copying it: there is one conversation, it is about
+ * this form now, and the forms list should be clear for the next thing they want to make.
+ *
+ * Best-effort. A thread that cannot be re-filed still holds every turn — it is just findable from
+ * the list rather than the form — so this never fails a message that already succeeded.
+ */
+export async function refileConversationToForm(
+  conversationId: string,
+  formId: string,
+  contextUser: UserInfo,
+): Promise<void> {
+  assertGuid(conversationId, 'conversation id');
+  assertGuid(formId, 'form id');
+  try {
+    const md = new Metadata();
+    const conversation = await md.GetEntityObject<MJConversationEntity>(ENTITY.Conversation, contextUser);
+    if (!(await conversation.Load(conversationId))) {
+      return;
+    }
+    conversation.ExternalID = chatExternalId(formId);
+    conversation.Name = 'Form authoring';
+    await saveRow(conversation, 'Conversation (re-filed to its form)');
+  } catch (error) {
+    LogError(
+      `[Forms chat] Could not re-file thread ${conversationId} to form ${formId}; it stays on the ` +
+        `forms list. ${errorText(error)}`,
+    );
+  }
+}
+
 /** Append one turn to a thread. */
 export async function appendTurn(
   conversationId: string,

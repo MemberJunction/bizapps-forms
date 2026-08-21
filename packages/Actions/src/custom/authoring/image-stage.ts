@@ -47,7 +47,10 @@ export interface ImageGenerationModel {
 export interface ImageStageResult {
   /** Target ids that now carry a URL, paired with it, for the caller to persist. */
   stored: Array<{ target: ImageTarget; url: string }>;
-  /** Everything that did not happen, named. Entries read like `image:option "Rooftop"`. */
+  /**
+   * Everything that did not happen, named — built by {@link imageDegradation}, so entries read
+   * like `image:the welcome screen — No API key found for OpenAIImageGenerator`.
+   */
   degraded: string[];
 }
 
@@ -89,17 +92,17 @@ export async function runImageStage(
         formId,
         generated.bytes,
         generated.contentType,
-        fileNameFor(request),
+        fileNameFor(request, generated.contentType),
         contextUser,
       );
       result.stored.push({ target: request.target, url: stored.url });
     } catch (error) {
-      const marker = `image:${request.describedAs}`;
+      const reason = error instanceof Error ? error.message : String(error);
       LogError(
         `[Forms authoring] Could not create the image for ${request.describedAs} on form ${formId}; ` +
-          `the form is unaffected. ${error instanceof Error ? error.message : String(error)}`,
+          `the form is unaffected. ${reason}`,
       );
-      result.degraded.push(marker);
+      result.degraded.push(imageDegradation(request.describedAs, reason));
     }
   }
   return result;
@@ -123,7 +126,7 @@ function applyCap(requests: readonly ImageRequest[]): {
     accepted: requests.slice(0, MAX_GENERATED_IMAGES),
     overflow: requests
       .slice(MAX_GENERATED_IMAGES)
-      .map((r) => `image:${r.describedAs} (over the ${MAX_GENERATED_IMAGES}-image limit)`),
+      .map((r) => imageDegradation(r.describedAs, `over the ${MAX_GENERATED_IMAGES}-image limit`)),
   };
 }
 
@@ -133,14 +136,37 @@ function applyCap(requests: readonly ImageRequest[]): {
  * Only for legibility in a bucket listing: uniqueness comes from the storage path's own UUID
  * segment, so two options that describe themselves identically cannot overwrite each other.
  */
-function fileNameFor(request: ImageRequest): string {
+function fileNameFor(request: ImageRequest, contentType: string): string {
   const slug = request.describedAs
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return `${slug || 'image'}.png`;
+  return `${slug || 'image'}.${extensionFor(contentType)}`;
 }
+
+/**
+ * The extension that matches the bytes.
+ *
+ * This was hardcoded `.png` on the reasoning that every current generator returns PNG. Gemini's
+ * image model returns JPEG, so every generated file was named `.png` while its recorded
+ * `ContentType` correctly said `image/jpeg` — a mismatch in the one place the name exists to help,
+ * a human reading a bucket listing. Serving is unaffected either way: the asset route sends the
+ * stored content type, not the extension.
+ */
+function extensionFor(contentType: string): string {
+  const subtype = contentType.split(';')[0].trim().toLowerCase().split('/')[1] ?? '';
+  return IMAGE_EXTENSIONS[subtype] ?? 'img';
+}
+
+/** Keyed on the raster subtypes the asset pipeline's allowlist accepts. */
+const IMAGE_EXTENSIONS: Readonly<Record<string, string>> = {
+  jpeg: 'jpg',
+  jpg: 'jpg',
+  png: 'png',
+  webp: 'webp',
+  gif: 'gif',
+};
 
 /**
  * Every image the persisted form is waiting for, in the order they should be made.
@@ -184,3 +210,29 @@ export function collectImageRequests(source: {
   }
   return requests;
 }
+
+/**
+ * One marker for one picture that did not happen, carrying WHY.
+ *
+ * The reason used to live only in the log. That was survivable while images were a silent
+ * best-effort garnish on a generated form, and stopped being survivable the moment an author could
+ * ask for one in the chat: they got "I could not add that: the welcome screen", which names the
+ * target and not one thing they could act on. "No API key found for OpenAIImageGenerator" is a
+ * sentence an operator fixes in a minute.
+ *
+ * The pairing with {@link reasonFromDegradation} is the point — one place builds the string, one
+ * place takes it apart, so the separator is not a convention two files have to remember.
+ */
+export function imageDegradation(describedAs: string, reason: string): string {
+  return `image:${describedAs}${DEGRADATION_SEPARATOR}${reason}`;
+}
+
+/** The reason out of a marker, or the marker's own text when it carries none. */
+export function reasonFromDegradation(marker: string): string {
+  const at = marker.indexOf(DEGRADATION_SEPARATOR);
+  return at === -1
+    ? marker.replace(/^image:/, '')
+    : marker.slice(at + DEGRADATION_SEPARATOR.length);
+}
+
+const DEGRADATION_SEPARATOR = ' — ';

@@ -14,7 +14,8 @@
  *   - `SessionID` (string, optional) — progress channel, used when the turn generates a form.
  * Output params:
  *   - `Reply` (markdown for the author), `Action`, `ConversationID`
- *   - `FormID` when the turn created one, `StyleID` when it restyled one
+ *   - `FormID` when the turn created one, `StyleID` when it restyled one, `ScreenID` +
+ *     `ImageURL` when it put a picture on a screen
  *
  * Result codes: `SUCCESS`, `MISSING_PARAMETERS`, `FAILED`.
  *
@@ -30,6 +31,7 @@ import type { UserInfo } from '@memberjunction/core';
 import {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormQuestionEntity,
+  mjBizAppsFormsFormScreenEntity,
   mjBizAppsFormsFormStyleEntity,
   guidOrUndefined,
   isGuid,
@@ -40,22 +42,31 @@ import {
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { errorText } from '../shared/error-text';
 import { runAuthoring } from './generate-form.action';
-import { applyThemeTokens } from './form-blueprint-builder';
+import { reasonFromDegradation, runImageStage, type ImageGenerationModel } from './image-stage';
+import { CoreActionImageGenerationModel } from './generate-image-model';
+import { applyGeneratedImage, applyThemeTokens } from './form-blueprint-builder';
 import { validateTheme } from './theme-tokens';
 import {
   appendTurn,
   askAssistant,
   ensureConversation,
   loadChatHistory,
+  refileConversationToForm,
   type ChatAssistantModel,
 } from './chat-assistant';
 import { AIPromptChatAssistantModel } from './chat-assistant-model';
 
 let activeChatModel: ChatAssistantModel = new AIPromptChatAssistantModel();
+let activeImageModel: ImageGenerationModel = new CoreActionImageGenerationModel();
 
 /** Override the chat assistant's model (e.g. a deterministic stub in tests). */
 export function setChatAssistantModel(model: ChatAssistantModel): void {
   activeChatModel = model;
+}
+
+/** Override the image generator the chat uses (e.g. a deterministic stub in tests). */
+export function setChatImageModel(model: ImageGenerationModel): void {
+  activeImageModel = model;
 }
 
 @RegisterClass(BaseAction, 'Forms: Chat')
@@ -107,6 +118,12 @@ export async function runChatTurn(
   setOutputParam(params, 'Action', response.action);
 
   const outcome = await performAction(response, params, formId, contextUser, conversation.ID);
+  // A turn that made a form moves the thread onto it, so the conversation is where the author is
+  // taken next rather than back on the list they just left.
+  const created = getStringParam(params, 'FormID');
+  if (response.action === 'create' && created && created !== formId) {
+    await refileConversationToForm(conversation.ID, created, contextUser);
+  }
   setOutputParam(params, 'Reply', outcome.reply);
   return { Success: true, ResultCode: 'SUCCESS', Message: outcome.reply };
 }
@@ -125,6 +142,9 @@ async function performAction(
     }
     if (response.action === 'restyle' && response.cssVariables) {
       return { reply: await restyleForm(response, params, formId, contextUser) };
+    }
+    if (response.action === 'image' && response.imagePrompt) {
+      return { reply: await addScreenImage(response, params, formId, contextUser) };
     }
     return { reply: response.reply };
   } catch (error) {
@@ -190,6 +210,79 @@ async function restyleForm(
     ? `\n\nOne thing to know: ${outcome.unreadablePairs.join('; ')} — the text there will be hard to read.`
     : '';
   return `${response.reply}${notes}`;
+}
+
+/**
+ * Generate a picture and put it on one of the form's screens.
+ *
+ * Reuses the image stage the streamed build already uses, so a picture asked for in chat takes
+ * exactly the path a picture asked for in a brief takes: the same metadata-resolved model, the same
+ * per-run cap, and the same asset pipeline with its size limit, raster allowlist and public prefix.
+ * There is one way bytes get into storage and this is not a second one.
+ */
+async function addScreenImage(
+  response: FormChatResponse,
+  params: RunActionParams,
+  formId: string | undefined,
+  contextUser: UserInfo,
+): Promise<string> {
+  if (!isGuid(formId)) {
+    return `${response.reply}\n\n**I could not add that:** open a form first and I will put a picture on it.`;
+  }
+  const wanted = response.imageTarget ?? 'welcome';
+  const screen = await findScreen(formId, wanted, contextUser);
+  if (!screen) {
+    return (
+      `${response.reply}\n\n**I could not add that:** this form has no ${wanted} screen yet. ` +
+      'Add one in the builder and ask me again.'
+    );
+  }
+
+  const outcome = await runImageStage(
+    formId,
+    [
+      {
+        prompt: response.imagePrompt as string,
+        target: { kind: 'screen', screenId: screen.ID },
+        describedAs: `the ${wanted} screen`,
+      },
+    ],
+    activeImageModel,
+    contextUser,
+  );
+
+  if (outcome.stored.length === 0) {
+    // Named, not swallowed: "no image model is active on this instance" and "the model refused the
+    // prompt" are different problems and only one of them is the author's to solve.
+    const why = outcome.degraded[0]
+      ? reasonFromDegradation(outcome.degraded[0])
+      : 'the image could not be made';
+    return `${response.reply}\n\n**I could not add that:** ${why}`;
+  }
+
+  await applyGeneratedImage(formId, outcome.stored[0].target, outcome.stored[0].url, contextUser);
+  setOutputParam(params, 'ScreenID', screen.ID);
+  setOutputParam(params, 'ImageURL', outcome.stored[0].url);
+  return response.reply;
+}
+
+/** The form's welcome or first ending screen, or undefined when it has none of that kind. */
+async function findScreen(
+  formId: string,
+  kind: 'welcome' | 'ending',
+  contextUser: UserInfo,
+): Promise<mjBizAppsFormsFormScreenEntity | undefined> {
+  const view = await new RunView().RunView<mjBizAppsFormsFormScreenEntity>(
+    {
+      EntityName: 'MJ_BizApps_Forms: Form Screens',
+      ExtraFilter: `FormID='${formId}' AND ScreenType='${kind === 'welcome' ? 'Welcome' : 'Ending'}'`,
+      OrderBy: 'DisplayOrder',
+      ResultType: 'entity_object',
+      MaxRows: 1,
+    },
+    contextUser,
+  );
+  return view.Success ? view.Results?.[0] : undefined;
 }
 
 /**

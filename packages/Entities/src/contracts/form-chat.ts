@@ -12,7 +12,7 @@
  * The model never touches the database — the same split the whole authoring pipeline uses.
  *
  * ── WHAT IT CANNOT DO YET, STATED PLAINLY. ───────────────────────────────────────────────────
- * `restyle` is the only edit to an existing form. Structural changes — add a question, reword one,
+ * `restyle` and `image` are the only edits to an existing form. Structural changes — add a question, reword one,
  * split a page — need the form read back OUT as a blueprint so the model can propose a delta
  * against it, which is a genuinely separate piece of work (the reverse mapping). Asking for one
  * gets an honest "I can't do that yet" rather than a confident nothing, because a chat that
@@ -32,6 +32,30 @@ export interface FormChatTurn {
   message: string;
   /** Present on an `Error` turn: what actually went wrong, for the author to act on. */
   error?: string;
+  /**
+   * When it was said. Read on the client, absent on the server.
+   *
+   * It exists to answer one question: is this conversation still WARM? An author who has just been
+   * carried from the forms list into the form they described is mid-conversation and expects to
+   * see it; the same author opening that form next week is not, and having the panel spring open
+   * at them would be an interruption. The timestamp separates those two without any cross-page
+   * state to keep in sync, and it decays on its own.
+   */
+  at?: Date;
+}
+
+/**
+ * How recently a thread must have been spoken in for the panel to open itself.
+ *
+ * Two minutes is longer than a navigation and much shorter than a return visit. The value only has
+ * to sit in that gap, so it is not tuned finely.
+ */
+export const WARM_THREAD_MS = 2 * 60 * 1000;
+
+/** Whether this thread was spoken in recently enough to still be the author's train of thought. */
+export function isThreadWarm(turns: readonly FormChatTurn[], now: number): boolean {
+  const last = turns[turns.length - 1]?.at;
+  return last ? now - last.getTime() < WARM_THREAD_MS : false;
 }
 
 /**
@@ -40,20 +64,31 @@ export interface FormChatTurn {
  * - `none` — conversation only. Advice, questions, anything that changes nothing.
  * - `create` — build a new form from `brief`, through the existing generation pipeline.
  * - `restyle` — apply `cssVariables` to the form currently open.
+ * - `image` — generate a picture from `imagePrompt` and put it on a screen of the open form.
  * - `unsupported` — the author asked for something real that is not built yet. Distinct from
  *   `none` so the reply can say so and so the gap is countable rather than invisible.
  */
-export type FormChatAction = 'none' | 'create' | 'restyle' | 'unsupported';
+export type FormChatAction = 'none' | 'create' | 'restyle' | 'image' | 'unsupported';
 
 /** The shape the chat prompt returns. Validated before anything acts on it. */
 export const formChatResponseSchema = z.object({
   /** Markdown shown to the author. Always present, whatever the action. */
   reply: z.string().min(1),
-  action: z.enum(['none', 'create', 'restyle', 'unsupported']),
+  action: z.enum(['none', 'create', 'restyle', 'image', 'unsupported']),
   /** `create` only: the brief handed to the generation pipeline. */
   brief: z.string().min(1).optional(),
   /** `restyle` only: `--mjf-*` overrides, validated against the theme vocabulary before persist. */
   cssVariables: z.record(z.string()).optional(),
+  /**
+   * `image` only: a short, concrete visual description — "a bowl of ramen on a wooden table, soft
+   * daylight". A description, never an instruction: the image model is not being talked to.
+   */
+  imagePrompt: z.string().min(1).optional(),
+  /**
+   * `image` only: which screen it goes on. Defaults to the welcome screen, which is the one an
+   * author almost always means and the only one a respondent sees before deciding to start.
+   */
+  imageTarget: z.enum(['welcome', 'ending']).optional(),
 });
 
 export type FormChatResponse = z.infer<typeof formChatResponseSchema>;

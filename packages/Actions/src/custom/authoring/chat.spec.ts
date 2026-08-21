@@ -99,9 +99,10 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
 }));
 
 import { UserInfo } from '@memberjunction/core';
-import { runChatTurn, setChatAssistantModel } from './chat.action';
+import { runChatTurn, setChatAssistantModel, setChatImageModel } from './chat.action';
 import { setStagedAuthoringModel, setFormDesignerModel } from './generate-form.action';
 import { chatExternalId, MAX_CHAT_HISTORY_TURNS } from './chat-assistant';
+import { resetGeneratedImageStore, setGeneratedImageStore } from './generated-image-store';
 import type { FormChatResponse } from '@mj-biz-apps/forms-entities';
 
 /**
@@ -114,9 +115,12 @@ import type { FormChatResponse } from '@mj-biz-apps/forms-entities';
 const FORM_ID = '11111111-2222-4333-8444-555555555555';
 const STYLE_ID = '66666666-7777-4888-8999-aaaaaaaaaaaa';
 
+const SCREEN_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+
 const CONVERSATION = 'MJ: Conversations';
 const DETAIL = 'MJ: Conversation Details';
 const STYLE = 'MJ_BizApps_Forms: Form Styles';
+const SCREEN = 'MJ_BizApps_Forms: Form Screens';
 
 const user = new UserInfo();
 
@@ -147,6 +151,7 @@ beforeEach(() => {
   saved.length = 0;
   rows.clear();
   minted = 0;
+  resetGeneratedImageStore();
   setChatAssistantModel({ respond: async () => JSON.stringify({ reply: 'ok', action: 'none' }) });
 });
 
@@ -253,6 +258,35 @@ describe('a create turn', () => {
     expect(String(out('Reply'))).toMatch(/Generated draft form/);
   });
 
+  it('moves the thread onto the form it just made', async () => {
+    /**
+     * THE BUG THIS GUARDS. An author on the forms list asks for a form; it is made and they are
+     * carried into it — where the builder looks for that form's thread, finds nothing, and shows
+     * an empty box. The exchange that produced the form was filed under the forms-list key, so it
+     * only reappeared if they navigated back. It looked like the conversation had been discarded.
+     */
+    assistant({ reply: 'Building that now.', action: 'create', brief: 'A contact form.' });
+    setFormDesignerModel({
+      design: async () =>
+        JSON.stringify({ name: 'Contact', pages: [{ questions: [{ type: 'Email', prompt: 'Email' }] }] }),
+    });
+
+    const { out } = await turn('create a form that collects name, email and address');
+
+    const formId = String(out('FormID'));
+    const filings = saved.filter((r) => r.entity === CONVERSATION).map((r) => r.fields.ExternalID);
+    expect(filings[0]).toBe('mj-forms:home');
+    expect(filings.at(-1)).toBe(chatExternalId(formId));
+  });
+
+  it('leaves the thread where it is when the turn made no form', async () => {
+    assistant({ reply: 'Building that now.', action: 'create', brief: 'something' });
+    setFormDesignerModel({ design: async () => 'not a blueprint' });
+    await turn('make me a form');
+    const filings = saved.filter((r) => r.entity === CONVERSATION).map((r) => r.fields.ExternalID);
+    expect(new Set(filings)).toEqual(new Set(['mj-forms:home']));
+  });
+
   it('tells the author in the thread when generation fails', async () => {
     assistant({ reply: 'Building that now.', action: 'create', brief: 'something' });
     setFormDesignerModel({ design: async () => 'not a blueprint' });
@@ -317,6 +351,120 @@ describe('a restyle turn', () => {
     const context = respond.mock.calls.at(-1)?.[0].context;
     expect(context?.name).toBe('RSVP');
     expect(context?.questions).toContain('[Email] Your email');
+  });
+});
+
+describe('an image turn', () => {
+  const PROMPT = 'a sunlit conference hall with rows of empty chairs';
+
+  beforeEach(() => {
+    rows.set('MJ_BizApps_Forms: Forms', [{ ID: FORM_ID, Name: 'RSVP', StyleID: null }]);
+    rows.set('MJ_BizApps_Forms: Form Questions', []);
+    rows.set(SCREEN, [
+      { ID: SCREEN_ID, FormID: FORM_ID, ScreenType: 'Welcome', DisplayOrder: 1, MediaURL: null },
+    ]);
+    setChatImageModel({
+      generate: async () => ({ bytes: new Uint8Array([1, 2, 3]), contentType: 'image/png' }),
+    });
+    setGeneratedImageStore({
+      store: async () => ({ url: 'https://assets.example/forms/hall.png' }),
+    });
+  });
+
+  it('puts the picture on the welcome screen and reports where it went', async () => {
+    assistant({ reply: 'Adding a conference hall to the start screen.', action: 'image', imagePrompt: PROMPT });
+
+    const { out } = await turn('add a picture of a conference hall', { FormID: FORM_ID });
+
+    expect(out('Action')).toBe('image');
+    expect(out('ScreenID')).toBe(SCREEN_ID);
+    expect(out('ImageURL')).toBe('https://assets.example/forms/hall.png');
+    const written = saved.filter((r) => r.entity === SCREEN).at(-1);
+    expect(written?.fields.MediaURL).toBe('https://assets.example/forms/hall.png');
+    // The reply is the assistant's own line; nothing is appended when it worked.
+    expect(out('Reply')).toBe('Adding a conference hall to the start screen.');
+  });
+
+  it('sends the picture the assistant described, not the author\'s words', async () => {
+    // The seam matters: the author says "something conference-y", the assistant turns that into a
+    // description an image model can actually draw, and THAT is what gets generated.
+    const generate = vi.fn(async () => ({ bytes: new Uint8Array([1]), contentType: 'image/png' }));
+    setChatImageModel({ generate });
+    assistant({ reply: 'On it.', action: 'image', imagePrompt: PROMPT });
+
+    await turn('something conference-y on the front', { FormID: FORM_ID });
+
+    expect(generate.mock.calls[0][0]).toBe(PROMPT);
+  });
+
+  it('targets the ending screen when that is what was asked for', async () => {
+    const endingId = 'cccccccc-dddd-4eee-8fff-000000000000';
+    rows.get(SCREEN)?.push({
+      ID: endingId,
+      FormID: FORM_ID,
+      ScreenType: 'Ending',
+      DisplayOrder: 1,
+      MediaURL: null,
+    });
+    assistant({ reply: 'Done.', action: 'image', imagePrompt: PROMPT, imageTarget: 'ending' });
+
+    const { out } = await turn('put a photo on the thank-you screen', { FormID: FORM_ID });
+
+    expect(out('ScreenID')).toBe(endingId);
+  });
+
+  it('says which screen is missing rather than failing silently', async () => {
+    rows.set(SCREEN, []);
+    assistant({ reply: 'Sure.', action: 'image', imagePrompt: PROMPT });
+    const { result, out } = await turn('add a picture', { FormID: FORM_ID });
+    expect(result.Success).toBe(true);
+    expect(String(out('Reply'))).toMatch(/no welcome screen yet/i);
+    expect(out('ImageURL')).toBeUndefined();
+  });
+
+  it('names the reason when the instance has no image store', async () => {
+    // Degraded, not swallowed: "nobody configured storage" is something the author can escalate,
+    // and a picture that never appears with no explanation is the failure this replaces.
+    resetGeneratedImageStore();
+    assistant({ reply: 'Sure.', action: 'image', imagePrompt: PROMPT });
+    const { out } = await turn('add a picture', { FormID: FORM_ID });
+    expect(String(out('Reply'))).toMatch(/no store configured/i);
+    expect(saved.some((r) => r.entity === SCREEN)).toBe(false);
+  });
+
+  it('tells the author what the image model actually said', async () => {
+    /**
+     * THE BUG THIS GUARDS, found by the smoke test on its first real run. The reply carried the
+     * degradation MARKER — "I could not add that: the welcome screen" — which names the target and
+     * nothing the author or an operator could act on. The cause ("No API key found for
+     * OpenAIImageGenerator") existed only in the server log.
+     */
+    setChatImageModel({
+      generate: async () => {
+        throw new Error('No API key found for OpenAIImageGenerator or vendor OpenAI');
+      },
+    });
+    assistant({ reply: 'On it.', action: 'image', imagePrompt: PROMPT });
+
+    const { out } = await turn('add a picture', { FormID: FORM_ID });
+
+    expect(String(out('Reply'))).toContain('No API key found for OpenAIImageGenerator');
+    // And it does NOT just echo the target back, which is what it used to do.
+    expect(String(out('Reply'))).not.toMatch(/could not add that:\*\* the welcome screen\.?$/);
+  });
+
+  it('explains itself rather than failing when no form is open', async () => {
+    assistant({ reply: 'Sure.', action: 'image', imagePrompt: PROMPT });
+    const { result, out } = await turn('add a picture');
+    expect(result.Success).toBe(true);
+    expect(String(out('Reply'))).toMatch(/open a form first/i);
+  });
+
+  it('does not reach a screen lookup with an injected form id', async () => {
+    assistant({ reply: 'Sure.', action: 'image', imagePrompt: PROMPT });
+    const { out } = await turn('add a picture', { FormID: "x' OR '1'='1" });
+    expect(String(out('Reply'))).toMatch(/open a form first/i);
+    expect(saved.some((r) => r.entity === SCREEN)).toBe(false);
   });
 });
 
