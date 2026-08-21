@@ -155,8 +155,16 @@ describe('the chat prompt names controls the builder actually has', () => {
         `the Design tab bullet must name "${exclusive}", which is one of the two things only that tab can set: ${designTab}`,
       ).toContain(exclusive);
     }
-    // Naming the operation is what makes the hand-back actionable — this prompt's own rule is to
-    // name the control, and for the assistant's own capabilities the "control" is the operation.
+    // WHY A MANDATED SHAPE IS LEGITIMATE HERE, which is a stronger reason than the trade-off that
+    // first justified it. This prompt's own house rule is that a refusal NAMES THE CONTROL. For the
+    // assistant's own capabilities the operation IS the control, so requiring `restyle`/`setLayout`
+    // is not an arbitrary shape imposed on the prose — it is the document's existing convention
+    // applied to the case where the control happens to be one of its own verbs.
+    //
+    // It does mean a hand-back phrased purely in prose — "you can set its colours yourself" —
+    // fails, which reads fine in English. That is deliberate: it is weaker guidance for a MODEL,
+    // which is the reader that matters. And the failure message names what to add, which is what
+    // stops a mandated shape being deleted the first time it fires.
     expect(
       designTab,
       `the Design tab bullet must name the operations that cover its other controls: ${designTab}`,
