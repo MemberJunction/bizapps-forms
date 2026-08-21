@@ -37,7 +37,7 @@ import {
   type ImageTarget,
 } from './image-stage';
 import { themeResponseSchema, validateTheme, type ThemeOutcome } from './theme-tokens';
-import { themeWithOverrides } from '@mj-biz-apps/forms-entities';
+import { DEFAULT_FORM_THEME } from '@mj-biz-apps/forms-entities';
 import {
   declaredKeys,
   extractJSON,
@@ -357,7 +357,13 @@ async function detailOnePage(
       `[Forms authoring] Page ${ctx.pageIndex + 1}: ${applied.questionsUpdated} question(s) ` +
         `detailed, ${applied.questionsAdded} added, ${applied.optionsAdded} option(s).`,
     );
-    return { optionImages: applied.optionImages };
+    // The page persisted, but its choice lists did not. That is a degradation, and this file's
+    // own contract is that every degradation is NAMED rather than left in a log — a single-select
+    // with no options renders as an empty control the respondent cannot answer.
+    return {
+      ...(applied.optionsSkipped ? { degraded: `${marker} (choices)` } : {}),
+      optionImages: applied.optionImages,
+    };
   } catch (error) {
     // A persist failure here is NOT fatal for the same reason a prompt failure is not: the page
     // already exists with usable questions. Fatal would mean discarding a form over one page.
@@ -588,10 +594,15 @@ async function runThemeStage(
 
   publishTheme('Painting the theme');
   try {
-    const outcome = validateTheme(await requestTheme(brief, model, outline, contextUser));
+    const outcome = validateTheme(
+      await requestTheme(brief, model, outline, contextUser),
+      DEFAULT_FORM_THEME,
+    );
     // Merged OVER the default rather than replacing it, so a palette the model chose keeps the
     // house sizing, alignment and corner radius. Those are decisions made by looking at a form.
-    await applyThemeTokens(built.formId, built.styleId, themeWithOverrides(outcome.cssVariables), contextUser);
+    // `outcome.cssVariables` IS the merged palette — the gate judged exactly this map, so there
+    // is nothing left to merge and no second step that can disagree with the first.
+    await applyThemeTokens(built.formId, built.styleId, outcome.cssVariables, contextUser);
     publishTheme('Theme applied', built.styleId);
     return reportThemeOutcome(outcome, built.formId);
   } catch (error) {
@@ -624,7 +635,9 @@ function reportThemeOutcome(outcome: ThemeOutcome, formId: string): string[] {
         `theme to keep the text readable: ${outcome.repairedTokens.join(', ')}.`,
     );
   }
-  return outcome.unreadablePairs.map((pair) => `theme:${pair} cannot reach AA contrast`);
+  // Not "AA": the accent-on-page pair is judged against WCAG 1.4.11's non-text bar of 3:1, and
+  // naming the wrong standard to an operator is worse than naming none.
+  return outcome.unreadablePairs.map((pair) => `theme:${pair} is below the contrast bar`);
 }
 
 /** Ask for a token map, retrying on an unparseable response. */

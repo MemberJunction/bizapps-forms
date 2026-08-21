@@ -27,6 +27,9 @@ const saved: SavedRow[] = [];
  */
 const rows = new Map<string, Array<Record<string, unknown>>>();
 
+/** Entity name whose next `RunView` should report failure, for the degradation tests. */
+let runViewFailsFor: string | null = null;
+
 /** Entities whose saves the fake keeps, because something later reads them back. */
 const READ_BACK_ENTITIES = new Set([
   'MJ_BizApps_Forms: Form Questions',
@@ -117,8 +120,13 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
   RunView: class {
     async RunView(params: { EntityName: string; ExtraFilter?: string }): Promise<{
       Success: boolean;
+      ErrorMessage?: string;
       Results: unknown[];
     }> {
+      if (runViewFailsFor === params.EntityName) {
+        runViewFailsFor = null;
+        return { Success: false, ErrorMessage: 'connection reset', Results: [] };
+      }
       const table = rows.get(params.EntityName) ?? [];
       return { Success: true, Results: table.filter((r) => matchesFilter(r, params.ExtraFilter)) };
     }
@@ -865,6 +873,11 @@ describe('runStagedAuthoring — theme', () => {
   it('reports a palette that cannot carry readable text', async () => {
     // Fixed by arithmetic where it can be, and NAMED where it cannot — a background nobody can
     // read on is a decision the author has to make, not one to make for them.
+    //
+    // TWO pairs, because the gate now judges the MERGED palette rather than the model's fragment.
+    // The grey page collides with the house accent as well as with the ink the model sent, and the
+    // accent is reported rather than repaired: replacing a brand colour with near-black to win a
+    // contrast check is not a repair, it is a different design nobody asked for.
     const model = stubModel({
       outline: vi.fn(async () => JSON.stringify(OUTLINE_WITH_LOOK)),
       theme: vi.fn(async () =>
@@ -872,7 +885,10 @@ describe('runStagedAuthoring — theme', () => {
       ),
     } as Partial<StagedAuthoringModel>);
     const result = await runStagedAuthoring('a grey form', model, user, options);
-    expect(result.degraded).toEqual(['theme:--mjf-page-ink on --mjf-page-bg cannot reach AA contrast']);
+    expect(result.degraded).toEqual([
+      'theme:--mjf-page-ink on --mjf-page-bg is below the contrast bar',
+      'theme:--mjf-accent on --mjf-page-bg is below the contrast bar',
+    ]);
   });
 
   it('degrades — never fails — when the theme prompt keeps returning nonsense', async () => {
@@ -889,5 +905,46 @@ describe('runStagedAuthoring — theme', () => {
     expect(result.degraded).toEqual(['theme:could not be generated']);
     expect(result.built.formId).toBeTruthy();
     expect(theme).toHaveBeenCalledTimes(MAX_DESIGNER_ATTEMPTS);
+  });
+});
+
+describe('runStagedAuthoring — a page whose choices could not be written', () => {
+  beforeEach(() => {
+    saved.length = 0;
+    rows.clear();
+    runViewFailsFor = null;
+    resetGeneratedImageStore();
+  });
+
+  it('NAMES the page whose choice lists were skipped', async () => {
+    /**
+     * THE BUG THIS GUARDS. The read that decides which questions already have options fails
+     * closed — it assumes they do, so a lost read costs a question its choices rather than
+     * doubling them. That direction is right. What was missing is that nothing said so: the page
+     * reported `optionsAdded: 0`, which is also what a page of free-text questions reports, the
+     * run logged success, and the author got a Ready form containing a single-select with no
+     * options — an empty control a respondent cannot answer, traceable only in a server log.
+     *
+     * This file's stated contract is that every degradation is NAMED in the completion event.
+     */
+    runViewFailsFor = ENTITY_NAME.option;
+    const result = await runStagedAuthoring(
+      'an RSVP',
+      stubModel({ outline: vi.fn(async () => JSON.stringify(OUTLINE)) } as Partial<StagedAuthoringModel>),
+      user,
+      options,
+    );
+
+    expect(result.degraded.some((d) => d.includes('choices'))).toBe(true);
+  });
+
+  it('says nothing when every page wrote its choices', async () => {
+    const result = await runStagedAuthoring(
+      'an RSVP',
+      stubModel({ outline: vi.fn(async () => JSON.stringify(OUTLINE)) } as Partial<StagedAuthoringModel>),
+      user,
+      options,
+    );
+    expect(result.degraded.filter((d) => d.includes('choices'))).toEqual([]);
   });
 });

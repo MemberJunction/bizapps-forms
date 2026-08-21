@@ -565,6 +565,14 @@ export interface PageDetailResult {
   questionsAdded: number;
   optionsAdded: number;
   /**
+   * True when the read that decides which questions already have options FAILED.
+   *
+   * Reported rather than inferred from `optionsAdded === 0`, which is also what a page of free-text
+   * questions produces. The two mean opposite things: one is a page that needed no choices, the
+   * other is a page whose choice lists were silently dropped to avoid duplicating them.
+   */
+  optionsSkipped: boolean;
+  /**
    * Options on this page that asked for a generated picture.
    *
    * A staged build's options are created HERE, not by the outline, so this is where their image
@@ -610,12 +618,14 @@ export async function applyPageDetail(
 ): Promise<PageDetailResult> {
   const md = new Metadata();
   const stubs = await loadPageQuestions(md, pageId, contextUser);
-  const questionsWithOptions = await loadQuestionsHavingOptions(stubs.map((q) => q.ID), contextUser);
+  const existingOptions = await loadQuestionsHavingOptions(stubs.map((q) => q.ID), contextUser);
+  const questionsWithOptions = existingOptions.questionIds;
 
   const result: PageDetailResult = {
     questionsUpdated: 0,
     questionsAdded: 0,
     optionsAdded: 0,
+    optionsSkipped: existingOptions.readFailed,
     optionImages: [],
   };
   const claim = stubClaimer(stubs, idByKey);
@@ -731,9 +741,9 @@ const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 async function loadQuestionsHavingOptions(
   questionIds: readonly string[],
   contextUser: UserInfo,
-): Promise<Set<string>> {
+): Promise<{ questionIds: Set<string>; readFailed: boolean }> {
   if (questionIds.length === 0) {
-    return new Set();
+    return { questionIds: new Set(), readFailed: false };
   }
   for (const id of questionIds) {
     assertGuid(id, 'question id');
@@ -751,14 +761,21 @@ async function loadQuestionsHavingOptions(
     // Fail closed toward NOT duplicating: an unreadable option list is treated as "options may
     // already exist", so a lost read costs a question its choices rather than doubling them. The
     // author can see a missing choice list; they cannot see a duplicated one that renders fine.
+    //
+    // `readFailed` is what carries that decision out to the run's degradation list. Without it the
+    // choice lists vanished and the build still reported Ready — a single-select rendering as an
+    // empty, unanswerable control, with the only trace in a server log.
     LogError(
       `[Forms authoring] Could not check which questions already have options ` +
         `(${view.ErrorMessage ?? 'unknown error'}); skipping option creation for this page to ` +
         'avoid duplicating them.',
     );
-    return new Set(questionIds);
+    return { questionIds: new Set(questionIds), readFailed: true };
   }
-  return new Set((view.Results ?? []).map((row) => row.QuestionID));
+  return {
+    questionIds: new Set((view.Results ?? []).map((row) => row.QuestionID)),
+    readFailed: false,
+  };
 }
 
 /** Apply a detailed question onto the stub row the outline created. */
