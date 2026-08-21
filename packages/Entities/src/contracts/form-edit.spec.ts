@@ -18,7 +18,8 @@ const snapshot = (answerCount = 0): FormSnapshot =>
         title: 'Details',
         questions: [
           { id: IDS.name, type: 'ShortText', prompt: 'Your name', isRequired: false, answerCount, options: [] },
-          { id: IDS.email, type: 'Email', prompt: 'Email', isRequired: true, answerCount: 0, options: [] },
+          { id: IDS.email, type: 'Email', prompt: 'Email', isRequired: true, answerCount: 0,
+            options: [{ id: 'o-yes', label: 'Yes' }, { id: 'o-no', label: 'No' }] },
         ],
       },
     ],
@@ -288,6 +289,26 @@ describe('planEdits — a position that names a question on another page', () =>
     ]);
     expect(plan.refused).toHaveLength(0);
     expect(plan.resolved).toHaveLength(1);
+  });
+});
+
+describe('planEdits — relabelling a choice', () => {
+  /**
+   * Option handles are minted and printed for every choice, and the prompt tells the model to
+   * name them. Until this operation existed, no schema accepted one: "change the third choice to
+   * Maybe" resolved `o3`, was refused for naming the wrong kind of row, and the author got a
+   * confident non-answer to a request the prompt had invited.
+   */
+  it('resolves an option handle to the choice row', () => {
+    const plan = planEdits(snapshot(), [{ op: 'updateOption', handle: 'o1', label: 'Maybe' }]);
+    expect(plan.refused).toHaveLength(0);
+    expect(plan.resolved[0]).toMatchObject({ op: 'updateOption', id: 'o-yes', label: 'Maybe' });
+  });
+
+  it('refuses a handle that names something other than a choice', () => {
+    const plan = planEdits(snapshot(), [{ op: 'updateOption', handle: 'q1', label: 'Maybe' }]);
+    expect(plan.resolved).toHaveLength(0);
+    expect(plan.refused[0].reason).toMatch(/choice|option/i);
   });
 });
 

@@ -145,6 +145,21 @@ async function applyOne(
     return `added "${edit.prompt}" (${edit.type}${choices ? `, ${choices} choices` : ''})`;
   }
 
+  if (edit.op === 'updateOption') {
+    const md = new Metadata();
+    const option = await md.GetEntityObject<mjBizAppsFormsFormQuestionOptionEntity>(
+      ENTITY.option,
+      contextUser,
+    );
+    if (!(await option.Load(edit.id))) {
+      throw new Error(`choice ${edit.id} could not be loaded`);
+    }
+    const before = option.Label;
+    option.Label = edit.label;
+    await saveRow(option, 'FormQuestionOption (edit)', { formId });
+    return `relabelled "${before}" to "${edit.label}"`;
+  }
+
   if (edit.op === 'deleteQuestion') {
     const md = new Metadata();
     const question = await md.GetEntityObject<mjBizAppsFormsFormQuestionEntity>(

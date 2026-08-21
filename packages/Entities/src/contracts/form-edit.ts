@@ -107,7 +107,22 @@ export const setLayoutSchema = z.object({
 });
 
 /** The whole vocabulary. Grows one operation at a time, each with its own tests. */
+/**
+ * Relabelling one choice.
+ *
+ * Separate from `updateQuestion` rather than an `options` array on it: rewriting the whole list
+ * would have to delete and recreate the rows, and `FormResponseAnswer` stores the option's id.
+ * Every stored answer naming that choice would stop resolving. Naming one row and changing its
+ * text leaves the id — and therefore every answer already given — alone.
+ */
+export const updateOptionSchema = z.object({
+  op: z.literal('updateOption'),
+  handle: z.string().min(1),
+  label: z.string().min(1),
+});
+
 export const editOperationSchema = z.discriminatedUnion('op', [
+  updateOptionSchema,
   updateQuestionSchema,
   deleteQuestionSchema,
   addQuestionSchema,
@@ -160,6 +175,7 @@ const HANDLE_KIND: Record<HandleBoundOperation['op'], SnapshotTarget['kind']> = 
   updatePage: 'page',
   deletePage: 'page',
   updateScreen: 'screen',
+  updateOption: 'option',
 };
 
 

@@ -294,6 +294,20 @@ describe('applyEdits — moving a question', () => {
   });
 });
 
+describe('applyEdits — relabelling a choice', () => {
+  it('writes the new label onto the option row the handle named, keeping its id', async () => {
+    const plan = planEdits(snapshot(), [{ op: 'updateOption', handle: 'o1', label: 'Maybe' }]);
+
+    const outcome = await applyEdits(FORM, plan, user);
+
+    const option = (rows.get('MJ_BizApps_Forms: Form Question Options') ?? [])[0];
+    // The id is the point: FormResponseAnswer stores it, so relabelling must not mint a new row.
+    expect(option.ID).toBe(OPT);
+    expect(option.Label).toBe('Maybe');
+    expect(outcome.applied).toHaveLength(1);
+  });
+});
+
 describe('applyEdits — a delete that fails partway', () => {
   /**
    * The property both of these pin: a multi-row delete either happens or does not. There is no
