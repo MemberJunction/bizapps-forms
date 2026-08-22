@@ -18,6 +18,16 @@ export interface RateLimitResult {
   retryAfterMs?: number;
 }
 
+/**
+ * Per-call window/max override. Absent fields fall back to the public-submit config, so existing
+ * submit callers pass nothing and are unaffected; the upload endpoint passes its OWN limits to
+ * reuse this one sliding-window store rather than duplicating the algorithm.
+ */
+export interface RateLimitOverrides {
+  max?: number;
+  windowMs?: number;
+}
+
 export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
   /** key -> ascending list of submission timestamps (ms epoch) within the window. */
   private readonly hits = new Map<string, number[]>();
@@ -27,11 +37,16 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
   }
 
   /**
-   * Record an attempt for `key` and decide whether it is allowed under the
-   * configured window/max. Prunes expired timestamps as it goes.
+   * Record an attempt for `key` and decide whether it is allowed under the configured (or
+   * overridden) window/max. Prunes expired timestamps as it goes.
+   *
+   * `overrides` lets a different caller (the upload endpoint) reuse this one store with its own
+   * limits; when absent the public-submit config applies, preserving every existing caller.
    */
-  public check(key: string, now: number = Date.now()): RateLimitResult {
-    const { rateLimitMax, rateLimitWindowMs } = getPublicSubmitConfig();
+  public check(key: string, now: number = Date.now(), overrides?: RateLimitOverrides): RateLimitResult {
+    const cfg = getPublicSubmitConfig();
+    const rateLimitMax = overrides?.max ?? cfg.rateLimitMax;
+    const rateLimitWindowMs = overrides?.windowMs ?? cfg.rateLimitWindowMs;
     const windowStart = now - rateLimitWindowMs;
     const recent = (this.hits.get(key) ?? []).filter((ts) => ts > windowStart);
 
