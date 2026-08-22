@@ -31,9 +31,46 @@ import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { InFlightLimiter } from '../http/in-flight-limiter.js';
+import { FormsRateLimiter, rateLimitedMessage } from '../public-submit/rate-limit.service.js';
 import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
+
+/**
+ * Process-wide in-flight cap on the anonymous upload endpoint, lazily built from config.
+ *
+ * Module-level (not per-instance) so the bound is one number for the whole process however many
+ * times ClassFactory instantiates the middleware. This is the DoS control that no client-controlled
+ * key can rotate around — see {@link InFlightLimiter}.
+ */
+let uploadInFlight: InFlightLimiter | undefined;
+function uploadInFlightLimiter(): InFlightLimiter {
+  if (!uploadInFlight) {
+    uploadInFlight = new InFlightLimiter(getUploadConfig().maxInFlight);
+  }
+  return uploadInFlight;
+}
+
+/** Test-only: drop the memoized limiter so a fresh config takes effect. */
+export function resetUploadInFlightForTests(): void {
+  uploadInFlight = undefined;
+}
+
+/**
+ * The client identity for the per-IP upload rate limit.
+ *
+ * ⚠️ Behind a proxy this collapses to the BALANCER'S address for every client, because
+ * `@memberjunction/server` never sets express's `trust proxy`. The IP window is therefore a
+ * generous CEILING, not a precise per-attacker control — the header-proof {@link InFlightLimiter}
+ * above is the durable bound. Do NOT "improve" this by reading `X-Forwarded-For`: it is
+ * caller-supplied, so an attacker would rotate it for an unlimited budget while honest shared-key
+ * traffic stayed metered. Whether a proxy header can be trusted is express's app-wide `trust proxy`
+ * decision, which this Open App does not own.
+ */
+function uploadRateKey(req: Request): string {
+  return `upload:${req.ip ?? 'unknown'}`;
+}
 
 /** The verified magic-link payload MJ's `createUnifiedAuthMiddleware` attaches to the request. */
 interface VerifiedUserPayload {
@@ -71,8 +108,44 @@ export class UploadMiddleware extends BaseServerMiddleware {
     ];
   }
 
-  /** Buffer the body (size-capped), parse multipart, run the service, and respond JSON. */
+  /**
+   * Abuse gate BEFORE any work: a per-IP sliding-window rate limit (a generous ceiling) plus a
+   * process-wide in-flight concurrency cap (the header-proof bound). Both run ahead of buffering
+   * the body so a flood is refused before it costs memory or storage. The in-flight slot wraps the
+   * whole request in a `finally`, so it releases on every exit path.
+   *
+   * Until this landed the upload endpoint had NO limiter at all: an authenticated anonymous session
+   * could POST files without bound (storage DoS). See {@link InFlightLimiter} for why an in-flight
+   * cap — not a window keyed on a client-controlled value — is the control that actually holds.
+   */
   private async handleUpload(req: Request, res: Response): Promise<void> {
+    const cfg = getUploadConfig();
+    const limit = FormsRateLimiter.Instance.check(uploadRateKey(req), Date.now(), {
+      max: cfg.rateLimitMax,
+      windowMs: cfg.rateLimitWindowMs,
+    });
+    if (!limit.allowed) {
+      sendJsonError(res, 429, rateLimitedMessage(limit.retryAfterMs));
+      return;
+    }
+
+    if (!uploadInFlightLimiter().TryEnter()) {
+      // 503 (load), not 429 (bad request): this clears the instant in-flight work drains. Not
+      // charged against the IP window — charging load would let a flood spend the budget of every
+      // client behind the same balancer, the failure the in-flight cap exists to avoid.
+      LogStatus('[Forms] Upload refused: too many uploads in flight. Clears as in-flight work drains.');
+      sendJsonError(res, 503, 'The upload service is busy right now. Please try again in a moment.');
+      return;
+    }
+    try {
+      await this.processUpload(req, res);
+    } finally {
+      uploadInFlightLimiter().Exit();
+    }
+  }
+
+  /** Buffer the body (size-capped), parse multipart, run the service, and respond JSON. */
+  private async processUpload(req: Request, res: Response): Promise<void> {
     const contextUser = userPayloadOf<VerifiedUserPayload>(req)?.userRecord;
     if (!contextUser) {
       // Should not happen (unified auth would have 401'd) — defensive fail-closed.

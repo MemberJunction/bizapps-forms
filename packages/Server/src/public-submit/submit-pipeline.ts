@@ -28,11 +28,13 @@ import { persistSubmission } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
 import { FormsRateLimiter, rateLimitedMessage } from './rate-limit.service';
 import {
+  countPartialResponses,
   findAdoptableResponseById,
   findOwnedResponseById,
   findResponseById,
   findSessionResponse,
 } from './response-lookup.service';
+import { InFlightLimiter } from '../http/in-flight-limiter';
 import { checkRespondentScope } from './scope-check.service';
 import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
@@ -189,8 +191,51 @@ function confirmationFields(
   };
 }
 
-/** Run the full pipeline and produce the client-facing result. */
+/**
+ * Process-wide in-flight cap on the submit pipeline, lazily built from config.
+ *
+ * The load-bearing durable control on this path. The resolver's `AppContext` cannot see `req.ip`,
+ * so the rate limiter below keys on the client-supplied session id — which a caller rotates per
+ * request to defeat it entirely. An in-flight cap reserves a real slot per request and cannot be
+ * rotated around, bounding concurrent work regardless of any forged identity. See
+ * {@link InFlightLimiter}. Module-level so the bound is one number for the whole process.
+ */
+let submitInFlight: InFlightLimiter | undefined;
+function submitInFlightLimiter(): InFlightLimiter {
+  if (!submitInFlight) {
+    submitInFlight = new InFlightLimiter(getPublicSubmitConfig().maxInFlight);
+  }
+  return submitInFlight;
+}
+
+/** Test-only: drop the memoized limiter so a fresh config takes effect. */
+export function resetSubmitInFlightForTests(): void {
+  submitInFlight = undefined;
+}
+
+/**
+ * Run the full pipeline behind the header-proof in-flight cap.
+ *
+ * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
+ * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
+ * the widget), because holding the request would be the resource exhaustion this defends against.
+ */
 export async function runSubmitPipeline(
+  ctx: PipelineContext,
+  submission: PipelineSubmission,
+): Promise<FormSubmissionResult> {
+  if (!submitInFlightLimiter().TryEnter()) {
+    return fail('The form is receiving a lot of traffic right now. Please try again in a moment.');
+  }
+  try {
+    return await runSubmitPipelineInner(ctx, submission);
+  } finally {
+    submitInFlightLimiter().Exit();
+  }
+}
+
+/** The full pipeline body — see {@link runSubmitPipeline} for the in-flight cap that wraps it. */
+async function runSubmitPipelineInner(
   ctx: PipelineContext,
   submission: PipelineSubmission,
 ): Promise<FormSubmissionResult> {
@@ -316,6 +361,21 @@ export async function runSubmitPipeline(
   const existingPartial = await resolveExistingPartial(ctx, resolved, submission);
 
   timer.mark('find-partial');
+
+  // 8b. Hard ceiling on NEW Partial rows per version — the durable bound on partial-write abuse.
+  //     Only a partial submit that would CREATE a fresh row is capped: a COMPLETE submit is already
+  //     gated by dedupe + quota, and a partial UPDATING an existing row adds none. This is the gate
+  //     the session-keyed rate limiter cannot be, because a rotated `x-session-id` defeats that
+  //     window but every rotated request still lands another row under this one count. Fail-CLOSED
+  //     (a count error refuses the partial) — autosave is fail-soft, so the widget simply retries.
+  if (!complete && !existingPartial.response) {
+    const capped = await partialCapExceeded(ctx, resolved);
+    if (capped) {
+      return report(capped);
+    }
+  }
+
+  timer.mark('partial-cap');
 
   // 9. Persist response + answers (CREATE, UPDATE partial, or PROMOTE partial→complete).
   const persisted = await persistSubmission(
@@ -497,6 +557,32 @@ async function checkDuplicate(
       status: 'Complete',
       ...confirmationFields(resolved, buildAnswerMap(submission.answers)),
     };
+  }
+  return undefined;
+}
+
+/**
+ * Whether creating another `Partial` row for this version would breach the hard ceiling.
+ *
+ * Returns a failure result to short-circuit the pipeline, or undefined to proceed. Counts under the
+ * elevated principal (the anonymous respondent cannot read responses) and fails CLOSED — a count
+ * error refuses the partial rather than risk an unbounded-write hole. A disabled cap (<= 0) is a
+ * no-op, so an operator can turn it off deliberately.
+ */
+async function partialCapExceeded(
+  ctx: PipelineContext,
+  resolved: ResolvedDefinition,
+): Promise<FormSubmissionResult | undefined> {
+  const cap = getPublicSubmitConfig().maxPartialsPerVersion;
+  if (cap <= 0) {
+    return undefined;
+  }
+  const counted = await countPartialResponses(ctx.provider, { formVersionId: resolved.version.ID }, ctx.elevatedUser);
+  if (!counted.ok) {
+    return fail('Could not save your progress right now. Please try again shortly.');
+  }
+  if (counted.count >= cap) {
+    return fail('This form is not accepting new drafts right now. Please try again later.');
   }
   return undefined;
 }

@@ -126,6 +126,41 @@ export async function findResponseById(
   return { ok: true, response: result.Results[0] };
 }
 
+/**
+ * Count the `Partial` (in-flight autosave) rows for a published version.
+ *
+ * The durable, request-context-independent bound on partial-write abuse. The submit resolver's
+ * `AppContext` cannot see `req.ip`, so its rate limiter keys on the client-supplied `x-session-id`
+ * header — which an attacker rotates per request to land every write in a fresh bucket the window
+ * limiter never trips. Partial writes are otherwise ungated (Turnstile + quota apply only to
+ * COMPLETE submissions), so without this a rotated header yields unbounded `FormResponse` rows.
+ *
+ * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
+ * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal
+ * (the anonymous respondent cannot READ responses). `count_only` returns `TotalRowCount` without
+ * materializing rows. Fail-CLOSED: on a count error we report the cap as reached so a database blip
+ * cannot become an unbounded-write hole (the caller turns that into a refused partial, which the
+ * widget silently retries — autosave is fail-soft).
+ */
+export async function countPartialResponses(
+  provider: DefinitionRunViewProvider,
+  key: Pick<ResponseLookupKey, 'formVersionId'>,
+  contextUser: UserInfo,
+): Promise<{ ok: boolean; count: number }> {
+  const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
+    {
+      EntityName: FORM_RESPONSE_ENTITY,
+      ExtraFilter: `FormVersionID=${sqlString(key.formVersionId)} AND Status='Partial'`,
+      ResultType: 'count_only',
+    },
+    contextUser,
+  );
+  if (!result.Success) {
+    return { ok: false, count: 0 };
+  }
+  return { ok: true, count: result.TotalRowCount };
+}
+
 /** Identity for adopting a client-supplied response id: the id PLUS its required owner/version. */
 export interface OwnedResponseLookupKey {
   responseId: string;

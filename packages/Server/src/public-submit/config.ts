@@ -14,6 +14,12 @@
  *  - `FORMS_RATELIMIT_MAX`            Max submissions per window per (session,distribution)
  *                                     key. Default 5.
  *  - `FORMS_RATELIMIT_WINDOW_MS`      Sliding-window length in ms. Default 60000 (1 min).
+ *  - `FORMS_SUBMIT_MAX_IN_FLIGHT`     Max simultaneous in-flight submit-pipeline runs
+ *                                     (process-wide). Default 50. The header-proof cap that the
+ *                                     session-keyed window limiter cannot provide.
+ *  - `FORMS_MAX_PARTIALS_PER_VERSION` Hard ceiling on the number of `Partial` (autosave) rows a
+ *                                     single published version may accumulate. Default 10000. Bounds
+ *                                     unbounded partial-row creation when the session key is rotated.
  *
  * Note: the repo `.env` has a known typo on an unrelated key
  * (`GRAPHQL_BASE_URL='httkp://localhost'`); WP-B does not depend on it.
@@ -45,6 +51,10 @@ export interface PublicSubmitConfig {
   hooksBlocking: boolean;
   rateLimitMax: number;
   rateLimitWindowMs: number;
+  /** Simultaneous in-flight submit-pipeline runs across the process — the header-proof cap. */
+  maxInFlight: number;
+  /** Hard ceiling on `Partial` rows per published version — bounds rotated-session partial spam. */
+  maxPartialsPerVersion: number;
 }
 
 const DEFAULT_TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
@@ -62,6 +72,8 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
     hooksBlocking: (process.env.FORMS_HOOKS_BLOCKING ?? '').trim().toLowerCase() === 'true',
     rateLimitMax: numberFromEnv('FORMS_RATELIMIT_MAX', 5),
     rateLimitWindowMs: numberFromEnv('FORMS_RATELIMIT_WINDOW_MS', 60_000),
+    maxInFlight: numberFromEnv('FORMS_SUBMIT_MAX_IN_FLIGHT', 50),
+    maxPartialsPerVersion: numberFromEnv('FORMS_MAX_PARTIALS_PER_VERSION', 10_000),
   });
   return cached;
 }
