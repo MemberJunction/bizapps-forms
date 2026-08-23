@@ -1,13 +1,13 @@
 /**
  * In-memory sliding-window rate limiter for the public routes.
  *
- * Consulted through a SET of gates rather than one key, because a public submission has to
- * satisfy several caps at once and they are keyed differently on purpose: a per-session cap
+ * Consulted through a SET of gates in ONE call, because a public submission has to satisfy
+ * several caps at once and they are keyed differently on purpose: a per-session cap
  * (fine-grained, but keyed on a value the caller supplies, so it bounds a well-behaved client
  * and nothing else) and a per-IP ceiling (keyed on the resolved peer, so it is the one a caller
- * cannot rotate away from). Keeping them as gates in one call is what lets a rejection charge
- * NOTHING to any bucket — checking then recording key-by-key charged the first bucket for a
- * request the second was about to refuse.
+ * cannot rotate away from). One call is what lets a refusal charge NOTHING to any bucket while
+ * still marking all of them as in use — two obligations a caller consulting the gates by hand
+ * would have to remember, and would eventually forget.
  *
  * Implemented as a `BaseSingleton` so a single shared window store exists across
  * all import paths in the MJAPI process (per CLAUDE.md rule 6). This is a
@@ -40,47 +40,80 @@ export class FormsRateLimiter extends BaseSingleton<FormsRateLimiter> {
   }
 
   /**
-   * Would every gate admit one more hit right now? A pure read — deciding and charging are
-   * separate calls so a caller can consult several buckets and charge none of them.
+   * Consult every gate and, if all of them admit, charge one hit to each.
    *
-   * `retryAfterMs` is the longest wait across the gates that refused, because the caller has to
-   * clear all of them, not the nearest one.
+   * ONE call rather than a check followed by a charge, because the two must not be separable.
+   * Every gate has to be consulted before ANY is charged — otherwise a request the second gate
+   * refuses has already spent the respondent's budget in the first — and a refusal has to keep
+   * the buckets it consulted alive, which a caller who merely "checked" would forget to do. Both
+   * obligations live in here so no call site can get them wrong.
+   *
+   * `retryAfterMs` is the longest wait across the gates that refused: the caller has to clear all
+   * of them, not the nearest one.
    */
-  public wouldAllowAll(gates: readonly RateLimitGate[], now: number = Date.now()): RateLimitResult {
+  public charge(gates: readonly RateLimitGate[], now: number = Date.now()): RateLimitResult {
     const { rateLimitWindowMs } = getPublicSubmitConfig();
     let retryAfterMs: number | undefined;
 
     for (const gate of gates) {
       const recent = this.recentHits(gate.key, now);
       if (recent.length >= gate.max) {
-        const wait = Math.max(0, recent[0] + rateLimitWindowMs - now);
-        retryAfterMs = Math.max(retryAfterMs ?? 0, wait);
+        retryAfterMs = Math.max(retryAfterMs ?? 0, Math.max(0, recent[0] + rateLimitWindowMs - now));
       }
     }
 
-    return retryAfterMs === undefined ? { allowed: true } : { allowed: false, retryAfterMs };
-  }
+    if (retryAfterMs !== undefined) {
+      // Refused. Charge nothing — but mark every bucket as still in use, because a caller being
+      // turned away is the caller we most need to keep remembering. Without this the only thing
+      // keeping a bucket alive would be a SUCCESSFUL charge, so a saturated bucket would go stale
+      // faster than an idle one and the key cap below would evict it — handing a caller a fresh
+      // budget precisely for having exhausted the last one.
+      for (const gate of gates) {
+        this.markInUse(gate.key, now);
+      }
+      return { allowed: false, retryAfterMs };
+    }
 
-  /** Charge one hit to each gate's bucket, pruning that bucket's expired timestamps. */
-  public recordAll(gates: readonly RateLimitGate[], now: number = Date.now()): void {
     for (const gate of gates) {
       const recent = this.recentHits(gate.key, now);
       recent.push(now);
-      // delete-then-set moves the bucket to the end of the Map's insertion order, which is what
-      // makes the eviction below least-recently-charged rather than oldest-ever-seen.
-      this.hits.delete(gate.key);
-      this.hits.set(gate.key, recent);
+      this.store(gate.key, recent);
     }
     this.evictBeyondKeyCap();
+    return { allowed: true };
   }
 
   /**
-   * Drop the least recently charged buckets once the store exceeds its cap.
+   * Refresh a bucket's place in the eviction order without charging it.
    *
-   * Evicting a live bucket forgives whatever it had accumulated, which is the honest trade: the
-   * alternative is a map a public caller can grow without bound by minting a key per request, and
-   * an out-of-memory API refuses everyone rather than one caller. Under real load the cap is far
-   * above the working set, so this only runs when something abnormal is happening.
+   * Only refreshes a bucket that already exists: a gate with no history has nothing worth
+   * remembering, and creating an empty entry for it would let a caller grow the store through
+   * requests that were refused for some other reason entirely.
+   */
+  private markInUse(key: string, now: number): void {
+    if (this.hits.has(key)) {
+      this.store(key, this.recentHits(key, now));
+    }
+  }
+
+  /**
+   * Write a bucket back, moving it to the end of the Map's insertion order.
+   *
+   * The delete-then-set is what makes that order a USAGE order, which is what
+   * {@link evictBeyondKeyCap} reads.
+   */
+  private store(key: string, stamps: number[]): void {
+    this.hits.delete(key);
+    this.hits.set(key, stamps);
+  }
+
+  /**
+   * Drop the least recently used buckets once the store exceeds its cap.
+   *
+   * Eviction forgives whatever a bucket had accumulated, so the ORDER is the security property:
+   * buckets go least-recently-USED, and every consult counts as a use — including a refusal. A
+   * caller still being turned away therefore stays at the back of this queue for as long as they
+   * keep trying, and what falls out is the buckets nobody has touched since.
    */
   private evictBeyondKeyCap(): void {
     const { rateLimitMaxKeys } = getPublicSubmitConfig();

@@ -59,6 +59,23 @@ describe('hashClientIp', () => {
     expect(hashClientIp('[2001:db8:abcd:1234::1]:54321')).toBe(hashClientIp('2001:db8:abcd:1234::1'));
   });
 
+  it('reads every spelling of an IPv4-mapped address as the one caller it is', () => {
+    // A proxy may write any of these into X-Forwarded-For. Only the dotted `::ffff:` form was
+    // recognised, so the other two fell through to /64 reduction and landed on `::/64` — sharing
+    // a bucket with each other AND with unrelated `::` addresses like loopback. That is both
+    // halves of the failure at once: one caller split across buckets, and unrelated callers
+    // merged into one.
+    const dotted = hashClientIp('::ffff:1.2.3.4');
+    expect(hashClientIp('0:0:0:0:0:ffff:1.2.3.4')).toBe(dotted);
+    expect(hashClientIp('::ffff:0102:0304')).toBe(dotted);
+    expect(hashClientIp('1.2.3.4')).toBe(dotted);
+    expect(hashClientIp('::1')).not.toBe(dotted);
+  });
+
+  it('reads a zero-padded IPv4 address as the same caller as its plain spelling', () => {
+    expect(hashClientIp('01.02.03.04')).toBe(hashClientIp('1.2.3.4'));
+  });
+
   it('never leaks the address it hashed', () => {
     expect(hashClientIp('203.0.113.7')).toMatch(/^[0-9a-f]{64}$/);
     expect(hashClientIp('203.0.113.7')).not.toContain('203.0.113');

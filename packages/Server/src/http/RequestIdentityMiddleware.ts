@@ -25,15 +25,33 @@ import { hashClientIp, resolveClientIp, runWithRequestIdentity } from './request
 /**
  * How many proxies WE operate in front of the API — the number of trailing `X-Forwarded-For`
  * entries that were written by infrastructure we control, and therefore the only ones worth
- * reading. Zero (the default) means the API is addressed directly and nothing in that header is
- * evidence of anything.
+ * reading. Unset means the API is addressed directly and nothing in that header is evidence of
+ * anything.
+ *
+ * THROWS on a malformed value rather than falling back to zero. Falling back looks like the safe
+ * direction and is the opposite: nobody sets this variable unless a proxy is in front, so a typo
+ * silently keys every respondent on the proxy's own address — one bucket for the entire
+ * deployment, which is the exact denial-of-service the per-caller ceilings exist to prevent. This
+ * is read at boot, so the throw fails the process start where somebody is watching, instead of
+ * degrading in production where nobody is.
  *
  * Read once at boot rather than per request: it describes the deployment's topology, which does
  * not change while the process runs.
  */
 export function trustedProxyHops(): number {
-  const raw = Number(process.env.FORMS_TRUSTED_PROXY_HOPS ?? '0');
-  return Number.isInteger(raw) && raw > 0 ? raw : 0;
+  const raw = process.env.FORMS_TRUSTED_PROXY_HOPS?.trim();
+  if (raw === undefined || raw === '') {
+    return 0;
+  }
+  const hops = Number(raw);
+  if (!Number.isInteger(hops) || hops < 0) {
+    throw new Error(
+      `FORMS_TRUSTED_PROXY_HOPS must be a non-negative whole number of proxy hops; got '${raw}'. ` +
+        'Use 0 (or leave it unset) when MJAPI is addressed directly, 1 behind a single load ' +
+        'balancer, 2 behind a CDN in front of one.',
+    );
+  }
+  return hops;
 }
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsRequestIdentity')

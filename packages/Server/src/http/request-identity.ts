@@ -59,9 +59,11 @@ function forwardedForEntries(raw: string | string[] | undefined): string[] {
  * The one-way abuse key for a client IP.
  *
  * Salted with `FORMS_SESSION_HASH_SALT` — deliberately the SAME secret `hashSessionId` uses, so
- * a deployment has one salt to set and rotate rather than two, one of which it will forget. The
- * two hash spaces are domain-separated by the `ip:` prefix below, so a session hash and an IP
- * hash can never collide even though they share a salt.
+ * a deployment has one salt to set and rotate rather than two, one of which it will forget.
+ * Sharing a salt is only safe because BOTH sides tag their preimage: `ip:` here, `sid:` there.
+ * With a tag on one side only, `x-session-id: ip:203.0.113.7` would have produced a session hash
+ * byte-identical to that address's IP hash — a header the caller writes, colliding with a value
+ * derived precisely because they cannot write it.
  *
  * Hashed rather than stored raw because this value reaches a log line and a bucket key, and a
  * raw IP in either is personal data we have no reason to keep.
@@ -78,19 +80,54 @@ function ipHashSalt(): string {
 /**
  * Reduce an address to the unit we are willing to call "one caller".
  *
- * IPv4 is that unit already. IPv6 is not: an ordinary host is delegated a whole /64 and can
- * source traffic from any address in it at no cost, so keying on the full address would let one
- * machine mint 2^64 buckets — the very bypass this module exists to close, moved one field over.
- * We therefore key IPv6 on its /64 prefix, accepting that two respondents behind one /64 share a
- * bucket (they are, by construction, one network).
+ * Two failure directions, and this has to avoid both. Splitting one caller across buckets hands
+ * them extra budget; merging two callers into one bucket lets either refuse service to the other.
+ * Address text is unusually good at causing both, because a single address has many legal
+ * spellings and unrelated addresses can share a prefix.
+ *
+ * The rules, in order:
+ *   - IPv4 is already the unit; only its octets are canonicalised (`01.02.03.04` and `1.2.3.4`
+ *     are one host, and treating them as two would be free budget).
+ *   - An IPv4-mapped IPv6 address IS an IPv4 caller, in every spelling — `::ffff:1.2.3.4`,
+ *     `0:0:0:0:0:ffff:1.2.3.4`, `::ffff:0102:0304`. Detected after expansion rather than by
+ *     matching one written form, because matching the dotted form alone let the other two fall
+ *     through to the `::/64` bucket, where they shared a key with each other and with loopback.
+ *   - Any other IPv6 keys on its /64. An ordinary host is delegated a whole /64 and can source
+ *     from any address in it at no cost, so per-address keying would let one machine mint 2^64
+ *     buckets. Two respondents behind one /64 do share a bucket; they are, by construction, one
+ *     network.
  */
 export function normalizeIpForKeying(rawIp: string): string {
   const ip = stripSourcePort(rawIp.trim().toLowerCase()).split('%')[0]; // drop IPv6 zone (fe80::1%eth0)
-  const mappedV4 = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(ip);
-  if (mappedV4) {
-    return mappedV4[1]; // an IPv4 peer on a dual-stack socket is the same caller as a bare v4 peer
+  if (!ip.includes(':')) {
+    return canonicalIpv4(ip) ?? ip;
   }
-  return ip.includes(':') ? ipv6Prefix64(ip) : ip;
+  const hextets = expandIpv6(ip);
+  if (!hextets) {
+    return ip; // unparseable: key on it verbatim rather than on a wrong reduction
+  }
+  return mappedIpv4(hextets) ?? hextets.slice(0, 4).join(':');
+}
+
+/** `1.2.3.4` from an IPv4 string, with octets canonicalised; `undefined` if it is not one. */
+function canonicalIpv4(ip: string): string | undefined {
+  const parts = ip.split('.');
+  if (parts.length !== 4) {
+    return undefined;
+  }
+  const octets = parts.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : Number.NaN));
+  return octets.every((o) => o >= 0 && o <= 255) ? octets.join('.') : undefined;
+}
+
+/** The dotted IPv4 address an expanded IPv6 encodes, if it is `::ffff:a.b.c.d` in any spelling. */
+function mappedIpv4(hextets: readonly string[]): string | undefined {
+  const isMapped = hextets.slice(0, 5).every((h) => h === '0000') && hextets[5] === 'ffff';
+  if (!isMapped) {
+    return undefined;
+  }
+  const high = Number.parseInt(hextets[6], 16);
+  const low = Number.parseInt(hextets[7], 16);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
 }
 
 /**
@@ -110,24 +147,41 @@ function stripSourcePort(ip: string): string {
   return colons === 1 ? ip.split(':')[0] : ip;
 }
 
-/** The run of zero hextets a `::` stands in for. */
-function zeroHextets(count: number): string[] {
-  return Array.from({ length: Math.max(0, count) }, () => '0');
-}
-
-/** Expand an IPv6 address far enough to read its first four hextets (the /64 prefix). */
-function ipv6Prefix64(ip: string): string {
-  const [head, tail] = ip.split('::');
+/** All eight hextets of an IPv6 address, zero-padded; `undefined` if it does not parse. */
+function expandIpv6(ip: string): string[] | undefined {
+  const [head, tail] = dottedTailAsHextets(ip).split('::');
   const headParts = head ? head.split(':') : [];
   const tailParts = tail ? tail.split(':') : [];
   const parts =
     tail === undefined
       ? headParts
       : [...headParts, ...zeroHextets(8 - headParts.length - tailParts.length), ...tailParts];
-  return parts
-    .slice(0, 4)
-    .map((hextet) => (hextet || '0').padStart(4, '0'))
-    .join(':');
+  if (parts.length !== 8 || parts.some((h) => !/^[0-9a-f]{0,4}$/.test(h))) {
+    return undefined;
+  }
+  return parts.map((hextet) => (hextet || '0').padStart(4, '0'));
+}
+
+/**
+ * Rewrite a trailing dotted quad as the two hextets it stands for, so one expansion routine
+ * handles `::ffff:1.2.3.4` and `::ffff:0102:0304` identically instead of only recognising the
+ * form somebody happened to write down first.
+ */
+function dottedTailAsHextets(ip: string): string {
+  const match = /^(.*:)(\d{1,3}(?:\.\d{1,3}){3})$/.exec(ip);
+  if (!match) {
+    return ip;
+  }
+  const octets = match[2].split('.').map(Number);
+  if (octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) {
+    return ip;
+  }
+  return `${match[1]}${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+}
+
+/** The run of zero hextets a `::` stands in for. */
+function zeroHextets(count: number): string[] {
+  return Array.from({ length: Math.max(0, count) }, () => '0');
 }
 
 /** What the public routes know about a caller, independent of anything the caller told us. */

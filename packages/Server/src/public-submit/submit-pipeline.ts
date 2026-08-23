@@ -96,13 +96,21 @@ export interface PipelineContext {
    * AFTER the anon scope check has authorized the request. See ON_SUBMIT_AUTOMATION_SPEC §7.
    */
   elevatedUser: UserInfo;
-  /** Anonymous magic-link session id (mj_sid) from the UserPayload. */
+  /**
+   * The caller's `x-session-id` request header, as `UserPayload.sessionId`.
+   *
+   * NOT `mj_sid` and not a JWT claim, whatever the name suggests — MJ reads it straight off the
+   * request in `extractAuthInputs`. It is a correlator the caller chooses, blank for any client
+   * that omits the header, and that is why it keys dedupe and the fine-grained per-session limit
+   * but nothing that has to hold against someone trying.
+   */
   sessionId: string;
   /**
    * Salted hash of the caller's resolved IP, from `RequestIdentityMiddleware` via
-   * `currentRequestIdentity()`. This is the ONLY caller attribute here that the caller did not
-   * choose — `sessionId` above is an `x-session-id` header — so it is what the abuse ceilings
-   * key on. Absent in unit tests and in a deployment that has not mounted the middleware.
+   * `currentRequestIdentity()`. The ONLY caller attribute here that the caller did not choose, so
+   * it is what the abuse ceilings key on. Absent in unit tests and in a deployment that has not
+   * mounted the middleware, in which case those ceilings are dropped rather than re-keyed onto
+   * something weaker — see `rateLimitGatesFor`.
    */
   clientIpHash?: string;
   /** Injectable for tests; defaults to global fetch. */
@@ -247,7 +255,18 @@ export async function runSubmitPipeline(
 
   timer.mark('resolve-form');
 
-  // 3. Turnstile (per form/distribution toggle) — FINAL submits only.
+  // 3. Rate-limit. `charge` consults every bucket before spending any of them, so a request one
+  //    gate refuses does not silently eat the respondent's budget in another.
+  warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
+  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete);
+  const limit = FormsRateLimiter.Instance.charge(gates);
+  if (!limit.allowed) {
+    return report(fail(rateLimitedMessage(limit.retryAfterMs)));
+  }
+
+  timer.mark('rate-limit');
+
+  // 4. Turnstile (per form/distribution toggle) — FINAL submits only.
   //
   //     A partial is exempt because a Turnstile token is single-use. The widget therefore
   //     withholds it from autosaves (see `buildSubmission`), keeping it for the submit that
@@ -258,7 +277,13 @@ export async function runSubmitPipeline(
   //
   //     This is not a bypass. A partial can only ever write a `Partial` row; promoting one to
   //     `Complete` runs this pipeline again with `partial` unset, and that pass is gated here. The
-  //     rate limiter below is what bounds partial writes, and it runs for every save either way.
+  //     rate limiter ABOVE is what bounds partial writes, and it runs for every save either way.
+  //
+  //     Ordered after the rate limit for the same single-use reason. Verifying first meant a
+  //     submission the limiter was about to refuse had already spent its token at Cloudflare, so
+  //     the respondent's retry — the one thing they can actually do about a rate limit — came
+  //     back "Captcha verification failed" instead of the wait. It also let a caller who was
+  //     being refused anyway keep costing us an outbound round trip per attempt.
   const needCaptcha =
     complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
@@ -267,18 +292,6 @@ export async function runSubmitPipeline(
   }
 
   timer.mark('captcha');
-
-  // 4. Rate-limit. Every bucket is consulted before ANY of them is charged, so a request that
-  //    one gate refuses does not silently spend the respondent's budget in another.
-  warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
-  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete);
-  const limit = FormsRateLimiter.Instance.wouldAllowAll(gates);
-  if (!limit.allowed) {
-    return report(fail(rateLimitedMessage(limit.retryAfterMs)));
-  }
-  FormsRateLimiter.Instance.recordAll(gates);
-
-  timer.mark('rate-limit');
 
   // 5. Dedupe (Task 1) — only on completion. If this session (or this client response id)
   //    already Completed this form, short-circuit rather than writing a second row.
@@ -419,11 +432,17 @@ export async function runSubmitPipeline(
  */
 function rateLimitGatesFor(ctx: PipelineContext, distributionId: string, complete: boolean): RateLimitGate[] {
   const config = getPublicSubmitConfig();
-  const identity = abuseIdentity({ clientIpHash: ctx.clientIpHash, sessionId: ctx.sessionId });
   const gates: RateLimitGate[] = [
     { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
-    { key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax },
   ];
+  const identity = abuseIdentity(ctx.clientIpHash);
+  if (!identity) {
+    // No resolved IP, so (b) and (c) have nothing to key on. They are omitted rather than keyed
+    // on something weaker — see `abuseIdentity`. Gate (a) is untouched, so this is exactly the
+    // behaviour that shipped before the ceilings existed, and the warning above has said so.
+    return gates;
+  }
+  gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
   if (complete) {
     gates.push({ key: completionCeilingKey(distributionId, identity), max: config.completionMax });
   }

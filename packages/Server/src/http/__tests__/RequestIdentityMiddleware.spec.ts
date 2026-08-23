@@ -18,7 +18,7 @@ import express from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
-import { RequestIdentityMiddleware } from '../RequestIdentityMiddleware';
+import { RequestIdentityMiddleware, trustedProxyHops } from '../RequestIdentityMiddleware';
 import { currentRequestIdentity } from '../request-identity';
 
 afterEach(() => {
@@ -75,6 +75,26 @@ describe('RequestIdentityMiddleware', () => {
       expect(forged).toBe(bare);
       expect(other).not.toBe(bare);
     });
+  });
+
+  it('refuses to start on a malformed hop count rather than quietly trusting nothing', () => {
+    // Coercing junk to 0 is the most dangerous possible reading of this setting: somebody only
+    // sets it because a proxy IS in front, and 0 keys every respondent on that proxy's address —
+    // one bucket for the whole deployment, which is the failure the ceilings exist to prevent.
+    // A boot-time throw is loud, immediate, and cannot reach production unnoticed.
+    for (const bad of ['one', '1.5', '-1']) {
+      process.env.FORMS_TRUSTED_PROXY_HOPS = bad;
+      expect(() => trustedProxyHops()).toThrow(/FORMS_TRUSTED_PROXY_HOPS/);
+    }
+  });
+
+  it('treats an unset or blank hop count as a directly-addressed API', () => {
+    // Blank counts as unset rather than malformed: `FORMS_TRUSTED_PROXY_HOPS=` is what a .env
+    // looks like with the value commented out, and refusing to boot on that would be a bug.
+    delete process.env.FORMS_TRUSTED_PROXY_HOPS;
+    expect(trustedProxyHops()).toBe(0);
+    process.env.FORMS_TRUSTED_PROXY_HOPS = '   ';
+    expect(trustedProxyHops()).toBe(0);
   });
 });
 

@@ -356,5 +356,64 @@ describe('runSubmitPipeline', () => {
     delete process.env.FORMS_RATELIMIT_IP_MAX;
     delete process.env.FORMS_COMPLETION_MAX;
   });
+
+  // When no IP could be resolved (middleware not mounted, or a socket already gone) the ceilings
+  // have nothing to key on. The tempting fallback — the session id — is blank for any client that
+  // omits the header, so every such caller would hash to ONE bucket and any one of them could
+  // refuse the form for all the others. That is a worse failure than not limiting, so the
+  // ceilings are dropped instead and the pre-existing per-session gate is left to do its job.
+  it('does not put unidentifiable callers in a shared bucket', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '1';
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks });
+    ctx.clientIpHash = undefined;
+
+    // BLANK, not merely distinct: MJ sets `sessionId` to '' for any client that omits the
+    // header, so this is what two unrelated header-less callers genuinely look like, and it is
+    // the case a session-derived fallback collapses onto a single bucket.
+    ctx.sessionId = '';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    const third = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // Turnstile ran BEFORE the rate limit, so a request the limiter was about to refuse had already
+  // spent an outbound Cloudflare round trip — and, worse, a Turnstile token is single-use (see
+  // the partial-save test above), so the refusal consumed the respondent's token. Their retry
+  // then failed with "Captcha verification failed" instead of the wait-and-retry message, on a
+  // form whose author cared enough to turn a captcha on. The cheap local gate belongs first.
+  it('does not spend a Turnstile token on a submission it is going to rate-limit', async () => {
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    process.env.FORMS_RATELIMIT_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ success: true }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const { ctx } = makeContext(respondentPermissions(), {
+      captcha: true,
+      fetchImpl,
+      clientIpHash: 'ip-respondent',
+      fireHooks: vi.fn(async (): Promise<HookFireResult[]> => []),
+    });
+
+    const first = await runSubmitPipeline(ctx, validSubmission({ turnstileToken: 'token-1' }));
+    const refused = await runSubmitPipeline(ctx, validSubmission({ turnstileToken: 'token-2' }));
+
+    expect(first.success).toBe(true);
+    expect(refused.success).toBe(false);
+    expect(refused.errors?.[0].message).toMatch(/too many/i);
+    // One verification for the accepted submit, none for the refused one.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    delete process.env.FORMS_TURNSTILE_SECRET;
+    delete process.env.FORMS_RATELIMIT_MAX;
+  });
 });
 

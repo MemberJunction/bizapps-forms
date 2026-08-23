@@ -27,9 +27,17 @@ function sessionHashSalt(): string {
   return process.env.FORMS_SESSION_HASH_SALT?.trim() || 'mj-forms-source-metadata-v1';
 }
 
-/** One-way SHA-256 of the anonymous session id (never store the raw id). */
+/**
+ * One-way SHA-256 of the anonymous session id (never store the raw id).
+ *
+ * The `sid:` tag is domain separation, and it is not decorative: {@link hashClientIp} shares this
+ * salt and tags its own preimage `ip:`, so without a tag here a caller could send
+ * `x-session-id: ip:203.0.113.7` and produce a session hash byte-identical to that address's IP
+ * hash. Nothing compares the two today, which is exactly why it would have gone unnoticed until
+ * something did.
+ */
 export function hashSessionId(sessionId: string): string {
-  return createHash('sha256').update(`${sessionHashSalt()}:${sessionId}`).digest('hex');
+  return createHash('sha256').update(`${sessionHashSalt()}:sid:${sessionId}`).digest('hex');
 }
 
 /** Inputs available to the resolver for building source metadata. */
@@ -82,15 +90,21 @@ export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'd
 /**
  * The identity an abuse ceiling is keyed on: the one thing about a caller they did not choose.
  *
- * Prefers the resolved client IP hash. `sessionId` is the fallback and NOT an equivalent — it
- * comes from the `x-session-id` header, so a caller who wants a fresh bucket simply asks for one.
- * The fallback exists so this stays correct in unit tests and in any deployment that has not
- * mounted `RequestIdentityMiddleware`; the pipeline says so out loud rather than degrading
- * quietly (see `warnOnceIfAbuseKeyingDegraded`).
+ * `undefined` when there is no resolved IP, and the ceilings are then simply not applied. There
+ * IS another identifier to hand — `sessionId` — and falling back to it was the obvious thing to
+ * do, but it is wrong twice over. It comes from the `x-session-id` header, so a caller wanting a
+ * fresh bucket just asks for one, which is the defect these ceilings exist to close. Worse, MJ
+ * leaves it BLANK for any client that omits the header, so every such caller would hash to one
+ * value and share a single bucket — one of them could then refuse the form for all of them. A
+ * ceiling that cannot tell callers apart is not a weaker ceiling, it is a denial-of-service with
+ * extra steps. Declining to limit leaves the pre-existing per-session gate exactly as it was.
+ *
+ * Callers must announce the degraded mode rather than take it quietly — see
+ * {@link warnOnceIfAbuseKeyingDegraded}.
  */
-export function abuseIdentity(inputs: { clientIpHash?: string; sessionId: string }): string {
-  const ipHash = inputs.clientIpHash?.trim();
-  return ipHash ? `ip:${ipHash}` : `sid:${hashSessionId(inputs.sessionId)}`;
+export function abuseIdentity(clientIpHash: string | undefined): string | undefined {
+  const ipHash = clientIpHash?.trim();
+  return ipHash ? `ip:${ipHash}` : undefined;
 }
 
 let warnedAboutDegradedKeying = false;

@@ -14,9 +14,16 @@
  * The window comes from the public-submit config, deliberately: a deployment tuning
  * `FORMS_RATELIMIT_WINDOW_MS` is describing how long it wants to remember a caller, and that
  * answer should not differ between two routes the same respondent uses in the same sitting.
+ *
+ * WITH NO IP, THIS GATE DOES NOTHING — on purpose. The only other identity available is the
+ * `x-session-id` header, which MJ leaves blank for any client that omits it, so every such
+ * caller would share ONE bucket and a single one of them could refuse uploads for the whole
+ * deployment. Declining to limit is the same posture this route had before the gate existed;
+ * inventing a shared bucket would be a new denial-of-service that no caller could route around.
+ * The warning below is what stops that being a silent decision.
  */
 import { FormsRateLimiter, type RateLimitResult } from '../public-submit/rate-limit.service.js';
-import { abuseIdentity } from '../public-submit/source-metadata.service.js';
+import { abuseIdentity, warnOnceIfAbuseKeyingDegraded } from '../public-submit/source-metadata.service.js';
 import { uploadRateLimitMax } from './config.js';
 
 /** What the limiter needs to know about an upload caller. */
@@ -27,17 +34,18 @@ export interface UploadCaller {
   sessionId?: string;
 }
 
-/** Consult and charge this caller's upload budget. */
+/**
+ * Consult and charge this caller's upload budget.
+ *
+ * Admits everything when the caller cannot be identified — see the module note above. That is a
+ * deliberate no-op rather than a shared bucket, and it is announced once per process rather than
+ * taken quietly.
+ */
 export function checkUploadRateLimit(caller: UploadCaller): RateLimitResult {
-  const gates = [
-    {
-      key: `upload:${abuseIdentity({ clientIpHash: caller.clientIpHash, sessionId: caller.sessionId ?? '' })}`,
-      max: uploadRateLimitMax(),
-    },
-  ];
-  const verdict = FormsRateLimiter.Instance.wouldAllowAll(gates);
-  if (verdict.allowed) {
-    FormsRateLimiter.Instance.recordAll(gates);
+  const identity = abuseIdentity(caller.clientIpHash);
+  if (!identity) {
+    warnOnceIfAbuseKeyingDegraded(caller.clientIpHash);
+    return { allowed: true };
   }
-  return verdict;
+  return FormsRateLimiter.Instance.charge([{ key: `upload:${identity}`, max: uploadRateLimitMax() }]);
 }

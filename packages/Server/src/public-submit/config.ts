@@ -90,8 +90,12 @@ export interface PublicSubmitConfig {
    * The store is keyed partly on values a public caller influences, so without a cap its key
    * space is itself a target: a caller minting a fresh key per request grows the map for as long
    * as they keep going, and expiry does not help — timestamps inside a bucket are pruned on
-   * access, but nothing ever removes the bucket. Eviction is least-recently-charged, so the
-   * buckets that survive pressure are the ones actively being rate-limited.
+   * access, but nothing ever removes the bucket.
+   *
+   * Eviction is least-recently-USED, where a refusal counts as a use. That distinction is the
+   * whole security property: evicting a bucket forgives what it had accumulated, and if only
+   * successful charges kept a bucket alive then a saturated one would go stale FASTER than an
+   * idle one — so the cap would hand a fresh budget to whoever had just exhausted theirs.
    */
   rateLimitMaxKeys: number;
   rateLimitWindowMs: number;

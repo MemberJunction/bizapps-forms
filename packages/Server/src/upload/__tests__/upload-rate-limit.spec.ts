@@ -27,4 +27,18 @@ describe('checkUploadRateLimit', () => {
     expect(checkUploadRateLimit({ clientIpHash: 'ip-respondent', sessionId: 'honest' }).allowed).toBe(true);
     delete process.env.FORMS_UPLOAD_IP_MAX;
   });
+
+  it('does not put unidentifiable callers in a shared bucket', async () => {
+    // Same reasoning as the submit pipeline: with no IP the only other identifier is blank for
+    // every header-less client, so one shared bucket would let any one of them deny uploads
+    // deployment-wide. The route admits instead, exactly as it did before this gate existed.
+    process.env.FORMS_UPLOAD_IP_MAX = '1';
+    resetPublicSubmitConfigForTests();
+
+    expect(checkUploadRateLimit({ sessionId: '' }).allowed).toBe(true);
+    expect(checkUploadRateLimit({ sessionId: '' }).allowed).toBe(true);
+    expect(checkUploadRateLimit({ sessionId: '' }).allowed).toBe(true);
+    delete process.env.FORMS_UPLOAD_IP_MAX;
+  });
 });
+

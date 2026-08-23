@@ -10,7 +10,8 @@
  * the VERIFIED anonymous magic-link session. MJ's `createUnifiedAuthMiddleware` runs before
  * post-auth middleware, verifies the `Authorization: Bearer` JWT, and attaches the
  * synthesized anonymous `UserInfo` at `req.userPayload.userRecord` + `req.userPayload.sessionId`
- * (`mj_sid`). We therefore contribute this route through {@link GetPostAuthMiddleware} and
+ * (which is the caller's `x-session-id` header, NOT an `mj_sid` claim — MJ reads it straight off
+ * the request, so it identifies nobody). We contribute this route through {@link GetPostAuthMiddleware} and
  * simply READ that verified payload — the exact same identity the `SubmitFormResponse`
  * GraphQL mutation runs under — instead of re-verifying the token or reinventing JWKS/JWT
  * handling. A missing/invalid token is already rejected upstream (401) and never reaches us
@@ -86,14 +87,7 @@ export class UploadMiddleware extends BaseServerMiddleware {
     // `MJ: Files` row, so the cheapest place to refuse a caller hammering this route is the
     // moment we know who they are — which is on arrival, since the key is their resolved peer
     // IP rather than anything in the (as yet unread) body.
-    const limit = checkUploadRateLimit({
-      clientIpHash: currentRequestIdentity()?.ipHash,
-      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
-    });
-    if (!limit.allowed) {
-      const retryAfterSeconds = Math.ceil((limit.retryAfterMs ?? 0) / 1000);
-      res.set('Retry-After', String(Math.max(1, retryAfterSeconds)));
-      sendJsonError(res, 429, `Too many uploads. Please wait ${Math.max(1, retryAfterSeconds)}s and try again.`);
+    if (this.refuseIfRateLimited(req, res)) {
       return;
     }
 
@@ -109,32 +103,58 @@ export class UploadMiddleware extends BaseServerMiddleware {
       return;
     }
 
-    const uploadReq: UploadRequest = {
+    const result = await runUpload(this.uploadContextFor(req, contextUser), {
       file: parsed.file,
       distributionSlug: parsed.fields.distributionSlug,
       distributionId: parsed.fields.distributionId,
       questionId: parsed.fields.questionId,
       responseId: parsed.fields.responseId,
-    };
-    const ctx: UploadContext = {
-      contextUser,
-      metadataProvider: new Metadata(),
-      runViewProvider: new RunView(),
-      storage: this.storageEngine(),
-      // The File row and its provenance row are written as the system user, never as the
-      // anonymous caller: the anonymous role holds no `MJ: Files` grant, and a provenance row the
-      // caller could write would prove nothing about who uploaded the file.
-      elevatedUser: UserCache.Instance.GetSystemUser(),
-      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
-    };
-
-    const result = await runUpload(ctx, uploadReq);
+    });
     if (!result.ok || !result.success) {
       const failure = result.failure ?? { status: 500, error: 'Upload failed.' };
       sendJsonError(res, failure.status, failure.error);
       return;
     }
     res.status(200).set('Cache-Control', 'no-store').json(result.success);
+  }
+
+  /**
+   * The identities and providers the upload service runs under.
+   *
+   * Two principals, deliberately. `contextUser` is the verified anonymous caller and is what
+   * authorizes the request; the File row and its provenance row are written as the SYSTEM user,
+   * because the anonymous role holds no `MJ: Files` grant and a provenance row the caller could
+   * write would prove nothing about who uploaded the file.
+   */
+  private uploadContextFor(req: Request, contextUser: UserInfo): UploadContext {
+    return {
+      contextUser,
+      metadataProvider: new Metadata(),
+      runViewProvider: new RunView(),
+      storage: this.storageEngine(),
+      elevatedUser: UserCache.Instance.GetSystemUser(),
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    };
+  }
+
+  /**
+   * Refuse an over-budget caller with 429 + `Retry-After`, and report whether it did.
+   *
+   * Returns a boolean rather than throwing because the caller is a route handler that has already
+   * written a response by this point; a thrown error there would produce a second one.
+   */
+  private refuseIfRateLimited(req: Request, res: Response): boolean {
+    const limit = checkUploadRateLimit({
+      clientIpHash: currentRequestIdentity()?.ipHash,
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    });
+    if (limit.allowed) {
+      return false;
+    }
+    const retryAfterSeconds = Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000));
+    res.set('Retry-After', String(retryAfterSeconds));
+    sendJsonError(res, 429, `Too many uploads. Please wait ${retryAfterSeconds}s and try again.`);
+    return true;
   }
 
   /** The configured MJ file-storage engine (canonical "store bytes + create File row"). */
