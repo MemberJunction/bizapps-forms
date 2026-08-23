@@ -23,6 +23,7 @@ import {
 } from './graphql-types';
 import { runSubmitPipeline, type PipelineSubmission } from './submit-pipeline';
 import { toAnswerInputs } from './input-mapping';
+import { currentRequestIdentity } from '../http/request-identity';
 
 @Resolver()
 export class PublicFormResolver extends ResolverBase {
@@ -84,8 +85,18 @@ export class PublicFormResolver extends ResolverBase {
     // user: the anonymous respondent can CREATE but not READ Form Responses. The anon `contextUser`
     // still gates authorization via the pipeline's scope check (no privilege accretion).
     const elevatedUser = UserCache.Instance.GetSystemUser();
+    // `clientIpHash` is the one caller attribute here that the caller did not choose, so it is
+    // what the pipeline's abuse ceilings key on. It reaches us through the request-scoped store
+    // that `RequestIdentityMiddleware` establishes pre-auth, because `AppContext` carries no
+    // request object — see `http/request-identity.ts`.
     const result = await runSubmitPipeline(
-      { provider, contextUser, elevatedUser, sessionId: userPayload.sessionId },
+      {
+        provider,
+        contextUser,
+        elevatedUser,
+        sessionId: userPayload.sessionId,
+        clientIpHash: currentRequestIdentity()?.ipHash,
+      },
       submission,
     );
     return toResultType(result);

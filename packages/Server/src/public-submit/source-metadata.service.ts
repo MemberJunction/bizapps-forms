@@ -2,15 +2,24 @@
  * Builds the `FormResponse.SourceMetadata` JSON blob and the rate-limit/dedupe
  * identity key for a public submission.
  *
- * Design note on "IP-hash": the MJ resolver `AppContext` does NOT surface the raw
- * HTTP request (no `req`/`req.ip`), so we cannot read the client IP inside the
- * resolver. Instead we use the anonymous magic-link **session id** (`mj_sid`,
- * carried on `UserPayload.sessionId`) — the per-session correlator MJ designed for
- * exactly this — as the privacy-preserving identity for rate-limiting, dedupe, and
- * audit. It is salted+hashed before storage so the raw session id never lands in a
- * data row. UA + referrer come from the client-supplied `ClientMeta`.
+ * Design note on "IP-hash", CORRECTED. This file used to say the client IP was simply
+ * unavailable — `AppContext` surfaces no `req`, so the resolver cannot read it — and concluded
+ * that the session id was therefore the identity to rate-limit on. The premise is true and the
+ * conclusion did not follow: the session id is `UserPayload.sessionId`, which MJ populates from
+ * the `x-session-id` request HEADER, so keying an abuse control on it let any caller pick their
+ * own bucket by sending a new value. The IP is reachable without a core fork — MJ mounts
+ * `BaseServerMiddleware.GetPreAuthMiddleware()` ahead of both auth and Apollo, so
+ * `RequestIdentityMiddleware` resolves the peer there and carries it in a request-scoped store
+ * (`http/request-identity.ts`) the resolver reads.
+ *
+ * So the two identities now have separate jobs, and the distinction is the point:
+ *   - session id — correlation and dedupe/upsert. Caller-supplied, still useful for that.
+ *   - IP hash    — the abuse ceilings, and nothing else.
+ * Both are salted+hashed before they reach a bucket key or a data row. UA + referrer come from
+ * the client-supplied `ClientMeta`.
  */
 import { createHash } from 'node:crypto';
+import { LogStatus } from '@memberjunction/core';
 import type { ClientMeta, JSONObject } from '@mj-biz-apps/forms-entities';
 
 /** Salt for the one-way session hash; overridable via env, with a stable default. */
@@ -68,6 +77,67 @@ export interface SourceMetadataInputs {
  */
 export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'distributionId'>): string {
   return `${inputs.distributionId}:${hashSessionId(inputs.sessionId)}`;
+}
+
+/**
+ * The identity an abuse ceiling is keyed on: the one thing about a caller they did not choose.
+ *
+ * Prefers the resolved client IP hash. `sessionId` is the fallback and NOT an equivalent — it
+ * comes from the `x-session-id` header, so a caller who wants a fresh bucket simply asks for one.
+ * The fallback exists so this stays correct in unit tests and in any deployment that has not
+ * mounted `RequestIdentityMiddleware`; the pipeline says so out loud rather than degrading
+ * quietly (see `warnOnceIfAbuseKeyingDegraded`).
+ */
+export function abuseIdentity(inputs: { clientIpHash?: string; sessionId: string }): string {
+  const ipHash = inputs.clientIpHash?.trim();
+  return ipHash ? `ip:${ipHash}` : `sid:${hashSessionId(inputs.sessionId)}`;
+}
+
+let warnedAboutDegradedKeying = false;
+
+/**
+ * Say ONCE, loudly, when the abuse ceilings are running on the session fallback.
+ *
+ * Without this the degraded mode is invisible: the pipeline keeps working, the limits keep
+ * appearing to fire, and the only symptom is that they can be walked around — which is exactly
+ * the state this whole seam was built to end. Once per process, not per request, because a line
+ * on every submission is a line nobody reads.
+ */
+export function warnOnceIfAbuseKeyingDegraded(clientIpHash: string | undefined): void {
+  if (clientIpHash?.trim() || warnedAboutDegradedKeying) {
+    return;
+  }
+  warnedAboutDegradedKeying = true;
+  LogStatus(
+    '[Forms] WARNING: no resolved client IP for a public submission — abuse ceilings are falling ' +
+      'back to the client-supplied session id, which a caller can rotate. Confirm ' +
+      'RequestIdentityMiddleware is registered (it ships in @mj-biz-apps/forms-server).',
+  );
+}
+
+/** Test-only: forget that the warning has been emitted. */
+export function resetAbuseKeyingWarningForTests(): void {
+  warnedAboutDegradedKeying = false;
+}
+
+/**
+ * Ceiling on SAVES (partial autosaves included) for one caller on one distribution.
+ *
+ * Scoped to the distribution as well as the caller so that abusing one form cannot throttle the
+ * same person's submission to an unrelated one, and prefixed so it can never collide with the
+ * composite per-session key above (which is `<distId>:<hash>`).
+ */
+export function saveCeilingKey(distributionId: string, identity: string): string {
+  return `save:${distributionId}:${identity}`;
+}
+
+/**
+ * Ceiling on COMPLETIONS for one caller on one distribution — a distinct bucket from
+ * {@link saveCeilingKey}, charged only when a submission is final, so a respondent's autosaves
+ * can never consume the budget that bounds the expensive on-submit work.
+ */
+export function completionCeilingKey(distributionId: string, identity: string): string {
+  return `done:${distributionId}:${identity}`;
 }
 
 /**

@@ -12,6 +12,7 @@
  *                                   Default: common images + PDF + plain text + office docs.
  *  - `FORMS_UPLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID to force a specific
  *                                   account; when unset the engine uses the first active one.
+ *  - `FORMS_UPLOAD_IP_MAX`          Max uploads per rate-limit window per client IP. Default 30.
  *  - `FORMS_UPLOAD_PATH_PREFIX`     Optional storage path prefix. Default `forms-uploads/<date>`.
  *                                   REFUSED if it lands under the authoring-asset prefix — see
  *                                   {@link assertUploadPrefixIsPrivate}.
@@ -126,6 +127,18 @@ function privatePathPrefix(): string | undefined {
 /** Test-only: clear the memoized config so env changes take effect. */
 export function resetUploadConfigForTests(): void {
   cached = undefined;
+}
+
+/**
+ * Max uploads one caller may make per rate-limit window.
+ *
+ * Read per call rather than frozen into {@link getUploadConfig} so a test (and an operator
+ * restarting with a new value) sees it without a cache reset; the read is a single env parse.
+ * Generous by design — a respondent attaching several files to one form is ordinary — while
+ * still bounding a caller who wants to write to storage in a loop.
+ */
+export function uploadRateLimitMax(): number {
+  return numberFromEnv('FORMS_UPLOAD_IP_MAX', 30);
 }
 
 /**

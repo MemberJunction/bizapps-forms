@@ -42,6 +42,7 @@ function makeContext(
     formResponseCount?: number;
     fireHooks?: PipelineContext['fireHooks'];
     fetchImpl?: typeof fetch;
+    clientIpHash?: string;
   } = {},
 ): { ctx: PipelineContext; saved: () => ReturnType<typeof makeFakeProvider>['saved'] } {
   const definition = makeDefinition(
@@ -65,6 +66,7 @@ function makeContext(
     contextUser: makeContextUser(),
     elevatedUser: makeContextUser(),
     sessionId: 'sess-abc',
+    clientIpHash: options.clientIpHash,
     fetchImpl: options.fetchImpl,
     fireHooks: options.fireHooks,
   };
@@ -271,4 +273,88 @@ describe('runSubmitPipeline', () => {
     expect(third.errors?.[0].message).toMatch(/too many/i);
     delete process.env.FORMS_RATELIMIT_MAX;
   });
+
+  // SECURITY REGRESSION (the defect PR #48 diagnosed). `ctx.sessionId` is `UserPayload.sessionId`,
+  // which MJ populates from the client-settable `x-session-id` header — so a caller who rotates
+  // it lands in a fresh per-session bucket on every request and the per-session cap never trips.
+  // Each accepted completion fires on-submit automations (confirmation email to an address the
+  // caller chose, an LLM run, entity upserts), so the bypass amplifies. The ceiling therefore has
+  // to key on something the caller cannot pick: their resolved IP.
+  it('throttles a caller who rotates the session id, because the bucket follows their IP', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-attacker' });
+
+    ctx.sessionId = 'forged-1';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-2';
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-3';
+    const third = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    // The amplification is what the cap is really for: the rejected request fires nothing.
+    expect(fireHooks).toHaveBeenCalledTimes(2);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  // The other half of the fix, and the reason the ceiling is keyed per (caller, distribution)
+  // rather than per distribution: a cap every respondent of a form shares is not an abuse
+  // ceiling, it is a shared kill switch. One caller saturating it would take the form offline
+  // for everyone filling it in — trading a rate-limit bypass for a cheaper, louder outage.
+  it('does not let one saturated caller throttle a different caller on the same form', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-attacker' });
+
+    ctx.sessionId = 'forged-1';
+    await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-2';
+    await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-3';
+    const saturated = await runSubmitPipeline(ctx, validSubmission());
+
+    // A real respondent arrives mid-attack, on the same form, from their own address.
+    ctx.clientIpHash = 'ip-respondent';
+    ctx.sessionId = 'honest-session';
+    const bystander = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(saturated.success).toBe(false);
+    expect(bystander.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  // Saves and completions cost wildly different things — an autosave upserts one row, a
+  // completion fires the confirmation email, the LLM run and the entity upserts — so one
+  // counter covering both can only ever be wrong in one direction: tight enough to throttle a
+  // respondent who is still typing, or loose enough to be no limit at all on the expensive path.
+  it('caps completions on their own budget, without throttling autosaves', async () => {
+    process.env.FORMS_RATELIMIT_MAX = '50';
+    process.env.FORMS_RATELIMIT_IP_MAX = '50';
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-respondent' });
+
+    const autosaves = [];
+    for (let i = 0; i < 4; i++) {
+      autosaves.push(await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] })));
+    }
+    const completion = await runSubmitPipeline(ctx, validSubmission());
+    const secondCompletion = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(autosaves.every((r) => r.success)).toBe(true);
+    expect(completion.success).toBe(true);
+    expect(secondCompletion.success).toBe(false);
+    expect(secondCompletion.errors?.[0].message).toMatch(/too many/i);
+    delete process.env.FORMS_RATELIMIT_MAX;
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
 });
+

@@ -31,9 +31,11 @@ import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { currentRequestIdentity } from '../http/request-identity.js';
 import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
+import { checkUploadRateLimit } from './upload-rate-limit.js';
 
 /** The verified magic-link payload MJ's `createUnifiedAuthMiddleware` attaches to the request. */
 interface VerifiedUserPayload {
@@ -77,6 +79,21 @@ export class UploadMiddleware extends BaseServerMiddleware {
     if (!contextUser) {
       // Should not happen (unified auth would have 401'd) — defensive fail-closed.
       sendJsonError(res, 401, 'Authentication required to upload.');
+      return;
+    }
+
+    // Before a single byte is buffered: an accepted upload stores bytes and creates an
+    // `MJ: Files` row, so the cheapest place to refuse a caller hammering this route is the
+    // moment we know who they are — which is on arrival, since the key is their resolved peer
+    // IP rather than anything in the (as yet unread) body.
+    const limit = checkUploadRateLimit({
+      clientIpHash: currentRequestIdentity()?.ipHash,
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    });
+    if (!limit.allowed) {
+      const retryAfterSeconds = Math.ceil((limit.retryAfterMs ?? 0) / 1000);
+      res.set('Retry-After', String(Math.max(1, retryAfterSeconds)));
+      sendJsonError(res, 429, `Too many uploads. Please wait ${Math.max(1, retryAfterSeconds)}s and try again.`);
       return;
     }
 

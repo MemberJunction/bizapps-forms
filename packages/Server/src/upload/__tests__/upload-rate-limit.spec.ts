@@ -1,0 +1,30 @@
+/**
+ * The public upload route had no rate limit at all: every call stores bytes and creates an
+ * `MJ: Files` row, and the only gates were a byte cap, a content-type allowlist and the anonymous
+ * scope — none of which bound how OFTEN a caller may do it.
+ */
+import { beforeEach, describe, expect, it } from 'vitest';
+import { checkUploadRateLimit } from '../upload-rate-limit';
+import { FormsRateLimiter } from '../../public-submit/rate-limit.service';
+import { resetPublicSubmitConfigForTests } from '../../public-submit/config';
+
+beforeEach(() => {
+  FormsRateLimiter.Instance.resetForTests();
+  resetPublicSubmitConfigForTests();
+});
+
+describe('checkUploadRateLimit', () => {
+  it('caps a caller who rotates the session id, and leaves other callers alone', () => {
+    process.env.FORMS_UPLOAD_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+
+    const attacker = (session: string) => checkUploadRateLimit({ clientIpHash: 'ip-attacker', sessionId: session });
+    expect(attacker('forged-1').allowed).toBe(true);
+    expect(attacker('forged-2').allowed).toBe(true);
+    expect(attacker('forged-3').allowed).toBe(false);
+
+    // A respondent uploading from their own address during the same window is unaffected.
+    expect(checkUploadRateLimit({ clientIpHash: 'ip-respondent', sessionId: 'honest' }).allowed).toBe(true);
+    delete process.env.FORMS_UPLOAD_IP_MAX;
+  });
+});

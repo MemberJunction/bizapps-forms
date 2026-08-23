@@ -26,7 +26,7 @@ import { resolvePublishedDefinition, type ResolvedDefinition } from './definitio
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
 import { persistSubmission } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
-import { FormsRateLimiter, rateLimitedMessage } from './rate-limit.service';
+import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
   findAdoptableResponseById,
   findOwnedResponseById,
@@ -34,7 +34,14 @@ import {
   findSessionResponse,
 } from './response-lookup.service';
 import { checkRespondentScope } from './scope-check.service';
-import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
+import {
+  abuseIdentity,
+  buildSourceMetadata,
+  completionCeilingKey,
+  rateLimitKey,
+  saveCeilingKey,
+  warnOnceIfAbuseKeyingDegraded,
+} from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
 import { buildAnswerMap, validateSubmission } from './validation.service';
 import {
@@ -91,6 +98,13 @@ export interface PipelineContext {
   elevatedUser: UserInfo;
   /** Anonymous magic-link session id (mj_sid) from the UserPayload. */
   sessionId: string;
+  /**
+   * Salted hash of the caller's resolved IP, from `RequestIdentityMiddleware` via
+   * `currentRequestIdentity()`. This is the ONLY caller attribute here that the caller did not
+   * choose — `sessionId` above is an `x-session-id` header — so it is what the abuse ceilings
+   * key on. Absent in unit tests and in a deployment that has not mounted the middleware.
+   */
+  clientIpHash?: string;
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
@@ -254,13 +268,15 @@ export async function runSubmitPipeline(
 
   timer.mark('captcha');
 
-  // 4. Rate-limit (per session + distribution).
-  const limit = FormsRateLimiter.Instance.check(
-    rateLimitKey({ sessionId: ctx.sessionId, distributionId: resolved.distribution.ID }),
-  );
+  // 4. Rate-limit. Every bucket is consulted before ANY of them is charged, so a request that
+  //    one gate refuses does not silently spend the respondent's budget in another.
+  warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
+  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete);
+  const limit = FormsRateLimiter.Instance.wouldAllowAll(gates);
   if (!limit.allowed) {
     return report(fail(rateLimitedMessage(limit.retryAfterMs)));
   }
+  FormsRateLimiter.Instance.recordAll(gates);
 
   timer.mark('rate-limit');
 
@@ -382,6 +398,36 @@ export async function runSubmitPipeline(
     status: persisted.status,
     ...confirmationFields(resolved, validation.answerMap),
   });
+}
+
+/**
+ * Which buckets this submission has to satisfy.
+ *
+ * Three, answering different questions, and only two of them are abuse controls:
+ *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
+ *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
+ *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
+ *       behaviour, worthless as a ceiling — and treating it as one was the defect.
+ *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
+ *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
+ *       ADDRESSES, which is the only currency a public endpoint can charge.
+ *   (c) per (caller, distribution), completions only — the same identity against a much tighter
+ *       cap, because a completion fires the on-submit automations (a confirmation email to an
+ *       address the submission chose, an LLM run, entity upserts) and an autosave does not. One
+ *       counter over both could only be tight enough to interrupt someone still typing, or loose
+ *       enough to leave the expensive path effectively unlimited.
+ */
+function rateLimitGatesFor(ctx: PipelineContext, distributionId: string, complete: boolean): RateLimitGate[] {
+  const config = getPublicSubmitConfig();
+  const identity = abuseIdentity({ clientIpHash: ctx.clientIpHash, sessionId: ctx.sessionId });
+  const gates: RateLimitGate[] = [
+    { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
+    { key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax },
+  ];
+  if (complete) {
+    gates.push({ key: completionCeilingKey(distributionId, identity), max: config.completionMax });
+  }
+  return gates;
 }
 
 /**
