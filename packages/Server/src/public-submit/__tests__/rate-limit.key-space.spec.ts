@@ -11,7 +11,11 @@ import { FormsRateLimiter } from '../rate-limit.service';
 import { resetPublicSubmitConfigForTests } from '../config';
 
 beforeEach(() => {
+  // Cleared up front, not on each test's last line: a test that throws mid-body never reaches
+  // its own cleanup, and the next test then runs under someone else's configuration.
   FormsRateLimiter.Instance.resetForTests();
+  delete process.env.FORMS_RATELIMIT_MAX_KEYS;
+  delete process.env.FORMS_RATELIMIT_WINDOW_MS;
   resetPublicSubmitConfigForTests();
 });
 

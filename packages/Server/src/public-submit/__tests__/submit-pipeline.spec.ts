@@ -73,10 +73,30 @@ function makeContext(
   return { ctx, saved: () => fake.saved };
 }
 
+/**
+ * Every knob these tests touch, cleared before each one.
+ *
+ * A test that sets an env var and unsets it on its LAST line unsets nothing when an assertion
+ * above that line throws — so one genuine failure silently reconfigures every test after it and
+ * reports as a cascade. Clearing up front makes each test independent of whatever its
+ * predecessor did or failed to undo, which is the difference between reading a failure and
+ * chasing one.
+ */
+const TUNABLES = [
+  'FORMS_TURNSTILE_SECRET',
+  'FORMS_RATELIMIT_MAX',
+  'FORMS_RATELIMIT_IP_MAX',
+  'FORMS_COMPLETION_MAX',
+  'FORMS_RATELIMIT_MAX_KEYS',
+  'FORMS_RATELIMIT_WINDOW_MS',
+] as const;
+
 beforeEach(() => {
   FormsRateLimiter.Instance.resetForTests();
+  for (const knob of TUNABLES) {
+    delete process.env[knob];
+  }
   resetPublicSubmitConfigForTests();
-  delete process.env.FORMS_TURNSTILE_SECRET;
 });
 
 describe('runSubmitPipeline', () => {
