@@ -251,5 +251,34 @@
     "primaryKey": {
       "ID": "7A49C1D4-8E02-4F5B-9C63-D18B52E7A930"
     }
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ: AI Prompt Runs",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "4B1E7C93-2A85-4D67-B0F4-9E3C5A2D8176"
+    },
+    "_comments": [
+      "Shipped by V202608241700__v0.11.x__Automation_Runner_AI_Prompt_Run_Write.sql under this",
+      "SAME id, so a regenerated seed reproduces this row rather than minting a duplicate under a",
+      "fresh GUID -- __mj.EntityPermission has no unique constraint on (EntityID, RoleID), so a",
+      "duplicate is silently additive and unions into the effective permission.",
+      "",
+      "Read + Create + Update, NO Delete. MJ's prompt engine inserts an AI Prompt Run when a run",
+      "starts and updates it on completion; it never deletes one. Delete is withheld because a",
+      "runner that can remove prompt-run rows can erase the record of its own executions -- the",
+      "same reasoning that keeps CanCreate off the Form Uploads ledger grant above.",
+      "",
+      "This is the only grant here on a CORE __mj entity. The prompt-run ledger is where MJ",
+      "records that an AI call happened at all, so any principal permitted to run a prompt must be",
+      "able to write it; 'Integration' and 'Widget Guest', the other non-interactive roles, hold",
+      "the same grant on this entity already."
+    ]
   }
 ]
