@@ -7,9 +7,11 @@ import {
   type mjBizAppsFormsFormEntity,
   type mjBizAppsFormsFormStyleEntity,
   type mjBizAppsFormsFormVersionEntity,
+  type FormSettings,
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_ENTITY } from '../shared/entity-names';
+import { parseFormSettings } from './json-fields';
 import type { FormTree } from './builder-models';
 import { buildPublishedDefinition } from './snapshot-builder';
 
@@ -45,6 +47,12 @@ export class PublishService {
   public async publish(tree: FormTree): Promise<PublishResult> {
     const style = await this.loadStyle(tree.form.StyleID);
     const automations = await this.loadAutomations(tree.form.ID);
+    const settings = await this.loadStoredSettings(tree.form.ID);
+    if (settings === null) {
+      const error = 'Could not read the form\'s settings; nothing was published.';
+      LogError(`Forms publish: ${error}`);
+      return { success: false, error };
+    }
     if (!automations) {
       // Publishing a snapshot with no automations when the form HAS automations would disable
       // every one of them silently, and the author's only signal would be side effects that stop
@@ -70,7 +78,7 @@ export class PublishService {
     // half-published row if a second save were to fail). If the PK is not yet
     // populated, fall back to the form id reference so formVersionId is never blank.
     const versionId = version.ID && version.ID.length > 0 ? version.ID : '';
-    const definition = buildPublishedDefinition(tree, style, versionId, automations);
+    const definition = buildPublishedDefinition(tree, style, versionId, automations, undefined, settings);
     version.DefinitionSnapshot = JSON.stringify(definition);
     if (!(await version.Save())) {
       const error = version.LatestResult?.CompleteMessage ?? 'unknown error';
@@ -133,6 +141,38 @@ export class PublishService {
    * we do not know — and publishing an empty array on a failed read would silently disable
    * automations the form actually has, for every response until someone republished.
    */
+  /**
+   * Read `Form.Settings` from the database, or null when the read itself failed.
+   *
+   * NOT from `tree.form`. The builder loads its tree once and never refreshes it, while the
+   * Automate tab writes settings through its own Form entity and has no output to announce it —
+   * so an author who removed every automation and published without leaving the builder
+   * snapshotted the settings as they were when the builder OPENED. The mode that removal had just
+   * written was absent, the snapshot inferred `legacy`, and all four built-in hooks came back.
+   *
+   * Null means "we do not know" and refuses the publish, exactly as {@link loadAutomations} does.
+   * Publishing settings we could not confirm is how a form silently loses its declared mode.
+   */
+  private async loadStoredSettings(formId: string): Promise<FormSettings | null> {
+    const rv = new RunView();
+    const result = await rv.RunView<{ Settings: string | null }>(
+      {
+        EntityName: FORMS_ENTITY.Form,
+        ExtraFilter: `ID='${formId}'`,
+        Fields: ['Settings'],
+        ResultType: 'simple',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(`Forms publish: could not load settings for form ${formId}: ${result.ErrorMessage}`);
+      return null;
+    }
+    // A form with no row here is not a read failure — `parseFormSettings` supplies the documented
+    // defaults for an absent blob, which is what a form that has never had settings written means.
+    return parseFormSettings(result.Results?.[0]?.Settings ?? null);
+  }
+
   public async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
     const rv = new RunView();
     const result = await rv.RunView<AuthoredAutomationRow>(

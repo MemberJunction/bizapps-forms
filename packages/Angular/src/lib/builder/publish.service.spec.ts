@@ -29,6 +29,9 @@ interface AutomationRow {
 }
 
 const automationRows: AutomationRow[] = [];
+/** What `Form.Settings` holds IN THE DATABASE — deliberately not what the in-memory tree carries. */
+let storedSettings: string | null = null;
+let formsReadSucceeds = true;
 /** Every EntityName the service asked RunView for, so we can assert it queried at all. */
 const queriedEntities: string[] = [];
 
@@ -61,6 +64,11 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       queriedEntities.push(params.EntityName);
       if (params.EntityName === 'MJ_BizApps_Forms: Form Automations') {
         return { Success: true, Results: automationRows };
+      }
+      if (params.EntityName === 'MJ_BizApps_Forms: Forms') {
+        return formsReadSucceeds
+          ? { Success: true, Results: [{ Settings: storedSettings }] }
+          : { Success: false, Results: [] };
       }
       // The version-number probe: no prior versions.
       return { Success: true, Results: [] };
@@ -157,5 +165,63 @@ describe('PublishService — automations in the snapshot', () => {
     // the builder would then require a republish to take effect in a way the author cannot see.
     // The runner is what honours `isActive`.
     expect(publishedSnapshot().automations[0].isActive).toBe(false);
+  });
+});
+
+/**
+ * The snapshot's settings must come from the DATABASE, not from the tree the builder loaded.
+ *
+ * Found by adversarial review of PR #59. `markAutomationsAuthoritative()` writes
+ * `onSubmitMode: 'Configured'` through its own Form entity, and the tab has no `@Output`, so the
+ * builder's `tree.form` — loaded once when the builder opened — never learns about it. Publishing
+ * without leaving the builder therefore snapshotted the STALE settings: an author who removed
+ * every automation got `automations: []` with no mode, which infers `legacy` and fires all four
+ * built-in hooks. The database was right and the snapshot, the only thing the server reads, was
+ * wrong.
+ *
+ * `loadAutomations` already re-reads for exactly this reason; settings simply had not been given
+ * the same treatment.
+ */
+describe('PublishService — settings in the snapshot', () => {
+  function reset(stored: string | null): void {
+    automationRows.length = 0;
+    queriedEntities.length = 0;
+    savedVersion.DefinitionSnapshot = '';
+    storedSettings = stored;
+    formsReadSucceeds = true;
+  }
+
+  it('publishes the stored on-submit mode, not the stale one the builder holds', async () => {
+    reset(JSON.stringify({ anonymousAllowed: true, captchaRequired: false, onSubmitMode: 'Configured' }));
+
+    // `tree()` carries `Settings: null` — the builder's copy, from before the Automate tab wrote.
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(true);
+    expect(publishedSnapshot().settings.onSubmitMode).toBe('Configured');
+  });
+
+  it('carries the rest of the stored settings too', async () => {
+    reset(JSON.stringify({ anonymousAllowed: false, captchaRequired: true, quota: 25, confirmationMessage: 'Thanks!' }));
+
+    await new PublishService().publish(tree());
+
+    const settings = publishedSnapshot().settings;
+    expect(settings.anonymousAllowed).toBe(false);
+    expect(settings.captchaRequired).toBe(true);
+    expect(settings.quota).toBe(25);
+    expect(settings.confirmationMessage).toBe('Thanks!');
+  });
+
+  it('refuses to publish when the form\'s settings cannot be read', async () => {
+    // Same reasoning as the automations read: publishing settings we could not confirm is how a
+    // form silently loses its declared mode and reverts to firing the built-ins.
+    reset(null);
+    formsReadSucceeds = false;
+
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(false);
+    expect(savedVersion.DefinitionSnapshot).toBe('');
   });
 });

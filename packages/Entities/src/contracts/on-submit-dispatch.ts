@@ -38,9 +38,12 @@ export interface OnSubmitDispatchInput {
  * snapshot published before this field exists carries no mode and must keep behaving identically.
  *
  * `Legacy` is honoured even when automations are present. That combination is mis-authored rather
- * than meaningful (the builder never produces it: it marks a form `Configured` the moment it
- * writes a row), and honouring the explicit declaration is the predictable reading. The submit
+ * than meaningful, and honouring the explicit declaration is the predictable reading. The submit
  * pipeline logs it, because automations that exist and never run is worth seeing in production.
+ *
+ * Neither supported authoring path produces it: the builder marks a form `Configured` whenever it
+ * adds or removes a step, and the Actions layer rejects the pair outright. It remains reachable by
+ * a hand-written snapshot, or by a caller going directly to `buildFormFromBlueprint`.
  */
 export function resolveOnSubmitDispatch(definition: OnSubmitDispatchInput): OnSubmitDispatch {
   switch (definition.settings.onSubmitMode) {

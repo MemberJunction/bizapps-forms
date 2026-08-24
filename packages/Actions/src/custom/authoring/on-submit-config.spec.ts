@@ -89,6 +89,13 @@ describe('applyOnSubmitConfig', () => {
     expect(result.onSubmitMode).toBeUndefined();
   });
 
+  it('treats a blank Automations value as "not supplied"', () => {
+    // The same class as the null case, one value over: `mode` collapses blank to absent and
+    // `automations` did not, so an empty-string param threw `Automations is not valid JSON`.
+    expect(applyOnSubmitConfig(base, undefined, '').automations).toBeUndefined();
+    expect(applyOnSubmitConfig(base, undefined, '   ').automations).toBeUndefined();
+  });
+
   it('treats a null OnSubmitMode as "not supplied"', () => {
     expect(applyOnSubmitConfig(base, null, undefined).onSubmitMode).toBeUndefined();
   });

@@ -989,14 +989,16 @@ export class AutomationTabComponent implements OnInit {
    * already says so, which is every call after the first.
    *
    * Failing here THROWS rather than warning, and that is deliberate. The caller wraps this in
-   * `run()`, which surfaces the message and abandons the add. The alternative — write the step
-   * anyway — produces exactly the state this whole change exists to remove: a form carrying
-   * authored automations that the server cannot tell apart from a form that configured nothing.
+   * `run()`, which surfaces the message and abandons the operation. The alternative — carry on
+   * anyway — produces exactly the state this whole change exists to remove: a form whose
+   * automation list the server cannot tell apart from a form that configured nothing.
+   *
+   * Called from BOTH the add and the remove paths, so its messages must not name either one.
    */
   private async markAutomationsAuthoritative(): Promise<void> {
     const form = await this.md.GetEntityObject<mjBizAppsFormsFormEntity>(FORMS_ENTITY.Form);
     if (!form || !(await form.Load(this.FormID))) {
-      throw new Error('This form could not be read, so the step was not added.');
+      throw new Error('This form could not be read, so nothing was changed.');
     }
     const updated = settingsUpdateToMarkAuthoritative(form.Settings);
     if (updated === null) {
@@ -1006,7 +1008,7 @@ export class AutomationTabComponent implements OnInit {
     if (!(await form.Save())) {
       throw new Error(
         form.LatestResult?.CompleteMessage ??
-          'This form could not be updated to run its own steps, so the step was not added.',
+          'This form could not be updated to run its own steps, so nothing was changed.',
       );
     }
   }

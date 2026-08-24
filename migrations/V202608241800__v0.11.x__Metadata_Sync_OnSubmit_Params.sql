@@ -73,7 +73,7 @@ BEGIN
         @Type = N'Input',
         @ValueType = N'Simple Object',
         @IsArray = 1,
-        @Description = N'The on-submit steps this form runs, in order, each naming an MJ Action (for example [{"actionName":"Forms: Send Confirmation Email"}]). Supplying this implies OnSubmitMode=''Configured''. An Action name this deployment does not have is an error, not a skipped step.',
+        @Description = N'The on-submit steps this form runs, in order, each naming an MJ Action (for example [{"actionName":"Forms: Send Confirmation Email"}]). Supplying this implies OnSubmitMode=''Configured'', and supplying it alongside ''Legacy'' is an error rather than a silently ignored list. An Action name this deployment does not have is an error, not a skipped step.',
         @IsRequired = 0,
         @MediaModality = NULL,
         @MediaModality_Clear = 1;
@@ -123,7 +123,7 @@ BEGIN
         @Type = N'Input',
         @ValueType = N'Simple Object',
         @IsArray = 1,
-        @Description = N'The on-submit steps this form runs, in order, each naming an MJ Action (for example [{"actionName":"Forms: Send Confirmation Email"}]). Supplying this implies OnSubmitMode=''Configured''. An Action name this deployment does not have is an error, not a skipped step.',
+        @Description = N'The on-submit steps this form runs, in order, each naming an MJ Action (for example [{"actionName":"Forms: Send Confirmation Email"}]). Supplying this implies OnSubmitMode=''Configured'', and supplying it alongside ''Legacy'' is an error rather than a silently ignored list. An Action name this deployment does not have is an error, not a skipped step.',
         @IsRequired = 0,
         @MediaModality = NULL,
         @MediaModality_Clear = 1;

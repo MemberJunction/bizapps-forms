@@ -1,5 +1,6 @@
 import type {
   mjBizAppsFormsFormStyleEntity,
+  FormSettings,
   FormStyleTokens,
   PublishedFormAutomation,
   PublishedFormDefinition,
@@ -34,6 +35,10 @@ import { parseSocialLinks } from '@mj-biz-apps/forms-entities';
  * `styleTokensOverride` lets the builder's live Preview reflect UNSAVED theme edits: when
  * supplied it is used verbatim instead of deriving tokens from `style`.
  *
+ * `settingsOverride` is the mirror image and exists for the opposite reason: publish must NOT
+ * trust the tree, because the Automate tab writes `Form.Settings` through its own entity and the
+ * builder's copy never learns about it.
+ *
  * `automations` is REQUIRED rather than defaulted, because defaulting it is exactly how this
  * silently broke once: publish emitted a hardcoded empty array, every configured binding
  * therefore never fired, and nothing failed — the submit path simply fell back to the legacy
@@ -46,6 +51,7 @@ export function buildPublishedDefinition(
   formVersionId: string,
   automations: readonly PublishedFormAutomation[],
   styleTokensOverride?: FormStyleTokens,
+  settingsOverride?: FormSettings,
 ): PublishedFormDefinition {
   const form = tree.form;
   return {
@@ -54,7 +60,11 @@ export function buildPublishedDefinition(
     name: form.Name,
     description: form.Description ?? undefined,
     renderMode: form.RenderMode as FormRenderMode,
-    settings: parseFormSettings(form.Settings),
+    // The override is what publish supplies, and it is authoritative: the builder's tree is loaded
+    // once and never refreshed, so `form.Settings` here can be older than what the database holds
+    // — see `PublishService.loadStoredSettings`. Deriving from the tree remains right for the live
+    // Preview, which renders unsaved edits.
+    settings: settingsOverride ?? parseFormSettings(form.Settings),
     styleTokens:
       styleTokensOverride ??
       buildStyleTokens(

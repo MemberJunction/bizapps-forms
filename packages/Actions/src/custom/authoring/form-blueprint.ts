@@ -145,6 +145,24 @@ export const formBlueprintSchema = z.object({
    */
   automations: z.array(blueprintAutomationSchema).optional(),
   pages: z.array(blueprintPageSchema).min(1),
+}).superRefine((blueprint, ctx) => {
+  // The invariant lives HERE rather than only in `applyOnSubmitConfig`, because this schema is the
+  // boundary every blueprint crosses — LLM output through `parseFormBlueprint`, and any direct
+  // caller of the exported `buildFormFromBlueprint`. Guarding one layer above left the state
+  // reachable by anything that did not route through the two shipping actions.
+  //
+  // `Legacy` runs the built-in steps; `automations` names steps that then never run. A caller
+  // asking for both is asking for something that cannot happen, and the failure is silent: rows
+  // are written, the caller sees success, and at runtime the built-ins fire instead.
+  if (blueprint.onSubmitMode === 'Legacy' && (blueprint.automations?.length ?? 0) > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['automations'],
+      message:
+        "onSubmitMode 'Legacy' runs the built-in on-submit steps, so these automations would be " +
+        "written and never run. Use 'Configured' to run them, or omit them to keep the built-ins.",
+    });
+  }
 });
 
 /**

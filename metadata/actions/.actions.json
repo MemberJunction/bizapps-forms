@@ -69,7 +69,7 @@
             "ValueType": "Simple Object",
             "IsArray": true,
             "IsRequired": false,
-            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured'. An Action name this deployment does not have is an error, not a skipped step."
+            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured', and supplying it alongside 'Legacy' is an error rather than a silently ignored list. An Action name this deployment does not have is an error, not a skipped step."
           },
           "primaryKey": {
             "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000006"
@@ -155,7 +155,7 @@
             "ValueType": "Simple Object",
             "IsArray": true,
             "IsRequired": false,
-            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured'. An Action name this deployment does not have is an error, not a skipped step."
+            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured', and supplying it alongside 'Legacy' is an error rather than a silently ignored list. An Action name this deployment does not have is an error, not a skipped step."
           },
           "primaryKey": {
             "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000006"

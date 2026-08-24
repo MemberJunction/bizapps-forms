@@ -45,10 +45,11 @@ export function applyOnSubmitConfig(
   // supplied would make every caller that simply omits `Automations` fail with
   // INVALID_ON_SUBMIT_CONFIG. Blank is absent for the same reason: `getStringParam`, which every
   // other param in this package goes through, already collapses blank to undefined.
-  if (mode !== undefined && mode !== null && mode.trim() !== '') {
-    configured.onSubmitMode = parseMode(mode);
+  const suppliedMode = textOrAbsent(mode);
+  if (suppliedMode !== undefined) {
+    configured.onSubmitMode = parseMode(suppliedMode);
   }
-  if (automations !== undefined && automations !== null) {
+  if (!isAbsent(automations)) {
     configured.automations = parseAutomations(automations);
   }
   // The PAIR, not either half. Each is individually valid, and the combination is the one shape
@@ -62,6 +63,32 @@ export function applyOnSubmitConfig(
     );
   }
   return configured;
+}
+
+/**
+ * Whether a caller supplied this parameter at all.
+ *
+ * `null` because MJ materialises a declared-but-unsupplied Action param as null — the migration
+ * declares both of these with `@DefaultValue = NULL` — and blank because `getStringParam`, which
+ * every other param in this package goes through, already collapses blank to undefined. Treating
+ * either as supplied makes a caller that simply omitted the parameter fail.
+ *
+ * One predicate for both parameters, because they diverged once: `mode` collapsed blank and
+ * `automations` did not, so an empty string threw `Automations is not valid JSON`.
+ */
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null || (typeof value === 'string' && value.trim() === '');
+}
+
+/**
+ * The same rule as {@link isAbsent}, in the form that narrows.
+ *
+ * A boolean predicate cannot tell the compiler that `mode` is a string afterwards, and the honest
+ * way to get that is to return the value rather than assert it — the alternative is a cast, which
+ * this repo's typing rules rule out and which would silently survive the parameter type widening.
+ */
+function textOrAbsent(value: string | null | undefined): string | undefined {
+  return isAbsent(value) || value === null || value === undefined ? undefined : value;
 }
 
 function parseMode(mode: string): (typeof ON_SUBMIT_MODES)[number] {

@@ -73,3 +73,38 @@ describe('taxonomy', () => {
     }
   });
 });
+
+/**
+ * The one combination that cannot mean anything: `Legacy` says the built-in steps run, and
+ * `automations` names steps that then never would. Rejecting it in `applyOnSubmitConfig` covers
+ * both shipping actions, but `buildFormFromBlueprint` is exported and `parseFormBlueprint` is the
+ * boundary LLM output crosses — so the invariant belongs on the schema, where nothing can route
+ * around it.
+ */
+describe('formBlueprintSchema — Legacy with authored steps', () => {
+  const base = {
+    name: 'Intake',
+    pages: [{ title: 'p', questions: [{ type: 'Email', prompt: 'Email' }] }],
+  };
+
+  it('rejects an explicit Legacy mode alongside authored steps', () => {
+    expect(() =>
+      parseFormBlueprint({
+        ...base,
+        onSubmitMode: 'Legacy',
+        automations: [{ actionName: 'Forms: Send Confirmation Email' }],
+      }),
+    ).toThrow();
+  });
+
+  it('accepts Legacy when no steps are authored', () => {
+    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Legacy' }).onSubmitMode).toBe('Legacy');
+    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Legacy', automations: [] }).automations).toEqual([]);
+  });
+
+  it('accepts steps with Configured, and with no mode at all', () => {
+    const steps = [{ actionName: 'Forms: Send Confirmation Email' }];
+    expect(parseFormBlueprint({ ...base, onSubmitMode: 'Configured', automations: steps }).automations).toHaveLength(1);
+    expect(parseFormBlueprint({ ...base, automations: steps }).automations).toHaveLength(1);
+  });
+});

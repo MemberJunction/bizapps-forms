@@ -58,8 +58,9 @@ describe('resolveOnSubmitDispatch', () => {
 
   it('reports automations that a Legacy declaration makes unreachable', () => {
     // Mis-authored rather than meaningful, and invisible without this: the rows exist, the author
-    // believes they run, and nothing errors. The builder cannot produce it; a hand-written
-    // snapshot can.
+    // believes they run, and nothing errors. Neither supported authoring path produces it — the
+    // builder marks a form `Configured` on add and on remove, and the Actions layer rejects the
+    // pair — but a hand-written snapshot or a direct `buildFormFromBlueprint` caller can.
     expect(hasUnreachableAutomations(input('Legacy', [automation()]))).toBe(true);
     expect(resolveOnSubmitDispatch(input('Legacy', [automation()])).kind).toBe('legacy');
   });
