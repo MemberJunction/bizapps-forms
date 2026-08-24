@@ -32,6 +32,8 @@ const automationRows: AutomationRow[] = [];
 /** What `Form.Settings` holds IN THE DATABASE — deliberately not what the in-memory tree carries. */
 let storedSettings: string | null = null;
 let formsReadSucceeds = true;
+/** A read that succeeds and returns nothing — a different thing from a read that failed. */
+let formsRowMissing = false;
 /** Every EntityName the service asked RunView for, so we can assert it queried at all. */
 const queriedEntities: string[] = [];
 
@@ -66,9 +68,10 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
         return { Success: true, Results: automationRows };
       }
       if (params.EntityName === 'MJ_BizApps_Forms: Forms') {
-        return formsReadSucceeds
-          ? { Success: true, Results: [{ Settings: storedSettings }] }
-          : { Success: false, Results: [] };
+        if (!formsReadSucceeds) {
+          return { Success: false, Results: [] };
+        }
+        return { Success: true, Results: formsRowMissing ? [] : [{ Settings: storedSettings }] };
       }
       // The version-number probe: no prior versions.
       return { Success: true, Results: [] };
@@ -189,6 +192,7 @@ describe('PublishService — settings in the snapshot', () => {
     savedVersion.DefinitionSnapshot = '';
     storedSettings = stored;
     formsReadSucceeds = true;
+    formsRowMissing = false;
   }
 
   it('publishes the stored on-submit mode, not the stale one the builder holds', async () => {
@@ -213,6 +217,36 @@ describe('PublishService — settings in the snapshot', () => {
     expect(settings.confirmationMessage).toBe('Thanks!');
   });
 
+  it('publishes the documented defaults for a row whose Settings was never written', async () => {
+    // The distinction the guard above rests on: a NULL column on a row that IS returned genuinely
+    // means "never written", and must keep publishing rather than refuse.
+    reset(null);
+
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(true);
+    expect(publishedSnapshot().settings.anonymousAllowed).toBe(true);
+    expect(publishedSnapshot().settings.onSubmitMode).toBeUndefined();
+  });
+
+  it('refuses to publish when the form row comes back missing', async () => {
+    // A successful read returning zero rows is NOT "this form has no settings". The form
+    // demonstrably exists — its automations were just read and a version row is about to be
+    // written for it — so an empty result means we do not know what its settings are.
+    //
+    // Publishing the defaults instead is a silent downgrade, and not only of the on-submit mode:
+    // `parseFormSettings(null)` yields anonymousAllowed=true and captchaRequired=false and drops
+    // quota, opensAt, closesAt, confirmationMessage and redirectUrl. A private, captcha-gated,
+    // capped form would publish as open, ungated and uncapped.
+    reset(JSON.stringify({ anonymousAllowed: false, captchaRequired: true, quota: 10 }));
+    formsRowMissing = true;
+
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(false);
+    expect(savedVersion.DefinitionSnapshot).toBe('');
+  });
+
   it('refuses to publish when the form\'s settings cannot be read', async () => {
     // Same reasoning as the automations read: publishing settings we could not confirm is how a
     // form silently loses its declared mode and reverts to firing the built-ins.
@@ -224,4 +258,4 @@ describe('PublishService — settings in the snapshot', () => {
     expect(result.success).toBe(false);
     expect(savedVersion.DefinitionSnapshot).toBe('');
   });
-});
+})

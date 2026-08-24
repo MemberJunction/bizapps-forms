@@ -168,9 +168,22 @@ export class PublishService {
       LogError(`Forms publish: could not load settings for form ${formId}: ${result.ErrorMessage}`);
       return null;
     }
-    // A form with no row here is not a read failure — `parseFormSettings` supplies the documented
-    // defaults for an absent blob, which is what a form that has never had settings written means.
-    return parseFormSettings(result.Results?.[0]?.Settings ?? null);
+    // A read that SUCCEEDS and returns nothing is still "we do not know", not "this form has no
+    // settings". The form demonstrably exists — its automations were read a moment ago and a
+    // version row is about to be written against it — so an empty result is an anomaly, and
+    // publishing the defaults in its place is a silent downgrade well beyond the on-submit mode:
+    // `parseFormSettings(null)` yields anonymousAllowed=true and captchaRequired=false and drops
+    // quota, opensAt, closesAt, confirmationMessage and redirectUrl. A private, captcha-gated,
+    // capped form would publish as open, ungated and uncapped.
+    //
+    // A NULL `Settings` column on a row that IS returned is different, and genuinely means "never
+    // written": that keeps the documented defaults.
+    const row = result.Results?.[0];
+    if (!row) {
+      LogError(`Forms publish: form ${formId} returned no row when reading its settings; nothing was published.`);
+      return null;
+    }
+    return parseFormSettings(row.Settings);
   }
 
   public async loadAutomations(formId: string): Promise<PublishedFormAutomation[] | null> {
