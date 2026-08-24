@@ -28,6 +28,12 @@ import './generated/generated.js';
 import { installConfirmationEmailSender } from './confirmation-email/install-sender.js';
 installConfirmationEmailSender();
 
+// Import the request-identity middleware so its @RegisterClass fires and MJ server bootstrap
+// mounts it PRE-AUTH. It establishes the server-derived caller identity (resolved peer IP, salted
+// and hashed) that the public routes key their abuse ceilings on — without it those ceilings fall
+// back to the client-settable `x-session-id`, which a caller can rotate to escape them.
+import './http/RequestIdentityMiddleware.js';
+
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
 

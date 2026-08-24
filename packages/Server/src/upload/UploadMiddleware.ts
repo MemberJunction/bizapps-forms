@@ -10,7 +10,8 @@
  * the VERIFIED anonymous magic-link session. MJ's `createUnifiedAuthMiddleware` runs before
  * post-auth middleware, verifies the `Authorization: Bearer` JWT, and attaches the
  * synthesized anonymous `UserInfo` at `req.userPayload.userRecord` + `req.userPayload.sessionId`
- * (`mj_sid`). We therefore contribute this route through {@link GetPostAuthMiddleware} and
+ * (which is the caller's `x-session-id` header, NOT an `mj_sid` claim — MJ reads it straight off
+ * the request, so it identifies nobody). We contribute this route through {@link GetPostAuthMiddleware} and
  * simply READ that verified payload — the exact same identity the `SubmitFormResponse`
  * GraphQL mutation runs under — instead of re-verifying the token or reinventing JWKS/JWT
  * handling. A missing/invalid token is already rejected upstream (401) and never reaches us
@@ -31,9 +32,11 @@ import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { currentRequestIdentity } from '../http/request-identity.js';
 import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
+import { checkUploadRateLimit } from './upload-rate-limit.js';
 
 /** The verified magic-link payload MJ's `createUnifiedAuthMiddleware` attaches to the request. */
 interface VerifiedUserPayload {
@@ -80,6 +83,14 @@ export class UploadMiddleware extends BaseServerMiddleware {
       return;
     }
 
+    // Before a single byte is buffered: an accepted upload stores bytes and creates an
+    // `MJ: Files` row, so the cheapest place to refuse a caller hammering this route is the
+    // moment we know who they are — which is on arrival, since the key is their resolved peer
+    // IP rather than anything in the (as yet unread) body.
+    if (this.refuseIfRateLimited(req, res)) {
+      return;
+    }
+
     const bodyResult = await readCappedBody(req, uploadBodyCap(), uploadTooLargeMessage());
     if (!bodyResult.ok || !bodyResult.body) {
       sendJsonError(res, bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
@@ -92,32 +103,58 @@ export class UploadMiddleware extends BaseServerMiddleware {
       return;
     }
 
-    const uploadReq: UploadRequest = {
+    const result = await runUpload(this.uploadContextFor(req, contextUser), {
       file: parsed.file,
       distributionSlug: parsed.fields.distributionSlug,
       distributionId: parsed.fields.distributionId,
       questionId: parsed.fields.questionId,
       responseId: parsed.fields.responseId,
-    };
-    const ctx: UploadContext = {
-      contextUser,
-      metadataProvider: new Metadata(),
-      runViewProvider: new RunView(),
-      storage: this.storageEngine(),
-      // The File row and its provenance row are written as the system user, never as the
-      // anonymous caller: the anonymous role holds no `MJ: Files` grant, and a provenance row the
-      // caller could write would prove nothing about who uploaded the file.
-      elevatedUser: UserCache.Instance.GetSystemUser(),
-      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
-    };
-
-    const result = await runUpload(ctx, uploadReq);
+    });
     if (!result.ok || !result.success) {
       const failure = result.failure ?? { status: 500, error: 'Upload failed.' };
       sendJsonError(res, failure.status, failure.error);
       return;
     }
     res.status(200).set('Cache-Control', 'no-store').json(result.success);
+  }
+
+  /**
+   * The identities and providers the upload service runs under.
+   *
+   * Two principals, deliberately. `contextUser` is the verified anonymous caller and is what
+   * authorizes the request; the File row and its provenance row are written as the SYSTEM user,
+   * because the anonymous role holds no `MJ: Files` grant and a provenance row the caller could
+   * write would prove nothing about who uploaded the file.
+   */
+  private uploadContextFor(req: Request, contextUser: UserInfo): UploadContext {
+    return {
+      contextUser,
+      metadataProvider: new Metadata(),
+      runViewProvider: new RunView(),
+      storage: this.storageEngine(),
+      elevatedUser: UserCache.Instance.GetSystemUser(),
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    };
+  }
+
+  /**
+   * Refuse an over-budget caller with 429 + `Retry-After`, and report whether it did.
+   *
+   * Returns a boolean rather than throwing because the caller is a route handler that has already
+   * written a response by this point; a thrown error there would produce a second one.
+   */
+  private refuseIfRateLimited(req: Request, res: Response): boolean {
+    const limit = checkUploadRateLimit({
+      clientIpHash: currentRequestIdentity()?.ipHash,
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    });
+    if (limit.allowed) {
+      return false;
+    }
+    const retryAfterSeconds = Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000));
+    res.set('Retry-After', String(retryAfterSeconds));
+    sendJsonError(res, 429, `Too many uploads. Please wait ${retryAfterSeconds}s and try again.`);
+    return true;
   }
 
   /** The configured MJ file-storage engine (canonical "store bytes + create File row"). */

@@ -174,6 +174,9 @@ republished so the snapshot carries it.
 | `FORMS_AUTOMATION_USER` | Name of the user automations run as. Default `Forms Automation Service`. |
 | `FORMS_BINDING_ALLOWED_ENTITIES` | Comma-separated entities bindings may write. Unset = unrestricted; **set-but-empty = permit nothing.** |
 | `FORMS_RATELIMIT_MAX` | Submissions per minute per session/distribution (default 5). Raise it for load or smoke runs. |
+| `FORMS_RATELIMIT_IP_MAX` | Submissions per minute per client IP/distribution (default 120). The ceiling a caller cannot rotate away from — raise it for load runs too. |
+| `FORMS_COMPLETION_MAX` | **Completed** submissions per minute per client IP/distribution (default 20). |
+| `FORMS_TRUSTED_PROXY_HOPS` | Proxies you operate in front of MJAPI (default 0). Governs which `X-Forwarded-For` entry is believed; see `.env.example`. |
 
 **The service principal fails closed.** If the configured user does not exist or is inactive, *no
 automations run at all* and a log line says so. There is deliberately no fallback to the system
