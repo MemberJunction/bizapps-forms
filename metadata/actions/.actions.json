@@ -58,7 +58,7 @@
             "Description": "Whether this form's own automations are what run on submit ('Legacy' or 'Configured'). 'Configured' with no Automations is the supported way to run NOTHING - how a caller that owns its own subject identity declines Forms: Upsert Respondent Person. Omit to keep the historical behaviour."
           },
           "primaryKey": {
-            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000003"
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000005"
           }
         },
         {
@@ -72,7 +72,7 @@
             "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured'. An Action name this deployment does not have is an error, not a skipped step."
           },
           "primaryKey": {
-            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000004"
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000006"
           }
         }
       ]
@@ -144,7 +144,7 @@
             "Description": "Whether this form's own automations are what run on submit ('Legacy' or 'Configured'). 'Configured' with no Automations is the supported way to run NOTHING - how a caller that owns its own subject identity declines Forms: Upsert Respondent Person. Omit to keep the historical behaviour."
           },
           "primaryKey": {
-            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000003"
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000005"
           }
         },
         {
@@ -158,7 +158,7 @@
             "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured'. An Action name this deployment does not have is an error, not a skipped step."
           },
           "primaryKey": {
-            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000004"
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000006"
           }
         }
       ]

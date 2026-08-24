@@ -13,26 +13,34 @@
 -- `metadata/actions/.actions.json` carries the same four records with the same ids, so the next
 -- real push diffs to nothing rather than re-creating them.
 --
--- GUARDED, WHERE THE GENERATOR IS NOT. `spCreateActionParam` is a bare INSERT. The generator can
--- afford that because it only emits records it has just diffed against the target; a hand-written
--- delta has diffed nothing. An unguarded insert on a host that already has one of these fails and
--- HALTS THE CHAIN — the #39 failure mode, which cost a release. Each guard keys on the id AND on
--- the (action, name) pair, because either colliding is enough to fail the insert.
+-- WHY THE IDS SKIP 03 AND 04. `7F0B0001-…-000000000003` and `…04` are already `InputMode` and
+-- `SessionID` on `Forms: Generate Form From Brief` — added by work that is not on `next`, and found
+-- only by dry-running this file against a real database. The hardcoded-id convention hands out a
+-- shared ordinal space with no registry, so the next author faces the same trap: CHECK THE TARGET
+-- before picking, rather than counting the rows in this repo.
+--
+-- TWO OUTCOMES, DELIBERATELY DIFFERENT. A param that already exists as (ActionID, Name) is skipped
+-- silently — that is a re-run or a host that installed this before, and halting there is the #39
+-- failure mode that cost a release. But an id already held by a DIFFERENT record is an authoring
+-- collision, and it RAISES: skipping would mean this parameter is never created, on that host,
+-- with the migration reporting success — the silent no-op this whole change exists to remove. That
+-- error means "pick a free id", not "re-run me".
 --
 -- Every block is self-contained: `GO` ends the batch, so a variable declared above one is not in
--- scope below it, and a shared DECLARE at the top would be silently out of scope for three of the
--- four inserts.
---
--- Ids follow this repo's convention: 7F0B<action-ordinal>-A1B2-4C3D-8E4F-0000000000<param-ordinal>.
+-- scope below it.
 -- =============================================================================
 
 -- Forms: Generate Form From Brief -> OnSubmitMode
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
-               WHERE ID = '7F0B0001-A1B2-4C3D-8E4F-000000000003'
-                  OR (ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001' AND Name = N'OnSubmitMode'))
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+           WHERE ID = '7F0B0001-A1B2-4C3D-8E4F-000000000005' AND NOT (ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001' AND Name = N'OnSubmitMode'))
+BEGIN
+    RAISERROR(N'V202608241800: ActionParam id 7F0B0001-A1B2-4C3D-8E4F-000000000005 is already held by a different record, so "OnSubmitMode" cannot be created with it. Pick a free id in the 7F0B space and update migrations/ and metadata/actions/.actions.json together.', 16, 1);
+END
+ELSE IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+                    WHERE ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001' AND Name = N'OnSubmitMode')
 BEGIN
     EXEC [${mjSchema}].spCreateActionParam
-        @ID = '7F0B0001-A1B2-4C3D-8E4F-000000000003',
+        @ID = '7F0B0001-A1B2-4C3D-8E4F-000000000005',
         @ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001',
         @Name = N'OnSubmitMode',
         @DefaultValue = NULL,
@@ -48,12 +56,16 @@ END
 GO
 
 -- Forms: Generate Form From Brief -> Automations
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
-               WHERE ID = '7F0B0001-A1B2-4C3D-8E4F-000000000004'
-                  OR (ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001' AND Name = N'Automations'))
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+           WHERE ID = '7F0B0001-A1B2-4C3D-8E4F-000000000006' AND NOT (ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001' AND Name = N'Automations'))
+BEGIN
+    RAISERROR(N'V202608241800: ActionParam id 7F0B0001-A1B2-4C3D-8E4F-000000000006 is already held by a different record, so "Automations" cannot be created with it. Pick a free id in the 7F0B space and update migrations/ and metadata/actions/.actions.json together.', 16, 1);
+END
+ELSE IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+                    WHERE ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001' AND Name = N'Automations')
 BEGIN
     EXEC [${mjSchema}].spCreateActionParam
-        @ID = '7F0B0001-A1B2-4C3D-8E4F-000000000004',
+        @ID = '7F0B0001-A1B2-4C3D-8E4F-000000000006',
         @ActionID = '7F0A0001-A1B2-4C3D-8E4F-000000000001',
         @Name = N'Automations',
         @DefaultValue = NULL,
@@ -69,12 +81,16 @@ END
 GO
 
 -- Forms: Create Form From Template -> OnSubmitMode
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
-               WHERE ID = '7F0B0002-A1B2-4C3D-8E4F-000000000003'
-                  OR (ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002' AND Name = N'OnSubmitMode'))
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+           WHERE ID = '7F0B0002-A1B2-4C3D-8E4F-000000000005' AND NOT (ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002' AND Name = N'OnSubmitMode'))
+BEGIN
+    RAISERROR(N'V202608241800: ActionParam id 7F0B0002-A1B2-4C3D-8E4F-000000000005 is already held by a different record, so "OnSubmitMode" cannot be created with it. Pick a free id in the 7F0B space and update migrations/ and metadata/actions/.actions.json together.', 16, 1);
+END
+ELSE IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+                    WHERE ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002' AND Name = N'OnSubmitMode')
 BEGIN
     EXEC [${mjSchema}].spCreateActionParam
-        @ID = '7F0B0002-A1B2-4C3D-8E4F-000000000003',
+        @ID = '7F0B0002-A1B2-4C3D-8E4F-000000000005',
         @ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002',
         @Name = N'OnSubmitMode',
         @DefaultValue = NULL,
@@ -90,12 +106,16 @@ END
 GO
 
 -- Forms: Create Form From Template -> Automations
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
-               WHERE ID = '7F0B0002-A1B2-4C3D-8E4F-000000000004'
-                  OR (ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002' AND Name = N'Automations'))
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+           WHERE ID = '7F0B0002-A1B2-4C3D-8E4F-000000000006' AND NOT (ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002' AND Name = N'Automations'))
+BEGIN
+    RAISERROR(N'V202608241800: ActionParam id 7F0B0002-A1B2-4C3D-8E4F-000000000006 is already held by a different record, so "Automations" cannot be created with it. Pick a free id in the 7F0B space and update migrations/ and metadata/actions/.actions.json together.', 16, 1);
+END
+ELSE IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[ActionParam]
+                    WHERE ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002' AND Name = N'Automations')
 BEGIN
     EXEC [${mjSchema}].spCreateActionParam
-        @ID = '7F0B0002-A1B2-4C3D-8E4F-000000000004',
+        @ID = '7F0B0002-A1B2-4C3D-8E4F-000000000006',
         @ActionID = '7F0A0002-A1B2-4C3D-8E4F-000000000002',
         @Name = N'Automations',
         @DefaultValue = NULL,
