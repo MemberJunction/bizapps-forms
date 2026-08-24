@@ -20,6 +20,7 @@ import {
   questionTypeBehavior,
   type FormQuestionType,
   type FormRenderMode,
+  type OnSubmitMode,
 } from '@mj-biz-apps/forms-entities';
 
 /**
@@ -96,18 +97,90 @@ export const blueprintPageSchema = z.object({
   questions: z.array(blueprintQuestionSchema).min(1),
 });
 
+/**
+ * One on-submit step, named rather than identified.
+ *
+ * BY NAME, because an Action gets a different ID in every environment — a blueprint carrying
+ * `ActionID` would author correctly on the machine it was written on and nowhere else. The Builder
+ * resolves names to IDs at persist time and REFUSES a name it cannot resolve, which is the
+ * opposite of what the builder UI's seeding does: seeding skips an unregistered built-in to
+ * reproduce the legacy runner's behaviour, whereas a consumer that explicitly named a step and
+ * silently did not get it has been lied to.
+ *
+ * Run order is the array's order. There is deliberately no `displayOrder` field: two steps sharing
+ * one is a state an author can trivially reach and whose consequences (the tab and the server
+ * tie-breaking differently, reorder arrows that write nothing) are invisible until production.
+ */
+export const blueprintAutomationSchema = z.object({
+  /** The MJ Action name, e.g. `Forms: Send Confirmation Email`. */
+  actionName: z.string().min(1),
+  trigger: z.enum(['OnComplete', 'OnPartial', 'OnCompleteOrPartial']).optional(),
+  executionMode: z.enum(['Sync', 'Async']).optional(),
+  continueOnError: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
 /** The full authoring blueprint the Designer emits and the Builder persists. */
 export const formBlueprintSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   renderMode: formRenderModeSchema.optional(),
   confirmationMessage: z.string().optional(),
+  /**
+   * Whether this form's own automations are what run on submit — see `OnSubmitMode` in
+   * `@mj-biz-apps/forms-entities`.
+   *
+   * Omitted is the historical inference and stays the default, because writing one here would
+   * change what every AI- and template-authored form does on submit, all at once. Supplying
+   * `Configured` with no `automations` is the supported way to run NOTHING: it is what a consumer
+   * owning its own subject identity needs in order to decline `Forms: Upsert Respondent Person`
+   * (bizapps-forms#47).
+   */
+  onSubmitMode: z.enum(['Legacy', 'Configured']).optional(),
+  /**
+   * The on-submit steps this form runs, in order. Supplying this implies `Configured`.
+   *
+   * An empty array is meaningful and distinct from omitting the field: `[]` says "run nothing",
+   * absent says "say nothing, and let the server infer as it always has".
+   */
+  automations: z.array(blueprintAutomationSchema).optional(),
   pages: z.array(blueprintPageSchema).min(1),
+}).superRefine((blueprint, ctx) => {
+  // The invariant lives HERE rather than only in `applyOnSubmitConfig`, because this schema is the
+  // boundary every blueprint crosses — LLM output through `parseFormBlueprint`, and any direct
+  // caller of the exported `buildFormFromBlueprint`. Guarding one layer above left the state
+  // reachable by anything that did not route through the two shipping actions.
+  //
+  // `Legacy` runs the built-in steps; `automations` names steps that then never run. A caller
+  // asking for both is asking for something that cannot happen, and the failure is silent: rows
+  // are written, the caller sees success, and at runtime the built-ins fire instead.
+  if (blueprint.onSubmitMode === 'Legacy' && (blueprint.automations?.length ?? 0) > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['automations'],
+      message:
+        "onSubmitMode 'Legacy' runs the built-in on-submit steps, so these automations would be " +
+        "written and never run. Use 'Configured' to run them, or omit them to keep the built-ins.",
+    });
+  }
 });
+
+/**
+ * The mode to persist for a blueprint.
+ *
+ * An explicit declaration wins; otherwise, authoring any `automations` array — empty included —
+ * is itself the declaration, because a consumer that listed its steps plainly means those steps
+ * and not four others. Saying nothing persists nothing, which is what preserves the behaviour of
+ * every form authored before this existed.
+ */
+export function blueprintOnSubmitMode(blueprint: FormBlueprint): OnSubmitMode | undefined {
+  return blueprint.onSubmitMode ?? (blueprint.automations ? 'Configured' : undefined);
+}
 
 export type BlueprintOption = z.infer<typeof blueprintOptionSchema>;
 export type BlueprintQuestion = z.infer<typeof blueprintQuestionSchema>;
 export type BlueprintPage = z.infer<typeof blueprintPageSchema>;
+export type BlueprintAutomation = z.infer<typeof blueprintAutomationSchema>;
 export type FormBlueprint = z.infer<typeof formBlueprintSchema>;
 
 /**

@@ -11,6 +11,17 @@
 import { spawnSync } from 'node:child_process';
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
 
+/**
+ * The SQL Server container these scripts shell into.
+ *
+ * Defaults to the workspace's shared container. It was `forms-sql` until the per-app databases were
+ * retired (WORKSPACE.md, 2026-08-21) and every app moved onto one server; the name was never
+ * updated here, so each of these scripts failed with `No such container: forms-sql` — a smoke test
+ * that cannot run is a smoke test that is not protecting anything.
+ */
+const SQL_CONTAINER = process.env.FORMS_SQL_CONTAINER || 'sql-mj-it';
+
+
 // Credentials come from the process environment, not from parsing .env here: a password may
 // legitimately contain the characters a naive .env parser treats as syntax. Run this via
 //   set -a && . ./.env && set +a && node smoke/seed-binding-smoke.mjs
@@ -25,7 +36,7 @@ const SLUG = process.argv[2] || 'contact-us-e2e';
 function sql(query) {
   const res = spawnSync(
     'docker',
-    ['exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
+    ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
       '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-Q', query],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
@@ -67,7 +78,7 @@ function readAuthoredAutomationRow(automationId) {
 function sqlWide(query) {
   const res = spawnSync(
     'docker',
-    ['exec', 'forms-sql', '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
+    ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
       '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-y', '0', '-Q', query],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );

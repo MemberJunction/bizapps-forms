@@ -11,6 +11,7 @@ export * from './question-types';
 export * from './form-definition';
 export * from './form-screens';
 export * from './published-automation-builder';
+export * from './on-submit-dispatch';
 export * from './answer-format';
 export * from './social-links';
 export * from './answer-canonical';

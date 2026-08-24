@@ -29,9 +29,25 @@ export interface FormStyleTokens {
 }
 
 /**
+ * How a form's on-submit automations are dispatched.
+ *
+ * This exists because `automations: []` was overloaded: it meant BOTH "this form has never
+ * configured anything" (fall back to the four legacy hooks) and "this form deliberately runs
+ * nothing", with no way to tell them apart. A consumer that owns its own subject identity
+ * therefore could not decline `Forms: Upsert Respondent Person`, and got a second `Person` row
+ * for the same human on every submission (bizapps-forms#47).
+ *
+ * `Configured` means the form's `automations` array is AUTHORITATIVE — including when it is
+ * empty, which is the whole point. `Legacy` names the historical default explicitly. Absent is
+ * the same inference the server has always made, which is what keeps every snapshot published
+ * before this field behaving exactly as it did.
+ */
+export type OnSubmitMode = 'Legacy' | 'Configured';
+
+/**
  * Form-level behavioral settings, mirroring `Form.Settings` (JSON). Governs
- * anonymous access, captcha gating, response quota, the open/close window, and the
- * post-submit experience.
+ * anonymous access, captcha gating, response quota, the open/close window, the
+ * post-submit experience, and how on-submit automations are dispatched.
  */
 export interface FormSettings {
   anonymousAllowed: boolean;
@@ -46,6 +62,15 @@ export interface FormSettings {
   confirmationMessage?: string;
   /** URL to redirect to after a successful submit (takes precedence over message). */
   redirectUrl?: string;
+  /**
+   * Whether this form's `automations` array is authoritative — see {@link OnSubmitMode}.
+   *
+   * Lives here rather than in a `Form` column purely because the snapshot already carries
+   * `settings` and a column would need a CodeGen run to be usable; promoting it is tracked
+   * separately. Absent is load-bearing and must stay optional: it is what every already-published
+   * snapshot carries, and it means "infer, as the server always did".
+   */
+  onSubmitMode?: OnSubmitMode;
 }
 
 /**

@@ -8,7 +8,7 @@
  * All entity I/O goes through `Metadata.GetEntityObject` with the context user, and
  * every `Save()` return value is checked (CLAUDE.md MJ patterns).
  */
-import { Metadata } from '@memberjunction/core';
+import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 import {
   mjBizAppsFormsFormEntity,
@@ -16,8 +16,16 @@ import {
   mjBizAppsFormsFormPageEntity,
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormQuestionOptionEntity,
+  mjBizAppsFormsFormAutomationEntity,
+  type FormSettings,
 } from '@mj-biz-apps/forms-entities';
-import { CHOICE_QUESTION_TYPES, type FormBlueprint, type BlueprintPage, type BlueprintQuestion } from './form-blueprint';
+import {
+  blueprintOnSubmitMode,
+  CHOICE_QUESTION_TYPES,
+  type FormBlueprint,
+  type BlueprintPage,
+  type BlueprintQuestion,
+} from './form-blueprint';
 
 const ENTITY = {
   Form: 'MJ_BizApps_Forms: Forms',
@@ -25,6 +33,7 @@ const ENTITY = {
   FormPage: 'MJ_BizApps_Forms: Form Pages',
   FormQuestion: 'MJ_BizApps_Forms: Form Questions',
   FormQuestionOption: 'MJ_BizApps_Forms: Form Question Options',
+  FormAutomation: 'MJ_BizApps_Forms: Form Automations',
 } as const;
 
 /** What the builder created — surfaced back to the calling action's output params. */
@@ -34,6 +43,8 @@ export interface BuiltFormResult {
   pageCount: number;
   questionCount: number;
   optionCount: number;
+  /** On-submit steps written from the blueprint; 0 when it authored none. */
+  automationCount: number;
 }
 
 /** Raised with a clear message when a `Save()` returns false. */
@@ -50,6 +61,18 @@ export async function buildFormFromBlueprint(
   ownerUserId?: string,
 ): Promise<BuiltFormResult> {
   const md = new Metadata();
+
+  // BEFORE anything is written. Resolving names here rather than inside `createAutomations` is the
+  // whole difference between a refusal and a half-built form: the Form row carries
+  // `onSubmitMode: 'Configured'` in its settings, so a resolve that fails after it is saved leaves
+  // a draft that is marked authoritative with zero automations — publish that and nothing runs at
+  // all, neither configured steps nor the legacy fallback. There is no transaction spanning these
+  // saves, so ordering is the only thing that can prevent it.
+  const actionIdByName = await resolveActionIds(
+    (blueprint.automations ?? []).map((a) => a.actionName),
+    contextUser,
+  );
+
   const form = await createForm(md, blueprint, contextUser, ownerUserId);
   const version = await createDraftVersion(md, form.ID, contextUser);
 
@@ -62,13 +85,104 @@ export async function buildFormFromBlueprint(
     optionCount += counts.options;
   }
 
+  const automationCount = await createAutomations(md, form.ID, blueprint, actionIdByName, contextUser);
+
   return {
     formId: form.ID,
     formVersionId: version.ID,
     pageCount: blueprint.pages.length,
     questionCount,
     optionCount,
+    automationCount,
   };
+}
+
+/**
+ * Persist the blueprint's on-submit steps, resolving each Action BY NAME.
+ *
+ * Takes the already-resolved name→id map rather than resolving here, because resolution must
+ * happen before the Form row exists — see {@link buildFormFromBlueprint}. By the time this runs,
+ * every authored name is known to be resolvable, so it cannot write a partial set.
+ *
+ * Returns the number of rows written (0 when the blueprint authors none).
+ */
+async function createAutomations(
+  md: Metadata,
+  formId: string,
+  blueprint: FormBlueprint,
+  actionIdByName: ReadonlyMap<string, string>,
+  contextUser: UserInfo,
+): Promise<number> {
+  const authored = blueprint.automations ?? [];
+  if (authored.length === 0) {
+    return 0;
+  }
+
+  for (let index = 0; index < authored.length; index++) {
+    const step = authored[index];
+    const automation = await md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
+      ENTITY.FormAutomation,
+      contextUser,
+    );
+    automation.NewRecord();
+    automation.FormID = formId;
+    automation.Name = step.actionName;
+    automation.TargetType = 'Action';
+    automation.ActionID = actionIdByName.get(step.actionName) as string;
+    // The legacy runner's behaviour is the default: fire on a completed submission only, one after
+    // another, logging a failure and continuing. A partial autosave firing a confirmation email on
+    // every keystroke is what the other trigger values cost if defaulted differently.
+    automation.Trigger = step.trigger ?? 'OnComplete';
+    automation.ExecutionMode = step.executionMode ?? 'Sync';
+    automation.DisplayOrder = index + 1;
+    automation.ContinueOnError = step.continueOnError ?? true;
+    automation.IsActive = step.isActive ?? true;
+    await save(automation, 'FormAutomation');
+  }
+  return authored.length;
+}
+
+/**
+ * Map the named Actions to their ids in THIS deployment, or throw naming what is missing.
+ *
+ * Action ids differ per environment, so a blueprint can only travel by name. The read is scoped to
+ * the names asked for: an unfiltered read of the Action catalogue would work and would quietly
+ * become a full-table scan on every authored form.
+ */
+async function resolveActionIds(
+  names: readonly string[],
+  contextUser: UserInfo,
+): Promise<Map<string, string>> {
+  const wanted = [...new Set(names)];
+  if (wanted.length === 0) {
+    // No steps authored: read nothing. Called unconditionally now that it runs before the Form is
+    // created, so this is what keeps an ordinary form from querying the Action catalogue at all.
+    return new Map();
+  }
+  const filter = wanted.map((n) => `Name='${n.replace(/'/g, "''")}'`).join(' OR ');
+  const result = await new RunView().RunView<{ ID: string; Name: string }>(
+    {
+      EntityName: 'MJ: Actions',
+      ExtraFilter: filter,
+      Fields: ['ID', 'Name'],
+      ResultType: 'simple',
+    },
+    contextUser,
+  );
+  if (!result.Success) {
+    throw new FormPersistError(
+      `Could not read the Action catalogue to resolve this form's on-submit steps: ${result.ErrorMessage ?? 'unknown error'}`,
+    );
+  }
+
+  const byName = new Map((result.Results ?? []).map((a) => [a.Name, a.ID]));
+  const missing = wanted.filter((n) => !byName.has(n));
+  if (missing.length > 0) {
+    throw new FormPersistError(
+      `This deployment has no Action named ${missing.map((n) => `"${n}"`).join(', ')}, so the form's on-submit steps were not written.`,
+    );
+  }
+  return byName;
 }
 
 async function createForm(
@@ -95,12 +209,18 @@ async function createForm(
 
 /** Build the `Form.Settings` JSON (matches the contract's `FormSettings` shape). */
 function buildFormSettingsJSON(blueprint: FormBlueprint): string {
-  const settings: Record<string, string | boolean> = {
+  const settings: FormSettings = {
     anonymousAllowed: true,
     captchaRequired: false,
   };
   if (blueprint.confirmationMessage) {
     settings.confirmationMessage = blueprint.confirmationMessage;
+  }
+  // Only when the blueprint actually says something. An absent mode is what every form authored
+  // before this carried, and it is what keeps the server inferring dispatch exactly as it did.
+  const mode = blueprintOnSubmitMode(blueprint);
+  if (mode) {
+    settings.onSubmitMode = mode;
   }
   return JSON.stringify(settings);
 }
@@ -226,7 +346,8 @@ async function save(
     | mjBizAppsFormsFormVersionEntity
     | mjBizAppsFormsFormPageEntity
     | mjBizAppsFormsFormQuestionEntity
-    | mjBizAppsFormsFormQuestionOptionEntity,
+    | mjBizAppsFormsFormQuestionOptionEntity
+    | mjBizAppsFormsFormAutomationEntity,
   label: string,
 ): Promise<void> {
   const ok = await entity.Save();

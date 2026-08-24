@@ -229,12 +229,28 @@ cd apps/MJAPI && node server.mjs   # the API harness → http://localhost:4121
 
 A published form is then reachable anonymously at `http://localhost:4121/f/<distribution-slug>`.
 
+> **What happens after Submit** — which automations run, how to configure or decline them from code,
+> and which record owns respondent identity (read `FormResponse.RespondentPersonID`; do not derive a
+> second Person) — is **[docs/on-submit-automations.md](docs/on-submit-automations.md)**. Read it
+> before building an app that consumes Forms responses.
+
 **Verify it actually works** — this exercises the public path end to end (host page, session token,
 widget bundle, published definition, anonymous submit) and is the check that would have caught the
 respondent-path defects in 0.2.1:
 
 ```bash
 npm run smoke:respondent -- <distribution-slug>
+```
+
+Two environment knobs, because the defaults stopped being right when the dev environment changed:
+
+| variable | default | when to set it |
+|---|---|---|
+| `FORMS_SMOKE_URL` | `http://localhost:4121` | the API actually serving Forms. In the shared dev workspace that is **`http://localhost:4000`** — `4121` is this repo's own harness, which the workspace no longer runs. |
+| `FORMS_SQL_CONTAINER` | `sql-mj-it` | the docker SQL Server the scripts that seed state shell into (`automation-semantics`, `upload-provenance`, `resume-arc`, `binding`). Was `forms-sql` until the per-app databases were retired. |
+
+```bash
+FORMS_SMOKE_URL=http://localhost:4000 npm run smoke:respondent -- <distribution-slug>
 ```
 
 ---
