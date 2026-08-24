@@ -322,6 +322,11 @@ function maskSql(sql) {
     // mask out of alignment with the source and three blanked the record outright — a silent pass.
     const structure = sql.split('');
     const values = sql.split('');
+    // Newlines survive blanking, so a mask is LINE-preserving as well as offset-preserving: printing
+    // one beside the source lines up, which is how the three silent-pass bugs in this layer were
+    // eventually seen. No reader below depends on it — a mutation pass over 600k inputs and every
+    // shipped .sql file cannot distinguish keeping it from dropping it — so it is a debuggability
+    // invariant, not behaviour. Do not "test" it; there is nothing to observe.
     const blankBoth = (from, to) => {
         for (let k = from; k < to; k++) {
             if (structure[k] === '\n') continue;
@@ -363,11 +368,21 @@ function maskSql(sql) {
     return { structure: structure.join(''), values: values.join('') };
 }
 
-/** `[start, end)` ranges between `GO` batch separators — the boundary the generator writes on. */
+/**
+ * `[start, end)` ranges between `GO` batch separators — the boundary the generator writes on.
+ *
+ * CRLF needs no handling here and must not grow any: ECMAScript counts CR as a LineTerminator, so
+ * under `/m` the `$` already matches BEFORE the `\r` of a Windows line ending. The `\r?` this
+ * pattern used to carry made it look like CRLF support a test could pin, and it is not: dropping it
+ * shortens `match[0]` by one character and therefore moves the next range's start back onto the
+ * `\r` — `"a\r\nGO\r\nb"` gives `[[0,3],[5,8]]` where it used to give `[[0,3],[6,8]]`. Every reader
+ * of a range trims or tokenises, so a leading CR changes nothing, and no input distinguishes the two
+ * spellings. `equivalent/crlf-in-go` in the mutation gate holds that claim to account.
+ */
 function splitBatches(masked) {
     const ranges = [];
     let start = 0;
-    for (const match of masked.matchAll(/^[ \t]*GO[ \t]*\r?$/gim)) {
+    for (const match of masked.matchAll(/^[ \t]*GO[ \t]*$/gim)) {
         ranges.push([start, match.index]);
         start = match.index + match[0].length;
     }
@@ -375,7 +390,16 @@ function splitBatches(masked) {
     return ranges;
 }
 
-/** Scans from `from` to the first character at paren depth 0 for which `stop` holds, else `to`. */
+/**
+ * Scans from `from` to the first character at paren depth 0 for which `stop` holds, else `to`.
+ *
+ * The depth tracking is defence, not a modelled shape, and is deliberately unpinned by any test: the
+ * only inputs that distinguish it from a flat scan put a terminator keyword inside parentheses in
+ * CODE — a column literally named `[SET]`, say — because the mask has already blanked anything
+ * inside a string or a comment. No generator emits that. Three lines that fail safe are worth
+ * keeping; a test asserting `[SET]` works would advertise support for SQL we do not model. See the
+ * DELIBERATELY NOT LISTED note in check-distribution-seed.mutants.mjs.
+ */
 function scanToDepthZero(masked, from, to, stop) {
     let depth = 0;
     for (let i = from; i < to; i++) {
@@ -424,7 +448,14 @@ function resolveArgumentValue(raw, assignments) {
     return null;
 }
 
-/** `@Name = value` pairs of one call, resolved through the batch's assignments. */
+/**
+ * `@Name = value` pairs of one call, resolved through the batch's assignments.
+ *
+ * The paren-depth guard on the comma split is the same unexercised defence as `scanToDepthZero`'s,
+ * and unpinned for the same reason: it only shows through on a value carrying a top-level comma
+ * inside parentheses BEFORE the text that identifies the grant — `WHERE Name IN (N'a', N'b')` — and
+ * nothing emits that either.
+ */
 function parseCallArguments(structure, values, from, to, assignments) {
     const args = new Map();
     let start = from;
@@ -512,16 +543,17 @@ function readEntityIdentity(value) {
 }
 
 /**
- * Every `spCreate/spUpdateEntityPermission` call in `sql` that binds the anonymous respondent role,
- * with its arguments already resolved through the per-record variables the generator emits. Pure
- * read; exported because the spec pins the guarded table against the shipped seed through it, using
- * the same parser the gate uses rather than a second one that could agree by coincidence.
- */
-/**
- * How many times the SQL names a permission procedure in CODE (comments excluded). Compared against
- * what the parser actually read, this is the gate's own postcondition: zero parsed calls is
- * otherwise indistinguishable from a clean file, and every parser blind spot — a new dialect, a
- * shape MetadataSync starts emitting, a mask that desynced — lands as exactly that.
+ * How many times the SQL names a permission procedure outside a comment. Compared against what the
+ * parser actually read, this is the gate's own postcondition: zero parsed calls is otherwise
+ * indistinguishable from a clean file, and every parser blind spot — a new dialect, a shape
+ * MetadataSync starts emitting, a mask that desynced — lands as exactly that.
+ *
+ * Counted on the `values` mask, which keeps string bodies, rather than the `structure` mask the
+ * parser itself matches on. That is the whole point: a backstop that read `structure` would share
+ * the string-scanning layer with the thing it is checking, so a desync that blanked real code would
+ * erase the calls and the count together and the gate would go quiet — the exact failure it exists
+ * to catch. The cost is that a procedure name inside a string literal reads as a call the parser
+ * missed. That is a false positive in the loud direction, and this file prefers loud.
  */
 export function countPermissionProcedureMentions(sql) {
     return [...maskSql(sql).values.matchAll(/sp(?:Create|Update)EntityPermission/gi)].length;
@@ -574,7 +606,12 @@ export function findPermissionCalls(sql) {
 
 /**
  * The permission calls that concern the anonymous role — everything `findPermissionCalls` read
- * except the calls that provably bind some other role.
+ * except the calls that provably bind some other role, with arguments already resolved through the
+ * per-record variables the generator emits.
+ *
+ * Pure read, and exported for the spec rather than for the gate: case 20 pins the guarded table
+ * against the shipped seed through this function, so the ids are re-derived by the SAME parser the
+ * gate uses rather than by a second one that could agree with it by coincidence.
  */
 export function findRespondentGrants(sql) {
     return findPermissionCalls(sql).filter((call) => call.role !== 'other');
