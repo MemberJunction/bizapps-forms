@@ -4,7 +4,6 @@ import type { ActionParam } from '@memberjunction/actions-base';
 import {
   buildFormRows,
   categoryNameMap,
-  readFormIdFromParams,
   readFormIdFromResult,
   responseCountMap,
   sortByUpdatedDesc,
@@ -98,32 +97,6 @@ describe('sortByUpdatedDesc', () => {
     expect(sorted[0].id).toBe('c'); // has a date
     expect(sorted[1].id).toBe('b'); // Amy before Zed
     expect(sorted[2].id).toBe('a');
-  });
-});
-
-describe('readFormIdFromParams', () => {
-  it('returns the FormID output param value', () => {
-    const params: ActionParam[] = [
-      { Name: 'Brief', Value: 'hi', Type: 'Input' },
-      { Name: 'FormID', Value: 'new-form-id', Type: 'Output' },
-    ];
-    expect(readFormIdFromParams(params)).toBe('new-form-id');
-  });
-
-  it('accepts a Both-typed FormID', () => {
-    const params: ActionParam[] = [{ Name: 'FormID', Value: 'x', Type: 'Both' }];
-    expect(readFormIdFromParams(params)).toBe('x');
-  });
-
-  it('ignores a FormID that is an input param', () => {
-    const params: ActionParam[] = [{ Name: 'FormID', Value: 'x', Type: 'Input' }];
-    expect(readFormIdFromParams(params)).toBeNull();
-  });
-
-  it('returns null when absent or empty', () => {
-    expect(readFormIdFromParams(undefined)).toBeNull();
-    expect(readFormIdFromParams([])).toBeNull();
-    expect(readFormIdFromParams([{ Name: 'FormID', Value: '', Type: 'Output' }])).toBeNull();
   });
 });
 

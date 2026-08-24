@@ -112,7 +112,7 @@
                 [attr.aria-label]="star + ' of ' + ratingMax()"
                 (click)="onRating(star)"
               >
-                <i class="fa-solid fa-star" aria-hidden="true"></i>
+                <mjf-icon name="star" />
               </button>
             }
           </div>
@@ -177,13 +177,13 @@
             @switch (uploadStatus()) {
               @case ('uploading') {
                 <span>
-                  <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                  <mjf-icon name="spinner" [spin]="true" />
                   Uploading {{ uploadFileName() }}@if (uploadPercent() !== null) { — {{ uploadPercent() }}% }…
                 </span>
               }
               @case ('done') {
                 <span class="mjf-file__ok">
-                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  <mjf-icon name="circle-check" />
                   {{ uploadFileName() }} uploaded
                 </span>
               }
@@ -192,11 +192,11 @@
 
           @if (uploadStatus() === 'error') {
             <p class="mjf-file__error" role="alert">
-              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <mjf-icon name="triangle-exclamation" />
               {{ uploadError() }}
             </p>
             <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry upload
+              <mjf-icon name="rotate-right" /> Retry upload
             </button>
           }
         }
@@ -215,7 +215,7 @@
                   <img class="mjf-pic__img" [src]="opt.imageURL" [alt]="opt.label" loading="lazy" />
                 } @else {
                   <span class="mjf-pic__img mjf-pic__img--empty" aria-hidden="true">
-                    <i class="fa-regular fa-image"></i>
+                    <mjf-icon name="image" />
                   </span>
                 }
                 <span class="mjf-pic__label">
@@ -276,18 +276,18 @@
                 <div class="mjf-rank__ghost" *cdkDragPlaceholder></div>
 
                 <span class="mjf-rank__grip" cdkDragHandle aria-hidden="true">
-                  <i class="fa-solid fa-grip-vertical"></i>
+                  <mjf-icon name="grip" />
                 </span>
                 <span class="mjf-rank__pos" aria-hidden="true">{{ i + 1 }}</span>
                 <span class="mjf-rank__label">{{ opt.label }}</span>
                 <span class="mjf-rank__moves">
                   <button type="button" class="mjf-rank__move" [disabled]="first"
                     [attr.aria-label]="'Move ' + opt.label + ' up'" (click)="moveRank(i, -1)">
-                    <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+                    <mjf-icon name="chevron-up" />
                   </button>
                   <button type="button" class="mjf-rank__move" [disabled]="last"
                     [attr.aria-label]="'Move ' + opt.label + ' down'" (click)="moveRank(i, 1)">
-                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    <mjf-icon name="chevron-down" />
                   </button>
                 </span>
               </li>
@@ -376,16 +376,16 @@
           />
           @if (uploadStatus() === 'uploading') {
             <p class="mjf-file__status" aria-live="polite">
-              <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Saving signature…
+              <mjf-icon name="spinner" [spin]="true" /> Saving signature…
             </p>
           }
           @if (uploadStatus() === 'error') {
             <p class="mjf-file__error" role="alert">
-              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <mjf-icon name="triangle-exclamation" />
               {{ uploadError() }}
             </p>
             <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry
+              <mjf-icon name="rotate-right" /> Retry
             </button>
           }
         }

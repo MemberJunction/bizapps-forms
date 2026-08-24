@@ -19,14 +19,27 @@ import { AIPromptParams } from '@memberjunction/ai-core-plus';
 import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import type { UserInfo } from '@memberjunction/core';
 import { parseFormBlueprint, type FormBlueprint } from './form-blueprint';
+import { MAX_DESIGNER_ATTEMPTS, STAGE_TIMEOUT_MS } from './limits';
 
 /**
- * Data passed to the Form Designer AI Prompt's template. `Brief` is the user's
- * natural-language request; the two optional fields are populated only on a retry so
- * the prompt can show the model its prior invalid output and the validation error.
+ * What the author gave us, which changes what the Designer is allowed to do with it.
+ *
+ * `brief` describes a form to design; `questions` is a list the author has ALREADY WRITTEN, whose
+ * wording the Designer must preserve verbatim while inferring only types, options, order and
+ * grouping. The distinction matters because the same text produces very different output: an
+ * author who pasted twenty questions and got twenty reworded ones back has lost the work they
+ * came here with.
+ */
+export type FormDesignerInputMode = 'brief' | 'questions';
+
+/**
+ * Data passed to the Form Designer AI Prompt's template. `Brief` is the user's request (or their
+ * pasted questions, per `InputMode`); the last two are populated only on a retry so the prompt can
+ * show the model its prior invalid output and the validation error.
  */
 export interface FormDesignerPromptData {
   Brief: string;
+  InputMode: FormDesignerInputMode;
   PreviousAttempt?: string;
   ValidationError?: string;
 }
@@ -73,6 +86,11 @@ export class AIPromptFormDesignerModel implements FormDesignerModel {
     // runner parses/validates the model's JSON for us; this lets it also repair
     // slightly-malformed JSON (trailing commas, stray fences) before giving up.
     params.attemptJSONRepair = true;
+    // The same bound the staged path and the chat put on a model call. Without it this path had
+    // none at all, and `MAX_DESIGNER_ATTEMPTS` retries it — so a hung call was three hung calls.
+    // This is the documented fallback for a caller with no SessionID, which is exactly the caller
+    // with nobody watching a progress bar to notice.
+    params.cancellationToken = AbortSignal.timeout(STAGE_TIMEOUT_MS);
 
     const result = await new AIPromptRunner().ExecutePrompt<FormBlueprint>(params);
     if (!result.success) {
@@ -104,8 +122,11 @@ function designerOutputText(rawResult: string | undefined, parsed: FormBlueprint
   return rawResult?.trim() ?? '';
 }
 
-/** Number of Designer attempts before giving up (matches the Form Builder agent's cap). */
-export const MAX_DESIGNER_ATTEMPTS = 3;
+/**
+ * Number of Designer attempts before giving up. Defined in `limits.ts` with every other cap and
+ * re-exported here so this file's long-standing import path keeps working.
+ */
+export { MAX_DESIGNER_ATTEMPTS } from './limits';
 
 /**
  * Run the Designer: run the AI Prompt, validate the result against the §5.3 taxonomy,
@@ -117,9 +138,10 @@ export async function designFormFromBrief(
   brief: string,
   model: FormDesignerModel,
   contextUser: UserInfo,
+  inputMode: FormDesignerInputMode = 'brief',
 ): Promise<FormBlueprint> {
   let lastError: unknown;
-  let promptData: FormDesignerPromptData = { Brief: brief };
+  let promptData: FormDesignerPromptData = { Brief: brief, InputMode: inputMode };
 
   for (let attempt = 1; attempt <= MAX_DESIGNER_ATTEMPTS; attempt++) {
     const raw = await model.design(promptData, contextUser);
@@ -127,7 +149,7 @@ export async function designFormFromBrief(
       return parseFormBlueprint(raw);
     } catch (error) {
       lastError = error;
-      promptData = { Brief: brief, PreviousAttempt: raw, ValidationError: errorText(error) };
+      promptData = { Brief: brief, InputMode: inputMode, PreviousAttempt: raw, ValidationError: errorText(error) };
     }
   }
   throw new Error(

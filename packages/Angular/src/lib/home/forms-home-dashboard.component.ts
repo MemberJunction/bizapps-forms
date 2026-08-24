@@ -23,6 +23,7 @@ import {
 } from './home-models';
 import { TemplatesGalleryComponent, type TemplateChoice } from '../templates/templates-gallery.component';
 import { FormCloneService } from '../templates/form-clone.service';
+import { FormChatComponent, FormChatService } from '../chat';
 
 /**
  * Status -> badge tone. Total over `FormStatus`, so widening the CHECK constraint
@@ -60,7 +61,7 @@ function plural(n: number, one: string, many = `${one}s`): string {
 }
 
 /** Which authoring panel (if any) is open. */
-type AuthoringPanel = 'none' | 'ai' | 'template';
+type AuthoringPanel = 'none' | 'template';
 
 /**
  * Forms home / studio — the first-class MJExplorer "Forms" surface
@@ -86,8 +87,8 @@ type AuthoringPanel = 'none' | 'ai' | 'template';
   selector: 'mj-forms-home-dashboard',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [FormsHomeService, FormCloneService],
-  imports: [FormsModule, DatePipe, TemplatesGalleryComponent],
+  providers: [FormsHomeService, FormCloneService, FormChatService],
+  imports: [FormsModule, DatePipe, TemplatesGalleryComponent, FormChatComponent],
   templateUrl: './forms-home-dashboard.component.html',
   styles: [FORMS_UI_CSS, FORMS_HOME_CSS],
 })
@@ -107,7 +108,6 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
   /** Archived forms are hidden by default; the toolbar toggles them back in. */
   public showArchived = false;
   public panel: AuthoringPanel = 'none';
-  public brief = '';
 
   /** MJGlobal subscription behind {@link watchForFormChanges}; released on destroy. */
   private formChanges?: EventSubscription;
@@ -288,17 +288,25 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
     this.cdr.markForCheck();
   }
 
-  /** Runs the AI authoring action from the entered brief. */
-  public async authorWithAI(): Promise<void> {
-    const brief = this.brief.trim();
-    if (!brief) {
-      this.errorMessage = 'Enter a brief describing the form you want.';
-      this.cdr.markForCheck();
-      return;
-    }
-    await this.runAuthoring(HOME_ACTION.generateFromBrief, [
-      { Name: 'Brief', Value: brief, Type: 'Input' },
-    ]);
+  /**
+   * A chat turn created a form — open it, exactly as the old Generate button did.
+   *
+   * THE CONVERSATION COMES WITH THEM. Opening the form used to end the exchange mid-sentence: the
+   * server had filed the thread under the forms-list key, so the builder looked for that form's
+   * thread, found nothing, and showed an empty box — the reply the author was waiting for only
+   * reappeared if they navigated back here. The server now re-files the thread onto the form it
+   * made, and the builder's panel opens itself on a thread this recent, so the reply is on screen
+   * when they land. Nothing needs to be handed across the navigation for that to work.
+   *
+   * The list is refreshed too: the author is leaving it, but they come back to it, and a list that
+   * is missing the form they just made is the same bug the old path shipped with.
+   */
+  protected async onChatCreatedForm(formId: string): Promise<void> {
+    this.OpenEntityRecord.emit({
+      EntityName: HOME_ENTITY.forms,
+      RecordPKey: CompositeKey.FromID(formId),
+    });
+    await this.loadForms();
   }
 
   /**
@@ -371,7 +379,6 @@ export class FormsHomeDashboardComponent extends BaseDashboard {
         return;
       }
       this.closePanel();
-      this.brief = '';
       if (result.formId) {
         this.OpenEntityRecord.emit({
           EntityName: HOME_ENTITY.forms,

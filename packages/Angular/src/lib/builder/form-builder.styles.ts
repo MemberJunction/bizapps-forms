@@ -176,7 +176,14 @@ const LAYOUT_CSS = /* css */ `
 .fb-body { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 340px; min-height: 0; overflow: hidden; }
 .fb-pane { overflow-y: auto; padding: var(--mjf-stack); }
 .fb-pane--left { border-right: 1px solid var(--mjf-rule); background: var(--mj-bg-surface); }
-.fb-pane--center { background: var(--mj-bg-page); padding: var(--mjf-stack) var(--mjf-gutter) 96px; }
+/* No reserved strip at the foot of the canvas. The 96px that used to sit here was meant to keep
+   the sticky chat clear of the last question, but the chat IS the last child — so the padding was
+   dead space BELOW it, and, being part of the pane rather than the canvas, it ended the chat's
+   containing block 96px above the pane's bottom edge. Sticky cannot pin an element past its own
+   containing block, so the chat hung ~96px up with the form scrolling through the gap underneath
+   it, reading as a box floating in the middle of the canvas. Nothing needs reserving: when the
+   author scrolls to the end, the chat is at its static position after the last question. */
+.fb-pane--center { background: var(--mj-bg-page); padding: var(--mjf-stack) var(--mjf-gutter); }
 .fb-pane--right { border-left: 1px solid var(--mjf-rule); background: var(--mj-bg-surface); }
 
 /* ------------------------------------------------------------------- palette */
@@ -184,14 +191,16 @@ const LAYOUT_CSS = /* css */ `
 /* Palette tools — search + import, pinned above the groups. At 25 types across seven groups,
    scanning is slower than typing, and an author who knows what they want should not have to
    know which heading we filed it under. */
-.fb-palette-tools {
+.fb-palette-search {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  /* Inherited from the .fb-palette-tools wrapper this used to sit in. That wrapper existed to
+     stack the search box above an "Import questions" button; with the button gone it was a
+     single-child flex column, so the only rule of its that still did anything moved here.
+     (No backticks in here: this file is a TypeScript template literal.) */
   margin-bottom: var(--mjf-stack);
 }
-
-.fb-palette-search { position: relative; display: flex; align-items: center; }
 .fb-palette-search i {
   position: absolute;
   left: 10px;
@@ -200,26 +209,6 @@ const LAYOUT_CSS = /* css */ `
   pointer-events: none;
 }
 .fb-palette-search .mjf-input { padding-left: 30px; }
-
-.fb-palette-import {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--mjf-meta);
-  color: var(--mj-text-secondary);
-  background: transparent;
-  border: 1px dashed var(--mj-border-default);
-  border-radius: var(--mjf-radius-sm);
-  transition: background var(--mjf-ease), border-color var(--mjf-ease);
-}
-.fb-palette-import:hover:not(:disabled) { border-color: var(--mj-brand-primary); background: var(--mj-bg-surface-hover); }
-.fb-palette-import:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -2px; }
-.fb-palette-import:disabled { opacity: 0.45; cursor: not-allowed; }
-.fb-palette-import i { width: 16px; text-align: center; color: var(--mj-text-muted); }
 
 /* ---- Screens on the canvas ----
    Rendered as a distinct card rather than as another question row, because that visual
@@ -636,4 +625,26 @@ const LAYOUT_CSS = /* css */ `
 // FORMS_VIZ_CSS carries the question-type palette: the group colours the rail's glyphs and
 // the canvas type pills read from. Included here rather than in the components because both
 // of those live in this component's template.
-export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${FORMS_VIZ_CSS}\n${LAYOUT_CSS}`;
+export const FORM_BUILDER_STYLES = `${FORMS_UI_CSS}\n${FORMS_VIZ_CSS}\n${LAYOUT_CSS}
+
+/* The canvas column fills its pane even when the form is short, so the auto margin below has
+   free space to push the chat into. */
+.fb-canvas { min-height: 100%; }
+
+/* The AI surface under the canvas, held at the BOTTOM of the pane.
+
+   Sticky keeps it reachable while a long form scrolls past, and gradient-backed so the last
+   question does not appear to run into it — but sticky does nothing until the element would
+   otherwise leave the scrollport, so on a two-question form it sat wherever the list ended,
+   floating in the middle of the canvas. margin-top: auto is what puts it at the bottom in that
+   case: the canvas is a flex column, so the auto margin absorbs the leftover height. Same pair as
+   .home-chat on the forms list, for the same reason. */
+.fb-chat {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  padding: 16px 0 12px;
+  margin-top: auto;
+  background: linear-gradient(to top, var(--mj-bg-page, var(--mj-bg-surface)) 72%, transparent);
+}
+`;

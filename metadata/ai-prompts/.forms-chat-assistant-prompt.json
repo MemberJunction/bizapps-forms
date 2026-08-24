@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Chat Assistant",
+      "Description": "The conversational surface of AI authoring. Replies to the author AND declares an action — none, create, restyle, image, edit, open, or unsupported — which deterministic code then performs. The model never touches the database, the same split the rest of the authoring pipeline uses. Model selection is metadata-driven and this prompt is the most likely to want a different tier from the structural stages, since it is conversational rather than generative.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Chat Assistant",
+      "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
+      "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
+      "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
+      "Status": "Active",
+      "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-chat-assistant.output-example.json",
+      "SelectionStrategy": "Specific",
+      "PowerPreference": "Highest",
+      "PromptRole": "System",
+      "PromptPosition": "First",
+      "ParallelizationMode": "None",
+      "ValidationBehavior": "None",
+      "MaxRetries": 1,
+      "EffortLevel": null
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": [
+        {
+          "fields": {
+            "PromptID": "@parent:ID",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.6 Flash",
+            "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718297"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T23:01:10.969Z",
+            "checksum": "e5db75362dab2734b7237909bdcb8efb0b21cce10f7fd4b599194df951e12c88"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829308"
+    },
+    "sync": {
+      "lastModified": "2026-08-21T02:50:43.231Z",
+      "checksum": "0be8418399675bc5393c8218daaa2415d5c325bbf1b0d954ab3b1959df95bb2d"
+    }
+  }
+]

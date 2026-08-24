@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
+import { defaultThemeJSON } from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormStyleEntity,
@@ -155,7 +156,9 @@ export class DesignStateService {
     created.NewRecord();
     created.Name = `${form.Name} theme`;
     created.Description = 'Design for this form.';
-    created.CSSVariables = serializeCssVariables({});
+    // The same house default a generated form gets — a form built by hand should not look
+    // like a different product from one built by brief.
+    created.CSSVariables = defaultThemeJSON();
     created.DisplayRank = 0;
     created.IsActive = true;
     if (!(await this.saveChecked(created, 'create the form style'))) {

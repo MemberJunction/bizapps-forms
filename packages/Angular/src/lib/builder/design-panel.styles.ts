@@ -112,4 +112,18 @@ export const DESIGN_PANEL_STYLES = /* css */ `
   .dp-preview { height: 70vh; }
 }
 
+/* The AI surface at the foot of the Design rail, beside the controls it can drive. */
+.dp-chat {
+  flex: none;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--mj-border-default);
+  background: var(--mj-bg-surface);
+}
+
+/* ONE rule between the rail and its foot, not two. Both the save-status row and the chat draw a
+   border-top, so when the status row renders — which is whenever a style has been touched — the
+   two stacked into a pair of lines with an all-but-empty strip trapped between them. The status
+   row is the top of that footer group, so it keeps the line; the chat drops its own and only
+   draws it when it is the footer on its own. */
+.dp-actions + .dp-chat { border-top: none; }
 `;

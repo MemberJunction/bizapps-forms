@@ -1,0 +1,51 @@
+[
+  {
+    "fields": {
+      "Name": "Forms: Page Detail",
+      "Description": "Second pass of a staged AI form build. Given the brief, the whole outline for coherence, and one page's sketched questions, writes that page's questions in full — options, help text, settings, validation and show/hide logic. Run once per page with bounded concurrency. Model selection is metadata-driven, so this stage can be pointed at a more careful model than the outline stage without a code change.",
+      "TemplateID": "@lookup:MJ: Templates.Name=MJ_BizApps_Forms: Page Detail",
+      "CategoryID": "@lookup:MJ: AI Prompt Categories.Name=MJ_BizApps_Forms",
+      "TypeID": "@lookup:MJ: AI Prompt Types.Name=Chat",
+      "AIModelTypeID": "@lookup:MJ: AI Model Types.Name=LLM",
+      "Status": "Active",
+      "ResponseFormat": "JSON",
+      "OutputType": "object",
+      "OutputExample": "@file:forms-page-detail.output-example.json",
+      "SelectionStrategy": "Specific",
+      "PowerPreference": "Highest",
+      "PromptRole": "System",
+      "PromptPosition": "First",
+      "ParallelizationMode": "None",
+      "ValidationBehavior": "Strict",
+      "MaxRetries": 2,
+      "EffortLevel": null
+    },
+    "relatedEntities": {
+      "MJ: AI Prompt Models": [
+        {
+          "fields": {
+            "PromptID": "@parent:ID",
+            "ModelID": "@lookup:MJ: AI Models.Name=Gemini 3.6 Flash",
+            "VendorID": "@lookup:MJ: AI Vendors.Name=Google",
+            "Priority": 100,
+            "Status": "Active"
+          },
+          "primaryKey": {
+            "ID": "5A6B7C8D-9E0F-4A1B-2C3D-4E5F60718295"
+          },
+          "sync": {
+            "lastModified": "2026-08-20T22:45:12.571Z",
+            "checksum": "e5db75362dab2734b7237909bdcb8efb0b21cce10f7fd4b599194df951e12c88"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "6B7C8D9E-0F1A-4B2C-3D4E-5F6071829306"
+    },
+    "sync": {
+      "lastModified": "2026-08-20T20:59:34.813Z",
+      "checksum": "bfb6414b77b82ef60715c44eceede5e554cf0eef0bf1b6892336db0b9ccb41c6"
+    }
+  }
+]

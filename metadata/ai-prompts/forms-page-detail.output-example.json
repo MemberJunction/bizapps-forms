@@ -1,0 +1,47 @@
+{
+  "questions": [
+    {
+      "key?": "attending",
+      "type": "SingleChoice",
+      "prompt": "Will you attend?",
+      "helpText?": "Pick one.",
+      "isRequired?": true,
+      "options?": [
+        {
+          "label": "Yes, I'll be there",
+          "value?": "yes",
+          "isDefault?": true,
+          "imagePrompt?": "a lit function room",
+          "matrixAxis?": "Row"
+        },
+        {
+          "label": "Sorry, I can't make it",
+          "value?": "no"
+        }
+      ],
+      "settings?": {
+        "min": 0,
+        "max": 5
+      },
+      "validationRule?": {
+        "minLength?": 2,
+        "maxLength?": 200,
+        "min?": 0,
+        "max?": 5,
+        "pattern?": "^[A-Z]{3}$",
+        "patternMessage?": "Use three capital letters."
+      },
+      "conditionalRule?": {
+        "show": {
+          "all": [
+            {
+              "questionKey": "attending",
+              "op": "equals",
+              "value": "yes"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

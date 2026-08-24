@@ -21,7 +21,6 @@ export const HOME_ENTITY = {
 
 /** Action names (registered by WP-C; see packages/Actions custom/authoring + templates). */
 export const HOME_ACTION = {
-  generateFromBrief: 'Forms: Generate Form From Brief',
   createFromTemplate: 'Forms: Create Form From Template',
 } as const;
 

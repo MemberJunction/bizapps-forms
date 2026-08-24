@@ -12,6 +12,11 @@ export {
   respondentLabel,
 } from './answer-values';
 export { toDate } from './runview-dates';
+export {
+  readActionOutput,
+  readActionOutputString,
+  type ClientActionResult,
+} from './action-output';
 export { flattenQuestions } from './published-questions';
 export { FORMS_UI_CSS, FORMS_UI_TOKENS, FORMS_UI_PRIMITIVES } from './forms-ui';
 export {
