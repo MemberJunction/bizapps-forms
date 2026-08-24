@@ -25,6 +25,9 @@ on:
       # `npm test` is Vitest and never executes a plain-Node .mjs spec — so a PR that weakened or
       # deleted a CHECK 3 case ran neither step. A gate whose tests nothing runs is a gate on trust.
       - 'scripts/check-distribution-seed.spec.mjs'
+      # The mutation gate and, just as importantly, its list of load-bearing behaviours: editing
+      # that list is how coverage is dropped, so it has to be able to fail the PR that does it.
+      - 'scripts/check-distribution-seed.mutants.mjs'
       - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
   pull_request:
@@ -42,6 +45,9 @@ on:
       # `npm test` is Vitest and never executes a plain-Node .mjs spec — so a PR that weakened or
       # deleted a CHECK 3 case ran neither step. A gate whose tests nothing runs is a gate on trust.
       - 'scripts/check-distribution-seed.spec.mjs'
+      # The mutation gate and, just as importantly, its list of load-bearing behaviours: editing
+      # that list is how coverage is dropped, so it has to be able to fail the PR that does it.
+      - 'scripts/check-distribution-seed.mutants.mjs'
       - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
 
@@ -62,3 +68,10 @@ jobs:
 
       - name: Check the gate itself still fires
         run: node scripts/check-distribution-seed.spec.mjs
+
+      # The step above proves the gate FIRES; this one proves its spec would NOTICE a behaviour
+      # going missing. CHECK 3's failure mode is silence, so an untested behaviour is one a
+      # refactor deletes with the suite green — which is what #44 found nine of. Takes ~1 minute:
+      # it runs the spec once per mutant, in a fresh process each time.
+      - name: Check the gate's spec still kills what it claims to cover
+        run: npm run lint:distribution:mutants
