@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/forms-server": patch
+"@mj-biz-apps/forms-server": minor
 ---
 
 `Forms: Analyze Written Responses` could never record a run, so it never completed.
