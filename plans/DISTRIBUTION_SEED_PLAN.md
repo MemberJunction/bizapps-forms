@@ -159,7 +159,7 @@ Commit: `chore(metadata): emit migration-ready SQL from mj sync push`.
 The push must run against a DB whose Forms metadata is **empty**, or the log records updates
 instead of creates and the migration is not replayable on a fresh install.
 
-1. `docker commit forms-sql forms-sql-snapshot:pre-seed-gen` (the dev DB is the only copy of this
+1. `docker commit sql-mj-it sql-mj-it-snapshot:pre-seed-gen` (was `forms-sql`; the per-app databases were retired 2026-08-21 — see `WORKSPACE.md`) (the dev DB is the only copy of this
    metadata — snapshot before touching it).
 2. Stand up a scratch DB: run `npm run mj:migrate` + host CodeGen against an empty database so the
    Forms schema and entity rows exist but no app metadata does.

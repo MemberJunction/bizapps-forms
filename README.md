@@ -242,6 +242,17 @@ respondent-path defects in 0.2.1:
 npm run smoke:respondent -- <distribution-slug>
 ```
 
+Two environment knobs, because the defaults stopped being right when the dev environment changed:
+
+| variable | default | when to set it |
+|---|---|---|
+| `FORMS_SMOKE_URL` | `http://localhost:4121` | the API actually serving Forms. In the shared dev workspace that is **`http://localhost:4000`** — `4121` is this repo's own harness, which the workspace no longer runs. |
+| `FORMS_SQL_CONTAINER` | `sql-mj-it` | the docker SQL Server the scripts that seed state shell into (`automation-semantics`, `upload-provenance`, `resume-arc`, `binding`). Was `forms-sql` until the per-app databases were retired. |
+
+```bash
+FORMS_SMOKE_URL=http://localhost:4000 npm run smoke:respondent -- <distribution-slug>
+```
+
 ---
 
 ## 🔌 Installing MJ Forms into a host app

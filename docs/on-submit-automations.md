@@ -110,8 +110,14 @@ The **Automate** tab writes the same `FormAutomation` rows. Two behaviours are w
 
 - Adding your first step **seeds the four built-ins** as ordinary rows first, so the cutover is
   visible and reversible rather than silently switching four things off.
-- Adding a step also marks the form `Configured` **permanently**. Removing every step afterwards
+- Adding **or removing** a step marks the form `Configured` **permanently**. Removing every step
   therefore means *run nothing* — the built-ins do not come back. This is the point: before it, an
   author who cleared their steps silently got all four again.
+
+  Marking on removal as well as on addition is what covers a form this builder did not configure in
+  the first place. `V202608081400__Backfill_Legacy_Automations` gave every form that predates 0.8.0
+  four automation rows and no mode, so an author of one of those can reach an empty list without
+  ever having *added* anything — and without this, that empty list would infer `legacy` and bring
+  the four built-ins back.
 
 Changes take effect on the next **publish**.

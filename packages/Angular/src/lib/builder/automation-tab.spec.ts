@@ -119,7 +119,7 @@ describe('failures are surfaced, never swallowed', () => {
 });
 
 describe('adding a step commits the form to its own automations', () => {
-  it('marks the form authoritative before writing the row', () => {
+  it('marks the form authoritative once the row is safely written', () => {
     // `addAutomation` is the single choke point for creating a step. If the mark is skipped, the
     // form keeps INFERRING its dispatch from whether the list is empty — so removing the last step
     // silently restores the confirmation email, follow-up task, respondent-Person upsert and
@@ -128,10 +128,12 @@ describe('adding a step commits the form to its own automations', () => {
     const body = source.slice(source.indexOf('private async addAutomation'));
 
     expect(body).toMatch(/markAutomationsAuthoritative\(\)/);
-    // Before the row, so a failure to mark abandons the add rather than leaving a step behind on a
-    // form the server still treats as unconfigured.
-    expect(body.indexOf('markAutomationsAuthoritative()')).toBeLessThan(
-      body.indexOf('automation.Save()'),
+    // AFTER the row is saved. Marking first and then failing to write leaves a form marked
+    // authoritative with zero automations — which runs nothing at all, neither configured steps nor
+    // the built-ins. Writing first and failing to mark leaves rows with no mode, which still infers
+    // `configured`: the same outcome, reachable again on the next edit.
+    expect(body.indexOf('automation.Save()')).toBeLessThan(
+      body.indexOf('markAutomationsAuthoritative()'),
     );
   });
 
@@ -141,11 +143,23 @@ describe('adding a step commits the form to its own automations', () => {
     expect(code()).not.toMatch(/onSubmitMode\s*[:=]\s*'Legacy'/);
   });
 
-  it('does not touch the mode when a step is removed', () => {
+  it('marks the form authoritative when a step is REMOVED, not only when one is added', () => {
+    // This test asserted the OPPOSITE until the adversarial review of PR #59, and in doing so it
+    // pinned the bug in place. Marking only on add covers a form whose steps this builder created;
+    // it misses every form that already had them. `V202608081400__Backfill_Legacy_Automations`
+    // gave EVERY pre-0.8.0 form four automation rows and no mode — so an author of one of those
+    // could delete all four, republish, and get an `automations: []` snapshot with the mode still
+    // absent, which infers `legacy` and brings all four built-ins back. That is the exact
+    // regression this PR claims to have removed.
     const source = code();
     const removeBody = source.slice(source.indexOf('protected async remove('));
     const nextMethod = removeBody.indexOf('private async update(');
+    const body = removeBody.slice(0, nextMethod);
 
-    expect(removeBody.slice(0, nextMethod)).not.toMatch(/onSubmitMode|markAutomationsAuthoritative/);
+    expect(body).toMatch(/markAutomationsAuthoritative\(\)/);
+    // Before the delete: if marking fails we must still be holding the rows, because rows with no
+    // mode still infer `configured`. Deleting first and failing to mark is the unrecoverable order
+    // — zero rows with no mode is indistinguishable from a form that configured nothing.
+    expect(body.indexOf('markAutomationsAuthoritative()')).toBeLessThan(body.indexOf('.Delete()'));
   });
 });

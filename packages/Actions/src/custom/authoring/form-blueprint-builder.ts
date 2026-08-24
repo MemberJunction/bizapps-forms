@@ -61,6 +61,18 @@ export async function buildFormFromBlueprint(
   ownerUserId?: string,
 ): Promise<BuiltFormResult> {
   const md = new Metadata();
+
+  // BEFORE anything is written. Resolving names here rather than inside `createAutomations` is the
+  // whole difference between a refusal and a half-built form: the Form row carries
+  // `onSubmitMode: 'Configured'` in its settings, so a resolve that fails after it is saved leaves
+  // a draft that is marked authoritative with zero automations — publish that and nothing runs at
+  // all, neither configured steps nor the legacy fallback. There is no transaction spanning these
+  // saves, so ordering is the only thing that can prevent it.
+  const actionIdByName = await resolveActionIds(
+    (blueprint.automations ?? []).map((a) => a.actionName),
+    contextUser,
+  );
+
   const form = await createForm(md, blueprint, contextUser, ownerUserId);
   const version = await createDraftVersion(md, form.ID, contextUser);
 
@@ -73,7 +85,7 @@ export async function buildFormFromBlueprint(
     optionCount += counts.options;
   }
 
-  const automationCount = await createAutomations(md, form.ID, blueprint, contextUser);
+  const automationCount = await createAutomations(md, form.ID, blueprint, actionIdByName, contextUser);
 
   return {
     formId: form.ID,
@@ -88,29 +100,23 @@ export async function buildFormFromBlueprint(
 /**
  * Persist the blueprint's on-submit steps, resolving each Action BY NAME.
  *
- * Refuses on anything it cannot vouch for — a name this deployment has not registered, or a read
- * that failed — rather than writing the steps it did manage to resolve. A partial set is the worst
- * outcome available here: the form is marked authoritative either way, so the steps that failed to
- * resolve do not fall back to anything, they simply never happen, and nothing says so.
+ * Takes the already-resolved name→id map rather than resolving here, because resolution must
+ * happen before the Form row exists — see {@link buildFormFromBlueprint}. By the time this runs,
+ * every authored name is known to be resolvable, so it cannot write a partial set.
  *
- * Returns the number of rows written (0 when the blueprint authors none), and does not read the
- * Action catalogue at all in that case.
+ * Returns the number of rows written (0 when the blueprint authors none).
  */
 async function createAutomations(
   md: Metadata,
   formId: string,
   blueprint: FormBlueprint,
+  actionIdByName: ReadonlyMap<string, string>,
   contextUser: UserInfo,
 ): Promise<number> {
   const authored = blueprint.automations ?? [];
   if (authored.length === 0) {
     return 0;
   }
-
-  const actionIdByName = await resolveActionIds(
-    authored.map((a) => a.actionName),
-    contextUser,
-  );
 
   for (let index = 0; index < authored.length; index++) {
     const step = authored[index];
@@ -148,6 +154,11 @@ async function resolveActionIds(
   contextUser: UserInfo,
 ): Promise<Map<string, string>> {
   const wanted = [...new Set(names)];
+  if (wanted.length === 0) {
+    // No steps authored: read nothing. Called unconditionally now that it runs before the Form is
+    // created, so this is what keeps an ordinary form from querying the Action catalogue at all.
+    return new Map();
+  }
   const filter = wanted.map((n) => `Name='${n.replace(/'/g, "''")}'`).join(' OR ');
   const result = await new RunView().RunView<{ ID: string; Name: string }>(
     {

@@ -297,6 +297,31 @@ describe('buildFormFromBlueprint + authored automations', () => {
     expect(row.fields.IsActive).toBe(false);
   });
 
+  it('writes NO form at all when a step names an Action this deployment lacks', async () => {
+    // Adversarial review of PR #59. The refusal was real but too late: the Form row was already
+    // saved WITH `onSubmitMode: 'Configured'` baked into its settings, so a failed resolve left a
+    // draft that is marked authoritative and carries zero automations. Publish that and NOTHING
+    // runs on submit — no configured steps, and no legacy fallback either, because the mode says
+    // the (empty) list is authoritative. Worse than the duplicate Person this PR set out to fix.
+    await expect(
+      buildFormFromBlueprint(withAutomations([{ actionName: 'Forms: Not Installed Here' }]), user),
+    ).rejects.toThrow();
+
+    expect(byEntity('MJ_BizApps_Forms: Forms')).toHaveLength(0);
+    expect(byEntity('MJ_BizApps_Forms: Form Versions')).toHaveLength(0);
+    expect(byEntity('MJ_BizApps_Forms: Form Automations')).toHaveLength(0);
+  });
+
+  it('writes no form when the Action catalogue cannot be read', async () => {
+    actionReadSucceeds = false;
+
+    await expect(
+      buildFormFromBlueprint(withAutomations([{ actionName: 'Forms: Send Confirmation Email' }]), user),
+    ).rejects.toThrow();
+
+    expect(byEntity('MJ_BizApps_Forms: Forms')).toHaveLength(0);
+  });
+
   it('refuses a step naming an Action this deployment does not have', async () => {
     // The opposite of what the builder UI's seeding does, deliberately. Seeding skips an
     // unregistered built-in to reproduce the legacy runner; here the consumer NAMED the step, and

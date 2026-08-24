@@ -36,15 +36,30 @@ export class OnSubmitConfigError extends Error {}
  */
 export function applyOnSubmitConfig(
   blueprint: FormBlueprint,
-  mode: string | undefined,
+  mode: string | null | undefined,
   automations: unknown,
 ): FormBlueprint {
   const configured: FormBlueprint = { ...blueprint };
-  if (mode !== undefined) {
+  // NULL IS ABSENT, not a value. MJ materialises a declared-but-unsupplied Action param as `null`
+  // — and the migration declares both of these with `@DefaultValue = NULL` — so treating null as
+  // supplied would make every caller that simply omits `Automations` fail with
+  // INVALID_ON_SUBMIT_CONFIG. Blank is absent for the same reason: `getStringParam`, which every
+  // other param in this package goes through, already collapses blank to undefined.
+  if (mode !== undefined && mode !== null && mode.trim() !== '') {
     configured.onSubmitMode = parseMode(mode);
   }
-  if (automations !== undefined) {
+  if (automations !== undefined && automations !== null) {
     configured.automations = parseAutomations(automations);
+  }
+  // The PAIR, not either half. Each is individually valid, and the combination is the one shape
+  // that fails silently: `Legacy` wins the dispatch, the authored steps are written anyway, and
+  // the caller sees Success plus a non-zero AutomationCount while at runtime the legacy four fire
+  // and their step never does. Nothing downstream can distinguish it from a form that meant it.
+  if (configured.onSubmitMode === 'Legacy' && (configured.automations?.length ?? 0) > 0) {
+    throw new OnSubmitConfigError(
+      "OnSubmitMode 'Legacy' runs the built-in on-submit steps, so the Automations supplied here " +
+        "would be written and never run. Use 'Configured' to run them, or omit them to keep the built-ins.",
+    );
   }
   return configured;
 }

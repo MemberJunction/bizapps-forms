@@ -55,10 +55,48 @@ describe('applyOnSubmitConfig', () => {
     expect(result.automations).toEqual([]);
   });
 
+  it('rejects steps authored alongside an explicit Legacy mode', () => {
+    // Adversarial review of PR #59. `Legacy` wins over the implied `Configured`, but the steps were
+    // still written — so the caller got Success and a non-zero AutomationCount, and at runtime the
+    // legacy four fired while their own step never did. Silently. Rejecting the PAIR is the only
+    // place that can catch it: each half is individually valid.
+    expect(() =>
+      applyOnSubmitConfig(base, 'Legacy', '[{"actionName":"Forms: Send Confirmation Email"}]'),
+    ).toThrow(/Legacy/i);
+  });
+
+  it('allows an explicit Legacy mode when no steps are authored', () => {
+    // The combination is the problem, not the mode: declaring Legacy explicitly is a legitimate way
+    // to say "keep the built-ins".
+    expect(applyOnSubmitConfig(base, 'Legacy', undefined).onSubmitMode).toBe('Legacy');
+    expect(applyOnSubmitConfig(base, 'Legacy', '[]').onSubmitMode).toBe('Legacy');
+  });
+
   it('rejects a mode it does not recognise instead of ignoring it', () => {
     // Ignoring it is the dangerous direction: the caller believes it opted out, and the legacy four
     // run anyway — exactly the silence this issue is about.
     expect(() => applyOnSubmitConfig(base, 'configured-ish', undefined)).toThrow(/onSubmitMode|OnSubmitMode/i);
+  });
+
+  it('treats a null Automations value as "not supplied"', () => {
+    // MJ materialises a declared-but-unsupplied param as `null`, and the migration declares
+    // `Automations` with `@DefaultValue = NULL`. A null reaching the parser throws
+    // INVALID_ON_SUBMIT_CONFIG, so every caller that simply omits the param would fail. Absent and
+    // null must mean the same thing: say nothing.
+    const result = applyOnSubmitConfig(base, undefined, null);
+
+    expect(result.automations).toBeUndefined();
+    expect(result.onSubmitMode).toBeUndefined();
+  });
+
+  it('treats a null OnSubmitMode as "not supplied"', () => {
+    expect(applyOnSubmitConfig(base, null, undefined).onSubmitMode).toBeUndefined();
+  });
+
+  it('treats a blank OnSubmitMode as "not supplied"', () => {
+    // `getStringParam` already collapses blank to undefined for every other param; an empty string
+    // arriving here must not be read as an unrecognised mode.
+    expect(applyOnSubmitConfig(base, '   ', undefined).onSubmitMode).toBeUndefined();
   });
 
   it('rejects steps that are not a list', () => {

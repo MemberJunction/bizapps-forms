@@ -591,6 +591,19 @@ export class AutomationTabComponent implements OnInit {
       return;
     }
     await this.run(async () => {
+      // BEFORE the delete, and on every removal rather than only the last one.
+      //
+      // Marking on add alone covers forms whose steps this builder created, and misses every form
+      // that already had them — `V202608081400__Backfill_Legacy_Automations` gave every pre-0.8.0
+      // form four automation rows and no mode. Such an author could delete all four, republish,
+      // and get an empty snapshot with the mode still absent, which infers `legacy` and restores
+      // the four built-ins: the exact regression this was meant to end.
+      //
+      // Before rather than after, because the failure directions are not symmetric: marking then
+      // failing to delete leaves the rows and the mode, which is what the author sees anyway;
+      // deleting then failing to mark can leave zero rows and no mode, which is indistinguishable
+      // from a form that configured nothing.
+      await this.markAutomationsAuthoritative();
       if (!(await row.Delete())) {
         throw new Error(row.LatestResult?.CompleteMessage ?? 'That step could not be removed.');
       }
@@ -927,10 +940,6 @@ export class AutomationTabComponent implements OnInit {
     configure: (row: mjBizAppsFormsFormAutomationEntity) => void,
   ): Promise<void> {
     const seeded = await this.seedLegacyDefaultsIfFirst();
-    // Before the row exists, not after. From this point the form's own steps are what run on
-    // submit — including when the author later removes every one of them, which is the whole
-    // point: an empty list must mean "run nothing", never "run the four built-ins again".
-    await this.markAutomationsAuthoritative();
     const automation = await this.md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
       'MJ_BizApps_Forms: Form Automations',
     );
@@ -963,6 +972,11 @@ export class AutomationTabComponent implements OnInit {
     if (!(await automation.Save())) {
       throw new Error(automation.LatestResult?.CompleteMessage ?? 'Saving that step failed.');
     }
+    // AFTER the row, not before. Marking first and then failing to write the row leaves a form
+    // marked authoritative with zero automations, which runs NOTHING on submit — neither
+    // configured steps nor the built-ins. This order fails the other way: rows exist, mode unset,
+    // which still infers `configured` and is corrected by the next edit.
+    await this.markAutomationsAuthoritative();
     this.selectedId.set(automation.ID);
     this.adding.set(null);
     this.resetAddState();

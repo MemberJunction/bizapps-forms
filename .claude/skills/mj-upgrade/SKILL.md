@@ -35,7 +35,7 @@ Keep install/build/test output in background log files under the scratchpad and 
 
 **Why this step, and not the pins, is what wrecks an upgrade.** A partially-migrated core schema still installs, builds, tests and starts clean. The damage surfaces hours later and nowhere near its cause: `AIEngine.Config()` hits a core entity the metadata does not have, throws `Error: Entity <name> not found in metadata`, and aborts loading its **entire** agent/metadata set — so an unrelated feature fails with a missing-agent error. The upgrade is done when steps 11–15 are *verified*, not when `migrate` exits 0.
 
-11. **Snapshot the database.** Local dev is a docker SQL Server (`forms-sql`, port 1456, database `MJ_Forms_Dev`) — `docker commit forms-sql forms-sql-snapshot:pre-<version>` before anything below.
+11. **Snapshot the database.** Local dev is a docker SQL Server — since the per-app databases were retired (see `WORKSPACE.md`, 2026-08-21) that is the shared `sql-mj-it` on port 1455, database `MJ_ATS_Dev`, NOT the old `forms-sql`/`MJ_Forms_Dev` on 1456. Run `docker commit sql-mj-it sql-mj-it-snapshot:pre-<version>` before anything below. This is the rollback point, so a stale container name here means the snapshot silently never happens: `docker commit` fails with `No such container` and the upgrade proceeds anyway.
 
 12. **Check the watermark *before* migrating.** The CLI fetches only migrations strictly newer than the highest successful version in `__mj.flyway_schema_history`, so one row with a too-high version permanently hides every migration below it, silently.
     ```sql
