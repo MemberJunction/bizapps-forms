@@ -32,11 +32,32 @@ import { FileStorageEngine } from '@memberjunction/storage';
 import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
+import { InFlightLimiter } from '../http/in-flight-limiter.js';
 import { currentRequestIdentity } from '../http/request-identity.js';
 import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
 import { checkUploadRateLimit } from './upload-rate-limit.js';
+
+/**
+ * Process-wide in-flight cap on the anonymous upload endpoint, lazily built from config.
+ *
+ * Module-level (not per-instance) so the bound is one number for the whole process however many
+ * times ClassFactory instantiates the middleware. Bounds simultaneous work, which the per-caller
+ * IP ceiling beside it does not — see {@link InFlightLimiter}.
+ */
+let uploadInFlight: InFlightLimiter | undefined;
+function uploadInFlightLimiter(): InFlightLimiter {
+  if (!uploadInFlight) {
+    uploadInFlight = new InFlightLimiter(getUploadConfig().maxInFlight);
+  }
+  return uploadInFlight;
+}
+
+/** Test-only: drop the memoized limiter so a fresh config takes effect. */
+export function resetUploadInFlightForTests(): void {
+  uploadInFlight = undefined;
+}
 
 /** The verified magic-link payload MJ's `createUnifiedAuthMiddleware` attaches to the request. */
 interface VerifiedUserPayload {
@@ -74,8 +95,38 @@ export class UploadMiddleware extends BaseServerMiddleware {
     ];
   }
 
-  /** Buffer the body (size-capped), parse multipart, run the service, and respond JSON. */
+  /**
+   * Two gates BEFORE any work, answering different questions: a process-wide in-flight cap (how
+   * much can run at once) and, inside `processUpload`, a per-caller window keyed on the resolved
+   * peer IP (how often one caller may act). Both run ahead of buffering the body, so a flood is
+   * refused before it costs memory or storage, and the in-flight slot wraps the whole request in a
+   * `finally` so it releases on every exit path.
+   *
+   * The in-flight cap goes FIRST so a request shed for load is never charged to anyone's window.
+   *
+   * Until these landed the upload endpoint had no frequency control at all: an authenticated
+   * anonymous session could POST files without bound (storage DoS).
+   */
   private async handleUpload(req: Request, res: Response): Promise<void> {
+    if (!uploadInFlightLimiter().TryEnter()) {
+      // 503 (load), not 429 (bad request): this clears the instant in-flight work drains.
+      //
+      // Deliberately BEFORE the per-caller window inside `processUpload`, so a request shed for
+      // load is never charged to anyone's budget. Charging load would let a flood spend the
+      // budget of unrelated callers, which is the failure the in-flight cap exists to avoid.
+      LogStatus('[Forms] Upload refused: too many uploads in flight. Clears as in-flight work drains.');
+      sendJsonError(res, 503, 'The upload service is busy right now. Please try again in a moment.');
+      return;
+    }
+    try {
+      await this.processUpload(req, res);
+    } finally {
+      uploadInFlightLimiter().Exit();
+    }
+  }
+
+  /** Buffer the body (size-capped), parse multipart, run the service, and respond JSON. */
+  private async processUpload(req: Request, res: Response): Promise<void> {
     const contextUser = userPayloadOf<VerifiedUserPayload>(req)?.userRecord;
     if (!contextUser) {
       // Should not happen (unified auth would have 401'd) — defensive fail-closed.

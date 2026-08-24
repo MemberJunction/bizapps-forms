@@ -126,6 +126,42 @@ export async function findResponseById(
   return { ok: true, response: result.Results[0] };
 }
 
+/**
+ * Count the `Partial` (in-flight autosave) rows for a published version.
+ *
+ * The durable, request-context-independent bound on partial-write abuse. The per-caller ceilings
+ * are sliding windows held in one process's memory, so they bound a RATE and nothing else: a
+ * caller who paces themselves under every window, or who spreads across addresses, accumulates
+ * rows for as long as they care to. Partial writes are otherwise ungated entirely — Turnstile and
+ * both quotas apply only to COMPLETE submissions — so this count is what actually stops the table
+ * growing without limit.
+ *
+ * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
+ * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal
+ * (the anonymous respondent cannot READ responses). `count_only` returns `TotalRowCount` without
+ * materializing rows. Fail-CLOSED: on a count error we report the cap as reached so a database blip
+ * cannot become an unbounded-write hole (the caller turns that into a refused partial, which the
+ * widget silently retries — autosave is fail-soft).
+ */
+export async function countPartialResponses(
+  provider: DefinitionRunViewProvider,
+  key: Pick<ResponseLookupKey, 'formVersionId'>,
+  contextUser: UserInfo,
+): Promise<{ ok: boolean; count: number }> {
+  const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
+    {
+      EntityName: FORM_RESPONSE_ENTITY,
+      ExtraFilter: `FormVersionID=${sqlString(key.formVersionId)} AND Status='Partial'`,
+      ResultType: 'count_only',
+    },
+    contextUser,
+  );
+  if (!result.Success) {
+    return { ok: false, count: 0 };
+  }
+  return { ok: true, count: result.TotalRowCount };
+}
+
 /** Identity for adopting a client-supplied response id: the id PLUS its required owner/version. */
 export interface OwnedResponseLookupKey {
   responseId: string;

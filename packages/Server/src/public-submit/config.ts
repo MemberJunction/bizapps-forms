@@ -23,6 +23,17 @@
  *  - `FORMS_RATELIMIT_WINDOW_MS`      Sliding-window length in ms. Default 60000 (1 min).
  *  - `FORMS_RATELIMIT_MAX_KEYS`       How many buckets the in-memory window store may retain
  *                                     before evicting the least recently charged. Default 50000.
+ *  - `FORMS_SUBMIT_MAX_IN_FLIGHT`     Max simultaneous in-flight submit-pipeline runs
+ *                                     (process-wide). Default 50. Bounds CONCURRENT work rather
+ *                                     than rate, which no sliding window can do at any setting —
+ *                                     a caller inside every limit can still open many requests at
+ *                                     once. Orthogonal to the ceilings above, not a substitute.
+ *  - `FORMS_MAX_PARTIALS_PER_VERSION` Hard ceiling on the number of `Partial` (autosave) rows a
+ *                                     single published version may accumulate. Default 10000.
+ *                                     The only DURABLE bound here: the caps above are per-window
+ *                                     and per-process, so a caller pacing themselves under all of
+ *                                     them, or spread across addresses, still accumulates rows
+ *                                     forever. This counts what is actually in the table.
  *
  * Note: the repo `.env` has a known typo on an unrelated key
  * (`GRAPHQL_BASE_URL='httkp://localhost'`); WP-B does not depend on it.
@@ -99,6 +110,10 @@ export interface PublicSubmitConfig {
    */
   rateLimitMaxKeys: number;
   rateLimitWindowMs: number;
+  /** Simultaneous in-flight submit-pipeline runs across the process — the concurrency bound. */
+  maxInFlight: number;
+  /** Hard ceiling on `Partial` rows per published version — bounds rotated-session partial spam. */
+  maxPartialsPerVersion: number;
 }
 
 const DEFAULT_TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
@@ -119,6 +134,8 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
     completionMax: numberFromEnv('FORMS_COMPLETION_MAX', 20),
     rateLimitMaxKeys: numberFromEnv('FORMS_RATELIMIT_MAX_KEYS', 50_000),
     rateLimitWindowMs: numberFromEnv('FORMS_RATELIMIT_WINDOW_MS', 60_000),
+    maxInFlight: numberFromEnv('FORMS_SUBMIT_MAX_IN_FLIGHT', 50),
+    maxPartialsPerVersion: numberFromEnv('FORMS_MAX_PARTIALS_PER_VERSION', 10_000),
   });
   return cached;
 }

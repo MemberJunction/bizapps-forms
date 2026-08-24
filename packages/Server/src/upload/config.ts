@@ -16,6 +16,7 @@
  *  - `FORMS_UPLOAD_PATH_PREFIX`     Optional storage path prefix. Default `forms-uploads/<date>`.
  *                                   REFUSED if it lands under the authoring-asset prefix — see
  *                                   {@link assertUploadPrefixIsPrivate}.
+ *  - `FORMS_UPLOAD_MAX_IN_FLIGHT`   Max simultaneous in-flight uploads (process-wide). Default 10.
  */
 
 import { LogError } from '@memberjunction/core';
@@ -41,6 +42,8 @@ const DEFAULT_ALLOWED_TYPES: readonly string[] = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 
+const DEFAULT_MAX_IN_FLIGHT = 10;
+
 /** Frozen, validated configuration for the upload endpoint. */
 export interface UploadConfig {
   enabled: boolean;
@@ -48,6 +51,9 @@ export interface UploadConfig {
   allowedTypes: readonly string[];
   storageAccountId: string | undefined;
   pathPrefix: string | undefined;
+  /** Per-IP sliding-window ceiling (a generous ceiling — see UploadMiddleware for the shared-proxy caveat). */
+  /** Simultaneous in-flight uploads across the process — the concurrency bound beside the IP ceiling. */
+  maxInFlight: number;
 }
 
 /** Numeric env read with a default; non-positive/invalid falls back to the default. */
@@ -86,6 +92,7 @@ export function getUploadConfig(): UploadConfig {
     allowedTypes: allowedTypesFromEnv(),
     storageAccountId: process.env.FORMS_UPLOAD_STORAGE_ACCOUNT?.trim() || undefined,
     pathPrefix: privatePathPrefix(),
+    maxInFlight: numberFromEnv('FORMS_UPLOAD_MAX_IN_FLIGHT', DEFAULT_MAX_IN_FLIGHT),
   });
   return cached;
 }
