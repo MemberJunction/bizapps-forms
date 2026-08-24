@@ -1,0 +1,266 @@
+- generic [ref=e3]:
+  - generic [ref=e6]:
+    - banner [ref=e7]:
+      - generic "MemberJunction" [ref=e8]
+      - text: 
+      - 'button "Switch application — current: Home" [ref=e11] [cursor=pointer]':
+        - generic [ref=e12]: 
+        - generic [ref=e13]: Home
+        - generic [ref=e14]: 
+      - navigation [ref=e16]:
+        - link "Home" [ref=e17] [cursor=pointer]
+        - button "Open records (14)" [ref=e21] [cursor=pointer]:
+          - generic [ref=e22]: 
+          - generic [ref=e23]: Records
+          - generic [ref=e24]: "14"
+      - generic [ref=e25]:
+        - generic [ref=e30]:
+          - generic [ref=e31]: 
+          - textbox "Search everything..." [ref=e32]
+          - generic [ref=e33]: ⌘K
+        - text: 
+        - button "" [ref=e34] [cursor=pointer]
+        - button "" [ref=e37] [cursor=pointer]
+        - button [ref=e40] [cursor=pointer]:
+          - img "User avatar" [ref=e41]
+    - generic:
+      - generic:
+        - generic:
+          - combobox:
+            - generic: "ATS: Applicant Sources"
+            - generic: 
+        - textbox "Search..."
+        - button ""
+    - text:    
+    - generic [ref=e43]:
+      - generic [ref=e366]:
+        - generic [ref=e367]:
+          - generic [ref=e368]:
+            - generic "Birthday Party RSVP" [ref=e369] [cursor=pointer]:
+              - button "Tab actions — Birthday Party RSVP" [ref=e370]:
+                - generic [ref=e371]: 
+                - text: 
+              - button "Close Birthday Party RSVP" [ref=e373]: 
+            - generic "Birthday Party RSVP" [ref=e374] [cursor=pointer]:
+              - button "Tab actions — Birthday Party RSVP" [ref=e375]:
+                - generic [ref=e376]: 
+                - text: 
+              - button "Close Birthday Party RSVP" [ref=e378]: 
+            - 'generic "ATS Demo: Application" [ref=e379] [cursor=pointer]':
+              - 'button "Tab actions — ATS Demo: Application" [ref=e380]':
+                - generic [ref=e381]: 
+                - text: 
+              - 'button "Close ATS Demo: Application" [ref=e383]': 
+            - generic "Community Beach Cleanup Volunteer Signup" [ref=e384] [cursor=pointer]:
+              - button "Tab actions — Community Beach Cleanup Volunteer Signup" [ref=e385]:
+                - generic [ref=e386]: 
+                - text: 
+              - button "Close Community Beach Cleanup Volunteer Signup" [ref=e388]: 
+            - generic "Applications" [ref=e389] [cursor=pointer]:
+              - button "Tab actions — Applications" [ref=e390]:
+                - generic [ref=e391]: 
+                - text: 
+              - button "Close Applications" [ref=e393]: 
+            - 'generic "ATS: Applications - ID|F1B628AD-2FCC-493D-963A-9D7C4129A6DF" [ref=e394] [cursor=pointer]':
+              - 'button "Tab actions — ATS: Applications - ID|F1B628AD-2FCC-493D-963A-9D7C4129A6DF" [ref=e395]':
+                - generic [ref=e396]: 
+                - text: 
+              - 'button "Close ATS: Applications - ID|F1B628AD-2FCC-493D-963A-9D7C4129A6DF" [ref=e398]': 
+            - generic "Technology Fellow" [ref=e399] [cursor=pointer]:
+              - button "Tab actions — Technology Fellow" [ref=e400]:
+                - generic [ref=e401]: 
+                - text: 
+              - button "Close Technology Fellow" [ref=e403]: 
+            - generic "Untitled form" [ref=e404] [cursor=pointer]:
+              - button "Tab actions — Untitled form" [ref=e405]:
+                - generic [ref=e406]: 
+                - text: 
+              - button "Close Untitled form" [ref=e408]: 
+            - generic "Company Dinner RSVP" [ref=e409] [cursor=pointer]:
+              - button "Tab actions — Company Dinner RSVP" [ref=e410]:
+                - generic [ref=e411]: 
+                - text: 
+              - button "Close Company Dinner RSVP" [ref=e413]: 
+            - generic "Demo Flow Agent" [ref=e414] [cursor=pointer]:
+              - button "Tab actions — Demo Flow Agent" [ref=e415]:
+                - generic [ref=e416]: 
+                - text: 
+              - button "Close Demo Flow Agent" [ref=e418]: 
+            - generic "Customer Acquisition Lead Form" [ref=e419] [cursor=pointer]:
+              - button "Tab actions — Customer Acquisition Lead Form" [ref=e420]:
+                - generic [ref=e421]: 
+                - text: 
+              - button "Close Customer Acquisition Lead Form" [ref=e423]: 
+            - generic "Application form" [ref=e424] [cursor=pointer]:
+              - button "Tab actions — Application form" [ref=e425]:
+                - generic [ref=e426]: 
+                - text: 
+              - button "Close Application form" [ref=e428]: 
+            - generic "Fun Acquisition Selection" [ref=e429] [cursor=pointer]:
+              - button "Tab actions — Fun Acquisition Selection" [ref=e430]:
+                - generic [ref=e431]: 
+                - text: 
+              - button "Close Fun Acquisition Selection" [ref=e433]: 
+            - generic "Untitled form" [ref=e434] [cursor=pointer]:
+              - button "Tab actions — Untitled form" [ref=e435]:
+                - generic [ref=e436]: 
+                - text: 
+              - button "Close Untitled form" [ref=e438]: 
+          - generic: 
+          - text: 
+          - button "Scroll tabs right" [ref=e439] [cursor=pointer]:
+            - generic [ref=e440]: 
+        - generic [ref=e441]:
+          - generic [ref=e443]:
+            - generic [ref=e444]:
+              - generic [ref=e445]: 
+              - button "Home" [ref=e446] [cursor=pointer]
+              - generic [ref=e447]: ›
+              - button "Home" [ref=e448] [cursor=pointer]
+            - generic [ref=e454]:
+              - generic [ref=e455]:
+                - textbox "Form name" [ref=e456]: "ATS Demo: Application"
+                - group "Render mode" [ref=e457]:
+                  - button "Scroll" [pressed] [ref=e458] [cursor=pointer]
+                  - button "One question" [ref=e459] [cursor=pointer]
+                - button "Save as template" [ref=e460] [cursor=pointer]:
+                  - generic [ref=e461]: 
+                  - text: Save as template
+                - button "Preview" [ref=e462] [cursor=pointer]:
+                  - generic [ref=e463]: 
+                  - text: Preview
+                - status "Everything in this form is live on its public link." [ref=e464]:
+                  - generic [ref=e465]: 
+                  - text: Published
+              - tablist "Builder workspace" [ref=e466]:
+                - tab "Build" [ref=e467] [cursor=pointer]:
+                  - generic [ref=e468]: 
+                  - text: Build
+                - tab "Design" [ref=e469] [cursor=pointer]:
+                  - generic [ref=e470]: 
+                  - text: Design
+                - tab "Distribute" [ref=e471] [cursor=pointer]:
+                  - generic [ref=e472]: 
+                  - text: Distribute
+                - tab "Automate" [active] [selected] [ref=e473] [cursor=pointer]:
+                  - generic [ref=e474]: 
+                  - text: Automate
+                - tab "Responses" [ref=e475] [cursor=pointer]:
+                  - generic [ref=e476]: 
+                  - text: Responses
+              - generic [ref=e740]:
+                - complementary "What happens on submit" [ref=e741]:
+                  - generic [ref=e742]:
+                    - paragraph [ref=e743]: On submit
+                    - button "Add" [ref=e744] [cursor=pointer]:
+                      - generic [ref=e745]: +
+                      - text: Add
+                  - list [ref=e746]:
+                    - listitem [ref=e747]:
+                      - button "Upsert Respondent Person Runs an action" [ref=e748] [cursor=pointer]:
+                        - generic [ref=e749]: "1"
+                        - generic [ref=e750]:
+                          - generic [ref=e751]: Upsert Respondent Person
+                          - generic [ref=e752]: Runs an action
+                    - listitem [ref=e753]:
+                      - button "Send Confirmation Email Runs an action" [ref=e754] [cursor=pointer]:
+                        - generic [ref=e755]: "2"
+                        - generic [ref=e756]:
+                          - generic [ref=e757]: Send Confirmation Email
+                          - generic [ref=e758]: Runs an action
+                    - listitem [ref=e759]:
+                      - button "Create Followup Task Runs an action" [ref=e760] [cursor=pointer]:
+                        - generic [ref=e761]: "3"
+                        - generic [ref=e762]:
+                          - generic [ref=e763]: Create Followup Task
+                          - generic [ref=e764]: Runs an action
+                    - listitem [ref=e765]:
+                      - button "Analyze Written Responses Runs an action" [ref=e766] [cursor=pointer]:
+                        - generic [ref=e767]: "4"
+                        - generic [ref=e768]:
+                          - generic [ref=e769]: Analyze Written Responses
+                          - generic [ref=e770]: Runs an action
+                    - listitem [ref=e771]:
+                      - button "Send responses to People Saves a record" [ref=e772] [cursor=pointer]:
+                        - generic [ref=e773]: "5"
+                        - generic [ref=e774]:
+                          - generic [ref=e775]: Send responses to People
+                          - generic [ref=e776]: Saves a record
+                - region "Selected step" [ref=e778]:
+                  - paragraph [ref=e779]:
+                    - generic [ref=e780]: 
+                    - generic [ref=e781]:
+                      - text: 5 things happen, in this order, after the answers are saved.
+                      - generic [ref=e782]: Their answers are saved before any of this runs, so a step that fails or takes its time never costs someone their submission.
+                  - generic [ref=e783]:
+                    - generic [ref=e784]:
+                      - generic [ref=e785]: 
+                      - heading "Upsert Respondent Person" [level=2] [ref=e787]
+                      - generic [ref=e788]: Runs an action
+                    - paragraph [ref=e789]: Find the person who submitted, or add them if they are new.
+                  - list [ref=e790]:
+                    - listitem [ref=e791]:
+                      - generic [ref=e792]: 
+                      - generic [ref=e793]: Runs in order, after the step before it has finished.
+                    - listitem [ref=e794]:
+                      - generic [ref=e795]: 
+                      - generic [ref=e796]: If it fails, the steps after it still run.
+                  - region "Settings for this step" [ref=e797]:
+                    - paragraph [ref=e798]: Settings
+                    - generic [ref=e799]:
+                      - generic [ref=e800]:
+                        - generic [ref=e801]: Switched on
+                        - generic [ref=e802]: Turn off to stop this step running, without losing how it is set up.
+                      - switch "Switched on" [checked] [ref=e804] [cursor=pointer]
+                    - generic [ref=e805]:
+                      - generic [ref=e806]:
+                        - generic [ref=e807]: Run it in sequence
+                        - generic [ref=e808]: "On: it waits for the step before it, so a later step can rely on what it made. Off: it starts straight away, alongside the other background steps."
+                      - switch "Run it in sequence" [checked] [ref=e810] [cursor=pointer]
+                    - generic [ref=e811]:
+                      - generic [ref=e812]:
+                        - generic [ref=e813]: Carry on if it fails
+                        - generic [ref=e814]: Off means a failure here stops the steps after it, which is what you want when they depend on this one.
+                      - switch "Carry on if it fails" [checked] [ref=e816] [cursor=pointer]
+                    - generic [ref=e817]:
+                      - generic [ref=e818]:
+                        - generic [ref=e819]: Position
+                        - generic [ref=e820]: Steps that run in sequence go in this order. Background steps all start together, so they can only be moved among themselves.
+                      - generic [ref=e821]:
+                        - button "Earlier" [disabled] [ref=e822]:
+                          - generic [ref=e823]: 
+                          - text: Earlier
+                        - button "Later" [ref=e824] [cursor=pointer]:
+                          - generic [ref=e825]: 
+                          - text: Later
+                    - button "Remove this step" [ref=e827] [cursor=pointer]:
+                      - generic [ref=e828]: 
+                      - text: Remove this step
+                  - region "Recent activity" [ref=e829]:
+                    - paragraph [ref=e830]: Recent activity
+                    - list [ref=e831]:
+                      - listitem [ref=e832]:
+                        - generic [ref=e833]: Failed
+                        - generic [ref=e834]: 8/24/26, 12:13 PM
+                        - generic [ref=e835]: "Failed to create Person record: {\"Source\":\"FirstName\",\"Message\":\"First Name cannot be null\",\"Value\":null,\"Type\":\"Failure\"} {\"Source\":\"LastName\",\"Message\":\"Last Name cannot be null\",\"Value\":null,\"Type\":\"Failure\"}"
+                      - listitem [ref=e836]:
+                        - generic [ref=e837]: Succeeded
+                        - generic [ref=e838]: 8/24/26, 11:54 AM
+                        - generic [ref=e839]: "{\"summary\":\"Created Person 349FED0F-2054-4462-9106-18875FDA95EA for response C5E1922C-544A-4D84-8267-89F6006367D6.\"}"
+                      - listitem [ref=e840]:
+                        - generic [ref=e841]: Succeeded
+                        - generic [ref=e842]: 8/24/26, 11:52 AM
+                        - generic [ref=e843]: "{\"summary\":\"Linked existing Person BE65026B-9E7D-41C3-A197-9BF688CCDF52 for response ADAF0F15-DC8B-4357-BF0C-FAF8F948A3EA.\"}"
+                      - listitem [ref=e844]:
+                        - generic [ref=e845]: Succeeded
+                        - generic [ref=e846]: 8/24/26, 11:52 AM
+                        - generic [ref=e847]: "{\"summary\":\"Linked existing Person BE65026B-9E7D-41C3-A197-9BF688CCDF52 for response 7C9534ED-0199-46B0-B657-D69A9F0526C2.\"}"
+                      - listitem [ref=e848]:
+                        - generic [ref=e849]: Succeeded
+                        - generic [ref=e850]: 8/24/26, 11:52 AM
+                        - generic [ref=e851]: "{\"summary\":\"Linked existing Person BE65026B-9E7D-41C3-A197-9BF688CCDF52 for response D3E9B7EA-160A-4BF7-ABAD-DEBB31D20B62.\"}"
+          - text: "                  #                                                    +     + "
+      - generic:
+        - generic "Open Records"
+  - button "Open chat" [ref=e360] [cursor=pointer]:
+    - generic [ref=e361]: 

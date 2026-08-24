@@ -193,3 +193,62 @@ describe('screens', () => {
     expect(parsed.endScreens).toEqual([]);
   });
 });
+
+/**
+ * A broken on-submit mode must never take the form down.
+ *
+ * `onSubmitMode` is side-effect configuration: it decides what runs AFTER a submission and is
+ * invisible to the respondent filling the form in. That puts it in the same class as
+ * `automations`, which this parser is deliberately lenient about for exactly this reason — a
+ * corrupt entry there is dropped rather than allowed to refuse the whole snapshot, "because
+ * refusing to serve the form because one automation entry is corrupt would take the form down for
+ * everyone to protect a side effect".
+ *
+ * When the field was first added it did not follow that rule: it went through the strict zod
+ * settings schema, so ANY unrecognised value — a typo, the wrong case, a null — failed the whole
+ * settings parse, which failed the whole snapshot, which served every respondent "Form
+ * unavailable". The builder made that reachable: its own settings parser is a whitelist that
+ * copies `onSubmitMode` through without validating it.
+ *
+ * Degrading to absent is the safe direction: absent means "infer", which is the behaviour every
+ * form had before this field existed.
+ */
+describe('a malformed onSubmitMode degrades instead of taking the form offline', () => {
+  function withMode(mode: unknown): ReturnType<typeof parsePublishedDefinition> {
+    const def = JSON.parse(JSON.stringify(makeDefinition()));
+    def.settings.onSubmitMode = mode;
+    return parsePublishedDefinition(JSON.stringify(def));
+  }
+
+  it.each([
+    ['a typo', 'Legcy'],
+    ['the wrong case', 'configured'],
+    ['an empty string', ''],
+    ['null', null],
+    ['a number', 5],
+    ['an object', {}],
+  ])('still serves the form when the mode is %s', (_label, mode) => {
+    const parsed = withMode(mode);
+
+    expect(parsed).toBeDefined();
+    expect(parsed?.pages[0].questions[0].type).toBe('ShortText');
+    // Dropped, not guessed at — an unreadable declaration is not a declaration.
+    expect(parsed?.settings.onSubmitMode).toBeUndefined();
+  });
+
+  it('still carries the two values it does recognise', () => {
+    expect(withMode('Configured')?.settings.onSubmitMode).toBe('Configured');
+    expect(withMode('Legacy')?.settings.onSubmitMode).toBe('Legacy');
+  });
+
+  it('keeps the rest of the settings when the mode is dropped', () => {
+    const def = JSON.parse(JSON.stringify(makeDefinition()));
+    def.settings = { anonymousAllowed: false, captchaRequired: true, quota: 10, onSubmitMode: 'nonsense' };
+
+    const parsed = parsePublishedDefinition(JSON.stringify(def));
+
+    expect(parsed?.settings.anonymousAllowed).toBe(false);
+    expect(parsed?.settings.captchaRequired).toBe(true);
+    expect(parsed?.settings.quota).toBe(10);
+  });
+});

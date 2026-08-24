@@ -73,7 +73,17 @@ export const formSettingsSchema = z.object({
   // assignability, and an optional property present on one side only is assignable both ways, so
   // the guard passes vacuously for every optional field. `form-settings-schema.spec.ts` is what
   // actually holds this in step with `FormSettings`.
-  onSubmitMode: z.enum(['Legacy', 'Configured']).optional(),
+  //
+  // `.catch(undefined)` is load-bearing, and it is the ONLY tolerant field in this schema. Every
+  // other setting here describes the form a respondent is about to fill in, so a value we cannot
+  // read is a form we only half understand and refusing is right. This one is side-effect
+  // configuration — invisible to the respondent, exactly like `automations`, which the snapshot
+  // parser is deliberately lenient about for the same reason. Without this, one unrecognised
+  // value (a typo, the wrong case, a null) failed the whole settings parse, which failed the
+  // whole snapshot, which served every respondent "Form unavailable" — taking the form down to
+  // protect a side effect. Degrading to absent means "infer", which is what every form did before
+  // this field existed.
+  onSubmitMode: z.enum(['Legacy', 'Configured']).optional().catch(undefined),
 });
 
 // --- Parse helpers ---------------------------------------------------------

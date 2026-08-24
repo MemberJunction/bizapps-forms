@@ -3,6 +3,7 @@ import type {
   ValidationRule,
   FormSettings,
   FormStyleTokens,
+  OnSubmitMode,
 } from '@mj-biz-apps/forms-entities';
 import type { JSONValue } from '@mj-biz-apps/forms-entities';
 
@@ -84,8 +85,25 @@ export function parseFormSettings(raw: string | null | undefined): FormSettings 
     redirectUrl: parsed?.redirectUrl,
     // A whitelist drops what it does not name, so omitting this would silently revert a form to
     // inferring its dispatch on the next save of ANY setting — see json-fields.spec.ts.
-    onSubmitMode: parsed?.onSubmitMode,
+    //
+    // Validated rather than copied, unlike every other field here. The rest are the author's own
+    // free-form values; this one is a closed set the SERVER reads to decide what runs on submit,
+    // and the builder writing a value nothing recognises would put it straight into the next
+    // published snapshot.
+    onSubmitMode: recognisedOnSubmitMode(parsed?.onSubmitMode),
   };
+}
+
+/**
+ * The mode if it is one of the two the contract defines, otherwise absent.
+ *
+ * Absent means "infer", which is what every form did before the field existed — so dropping an
+ * unreadable value costs nothing and keeps the stored data honest. Deliberately exact rather than
+ * case-insensitive: accepting `configured` here would write a value back that only this parser
+ * understands, which is the drift it exists to prevent.
+ */
+function recognisedOnSubmitMode(value: unknown): OnSubmitMode | undefined {
+  return value === 'Legacy' || value === 'Configured' ? value : undefined;
 }
 
 export function serializeFormSettings(settings: FormSettings): string {

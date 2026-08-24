@@ -59,6 +59,17 @@ describe('form settings', () => {
     expect(settings.captchaRequired).toBe(false);
   });
 
+  it('drops an on-submit mode it does not recognise rather than passing it on', () => {
+    // This parser is a whitelist with no validation, so it used to copy whatever sat in
+    // `Form.Settings` straight into the next published snapshot. The server then rejected the
+    // whole snapshot over it and served "Form unavailable" — the server is tolerant now, but the
+    // builder should not be the thing manufacturing a value nothing can read.
+    for (const bad of ['configured', 'Legcy', '', 'null']) {
+      expect(parseFormSettings(JSON.stringify({ anonymousAllowed: true, captchaRequired: false, onSubmitMode: bad })).onSubmitMode)
+        .toBeUndefined();
+    }
+  });
+
   it('preserves an on-submit mode through a round-trip', () => {
     // The builder marks a form `Configured` the moment it writes its first automation row. This
     // parser is a whitelist, so a field missing from it is dropped on the next save — the form
