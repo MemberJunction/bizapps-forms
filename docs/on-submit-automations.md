@@ -18,7 +18,13 @@ The third row is the historical behaviour and the default. Every snapshot publis
 
 The decision lives in one place — `resolveOnSubmitDispatch` in `@mj-biz-apps/forms-entities` — and
 automations always execute **from the published snapshot**, never from the live `FormAutomation`
-rows. A step you configure but do not republish does nothing, by design: a response runs the
+rows.
+
+A mode the server cannot read — a typo, the wrong case, anything that is not one of the two values
+— is **dropped**, and the form falls back to inferring as it always did. It is deliberately not an
+error at that point: this setting is invisible to the respondent, and refusing to serve the form
+over it would take a live form offline to protect a side effect. The authoring paths are strict, so
+you are told about a bad value when you supply one rather than discovering it later. A step you configure but do not republish does nothing, by design: a response runs the
 configuration its own form version was published with.
 
 ### The four built-in hooks
@@ -64,6 +70,9 @@ Per-step options, with their defaults — chosen to reproduce what the legacy ru
 | `executionMode` | `Sync` | sequential and awaited, so a later step can rely on an earlier one |
 | `continueOnError` | `true` | best-effort, matching the legacy loop |
 | `isActive` | `true` | an inactive step is carried into the snapshot and skipped at run time |
+
+Supplying `Automations` alongside `OnSubmitMode: 'Legacy'` is an **error**, not a silently ignored
+list: `Legacy` runs the built-in steps, so the ones you named would be written and never run.
 
 An Action name this deployment does not have is a **hard failure**, not a skipped step. That is
 deliberately the opposite of what the builder's seeding does: seeding skips an unregistered
