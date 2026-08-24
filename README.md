@@ -229,6 +229,11 @@ cd apps/MJAPI && node server.mjs   # the API harness → http://localhost:4121
 
 A published form is then reachable anonymously at `http://localhost:4121/f/<distribution-slug>`.
 
+> **What happens after Submit** — which automations run, how to configure or decline them from code,
+> and which record owns respondent identity (read `FormResponse.RespondentPersonID`; do not derive a
+> second Person) — is **[docs/on-submit-automations.md](docs/on-submit-automations.md)**. Read it
+> before building an app that consumes Forms responses.
+
 **Verify it actually works** — this exercises the public path end to end (host page, session token,
 widget bundle, published definition, anonymous submit) and is the check that would have caught the
 respondent-path defects in 0.2.1:

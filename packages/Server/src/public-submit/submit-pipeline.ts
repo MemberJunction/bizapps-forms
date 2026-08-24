@@ -16,7 +16,9 @@ import { createStageTimer, formatTimings } from './stage-timer';
 import {
   endingMessage,
   endingRedirectUrl,
+  hasUnreachableAutomations,
   resolveEndingScreen,
+  resolveOnSubmitDispatch,
   type AnswerValue,
   type FormAnswerInput,
   type FormSubmissionResult,
@@ -675,13 +677,38 @@ async function checkQuotas(ctx: PipelineContext, resolved: ResolvedDefinition): 
 async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinition, responseId: string): Promise<void> {
   // A form that configures its own automations runs those; one that does not keeps the legacy
   // hard-coded hook list. That fallback is what makes this switch safe to land before any form has
-  // been re-published: every existing snapshot carries an empty `automations` array, so every
-  // existing form takes the legacy path and behaves exactly as it did. The constant list can only
-  // be deleted once a back-fill has given every form equivalent automations AND a parity test has
-  // shown the two produce the same effects.
-  if (resolved.definition.automations.length > 0 && !ctx.fireHooks) {
-    await runConfiguredAutomations(resolved, responseId);
-    return;
+  // been re-published: a snapshot published before automations existed carries an empty
+  // `automations` array, so it takes the legacy path and behaves exactly as it did.
+  //
+  // The decision itself lives in `resolveOnSubmitDispatch` rather than inline here, because
+  // inline it was an `automations.length > 0` test that could not tell "has never configured
+  // anything" from "deliberately runs nothing" — the two were the same snapshot. That cost a
+  // consumer owning its own subject identity a duplicate `Person` row on every submission
+  // (bizapps-forms#47), and it silently restored all four legacy hooks for any author who removed
+  // their last step in the builder.
+  const dispatch = resolveOnSubmitDispatch(resolved.definition);
+  if (dispatch.kind === 'configured') {
+    if (dispatch.automations.length === 0) {
+      // Declared authoritative and empty: nothing runs. Returning HERE rather than letting
+      // `runConfiguredAutomations` discover an empty plan also skips resolving the service
+      // principal and reading the response back — real work, on the hot path, for a form that has
+      // told us it wants none of it.
+      return;
+    }
+    if (!ctx.fireHooks) {
+      await runConfiguredAutomations(resolved, responseId);
+      return;
+    }
+    // A test injected a firer. Fall through to it, as this path always has: `runConfiguredAutomations`
+    // needs a database and a service principal, so the injected firer is what a pipeline test can
+    // actually observe.
+  }
+
+  if (hasUnreachableAutomations(resolved.definition)) {
+    console.warn(
+      `[forms] form ${resolved.definition.formId} declares onSubmitMode='Legacy' but carries ` +
+        `${resolved.definition.automations.length} automation(s); those will not run.`,
+    );
   }
 
   // Default firer runs under the system user internally; the anonymous ctx.contextUser is

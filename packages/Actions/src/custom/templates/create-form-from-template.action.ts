@@ -10,7 +10,15 @@
  *      (e.g. `contact`, `rsvp`, `nps`, `lead-capture`, `application`).
  *   - `Name` (string, optional) — overrides the template's default form name.
  *   - `OwnerUserID` (string, optional) — stamped on the created Form.
- * Output params: `FormID`, `FormVersionID`, `PageCount`, `QuestionCount`, `OptionCount`.
+ *   - `OnSubmitMode` ('Legacy' | 'Configured', optional) — whether this form's own automations
+ *      are what run on submit. `Configured` with no `Automations` is the supported way to run
+ *      NOTHING, which is how a consumer that owns its own subject identity declines
+ *      `Forms: Upsert Respondent Person` (bizapps-forms#47). Omitted keeps the historical
+ *      inference, so an existing caller's forms are unaffected.
+ *   - `Automations` (JSON array, optional) — the on-submit steps this form runs, in order, each
+ *      naming an MJ Action. Supplying it implies `Configured`.
+ * Output params: `FormID`, `FormVersionID`, `PageCount`, `QuestionCount`, `OptionCount`,
+ * `AutomationCount`.
  */
 import { BaseAction } from '@memberjunction/actions';
 import type { ActionResultSimple, RunActionParams } from '@memberjunction/actions-base';
@@ -19,6 +27,8 @@ import { buildFormFromBlueprint, FormPersistError } from '../authoring/form-blue
 import type { FormBlueprint } from '../authoring/form-blueprint';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { STARTER_TEMPLATES, getStarterTemplate } from './starter-templates';
+import { applyOnSubmitConfig, OnSubmitConfigError } from '../authoring/on-submit-config';
+import { findParam } from '../shared/action-params';
 
 @RegisterClass(BaseAction, 'Forms: Create Form From Template')
 export class CreateFormFromTemplateAction extends BaseAction {
@@ -34,7 +44,20 @@ export class CreateFormFromTemplateAction extends BaseAction {
       return fail(`Unknown TemplateKey '${key}'. Known templates: ${known}.`, 'UNKNOWN_TEMPLATE');
     }
 
-    const blueprint = withName(template.blueprint, getStringParam(params, 'Name'));
+    let blueprint = withName(template.blueprint, getStringParam(params, 'Name'));
+    try {
+      blueprint = applyOnSubmitConfig(
+        blueprint,
+        getStringParam(params, 'OnSubmitMode'),
+        findParam(params, 'Automations')?.Value,
+      );
+    } catch (error) {
+      // Before anything is written. A caller that mis-specified its on-submit steps must get an
+      // error, not a form that silently runs the four built-ins it was trying to replace.
+      const code = error instanceof OnSubmitConfigError ? 'INVALID_ON_SUBMIT_CONFIG' : 'FAILED';
+      return fail(asText(error), code);
+    }
+
     try {
       const built = await buildFormFromBlueprint(blueprint, params.ContextUser, getStringParam(params, 'OwnerUserID'));
       setOutputParam(params, 'FormID', built.formId);
@@ -42,6 +65,7 @@ export class CreateFormFromTemplateAction extends BaseAction {
       setOutputParam(params, 'PageCount', built.pageCount);
       setOutputParam(params, 'QuestionCount', built.questionCount);
       setOutputParam(params, 'OptionCount', built.optionCount);
+      setOutputParam(params, 'AutomationCount', built.automationCount);
       return {
         Success: true,
         ResultCode: 'SUCCESS',

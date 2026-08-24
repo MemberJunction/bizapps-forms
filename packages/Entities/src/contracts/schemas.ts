@@ -69,6 +69,11 @@ export const formSettingsSchema = z.object({
   closesAt: z.string().optional(),
   confirmationMessage: z.string().optional(),
   redirectUrl: z.string().optional(),
+  // Optional, and therefore NOT protected by `_settingsMatch` below: `AssertExtends` compares
+  // assignability, and an optional property present on one side only is assignable both ways, so
+  // the guard passes vacuously for every optional field. `form-settings-schema.spec.ts` is what
+  // actually holds this in step with `FormSettings`.
+  onSubmitMode: z.enum(['Legacy', 'Configured']).optional(),
 });
 
 // --- Parse helpers ---------------------------------------------------------

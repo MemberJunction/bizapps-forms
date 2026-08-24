@@ -117,3 +117,35 @@ describe('failures are surfaced, never swallowed', () => {
     expect(code()).toMatch(/row\.Revert\(\);/);
   });
 });
+
+describe('adding a step commits the form to its own automations', () => {
+  it('marks the form authoritative before writing the row', () => {
+    // `addAutomation` is the single choke point for creating a step. If the mark is skipped, the
+    // form keeps INFERRING its dispatch from whether the list is empty — so removing the last step
+    // silently restores the confirmation email, follow-up task, respondent-Person upsert and
+    // answer scoring (bizapps-forms#47).
+    const source = code();
+    const body = source.slice(source.indexOf('private async addAutomation'));
+
+    expect(body).toMatch(/markAutomationsAuthoritative\(\)/);
+    // Before the row, so a failure to mark abandons the add rather than leaving a step behind on a
+    // form the server still treats as unconfigured.
+    expect(body.indexOf('markAutomationsAuthoritative()')).toBeLessThan(
+      body.indexOf('automation.Save()'),
+    );
+  });
+
+  it('never returns a form to the legacy list', () => {
+    // There is no inverse anywhere, by design: once an author configures their own steps, removing
+    // all of them means "run nothing".
+    expect(code()).not.toMatch(/onSubmitMode\s*[:=]\s*'Legacy'/);
+  });
+
+  it('does not touch the mode when a step is removed', () => {
+    const source = code();
+    const removeBody = source.slice(source.indexOf('protected async remove('));
+    const nextMethod = removeBody.indexOf('private async update(');
+
+    expect(removeBody.slice(0, nextMethod)).not.toMatch(/onSubmitMode|markAutomationsAuthoritative/);
+  });
+});

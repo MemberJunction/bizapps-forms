@@ -59,6 +59,20 @@ describe('form settings', () => {
     expect(settings.captchaRequired).toBe(false);
   });
 
+  it('preserves an on-submit mode through a round-trip', () => {
+    // The builder marks a form `Configured` the moment it writes its first automation row. This
+    // parser is a whitelist, so a field missing from it is dropped on the next save — the form
+    // would silently revert to inferring its dispatch, and deleting the last step would bring all
+    // four legacy hooks back (bizapps-forms#47).
+    const raw = serializeFormSettings({
+      anonymousAllowed: true,
+      captchaRequired: false,
+      onSubmitMode: 'Configured',
+    });
+
+    expect(parseFormSettings(raw).onSubmitMode).toBe('Configured');
+  });
+
   it('round-trips', () => {
     const settings: FormSettings = {
       anonymousAllowed: false,

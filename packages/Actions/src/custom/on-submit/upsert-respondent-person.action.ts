@@ -6,6 +6,13 @@
  * loose and defensive — by email (case-insensitive). Idempotent: if the response
  * already has a RespondentPersonID, or no email was collected, it skips cleanly.
  *
+ * THIS ACTION OWNS RESPONDENT IDENTITY. A consuming app should read the
+ * `FormResponse.RespondentPersonID` this stamps rather than upserting its own Person from the same
+ * answers — the dedupe below covers only rows this action created, so an independent upsert
+ * produces a second Person for the same human that Forms neither knows about nor points at, with
+ * nothing logged. An app that genuinely owns subject identity should instead decline this hook
+ * (`onSubmitMode: 'Configured'`). See `docs/on-submit-automations.md`.
+ *
  * Contract: invoked BY NAME by WP-B's submit endpoint (seam S3). Do not rename.
  *
  * Input params: `FormResponseID` (string, required) — the just-saved response id.

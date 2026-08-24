@@ -16,6 +16,7 @@ import {
 import type {
   JSONValue,
   mjBizAppsFormsFormAutomationEntity,
+  mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormEntityBindingEntity,
 } from '@mj-biz-apps/forms-entities';
 
@@ -32,6 +33,8 @@ import {
   type StepKind,
   type SubmitStep,
 } from './automation-steps';
+import { settingsUpdateToMarkAuthoritative } from './on-submit-mode';
+import { FORMS_ENTITY } from '../shared/entity-names';
 import {
   pickEntities,
   pickTargets,
@@ -924,6 +927,10 @@ export class AutomationTabComponent implements OnInit {
     configure: (row: mjBizAppsFormsFormAutomationEntity) => void,
   ): Promise<void> {
     const seeded = await this.seedLegacyDefaultsIfFirst();
+    // Before the row exists, not after. From this point the form's own steps are what run on
+    // submit — including when the author later removes every one of them, which is the whole
+    // point: an empty list must mean "run nothing", never "run the four built-ins again".
+    await this.markAutomationsAuthoritative();
     const automation = await this.md.GetEntityObject<mjBizAppsFormsFormAutomationEntity>(
       'MJ_BizApps_Forms: Form Automations',
     );
@@ -959,6 +966,35 @@ export class AutomationTabComponent implements OnInit {
     this.selectedId.set(automation.ID);
     this.adding.set(null);
     this.resetAddState();
+  }
+
+  /**
+   * Record on the form that its own automations are what run on submit.
+   *
+   * Idempotent and cheap: {@link settingsUpdateToMarkAuthoritative} returns null once the form
+   * already says so, which is every call after the first.
+   *
+   * Failing here THROWS rather than warning, and that is deliberate. The caller wraps this in
+   * `run()`, which surfaces the message and abandons the add. The alternative — write the step
+   * anyway — produces exactly the state this whole change exists to remove: a form carrying
+   * authored automations that the server cannot tell apart from a form that configured nothing.
+   */
+  private async markAutomationsAuthoritative(): Promise<void> {
+    const form = await this.md.GetEntityObject<mjBizAppsFormsFormEntity>(FORMS_ENTITY.Form);
+    if (!form || !(await form.Load(this.FormID))) {
+      throw new Error('This form could not be read, so the step was not added.');
+    }
+    const updated = settingsUpdateToMarkAuthoritative(form.Settings);
+    if (updated === null) {
+      return;
+    }
+    form.Settings = updated;
+    if (!(await form.Save())) {
+      throw new Error(
+        form.LatestResult?.CompleteMessage ??
+          'This form could not be updated to run its own steps, so the step was not added.',
+      );
+    }
   }
 
   /** The highest DisplayOrder among the steps currently loaded, or 0 when there are none. */

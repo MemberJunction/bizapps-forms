@@ -82,6 +82,9 @@ export function parseFormSettings(raw: string | null | undefined): FormSettings 
     closesAt: parsed?.closesAt,
     confirmationMessage: parsed?.confirmationMessage,
     redirectUrl: parsed?.redirectUrl,
+    // A whitelist drops what it does not name, so omitting this would silently revert a form to
+    // inferring its dispatch on the next save of ANY setting — see json-fields.spec.ts.
+    onSubmitMode: parsed?.onSubmitMode,
   };
 }
 

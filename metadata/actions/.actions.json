@@ -46,6 +46,34 @@
             "lastModified": "2026-08-08T18:25:28.337Z",
             "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
           }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "OnSubmitMode",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Whether this form's own automations are what run on submit ('Legacy' or 'Configured'). 'Configured' with no Automations is the supported way to run NOTHING - how a caller that owns its own subject identity declines Forms: Upsert Respondent Person. Omit to keep the historical behaviour."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000003"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Automations",
+            "Type": "Input",
+            "ValueType": "Simple Object",
+            "IsArray": true,
+            "IsRequired": false,
+            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured'. An Action name this deployment does not have is an error, not a skipped step."
+          },
+          "primaryKey": {
+            "ID": "7F0B0001-A1B2-4C3D-8E4F-000000000004"
+          }
         }
       ]
     },
@@ -103,6 +131,34 @@
           "sync": {
             "lastModified": "2026-08-08T18:25:28.382Z",
             "checksum": "0832a79bc0a03c0b89a688e94ae4b12f45c5500a9583343017ad779a59fc77fa"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "OnSubmitMode",
+            "Type": "Input",
+            "ValueType": "Scalar",
+            "IsArray": false,
+            "IsRequired": false,
+            "Description": "Whether this form's own automations are what run on submit ('Legacy' or 'Configured'). 'Configured' with no Automations is the supported way to run NOTHING - how a caller that owns its own subject identity declines Forms: Upsert Respondent Person. Omit to keep the historical behaviour."
+          },
+          "primaryKey": {
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000003"
+          }
+        },
+        {
+          "fields": {
+            "ActionID": "@parent:ID",
+            "Name": "Automations",
+            "Type": "Input",
+            "ValueType": "Simple Object",
+            "IsArray": true,
+            "IsRequired": false,
+            "Description": "The on-submit steps this form runs, in order, each naming an MJ Action (for example [{\"actionName\":\"Forms: Send Confirmation Email\"}]). Supplying this implies OnSubmitMode='Configured'. An Action name this deployment does not have is an error, not a skipped step."
+          },
+          "primaryKey": {
+            "ID": "7F0B0002-A1B2-4C3D-8E4F-000000000004"
           }
         }
       ]
