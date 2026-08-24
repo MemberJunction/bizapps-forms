@@ -26,7 +26,7 @@ import { resolvePublishedDefinition, type ResolvedDefinition } from './definitio
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
 import { persistSubmission } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
-import { FormsRateLimiter, rateLimitedMessage } from './rate-limit.service';
+import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
   countPartialResponses,
   findAdoptableResponseById,
@@ -36,7 +36,14 @@ import {
 } from './response-lookup.service';
 import { InFlightLimiter } from '../http/in-flight-limiter';
 import { checkRespondentScope } from './scope-check.service';
-import { buildSourceMetadata, rateLimitKey } from './source-metadata.service';
+import {
+  abuseIdentity,
+  buildSourceMetadata,
+  completionCeilingKey,
+  rateLimitKey,
+  saveCeilingKey,
+  warnOnceIfAbuseKeyingDegraded,
+} from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
 import { buildAnswerMap, validateSubmission } from './validation.service';
 import {
@@ -91,8 +98,23 @@ export interface PipelineContext {
    * AFTER the anon scope check has authorized the request. See ON_SUBMIT_AUTOMATION_SPEC §7.
    */
   elevatedUser: UserInfo;
-  /** Anonymous magic-link session id (mj_sid) from the UserPayload. */
+  /**
+   * The caller's `x-session-id` request header, as `UserPayload.sessionId`.
+   *
+   * NOT `mj_sid` and not a JWT claim, whatever the name suggests — MJ reads it straight off the
+   * request in `extractAuthInputs`. It is a correlator the caller chooses, blank for any client
+   * that omits the header, and that is why it keys dedupe and the fine-grained per-session limit
+   * but nothing that has to hold against someone trying.
+   */
   sessionId: string;
+  /**
+   * Salted hash of the caller's resolved IP, from `RequestIdentityMiddleware` via
+   * `currentRequestIdentity()`. The ONLY caller attribute here that the caller did not choose, so
+   * it is what the abuse ceilings key on. Absent in unit tests and in a deployment that has not
+   * mounted the middleware, in which case those ceilings are dropped rather than re-keyed onto
+   * something weaker — see `rateLimitGatesFor`.
+   */
+  clientIpHash?: string;
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
@@ -194,11 +216,12 @@ function confirmationFields(
 /**
  * Process-wide in-flight cap on the submit pipeline, lazily built from config.
  *
- * The load-bearing durable control on this path. The resolver's `AppContext` cannot see `req.ip`,
- * so the rate limiter below keys on the client-supplied session id — which a caller rotates per
- * request to defeat it entirely. An in-flight cap reserves a real slot per request and cannot be
- * rotated around, bounding concurrent work regardless of any forged identity. See
- * {@link InFlightLimiter}. Module-level so the bound is one number for the whole process.
+ * Bounds CONCURRENT work, which the rate ceilings below do not: they limit how often a caller may
+ * act, not how many requests they may have in flight at once, so a caller inside every ceiling can
+ * still exhaust sockets and pool connections. Orthogonal to the per-caller ceilings rather than a
+ * replacement for them — see {@link InFlightLimiter}, whose header-rotation rationale is obsolete
+ * now that the ceilings key on the resolved peer IP. Module-level so the bound is one number for
+ * the whole process.
  */
 let submitInFlight: InFlightLimiter | undefined;
 function submitInFlightLimiter(): InFlightLimiter {
@@ -214,7 +237,7 @@ export function resetSubmitInFlightForTests(): void {
 }
 
 /**
- * Run the full pipeline behind the header-proof in-flight cap.
+ * Run the full pipeline behind the process-wide in-flight cap.
  *
  * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
  * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
@@ -278,7 +301,18 @@ async function runSubmitPipelineInner(
 
   timer.mark('resolve-form');
 
-  // 3. Turnstile (per form/distribution toggle) — FINAL submits only.
+  // 3. Rate-limit. `charge` consults every bucket before spending any of them, so a request one
+  //    gate refuses does not silently eat the respondent's budget in another.
+  warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
+  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete);
+  const limit = FormsRateLimiter.Instance.charge(gates);
+  if (!limit.allowed) {
+    return report(fail(rateLimitedMessage(limit.retryAfterMs)));
+  }
+
+  timer.mark('rate-limit');
+
+  // 4. Turnstile (per form/distribution toggle) — FINAL submits only.
   //
   //     A partial is exempt because a Turnstile token is single-use. The widget therefore
   //     withholds it from autosaves (see `buildSubmission`), keeping it for the submit that
@@ -289,7 +323,13 @@ async function runSubmitPipelineInner(
   //
   //     This is not a bypass. A partial can only ever write a `Partial` row; promoting one to
   //     `Complete` runs this pipeline again with `partial` unset, and that pass is gated here. The
-  //     rate limiter below is what bounds partial writes, and it runs for every save either way.
+  //     rate limiter ABOVE is what bounds partial writes, and it runs for every save either way.
+  //
+  //     Ordered after the rate limit for the same single-use reason. Verifying first meant a
+  //     submission the limiter was about to refuse had already spent its token at Cloudflare, so
+  //     the respondent's retry — the one thing they can actually do about a rate limit — came
+  //     back "Captcha verification failed" instead of the wait. It also let a caller who was
+  //     being refused anyway keep costing us an outbound round trip per attempt.
   const needCaptcha =
     complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
@@ -298,16 +338,6 @@ async function runSubmitPipelineInner(
   }
 
   timer.mark('captcha');
-
-  // 4. Rate-limit (per session + distribution).
-  const limit = FormsRateLimiter.Instance.check(
-    rateLimitKey({ sessionId: ctx.sessionId, distributionId: resolved.distribution.ID }),
-  );
-  if (!limit.allowed) {
-    return report(fail(rateLimitedMessage(limit.retryAfterMs)));
-  }
-
-  timer.mark('rate-limit');
 
   // 5. Dedupe (Task 1) — only on completion. If this session (or this client response id)
   //    already Completed this form, short-circuit rather than writing a second row.
@@ -364,9 +394,10 @@ async function runSubmitPipelineInner(
 
   // 8b. Hard ceiling on NEW Partial rows per version — the durable bound on partial-write abuse.
   //     Only a partial submit that would CREATE a fresh row is capped: a COMPLETE submit is already
-  //     gated by dedupe + quota, and a partial UPDATING an existing row adds none. This is the gate
-  //     the session-keyed rate limiter cannot be, because a rotated `x-session-id` defeats that
-  //     window but every rotated request still lands another row under this one count. Fail-CLOSED
+  //     gated by dedupe + quota, and a partial UPDATING an existing row adds none. This is the only
+  //     DURABLE bound of the three: the ceilings above are per-window and per-process, so a caller
+  //     pacing themselves under all of them — or spread across addresses — still accumulates rows
+  //     without limit. This one counts what is actually in the table. Fail-CLOSED
   //     (a count error refuses the partial) — autosave is fail-soft, so the widget simply retries.
   if (!complete && !existingPartial.response) {
     const capped = await partialCapExceeded(ctx, resolved);
@@ -442,6 +473,42 @@ async function runSubmitPipelineInner(
     status: persisted.status,
     ...confirmationFields(resolved, validation.answerMap),
   });
+}
+
+/**
+ * Which buckets this submission has to satisfy.
+ *
+ * Three, answering different questions, and only two of them are abuse controls:
+ *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
+ *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
+ *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
+ *       behaviour, worthless as a ceiling — and treating it as one was the defect.
+ *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
+ *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
+ *       ADDRESSES, which is the only currency a public endpoint can charge.
+ *   (c) per (caller, distribution), completions only — the same identity against a much tighter
+ *       cap, because a completion fires the on-submit automations (a confirmation email to an
+ *       address the submission chose, an LLM run, entity upserts) and an autosave does not. One
+ *       counter over both could only be tight enough to interrupt someone still typing, or loose
+ *       enough to leave the expensive path effectively unlimited.
+ */
+function rateLimitGatesFor(ctx: PipelineContext, distributionId: string, complete: boolean): RateLimitGate[] {
+  const config = getPublicSubmitConfig();
+  const gates: RateLimitGate[] = [
+    { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
+  ];
+  const identity = abuseIdentity(ctx.clientIpHash);
+  if (!identity) {
+    // No resolved IP, so (b) and (c) have nothing to key on. They are omitted rather than keyed
+    // on something weaker — see `abuseIdentity`. Gate (a) is untouched, so this is exactly the
+    // behaviour that shipped before the ceilings existed, and the warning above has said so.
+    return gates;
+  }
+  gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
+  if (complete) {
+    gates.push({ key: completionCeilingKey(distributionId, identity), max: config.completionMax });
+  }
+  return gates;
 }
 
 /**

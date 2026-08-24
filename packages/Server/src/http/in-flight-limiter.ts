@@ -1,19 +1,22 @@
 /**
- * A cap on SIMULTANEOUS in-flight anonymous requests — the control a rate-limit window
- * structurally cannot provide, and the one an attacker who rotates a client-controlled key
- * (a header, a session id) cannot defeat, because it reserves a real slot per request and
- * releases it only on COMPLETION.
+ * A cap on SIMULTANEOUS in-flight anonymous requests — a bound on CONCURRENCY, which no
+ * sliding window provides at any setting.
  *
- * Why this matters HERE (bizapps-forms public path):
- *   - The anonymous submit resolver's `AppContext` cannot see `req.ip`, so its per-request
- *     limiter falls back to the client-supplied `x-session-id`. An attacker rotates that header
- *     per request → every request lands in a fresh sliding-window bucket → the window limiter
- *     never trips. An in-flight cap holds regardless of any header, because the bound is on the
- *     count of requests executing at once, not on any identity the caller can forge.
- *   - The upload middleware CAN see `req.ip`, but even an honest per-IP window collapses to one
- *     bucket for every client behind a load balancer (`@memberjunction/server` never sets
- *     express's `trust proxy`). An in-flight cap self-heals in milliseconds where a window cap
- *     would lock the whole shared key out for a full minute.
+ * REVISED. This was written when the public limiter keyed on the client-supplied `x-session-id`,
+ * and argued that an in-flight cap was the only control an attacker could not rotate around. That
+ * premise no longer holds: `RequestIdentityMiddleware` resolves the peer IP pre-auth and the
+ * ceilings key on it, so they are header-proof on their own. The cap is not redundant, but its
+ * job is narrower and worth stating correctly rather than leaving the old claim to mislead:
+ *
+ *   - A window limits how OFTEN a caller may act; it says nothing about how many requests they
+ *     may have executing at once. A caller comfortably inside every rate ceiling can still open
+ *     hundreds of concurrent requests and exhaust sockets, pool connections and memory. That is
+ *     the gap this closes, and it is orthogonal to identity.
+ *   - It degrades gracefully under genuine load, from any source — a traffic spike, a retry
+ *     storm, a misbehaving integration — none of which is abuse and none of which a per-caller
+ *     ceiling addresses.
+ *   - It self-heals in milliseconds as work drains, where a window refusal stands for the rest
+ *     of its period.
  *
  * Mirrors the same class in the sibling `bizapps-caliber` repo (InterviewHostMiddleware). Not a
  * queue, deliberately: queueing an anonymous request holds a socket + a slot for a caller who may

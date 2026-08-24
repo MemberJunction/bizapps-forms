@@ -42,6 +42,7 @@ function makeContext(
     formResponseCount?: number;
     fireHooks?: PipelineContext['fireHooks'];
     fetchImpl?: typeof fetch;
+    clientIpHash?: string;
   } = {},
 ): { ctx: PipelineContext; saved: () => ReturnType<typeof makeFakeProvider>['saved'] } {
   const definition = makeDefinition(
@@ -65,16 +66,37 @@ function makeContext(
     contextUser: makeContextUser(),
     elevatedUser: makeContextUser(),
     sessionId: 'sess-abc',
+    clientIpHash: options.clientIpHash,
     fetchImpl: options.fetchImpl,
     fireHooks: options.fireHooks,
   };
   return { ctx, saved: () => fake.saved };
 }
 
+/**
+ * Every knob these tests touch, cleared before each one.
+ *
+ * A test that sets an env var and unsets it on its LAST line unsets nothing when an assertion
+ * above that line throws — so one genuine failure silently reconfigures every test after it and
+ * reports as a cascade. Clearing up front makes each test independent of whatever its
+ * predecessor did or failed to undo, which is the difference between reading a failure and
+ * chasing one.
+ */
+const TUNABLES = [
+  'FORMS_TURNSTILE_SECRET',
+  'FORMS_RATELIMIT_MAX',
+  'FORMS_RATELIMIT_IP_MAX',
+  'FORMS_COMPLETION_MAX',
+  'FORMS_RATELIMIT_MAX_KEYS',
+  'FORMS_RATELIMIT_WINDOW_MS',
+] as const;
+
 beforeEach(() => {
   FormsRateLimiter.Instance.resetForTests();
+  for (const knob of TUNABLES) {
+    delete process.env[knob];
+  }
   resetPublicSubmitConfigForTests();
-  delete process.env.FORMS_TURNSTILE_SECRET;
 });
 
 describe('runSubmitPipeline', () => {
@@ -271,4 +293,147 @@ describe('runSubmitPipeline', () => {
     expect(third.errors?.[0].message).toMatch(/too many/i);
     delete process.env.FORMS_RATELIMIT_MAX;
   });
+
+  // SECURITY REGRESSION (the defect PR #48 diagnosed). `ctx.sessionId` is `UserPayload.sessionId`,
+  // which MJ populates from the client-settable `x-session-id` header — so a caller who rotates
+  // it lands in a fresh per-session bucket on every request and the per-session cap never trips.
+  // Each accepted completion fires on-submit automations (confirmation email to an address the
+  // caller chose, an LLM run, entity upserts), so the bypass amplifies. The ceiling therefore has
+  // to key on something the caller cannot pick: their resolved IP.
+  it('throttles a caller who rotates the session id, because the bucket follows their IP', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-attacker' });
+
+    ctx.sessionId = 'forged-1';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-2';
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-3';
+    const third = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0].message).toMatch(/too many/i);
+    // The amplification is what the cap is really for: the rejected request fires nothing.
+    expect(fireHooks).toHaveBeenCalledTimes(2);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  // The other half of the fix, and the reason the ceiling is keyed per (caller, distribution)
+  // rather than per distribution: a cap every respondent of a form shares is not an abuse
+  // ceiling, it is a shared kill switch. One caller saturating it would take the form offline
+  // for everyone filling it in — trading a rate-limit bypass for a cheaper, louder outage.
+  it('does not let one saturated caller throttle a different caller on the same form', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-attacker' });
+
+    ctx.sessionId = 'forged-1';
+    await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-2';
+    await runSubmitPipeline(ctx, validSubmission());
+    ctx.sessionId = 'forged-3';
+    const saturated = await runSubmitPipeline(ctx, validSubmission());
+
+    // A real respondent arrives mid-attack, on the same form, from their own address.
+    ctx.clientIpHash = 'ip-respondent';
+    ctx.sessionId = 'honest-session';
+    const bystander = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(saturated.success).toBe(false);
+    expect(bystander.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+  });
+
+  // Saves and completions cost wildly different things — an autosave upserts one row, a
+  // completion fires the confirmation email, the LLM run and the entity upserts — so one
+  // counter covering both can only ever be wrong in one direction: tight enough to throttle a
+  // respondent who is still typing, or loose enough to be no limit at all on the expensive path.
+  it('caps completions on their own budget, without throttling autosaves', async () => {
+    process.env.FORMS_RATELIMIT_MAX = '50';
+    process.env.FORMS_RATELIMIT_IP_MAX = '50';
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-respondent' });
+
+    const autosaves = [];
+    for (let i = 0; i < 4; i++) {
+      autosaves.push(await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] })));
+    }
+    const completion = await runSubmitPipeline(ctx, validSubmission());
+    const secondCompletion = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(autosaves.every((r) => r.success)).toBe(true);
+    expect(completion.success).toBe(true);
+    expect(secondCompletion.success).toBe(false);
+    expect(secondCompletion.errors?.[0].message).toMatch(/too many/i);
+    delete process.env.FORMS_RATELIMIT_MAX;
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // When no IP could be resolved (middleware not mounted, or a socket already gone) the ceilings
+  // have nothing to key on. The tempting fallback — the session id — is blank for any client that
+  // omits the header, so every such caller would hash to ONE bucket and any one of them could
+  // refuse the form for all the others. That is a worse failure than not limiting, so the
+  // ceilings are dropped instead and the pre-existing per-session gate is left to do its job.
+  it('does not put unidentifiable callers in a shared bucket', async () => {
+    process.env.FORMS_RATELIMIT_IP_MAX = '1';
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks });
+    ctx.clientIpHash = undefined;
+
+    // BLANK, not merely distinct: MJ sets `sessionId` to '' for any client that omits the
+    // header, so this is what two unrelated header-less callers genuinely look like, and it is
+    // the case a session-derived fallback collapses onto a single bucket.
+    ctx.sessionId = '';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    const third = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(third.success).toBe(true);
+    delete process.env.FORMS_RATELIMIT_IP_MAX;
+    delete process.env.FORMS_COMPLETION_MAX;
+  });
+
+  // Turnstile ran BEFORE the rate limit, so a request the limiter was about to refuse had already
+  // spent an outbound Cloudflare round trip — and, worse, a Turnstile token is single-use (see
+  // the partial-save test above), so the refusal consumed the respondent's token. Their retry
+  // then failed with "Captcha verification failed" instead of the wait-and-retry message, on a
+  // form whose author cared enough to turn a captcha on. The cheap local gate belongs first.
+  it('does not spend a Turnstile token on a submission it is going to rate-limit', async () => {
+    process.env.FORMS_TURNSTILE_SECRET = 'test-secret';
+    process.env.FORMS_RATELIMIT_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const fetchImpl = vi.fn(
+      async () => new Response(JSON.stringify({ success: true }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const { ctx } = makeContext(respondentPermissions(), {
+      captcha: true,
+      fetchImpl,
+      clientIpHash: 'ip-respondent',
+      fireHooks: vi.fn(async (): Promise<HookFireResult[]> => []),
+    });
+
+    const first = await runSubmitPipeline(ctx, validSubmission({ turnstileToken: 'token-1' }));
+    const refused = await runSubmitPipeline(ctx, validSubmission({ turnstileToken: 'token-2' }));
+
+    expect(first.success).toBe(true);
+    expect(refused.success).toBe(false);
+    expect(refused.errors?.[0].message).toMatch(/too many/i);
+    // One verification for the accepted submit, none for the refused one.
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    delete process.env.FORMS_TURNSTILE_SECRET;
+    delete process.env.FORMS_RATELIMIT_MAX;
+  });
 });
+

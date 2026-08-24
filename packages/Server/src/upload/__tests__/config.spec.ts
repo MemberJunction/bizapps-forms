@@ -2,7 +2,7 @@
  * Unit tests for the upload endpoint configuration + content-type allowlist matching.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { contentTypeAllowed, getUploadConfig, resetUploadConfigForTests } from '../config';
+import { contentTypeAllowed, getUploadConfig, resetUploadConfigForTests, uploadRateLimitMax } from '../config';
 
 const SAVED = { ...process.env };
 
@@ -38,24 +38,26 @@ describe('getUploadConfig', () => {
     expect(getUploadConfig().maxBytes).toBe(10 * 1024 * 1024);
   });
 
-  it('defaults the abuse caps (per-IP rate limit + in-flight concurrency)', () => {
-    delete process.env.FORMS_UPLOAD_RATELIMIT_MAX;
-    delete process.env.FORMS_UPLOAD_RATELIMIT_WINDOW_MS;
+  // The per-caller upload rate limit is `FORMS_UPLOAD_IP_MAX` (see `uploadRateLimitMax`), keyed on
+  // the resolved peer IP. The `FORMS_UPLOAD_RATELIMIT_MAX`/`_WINDOW_MS` pair this file used to
+  // assert was a second, unwired copy of the same idea and is gone; only the concurrency bound
+  // lives in the frozen config.
+  it('defaults the in-flight concurrency cap', () => {
     delete process.env.FORMS_UPLOAD_MAX_IN_FLIGHT;
-    const cfg = getUploadConfig();
-    expect(cfg.rateLimitMax).toBe(20);
-    expect(cfg.rateLimitWindowMs).toBe(60_000);
-    expect(cfg.maxInFlight).toBe(10);
+    expect(getUploadConfig().maxInFlight).toBe(10);
   });
 
-  it('honors env overrides for the abuse caps', () => {
-    process.env.FORMS_UPLOAD_RATELIMIT_MAX = '3';
-    process.env.FORMS_UPLOAD_RATELIMIT_WINDOW_MS = '5000';
+  it('honors an env override for the in-flight cap', () => {
     process.env.FORMS_UPLOAD_MAX_IN_FLIGHT = '2';
-    const cfg = getUploadConfig();
-    expect(cfg.rateLimitMax).toBe(3);
-    expect(cfg.rateLimitWindowMs).toBe(5000);
-    expect(cfg.maxInFlight).toBe(2);
+    expect(getUploadConfig().maxInFlight).toBe(2);
+  });
+
+  it('defaults and overrides the per-caller upload rate limit', () => {
+    delete process.env.FORMS_UPLOAD_IP_MAX;
+    expect(uploadRateLimitMax()).toBe(30);
+    process.env.FORMS_UPLOAD_IP_MAX = '3';
+    expect(uploadRateLimitMax()).toBe(3);
+    delete process.env.FORMS_UPLOAD_IP_MAX;
   });
 });
 

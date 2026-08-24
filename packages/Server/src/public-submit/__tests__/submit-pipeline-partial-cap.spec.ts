@@ -1,8 +1,9 @@
 /**
- * The per-version Partial-row cap — the durable bound on partial-write abuse when the
- * client-controlled `x-session-id` (and thus the session-keyed rate limiter) is rotated per
- * request. Only a partial submit that would CREATE a new row is capped; complete submits and
- * updates to an existing partial are not.
+ * The per-version Partial-row cap — the only DURABLE bound on partial-write abuse. The per-caller
+ * ceilings are sliding windows in one process's memory, so they bound a rate; a caller pacing
+ * themselves under them, or spread across addresses, still accumulates rows forever. Only a
+ * partial submit that would CREATE a new row is capped; complete submits and updates to an
+ * existing partial are not.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { runSubmitPipeline, resetSubmitInFlightForTests, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';

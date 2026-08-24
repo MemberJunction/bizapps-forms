@@ -12,11 +12,10 @@
  *                                   Default: common images + PDF + plain text + office docs.
  *  - `FORMS_UPLOAD_STORAGE_ACCOUNT` Optional FileStorageAccount ID to force a specific
  *                                   account; when unset the engine uses the first active one.
+ *  - `FORMS_UPLOAD_IP_MAX`          Max uploads per rate-limit window per client IP. Default 30.
  *  - `FORMS_UPLOAD_PATH_PREFIX`     Optional storage path prefix. Default `forms-uploads/<date>`.
  *                                   REFUSED if it lands under the authoring-asset prefix — see
  *                                   {@link assertUploadPrefixIsPrivate}.
- *  - `FORMS_UPLOAD_RATELIMIT_MAX`   Max uploads per window per client IP. Default 20.
- *  - `FORMS_UPLOAD_RATELIMIT_WINDOW_MS`  Sliding-window length in ms. Default 60000 (1 min).
  *  - `FORMS_UPLOAD_MAX_IN_FLIGHT`   Max simultaneous in-flight uploads (process-wide). Default 10.
  */
 
@@ -43,8 +42,6 @@ const DEFAULT_ALLOWED_TYPES: readonly string[] = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ];
 
-const DEFAULT_RATELIMIT_MAX = 20;
-const DEFAULT_RATELIMIT_WINDOW_MS = 60_000;
 const DEFAULT_MAX_IN_FLIGHT = 10;
 
 /** Frozen, validated configuration for the upload endpoint. */
@@ -55,9 +52,7 @@ export interface UploadConfig {
   storageAccountId: string | undefined;
   pathPrefix: string | undefined;
   /** Per-IP sliding-window ceiling (a generous ceiling — see UploadMiddleware for the shared-proxy caveat). */
-  rateLimitMax: number;
-  rateLimitWindowMs: number;
-  /** Simultaneous in-flight uploads across the process — the header-proof cap that closes the DoS gap. */
+  /** Simultaneous in-flight uploads across the process — the concurrency bound beside the IP ceiling. */
   maxInFlight: number;
 }
 
@@ -97,8 +92,6 @@ export function getUploadConfig(): UploadConfig {
     allowedTypes: allowedTypesFromEnv(),
     storageAccountId: process.env.FORMS_UPLOAD_STORAGE_ACCOUNT?.trim() || undefined,
     pathPrefix: privatePathPrefix(),
-    rateLimitMax: numberFromEnv('FORMS_UPLOAD_RATELIMIT_MAX', DEFAULT_RATELIMIT_MAX),
-    rateLimitWindowMs: numberFromEnv('FORMS_UPLOAD_RATELIMIT_WINDOW_MS', DEFAULT_RATELIMIT_WINDOW_MS),
     maxInFlight: numberFromEnv('FORMS_UPLOAD_MAX_IN_FLIGHT', DEFAULT_MAX_IN_FLIGHT),
   });
   return cached;
@@ -141,6 +134,18 @@ function privatePathPrefix(): string | undefined {
 /** Test-only: clear the memoized config so env changes take effect. */
 export function resetUploadConfigForTests(): void {
   cached = undefined;
+}
+
+/**
+ * Max uploads one caller may make per rate-limit window.
+ *
+ * Read per call rather than frozen into {@link getUploadConfig} so a test (and an operator
+ * restarting with a new value) sees it without a cache reset; the read is a single env parse.
+ * Generous by design — a respondent attaching several files to one form is ordinary — while
+ * still bounding a caller who wants to write to storage in a loop.
+ */
+export function uploadRateLimitMax(): number {
+  return numberFromEnv('FORMS_UPLOAD_IP_MAX', 30);
 }
 
 /**

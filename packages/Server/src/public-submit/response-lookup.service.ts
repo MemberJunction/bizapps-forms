@@ -129,11 +129,12 @@ export async function findResponseById(
 /**
  * Count the `Partial` (in-flight autosave) rows for a published version.
  *
- * The durable, request-context-independent bound on partial-write abuse. The submit resolver's
- * `AppContext` cannot see `req.ip`, so its rate limiter keys on the client-supplied `x-session-id`
- * header — which an attacker rotates per request to land every write in a fresh bucket the window
- * limiter never trips. Partial writes are otherwise ungated (Turnstile + quota apply only to
- * COMPLETE submissions), so without this a rotated header yields unbounded `FormResponse` rows.
+ * The durable, request-context-independent bound on partial-write abuse. The per-caller ceilings
+ * are sliding windows held in one process's memory, so they bound a RATE and nothing else: a
+ * caller who paces themselves under every window, or who spreads across addresses, accumulates
+ * rows for as long as they care to. Partial writes are otherwise ungated entirely — Turnstile and
+ * both quotas apply only to COMPLETE submissions — so this count is what actually stops the table
+ * growing without limit.
  *
  * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
  * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal

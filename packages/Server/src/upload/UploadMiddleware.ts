@@ -10,7 +10,8 @@
  * the VERIFIED anonymous magic-link session. MJ's `createUnifiedAuthMiddleware` runs before
  * post-auth middleware, verifies the `Authorization: Bearer` JWT, and attaches the
  * synthesized anonymous `UserInfo` at `req.userPayload.userRecord` + `req.userPayload.sessionId`
- * (`mj_sid`). We therefore contribute this route through {@link GetPostAuthMiddleware} and
+ * (which is the caller's `x-session-id` header, NOT an `mj_sid` claim — MJ reads it straight off
+ * the request, so it identifies nobody). We contribute this route through {@link GetPostAuthMiddleware} and
  * simply READ that verified payload — the exact same identity the `SubmitFormResponse`
  * GraphQL mutation runs under — instead of re-verifying the token or reinventing JWKS/JWT
  * handling. A missing/invalid token is already rejected upstream (401) and never reaches us
@@ -32,17 +33,18 @@ import { UserCache } from '@memberjunction/generic-database-provider';
 
 import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { InFlightLimiter } from '../http/in-flight-limiter.js';
-import { FormsRateLimiter, rateLimitedMessage } from '../public-submit/rate-limit.service.js';
+import { currentRequestIdentity } from '../http/request-identity.js';
 import { UPLOAD_ROUTE, getUploadConfig, uploadBodyCap, uploadTooLargeMessage } from './config.js';
 import { parseMultipart } from './multipart.js';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from './upload.service.js';
+import { checkUploadRateLimit } from './upload-rate-limit.js';
 
 /**
  * Process-wide in-flight cap on the anonymous upload endpoint, lazily built from config.
  *
  * Module-level (not per-instance) so the bound is one number for the whole process however many
- * times ClassFactory instantiates the middleware. This is the DoS control that no client-controlled
- * key can rotate around — see {@link InFlightLimiter}.
+ * times ClassFactory instantiates the middleware. Bounds simultaneous work, which the per-caller
+ * IP ceiling beside it does not — see {@link InFlightLimiter}.
  */
 let uploadInFlight: InFlightLimiter | undefined;
 function uploadInFlightLimiter(): InFlightLimiter {
@@ -55,21 +57,6 @@ function uploadInFlightLimiter(): InFlightLimiter {
 /** Test-only: drop the memoized limiter so a fresh config takes effect. */
 export function resetUploadInFlightForTests(): void {
   uploadInFlight = undefined;
-}
-
-/**
- * The client identity for the per-IP upload rate limit.
- *
- * ⚠️ Behind a proxy this collapses to the BALANCER'S address for every client, because
- * `@memberjunction/server` never sets express's `trust proxy`. The IP window is therefore a
- * generous CEILING, not a precise per-attacker control — the header-proof {@link InFlightLimiter}
- * above is the durable bound. Do NOT "improve" this by reading `X-Forwarded-For`: it is
- * caller-supplied, so an attacker would rotate it for an unlimited budget while honest shared-key
- * traffic stayed metered. Whether a proxy header can be trusted is express's app-wide `trust proxy`
- * decision, which this Open App does not own.
- */
-function uploadRateKey(req: Request): string {
-  return `upload:${req.ip ?? 'unknown'}`;
 }
 
 /** The verified magic-link payload MJ's `createUnifiedAuthMiddleware` attaches to the request. */
@@ -109,30 +96,24 @@ export class UploadMiddleware extends BaseServerMiddleware {
   }
 
   /**
-   * Abuse gate BEFORE any work: a per-IP sliding-window rate limit (a generous ceiling) plus a
-   * process-wide in-flight concurrency cap (the header-proof bound). Both run ahead of buffering
-   * the body so a flood is refused before it costs memory or storage. The in-flight slot wraps the
-   * whole request in a `finally`, so it releases on every exit path.
+   * Two gates BEFORE any work, answering different questions: a process-wide in-flight cap (how
+   * much can run at once) and, inside `processUpload`, a per-caller window keyed on the resolved
+   * peer IP (how often one caller may act). Both run ahead of buffering the body, so a flood is
+   * refused before it costs memory or storage, and the in-flight slot wraps the whole request in a
+   * `finally` so it releases on every exit path.
    *
-   * Until this landed the upload endpoint had NO limiter at all: an authenticated anonymous session
-   * could POST files without bound (storage DoS). See {@link InFlightLimiter} for why an in-flight
-   * cap — not a window keyed on a client-controlled value — is the control that actually holds.
+   * The in-flight cap goes FIRST so a request shed for load is never charged to anyone's window.
+   *
+   * Until these landed the upload endpoint had no frequency control at all: an authenticated
+   * anonymous session could POST files without bound (storage DoS).
    */
   private async handleUpload(req: Request, res: Response): Promise<void> {
-    const cfg = getUploadConfig();
-    const limit = FormsRateLimiter.Instance.check(uploadRateKey(req), Date.now(), {
-      max: cfg.rateLimitMax,
-      windowMs: cfg.rateLimitWindowMs,
-    });
-    if (!limit.allowed) {
-      sendJsonError(res, 429, rateLimitedMessage(limit.retryAfterMs));
-      return;
-    }
-
     if (!uploadInFlightLimiter().TryEnter()) {
-      // 503 (load), not 429 (bad request): this clears the instant in-flight work drains. Not
-      // charged against the IP window — charging load would let a flood spend the budget of every
-      // client behind the same balancer, the failure the in-flight cap exists to avoid.
+      // 503 (load), not 429 (bad request): this clears the instant in-flight work drains.
+      //
+      // Deliberately BEFORE the per-caller window inside `processUpload`, so a request shed for
+      // load is never charged to anyone's budget. Charging load would let a flood spend the
+      // budget of unrelated callers, which is the failure the in-flight cap exists to avoid.
       LogStatus('[Forms] Upload refused: too many uploads in flight. Clears as in-flight work drains.');
       sendJsonError(res, 503, 'The upload service is busy right now. Please try again in a moment.');
       return;
@@ -153,6 +134,14 @@ export class UploadMiddleware extends BaseServerMiddleware {
       return;
     }
 
+    // Before a single byte is buffered: an accepted upload stores bytes and creates an
+    // `MJ: Files` row, so the cheapest place to refuse a caller hammering this route is the
+    // moment we know who they are — which is on arrival, since the key is their resolved peer
+    // IP rather than anything in the (as yet unread) body.
+    if (this.refuseIfRateLimited(req, res)) {
+      return;
+    }
+
     const bodyResult = await readCappedBody(req, uploadBodyCap(), uploadTooLargeMessage());
     if (!bodyResult.ok || !bodyResult.body) {
       sendJsonError(res, bodyResult.status ?? 400, bodyResult.error ?? 'Failed to read upload.');
@@ -165,32 +154,58 @@ export class UploadMiddleware extends BaseServerMiddleware {
       return;
     }
 
-    const uploadReq: UploadRequest = {
+    const result = await runUpload(this.uploadContextFor(req, contextUser), {
       file: parsed.file,
       distributionSlug: parsed.fields.distributionSlug,
       distributionId: parsed.fields.distributionId,
       questionId: parsed.fields.questionId,
       responseId: parsed.fields.responseId,
-    };
-    const ctx: UploadContext = {
-      contextUser,
-      metadataProvider: new Metadata(),
-      runViewProvider: new RunView(),
-      storage: this.storageEngine(),
-      // The File row and its provenance row are written as the system user, never as the
-      // anonymous caller: the anonymous role holds no `MJ: Files` grant, and a provenance row the
-      // caller could write would prove nothing about who uploaded the file.
-      elevatedUser: UserCache.Instance.GetSystemUser(),
-      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
-    };
-
-    const result = await runUpload(ctx, uploadReq);
+    });
     if (!result.ok || !result.success) {
       const failure = result.failure ?? { status: 500, error: 'Upload failed.' };
       sendJsonError(res, failure.status, failure.error);
       return;
     }
     res.status(200).set('Cache-Control', 'no-store').json(result.success);
+  }
+
+  /**
+   * The identities and providers the upload service runs under.
+   *
+   * Two principals, deliberately. `contextUser` is the verified anonymous caller and is what
+   * authorizes the request; the File row and its provenance row are written as the SYSTEM user,
+   * because the anonymous role holds no `MJ: Files` grant and a provenance row the caller could
+   * write would prove nothing about who uploaded the file.
+   */
+  private uploadContextFor(req: Request, contextUser: UserInfo): UploadContext {
+    return {
+      contextUser,
+      metadataProvider: new Metadata(),
+      runViewProvider: new RunView(),
+      storage: this.storageEngine(),
+      elevatedUser: UserCache.Instance.GetSystemUser(),
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    };
+  }
+
+  /**
+   * Refuse an over-budget caller with 429 + `Retry-After`, and report whether it did.
+   *
+   * Returns a boolean rather than throwing because the caller is a route handler that has already
+   * written a response by this point; a thrown error there would produce a second one.
+   */
+  private refuseIfRateLimited(req: Request, res: Response): boolean {
+    const limit = checkUploadRateLimit({
+      clientIpHash: currentRequestIdentity()?.ipHash,
+      sessionId: userPayloadOf<VerifiedUserPayload>(req)?.sessionId,
+    });
+    if (limit.allowed) {
+      return false;
+    }
+    const retryAfterSeconds = Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000));
+    res.set('Retry-After', String(retryAfterSeconds));
+    sendJsonError(res, 429, `Too many uploads. Please wait ${retryAfterSeconds}s and try again.`);
+    return true;
   }
 
   /** The configured MJ file-storage engine (canonical "store bytes + create File row"). */

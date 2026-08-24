@@ -1,6 +1,7 @@
 /**
- * Unit tests for the shared {@link InFlightLimiter} — the header-proof concurrency cap that both
- * the anonymous submit pipeline and the upload endpoint use to bound simultaneous work.
+ * Unit tests for the shared {@link InFlightLimiter} — the concurrency cap that both the anonymous
+ * submit pipeline and the upload endpoint use to bound simultaneous work, which the per-caller
+ * rate ceilings beside it do not.
  */
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAX_IN_FLIGHT, InFlightLimiter } from '../in-flight-limiter';
