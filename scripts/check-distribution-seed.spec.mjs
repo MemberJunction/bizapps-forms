@@ -203,9 +203,15 @@ function filterArgument(suffix, capability, spec) {
 /**
  * One permission record in the shape the generator actually logs: DECLAREs, per-record SET
  * assignments, then an EXEC whose every argument is a variable reference. Built rather than pasted
- * so each case states only what it is testing — but built in the REAL shape, because a
- * hand-simplified `EXEC ... @RoleID = '<literal>'` would exercise a parser path the shipped files
- * never take.
+ * so each case states only what it is testing — but built in the REAL shape by default, because a
+ * hand-simplified `EXEC ... @RoleID = '<literal>'` exercises a parser path the shipped files never
+ * take: all twenty `@RoleID` bindings in `V202608081700` go through a variable.
+ *
+ * `roleBinding` reaches that other path on purpose for case 43. D3 names three ways a call may bind
+ * the role — through the call's own SET, as a literal, or as an inline subselect — and the first was
+ * the only one any fixture used, so the two the generator does not emit today were unpinned. They
+ * are the shapes a future MetadataSync is most likely to switch to, which is the whole reason the
+ * gate reads them.
  */
 function permissionRecord({
     suffix,
@@ -222,9 +228,11 @@ function permissionRecord({
 }) {
     const entity = entityId ? `'${entityId}'` : `(SELECT ID FROM [\${mjSchema}].[Entity] WHERE Name = N'${entityName}')`;
     const role =
-        roleBinding === 'byId'
+        roleBinding === 'byId' || roleBinding === 'inlineById'
             ? "'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C'"
             : `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent')`;
+    // An inline binding writes the value in the EXEC and emits no SET, which is the point of it.
+    const inlineRole = roleBinding.startsWith('inline');
     const create = filterArgument(suffix, 'Create', createFilter);
     const read = filterArgument(suffix, 'Read', readFilter);
     return [
@@ -241,7 +249,7 @@ function permissionRecord({
         `@Type_${suffix} NVARCHAR(10)`,
         `SET\n  @ID_${suffix} = '00000000-0000-4000-8000-0000000000${suffix.slice(0, 2)}'`,
         `SET\n  @EntityID_${suffix} = ${entity}`,
-        `SET\n  @RoleID_${suffix} = ${role}`,
+        inlineRole ? null : `SET\n  @RoleID_${suffix} = ${role}`,
         `SET\n  @CanCreate_${suffix} = ${canCreate}`,
         `SET\n  @CanRead_${suffix} = ${canRead}`,
         `SET\n  @CanUpdate_${suffix} = ${canUpdate}`,
@@ -251,7 +259,7 @@ function permissionRecord({
         `SET\n  @Type_${suffix} = N'Allow' EXEC [\${mjSchema}].${procedure} @ID = @ID_${suffix},`,
         [
             `  @EntityID = @EntityID_${suffix}`,
-            `  @RoleID = @RoleID_${suffix}`,
+            `  @RoleID = ${inlineRole ? role : `@RoleID_${suffix}`}`,
             `  @CanCreate = @CanCreate_${suffix}`,
             `  @CanRead = @CanRead_${suffix}`,
             `  @CanUpdate = @CanUpdate_${suffix}`,
@@ -263,7 +271,9 @@ function permissionRecord({
         '',
         'GO',
         '',
-    ].join('\n');
+    ]
+        .filter((line) => line !== null)
+        .join('\n');
 }
 
 /** A seed file: the header comment these always carry, then the records. */
@@ -683,6 +693,322 @@ withSeed(
         check('scans a seed named MetadataSync, without the underscore', violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
     },
 );
+
+// ---------------------------------------------------------------------------
+// CHECK 1 and CHECK 3 — behaviours a mutation pass found unpinned (#44).
+//
+// `scripts/check-distribution-seed.mutants.mjs` deletes each of the behaviours
+// below one at a time and fails if no case here notices. Every case names the
+// mutant it kills, because a case whose purpose nobody can state is the next one
+// to be "simplified" away — which is the failure mode this whole file exists for.
+// ---------------------------------------------------------------------------
+
+const FORM_RESPONSE_ANSWERS = 'D03BCDF5-0B32-4EA8-88E8-F73D70A90810';
+const RESPONDENT_BY_NAME = `(SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Form Respondent')`;
+
+/**
+ * One hand-written call, for the shapes `permissionRecord` deliberately does not emit. Everything
+ * inline, no DECLAREs: these cases are about how a call is RECOGNISED and read, not about the
+ * generator's record shape, and a real record around them would only add noise.
+ */
+function rawCall(args, { keyword = 'EXEC', prefix = `[\${mjSchema}].`, procedure = 'spCreateEntityPermission' } = {}) {
+    return `${keyword} ${prefix}${procedure} ${args};\nGO\n`;
+}
+
+// 31. mask/escaped-quote. T-SQL doubles an apostrophe and `V202608081700` already carries 36 of
+//     them. Reading `''` as a closing quote inverts code and prose for everything after it, and the
+//     record below stops existing — the gate reads a clean file and says so.
+stillCaught(
+    "sees the record after a description carrying an escaped '' apostrophe",
+    `DECLARE @D_${VIOLATION.suffix} NVARCHAR(200)\nSET\n  @D_${VIOLATION.suffix} = N'The respondent''s own submissions'\n${permissionRecord(VIOLATION)}`,
+);
+
+// 32. mask/string-body. The structure mask blanks string bodies so that a `;` or an `EXEC` inside
+//     prose cannot truncate a statement or invent a call. Note what is asserted: not just that the
+//     real record survives — it does either way, because the phantom call the mutant conjures out of
+//     the quoted text ends where the real one begins — but that the quoted text produces NO call at
+//     all. "Still caught" would have passed here and measured nothing.
+withSeed(
+    POST,
+    `DECLARE @D_${VIOLATION.suffix} NVARCHAR(200)\nSET\n  @D_${VIOLATION.suffix} = N'Run; then EXEC spCreateEntityPermission by hand'\n${permissionRecord(VIOLATION)}`,
+    (violations) => {
+        check(
+            'reads a procedure named inside a description as prose, not as a second call',
+            violations.some((v) => v.includes('CanCreate')) && !violations.some((v) => v.includes('cannot resolve')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 33. call/backstop-independent-of-string-mask. The backstop counts mentions on the VALUES mask,
+//     which keeps string bodies, rather than the structure mask the parser matches on — so it does
+//     not share the string-scanning layer with the thing it is checking. The cost is visible here:
+//     a procedure named only inside a string reads as a call the parser missed, and the gate says so
+//     rather than staying quiet. Loud is the direction this file chooses.
+withSeed(
+    POST,
+    `DECLARE @D NVARCHAR(200)\nSET\n  @D = N'documented at spCreateEntityPermission'\nGO\n`,
+    (violations) => {
+        check(
+            'refuses a seed naming a permission procedure it could not parse, even inside a string',
+            violations.some((v) => v.includes('could not parse')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 34. mask/block-comment. Case 22 pins only the unbalanced-`/*` trade-off; nothing pinned the
+//     blanking itself, so a record commented out for a later delta read as a live grant.
+withSeed(POST, `/* superseded by the delta in v0.12:\n${permissionRecord(VIOLATION)}\n*/\n`, (violations) => {
+    check('does not read a /* */-commented-out record as a live grant', violations.length === 0, JSON.stringify(violations));
+});
+
+// 35. scan/go-batches. Variables are traced per `GO` batch. Collapse that to one file-wide map and
+//     the LAST binding of a reused suffix wins everywhere, so the second record below re-attributes
+//     the first record's grant to another role and the violation disappears. The generator suffixes
+//     per record today; the batch boundary is what stops that from being load-bearing.
+withSeed(
+    POST,
+    `DECLARE @RoleID_x UNIQUEIDENTIFIER, @EntityID_x UNIQUEIDENTIFIER, @CanCreate_x BIT
+SET
+  @RoleID_x = ${RESPONDENT_BY_NAME}
+SET
+  @EntityID_x = '${FORM_RESPONSES}'
+SET
+  @CanCreate_x = 1
+EXEC [\${mjSchema}].spCreateEntityPermission @EntityID = @EntityID_x, @RoleID = @RoleID_x, @CanCreate = @CanCreate_x, @CreateRLSFilterID_Clear = 1;
+GO
+DECLARE @RoleID_x UNIQUEIDENTIFIER
+SET
+  @RoleID_x = (SELECT ID FROM [\${mjSchema}].[Role] WHERE Name = N'Integration')
+EXEC [\${mjSchema}].spCreateEntityPermission @RoleID = @RoleID_x, @CanRead = 1;
+GO
+`,
+    (violations) => {
+        check(
+            'traces variables per GO batch, so a suffix reused by a later record cannot rewrite an earlier grant',
+            violations.some((v) => v.includes('CanCreate')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 36. scan/assignment-terminators. A `SET` value ends at the next `EXEC`/`EXECUTE`/`DECLARE` as well
+//     as at `;`. Without that, an unterminated assignment swallows the statement after it: the
+//     filter id below resolves to itself plus a whole EXEC, stops being a literal UUID, and rule 4
+//     silently skips a grant pointed at another app's filter record. The generator puts `@Type` last
+//     today, which is the only reason no shipped file depends on this.
+for (const [name, sql] of [
+    [
+        'an EXEC on the same line',
+        `DECLARE @F_y UNIQUEIDENTIFIER\nSET\n  @F_y = '${OWN_DISTRIBUTION_FILTER}' EXEC [\${mjSchema}].spCreateEntityPermission @EntityID = '${FORM_RESPONSES}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = @F_y;\nGO\n`,
+    ],
+    [
+        "the next record's DECLARE",
+        `DECLARE @F_y UNIQUEIDENTIFIER\nSET\n  @F_y = '${OWN_DISTRIBUTION_FILTER}'\nDECLARE @Unused INT\nEXEC [\${mjSchema}].spCreateEntityPermission @EntityID = '${FORM_RESPONSES}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = @F_y;\nGO\n`,
+    ],
+]) {
+    withSeed(POST, sql, (violations) => {
+        check(
+            `ends a SET value at ${name}, so the filter it binds is still read as a literal`,
+            violations.some((v) => v.includes(OWN_DISTRIBUTION_FILTER) && v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    });
+}
+
+// 37. call/schema-prefix-optional, call/schema-prefix-bare, call/execute-spelling. The call regex
+//     accepts all three and every fixture wrote the same one — `EXEC [${mjSchema}].sp…` — so the
+//     other arms were decoration. A seed emitted by a differently-configured MetadataSync takes
+//     exactly these shapes, and an unrecognised call is a silent pass, not an error.
+for (const [name, options] of [
+    ['no schema prefix at all', { prefix: '' }],
+    ['a bare, unbracketed schema prefix', { prefix: 'dbo.' }],
+    ['the EXECUTE spelling', { keyword: 'EXECUTE' }],
+]) {
+    withSeed(
+        POST,
+        rawCall(`@EntityID = '${FORM_RESPONSES}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID_Clear = 1`, options),
+        (violations) => {
+            check(`reads a permission call written with ${name}`, violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
+        },
+    );
+}
+
+// 38. identity/uuid-case. Lower-case UUID literals already ship in migrations/, and case 28's own
+//     PostgreSQL fixture is written entirely in them. Drop the normalisation and a lower-case seed
+//     matches neither the role nor the guarded table: every rule skips and the gate reports health.
+withSeed(
+    POST,
+    rawCall(
+        `@EntityID = '${FORM_RESPONSE_ANSWERS.toLowerCase()}', @RoleID = 'a18e13fc-b2c1-4e77-a3d7-ee775bde098c', ` +
+            `@CanCreate = 1, @CreateRLSFilterID = '${OWN_DISTRIBUTION_FILTER.toLowerCase()}'`,
+    ),
+    (violations) => {
+        check(
+            'matches the role and the guarded table when the seed writes its ids in lower case',
+            violations.some((v) => v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 39. identity/uuid-n-prefix. `N'<uuid>'` is a spelling T-SQL accepts and nothing ships today; the
+//     parser reads it, and without a case that is an accident rather than a decision.
+withSeed(
+    POST,
+    rawCall(`@EntityID = N'${FORM_RESPONSES}', @RoleID = N'A18E13FC-B2C1-4E77-A3D7-EE775BDE098C', @CanCreate = 1, @CreateRLSFilterID_Clear = 1`),
+    (violations) => {
+        check("reads a UUID literal written with the N prefix", violations.some((v) => v.includes('CanCreate')), JSON.stringify(violations));
+    },
+);
+
+// 40. identity/role-substring-fallback. When neither the id reader nor the `Name = N'…'` reader can
+//     make sense of `@RoleID`, a call that still names the role literally is attributed to it rather
+//     than written off as unreadable. It is the last thing standing between a reworded subselect and
+//     an unexamined grant.
+withSeed(
+    POST,
+    rawCall(
+        `@EntityID = '${FORM_RESPONSES}', ` +
+            `@RoleID = (SELECT TOP 1 ID FROM [\${mjSchema}].[Role] WHERE UPPER(Name) = UPPER('Form Respondent')), ` +
+            '@CanCreate = 1, @CreateRLSFilterID_Clear = 1',
+    ),
+    (violations) => {
+        check(
+            'attributes a grant whose @RoleID expression it cannot parse but which names the role literally',
+            violations.some((v) => v.includes('CanCreate')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 41. identity/absent-vs-unknown. Case 18 pins that an unreadable `@RoleID` is reported; it does not
+//     pin WHY, and the two whys are different facts — a missing parameter is a malformed call, an
+//     unreadable one is a shape the parser has outgrown. Someone reading the failure needs to know
+//     which of those they are looking at.
+withSeed(POST, rawCall(`@EntityID = '${FORM_RESPONSES}', @CanCreate = 1`), (violations) => {
+    check(
+        'says the @RoleID parameter is absent, rather than that it could not be read',
+        violations.some((v) => v.includes('the parameter is absent')),
+        JSON.stringify(violations),
+    );
+});
+
+// 42. rule/delete-is-a-write. D2.3 names Update AND Delete; only Update was tested, so half the rule
+//     could have been deleted with the suite green.
+withSeed(POST, rawCall(`@EntityID = '${FORM_RESPONSE_ANSWERS}', @RoleID = ${RESPONDENT_BY_NAME}, @CanDelete = 1`), (violations) => {
+    check('flags a CanDelete grant, not just CanUpdate', violations.some((v) => v.includes('CanDelete')), JSON.stringify(violations));
+});
+
+// 43. rule/guard-key-capability — a MUST PASS. The guarded table is keyed on (entity, capability),
+//     and Form Distributions appears in it only for Read. A filtered CREATE grant on that entity is
+//     therefore an ordinary new grant: rules 1-3 clear it and rule 4 has nothing to say. Judge it
+//     against the Read row and the gate invents a contract this app never declared.
+const UNGUARDED_CREATE = rawCall(
+    `@EntityID = '${FORM_DISTRIBUTIONS}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = '${DENY_CREATE_FILTER}'`,
+);
+withSeed(POST, UNGUARDED_CREATE, (violations) => {
+    // Both halves matter. "No violations" alone would also hold if the gate had never read the file
+    // at all, which is the shape of pass this whole suite exists to distrust — so the second half
+    // says the silence is informed: the call WAS parsed, as a respondent grant of Create.
+    const parsed = findPermissionCalls(UNGUARDED_CREATE);
+    check(
+        'does not judge a Create grant against the guarded table row for Read on the same entity',
+        violations.length === 0 && parsed.length === 1 && parsed[0].role === 'respondent' && parsed[0].granted.Create,
+        `violations=${JSON.stringify(violations)} parsed=${JSON.stringify(parsed)}`,
+    );
+});
+
+// 44. rule/guard-key-entity-id. Case 13 resolves its guarded pair by entity NAME and case 27 by a
+//     bracketed one; both go through `readQuotedName`. Nothing reached rule 4 through a literal
+//     entity id, which is how `V202608081700` itself binds every one of them.
+withSeed(
+    POST,
+    rawCall(`@EntityID = '${FORM_RESPONSE_ANSWERS}', @RoleID = ${RESPONDENT_BY_NAME}, @CanCreate = 1, @CreateRLSFilterID = '${OWN_DISTRIBUTION_FILTER}'`),
+    (violations) => {
+        check(
+            'applies rule 4 to a guarded pair identified by literal entity id',
+            violations.some((v) => v.includes(OWN_DISTRIBUTION_FILTER) && v.includes(DENY_CREATE_FILTER)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 45. scope/unstamped-is-checked. A file Skyway cannot order is the one most likely to land last, so
+//     it is scanned rather than skipped. The comment said so; nothing held it to it.
+withSeed(
+    'Metadata_Sync_hotfix.sql',
+    seedSql(permissionRecord({ suffix: 'de04ef05', entityId: FORM_RESPONSE_ANSWERS, canCreate: 1, createFilter: 'clear' })),
+    (violations) => {
+        check(
+            'scans a seed whose filename carries no version stamp',
+            violations.some((v) => v.includes('CanCreate')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 46. scope/watershed-is-exclusive — a MUST PASS, and the case that decides which side of the
+//     boundary the watershed sits on. `V202608131600` IS the hardening migration, so a seed sharing
+//     its stamp is corrected by it, exactly like the pre-watershed seeds of case 14. Nothing said
+//     whether `>` was deliberate or an off-by-one nobody had thought about.
+//     Asserted as a BOUNDARY rather than as a silence: the identical seed content is checked at the
+//     watershed minute and at the minute after it, so the case fails if the gate stops scanning
+//     either side. A bare "no violations" at one stamp would also pass on a gate that had quietly
+//     stopped reading the directory.
+const AT_WATERSHED = seedSql(permissionRecord({ suffix: 'ef05fa06', entityId: FORM_RESPONSE_ANSWERS, canCreate: 1, createFilter: 'clear' }));
+withSeed('V202608131600__v0.10.x__Metadata_Sync.sql', AT_WATERSHED, (violations) => {
+    check('exempts a seed stamped exactly at the watershed, which the hardening migration corrects', violations.length === 0, JSON.stringify(violations));
+});
+withSeed('V202608131601__v0.10.x__Metadata_Sync.sql', AT_WATERSHED, (violations) => {
+    check(
+        'checks the very next minute after the watershed, so the exemption is a boundary and not a blind spot',
+        violations.some((v) => v.includes('CanCreate')),
+        JSON.stringify(violations),
+    );
+});
+
+// 47. seed/new-metadata. CHECK 1 has three branches and only "changed" was tested. A metadata file
+//     ADDED after the seed was generated ships nowhere at all, which is the worse of the two — and
+//     it must say "new", because "changed" sends the reader looking for an edit that never happened.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        writeFileSync(join(root, 'metadata', 'roles', '.extra-roles.json'), '[]');
+    },
+    (violations) => {
+        check(
+            'flags metadata added after the seed was generated, as new rather than as changed',
+            violations.some((v) => v.includes('.extra-roles.json') && v.includes('is new metadata')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 48. seed/deleted-metadata. The third branch: the file is gone but the seed still creates its
+//     records, so a fresh install gets rows the source tree no longer describes.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        rmSync(join(root, 'metadata', 'roles', '.roles.json'));
+    },
+    (violations) => {
+        check(
+            'flags metadata deleted after the seed was generated, which still ships its records',
+            violations.some((v) => v.includes('.roles.json') && v.includes('was deleted')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+// 49. Not a mutant — a coverage gap, and the one item on #44 that no mutant expresses. D3 names
+//     three ways a call may bind the role and every fixture used the same one, because
+//     `permissionRecord` builds the generator's real shape and the generator always routes through a
+//     variable. The other two are what a future MetadataSync would most plausibly switch to.
+for (const roleBinding of ['inlineById', 'inlineByName']) {
+    stillCaught(`reads @RoleID bound inline in the EXEC (${roleBinding})`, seedSql(permissionRecord({ ...VIOLATION, roleBinding })));
+}
 
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
