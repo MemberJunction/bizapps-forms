@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/forms-server": patch
+"@mj-biz-apps/forms-server": minor
 ---
 
 Attach a respondent's uploads to the records people actually open.
