@@ -20,6 +20,7 @@ import type { ActionResultSimple, RunActionParams } from '@memberjunction/action
 import { RegisterClass } from '@memberjunction/global';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 // Task types come from the package that owns __mj_BizAppsTasks — Forms deliberately
 // does not generate them (rationale: `excludeSchemas` in mj.config.cjs).
 import type {
@@ -154,7 +155,7 @@ async function createTaskLink(
 /** Resolve the required Task.TypeID — by name when supplied, else the first active type. */
 async function resolveTaskTypeId(typeName: string | undefined, contextUser: UserInfo): Promise<string | null> {
   const rv = new RunView();
-  const filter = typeName ? `Name='${typeName.replace(/'/g, "''")}'` : 'IsActive=1';
+  const filter = typeName ? `Name=${quoteSqlString(typeName)}` : 'IsActive=1';
   const result = await rv.RunView<mjBizAppsTasksTaskTypeEntity>(
     {
       EntityName: ENTITY.TaskType,

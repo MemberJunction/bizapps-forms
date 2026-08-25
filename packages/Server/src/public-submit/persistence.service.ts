@@ -18,6 +18,7 @@
  * typed columns mirror the `FormAnswerInput` transport exactly.
  */
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
   FormAnswerInput,
   JSONValue,
@@ -299,7 +300,7 @@ async function replaceAnswersClear(
   const existing = await provider.RunView<mjBizAppsFormsFormResponseAnswerEntityType>(
     {
       EntityName: FORM_RESPONSE_ANSWER_ENTITY,
-      ExtraFilter: `ResponseID='${responseId.replace(/'/g, "''")}'`,
+      ExtraFilter: `ResponseID=${quoteSqlString(responseId)}`,
       ResultType: 'entity_object',
     },
     contextUser,

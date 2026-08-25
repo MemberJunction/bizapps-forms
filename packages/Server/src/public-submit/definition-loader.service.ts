@@ -13,6 +13,7 @@
  * than a throw.
  */
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormDistributionEntityType,
   mjBizAppsFormsFormVersionEntityType,
@@ -55,11 +56,6 @@ export interface DefinitionLoadResult {
   failure?: DefinitionLoadFailure;
 }
 
-/** Escape a string literal for safe inclusion in a RunView `ExtraFilter`. */
-function sqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 /** Load the active distribution row for a slug, or `undefined` if none/closed. */
 async function loadDistribution(
   provider: DefinitionRunViewProvider,
@@ -69,7 +65,7 @@ async function loadDistribution(
   const result = await provider.RunView<mjBizAppsFormsFormDistributionEntityType>(
     {
       EntityName: FORM_DISTRIBUTION_ENTITY,
-      ExtraFilter: `Slug=${sqlString(slug)}`,
+      ExtraFilter: `Slug=${quoteSqlString(slug)}`,
       ResultType: 'simple',
     },
     contextUser,
@@ -89,7 +85,7 @@ async function loadPublishedVersion(
   const result = await provider.RunView<mjBizAppsFormsFormVersionEntityType>(
     {
       EntityName: FORM_VERSION_ENTITY,
-      ExtraFilter: `FormID=${sqlString(formId)} AND Status='Published'`,
+      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Published'`,
       OrderBy: 'VersionNumber DESC',
       ResultType: 'simple',
     },

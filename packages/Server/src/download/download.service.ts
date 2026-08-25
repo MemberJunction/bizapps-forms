@@ -45,6 +45,7 @@
  */
 import { LogError } from '@memberjunction/core';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
+import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
 import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
@@ -173,7 +174,7 @@ async function readProvenance(ctx: DownloadContext, fileId: string): Promise<Upl
   const result = await ctx.runViewProvider.RunView<UploadProvenanceRow>(
     {
       EntityName: FORM_UPLOAD_ENTITY,
-      ExtraFilter: `FileID='${escapeSql(fileId)}'`,
+      ExtraFilter: `FileID='${escapeSqlString(fileId)}'`,
       Fields: ['FileID', 'FileName', 'ContentType', 'Status'],
       MaxRows: 1,
       ResultType: 'simple',
@@ -192,7 +193,7 @@ async function readFileRecord(ctx: DownloadContext, fileId: string): Promise<Sto
   const result = await ctx.runViewProvider.RunView<StoredFileRow>(
     {
       EntityName: FILE_ENTITY,
-      ExtraFilter: `ID='${escapeSql(fileId)}'`,
+      ExtraFilter: `ID='${escapeSqlString(fileId)}'`,
       Fields: ['ID', 'Name', 'ContentType', 'ProviderID', 'ProviderKey', 'Status'],
       MaxRows: 1,
       ResultType: 'simple',
@@ -204,9 +205,4 @@ async function readFileRecord(ctx: DownloadContext, fileId: string): Promise<Sto
     return undefined;
   }
   return result.Results[0];
-}
-
-/** Single quotes doubled, the only escape a T-SQL string literal needs. */
-function escapeSql(value: string): string {
-  return value.replace(/'/g, "''");
 }

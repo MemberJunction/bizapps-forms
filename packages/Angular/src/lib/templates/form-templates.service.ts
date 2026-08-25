@@ -22,6 +22,7 @@ import {
   type TransactionGroupBase,
   type UserInfo,
 } from '@memberjunction/core';
+import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormEntity,
   mjBizAppsFormsFormPageEntity,
@@ -177,7 +178,7 @@ export class FormTemplatesService {
     if (!trimmed) {
       return false;
     }
-    const escaped = trimmed.replace(/'/g, "''");
+    const escaped = escapeSqlString(trimmed);
     const res = (await this.rv.RunView(
       {
         EntityName: FORMS_ENTITY.Form,

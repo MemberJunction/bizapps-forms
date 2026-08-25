@@ -39,7 +39,12 @@ describe('activity is scoped to this form', () => {
   });
 
   it('scopes the automations themselves to this form', () => {
-    expect(code()).toMatch(/ExtraFilter: `FormID='\$\{escapeSql\(this\.FormID\)\}'`/);
+    // The escaper is matched as `\w+` rather than by name. What this guard is about is the FILTER —
+    // that the query is bounded by this component's own FormID — and pinning the helper's spelling
+    // made an unrelated rename (the sixteen-copies consolidation, #67) fail a test about form
+    // scoping. That the value is escaped at all is still required; which function does it is not
+    // this file's business, and `sql-literal.spec.ts` owns the escaping rule itself.
+    expect(code()).toMatch(/ExtraFilter: `FormID='\$\{\w+\(this\.FormID\)\}'`/);
   });
 });
 

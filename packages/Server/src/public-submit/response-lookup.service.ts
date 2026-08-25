@@ -20,6 +20,7 @@
  * fail-closed from the returned `ok` flag.
  */
 import type { UserInfo } from '@memberjunction/core';
+import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './definition-loader.service';
 import { FORM_RESPONSE_ENTITY } from './entity-names';
@@ -43,11 +44,6 @@ export interface ResponseLookupResult {
   response?: mjBizAppsFormsFormResponseEntityType;
 }
 
-/** Escape a string literal for safe inclusion in a RunView `ExtraFilter`. */
-function sqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 /**
  * Load the most-recent response for `(session, version)` in the given status, or none.
  * `status` narrows to 'Complete' (dedupe) or 'Partial' (upsert/promote).
@@ -67,9 +63,9 @@ export async function findSessionResponse(
     {
       EntityName: FORM_RESPONSE_ENTITY,
       ExtraFilter:
-        `FormVersionID=${sqlString(key.formVersionId)} ` +
-        `AND AnonymousSessionID=${sqlString(key.sessionId)} ` +
-        `AND Status=${sqlString(status)}`,
+        `FormVersionID=${quoteSqlString(key.formVersionId)} ` +
+        `AND AnonymousSessionID=${quoteSqlString(key.sessionId)} ` +
+        `AND Status=${quoteSqlString(status)}`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',
       MaxRows: 1,
@@ -86,9 +82,15 @@ export async function findSessionResponse(
  * Escape a value for a SQL `LIKE` predicate, then wrap it as a quoted literal. Escapes the
  * ESCAPE-designated `\`, plus the wildcards `%` and `_`, so a client id embedded in the JSON
  * is matched literally (defense-in-depth — a valid UUID has none of these characters).
+ *
+ * Stays local, deliberately, while the plain-literal helper it used to sit beside moved to
+ * `@mj-biz-apps/forms-entities`: wildcard escaping is a property of the LIKE PREDICATE, not of SQL
+ * string literals, and the two filters below are the only place in the repo that uses one. Hoisting
+ * it would offer every call site a function that silently changes what their `=` comparison means.
+ * The quote-doubling half is the shared rule and is delegated; the wildcard half is this file's.
  */
 function sqlLikeLiteral(value: string): string {
-  const escaped = value.replace(/[\\%_]/g, (ch) => `\\${ch}`).replace(/'/g, "''");
+  const escaped = escapeSqlString(value.replace(/[\\%_]/g, (ch) => `\\${ch}`));
   return `'%${escaped}%'`;
 }
 
@@ -111,8 +113,8 @@ export async function findResponseById(
     {
       EntityName: FORM_RESPONSE_ENTITY,
       ExtraFilter:
-        `ID=${sqlString(key.responseId)} ` +
-        `AND FormVersionID=${sqlString(key.formVersionId)} ` +
+        `ID=${quoteSqlString(key.responseId)} ` +
+        `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
         `AND SourceMetadata LIKE ${sqlLikeLiteral(`"clientResponseId":"${key.responseId}"`)} ESCAPE '\\'`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',
@@ -151,7 +153,7 @@ export async function countPartialResponses(
   const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
     {
       EntityName: FORM_RESPONSE_ENTITY,
-      ExtraFilter: `FormVersionID=${sqlString(key.formVersionId)} AND Status='Partial'`,
+      ExtraFilter: `FormVersionID=${quoteSqlString(key.formVersionId)} AND Status='Partial'`,
       ResultType: 'count_only',
     },
     contextUser,
@@ -194,8 +196,8 @@ export async function findAdoptableResponseById(
     {
       EntityName: FORM_RESPONSE_ENTITY,
       ExtraFilter:
-        `ID=${sqlString(key.responseId)} ` +
-        `AND FormVersionID=${sqlString(key.formVersionId)} ` +
+        `ID=${quoteSqlString(key.responseId)} ` +
+        `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
         `AND Status='Partial' ` +
         // Require the row to carry this exact client id in its SourceMetadata JSON — proves the
         // PK was minted by the widget (not a guessed/foreign id), the ownership capability when
@@ -237,9 +239,9 @@ export async function findOwnedResponseById(
     {
       EntityName: FORM_RESPONSE_ENTITY,
       ExtraFilter:
-        `ID=${sqlString(key.responseId)} ` +
-        `AND AnonymousSessionID=${sqlString(key.sessionId)} ` +
-        `AND FormVersionID=${sqlString(key.formVersionId)} ` +
+        `ID=${quoteSqlString(key.responseId)} ` +
+        `AND AnonymousSessionID=${quoteSqlString(key.sessionId)} ` +
+        `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
         `AND Status='Partial'`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',

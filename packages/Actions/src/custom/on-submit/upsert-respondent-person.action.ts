@@ -23,6 +23,7 @@ import type { ActionResultSimple, RunActionParams } from '@memberjunction/action
 import { RegisterClass } from '@memberjunction/global';
 import { Metadata, RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
+import { escapeSqlString } from '@mj-biz-apps/forms-entities';
 import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 // Person comes from the package that owns __mj_BizAppsCommon — Forms deliberately
 // does not generate it (rationale: `excludeSchemas` in mj.config.cjs).
@@ -163,7 +164,7 @@ async function findPersonByEmail(
   contextUser: UserInfo,
 ): Promise<mjBizAppsCommonPersonEntity | null> {
   const rv = new RunView();
-  const escaped = email.replace(/'/g, "''");
+  const escaped = escapeSqlString(email);
   const result = await rv.RunView<mjBizAppsCommonPersonEntity>(
     {
       EntityName: PERSON_ENTITY,

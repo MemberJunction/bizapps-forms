@@ -84,6 +84,12 @@ vi.mock('@memberjunction/core', async (importOriginal) => ({
       }
       // Match the way SQL would: the filter carries names with quotes doubled, so a fake that
       // looked for the raw name would report every quoted name as unregistered.
+      //
+      // Written out longhand rather than calling `quoteSqlString`, deliberately, and it is the one
+      // copy of the doubling rule the #67 consolidation left standing in `packages/`. Importing the
+      // shared helper here would make this assert that the code under test and its own test double
+      // call the same function — which stays green if that function is wrong. Restating the rule
+      // independently is what lets this fake disagree with the production escaper and fail.
       const results = Object.entries(registeredActions)
         .filter(([name]) => (params.ExtraFilter ?? '').includes(`'${name.replace(/'/g, "''")}'`))
         .map(([name, ID]) => ({ ID, Name: name }));

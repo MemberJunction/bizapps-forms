@@ -16,6 +16,7 @@
  * unit-testable without a live server: tests pass a fake distribution loader and a stub `fetch`.
  */
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
 const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
@@ -70,11 +71,6 @@ export interface RedeemDeps {
   fetchImpl: typeof fetch;
 }
 
-/** Escape a string literal for safe inclusion in a RunView `ExtraFilter`. */
-function sqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 /** Distribution is open for redemption if active, not Closed, and within its open/close window. */
 function distributionIsOpen(dist: mjBizAppsFormsFormDistributionEntityType, now: Date): boolean {
   if (!dist.IsActive || dist.Status === 'Closed') {
@@ -97,7 +93,7 @@ async function loadDistribution(
   const result = await deps.provider.RunView<mjBizAppsFormsFormDistributionEntityType>(
     {
       EntityName: FORM_DISTRIBUTION_ENTITY,
-      ExtraFilter: `Slug=${sqlString(slug)}`,
+      ExtraFilter: `Slug=${quoteSqlString(slug)}`,
       ResultType: 'simple',
       MaxRows: 1,
     },
