@@ -275,10 +275,71 @@
       "runner that can remove prompt-run rows can erase the record of its own executions -- the",
       "same reasoning that keeps CanCreate off the Form Uploads ledger grant above.",
       "",
-      "This is the only grant here on a CORE __mj entity. The prompt-run ledger is where MJ",
-      "records that an AI call happened at all, so any principal permitted to run a prompt must be",
-      "able to write it; 'Integration' and 'Widget Guest', the other non-interactive roles, hold",
-      "the same grant on this entity already."
+      "This was the first grant here on a CORE __mj entity; the Action Execution Logs record",
+      "below is the second. The prompt-run ledger is where MJ records that an AI call happened at",
+      "all, so any principal permitted to run a prompt must be able to write it; 'Integration' and",
+      "'Widget Guest', the other non-interactive roles, hold the same grant on this entity already."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ_BizApps_Common: People",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "2F22F165-073D-45BB-AD26-6534BA222E59"
+    },
+    "_comments": [
+      "Shipped by V202608242100__v0.11.x__Automation_Runner_Person_Write.sql under this SAME id, so",
+      "a regenerated seed reproduces this row rather than minting a duplicate under a fresh GUID.",
+      "",
+      "'Forms: Upsert Respondent Person' exists to match-or-create one of these and stamp",
+      "FormResponse.RespondentPersonID with the result, and 'Forms: Bind Response To Entity' writes",
+      "the same table. Neither could, on any host where an operator had not hand-inserted this row",
+      "-- which is how #60 found it: the grant was live in a dev database under an id that appeared",
+      "in no migration and no metadata file, the signature of a fix applied and never shipped.",
+      "",
+      "Read + Create + Update, NO Delete. Read for the match-by-email that prevents duplicate",
+      "People (#47), Create for a first-time respondent, Update because entity binding merges into",
+      "a matched record rather than only creating. Delete is withheld: nothing on this path removes",
+      "a Person, and a runner that could would let an anonymous submission destroy a subject record.",
+      "",
+      "This entity belongs to bizapps-common, not to Forms. Forms declares that app as a HARD",
+      "dependency in mj-app.json precisely so it can build on it with real foreign keys, and",
+      "FormResponse.RespondentPersonID is one of them -- so a principal Forms invents, to run an",
+      "action Forms ships, against a table Forms already points at, is Forms' grant to make."
+    ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ: Action Execution Logs",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": true,
+      "CanDelete": false
+    },
+    "primaryKey": {
+      "ID": "5BC1949A-60F7-4788-A87D-A2FA2C073E69"
+    },
+    "_comments": [
+      "Shipped by V202608242110__v0.11.x__Automation_Runner_Action_Execution_Log_Write.sql under",
+      "this SAME id, so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "MJ's action engine writes one of these per execution -- inserted at start, updated at",
+      "completion. Without the grant the automation still RUNS and FormAutomationRun is still",
+      "written, so this cost the audit trail rather than the work. It also left a column Forms",
+      "ships permanently null: FormAutomationRun.ActionExecutionLogID is a foreign key to this",
+      "entity, and on the database where #60 was found all 134 automation runs carried NULL there,",
+      "successes included. Forms' own ledger could not be joined to MJ's.",
+      "",
+      "Read + Create + Update, NO Delete -- exactly what 'Developer' holds on this entity.",
+      "'Integration' additionally holds Delete, which a runner has no reason to and which would let",
+      "it erase the evidence of its own executions."
     ]
   }
 ]

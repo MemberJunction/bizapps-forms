@@ -15,7 +15,12 @@
  *   - 'Forms: Generate Form From Brief'
  *   - 'Forms: Create Form From Template'
  *   - 'Forms: Bind Response To Entity'
+ *
+ * It also registers the SIBLING APPS' entity classes the on-submit actions write through — see
+ * {@link LoadSiblingEntities}.
  */
+import { LoadGeneratedEntities as LoadCommonEntities } from '@mj-biz-apps/common-entities';
+import { LoadGeneratedEntities as LoadTasksEntities } from '@mj-biz-apps/tasks-entities';
 import { BindResponseToEntityAction } from './binding/bind-response-to-entity.action';
 import { UpsertRespondentPersonAction } from './on-submit/upsert-respondent-person.action';
 import { SendConfirmationEmailAction } from './on-submit/send-confirmation-email.action';
@@ -83,6 +88,41 @@ const FORMS_ACTION_CLASSES = [
   CreateFormFromTemplateAction,
   BindResponseToEntityAction,
 ] as const;
+
+/**
+ * Register the sibling apps' generated entity classes, at MODULE LOAD.
+ *
+ * `Forms: Upsert Respondent Person` writes `MJ_BizApps_Common: People`; `Forms: Create Followup
+ * Task` writes three `MJ_BizApps_Tasks:` entities. Forms deliberately does not generate any of
+ * them (`excludeSchemas` in mj.config.cjs), so the actions can only name their classes through
+ * `import type` — and a type import is erased at compile time. Nothing in the shipped package
+ * ever loaded the packages that own them, which made them a PHANTOM RUNTIME DEPENDENCY: correct
+ * only on a host that happened to load them for its own reasons.
+ *
+ * The failure is silent, which is why it survived. `GetEntityObject` does not throw for an
+ * unregistered entity — MJ's ClassFactory falls back to a plain `BaseEntity` (providerBase's
+ * `CreateInstance(BaseEntity, entityName, …)`), which has `Get`/`Set` but none of the generated
+ * typed accessors. `person.FirstName = 'Ada'` then defines a JS own-property the entity never
+ * reads, and the record saves as all-nulls. Issue #60: the upsert action reported
+ * `First Name cannot be null` for responses whose First name answer was sitting in the row, while
+ * the entity-binding action — which writes the SAME entity through `record.Set(field, value)` —
+ * wrote those same answers correctly seconds later in the same submit.
+ *
+ * At module scope, NOT inside {@link LoadFormsActions}: nothing in production calls that function
+ * (its only caller is this package's own spec). Registration has to happen on import, exactly as
+ * the action classes' own decorators do.
+ *
+ * These packages stay `peerDependencies` rather than `dependencies` — the host owns the single
+ * copy, and promoting them risks a second one, which the ClassFactory resolves by taking the LAST
+ * registration for a key and warns about at startup.
+ *
+ * Both `LoadGeneratedEntities` functions have empty bodies and return `void`: the registration is
+ * the `export *` side effect of importing the module at all, and the call is the anti-tree-shake
+ * anchor that keeps a bundler from dropping the import. `register.spec.ts` asserts the outcome
+ * rather than the calls, because the calls are not what does the work.
+ */
+LoadCommonEntities();
+LoadTasksEntities();
 
 /** Force-load all Forms action subclasses so their @RegisterClass decorators fire. */
 export function LoadFormsActions(): number {

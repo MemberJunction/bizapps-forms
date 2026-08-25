@@ -12,6 +12,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
+// PRECONDITION, not decoration. The action refuses to run when no generated class is registered
+// for the entities it writes, because MJ's fallback would silently discard every field it sets
+// (#60). In production `custom/register.ts` imports this package for exactly that reason, and
+// `register.spec.ts` is what pins that it still does; here we only need the precondition met.
+import '@mj-biz-apps/tasks-entities';
 
 // ---------------------------------------------------------------------------
 // Fakes for the entity / RunView layer.
