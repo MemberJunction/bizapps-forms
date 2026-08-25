@@ -161,6 +161,16 @@ no link rather than a broken one. Two round trips, not one: the uploads join nee
 answers' `FileID`s. The export pivot moved to a pure `dashboard/services/export-pivot.ts`
 so the exported file's shape is unit-testable.
 
+**[2026-08-25] MJ's attachments panel now has data, and this view is unaffected.** Forms
+writes `__mj.FileEntityRecordLink` rows for a response's file answers
+(`plans/FILE_LINKS_PLAN.md`), so the generic `<mj-record-attachments>` button on the
+generated `Form Responses` form — which every deployment has been rendering with a count of
+zero since the MJ 6.1.0-edge pin — shows the respondent's uploads. **This tab's uploads
+join is unchanged:** it reads `FormUpload` by the answers' `FileID`s, which is the richer
+source (it carries `FileName`, `ContentType`, `SizeBytes` and `Status`, and it is what the
+`GET /forms/files/:id` download route authorizes against). The link rows are for MJ's panel;
+this view keeps its own read. The two agree because both derive from the same file answers.
+
 ### S2 — Responses tab in the builder · size M
 
 - Add `'responses'` to `BuilderTab` (`form-builder.component.ts:44`), a fifth

@@ -341,5 +341,40 @@
       "'Integration' additionally holds Delete, which a runner has no reason to and which would let",
       "it erase the evidence of its own executions."
     ]
+  },
+  {
+    "fields": {
+      "EntityID": "@lookup:MJ: Entities.Name=MJ: File Entity Record Links",
+      "RoleID": "@lookup:MJ: Roles.Name=Forms Automation Runner",
+      "CanRead": true,
+      "CanCreate": true,
+      "CanUpdate": false,
+      "CanDelete": true
+    },
+    "primaryKey": {
+      "ID": "BA109DE8-2DAA-4664-816A-743673002FCC"
+    },
+    "_comments": [
+      "Shipped by V202608251800__v0.11.x__Automation_Runner_File_Link_Write.sql under this SAME id,",
+      "so a regenerated seed reproduces this row rather than minting a duplicate.",
+      "",
+      "MJ's record-attachments panel reads __mj.FileEntityRecordLink by (EntityID, RecordID) -- not",
+      "FormResponseAnswer.FileID and not MJ: Files. Forms writes those links in two places: on the",
+      "form response (as the SYSTEM user, which already holds Integration + Developer and needs no",
+      "grant) and on the record an entity binding materializes, which runs as this principal.",
+      "",
+      "Read + Create + Delete, NO Update. Read because the writer owns idempotency -- the table has",
+      "no unique constraint on (FileID, EntityID, RecordID), so a re-driven binding would stack",
+      "duplicate attachments without it. Delete so a REPLACED upload stops being on display; the",
+      "reconciler only ever removes links whose file has a FormUpload row for the same response, so",
+      "a hand-attached file is never in scope. Not Update: a link is (FileID, EntityID, RecordID)",
+      "and nothing else, and rewriting one in place repoints an existing attachment at another file.",
+      "",
+      "DELIBERATELY NOT PAIRED WITH ANY GRANT ON 'MJ: Files'. The panel's 'Delete Completely' --",
+      "which deletes the link, then hard-deletes the file row, with no transaction, no confirmation",
+      "and no call to the storage driver (MemberJunction/MJ#4046) -- is gated on CanDelete over BOTH",
+      "entities. Holding only this one leaves this principal with the panel's harmless 'Unlink from",
+      "Record' and nothing more."
+    ]
   }
 ]

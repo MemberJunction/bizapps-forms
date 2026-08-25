@@ -258,6 +258,8 @@ public path completely broken and every unit test passing.
 | `Forms: Bind Response To Entity` action | `packages/Actions/src/custom/binding/bind-response-to-entity.action.ts` |
 | Recovery sweep | `packages/Server/src/automation/recovery-sweep.ts` |
 | Upload provenance | `packages/Server/src/upload/upload-provenance.service.ts` |
+| File→record link reconciliation (pure) | `packages/Server/src/file-links/file-links.service.ts` |
+| The MJ I/O behind that | `packages/Server/src/file-links/mj-file-link-gateway.ts` |
 | Builder "Automate" tab | `packages/Angular/src/lib/builder/automation-tab.component.ts` |
 | Service principal, allow-list, sweep | `packages/Server/src/automation/{service-principal,allowed-entities,recovery-sweep}.ts` |
 
@@ -306,6 +308,76 @@ business record later, when nobody is waiting and refusing costs nothing. Both c
 the same `evaluateProvenance`, via `everyFileIsAttributable` — an earlier bind-time version
 compared only the distribution, which on a public form anyone can open means "was this uploaded by
 anybody at all".
+
+### The same file, visible on both records
+
+Proving a file is the respondent's own is what lets it be *written*. Making it *visible* is a
+separate write, because MJ's record-attachments panel (`<mj-record-attachments>`) reads neither of
+the two places Forms already records a file: not `FormResponseAnswer.FileID`, and not the
+`FormUpload` ledger. It reads one table — `__mj.FileEntityRecordLink`, filtered by `EntityID` and
+`RecordID`. Until Forms wrote those rows, a résumé was stored, downloadable through
+`GET /forms/files/:id`, and invisible on both the response and the applicant.
+
+Forms writes them in two places, from one definition (`syncFileLinks`):
+
+| Where | When | As whom |
+|---|---|---|
+| The `FormResponse` row | inside `persistSubmission`, on partial saves as well as complete ones | the submit pipeline's elevated system user |
+| The record a binding wrote | after `recordBindingLedgerRow`, in `dispatch-automation.ts` | the automation service principal |
+
+Three rules govern it, and each exists because nothing in the schema enforces it:
+
+1. **The writer owns idempotency.** `FileEntityRecordLink` has a primary key and two foreign keys
+   and *no* unique constraint on (FileID, EntityID, RecordID). Autosave, promotion and a recovery
+   sweep all re-run these paths, so the reconciler reads what is attached and inserts only what is
+   missing. Remove that read and every autosave stacks another copy on the record.
+2. **Only files this response uploaded may be unlinked.** A respondent who replaces their upload
+   should not leave the old one on display — but the panel also lets a person attach files to the
+   same record by hand, and those are not ours to delete. The test is **provenance, not who made
+   the link row**: removable means the file has a `FormUpload` row for *this* response. Read that
+   precisely — a file Forms uploaded for this response, re-attached by hand and then dropped from
+   the answers, *is* removed, because by that test it is ours. What is protected is every file the
+   response never uploaded, which is everything a person brought from anywhere else.
+3. **Attaching is gated on the same provenance verdict as writing.** `filesAreVerified` is computed
+   once per binding and used for both. An attachment on someone else's record is exactly as
+   readable as a column on it, so the two answers must not be able to disagree. Note what an
+   unverified verdict also costs: it skips *reconciliation*, not merely attachment, so a file
+   attached by an earlier verified run stays put. That is intended — the verdict is false on any
+   doubt including a failed lookup, and removing on doubt would strip legitimate attachments off
+   business records during a database blip.
+
+An `Unchanged` binding outcome still reconciles: the binding found its record and had nothing new
+to write, which says nothing about whether the attachments are current — records bound before this
+existed arrive precisely that way. `Skipped`, and any outcome with no `targetRecordId`, attaches
+nothing.
+
+Both writes are **best-effort and logged**. The response, its answers, and the bound business
+record are all already saved by the time the link write runs; failing the operation because a
+convenience row could not be inserted would report a write that succeeded as a failure and invite
+a re-drive that duplicates the business record.
+
+The `Forms Automation Runner` role needs its own grant for the second write —
+`V202608251800__v0.11.x__Automation_Runner_File_Link_Write.sql`, Read + Create + Delete on
+`MJ: File Entity Record Links`. The system user already holds Integration and Developer and needs
+nothing. `smoke/file-links-path.mjs` (`npm run smoke:file-links`) is what proves the wiring, the
+grant and the reconciliation together against a real database.
+
+### ⚠️ Interim: do not grant a *person's* role CanDelete on files
+
+MJ's attachments panel offers "Delete Completely", which deletes the link row and then
+**hard-deletes the `MJ: Files` row** — sequentially, in no transaction, with no confirmation
+dialog, and with no call to the storage driver. Two consequences, and the second is worse than the
+first: a delete that half-fails on `FK_FormUpload_File` leaves the file with no link and no way
+back to it through the UI, and a delete that *succeeds* orphans the stored bytes forever. Root
+cause is MJ-side — `MJ: Files` has no server-entity subclass and `spDeleteFile` is a bare row
+`DELETE` — and it is filed upstream as **MemberJunction/MJ#4046**, which proposes an
+`MJFileEntityServer` following MJ's own `MJTagEntityServer` / `MJListEntityServer` precedents.
+
+The button is gated on the viewing user holding `CanDelete` on **both** `MJ: Files` and
+`MJ: File Entity Record Links`. Until #4046 lands, do not grant a role a person holds `CanDelete`
+on either. The automation runner's grant above is deliberately on the link entity **only**, which
+leaves it with the panel's harmless "Unlink from Record" and nothing more; `V202608251800` asserts
+that as a postcondition so a later widening cannot happen quietly.
 
 ---
 
