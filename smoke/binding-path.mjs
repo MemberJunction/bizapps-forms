@@ -18,11 +18,19 @@
  *   set -a && . ./.env && set +a && node smoke/binding-path.mjs
  */
 import { sessionIdFor } from './lib/session.mjs';
-import { resolveFormId, resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = resolveSlug('binding-path.mjs');
+// The automation `seed-binding-smoke.mjs` creates, and the form it is wired to — NOT whichever
+// form sorts first. Two of the assertions below hold only on a form whose sole automation is this
+// binding: "all five submissions ran their automation" counts runs (a form with five automations
+// reports 15), and "first submission creates the record" needs the binding to be the FIRST thing
+// that sees the address. On a form that also runs `Forms: Upsert Respondent Person`, that action
+// creates the Person first and the binding correctly reports `Unchanged` — a real outcome, read
+// as a failure, because the fixture was pointed at a form it was never written for.
+const SEEDED_AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
+const SLUG = resolveSeededSlug('binding-path.mjs', { automationId: SEEDED_AUTOMATION_ID });
 // Resolved up front so a wrong slug fails naming the slugs that would have worked, rather 
 // than as an HTTP error several steps later that reads like the server is broken.
 resolveFormId(SLUG);
@@ -32,6 +40,34 @@ let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
 const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
+
+/**
+ * On-submit automations are DETACHED from the request — the submit answers the respondent as soon
+ * as the response is persisted and lets the binding run after. Every assertion in this file is
+ * about what the BINDING did, so every one of them is about something that becomes true shortly
+ * AFTER the mutation returns, and reading the ledger the instant the submit resolves races the
+ * work being inspected. It did: `ledgerFor` returned null, the record id came back undefined, and
+ * the suite died inside `personById` on `Conversion failed when converting ... to uniqueidentifier`
+ * — a fixture race wearing the costume of a SQL bug. Same shape as
+ * `automation-semantics-path.mjs`: poll, with a budget, and treat running out as a real failure.
+ */
+const BINDING_BUDGET_MS = 30_000;
+const POLL_MS = 250;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll `read` until `isDone` accepts its value, or give up after the budget. Returns the last. */
+async function eventually(read, isDone) {
+  const deadline = Date.now() + BINDING_BUDGET_MS;
+  let value = read();
+  while (!isDone(value) && Date.now() < deadline) {
+    await sleep(POLL_MS);
+    value = read();
+  }
+  return value;
+}
+
+/** The ledger row for a response, once the detached automation has written it. */
+const ledgerEventually = (responseId) => eventually(() => ledgerFor(responseId), Boolean);
 
 async function gql(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
@@ -61,16 +97,12 @@ async function newSession() {
 /** Submit one response with the given email and name; returns its responseId. */
 async function submit(token, definition, { email, name }) {
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
-  const answers = questions.map((q) => {
-    if (q.type === 'Email') return { questionId: q.id, textValue: email };
-    if (q.prompt.toLowerCase().includes('name')) return { questionId: q.id, textValue: name };
-    if (['Number', 'Rating', 'NPS'].includes(q.type)) return { questionId: q.id, numericValue: 7 };
-    if (q.type === 'YesNo') return { questionId: q.id, booleanValue: true };
-    if (['Date', 'Time'].includes(q.type)) return { questionId: q.id, dateValue: new Date(0).toISOString() };
-    if (['MultiChoice', 'Dropdown', 'SingleChoice'].includes(q.type)) return { questionId: q.id, jsonValue: JSON.stringify(['smoke']) };
-    if (q.type === 'Phone') return { questionId: q.id, textValue: '+1 555 010 1234' };
-    return { questionId: q.id, textValue: 'binding smoke' };
-  });
+  // `buildAnswers`, not a local copy of it. The copy that used to live here sent
+  // `jsonValue: '["smoke"]'` for every choice question, which the server rejects with "Choose
+  // only from the offered options" on any form whose choices are real — so this suite could not
+  // run at all against a form somebody had actually built. The helper picks the question's OWN
+  // first option, which is the whole reason it exists (see smoke/lib/fixture.mjs).
+  const answers = buildAnswers(questions, { email, name });
 
   const data = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {
@@ -100,6 +132,12 @@ function ledgerFor(responseId) {
 }
 
 function personById(id) {
+  // Guarded because the caller reads it off a ledger row that may not exist. Interpolating an
+  // absent id produced `Msg 8169, Conversion failed ... to uniqueidentifier`, which reads as a
+  // database problem rather than as "the binding had not run yet".
+  if (!id) {
+    return null;
+  }
   const row = sql(`SELECT TOP 1 ISNULL(FirstName,'') + '~' + ISNULL(Email,'') FROM __mj_BizAppsCommon.Person WHERE ID='${id}';`);
   if (!row) return null;
   const [firstName, email] = row.split('~');
@@ -125,7 +163,7 @@ async function main() {
 
   // 1. First sighting creates the record.
   const first = await submit(token, definition, { email: emailA, name: 'Ada' });
-  const firstLedger = ledgerFor(first);
+  const firstLedger = await ledgerEventually(first);
   check(firstLedger?.outcome === 'Created', `first submission creates the record (got ${firstLedger?.outcome ?? 'no ledger row'})`);
   const personId = firstLedger?.recordId;
   check(Boolean(personById(personId)), 'the ledger TargetRecordID joins to a real Person row',
@@ -134,7 +172,7 @@ async function main() {
 
   // 2. Same person again, different name: updates, never duplicates.
   const second = await submit(await newSession(), definition, { email: emailA, name: 'Ada Lovelace' });
-  const secondLedger = ledgerFor(second);
+  const secondLedger = await ledgerEventually(second);
   check(secondLedger?.outcome === 'Merged', `a repeat submission merges (got ${secondLedger?.outcome})`);
   check(secondLedger?.recordId === personId, 'it merges into the SAME record, rather than creating a second one');
   check(personById(personId)?.firstName === 'Ada Lovelace', 'the update actually wrote the new value');
@@ -142,7 +180,7 @@ async function main() {
   // 3. The identity match must be case-insensitive. This is the defect class that has shipped
   //    twice in this codebase; here it would present as a duplicate person per submission.
   const third = await submit(await newSession(), definition, { email: emailA.toUpperCase(), name: 'Ada Lovelace' });
-  const thirdLedger = ledgerFor(third);
+  const thirdLedger = await ledgerEventually(third);
   check(thirdLedger?.recordId === personId,
     'an UPPERCASE email matches the same person',
     `got ${thirdLedger?.recordId} vs ${personId} — a new record means the identity match is case-sensitive`);
@@ -152,14 +190,14 @@ async function main() {
   //    answer cannot be submitted through the real path; the neverBlank rule itself is covered by
   //    the unit matrix, and what only a live run can show is the no-op.)
   const fourth = await submit(await newSession(), definition, { email: emailA, name: 'Ada Lovelace' });
-  const fourthLedger = ledgerFor(fourth);
+  const fourthLedger = await ledgerEventually(fourth);
   check(fourthLedger?.outcome === 'Unchanged',
     `a resubmission of identical values reports Unchanged (got ${fourthLedger?.outcome})`);
   check(personById(personId)?.firstName === 'Ada Lovelace', 'the record still holds the right value');
 
   // 5. A different person gets their own record.
   const fifth = await submit(await newSession(), definition, { email: emailB, name: 'Grace' });
-  const fifthLedger = ledgerFor(fifth);
+  const fifthLedger = await ledgerEventually(fifth);
   check(fifthLedger?.outcome === 'Created' && fifthLedger?.recordId !== personId,
     'a different email creates a separate record');
 
@@ -168,8 +206,11 @@ async function main() {
   //    would let an old failure fail a good run forever (and, worse, let a new failure hide among
   //    them).
   const ids = [first, second, third, fourth, fifth].map((r) => `'${r}'`).join(',');
-  const runStates = sql(`SELECT Status + '=' + CAST(COUNT(*) AS varchar)
+  const readRunStates = () => sql(`SELECT Status + '=' + CAST(COUNT(*) AS varchar)
     FROM __mj_BizAppsForms.FormAutomationRun WHERE FormResponseID IN (${ids}) GROUP BY Status;`);
+  // Detached again: wait for the last run to leave `Running` before tallying, or the tally counts
+  // a run that had not finished as one that never succeeded.
+  const runStates = await eventually(readRunStates, (v) => !v.includes('Running'));
   check(!runStates.includes('Failed'), `no automation run failed (${runStates.replace(/\n/g, ' ')})`);
   check(runStates.includes('Succeeded=5'), `all five submissions ran their automation (${runStates.replace(/\n/g, ' ')})`);
 

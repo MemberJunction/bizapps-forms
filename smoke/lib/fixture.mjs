@@ -76,6 +76,52 @@ export function resolveSlug(scriptName) {
   return discovered;
 }
 
+/**
+ * The slug of the form a SEEDED fixture is actually wired to, found by the row it owns.
+ *
+ * {@link resolveSlug} answers "some published form with an Email question", which is right for a
+ * suite that only needs somewhere to submit. It is WRONG for a suite that mutates a seeded
+ * automation or binding and then asserts on what that row did, because the form it picks
+ * alphabetically need not be the form whose automation points at the row. That is not
+ * hypothetical: `resume-arc-path` patched the smoke binding's FieldMappings, ran against a
+ * different form whose automation pointed somewhere else, and reported the missing value as a
+ * product defect; `automation-semantics-path` rewrote one form's authored automations and then
+ * asserted counts against another's.
+ *
+ * Deliberately does NOT filter on `IsActive`: `automation-semantics-path` disables the automation
+ * mid-run, and a suite that cannot find its own fixture because a previous run left it disabled
+ * fails for a reason that has nothing to do with what it tests.
+ *
+ * An explicit slug still wins — an operator naming a form means it — and the caller is expected to
+ * check the wiring holds for it rather than assume, which is the half that was missing before.
+ */
+export function resolveSeededSlug(scriptName, { automationId, bindingId } = {}) {
+  const given = process.argv[2] || process.env.FORMS_SMOKE_SLUG;
+  if (given) {
+    return given;
+  }
+  requireDbEnv(scriptName);
+  const predicate = automationId
+    ? `a.ID = '${escape(automationId)}'`
+    : `a.BindingID = '${escape(bindingId)}'`;
+  const discovered = sql(
+    `SELECT TOP 1 d.Slug FROM __mj_BizAppsForms.FormAutomation a
+     JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID = a.FormID
+     WHERE ${predicate} AND d.Slug IS NOT NULL AND LEN(d.Slug) > 0
+     ORDER BY d.Slug;`,
+  ).trim();
+  if (!discovered) {
+    const slugs = availableSlugs();
+    throw new Error(
+      `${scriptName} asserts on a seeded automation, and no published form is wired to it. Run ` +
+        '`npm run smoke:binding:seed` first — it creates the binding AND the automation that ' +
+        `points at it. ${slugs.length ? `Distributions that exist: ${slugs.join(', ')}.` : ''}`,
+    );
+  }
+  console.log(`  note  no slug given; using "${discovered}" — the form its seeded fixture is wired to`);
+  return discovered;
+}
+
 /** The form id behind a slug. Throws naming the slugs that would have worked. */
 export function resolveFormId(slug) {
   const formId = sql(

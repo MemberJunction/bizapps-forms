@@ -18,17 +18,22 @@
  *   set -a && . ./.env && set +a && node smoke/automation-semantics-path.mjs
  */
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
-import { resolveFormId, resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
 import { sessionIdFor } from './lib/session.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = resolveSlug('automation-semantics-path.mjs');
+const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
+// The form this suite is wired to, NOT whichever form sorts first. Every scenario below rewrites
+// the authored row above, republishes THAT form's snapshot from THAT form's authored rows, and
+// then asserts exact counts ("restored to a single active automation"). Run against a form with
+// five authored automations and every one of those counts is wrong — and the republish rewrites
+// the automations of a form this suite does not own.
+const SLUG = resolveSeededSlug('automation-semantics-path.mjs', { automationId: AUTOMATION_ID });
 // Resolved up front so a wrong slug fails naming the slugs that would have worked, rather 
 // than as an HTTP error several steps later that reads like the server is broken.
 resolveFormId(SLUG);
 const env = process.env;
-const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
 
 let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
@@ -94,16 +99,10 @@ async function definitionFor(token) {
 /** Submit through the real public path. `partial` drives the Complete/Partial distinction. */
 async function submit(token, definition, { email, name, partial = false, responseId }) {
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
-  const answers = questions.map((q) => {
-    if (q.type === 'Email') return { questionId: q.id, textValue: email };
-    if (q.prompt.toLowerCase().includes('name')) return { questionId: q.id, textValue: name };
-    if (['Number', 'Rating', 'NPS'].includes(q.type)) return { questionId: q.id, numericValue: 7 };
-    if (q.type === 'YesNo') return { questionId: q.id, booleanValue: true };
-    if (['Date', 'Time'].includes(q.type)) return { questionId: q.id, dateValue: new Date(0).toISOString() };
-    if (['MultiChoice', 'Dropdown', 'SingleChoice'].includes(q.type)) return { questionId: q.id, jsonValue: JSON.stringify(['smoke']) };
-    if (q.type === 'Phone') return { questionId: q.id, textValue: '+1 555 010 1234' };
-    return { questionId: q.id, textValue: 'semantics smoke' };
-  });
+  // `buildAnswers`, not a local copy of it — see the note in binding-path.mjs. The values it
+  // produces are the same deterministic ones this used (7, true, the epoch) EXCEPT for choices,
+  // where it picks the question's own first option instead of a literal the form never offered.
+  const answers = buildAnswers(questions, { email, name });
 
   const data = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {
