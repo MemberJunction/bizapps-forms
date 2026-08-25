@@ -12,10 +12,14 @@
  *   set -a && . ./.env && set +a && node smoke/upload-provenance-path.mjs
  */
 import { sessionIdFor } from './lib/session.mjs';
+import { resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = process.argv[2] || 'contact-us-e2e';
+const SLUG = resolveSlug('upload-provenance-path.mjs');
+// Resolved up front so a wrong slug fails naming the slugs that would have worked, rather 
+// than as an HTTP error several steps later that reads like the server is broken.
+resolveFormId(SLUG);
 const env = process.env;
 
 let failures = 0;

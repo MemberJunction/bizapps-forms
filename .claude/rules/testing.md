@@ -65,10 +65,23 @@ npm run lint:generated                            # CodeGen scope gate
 npm run lint:ui                                   # design-token gate
 ```
 
+**Every script takes the distribution slug as its first argument, or `FORMS_SMOKE_SLUG`.** Given
+neither, one is discovered from the database — the first published form carrying an Email question,
+printed so a run always says which form it used. Nothing is hardcoded: the question ids each
+fixture needs are resolved BY ROLE from whichever form was chosen (`smoke/lib/fixture.mjs`), so the
+same suite runs against a contact form, a job application, or whatever a given database holds.
+
+These used to name one fixture — a form at slug `contact-us-e2e`, plus the literal GUIDs of its
+questions — which meant no other database could run them, and said so badly: a missing form
+surfaced as `Conversion failed when converting from a character string to uniqueidentifier`, and a
+present form with different questions produced `Submission is missing required value(s): Email`,
+which reads like a product defect and never was one. If a fixture cannot be satisfied now, the
+script says which form it looked at, what role it needed, and which slugs would have worked.
+
 **None of these run in CI.** `smoke/**` appears in `build.yml`'s path filter, so editing one
-triggers the workflow — but no job executes them, and the fixtures they need (a form at slug
-`contact-us-e2e`) are not reproducible from the repo. They are manual, and they are the only thing
-standing between you and the failure class below.
+triggers the workflow — but no job executes them: they need a live API, a SQL Server container and
+a published form, which no build agent has. They are manual, and they are the only thing standing
+between you and the failure class below.
 
 > A publish bug once made entity binding completely inert — the snapshot never carried the
 > configured automations, so no binding ever fired — while the whole unit suite AND the binding

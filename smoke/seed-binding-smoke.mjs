@@ -2,18 +2,40 @@
  * Seed a live entity binding so the respondent smoke test exercises it end to end.
  *
  * Creates (idempotently): the automation service principal and its role assignment, a
- * FormEntityBinding from the Contact-us form onto MJ_BizApps_Common: People, a FormAutomation
+ * FormEntityBinding from the target form onto MJ_BizApps_Common: People, a FormAutomation
  * pointing at it, and a republished FormVersion whose snapshot carries that automation — because
  * automations execute from the snapshot, not from the live rows.
+ *
+ * WHICH form is resolved at run time rather than named here. This file used to hardcode the
+ * literal GUIDs of one form's Email and name questions, which meant the binding it wrote was
+ * correct on exactly one database and silently wrong everywhere else: the mapping pointed at
+ * questions the target form did not have, so the binding ran and failed with `Submission is
+ * missing required value(s): Email` — a message that reads like a product defect and is not one.
  *
  * Run against a local dev database only. It writes real rows.
  */
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
 import { requireDbEnv, sql, sqlWide } from './lib/sqlcmd.mjs';
+import {
+  pickEmailQuestion,
+  pickNameQuestion,
+  requireQuestion,
+  resolveFormId,
+  resolveQuestions,
+  resolveSlug,
+} from './lib/fixture.mjs';
 
 requireDbEnv('seed-binding-smoke.mjs');
 
-const SLUG = process.argv[2] || 'contact-us-e2e';
+const SLUG = resolveSlug('seed-binding-smoke.mjs');
+const formId = resolveFormId(SLUG);
+const questions = resolveQuestions(formId);
+// Resolved BY ROLE, so the same fixture binds correctly whatever form it is pointed at. Both are
+// required: without an email question the identity rule has nothing to match on, and Person's
+// FirstName is NOT NULL so a create would fail on the column rather than on anything under test.
+const emailQuestion = requireQuestion(pickEmailQuestion(questions), 'the respondent email', SLUG, questions);
+const nameQuestion = requireQuestion(pickNameQuestion(questions), 'the respondent given name', SLUG, questions);
+console.log(`  note  form "${SLUG}": email <- "${emailQuestion.prompt}", first name <- "${nameQuestion.prompt}"`);
 
 /**
  * Read one authored automation exactly as publish reads it.
@@ -48,14 +70,12 @@ const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
 // where the migrations have not run.
 const PRINCIPAL_ID = '9F2B7C41-6E8D-4A53-B1F0-3C7D5E9A2B84';
 const PRINCIPAL_ROLE_ID = '5154187D-0AB9-4C75-A444-CFC3D10E1BC0';
-const Q_EMAIL = 'AE1FF634-ADE2-4AE9-9B16-1A417CC73AE8';
-const Q_NAME = '17B03D45-7C90-4CA5-AB78-C98404D2C7EC';
 
 const fieldMappings = JSON.stringify({
   version: 1,
   fields: [
-    { targetField: 'Email', source: { kind: 'question', questionId: Q_EMAIL }, required: true },
-    { targetField: 'FirstName', source: { kind: 'question', questionId: Q_NAME } },
+    { targetField: 'Email', source: { kind: 'question', questionId: emailQuestion.id }, required: true },
+    { targetField: 'FirstName', source: { kind: 'question', questionId: nameQuestion.id } },
     // Person.LastName is NOT NULL, so a mapping that omits it can merge into an existing row but
     // can never create one — the binding correctly reports a candidate failure carrying the
     // database's own message. A static source both satisfies the column and exercises that kind.
@@ -138,7 +158,6 @@ WHEN NOT MATCHED BY TARGET
 console.log('  ok    entity permissions for the principal');
 
 // 2. The binding + the automation that runs it.
-const formId = sql(`SET NOCOUNT ON; SELECT TOP 1 CAST(f.ID AS varchar(40)) FROM __mj_BizAppsForms.Form f JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID=f.ID WHERE d.Slug='${SLUG}';`).trim();
 const peopleEntityId = sql(`SET NOCOUNT ON; SELECT CAST(ID AS varchar(40)) FROM __mj.Entity WHERE Name='MJ_BizApps_Common: People';`).trim();
 
 sql(`

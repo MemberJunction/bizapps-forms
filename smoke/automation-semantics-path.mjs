@@ -18,11 +18,15 @@
  *   set -a && . ./.env && set +a && node smoke/automation-semantics-path.mjs
  */
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
+import { resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
 import { sessionIdFor } from './lib/session.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = process.argv[2] || 'contact-us-e2e';
+const SLUG = resolveSlug('automation-semantics-path.mjs');
+// Resolved up front so a wrong slug fails naming the slugs that would have worked, rather 
+// than as an HTTP error several steps later that reads like the server is broken.
+resolveFormId(SLUG);
 const env = process.env;
 const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
 

@@ -47,9 +47,10 @@
  * reason is worse than one that says it did not run.
  */
 import { sessionIdFor } from './lib/session.mjs';
+import { resolveSlug } from './lib/fixture.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = process.argv[2] || process.env.FORMS_SMOKE_SLUG || 'contact-us-e2e';
+const SLUG = resolveSlug('respondent-scope-path.mjs');
 const OTHER_DISTRIBUTION_ID = process.argv[3] || process.env.FORMS_SMOKE_OTHER_DISTRIBUTION_ID || '';
 
 let failures = 0;
