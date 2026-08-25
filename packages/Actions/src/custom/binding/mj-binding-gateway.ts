@@ -9,6 +9,7 @@
  */
 import { CompositeKey, LogError, Metadata, RunView } from '@memberjunction/core';
 import type { BaseEntity, EntityInfo, UserInfo } from '@memberjunction/core';
+import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { CanonicalAnswerValue, IdentityNormalization } from '@mj-biz-apps/forms-entities';
 import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery } from './binding-executor';
 
@@ -167,25 +168,6 @@ function criterionToSql(
     default:
       return `${column} = ${sqlLiteral(criterion.value)}`;
   }
-}
-
-/**
- * Single-quote a value for SQL, doubling any quote it contains.
- *
- * `N`-prefixed so the literal is nvarchar. Without it SQL Server parses the literal as varchar in
- * the database's collation codepage, which silently replaces any character that codepage lacks
- * with `?` BEFORE the comparison happens — so a respondent whose name or email contains a
- * non-Latin character matches nothing, and the binding creates them a second record on every
- * submission.
- *
- * The `dialect` parameter exists because PostgreSQL rejects that prefix, but NOTHING SELECTS IT
- * TODAY: every caller takes the SQL Server default, and there is no runtime dialect detection
- * anywhere in this package. Binding against a PostgreSQL-backed deployment therefore needs that
- * detection wired in first — the parameter is the seam for it, not evidence that it is handled.
- */
-export function sqlLiteral(value: string, dialect: 'sqlserver' | 'postgresql' = 'sqlserver'): string {
-  const quoted = `'${value.replace(/'/g, "''")}'`;
-  return dialect === 'sqlserver' ? `N${quoted}` : quoted;
 }
 
 /** Read the primary key out of a `simple` result row, pipe-joined for a composite key. */

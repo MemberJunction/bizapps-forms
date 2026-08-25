@@ -1256,3 +1256,49 @@ native entities. This is the reporting differentiator no incumbent has.
     into a logged error; it is a no-op now, neither counted nor reported. `foldedFileIds` could
     throw on a nullish id from OUTSIDE the try/catch, contradicting the module's own "never
     throws". And the smoke's bound-record delete check was ordered so it passed vacuously.
+
+- **2026-08-25 (later) — a migration that duplicated the metadata CodeGen reads, and sixteen
+  spellings of one escape.** Three issues (#64, #66, #67) worked as one branch, each verified
+  against the working tree and the live dev database before any code was written. Plan:
+  `plans/ISSUE-64-66-67-METADATA-CONVERGE-AND-SQL-ESCAPER-PLAN.md`.
+
+  - **The wrong question, asked seventeen times.** `V202608191300` guards most of its inserts on a
+    natural key and seventeen of them on `[ID] = '<guid>'` alone. The first asks whether the thing
+    already exists; the second asks whether *this row* was inserted before, which is only the same
+    question on a host that has never minted its own id for it. Anyone who ran `mj codegen` between
+    `V202608182100` and `V202608191300` — the documented workflow — had exactly that, so all
+    seventeen guards missed and inserted a second copy. Four of the seven core metadata tables have
+    no unique constraint on their natural key upstream, so it landed silently.
+  - **#66 was the same bug, one step downstream.** CodeGen emits one `@FieldResolver` per
+    `EntityRelationship` row, so the duplicated `Forms → Form Screens` row made regeneration emit
+    `mjBizAppsFormsFormScreens_FormIDArray` twice and `forms-server` stopped compiling. Every gate
+    stayed green for six days: the unit suites read hand-written source, `pnpm run build` compiles
+    the CHECKED-IN generated files (which predate the duplicate), and the smoke suites drive the
+    running server. Nothing in the repo read `__mj`, which is the only place the defect existed.
+  - **`V202608252300` converges by keep-list.** The migration's own ids win, so a repaired host ends
+    up row-for-row identical to a fresh install rather than merely un-duplicated. No-op on a clean
+    database and on the half-cleaned one this was found on; cannot touch host-authored metadata,
+    because every delete requires a same-natural-key sibling from the keep-list.
+  - **Two findings neither issue had.** `EntitySetting` was duplicated too (`FieldCategoryInfo`,
+    `FieldCategoryIcons` on Form Screens) and was in nobody's sweep. And the ID-only guard is not
+    one author's slip — it is **the guard CodeGen emits** for a relationship row: 51 statements
+    across five migrations, four of them pasted CodeGen output. That reframes the fix as upstream
+    MJ, and it is why CHECK 4's watershed sits after the *latest* offender rather than the first.
+  - **Two gates, because the defect has two homes.** `scripts/check-distribution-seed.mjs` CHECK 4
+    refuses the guard shape in SQL at authoring time; `smoke/metadata-integrity-path.mjs` rules on
+    the end state in the database, catching a duplicate whatever wrote it — which is the only
+    coverage available for the 33 relationship rows whose twins nobody has observed. Nine MUTANTS
+    entries pin CHECK 4's load-bearing behaviours; the mutation gate rejected the first draft three
+    times (a stale anchor and two behaviours no case killed) before all 58 passed.
+  - **#67: sixteen implementations, not the six the issue listed.** Seven named local functions
+    spelled four ways plus nine inline, already drifted into four different decisions — one
+    N-prefixes, one tolerated `null`, one escapes LIKE wildcards. Now one module in
+    `forms-entities`, which every consumer already depended on, so the coupling objection that had
+    kept them apart did not survive contact with the dependency graph. Emitted SQL is
+    byte-identical at every site, the file-link gateway's `(value || '')` included — that package
+    compiles without `strictNullChecks`, so the tolerance is behaviour, not decoration.
+  - **Proof for #66 is a round trip, not an assertion.** With the repair applied, `mj codegen` ran
+    clean (no `ERROR running one or more AFTER commands`) and regenerated
+    `packages/Server/src/generated/generated.ts` **byte-identically** to what is checked in. The
+    regeneration artifacts were discarded: the DisplayName drift they also carry belongs to
+    `chore/resync-codegen-output`, which this unblocks.

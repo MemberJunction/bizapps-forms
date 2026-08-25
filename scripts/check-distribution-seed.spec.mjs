@@ -17,6 +17,7 @@ import {
     findRespondentGrants,
     findPermissionCalls,
     countPermissionProcedureMentions,
+    findIdOnlyGuardedInserts,
     RESPONDENT_GUARDED_GRANTS,
 } from './check-distribution-seed.mjs';
 
@@ -1008,6 +1009,201 @@ withFixture(
 //     variable. The other two are what a future MetadataSync would most plausibly switch to.
 for (const roleBinding of ['inlineById', 'inlineByName']) {
     stillCaught(`reads @RoleID bound inline in the EXEC (${roleBinding})`, seedSql(permissionRecord({ ...VIOLATION, roleBinding })));
+}
+
+// ---------------------------------------------------------------------------
+// CHECK 4 — ID-only guards on core-metadata inserts
+// ---------------------------------------------------------------------------
+
+/** A migration that lands AFTER CHECK 4's watershed, so the check speaks; and one that lands before. */
+const POST_GUARD = 'V202609010000__v0.12.x__New_Metadata.sql';
+const PRE_GUARD = 'V202608200000__v0.11.x__Old_Metadata.sql';
+
+/** Drops one migration into an otherwise-quiet repo and asserts on what CHECK 4 says about it. */
+function withMigration(fileName, sql, assert) {
+    withFixture(
+        (root) => {
+            quietRepo(root);
+            writeFileSync(join(root, 'migrations', fileName), sql);
+        },
+        (violations) => assert(violations.filter((v) => v.includes(fileName))),
+    );
+}
+
+const idOnlyGuarded = (table) => `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[${table}] WHERE [ID] = '6729890a-d62c-4806-8fd3-3ce466fd0395')
+BEGIN
+   INSERT INTO [\${mjSchema}].[${table}] ([ID], [EntityID]) VALUES ('6729890a-d62c-4806-8fd3-3ce466fd0395', 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8')
+END;
+`;
+
+// 50. The defect itself, on the table whose duplicate broke CodeGen (#66).
+withMigration(POST_GUARD, idOnlyGuarded('EntityRelationship'), (violations) => {
+    check(
+        'flags an EntityRelationship insert guarded on [ID] alone',
+        violations.some((v) => v.includes('EntityRelationship') && v.includes("[ID] = '<guid>'")),
+        JSON.stringify(violations),
+    );
+});
+
+// 51. Every table on the list, not just the one that bit us. The three with upstream unique
+//     constraints are included deliberately — see CORE_METADATA_TABLES' comment.
+for (const table of ['Entity', 'EntityField', 'EntityFieldValue', 'EntityRelationship', 'EntityPermission', 'ApplicationEntity', 'EntitySetting']) {
+    withMigration(POST_GUARD, idOnlyGuarded(table), (violations) => {
+        check(`flags an ID-only guard on ${table}`, violations.length === 1, JSON.stringify(violations));
+    });
+}
+
+// 52. A MUST PASS — the shape `V202608191300`'s EntityField inserts already use, and the shape the
+//     violation message tells authors to write. If this fired, the check would be telling people to
+//     fix a guard by making it a violation.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE ID = '26476755-bae0-4a03-b6c3-79857c530d6f' OR (EntityID = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8' AND Name = 'TemplateSourceFormID')) BEGIN
+   INSERT INTO [\${mjSchema}].[EntityField] ([ID], [Name]) VALUES ('26476755-bae0-4a03-b6c3-79857c530d6f', 'TemplateSourceFormID')
+END;
+`,
+    (violations) => check('stays silent on an OR-joined natural-key guard', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 53. A MUST PASS — the Entity fence, where the guard names a natural key and the block it governs
+//     inserts THREE different core tables. Keying off the inserted table rather than the predicate
+//     would fail this.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '\${flyway:defaultSchema}')
+BEGIN
+   INSERT INTO [\${mjSchema}].[Entity] ([ID], [Name]) VALUES ('1', 'x');
+   INSERT INTO [\${mjSchema}].[ApplicationEntity] ([ID], [EntityID]) VALUES ('2', '1');
+   INSERT INTO [\${mjSchema}].[EntityPermission] ([ID], [EntityID]) VALUES ('3', '1');
+END;
+`,
+    (violations) => check('stays silent on a natural-key fence governing several inserts', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 54. The rescue that isn't. `V202608191300`'s QuestionType inserts carry a companion `AND EXISTS`
+//     OUTSIDE the NOT EXISTS, and it does not help: it tests that a DIFFERENT row exists, so on a
+//     host where the ID guard is wrong the insert still fires. A parser that read the whole `IF`
+//     condition rather than the NOT EXISTS subquery would call this natural-keyed and pass it.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityFieldValue] WHERE [ID] = 'a3807a5d-b745-4aa1-8c9c-97a37c3f0651')
+   AND EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityField] WHERE [ID] = '0A4FF448-80DF-4D5D-94EC-E315822A1B45' AND Name = 'QuestionType')
+INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [EntityFieldID], [Value]) VALUES ('a3807a5d-b745-4aa1-8c9c-97a37c3f0651', '0A4FF448-80DF-4D5D-94EC-E315822A1B45', 'ShortText');
+`,
+    (violations) =>
+        check(
+            'a companion AND EXISTS does not rescue an ID-only guard',
+            violations.some((v) => v.includes('EntityFieldValue')),
+            JSON.stringify(violations),
+        ),
+);
+
+// 55. The watershed. The same SQL before the stamp is shipped history nobody may edit.
+withMigration(PRE_GUARD, idOnlyGuarded('EntityRelationship'), (violations) =>
+    check('exempts migrations at or before the watershed', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 56. A MUST PASS — plain DML under no guard at all, which is what the repair migration itself is.
+//     Flagging it would fail the very file that fixes the defect.
+withMigration(
+    POST_GUARD,
+    `
+DELETE FROM [\${mjSchema}].[EntityRelationship] WHERE [ID] = 'f3063e0c-7b0a-4b29-8f0c-86450e15f6d3';
+UPDATE [\${mjSchema}].[EntityPermission] SET CanRead = 1 WHERE [ID] = '855332fc-b2ee-4254-b3fa-6b513e29de83';
+`,
+    (violations) => check('ignores guard-free DML', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 57. A MUST PASS — a table OUTSIDE the core-metadata list. This app's own tables are guarded on ID
+//     legitimately all over `migrations/`, because their ids ARE ours to mint: no other writer
+//     creates a `Form` row behind our back, which is the whole difference.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${flyway:defaultSchema}].[Form] WHERE [ID] = '6729890a-d62c-4806-8fd3-3ce466fd0395')
+   INSERT INTO [\${flyway:defaultSchema}].[Form] ([ID], [Name]) VALUES ('6729890a-d62c-4806-8fd3-3ce466fd0395', 'x');
+`,
+    (violations) => check('ignores inserts into this app\'s own schema', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 58. Comments cannot manufacture a violation, and cannot hide one. The same lesson CHECK 3's mask
+//     layer records — its worst bugs were all a comment being read as code or code as a comment.
+withMigration(
+    POST_GUARD,
+    `
+-- IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE [ID] = 'x') INSERT INTO [\${mjSchema}].[EntityRelationship]
+/* A block explaining that guarding INSERT INTO [\${mjSchema}].[EntitySetting] on [ID] = 'y' is wrong. */
+SELECT 1;
+`,
+    (violations) => check('reads no violation out of prose describing one', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 59. A MUST PASS — a guard whose subquery has NO `WHERE` at all. "Does this table have any rows"
+//     is not the defect this check names, and reading a missing predicate as an ID-only one would
+//     flag the broadest possible guard as the narrowest.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship])
+   INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID], [EntityID]) VALUES ('1', '2');
+`,
+    (violations) => check('does not treat a WHERE-less guard as ID-only', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 60. A MUST PASS — a CORE-SCHEMA table that is not one of the seven. `V202608131600` guards its
+//     `RowLevelSecurityFilter` inserts on `[ID]` exactly like this, and correctly: those ids are
+//     Forms' own to mint, so no other writer creates the row behind our back. That is the whole
+//     distinction the table list draws, and case 57 does not reach it — a filter on the SCHEMA alone
+//     would pass that one for the wrong reason.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[RowLevelSecurityFilter] WHERE ID = '7F0E0001-A1B2-4C3D-8E4F-000000000001')
+    INSERT INTO [\${mjSchema}].[RowLevelSecurityFilter] (ID, Name) VALUES ('7F0E0001-A1B2-4C3D-8E4F-000000000001', N'x');
+`,
+    (violations) => check('ignores a core table outside the metadata seven', violations.length === 0, JSON.stringify(violations)),
+);
+
+// 61. A MUST PASS — an ID-only guard whose body is NOT DML must not reach forward and blame the
+//     next insert. Found by adversarial review: matching only DML made the scan step over the
+//     `PRINT` and attribute the well-guarded `EntityRelationship` insert below to this guard,
+//     reporting a violation against a line that is correct. Over-reporting is this gate's safe
+//     direction; naming the WRONG statement is not, because it sends someone to fix healthy code.
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE [ID] = '6729890a-d62c-4806-8fd3-3ce466fd0395')
+    PRINT 'nothing to do';
+
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE ID = '855332fc-b2ee-4254-b3fa-6b513e29de83' OR (EntityID = 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8' AND RelatedEntityJoinField = 'TemplateSourceFormID'))
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID], [EntityID]) VALUES ('855332fc-b2ee-4254-b3fa-6b513e29de83', 'C6DB9AD8-11EA-451B-B0E1-71D7BFD894B8');
+`,
+    (violations) =>
+        check(
+            'an ID-only guard over a non-DML statement does not blame the next insert',
+            violations.length === 0,
+            JSON.stringify(violations),
+        ),
+);
+
+// 62. The parser reproduces, on the real shipped file, exactly the count established by hand while
+//     writing the repair migration: 14 EntityFieldValue + 1 EntityRelationship + 2 EntitySetting.
+//     Pinned against `migrations/` itself so the number cannot drift from the file it describes.
+{
+    const offender = readFileSync(join(REPO_ROOT, 'migrations', 'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql'), 'utf-8');
+    const byTable = {};
+    for (const { table } of findIdOnlyGuardedInserts(offender)) {
+        byTable[table] = (byTable[table] ?? 0) + 1;
+    }
+    check(
+        'reads the 17 ID-only guards V202608191300 actually ships',
+        byTable.EntityFieldValue === 14 && byTable.EntityRelationship === 1 && byTable.EntitySetting === 2,
+        JSON.stringify(byTable),
+    );
 }
 
 if (failures > 0) {

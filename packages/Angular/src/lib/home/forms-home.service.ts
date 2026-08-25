@@ -12,6 +12,7 @@
 import { Injectable } from '@angular/core';
 import { LogError, Metadata, RunView, type RunViewResult } from '@memberjunction/core';
 import type { MJActionEntityType } from '@memberjunction/core-entities';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormEntity } from '@mj-biz-apps/forms-entities';
 import type { ActionParam, ActionResult } from '@memberjunction/actions-base';
 import { GraphQLActionClient, GraphQLDataProvider } from '@memberjunction/graphql-dataprovider';
@@ -144,7 +145,7 @@ export class FormsHomeService {
       EntityName: HOME_ENTITY.actions,
       ResultType: 'simple',
       Fields: ['ID', 'Name'],
-      ExtraFilter: `Name='${actionName.replace(/'/g, "''")}'`,
+      ExtraFilter: `Name=${quoteSqlString(actionName)}`,
       MaxRows: 1,
     })) as RunViewResult<MJActionEntityType>;
     if (!res.Success || res.Results.length === 0) {

@@ -9,6 +9,7 @@
  * service after a successful Save so we never burn quota on a failed write.
  */
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
   FormSettings,
   mjBizAppsFormsFormDistributionEntityType,
@@ -40,7 +41,7 @@ export async function formQuotaExceeded(
   const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
     {
       EntityName: FORM_RESPONSE_ENTITY,
-      ExtraFilter: `FormID='${formId.replace(/'/g, "''")}' AND Status='Complete'`,
+      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Complete'`,
       ResultType: 'count_only',
     },
     contextUser,

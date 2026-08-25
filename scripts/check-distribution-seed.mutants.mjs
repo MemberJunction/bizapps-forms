@@ -182,7 +182,7 @@ const MUTANTS = [
     ['scope/watershed-is-exclusive', 'the watershed itself is EXEMPT — `>` not `>=` — because the hardening migration has the last word at its own stamp',
         'Number(stamp[1]) > RESPONDENT_HARDENING_WATERSHED', 'Number(stamp[1]) >= RESPONDENT_HARDENING_WATERSHED'],
     ['scope/migrations-pg', 'migrations-pg/ is scanned, so the first PostgreSQL seed is checked from birth',
-        `    for (const dirName of ['migrations', 'migrations-pg']) {`, `    for (const dirName of ['migrations']) {`],
+        `const SHIPPED_MIGRATION_DIRS = ['migrations', 'migrations-pg'];`, `const SHIPPED_MIGRATION_DIRS = ['migrations'];`],
 
     // --- CHECK 1 and CHECK 2 ---------------------------------------------------------------------
     ['seed/missing-migration', 'metadata with no seed migration at all is reported',
@@ -204,6 +204,35 @@ const MUTANTS = [
     ['placeholder/teardown-map', 'teardown scripts get the stricter map — MJ substitutes only ${mjSchema} there',
         `dir.endsWith('migrations-teardown') ? new Set(['mjSchema']) : INSTALL_SUPPLIED_PLACEHOLDERS`,
         'INSTALL_SUPPLIED_PLACEHOLDERS'],
+
+    // --- CHECK 4: ID-only guards on core-metadata inserts (#64 / #66) -----------------------------
+    ['idguard/predicate-is-id-only', 'a guard is flagged ONLY when its predicate is nothing but `[ID] = …`, so the OR-joined natural-key shape passes',
+        `const ID_ONLY_PREDICATE = /^\\s*\\[?ID\\]?\\s*=\\s*(?:N?'[^']*'|@\\w+)\\s*$/i;`,
+        `const ID_ONLY_PREDICATE = /\\[?ID\\]?\\s*=\\s*(?:N?'[^']*'|@\\w+)/i;`],
+    ['idguard/where-clause-read', 'the predicate is read from the subquery\'s WHERE, so a guard with no WHERE at all is not treated as ID-only',
+        '        if (predicate === null || !ID_ONLY_PREDICATE.test(predicate)) continue;',
+        '        if (predicate !== null && !ID_ONLY_PREDICATE.test(predicate)) continue;'],
+    ['idguard/not-exists-subquery-only', 'the predicate comes from INSIDE the `NOT EXISTS (…)`, so a companion `AND EXISTS (…)` outside it cannot rescue an ID-only guard',
+        '        const predicate = whereClauseOf(structure.slice(open + 1, close));',
+        '        const predicate = whereClauseOf(structure.slice(open + 1, governedStatement(structure, close + 1)[0]));'],
+    ['idguard/core-tables-only', 'only the seven core `__mj` metadata tables are ruled on, so this app\'s own ID-guarded inserts are left alone',
+        '            if (CORE_METADATA_TABLES.has(insert[1].toLowerCase())) {', '            if (true) {'],
+    ['idguard/table-list-complete', 'the table list carries all seven, so dropping the constrained ones (whose failure is loud, not silent) is noticed',
+        `['entity', 'entityfield', 'entityfieldvalue', 'entityrelationship', 'entitypermission', 'applicationentity', 'entitysetting']`,
+        `['entityfieldvalue', 'entityrelationship', 'entitysetting', 'entitypermission']`],
+    ['idguard/watershed', 'only migrations AFTER the watershed are scanned, so the five shipped offenders nobody may edit do not fail a healthy tree',
+        '            .filter((f) => f.endsWith(\'.sql\') && landsAfter(f, ID_ONLY_GUARD_WATERSHED))',
+        '            .filter((f) => f.endsWith(\'.sql\'))'],
+    ['idguard/watershed-is-exclusive', 'the watershed is EXCLUSIVE, so the offender at the stamp itself stays exempt',
+        '    return stamp === null || Number(stamp[1]) > watershed;',
+        '    return stamp === null || Number(stamp[1]) >= watershed;'],
+    ['idguard/governed-block', 'a guard governs its whole `BEGIN … END`, so an insert two lines below the guard is still attributed to it',
+        `            if (keyword === 'BEGIN') return [i, matchingEnd(text, i)];`,
+        `            if (keyword === 'BEGIN') return [i, i];`],
+    ['idguard/masked-source', 'the scan reads the comment-blanked mask, so prose describing a bad guard is not read as one',
+        '    const { structure } = maskSql(sql);', '    const structure = sql;'],
+    ['idguard/stops-at-any-statement', 'the scan stops at the FIRST statement of any kind, so a guard over a PRINT cannot reach forward and blame the next insert',
+        '            if (!GOVERNED_DML.has(keyword)) return [i, i];', '            if (!GOVERNED_DML.has(keyword)) continue;'],
 ];
 
 /**

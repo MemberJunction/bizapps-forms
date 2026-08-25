@@ -20,6 +20,21 @@
  *
  *   Regenerate both together:  npm run seed:manifest   (after regenerating the seed migration)
  *
+ * CHECK 4 — A CORE-METADATA INSERT IS NEVER GUARDED ON ITS OWN ID ALONE.
+ *   `IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = '<guid>')` asks
+ *   whether THIS ROW was inserted before. What makes an insert safe is whether the THING IT
+ *   DESCRIBES already exists, under whatever id the host minted for it — and on any machine that ran
+ *   `mj codegen` before the migration, that id is not ours. The guard misses, the insert lands a
+ *   second copy, and four of the seven tables involved have no unique constraint on their natural
+ *   key to stop it. That is #64. Its consequence is #66: CodeGen emits one `@FieldResolver` per
+ *   `EntityRelationship` row, so a duplicated row makes the NEXT regeneration emit a duplicate
+ *   identifier and `forms-server` stops compiling — on whichever branch happens to regenerate,
+ *   nowhere near the migration that caused it.
+ *
+ *   This is the third gate here whose failure mode is silence, and the third for the same reason:
+ *   everything builds, every test passes, and the checked-in generated files still compile, because
+ *   they predate the duplicate. Nothing in the repo reads the database this defect lives in.
+ *
  * CHECK 2 — NO UNRESOLVABLE PLACEHOLDERS IN SHIPPED SQL.
  *   `mj migrate` builds Skyway's placeholder map from THIS repo's mj.config.cjs, but
  *   `mj app install` builds it from the HOST's (MJCLI's open-app-context.ts ->
@@ -83,6 +98,15 @@ const REPO_ROOT = join(__dirname, '..');
  * heard of us.
  */
 const INSTALL_SUPPLIED_PLACEHOLDERS = new Set(['flyway:defaultSchema', 'mjSchema']);
+
+/**
+ * The directories whose SQL reaches a stranger's database, scanned by CHECK 3 and CHECK 4 alike.
+ *
+ * `migrations-pg/` is included so the first PostgreSQL seed is checked from birth rather than from
+ * whenever somebody remembers to widen a gate. It is not kept in lockstep today (it stops at 0.8.x),
+ * which is precisely why the gates must already know about it.
+ */
+const SHIPPED_MIGRATION_DIRS = ['migrations', 'migrations-pg'];
 
 /**
  * The one machine-generated file class: `mj sync push`'s output, moved into migrations/. CHECK 1
@@ -716,7 +740,7 @@ function landsAfterHardening(file) {
 }
 
 function checkRespondentGrants(repoRoot, violations) {
-    for (const dirName of ['migrations', 'migrations-pg']) {
+    for (const dirName of SHIPPED_MIGRATION_DIRS) {
         const dir = join(repoRoot, dirName);
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => METADATA_SEED_FILE.test(f) && landsAfterHardening(f)).sort()) {
@@ -742,6 +766,203 @@ function checkRespondentGrants(repoRoot, violations) {
 }
 
 // ---------------------------------------------------------------------------
+// CHECK 4 — a core-metadata INSERT is never guarded on its own ID alone
+// ---------------------------------------------------------------------------
+
+/**
+ * The `__mj` tables a migration may write metadata rows into, and where the guard shape matters.
+ *
+ * The failure differs across them, and BOTH halves belong on this list. `EntityFieldValue`,
+ * `EntityRelationship`, `EntitySetting` and `EntityPermission` carry no unique constraint on their
+ * natural key, so an ID-only guard duplicates SILENTLY — that is #64, and the duplicated
+ * relationship row is what broke CodeGen in #66. `Entity`, `EntityField` and `ApplicationEntity` DO
+ * carry one (`UQ_EntityField_EntityID_Name`, `UQ_ApplicationEntity_ApplicationID_EntityID`), so the
+ * same mistake there fails LOUDLY on a constraint violation and takes the install down instead.
+ *
+ * Do not "optimise" the constrained three off this list on the grounds that the database catches
+ * them. A migration that cannot apply is not a lesser defect than one that applies wrongly — it is
+ * the same authoring error, and the fix is identical: guard on the natural key.
+ */
+const CORE_METADATA_TABLES = new Set(
+    ['entity', 'entityfield', 'entityfieldvalue', 'entityrelationship', 'entitypermission', 'applicationentity', 'entitysetting'],
+);
+
+/**
+ * The point after which an ID-only guard is a NEW defect rather than shipped history.
+ *
+ * WATERSHED, NOT WHOLE HISTORY — the same reasoning CHECK 3 records at line 42, and the same
+ * constraint: `migrations/` is append-only, so a gate that fails on a file nobody may edit is a gate
+ * someone disables. FIVE shipped migrations carry this shape, 51 statements in total, and none can
+ * be corrected in place:
+ *
+ *   B202606281200  Schema_and_Tables                 — 16 EntityRelationship
+ *   V202608072330  Automation_And_Entity_Binding     — 12 EntityRelationship
+ *   V202608081200  Form_Upload_Provenance            —  5 EntityRelationship
+ *   V202608191300  Element_Parity_Metadata_Backfill  — 17 mixed (#64: 14 value, 1 rel, 2 setting)
+ *   V202608211600  Form_Template_Source              —  1 EntityRelationship
+ *
+ * That distribution is the real lesson, and it is why this check is worth its lines: only the fourth
+ * file was hand-authored. The other four are PASTED CODEGEN OUTPUT, and this is the guard CodeGen
+ * itself emits for a relationship row — so the defect arrives by the routine act of running
+ * `mj codegen` and pasting the result, not by anybody choosing a weak predicate. Upstream MJ is
+ * where that ends (see the PR's follow-ups); until then this gate is what stops the next paste.
+ *
+ * The stamp therefore sits after the LATEST offender, not the first. Their damage on existing hosts
+ * is repaired by `V202608252300__Converge_Element_Parity_Metadata_Duplicates.sql` for the rows it
+ * could identify, and `smoke/metadata-integrity-path.mjs` rules on the END STATE in the database for
+ * everything else — it reports a duplicate whatever wrote it, which is the coverage that matters for
+ * the 33 rows above whose twins nobody has observed. This check rules on the SQL instead, so that the
+ * next one is never written. Moving this stamp forward again to quiet a NEW violation would be
+ * exactly the wrong repair: add the natural key to the guard instead.
+ */
+const ID_ONLY_GUARD_WATERSHED = 202608211600;
+
+/** The `[` … `]`-optional core-table INSERT, on either spelling of the core schema. */
+const CORE_INSERT = /\bINSERT\s+INTO\s+(?:\[\$\{mjSchema\}\]|\[?__mj\]?)\s*\.\s*\[?(\w+)\]?/gi;
+
+/** A predicate that tests the row's own id and nothing else — the defect this check names. */
+const ID_ONLY_PREDICATE = /^\s*\[?ID\]?\s*=\s*(?:N?'[^']*'|@\w+)\s*$/i;
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function matchingParen(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i++) {
+        if (text[i] === '(') depth++;
+        else if (text[i] === ')' && --depth === 0) return i;
+    }
+    return -1;
+}
+
+/** Index of the `END` closing the `BEGIN` at `begin`, or the end of the text. */
+function matchingEnd(text, begin) {
+    const keyword = /\b(BEGIN|END)\b/gi;
+    keyword.lastIndex = begin;
+    let depth = 0;
+    for (let match = keyword.exec(text); match !== null; match = keyword.exec(text)) {
+        if (match[1].toUpperCase() === 'BEGIN') depth++;
+        else if (--depth === 0) return match.index;
+    }
+    return text.length;
+}
+
+/** Everything after the subquery's top-level `WHERE`, or null when it has none. */
+function whereClauseOf(subquery) {
+    const where = /\bWHERE\b/iy;
+    let depth = 0;
+    for (let i = 0; i < subquery.length; i++) {
+        const char = subquery[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (depth === 0) {
+            where.lastIndex = i;
+            if (where.test(subquery)) return subquery.slice(where.lastIndex);
+        }
+    }
+    return null;
+}
+
+/**
+ * The statement an `IF` guard governs: `[from, to)` of its `BEGIN … END` block, or of the single
+ * statement that follows.
+ *
+ * Scanning starts AFTER the `NOT EXISTS (…)` closes and steps over whatever else the condition
+ * carries, at paren depth zero. That is what makes a companion `AND EXISTS (…)` unable to rescue an
+ * ID-only guard: the extra clause is skipped as condition text, never read as a second predicate.
+ * It is the shape `V202608191300`'s QuestionType inserts use, and it does not help — the `AND
+ * EXISTS` tests that a DIFFERENT row exists, so on a host where the NOT EXISTS is wrong it fires
+ * anyway.
+ *
+ * ⚠️ THE SCAN STOPS AT THE FIRST STATEMENT OF ANY KIND, not at the first statement we care about.
+ * `STATEMENT_START` therefore lists `PRINT`, `SET`, `SELECT` and friends alongside the DML: a guard
+ * whose body is `PRINT 'x'` governs that PRINT and nothing else, and returning an EMPTY region for
+ * it is the correct answer. An earlier draft matched only DML and so scanned straight past the
+ * PRINT to whatever `INSERT` came next — attributing an unrelated, possibly well-guarded insert to
+ * this guard and reporting a violation against the wrong line. Over-reporting is the safe direction
+ * for this gate, but naming the wrong statement is not: it sends someone to fix code that is fine.
+ */
+const STATEMENT_START = /\b(BEGIN|INSERT|UPDATE|DELETE|EXEC|EXECUTE|SELECT|SET|PRINT|THROW|DECLARE|RAISERROR|WAITFOR|MERGE|TRUNCATE|IF|WHILE|RETURN|GOTO)\b/iy;
+const GOVERNED_DML = new Set(['INSERT', 'UPDATE', 'DELETE', 'EXEC', 'EXECUTE']);
+
+function governedStatement(text, from) {
+    let depth = 0;
+    for (let i = from; i < text.length; i++) {
+        const char = text[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (depth === 0) {
+            STATEMENT_START.lastIndex = i;
+            const match = STATEMENT_START.exec(text);
+            if (match === null || match.index !== i) continue;
+            const keyword = match[1].toUpperCase();
+            if (keyword === 'BEGIN') return [i, matchingEnd(text, i)];
+            if (!GOVERNED_DML.has(keyword)) return [i, i];
+            const semicolon = text.indexOf(';', i);
+            return [i, semicolon === -1 ? text.length : semicolon];
+        }
+    }
+    return [from, from];
+}
+
+/**
+ * Core-metadata tables inserted under an `IF NOT EXISTS` whose predicate tests only `[ID]`.
+ *
+ * Read off the STRUCTURE mask, like CHECK 3's parser: string bodies are blanked, so a guid inside a
+ * literal still reads as `'        '` and matches the shape without the value mattering, while a
+ * `--` comment describing a guard can never be mistaken for one. Pure read; exported for the spec.
+ */
+export function findIdOnlyGuardedInserts(sql) {
+    const { structure } = maskSql(sql);
+    const found = [];
+    for (const guard of structure.matchAll(/\bIF\s+NOT\s+EXISTS\s*\(/gi)) {
+        const open = guard.index + guard[0].length - 1;
+        const close = matchingParen(structure, open);
+        if (close === -1) continue;
+        const predicate = whereClauseOf(structure.slice(open + 1, close));
+        if (predicate === null || !ID_ONLY_PREDICATE.test(predicate)) continue;
+        const [from, to] = governedStatement(structure, close + 1);
+        for (const insert of structure.slice(from, to).matchAll(CORE_INSERT)) {
+            if (CORE_METADATA_TABLES.has(insert[1].toLowerCase())) {
+                found.push({ table: insert[1], line: structure.slice(0, guard.index).split('\n').length });
+            }
+        }
+    }
+    return found;
+}
+
+/** A migration's position relative to `watershed`, read from the `V<YYYYMMDDHHMM>` in its name. */
+function landsAfter(file, watershed) {
+    const stamp = file.match(/^[VB](\d{12})__/);
+    return stamp === null || Number(stamp[1]) > watershed;
+}
+
+function checkIdOnlyGuards(repoRoot, violations) {
+    for (const dirName of SHIPPED_MIGRATION_DIRS) {
+        const dir = join(repoRoot, dirName);
+        if (!existsSync(dir)) continue;
+        const files = readdirSync(dir)
+            .filter((f) => f.endsWith('.sql') && landsAfter(f, ID_ONLY_GUARD_WATERSHED))
+            .sort();
+        for (const file of files) {
+            const rel = relative(repoRoot, join(dir, file));
+            for (const { table, line } of findIdOnlyGuardedInserts(readFileSync(join(dir, file), 'utf-8'))) {
+                violations.push(
+                    `${rel}:${line} guards an INSERT into \`${table}\` on \`[ID] = '<guid>'\` alone. That asks whether ` +
+                        'THIS ROW was inserted before; what makes an insert safe is whether the THING IT DESCRIBES already ' +
+                        'exists, under whatever id the host minted for it. Any developer who ran `mj codegen` before this ' +
+                        'migration has that row under a different id, so the guard misses and the insert lands a second ' +
+                        'copy — silently, because these tables have no unique constraint on their natural key. A duplicated ' +
+                        'EntityRelationship makes CodeGen emit one @FieldResolver per row and forms-server stops compiling ' +
+                        '(#66); a duplicated EntityFieldValue duplicates a generated union member. Guard on the natural key ' +
+                        `instead — \`WHERE ID = '<guid>' OR (EntityID = … AND Name = …)\` is the shape the EntityField ` +
+                        'inserts in the same file already use. A companion `AND EXISTS (…)` outside the NOT EXISTS does ' +
+                        'not count: it tests a different row.',
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point. Skipped when imported (by seed:manifest, which reuses buildManifest).
 // ---------------------------------------------------------------------------
 
@@ -751,6 +972,7 @@ export function runChecks(repoRoot = REPO_ROOT) {
     checkSeedMigration(repoRoot, violations);
     checkPlaceholders(repoRoot, violations);
     checkRespondentGrants(repoRoot, violations);
+    checkIdOnlyGuards(repoRoot, violations);
     return violations;
 }
 
@@ -765,6 +987,7 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
     }
     console.log(
         '✅ Distribution gate passed — metadata seed is present and current; shipped SQL uses only install-supplied ' +
-            'placeholders; no post-hardening seed re-grants the Form Respondent role unfiltered access.',
+            'placeholders; no post-hardening seed re-grants the Form Respondent role unfiltered access; no new ' +
+            'core-metadata insert is guarded on its own ID alone.',
     );
 }

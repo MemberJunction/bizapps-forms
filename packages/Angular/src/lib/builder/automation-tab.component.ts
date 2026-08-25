@@ -7,6 +7,7 @@ import {
   CanonicalAnswers,
   LEGACY_ON_SUBMIT_AUTOMATIONS,
   parseFieldMappings,
+  escapeSqlString,
   parseIdentityRule,
   resolveMappedValues,
   type FieldMappings,
@@ -240,7 +241,7 @@ export class AutomationTabComponent implements OnInit {
     const [autos, legacy] = await new RunView().RunViews([
       {
         EntityName: 'MJ_BizApps_Forms: Form Automations',
-        ExtraFilter: `FormID='${escapeSql(this.FormID)}'`,
+        ExtraFilter: `FormID='${escapeSqlString(this.FormID)}'`,
         OrderBy: 'DisplayOrder ASC',
         ResultType: 'entity_object',
       },
@@ -818,7 +819,7 @@ export class AutomationTabComponent implements OnInit {
     this.previewNote.set('');
     const latest = await new RunView().RunView<{ ID: string }>({
       EntityName: 'MJ_BizApps_Forms: Form Responses',
-      ExtraFilter: `FormID='${escapeSql(this.FormID)}' AND Status='Complete'`,
+      ExtraFilter: `FormID='${escapeSqlString(this.FormID)}' AND Status='Complete'`,
       OrderBy: '__mj_CreatedAt DESC',
       MaxRows: 1,
       Fields: ['ID'],
@@ -831,7 +832,7 @@ export class AutomationTabComponent implements OnInit {
 
     const answers = await new RunView().RunView<StoredAnswerRow>({
       EntityName: 'MJ_BizApps_Forms: Form Response Answers',
-      ExtraFilter: `ResponseID='${escapeSql(latest.Results[0].ID)}'`,
+      ExtraFilter: `ResponseID='${escapeSqlString(latest.Results[0].ID)}'`,
       ResultType: 'simple',
     });
     if (!answers.Success) {
@@ -1190,12 +1191,12 @@ function inClause(column: string, ids: readonly string[]): string {
   if (ids.length === 0) {
     return '1=0';
   }
-  return `${column} IN (${ids.map((id) => `'${escapeSql(id)}'`).join(',')})`;
+  return `${column} IN (${ids.map((id) => `'${escapeSqlString(id)}'`).join(',')})`;
 }
 
 /** The four built-in hooks, as a name filter. */
 function legacyActionFilter(): string {
-  return LEGACY_ON_SUBMIT_AUTOMATIONS.map((d) => `Name='${escapeSql(d.actionName)}'`).join(' OR ');
+  return LEGACY_ON_SUBMIT_AUTOMATIONS.map((d) => `Name='${escapeSqlString(d.actionName)}'`).join(' OR ');
 }
 
 /**
@@ -1210,11 +1211,6 @@ function decodeJsonColumn(raw: string | null): JSONValue | null {
     return null;
   }
   return JSON.parse(raw) as JSONValue;
-}
-
-/** Single quotes doubled, the only escape a T-SQL string literal needs. */
-function escapeSql(value: string): string {
-  return value.replace(/'/g, "''");
 }
 
 /**

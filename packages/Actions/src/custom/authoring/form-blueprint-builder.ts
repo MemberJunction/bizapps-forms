@@ -17,6 +17,7 @@ import {
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormQuestionOptionEntity,
   mjBizAppsFormsFormAutomationEntity,
+  quoteSqlString,
   type FormSettings,
 } from '@mj-biz-apps/forms-entities';
 import {
@@ -159,7 +160,7 @@ async function resolveActionIds(
     // created, so this is what keeps an ordinary form from querying the Action catalogue at all.
     return new Map();
   }
-  const filter = wanted.map((n) => `Name='${n.replace(/'/g, "''")}'`).join(' OR ');
+  const filter = wanted.map((n) => `Name=${quoteSqlString(n)}`).join(' OR ');
   const result = await new RunView().RunView<{ ID: string; Name: string }>(
     {
       EntityName: 'MJ: Actions',

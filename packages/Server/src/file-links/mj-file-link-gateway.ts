@@ -14,6 +14,7 @@
 import { Metadata, RunView } from '@memberjunction/core';
 import type { BaseEntity, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import type { MJFileEntityRecordLinkEntity } from '@memberjunction/core-entities';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
 import {
@@ -67,11 +68,21 @@ export class MJFileLinkGateway implements FileLinkGateway {
    * it must not do is mistake "we could not find out what is attached" for "nothing is attached".
    */
   public async loadState(target: FileLinkTarget, responseId: string): Promise<FileLinkState> {
+    // ⚠️ The `?? ''` is the local escaper's `(value || '')` tolerance, preserved verbatim when that
+    // copy was replaced by the shared `quoteSqlString`. It is NOT redundant with the `string` types
+    // above: this package compiles without `strictNullChecks`, so an undefined id reaches here
+    // silently, and the old helper turned it into `''`. Keeping it makes the consolidation a pure
+    // refactor. It is arguably the wrong behaviour — an undefined `entityId` yields `EntityID=''`,
+    // which matches nothing, and `loadState` then reports "nothing is attached", the one conclusion
+    // this class's own comment says it must never reach by accident. Fixing that is a behaviour
+    // change and belongs in its own commit; it is listed as a follow-up.
     const [links, uploads] = await this.provider.RunViews<FileLinkQueryRow>(
       [
         {
           EntityName: FILE_ENTITY_RECORD_LINK_ENTITY,
-          ExtraFilter: `EntityID=${sqlLiteral(target.entityId)} AND RecordID=${sqlLiteral(target.recordId)}`,
+          ExtraFilter:
+            `EntityID=${quoteSqlString(target.entityId ?? '')} ` +
+            `AND RecordID=${quoteSqlString(target.recordId ?? '')}`,
           Fields: ['ID', 'FileID'],
           ResultType: 'simple',
         },
@@ -79,7 +90,7 @@ export class MJFileLinkGateway implements FileLinkGateway {
           // Every upload Forms recorded against this response, INCLUDING revoked ones: a revoked
           // upload's link is still ours to remove, and filtering them out here would strand it.
           EntityName: FORM_UPLOAD_ENTITY,
-          ExtraFilter: `ResponseDraftID=${sqlLiteral(responseId)}`,
+          ExtraFilter: `ResponseDraftID=${quoteSqlString(responseId ?? '')}`,
           Fields: ['FileID'],
           ResultType: 'simple',
         },
@@ -146,18 +157,4 @@ export class MJFileLinkGateway implements FileLinkGateway {
       this.contextUser,
     );
   }
-}
-
-/**
- * A T-SQL string literal: single quotes doubled, the only escape one needs.
- *
- * A deliberate local copy, not an oversight. This repo carries several spellings of this
- * three-line function (`download.service.ts`, `response-lookup.service.ts`, the binding gateway's
- * exported `sqlLiteral`), and the right fix is one shared SQL helper — a repo-wide change, not
- * something to smuggle in here. The alternative available today is importing the binding
- * gateway's copy across a package boundary, which would make the file-link module depend on the
- * entity-binding gateway for string quoting: a worse coupling than a duplicated escape.
- */
-function sqlLiteral(value: string): string {
-  return `'${(value || '').replace(/'/g, "''")}'`;
 }

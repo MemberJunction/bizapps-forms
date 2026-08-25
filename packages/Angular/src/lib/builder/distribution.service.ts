@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { EntitySaveOptions, Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
+import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormDistributionEntityType,
@@ -306,7 +307,7 @@ export class DistributionService {
     const result = await rv.RunView(
       {
         EntityName: FORMS_ENTITY.FormDistribution,
-        ExtraFilter: `Slug='${slug.replace(/'/g, "''")}'`,
+        ExtraFilter: `Slug=${quoteSqlString(slug)}`,
         ResultType: 'count_only',
       },
       this.user,
