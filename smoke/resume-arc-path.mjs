@@ -200,6 +200,16 @@ const up = await fetch(`${BASE}/forms/upload`, { method: 'POST', headers: { Auth
 const upBody = await up.json().catch(() => ({}));
 check(up.status === 200 && upBody.fileId, `upload accepted (HTTP ${up.status})`, JSON.stringify(upBody));
 const fileId = upBody.fileId;
+if (!fileId) {
+  // Stop here rather than carrying an undefined id into the artifact checks. Without this the
+  // script reported the upload failure and then died on `fileId.toLowerCase()` several steps
+  // later — a TypeError stack that buries the one line saying what actually went wrong. Seen for
+  // real when the API had cached a storage credential that was saved after it booted: the
+  // message that mattered ("File storage is not available: Credential … not found") was already
+  // on screen, three lines above a crash that looked like the bug.
+  console.log(`\nFAIL — ${failures} check(s) failed. Nothing downstream can run without an uploaded file.`);
+  process.exit(1);
+}
 
 // The Bug 2 rejection path, driven for real. Without this the file only ever sent a VALID
 // questionId, which the pre-fix code also accepted — so the whole smoke passed unchanged against
