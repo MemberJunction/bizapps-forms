@@ -23,29 +23,22 @@
  *
  * Run:  set -a && . ./.env && set +a && node smoke/resume-arc-path.mjs
  */
-import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { sql } from './lib/sqlcmd.mjs';
+import { buildAnswers, pickEmailQuestion, pickNameQuestion, requireQuestion, resolveFormId, resolveQuestions, resolveSlug } from './lib/fixture.mjs';
 import { sessionIdFor } from './lib/session.mjs';
 
-/**
- * The SQL Server container these scripts shell into.
- *
- * Defaults to the workspace's shared container. It was `forms-sql` until the per-app databases were
- * retired (WORKSPACE.md, 2026-08-21) and every app moved onto one server; the name was never
- * updated here, so each of these scripts failed with `No such container: forms-sql` — a smoke test
- * that cannot run is a smoke test that is not protecting anything.
- */
-const SQL_CONTAINER = process.env.FORMS_SQL_CONTAINER || 'sql-mj-it';
-
-
 const BASE = 'http://localhost:4121';
-const SLUG = 'contact-us-e2e';
-const Q_NAME = '17B03D45-7C90-4CA5-AB78-C98404D2C7EC';
-const Q_EMAIL = 'AE1FF634-ADE2-4AE9-9B16-1A417CC73AE8';
-const Q_MSG = 'A0AEE39C-C337-45CF-ABBF-B9323BE0CB32';
-const Q_PHONE = 'F1B3361D-BF58-4DBE-92A9-FE7AE8FB1ED0';
+const SLUG = resolveSlug('resume-arc-path.mjs');
+const FORM_ID = resolveFormId(SLUG);
+const FORM_QUESTIONS = resolveQuestions(FORM_ID);
+// The résumé question is this fixture's OWN row, so it keeps a fixed id -- the script creates it.
+// Everything else is resolved from whatever form was chosen, including the page to hang it on:
+// PageID is a real foreign key, so a literal from another form fails on FK_FormQuestion_Page.
 const Q_RESUME = 'ABABABAB-0000-4000-8000-000000000010';
-const PAGE_ID = '4C42F586-2AF0-478D-AE20-CCC447F40EDA';
+const PAGE_ID = requireQuestion(FORM_QUESTIONS[0], 'a page to add the résumé question to', SLUG, FORM_QUESTIONS).pageId;
+const EMAIL_Q = requireQuestion(pickEmailQuestion(FORM_QUESTIONS), 'the respondent email', SLUG, FORM_QUESTIONS);
+const NAME_Q = requireQuestion(pickNameQuestion(FORM_QUESTIONS), 'the respondent given name', SLUG, FORM_QUESTIONS);
 const BINDING_ID = '11111111-2222-4333-8444-555555555001';
 
 const env = process.env;
@@ -53,14 +46,6 @@ let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
 const check = (c, m, d) => (c ? pass(m) : fail(m, d));
-
-function sql(q) {
-  const r = spawnSync('docker', ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost',
-    '-d', env.DB_DATABASE, '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-Q',
-    `SET NOCOUNT ON; ${q}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-  if (r.status !== 0) throw new Error(r.stderr || r.stdout);
-  return r.stdout.trim();
-}
 
 async function gql(token, query, variables) {
   const body = await gqlRaw(token, query, variables);
@@ -128,8 +113,8 @@ END
 const fieldMappings = JSON.stringify({
   version: 1,
   fields: [
-    { targetField: 'Email', source: { kind: 'question', questionId: Q_EMAIL }, required: true },
-    { targetField: 'FirstName', source: { kind: 'question', questionId: Q_NAME } },
+    { targetField: 'Email', source: { kind: 'question', questionId: EMAIL_Q.id }, required: true },
+    { targetField: 'FirstName', source: { kind: 'question', questionId: NAME_Q.id } },
     { targetField: 'LastName', source: { kind: 'static', value: '(resume-arc)' } },
     // The Applicant.ResumeFileID analogue: the uploaded file's MJ: Files id lands here.
     { targetField: 'PhotoURL', source: { kind: 'question', questionId: Q_RESUME } },
@@ -186,7 +171,8 @@ const published = await gql(token,
 const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
 const formVersionId = definition.formVersionId;
 check(Boolean(formVersionId), 'published definition carries formVersionId');
-check((definition.pages?.[0]?.questions ?? []).some((q) => q.id.toLowerCase() === Q_RESUME.toLowerCase()),
+const definitionQuestions = (definition.pages ?? []).flatMap((pg) => pg.questions ?? []);
+check(definitionQuestions.some((q) => q.id.toLowerCase() === Q_RESUME.toLowerCase()),
   'published definition now contains the FileUpload question');
 
 const submission = await gql(token, `
@@ -200,13 +186,14 @@ const submission = await gql(token, `
     partial: false,
     startedAt: new Date().toISOString(),
     clientMeta: { referrer: '', userAgent: 'resume-arc-smoke' },
-    answers: [
-      { questionId: Q_NAME, textValue: 'Resume Arc' },
-      { questionId: Q_EMAIL, textValue: email },
-      { questionId: Q_MSG, textValue: 'full arc test' },
-      { questionId: Q_PHONE, numericValue: 5550101234 },
-      { questionId: Q_RESUME, fileId },
-    ],
+    // Built from the published definition rather than a fixed list, so this runs against whatever
+    // form was resolved. Only the résumé is supplied by hand: a file id has to come from a real
+    // upload for its provenance to be attributable, which is the whole point of this test.
+    answers: buildAnswers(definitionQuestions, {
+      email,
+      name: 'Resume Arc',
+      overrides: { [Q_RESUME]: { fileId } },
+    }),
   },
 });
 const result = submission?.SubmitFormResponse;
@@ -239,13 +226,11 @@ const stolen = await gqlRaw(token2, `
   input: {
     distributionSlug: SLUG, formVersionId, responseId: rid2, partial: false,
     startedAt: new Date().toISOString(), clientMeta: { referrer: '', userAgent: 'resume-arc-smoke' },
-    answers: [
-      { questionId: Q_NAME, textValue: 'Thief' },
-      { questionId: Q_EMAIL, textValue: `thief+${Date.now()}@example.invalid` },
-      { questionId: Q_MSG, textValue: 'stealing a file' },
-      { questionId: Q_PHONE, numericValue: 1 },
-      { questionId: Q_RESUME, fileId },
-    ],
+    answers: buildAnswers(definitionQuestions, {
+      email: `thief+${Date.now()}@example.invalid`,
+      name: 'Thief',
+      overrides: { [Q_RESUME]: { fileId } },
+    }),
   },
 });
 

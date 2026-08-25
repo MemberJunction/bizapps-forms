@@ -17,37 +17,21 @@
  * Prerequisites: MJAPI running, and `smoke/seed-binding-smoke.mjs` already run.
  *   set -a && . ./.env && set +a && node smoke/binding-path.mjs
  */
-import { spawnSync } from 'node:child_process';
 import { sessionIdFor } from './lib/session.mjs';
-
-/**
- * The SQL Server container these scripts shell into.
- *
- * Defaults to the workspace's shared container. It was `forms-sql` until the per-app databases were
- * retired (WORKSPACE.md, 2026-08-21) and every app moved onto one server; the name was never
- * updated here, so each of these scripts failed with `No such container: forms-sql` — a smoke test
- * that cannot run is a smoke test that is not protecting anything.
- */
-const SQL_CONTAINER = process.env.FORMS_SQL_CONTAINER || 'sql-mj-it';
-
+import { resolveFormId, resolveSlug } from './lib/fixture.mjs';
+import { sql } from './lib/sqlcmd.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
-const SLUG = process.argv[2] || 'contact-us-e2e';
+const SLUG = resolveSlug('binding-path.mjs');
+// Resolved up front so a wrong slug fails naming the slugs that would have worked, rather 
+// than as an HTTP error several steps later that reads like the server is broken.
+resolveFormId(SLUG);
 const env = process.env;
 
 let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
 const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
-
-function sql(query) {
-  const res = spawnSync('docker', [
-    'exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
-    '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-s', '|', '-Q', `SET NOCOUNT ON; ${query}`,
-  ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (res.status !== 0) throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
-  return res.stdout.trim();
-}
 
 async function gql(token, query, variables) {
   const res = await fetch(`${BASE}/`, {
