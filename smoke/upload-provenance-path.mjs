@@ -11,19 +11,8 @@
  *
  *   set -a && . ./.env && set +a && node smoke/upload-provenance-path.mjs
  */
-import { spawnSync } from 'node:child_process';
 import { sessionIdFor } from './lib/session.mjs';
-
-/**
- * The SQL Server container these scripts shell into.
- *
- * Defaults to the workspace's shared container. It was `forms-sql` until the per-app databases were
- * retired (WORKSPACE.md, 2026-08-21) and every app moved onto one server; the name was never
- * updated here, so each of these scripts failed with `No such container: forms-sql` — a smoke test
- * that cannot run is a smoke test that is not protecting anything.
- */
-const SQL_CONTAINER = process.env.FORMS_SQL_CONTAINER || 'sql-mj-it';
-
+import { sql } from './lib/sqlcmd.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
 const SLUG = process.argv[2] || 'contact-us-e2e';
@@ -33,14 +22,6 @@ let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
 const check = (cond, m, d) => (cond ? pass(m) : fail(m, d));
-
-function sql(q) {
-  const r = spawnSync('docker', ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost',
-    '-d', env.DB_DATABASE, '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-Q',
-    `SET NOCOUNT ON; ${q}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-  if (r.status !== 0) throw new Error(r.stderr || r.stdout);
-  return r.stdout.trim();
-}
 
 async function session() {
   const html = await (await fetch(`${BASE}/f/${SLUG}`)).text();

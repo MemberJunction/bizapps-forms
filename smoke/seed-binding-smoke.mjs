@@ -8,43 +8,12 @@
  *
  * Run against a local dev database only. It writes real rows.
  */
-import { spawnSync } from 'node:child_process';
 import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-apps/forms-entities';
+import { requireDbEnv, sql, sqlWide } from './lib/sqlcmd.mjs';
 
-/**
- * The SQL Server container these scripts shell into.
- *
- * Defaults to the workspace's shared container. It was `forms-sql` until the per-app databases were
- * retired (WORKSPACE.md, 2026-08-21) and every app moved onto one server; the name was never
- * updated here, so each of these scripts failed with `No such container: forms-sql` — a smoke test
- * that cannot run is a smoke test that is not protecting anything.
- */
-const SQL_CONTAINER = process.env.FORMS_SQL_CONTAINER || 'sql-mj-it';
-
-
-// Credentials come from the process environment, not from parsing .env here: a password may
-// legitimately contain the characters a naive .env parser treats as syntax. Run this via
-//   set -a && . ./.env && set +a && node smoke/seed-binding-smoke.mjs
-const env = process.env;
-if (!env.DB_PASSWORD || !env.DB_DATABASE) {
-  console.error('Source .env first: set -a && . ./.env && set +a && node smoke/seed-binding-smoke.mjs');
-  process.exit(1);
-}
+requireDbEnv('seed-binding-smoke.mjs');
 
 const SLUG = process.argv[2] || 'contact-us-e2e';
-
-function sql(query) {
-  const res = spawnSync(
-    'docker',
-    ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
-      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-h', '-1', '-W', '-Q', query],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
-  if (res.status !== 0) {
-    throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
-  }
-  return res.stdout.trim();
-}
 
 /**
  * Read one authored automation exactly as publish reads it.
@@ -65,32 +34,6 @@ function readAuthoredAutomationRow(automationId) {
     throw new Error(`automation ${automationId} was not written; cannot build a snapshot from it`);
   }
   return row;
-}
-
-/**
- * Run a query whose single column may exceed sqlcmd's 256-character default.
- *
- * `-y 0` lifts that truncation but is mutually exclusive with both `-W` and `-h`, so this is a
- * separate invocation rather than a flag on {@link sql}, and the header row it therefore prints is
- * stripped here. Truncation is the nastiest kind of failure to leave in: the output still looks
- * like JSON, it is just half a document.
- */
-function sqlWide(query) {
-  const res = spawnSync(
-    'docker',
-    ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
-      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', '-y', '0', '-Q', query],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
-  if (res.status !== 0) {
-    throw new Error(`sqlcmd failed: ${res.stderr || res.stdout}`);
-  }
-  // Drop sqlcmd's column header and its dashed rule; keep the payload lines.
-  return res.stdout
-    .split('\n')
-    .filter((line) => !/^JSON_/.test(line) && !/^-+$/.test(line.trim()) && line.trim() !== '')
-    .join('')
-    .trim();
 }
 
 const BINDING_ID = '11111111-2222-4333-8444-555555555001';
