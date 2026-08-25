@@ -42,11 +42,16 @@
 --
 -- WHY HAND-WRITTEN SQL RATHER THAN A REGENERATED SEED — same as V202608242110. The record for this
 -- grant is declared in `metadata/entity-permissions/.entity-permissions.json` under the SAME id
--- this file inserts (BA109DE8-2DAA-4664-816A-743673002FCC), so `metadata/` describes the deployed
+-- this file lands (BA109DE8-2DAA-4664-816A-743673002FCC), so `metadata/` describes the deployed
 -- state and a future full regeneration reproduces exactly this row instead of minting a duplicate
 -- under a fresh GUID (`__mj.EntityPermission` has no unique constraint on (EntityID, RoleID), so a
 -- duplicate is silently additive). This file is the SHIPPING VEHICLE for that record: hosts already
 -- installed need the grant applied without replaying a 4,600-line seed.
+--
+-- LANDS, not merely inserts. A row that already exists for this pair is re-keyed onto the declared
+-- id before the flags are touched, and the last postcondition asserts it — because the id is the
+-- half of that claim nothing else checks, and a grant sitting under an operator's own GUID reads
+-- as correct right up until the regeneration that duplicates it.
 
 DECLARE @RunnerRoleID UNIQUEIDENTIFIER = (
     SELECT ID FROM [${mjSchema}].[Role] WHERE Name = N'Forms Automation Runner');
@@ -60,6 +65,27 @@ IF @RunnerRoleID IS NULL
     THROW 51160, 'MJ Forms v0.11.x: role "Forms Automation Runner" not found — the 0.8.x metadata seed has not run on this database.', 1;
 IF @FileLinkEntityID IS NULL
     THROW 51161, 'MJ Forms v0.11.x: entity "MJ: File Entity Record Links" not found — core MJ metadata is missing or behind; run the core migration first.', 1;
+
+-- Converge the row on the DECLARED id first, so the header's claim above is true whichever branch
+-- below runs. Without this the `EXISTS` path corrects the flags and leaves whatever id was already
+-- there — which happens when an operator hand-inserts the grant while diagnosing the "bindings
+-- attach nothing" symptom. The flags end up right either way, so nothing looks wrong; the damage
+-- lands later, when a full metadata regeneration keyed on `BA109DE8…` finds no such row, inserts
+-- one, and `GetUserPermisions` unions two grants for the same pair. Nothing foreign-keys
+-- `EntityPermission.ID`, so re-keying the row is safe; the NOT EXISTS guard keeps this from
+-- colliding with a row that already holds the id for some other pair.
+IF EXISTS (
+    SELECT 1 FROM [${mjSchema}].[EntityPermission]
+    WHERE RoleID = @RunnerRoleID AND EntityID = @FileLinkEntityID
+      AND ID <> 'BA109DE8-2DAA-4664-816A-743673002FCC')
+   AND NOT EXISTS (
+    SELECT 1 FROM [${mjSchema}].[EntityPermission]
+    WHERE ID = 'BA109DE8-2DAA-4664-816A-743673002FCC')
+BEGIN
+    UPDATE [${mjSchema}].[EntityPermission]
+    SET ID = 'BA109DE8-2DAA-4664-816A-743673002FCC'
+    WHERE RoleID = @RunnerRoleID AND EntityID = @FileLinkEntityID;
+END
 
 -- Grant. If any permission row already exists for the pair, correct it in place rather than adding
 -- a second row — `__mj.EntityPermission` has no unique constraint on (EntityID, RoleID), and
@@ -85,7 +111,7 @@ BEGIN
         ('BA109DE8-2DAA-4664-816A-743673002FCC', @FileLinkEntityID, @RunnerRoleID, 1, 1, 0, 1);
 END
 
--- Postconditions. THREE checks, because none implies the others and this file asserts every half of
+-- Postconditions. FOUR checks, because none implies the others and this file asserts every half of
 -- what its header promises. (No role-wide counts — shared-role discipline, per #39.)
 IF NOT EXISTS (
     SELECT 1 FROM [${mjSchema}].[EntityPermission]
@@ -109,3 +135,12 @@ IF EXISTS (
     JOIN [${mjSchema}].[Entity] e ON e.ID = p.EntityID
     WHERE p.RoleID = @RunnerRoleID AND e.Name = N'MJ: Files' AND p.CanDelete = 1)
     THROW 51164, 'MJ Forms v0.11.x: postcondition failed — "Forms Automation Runner" holds CanDelete on "MJ: Files". Combined with the link-entity grant above that is MJ''s "Delete Completely" path, which hard-deletes the file row and orphans its stored bytes (MemberJunction/MJ#4046).', 1;
+
+-- The deployed row must carry the id `metadata/` declares. The three checks above all pass on a
+-- row under some other id, and that row is invisible to a later regeneration keyed on this one —
+-- which then inserts a duplicate that GetUserPermisions unions with it.
+IF NOT EXISTS (
+    SELECT 1 FROM [${mjSchema}].[EntityPermission]
+    WHERE RoleID = @RunnerRoleID AND EntityID = @FileLinkEntityID
+      AND ID = 'BA109DE8-2DAA-4664-816A-743673002FCC')
+    THROW 51165, 'MJ Forms v0.11.x: postcondition failed — the grant exists but not under the id metadata/entity-permissions declares (BA109DE8-2DAA-4664-816A-743673002FCC). A regenerated seed will not see it and will insert a second row for the same pair.', 1;

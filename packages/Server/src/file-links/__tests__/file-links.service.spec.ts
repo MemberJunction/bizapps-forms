@@ -213,6 +213,39 @@ describe('syncFileLinks', () => {
     expect(result).toEqual({ created: 0, deleted: 0, failures: [] });
   });
 
+  it('reports rather than throws when a gateway hands back a malformed state', async () => {
+    // Rule 3 is "report, never throw", and the plan step used to sit OUTSIDE the only try/catch —
+    // so a gateway whose loadState resolved without one of the arrays threw a TypeError straight
+    // past both call sites' best-effort posture, failing a respondent's submit for a cosmetic
+    // write. Unreachable through the production gateway; the contract is the point.
+    const malformed: FileLinkGateway = {
+      loadState: async () => ({ responseOwnedFileIds: [FILE_A] }) as unknown as FileLinkState,
+      createLink: async () => ({ ok: true }),
+      deleteLink: async () => ({ ok: true }),
+    };
+
+    const result = await syncFileLinks(malformed, { target: TARGET, fileIds: [FILE_A], responseId: RESPONSE_ID });
+
+    expect(result.created).toBe(0);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatch(/could not/i);
+  });
+
+  it('reports an empty file id instead of attempting a link the database must reject', async () => {
+    // An empty id can only come from a caller that stopped filtering. Carrying it into the wanted
+    // set produced a guaranteed-failing insert whose message was about SQL rather than about the
+    // real problem. Dropping it cannot cause a wrongful delete either: no link row has an empty
+    // FileID, so it is never in the owned set the delete pass draws from.
+    const gateway = new StubGateway(state([], []));
+
+    const result = await sync(gateway, ['', FILE_A]);
+
+    expect(gateway.created).toEqual([FILE_A]);
+    expect(result.created).toBe(1);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatch(/empty/i);
+  });
+
   it('changes nothing when the current links could not be read', async () => {
     // A failed read is not an empty record. Writing on that assumption duplicates every link
     // that is already there.

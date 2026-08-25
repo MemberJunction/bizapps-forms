@@ -77,6 +77,31 @@ export function resolveSlug(scriptName) {
 }
 
 /**
+ * Why this slug cannot be used for a suite that mutates a seeded fixture, or undefined when it can.
+ *
+ * Pure, so the decision is testable without a database — see `fixture.spec.mjs`. Case- and
+ * space-folded because one side comes off a command line and the other out of SQL Server.
+ */
+export function describeSeedWiringMismatch({ slug, wiredSlugs = [], scriptName = 'this suite' }) {
+  const fold = (v) => String(v ?? '').trim().toLowerCase();
+  if (wiredSlugs.some((candidate) => fold(candidate) === fold(slug))) {
+    return undefined;
+  }
+  if (wiredSlugs.length === 0) {
+    return (
+      `${scriptName} mutates a seeded automation and asserts on what it did, and no published ` +
+      'form is wired to it. Run `npm run smoke:binding:seed` first — it creates the binding AND ' +
+      'the automation that points at it.'
+    );
+  }
+  return (
+    `${scriptName} is wired to a seeded automation that "${slug}" does not run, so every ` +
+    'assertion it makes about that automation would be about a different form\'s. Pass ' +
+    `"${wiredSlugs[0]}" instead.`
+  );
+}
+
+/**
  * The slug of the form a SEEDED fixture is actually wired to, found by the row it owns.
  *
  * {@link resolveSlug} answers "some published form with an Email question", which is right for a
@@ -88,38 +113,39 @@ export function resolveSlug(scriptName) {
  * product defect; `automation-semantics-path` rewrote one form's authored automations and then
  * asserted counts against another's.
  *
+ * THE CHECK LIVES HERE, NOT IN THE CALLERS. An earlier version documented it as the caller's
+ * obligation for an explicitly-passed slug — and one caller of three honoured it, so
+ * `npm run smoke:binding -- some-other-slug` walked straight back into the bug this function was
+ * written to close. An obligation that three files have to remember is one that two of them will
+ * forget; verifying it here is the same fix one level deeper.
+ *
  * Deliberately does NOT filter on `IsActive`: `automation-semantics-path` disables the automation
  * mid-run, and a suite that cannot find its own fixture because a previous run left it disabled
  * fails for a reason that has nothing to do with what it tests.
- *
- * An explicit slug still wins — an operator naming a form means it — and the caller is expected to
- * check the wiring holds for it rather than assume, which is the half that was missing before.
  */
 export function resolveSeededSlug(scriptName, { automationId, bindingId } = {}) {
-  const given = process.argv[2] || process.env.FORMS_SMOKE_SLUG;
-  if (given) {
-    return given;
-  }
   requireDbEnv(scriptName);
   const predicate = automationId
     ? `a.ID = '${escape(automationId)}'`
     : `a.BindingID = '${escape(bindingId)}'`;
-  const discovered = sql(
-    `SELECT TOP 1 d.Slug FROM __mj_BizAppsForms.FormAutomation a
+  const out = sql(
+    `SELECT d.Slug FROM __mj_BizAppsForms.FormAutomation a
      JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID = a.FormID
      WHERE ${predicate} AND d.Slug IS NOT NULL AND LEN(d.Slug) > 0
      ORDER BY d.Slug;`,
-  ).trim();
-  if (!discovered) {
-    const slugs = availableSlugs();
-    throw new Error(
-      `${scriptName} asserts on a seeded automation, and no published form is wired to it. Run ` +
-        '`npm run smoke:binding:seed` first — it creates the binding AND the automation that ' +
-        `points at it. ${slugs.length ? `Distributions that exist: ${slugs.join(', ')}.` : ''}`,
-    );
+  );
+  const wiredSlugs = out ? out.split('\n').map((v) => v.trim()).filter(Boolean) : [];
+
+  const given = process.argv[2] || process.env.FORMS_SMOKE_SLUG;
+  const slug = given || wiredSlugs[0];
+  const mismatch = describeSeedWiringMismatch({ slug, wiredSlugs, scriptName });
+  if (mismatch) {
+    throw new Error(mismatch);
   }
-  console.log(`  note  no slug given; using "${discovered}" — the form its seeded fixture is wired to`);
-  return discovered;
+  if (!given) {
+    console.log(`  note  no slug given; using "${slug}" — the form its seeded fixture is wired to`);
+  }
+  return slug;
 }
 
 /** The form id behind a slug. Throws naming the slugs that would have worked. */

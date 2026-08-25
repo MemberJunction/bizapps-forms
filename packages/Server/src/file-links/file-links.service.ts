@@ -124,16 +124,24 @@ export async function syncFileLinks(
     return { created: 0, deleted: 0, failures: [invalid] };
   }
 
-  let state: FileLinkState;
+  const wanted = foldedFileIds(input.fileIds);
+  let plan: FileLinkPlan;
   try {
-    state = await gateway.loadState(input.target, input.responseId);
+    // The READ and the PLAN are guarded together. The plan was outside this block, which left the
+    // "never throws" contract true of most of the function rather than of the function: a gateway
+    // that resolved without one of the state arrays threw a TypeError straight past both call
+    // sites' best-effort posture. Not reachable through the production gateway — the types forbid
+    // it and it defaults both arrays — but a contract that holds only for the current
+    // implementation is not a contract.
+    plan = planFileLinks(wanted.ids, await gateway.loadState(input.target, input.responseId));
   } catch (error) {
     // A failed read is not an empty record. Writing on that assumption would duplicate every
     // existing link, so a read we could not complete means we change nothing.
     return { created: 0, deleted: 0, failures: [`could not read existing file links: ${detail(error)}`] };
   }
 
-  return applyPlan(gateway, input.target, planFileLinks(foldedFileIds(input.fileIds), state));
+  const result = await applyPlan(gateway, input.target, plan);
+  return { ...result, failures: [...wanted.failures, ...result.failures] };
 }
 
 /** What one sync intends to write. */
@@ -255,19 +263,29 @@ function isPresent(value: string | undefined | null): boolean {
 /**
  * The wanted set, keyed by folded id so a lookup is case-insensitive, valued by the original.
  *
- * Null-safe throughout, because this runs OUTSIDE the try/catch around the read and the module's
- * whole contract is that it reports rather than throws. Both callers filter for truthy ids today;
- * a rejected promise here would fail a respondent's submission, which is exactly what rule 3
- * exists to prevent — and this package compiles without `strictNullChecks`, so the types do not
- * stand in the way of a caller that stops filtering.
+ * Null-safe throughout, because the module's whole contract is that it reports rather than throws.
+ * Both callers filter for truthy ids today; this package compiles without `strictNullChecks`, so
+ * the types do not stand in the way of a caller that stops filtering.
+ *
+ * An EMPTY id is the one thing dropped rather than carried, and it is the one case where dropping
+ * is safe: no link row has an empty `FileID`, so it can never be in the owned set the delete pass
+ * draws from, and leaving it in the wanted set only bought a guaranteed-failing insert whose error
+ * talked about SQL instead of about the caller that stopped filtering. It is REPORTED, not
+ * swallowed. A merely malformed id still travels — that one could match an existing link, and
+ * removing it from "wanted" is how rule 2 would read it as "the respondent deleted this file".
  */
-function foldedFileIds(fileIds: readonly string[]): Map<string, string> {
-  const wanted = new Map<string, string>();
+function foldedFileIds(fileIds: readonly string[]): { ids: Map<string, string>; failures: string[] } {
+  const ids = new Map<string, string>();
+  const failures: string[] = [];
   for (const fileId of fileIds ?? []) {
     const folded = fold(fileId);
-    wanted.set(folded, folded ? String(fileId).trim() : '');
+    if (!folded) {
+      failures.push('file links: an empty file id was supplied and has been ignored.');
+      continue;
+    }
+    ids.set(folded, String(fileId).trim());
   }
-  return wanted;
+  return { ids, failures };
 }
 
 /**

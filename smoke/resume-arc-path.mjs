@@ -168,31 +168,21 @@ check(
   'binding field map references the résumé question (seed-binding-smoke.mjs has run)',
 );
 
-// The check the row assertion above cannot make. A patched binding proves nothing unless THIS
-// form's automation is the thing that runs it — and when it was not, every downstream assertion
-// here reported a fixture problem as a product defect.
+// The automation that RUNS the patched binding on this form. `resolveSeededSlug` has already
+// refused a slug whose form is not wired to the binding, so this resolves — but it is asserted
+// rather than assumed, because the id below scopes the run lookup and a silent blank there would
+// send the automation check looking at some other automation's row.
 const BINDING_AUTOMATION_ID = sql(
   `SELECT TOP 1 CAST(a.ID AS varchar(40)) FROM __mj_BizAppsForms.FormAutomation a
    JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID = a.FormID
    WHERE d.Slug = '${SLUG}' AND a.TargetType = 'EntityBinding' AND a.IsActive = 1
      AND a.BindingID = '${BINDING_ID}';`,
 ).trim();
-if (!BINDING_AUTOMATION_ID) {
-  const runs = sql(
-    `SELECT TOP 1 d.Slug FROM __mj_BizAppsForms.FormAutomation a
-     JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID = a.FormID
-     WHERE a.BindingID = '${BINDING_ID}' AND a.IsActive = 1 ORDER BY d.Slug;`,
-  ).trim();
-  fail(
-    `the form at "${SLUG}" runs the binding this fixture patches`,
-    runs
-      ? `it does not — its binding automation points somewhere else. Pass "${runs}" instead.`
-      : 'no form runs the smoke binding at all; run `npm run smoke:binding:seed` first.',
-  );
-  console.log(`\nFAIL — ${failures} check(s) failed.`);
-  process.exit(1);
-}
-pass('the form under test runs the binding this fixture patches');
+check(
+  Boolean(BINDING_AUTOMATION_ID),
+  'the binding this fixture patches is wired to an ACTIVE automation on the form under test',
+  'the form runs it, but the automation is disabled — re-enable it or re-run smoke:binding:seed',
+);
 
 // ---------- 2. drive the public path ----------
 console.log('--- driving the public path ---');
