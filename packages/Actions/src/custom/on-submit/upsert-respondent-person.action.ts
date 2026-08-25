@@ -29,9 +29,16 @@ import type { FormQuestionType } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsCommonPersonEntity } from '@mj-biz-apps/common-entities';
 import { getStringParam, setOutputParam } from '../shared/action-params';
 import { saveOrExplain } from '../shared/save-entity';
+import { explainMissingEntityClasses } from '../shared/generated-entity';
 import { loadFormResponseContext, type AnswerWithType, type FormResponseContext } from '../shared/form-response-context';
 
 const PERSON_ENTITY = 'MJ_BizApps_Common: People';
+
+/**
+ * The sibling-app entities this action writes. Checked up front rather than trusted: an
+ * unregistered class does not fail the write, it silently drops every field set on it (#60).
+ */
+const SIBLING_ENTITIES = [PERSON_ENTITY] as const;
 
 /** Respondent identity fields harvested from the answers. */
 interface RespondentIdentity {
@@ -47,6 +54,10 @@ export class UpsertRespondentPersonAction extends BaseAction {
     const responseId = getStringParam(params, 'FormResponseID');
     if (!responseId) {
       return fail('FormResponseID parameter is required', 'MISSING_PARAMETERS');
+    }
+    const missingClasses = explainMissingEntityClasses(SIBLING_ENTITIES);
+    if (missingClasses) {
+      return fail(missingClasses, 'ENTITY_CLASS_UNREGISTERED');
     }
 
     const ctx = await loadFormResponseContext(responseId, params.ContextUser);
