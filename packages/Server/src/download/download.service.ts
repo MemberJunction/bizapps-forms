@@ -46,11 +46,10 @@
 import { LogError } from '@memberjunction/core';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 
+import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
 import { readStoredObject, type StorageReadEngine } from '../storage/read-object.js';
 import { getDownloadConfig } from './config.js';
 
-/** The Forms entity that records a file as belonging to a response. */
-const FORM_UPLOAD_ENTITY = 'MJ_BizApps_Forms: Form Uploads';
 /** MJ core's file registry, read only after the provenance row has authorized the caller. */
 const FILE_ENTITY = 'MJ: Files';
 

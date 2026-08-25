@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto';
 
 
 import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities';
+import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
@@ -206,7 +207,7 @@ function validateFile(file: ParsedFile | undefined): UploadResult {
 export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<boolean> {
   try {
     const row = await new Metadata().GetEntityObject<mjBizAppsFormsFormUploadEntity>(
-      'MJ_BizApps_Forms: Form Uploads',
+      FORM_UPLOAD_ENTITY,
       input.writer,
     );
     if (!row) {
