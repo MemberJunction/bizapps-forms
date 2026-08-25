@@ -95,19 +95,10 @@ module.exports = {
   // mixed-case spelling excludes Forms' own schema from its own CodeGen run.
   includeSchemas: ['__mj_BizAppsForms', '__mj_bizappsforms'],
 
-  /**
-   * System schemas, kept explicit.
-   *
-   * Redundant while `includeSchemas` is set — the allow-list already puts everything
-   * unnamed out of scope — but retained deliberately for two reasons: CodeGen's config
-   * schema expects the key, and if `includeSchemas` were ever removed this is the
-   * behaviour the repo falls back to rather than generating from the whole database.
-   */
-  excludeSchemas: [
-    'sys', 'staging', 'dbo', '__mj',
-    '__mj_BizAppsCommon', '__mj_BizAppsTasks',
-    '__mj_bizappscommon', '__mj_bizappstasks',
-  ],
+  // Empty on purpose. includeSchemas is the scope; unnamed schemas (core,
+  // siblings, never-seen) are already out. mj app install may append here
+  // on a consumer host, so keep the key.
+  excludeSchemas: [],
 
   /** SQL migration output for CodeGen-produced objects */
   SQLOutput: {
