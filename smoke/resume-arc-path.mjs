@@ -21,15 +21,27 @@
  * snapshot splice) and a binding FieldMap for it. Requires a running MJAPI with a working
  * storage account (any driver), and seed-binding-smoke.mjs run first.
  *
+ * THE FORM IS NOT DISCOVERED THE WAY THE OTHER SUITES DISCOVER ONE, and the difference is the
+ * whole reason this file works. `resolveSlug` picks the first published form carrying an Email
+ * question — alphabetical — which is not necessarily a form that BINDS anything. This fixture
+ * patches the smoke binding's FieldMappings and then asserts the file id landed on the record
+ * that binding wrote, so it must run against the form whose automation actually points at that
+ * binding. It did not: discovery picked a form with its own, differently-mapped binding, so the
+ * fixture patched a row nobody ran and then reported the missing `PhotoURL` as a product defect.
+ * The patched-row assertion could not catch it either — it checked the ROW, never the WIRING.
+ * Everything mutated here therefore belongs to the smoke fixture; no authored binding is touched.
+ *
  * Run:  set -a && . ./.env && set +a && node smoke/resume-arc-path.mjs
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from './lib/sqlcmd.mjs';
-import { buildAnswers, pickEmailQuestion, pickNameQuestion, requireQuestion, resolveFormId, resolveQuestions, resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, pickEmailQuestion, pickNameQuestion, requireQuestion, resolveFormId, resolveQuestions, resolveSeededSlug } from './lib/fixture.mjs';
 import { sessionIdFor } from './lib/session.mjs';
 
 const BASE = 'http://localhost:4121';
-const SLUG = resolveSlug('resume-arc-path.mjs');
+const BINDING_ID = '11111111-2222-4333-8444-555555555001';
+
+const SLUG = resolveSeededSlug('resume-arc-path.mjs', { bindingId: BINDING_ID });
 const FORM_ID = resolveFormId(SLUG);
 const FORM_QUESTIONS = resolveQuestions(FORM_ID);
 // The résumé question is this fixture's OWN row, so it keeps a fixed id -- the script creates it.
@@ -39,13 +51,36 @@ const Q_RESUME = 'ABABABAB-0000-4000-8000-000000000010';
 const PAGE_ID = requireQuestion(FORM_QUESTIONS[0], 'a page to add the résumé question to', SLUG, FORM_QUESTIONS).pageId;
 const EMAIL_Q = requireQuestion(pickEmailQuestion(FORM_QUESTIONS), 'the respondent email', SLUG, FORM_QUESTIONS);
 const NAME_Q = requireQuestion(pickNameQuestion(FORM_QUESTIONS), 'the respondent given name', SLUG, FORM_QUESTIONS);
-const BINDING_ID = '11111111-2222-4333-8444-555555555001';
 
 const env = process.env;
 let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, d) => { failures++; console.error(`  FAIL  ${m}${d ? `\n          ${d}` : ''}`); };
 const check = (c, m, d) => (c ? pass(m) : fail(m, d));
+
+/**
+ * On-submit automations are DETACHED from the request: the submit answers the respondent as soon
+ * as the response is persisted and lets the binding run after, which is what took a submit from
+ * ~8.3s to ~0.3s. Every assertion below about what the BINDING did is therefore an assertion
+ * about something that becomes true shortly after the mutation returns — measured ~12s behind it
+ * on the stack this was written against. Reading the instant the submit resolves races the work
+ * being inspected, and reported `Running` as a failure. Same shape as
+ * `automation-semantics-path.mjs`: poll, with a budget, and treat running out as a real failure.
+ */
+const AUTOMATION_BUDGET_MS = 30_000;
+const POLL_MS = 250;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll `read` until `isDone` accepts its value, or give up after the budget. Returns the last. */
+async function eventually(read, isDone) {
+  const deadline = Date.now() + AUTOMATION_BUDGET_MS;
+  let value = read();
+  while (!isDone(value) && Date.now() < deadline) {
+    await sleep(POLL_MS);
+    value = read();
+  }
+  return value;
+}
 
 async function gql(token, query, variables) {
   const body = await gqlRaw(token, query, variables);
@@ -133,6 +168,22 @@ check(
   'binding field map references the résumé question (seed-binding-smoke.mjs has run)',
 );
 
+// The automation that RUNS the patched binding on this form. `resolveSeededSlug` has already
+// refused a slug whose form is not wired to the binding, so this resolves — but it is asserted
+// rather than assumed, because the id below scopes the run lookup and a silent blank there would
+// send the automation check looking at some other automation's row.
+const BINDING_AUTOMATION_ID = sql(
+  `SELECT TOP 1 CAST(a.ID AS varchar(40)) FROM __mj_BizAppsForms.FormAutomation a
+   JOIN __mj_BizAppsForms.FormDistribution d ON d.FormID = a.FormID
+   WHERE d.Slug = '${SLUG}' AND a.TargetType = 'EntityBinding' AND a.IsActive = 1
+     AND a.BindingID = '${BINDING_ID}';`,
+).trim();
+check(
+  Boolean(BINDING_AUTOMATION_ID),
+  'the binding this fixture patches is wired to an ACTIVE automation on the form under test',
+  'the form runs it, but the automation is disabled — re-enable it or re-run smoke:binding:seed',
+);
+
 // ---------- 2. drive the public path ----------
 console.log('--- driving the public path ---');
 const token = await session();
@@ -149,6 +200,16 @@ const up = await fetch(`${BASE}/forms/upload`, { method: 'POST', headers: { Auth
 const upBody = await up.json().catch(() => ({}));
 check(up.status === 200 && upBody.fileId, `upload accepted (HTTP ${up.status})`, JSON.stringify(upBody));
 const fileId = upBody.fileId;
+if (!fileId) {
+  // Stop here rather than carrying an undefined id into the artifact checks. Without this the
+  // script reported the upload failure and then died on `fileId.toLowerCase()` several steps
+  // later — a TypeError stack that buries the one line saying what actually went wrong. Seen for
+  // real when the API had cached a storage credential that was saved after it booted: the
+  // message that mattered ("File storage is not available: Credential … not found") was already
+  // on screen, three lines above a crash that looked like the bug.
+  console.log(`\nFAIL — ${failures} check(s) failed. Nothing downstream can run without an uploaded file.`);
+  process.exit(1);
+}
 
 // The Bug 2 rejection path, driven for real. Without this the file only ever sent a VALID
 // questionId, which the pre-fix code also accepted — so the whole smoke passed unchanged against
@@ -209,10 +270,20 @@ check(answerRow.toLowerCase() === fileId.toLowerCase(), 'FormResponseAnswer.File
 const ledger = sql(`SELECT Status FROM __mj_BizAppsForms.FormUpload WHERE FileID='${fileId}';`);
 check(ledger === 'Active', 'provenance ledger row Active', ledger);
 
-const run = sql(`SELECT TOP 1 Status + ' | ' + ISNULL(ErrorMessage,'') FROM __mj_BizAppsForms.FormAutomationRun WHERE FormResponseID='${responseId}' ORDER BY __mj_CreatedAt DESC;`);
-check(run.startsWith('Succeeded'), `automation run Succeeded (${run || 'no run row'})`, run);
+// Scoped to the BINDING's run, not `TOP 1 ... ORDER BY created DESC` across every automation the
+// form fires. A form carrying an unrelated failing automation would otherwise fail this check for
+// a reason that has nothing to do with the résumé arc.
+const readRun = () => sql(
+  `SELECT TOP 1 Status + ' | ' + ISNULL(ErrorMessage,'')
+   FROM __mj_BizAppsForms.FormAutomationRun
+   WHERE FormResponseID='${responseId}' AND FormAutomationID='${BINDING_AUTOMATION_ID}'
+   ORDER BY __mj_CreatedAt DESC;`,
+);
+const run = await eventually(readRun, (v) => /^(Succeeded|Failed)/.test(v));
+check(run.startsWith('Succeeded'), `binding automation run Succeeded (${run || 'no run row within budget'})`, run);
 
-const person = sql(`SELECT ISNULL(PhotoURL,'NULL') FROM __mj_BizAppsCommon.Person WHERE Email='${email}';`);
+const readPerson = () => sql(`SELECT ISNULL(PhotoURL,'NULL') FROM __mj_BizAppsCommon.Person WHERE Email='${email}';`);
+const person = await eventually(readPerson, (v) => v.toLowerCase() === fileId.toLowerCase());
 check(person.toLowerCase() === fileId.toLowerCase(), 'Person.PhotoURL carries the file id (ResumeFileID analogue)', person);
 
 // ---------- 4. adversarial: a stranger cannot claim the file ----------

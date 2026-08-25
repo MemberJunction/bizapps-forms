@@ -87,3 +87,9 @@ jobs:
       # dependsOn ^build.
       - name: Run tests
         run: npm test
+
+      # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
+      # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a
+      # failure whose whole character is that the run still looks like it passed.
+      - name: Smoke fixture wiring check tests
+        run: node smoke/lib/fixture.spec.mjs

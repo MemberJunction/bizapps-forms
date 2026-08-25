@@ -15,6 +15,8 @@
 import { RunView } from '@memberjunction/core';
 import type { UserInfo } from '@memberjunction/core';
 
+import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names.js';
+
 /** Why a file id was rejected. */
 export type ProvenanceFailure =
   /** No ledger row at all — the file did not come through the Forms upload endpoint. */
@@ -132,7 +134,7 @@ export async function loadUploadLedger(
   const inList = unique.map((id) => `'${id.replace(/'/g, "''")}'`).join(',');
   const result = await new RunView().RunView<UploadLedgerRow>(
     {
-      EntityName: 'MJ_BizApps_Forms: Form Uploads',
+      EntityName: FORM_UPLOAD_ENTITY,
       ExtraFilter: `FileID IN (${inList})`,
       Fields: ['FileID', 'DistributionID', 'ResponseDraftID', 'AnonymousSessionID', 'Status'],
       ResultType: 'simple',

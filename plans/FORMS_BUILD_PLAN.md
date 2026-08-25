@@ -1196,3 +1196,63 @@ native entities. This is the reporting differentiator no incumbent has.
       Response opened from Explorer search, rendered against a real host login. Not possible from this
       worktree: `apps/` is untracked and absent, and the main checkout's `apps/MJExplorer/` holds only a
       `dist`. Unit tests and live SQL both structurally cannot supply it.
+
+- **2026-08-25 — a résumé that was stored, downloadable, and invisible.** MJ 6.1.0-edge added a
+  generic record-attachments panel (`<mj-record-attachments>`, MJ `dfb2b74552`) that every generated
+  form already mounts, so Forms' entities have been rendering an attachments button since the pin
+  moved — reading zero, on every record, in every deployment. It reads ONE table:
+  `__mj.FileEntityRecordLink`, filtered by `EntityID` + `RecordID`. Forms records a respondent's
+  file in two other places (`FormResponseAnswer.FileID` and the `FormUpload` ledger) and wrote no
+  link rows at all. Plan: `plans/FILE_LINKS_PLAN.md`.
+
+  - **One reconciler, two call sites** (`packages/Server/src/file-links/`). `syncFileLinks` makes a
+    target record's attachments match a response's file answers; `persistSubmission` calls it for
+    the `FormResponse` row and `dispatch-automation` calls it for the record a binding wrote. The
+    binding executor is generic over target entities, so ATS and every future target are covered
+    with no per-app code and no change to the target apps.
+  - **The table enforces none of what matters, so the writer does.** No unique constraint on
+    (FileID, EntityID, RecordID) — and autosave, promotion and the recovery sweep all re-run these
+    paths — so idempotency is a read, not a constraint. Deletion is scoped by provenance: a link is
+    removable only when its file has a `FormUpload` row for THIS response, which is what lets a
+    replaced upload disappear while a file someone attached by hand through the panel survives.
+  - **Attaching is gated on the same verdict as writing.** `filesAreVerified` is now computed once
+    per binding and used both for `allowFileAnswers` and for the attachment. An attachment on a
+    business record is exactly as readable as a column on it, so the two answers must not be free
+    to disagree — which they were, structurally, when the call was inline.
+  - **Both writes are best-effort and logged**, the `incrementResponseCount` posture: the response,
+    its answers and the bound record are already saved when they run, so failing the operation
+    would report a success as a failure and invite a re-drive that duplicates the business record.
+  - **One grant was missing and one was already there** (`V202608251800`). Verified against the
+    live dev database rather than assumed: the submit path's `System` user holds Integration *and*
+    Developer, both full CRUD on the link entity — nothing needed. `Forms Automation Service` holds
+    only `Forms Automation Runner`, which had **no permission row at all** on that entity, so every
+    binding would have attached nothing and said nothing. Granted Read + Create + Delete, no Update.
+  - **Delete is granted on the link entity ONLY, deliberately.** MJ's panel offers "Delete
+    Completely", which deletes the link then hard-deletes the `MJ: Files` row — sequentially, no
+    transaction, no confirmation, and no call to the storage driver, so a successful delete orphans
+    the bytes and a half-failed one strands the file. That button needs `CanDelete` on both
+    entities; the runner has it on one, and the migration asserts the absence of the other as a
+    postcondition. Root cause is MJ-side and filed as **MemberJunction/MJ#4046**
+    (`MJFileEntityServer`, following MJ's own `MJTagEntityServer` / `MJListEntityServer`
+    precedents). Nothing here waits on it — `FK_FormUpload_File` is the fail-closed backstop — but
+    until it lands, no role a PERSON holds should get `CanDelete` on `MJ: Files` or on the link
+    entity.
+  - **Verified live, both legs.** `npm run smoke:file-links` against the local stack with a REAL
+    upload through `POST /forms/upload`: the file attaches to the response, a re-saved draft does
+    not attach it twice, a replacement removes the superseded link and leaves a hand-attached one
+    alone, and the same file reaches the bound `MJ_BizApps_Common: People` record. The bound-record
+    leg polls with a budget because on-submit automations are detached from the request — measured
+    ~12s behind the mutation here. A second response from the same person then binds to the SAME
+    record and must add its file WITHOUT stripping the first response's — the property that stops
+    one respondent's reconcile erasing another's attachments off a record they share.
+    Mutation-checked: neutering both writers in the built output kills 4 of the smoke's checks,
+    including the binding one. `packages/Server` unit tests **462** green; the migration was
+    replayed twice to prove idempotency (no duplicate rows, postconditions hold).
+  - **Review found four things worth fixing, all now fixed.** The gateway had no unit tests at all,
+    so §3's "a revoked upload's link is still ours to remove" lived only in the absence of a
+    `Status` predicate — a spec now pins that, and pins that a failed read THROWS rather than
+    reporting an empty record (the failure that would re-insert every existing link). A link
+    another writer already removed reported as a failure, which turned a race that resolved itself
+    into a logged error; it is a no-op now, neither counted nor reported. `foldedFileIds` could
+    throw on a nullish id from OUTSIDE the try/catch, contradicting the module's own "never
+    throws". And the smoke's bound-record delete check was ordered so it passed vacuously.

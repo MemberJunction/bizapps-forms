@@ -12,7 +12,7 @@
  *   set -a && . ./.env && set +a && node smoke/upload-provenance-path.mjs
  */
 import { sessionIdFor } from './lib/session.mjs';
-import { resolveFormId, resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
@@ -51,12 +51,22 @@ async function gql(token, query, variables) {
   return body.data;
 }
 
-/** Upload a small file through the real endpoint, tagged with a response id. */
-async function upload(token, responseId) {
+/**
+ * Upload a small file through the real endpoint, tagged with a response id.
+ *
+ * The question id comes from the PUBLISHED DEFINITION. It used to be the literal `'q-smoke'`,
+ * which the endpoint correctly rejects as unknown — so this leg never once ran for real, and the
+ * fallback below reported the rejection as "blob storage unavailable". That reads as an
+ * environment limitation rather than a fixture that names a question no form has.
+ */
+async function upload(token, responseId, fileQuestionId) {
+  if (!fileQuestionId) {
+    return { status: 0, body: { error: 'this form has no file question to upload against' } };
+  }
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], { type: 'application/pdf' }), 'smoke.pdf');
   form.append('distributionSlug', SLUG);
-  form.append('questionId', 'q-smoke');
+  form.append('questionId', fileQuestionId);
   form.append('responseId', responseId);
   const res = await fetch(`${BASE}/forms/upload`, {
     method: 'POST',
@@ -66,15 +76,23 @@ async function upload(token, responseId) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
-async function submitWithFile(token, definition, responseId, fileId) {
+/**
+ * Submit the form with the file id attached to one question.
+ *
+ * Built with `buildAnswers` rather than by hand. The hand-rolled version sent a literal
+ * `textValue` for every non-numeric question, which any form with real choices rejects with
+ * "Choose only from the offered options" — the exact failure `smoke/lib/fixture.mjs`'s header
+ * describes and the helper exists to prevent. It also pushed a SECOND answer for question one
+ * rather than overriding it, so the response carried a duplicate.
+ */
+async function submitWithFile(token, definition, responseId, fileId, fileQuestionId) {
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
-  const answers = questions.map((q) => {
-    if (q.type === 'Email') return { questionId: q.id, textValue: 'provenance@example.com' };
-    if (['Number', 'Rating', 'NPS'].includes(q.type)) return { questionId: q.id, numericValue: 7 };
-    return { questionId: q.id, textValue: 'provenance smoke' };
+  const target = fileQuestionId ?? questions[0]?.id;
+  const answers = buildAnswers(questions, {
+    email: `provenance-${responseId.slice(0, 8)}@example.com`,
+    name: 'Provenance',
+    overrides: { [target]: { fileId } },
   });
-  // Attach the file id to the first question, which is what a file answer looks like on the wire.
-  answers.push({ questionId: questions[0].id, fileId });
   const data = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {
       SubmitFormResponse(input: $input) { success errors { message } }
@@ -97,9 +115,13 @@ async function main() {
   const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
 
   const responseA = crypto.randomUUID();
+  // The question a real upload would be made against, from the published definition.
+  const fileQuestion = (definition.pages ?? [])
+    .flatMap((p) => p.questions ?? [])
+    .find((q) => q.type === 'FileUpload' || q.type === 'Signature');
   let fileId;
 
-  const uploaded = await upload(tokenA, responseA);
+  const uploaded = await upload(tokenA, responseA, fileQuestion?.id);
   if (uploaded.status === 200 && uploaded.body.fileId) {
     fileId = uploaded.body.fileId;
     pass('an anonymous session uploaded a file through the real endpoint');
@@ -109,10 +131,13 @@ async function main() {
     check(ledger.toLowerCase().includes(responseA.toLowerCase()),
       'the provenance row records the response it was uploaded for');
   } else {
-    // No blob storage in this environment. The storage leg is not what this test is about — the
-    // control being proved is the SUBMIT check — so the ledger state an upload would have produced
-    // is seeded directly and the rest of the test runs unchanged against the real public path.
-    console.log(`  note  blob storage unavailable here (${uploaded.body?.error ?? uploaded.status});`);
+    // The upload could not be made — no file question on this form, or no storage configured. The
+    // storage leg is not what this test is about (the control being proved is the SUBMIT check),
+    // so the ledger state an upload would have produced is seeded directly and the rest of the
+    // test runs unchanged against the real public path. The REASON is printed rather than
+    // guessed at: this used to announce "blob storage unavailable" for what was actually a
+    // fixture naming a question no form has.
+    console.log(`  note  could not upload for real (${uploaded.body?.error ?? uploaded.status});`);
     console.log('        seeding the ledger state an upload would have written and testing the submit gate.');
     fileId = crypto.randomUUID();
     sql(`
@@ -132,13 +157,13 @@ async function main() {
   // The whole point: session B claims session A's file.
   const tokenB = await session();
   const responseB = crypto.randomUUID();
-  const stolen = await submitWithFile(tokenB, definition, responseB, fileId);
+  const stolen = await submitWithFile(tokenB, definition, responseB, fileId, fileQuestion?.id);
   check(stolen?.success === false,
     'a DIFFERENT session cannot submit that file id',
     'this is the cross-tenant disclosure the ledger exists to prevent');
 
   // And the legitimate owner still can.
-  const owned = await submitWithFile(tokenA, definition, responseA, fileId);
+  const owned = await submitWithFile(tokenA, definition, responseA, fileId, fileQuestion?.id);
   check(owned?.success === true,
     'the session that uploaded it can still submit it',
     owned?.errors?.[0]?.message ?? 'the check must not reject legitimate uploads');

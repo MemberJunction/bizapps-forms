@@ -47,7 +47,7 @@
  * reason is worse than one that says it did not run.
  */
 import { sessionIdFor } from './lib/session.mjs';
-import { resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
 const SLUG = resolveSlug('respondent-scope-path.mjs');
@@ -194,17 +194,6 @@ async function main() {
   // Without this the file would prove only that something is broken. The deny-all create filter is
   // supposed to cost nothing, because `PublicFormResolver` elevates to the system user for every
   // response write; this is what makes that claim testable rather than asserted.
-  const answerFor = (type) => {
-    switch (type) {
-      case 'Number': case 'Rating': case 'NPS': return { numericValue: 7 };
-      case 'YesNo': return { booleanValue: true };
-      case 'Date': case 'Time': return { dateValue: new Date(0).toISOString() };
-      case 'MultiChoice': return { jsonValue: JSON.stringify(['smoke']) };
-      case 'Email': return { textValue: 'smoke@example.com' };
-      case 'Phone': return { textValue: '+1 555 010 1234' };
-      default: return { textValue: `scope smoke ${new Date(0).toISOString()}` };
-    }
-  };
   const submission = await gql(token, `
     mutation S($input: FormSubmissionInputType!) {
       SubmitFormResponse(input: $input) { success responseId status errors { message } }
@@ -215,7 +204,10 @@ async function main() {
       partial: false,
       startedAt: new Date(0).toISOString(),
       clientMeta: { referrer: '', userAgent: 'forms-scope-smoke' },
-      answers: questions.map((q) => ({ questionId: q.id, ...answerFor(q.type) })),
+      // `buildAnswers`, not a local copy of it — see the note in binding-path.mjs. This check is
+      // the one that proves the deny-all create filter costs the pipeline nothing, so a fixture
+      // that cannot produce an acceptable submission reports that claim as false.
+      answers: buildAnswers(questions, { email: 'scope-smoke@example.com', name: 'Scope Smoke' }),
     },
   });
   const result = submission.data?.SubmitFormResponse;

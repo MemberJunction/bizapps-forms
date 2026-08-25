@@ -61,6 +61,7 @@ npm run smoke:respondent -- <distribution-slug>   # drives the real public surfa
 npm run smoke:binding                             # entity binding: create / merge / match / ledger
 npm run smoke:automation                          # WHETHER and IN WHAT ORDER an automation runs
 npm run smoke:provenance                          # a file id cannot be claimed across sessions
+npm run smoke:file-links                          # uploads attach to the response AND the bound record
 npm run lint:generated                            # CodeGen scope gate
 npm run lint:ui                                   # design-token gate
 ```

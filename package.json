@@ -38,6 +38,7 @@
     "smoke:binding:seed": "node smoke/seed-binding-smoke.mjs",
     "smoke:automation": "node smoke/automation-semantics-path.mjs",
     "smoke:provenance": "node smoke/upload-provenance-path.mjs",
+    "smoke:file-links": "node smoke/file-links-path.mjs",
     "smoke:resume-arc": "node smoke/resume-arc-path.mjs"
   },
   "repository": {

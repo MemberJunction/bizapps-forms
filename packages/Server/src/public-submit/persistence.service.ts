@@ -1,7 +1,8 @@
 /**
  * Persist a validated submission as one `FormResponse` row plus one
- * `FormResponseAnswer` per visible answer, then (for a completed submission)
- * increment the distribution's `ResponseCount`.
+ * `FormResponseAnswer` per visible answer, attach any uploaded files to the response record so
+ * MJ's attachments panel shows them, then (for a completed submission) increment the
+ * distribution's `ResponseCount`.
  *
  * Three modes (all funnel through {@link persistSubmission}):
  *   - CREATE   — first save for a session (Partial autosave or one-shot Complete).
@@ -25,6 +26,8 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntityType,
   mjBizAppsFormsFormResponseEntity,
 } from '@mj-biz-apps/forms-entities';
+import { syncFileLinks } from '../file-links/file-links.service';
+import { MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
 import {
   FORM_DISTRIBUTION_ENTITY,
   FORM_RESPONSE_ANSWER_ENTITY,
@@ -353,6 +356,52 @@ async function incrementResponseCount(
 }
 
 /**
+ * The file ids among a submission's answers, in answer order.
+ *
+ * Named apart from `dispatch-automation.ts`'s `fileAnswerIds` on purpose: same idea, different
+ * input entirely (validated submission input here, collapsed `CanonicalAnswers` there), so they
+ * cannot share an implementation and one name across both would suggest they could.
+ */
+function submittedFileIds(answers: ValidatedAnswer[]): string[] {
+  return (answers || []).map((a) => a.input.fileId).filter((id): id is string => Boolean(id));
+}
+
+/**
+ * Make the response record's ATTACHMENTS match its file answers (best-effort; logs, never fails).
+ *
+ * A file answer already stores its `MJ: Files` id on the answer row, but MJ's attachments panel
+ * does not read answer rows — it reads `FileEntityRecordLink` for (EntityID, RecordID). Without
+ * this write a respondent's résumé is stored, downloadable, and invisible on the response.
+ *
+ * Same posture as {@link incrementResponseCount} and for the same reason: the response and its
+ * answers are already saved by the time this runs, so reporting a failure here would tell the
+ * respondent their submission failed when it did not. The reconciler returns its failures rather
+ * than throwing, so there is nothing to catch — only something to log.
+ */
+async function attachResponseFiles(
+  provider: DatabaseProviderBase,
+  inputs: PersistenceInputs,
+  responseId: string,
+  contextUser: UserInfo,
+): Promise<void> {
+  const entity = provider.EntityByName(FORM_RESPONSE_ENTITY);
+  if (!entity) {
+    console.warn(`[forms] Cannot attach files to response ${responseId}: "${FORM_RESPONSE_ENTITY}" is not in metadata.`);
+    return;
+  }
+  const result = await syncFileLinks(new MJFileLinkGateway(provider, contextUser), {
+    // The link table keys on the entity's ROW ID, not its name — which is also what the panel
+    // filters on, so the two have to agree exactly.
+    target: { entityId: entity.ID, recordId: responseId },
+    fileIds: submittedFileIds(inputs.answers),
+    responseId,
+  });
+  for (const failure of result.failures) {
+    console.warn(`[forms] Response ${responseId}: ${failure}`);
+  }
+}
+
+/**
  * Save the response and all its answers. CREATE (default), or UPDATE/PROMOTE when
  * `existingResponseId` is set — in which case the existing row's answers are REPLACED so
  * repeated Partial autosaves stay idempotent (Task 4). `ResponseCount` is incremented only
@@ -393,6 +442,12 @@ export async function persistSubmission(
   if (!inserted.ok) {
     return { ok: false, message: inserted.message };
   }
+
+  // Runs on partial saves too: a respondent who uploaded on page one should see the file on the
+  // response before they finish. Reconciling from the CURRENT answers is what makes the upsert
+  // and promotion paths need no special casing here — a replaced or removed upload is an answer
+  // change, and the attachments follow the answers.
+  await attachResponseFiles(provider, inputs, responseId, contextUser);
 
   // Count once, only when this write newly transitioned the row to Complete (fresh Complete or
   // Partial→Complete promotion) — never when re-completing an already-counted row.

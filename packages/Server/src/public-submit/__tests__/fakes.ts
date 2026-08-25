@@ -18,6 +18,8 @@ import type {
   mjBizAppsFormsFormDistributionEntityType,
   mjBizAppsFormsFormVersionEntityType,
 } from '@mj-biz-apps/forms-entities';
+import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.service';
+import { FORM_UPLOAD_ENTITY } from '../entity-names';
 
 /** A recorded entity save, captured by the fake provider for assertions. */
 export interface SavedRecord {
@@ -63,12 +65,21 @@ export interface FakeProviderConfig {
    * would), and the subsequent recovery `Load` finds it.
    */
   concurrentlyCreated?: ExistingResponseRow[];
+  /**
+   * `MJ: File Entity Record Links` rows the link view should return. Returned unfiltered: the
+   * target is asserted on the WRITTEN row instead, which is where getting it wrong would matter.
+   */
+  fileLinks?: { ID: string; FileID: string }[];
+  /** `FormUpload` rows for the response under test — what Forms is allowed to unlink. */
+  responseUploads?: { FileID: string }[];
 }
 
 /** The fake provider plus inspection handles for tests. */
 export interface FakeProvider {
   provider: DatabaseProviderBase;
   saved: SavedRecord[];
+  /** Rows `Delete()`d, so a test can assert a removal and not just an absence. */
+  deleted: SavedRecord[];
   distribution?: mjBizAppsFormsFormDistributionEntityType;
 }
 
@@ -88,6 +99,7 @@ type ResponseStore = Map<string, ExistingResponseRow>;
 function makeFakeEntity(
   entityName: string,
   saved: SavedRecord[],
+  deleted: SavedRecord[],
   failSave: boolean,
   responseStore: ResponseStore,
 ) {
@@ -147,7 +159,10 @@ function makeFakeEntity(
         }
         return true;
       },
-      Delete: async () => true,
+      Delete: async () => {
+        deleted.push({ entityName, values: { ID: record.ID } });
+        return true;
+      },
     },
     {
       set(target, prop: string, value) {
@@ -169,10 +184,26 @@ function makeFakeEntity(
   return record;
 }
 
+/**
+ * Stable, GUID-shaped ids for the fake's entities. The file-link table stores an entity's ROW ID
+ * rather than its name, and rejects anything not shaped like one — so a fake `EntityInfo` without
+ * a realistic `ID` would make that guard look broken instead of exercising it.
+ */
+const fakeEntityIds = new Map<string, string>();
+export function fakeEntityId(entityName: string): string {
+  let id = fakeEntityIds.get(entityName);
+  if (!id) {
+    id = `eeeeeeee-0000-4000-8000-${String(fakeEntityIds.size + 1).padStart(12, '0')}`;
+    fakeEntityIds.set(entityName, id);
+  }
+  return id;
+}
+
 /** Build a fake EntityInfo whose GetUserPermisions reflects the configured CanCreate. */
 function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo {
   const permissions = { CanCreate: canCreate, CanRead: true, CanUpdate: false, CanDelete: false } as EntityUserPermissionInfo;
   const info = {
+    ID: fakeEntityId(entityName),
     Name: entityName,
     GetUserPermisions: (_user: UserInfo): EntityUserPermissionInfo => permissions,
   };
@@ -182,6 +213,7 @@ function makeFakeEntityInfo(entityName: string, canCreate: boolean): EntityInfo 
 /** Construct a fake provider implementing the pipeline's required surface. */
 export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   const saved: SavedRecord[] = [];
+  const deleted: SavedRecord[] = [];
 
   // The persistent row store. RunView-visible rows AND race-only rows both live here (so a
   // CREATE collides and the recovery Load resolves); only `existingResponses` is returned by
@@ -212,14 +244,24 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
       const rows = (config.existingResponses ?? []).filter((r) => matchesResponseFilter(r, filter));
       return runViewResult<T>(true, rows as unknown as T[]);
     }
+    if (name === FILE_ENTITY_RECORD_LINK_ENTITY) {
+      return runViewResult<T>(true, (config.fileLinks ?? []) as unknown as T[]);
+    }
+    if (name === FORM_UPLOAD_ENTITY) {
+      return runViewResult<T>(true, (config.responseUploads ?? []) as unknown as T[]);
+    }
     return runViewResult<T>(true, []);
   };
 
   const provider = {
     RunView: runView,
-    RunViews: async () => [],
+    // Batched reads go through the SAME emulation as single ones. This returned an empty array
+    // until the file-link reconciler started batching, at which point "no results" and "the view
+    // did not run" became indistinguishable to the code under test.
+    RunViews: async <T>(params: RunViewParams[]): Promise<RunViewResult<T>[]> =>
+      Promise.all(params.map((p) => runView<T>(p))),
     GetEntityObject: async (entityName: string) =>
-      makeFakeEntity(entityName, saved, config.failSaveFor === entityName, responseStore),
+      makeFakeEntity(entityName, saved, deleted, config.failSaveFor === entityName, responseStore),
     EntityByName: (entityName: string) =>
       makeFakeEntityInfo(entityName, config.createPermissions[entityName] ?? false),
   };
@@ -227,6 +269,7 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
   return {
     provider: provider as unknown as DatabaseProviderBase,
     saved,
+    deleted,
     distribution: config.distribution,
   };
 }
