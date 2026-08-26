@@ -392,7 +392,16 @@ function schemaSyncProcNames(repoRoot) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
             const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
+            // Both spellings, or discovery is only half true. T-SQL names the argument; PostgreSQL
+            // passes it positionally, so matching `@ExcludedSchemaNames` alone meant a proc used
+            // ONLY in `migrations-pg/` was never discovered — and once the positional matcher was
+            // filtered to discovered names, that made CHECK 5 silent on exactly the dialect it had
+            // just been taught to read. Coverage should not depend on a proc happening to appear
+            // in T-SQL too.
             for (const call of sql.matchAll(/\[?(sp\w+)\]?\s*@ExcludedSchemaNames/gi)) {
+                names.add(call[1].toLowerCase());
+            }
+            for (const call of sql.matchAll(/"(sp\w+)"\s*\(\s*'[^']*'/gi)) {
                 names.add(call[1].toLowerCase());
             }
         }
@@ -414,10 +423,15 @@ function countSchemaSyncCalls(sql, procNames) {
     // `[spDeleteUnneededEntityFields], @EntityIDs=…` — which is precisely the shape a careless
     // deletion produces, so the one mutation that mattered slipped through. Being name-anchored
     // also covers the PostgreSQL call form (`SELECT schema."spX"(…)`), which has no EXEC to anchor
-    // on. Callers pass the STRUCTURE mask, so a name inside a string literal is already blanked
-    // before it reaches here — see the call site for the false failure that taught us that.
+    // Matched only where the name is QUOTED as a callee — `[spX]` in T-SQL, `"spX"` in
+    // PostgreSQL. Both dialects always quote it, and prose never does, which is what separates a
+    // real call from an `sp_addextendedproperty` description that merely names one. Anchoring on
+    // the punctuation BEFORE the name rather than after is what makes this robust: an earlier
+    // version required a particular character after it and missed `[spX], @EntityIDs=…`, the
+    // shape a careless deletion leaves behind. This also still sees a call inside a dynamic-SQL
+    // literal, which is the reason the caller hands us the `values` mask.
     let calls = 0;
-    for (const call of sql.matchAll(/\b(sp\w+)\b/gi)) {
+    for (const call of sql.matchAll(/[["](sp\w+)/gi)) {
         if (procNames.has(call[1].toLowerCase())) {
             calls++;
         }
@@ -515,13 +529,16 @@ function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
             const stamp = /^[A-Z](\d{12})__/.exec(file);
             if (stamp === null || stamp[1] < SCHEMA_SYNC_GATE_FROM) continue;
             const path = join(dir, file);
-            // The STRUCTURE mask, which blanks string-literal BODIES as well as comments. `values`
-            // keeps literals, so a compliant migration whose `sp_addextendedproperty` description
-            // happens to name a sync proc in prose was counted as making a call it never makes —
-            // a false FAILURE that blocks correct work and prescribes a fix already in place. The
-            // comment here used to defend that as "loud rather than silent, which is the right way
-            // round"; that was a false choice, since the structure mask is neither.
-            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).structure, procNames);
+            // The `values` mask, deliberately — the same choice, for the same reason, that
+            // `countPermissionProcedureMentions` documents above: a backstop that read `structure`
+            // shares the string-scanning layer with the parser it is checking, so a mask desync
+            // that blanked real code would erase the calls and the count together and the gate
+            // would go quiet. This briefly read `structure` to dodge a false positive on a
+            // procedure name appearing in prose; that traded a loud wrong answer for a silent one,
+            // and it also went blind to a real call inside a dynamic-SQL literal. The prose
+            // problem is solved in {@link countSchemaSyncCalls} instead, by requiring the name to
+            // be QUOTED the way both dialects quote a callee.
+            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values, procNames);
             const parsed = lists.filter((l) => l.file === path).length;
             if (calls > parsed) {
                 violations.push(

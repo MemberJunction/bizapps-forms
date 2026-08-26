@@ -788,11 +788,13 @@ async function checkDuplicate(
     return fail('Could not verify submission status; please retry shortly.');
   }
   if (existing.response) {
-    // Idempotent resubmit: surface the ORIGINAL response id + Complete status (and the same
-    // confirmation) so the client treats it as a successful (already-recorded) submission,
-    // without creating a second row. (No dedicated `duplicate` flag is added to the shared
-    // FormSubmissionResult contract — that lives in @mj-biz-apps/forms-entities, outside this
-    // change's scope; the existing responseId + Complete status is the client-visible signal.)
+    // Idempotent resubmit: surface the ORIGINAL response id and THE ROW'S OWN status and copy, so
+    // the client treats it as an already-recorded submission without creating a second row. The
+    // status is not always `Complete` — this branch now recognises every terminal status, and a
+    // session sealed by a knockout must be told that rather than congratulated. (No dedicated
+    // `duplicate` flag is added to the shared FormSubmissionResult contract — that lives in
+    // @mj-biz-apps/forms-entities, outside this change's scope; the responseId plus the row's
+    // status is the client-visible signal.)
     return {
       success: true,
       responseId: existing.response.ID,

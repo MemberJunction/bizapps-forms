@@ -382,8 +382,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (!def || !rt || this.phase() !== 'ready') {
       return undefined;
     }
-    const score = computeScore(rt.visibleAnswerableQuestions(), rt.currentAnswers());
-    return resolveDisqualification(def.endScreens ?? [], rt.currentAnswers(), { score });
+    // `visibleAnswers()`, not the raw map — the set this widget will SEND, which is the set the
+    // server judges. The score already folded over the visible questions while the conditions were
+    // read from the raw map, so the two halves of this one expression disagreed: a knockout could
+    // fire here on an answer to a question the respondent had since hidden, be omitted from the
+    // payload, and leave the server writing `Complete` — SubmittedAt stamped, quota counted, every
+    // on-submit automation fired — while the respondent was shown the knockout screen.
+    const answers = rt.visibleAnswers();
+    return resolveDisqualification(def.endScreens ?? [], answers, {
+      score: computeScore(rt.visibleAnswerableQuestions(), answers),
+    });
   }
 
   /**
@@ -651,10 +659,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (!def || !rt) {
       return;
     }
-    // Score over the questions the respondent could reach (C4) — the same basis the server
-    // uses, so both sides band on the same number.
-    const score = computeScore(rt.visibleAnswerableQuestions(), rt.currentAnswers());
-    this.endingScreen.set(resolveEndingScreen(def.endScreens ?? [], rt.currentAnswers(), { score }));
+    // The same one set the knockout uses, and for the same reason: the server resolves the ending
+    // from the payload, so banding here on answers that were never sent picks a different screen
+    // than the one the response is recorded against.
+    const answers = rt.visibleAnswers();
+    this.endingScreen.set(
+      resolveEndingScreen(def.endScreens ?? [], answers, {
+        score: computeScore(rt.visibleAnswerableQuestions(), answers),
+      }),
+    );
   }
 
   /**

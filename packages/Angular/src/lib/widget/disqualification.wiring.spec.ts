@@ -246,3 +246,19 @@ describe('a screened-out respondent is never told they succeeded', () => {
     expect(source()).toMatch(/SCREENED_OUT_MESSAGE/);
   });
 });
+
+describe('the client judges exactly what it sends', () => {
+  it('the knockout reads visibleAnswers, never the raw map', () => {
+    // `buildAnswerInputs` sends only the visible set and the server judges from what arrives, so
+    // any client verdict reached on `currentAnswers()` can disagree with the recorded outcome.
+    const body = methodBody('private disqualifyingScreen');
+    expect(body).toMatch(/visibleAnswers\(\)/);
+    expect(body).not.toMatch(/currentAnswers\(\)/);
+  });
+
+  it('and so does the ending resolution', () => {
+    const body = methodBody('private resolveEnding');
+    expect(body).toMatch(/visibleAnswers\(\)/);
+    expect(body).not.toMatch(/currentAnswers\(\)/);
+  });
+});

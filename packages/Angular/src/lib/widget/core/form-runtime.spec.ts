@@ -193,6 +193,49 @@ function formOf(
   return def;
 }
 
+describe('FormRuntime.visibleAnswers', () => {
+  /**
+   * The set the widget SENDS is `visibleAnswerableQuestions` (see `buildAnswerInputs`), and the
+   * server judges knockouts, endings and score from exactly what arrives. So any client-side
+   * verdict has to be reached on the same set, or the two sides disagree about the same
+   * submission — and the client's copy is the one the respondent sees while the server's is the
+   * one that gets recorded.
+   *
+   * The raw map keeps an answer whose question has since been hidden: `setValue` deletes a key
+   * only on null/undefined, and nothing prunes on visibility change.
+   */
+  it('drops an answer whose question is no longer visible', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gate' },
+        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+      ]),
+    );
+    rt.setValue('gate', 'Company');
+    rt.setValue('detail', 'left over');
+    expect([...rt.visibleAnswers().keys()].sort()).toEqual(['detail', 'gate']);
+
+    rt.setValue('gate', 'Individual');
+    // Still in the raw map — nothing prunes it — but no longer part of what this form is saying.
+    expect(rt.currentAnswers().has('detail')).toBe(true);
+    expect([...rt.visibleAnswers().keys()]).toEqual(['gate']);
+  });
+
+  it('is exactly what buildAnswerInputs will send', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gate' },
+        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+        { id: 'note', type: 'Statement' },
+      ]),
+    );
+    rt.setValue('gate', 'Individual');
+    rt.setValue('detail', 'left over');
+
+    expect([...rt.visibleAnswers().keys()].sort()).toEqual(rt.buildAnswerInputs().map((a) => a.questionId).sort());
+  });
+});
+
 describe('FormRuntime progress', () => {
   it('does not let optional questions dilute the bar', () => {
     const rt = new FormRuntime(

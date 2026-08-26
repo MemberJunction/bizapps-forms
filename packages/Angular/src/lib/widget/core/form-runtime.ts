@@ -115,6 +115,31 @@ export class FormRuntime {
     resolveVisibleQuestions(this.orderedPages(), this.answers()),
   );
 
+  /**
+   * The answers this form is actually SAYING — restricted to the questions currently visible.
+   *
+   * The distinction from {@link currentAnswers} is load-bearing, and it caused a real divergence.
+   * `setValue` removes a key only when the value goes null/undefined, and nothing prunes on a
+   * VISIBILITY change, so the raw map keeps an answer to a question the respondent has since
+   * hidden. That is right for the map — re-showing the question should bring the answer back — and
+   * wrong for every verdict, because {@link buildAnswerInputs} sends only the visible set and the
+   * server judges knockouts, endings and score from exactly what arrives. Reaching a client-side
+   * verdict on the raw map therefore let the widget disqualify someone the server then recorded as
+   * `Complete`, with SubmittedAt stamped, the quota counted and every on-submit automation fired.
+   *
+   * So: one set in play, and it is this one. Same lesson as the score basis, one layer up.
+   */
+  public visibleAnswers(): ReadonlyMap<string, AnswerValue> {
+    const map = new Map<string, AnswerValue>();
+    const answers = this.answers();
+    for (const question of this.visibleAnswerableQuestions()) {
+      if (answers.has(question.id)) {
+        map.set(question.id, answers.get(question.id));
+      }
+    }
+    return map;
+  }
+
   // --- Validation ----------------------------------------------------------
 
   /** Validation message for a question, or `null` when valid. */

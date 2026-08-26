@@ -1341,6 +1341,32 @@ withFixture(
         ),
 );
 
+// The two directions CHECK 5's accounting has to get right at once, and they pull apart. Round
+// nine reported a false failure on prose; round ten reported that the fix for it went blind to a
+// real call inside a dynamic-SQL literal. Both are cases now, because either alone licenses the
+// other's bug.
+withMigration(
+    POST_GUARD,
+    "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Rebuilt by spUpdateExistingEntitiesFromSchema during install';\n",
+    (violations) =>
+        check(
+            'a procedure named in PROSE is not counted as a call',
+            !violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    POST_GUARD,
+    "DECLARE @cmd NVARCHAR(MAX) = N'EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames = @p';\n",
+    (violations) =>
+        check(
+            'a real call hidden inside a dynamic-SQL literal IS counted',
+            violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

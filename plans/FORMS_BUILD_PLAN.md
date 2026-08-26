@@ -1826,3 +1826,45 @@ native entities. This is the reporting differentiator no incumbent has.
      have made this real.
 
   **Verification:** 1,827 unit tests, six gates (66 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round ten: the client was judging a set it never sent, and I had broken a
+  principle this repo already wrote down and tested.** Four findings.
+
+  1. **Client and server judged knockouts on different answers, so a screened-out respondent got a
+     `Complete` row and every on-submit automation fired.** The widget judged on
+     `rt.currentAnswers()` — the RAW map, which keeps an answer whose question has since been
+     hidden, because `setValue` prunes only on null/undefined and nothing prunes on a visibility
+     change. But `buildAnswerInputs` sends only the visible set, and the server judges from what
+     arrives. So a knockout could fire in the browser on an answer that was never transmitted:
+     respondent sees the knockout screen and its redirect, server writes `Complete`, stamps
+     SubmittedAt, counts the quota, fires the hooks.
+
+     The sharpest detail is that the inconsistency sat INSIDE ONE EXPRESSION: the score folded over
+     `visibleAnswerableQuestions` while the conditions read `currentAnswers()`. I had fixed the
+     score basis in round one and left the conditions beside it untouched, in the same line, twice
+     more while editing that function. `FormRuntime.visibleAnswers()` is now the one set, used by
+     the knockout AND the ending resolution — so the client judges exactly what it sends, by
+     construction rather than by agreement.
+  2. **My round-nine `.values` → `.structure` change violated a principle documented and pinned in
+     the same file.** `countPermissionProcedureMentions` explains at length why a backstop must
+     count on `values`: reading `structure` shares the string-scanning layer with the parser it
+     checks, so a mask desync erases the calls and the count together and the gate goes quiet.
+     There is a spec case and a mutant for that on CHECK 3. I made CHECK 5 do the opposite to dodge
+     a false positive on prose — trading a loud wrong answer for a silent one, and going blind to a
+     real call inside a dynamic-SQL literal. Restored to `values`, and the prose problem solved
+     where it belongs: the accounting now counts only a QUOTED callee (`[spX]`, `"spX"`), which is
+     how both dialects write a call and not how prose mentions one. Both directions are now spec
+     cases with mutants, because either alone licenses the other's bug.
+  3. Filtering the positional matcher to discovered procs (round nine) narrowed CHECK 5 for
+     PostgreSQL, because discovery matched only the T-SQL spelling — so a proc used only in
+     `migrations-pg/` was never discovered and its list never read. Discovery now reads both
+     spellings; verified with a PG-only proc carrying a narrow list, which is now caught.
+  4. A comment claiming the idempotent resubmit surfaces "Complete status" as the client-visible
+     signal, six lines above code this PR changed to return the row's own status.
+
+  **On the reviewing.** This round was told not to modify the repo and to cite evidence per
+  finding; it did both, worked in a scratch copy, and reported findings its own scoring step had
+  put below the posting bar rather than dropping them. Three of the four came from mutations it ran
+  itself. That instruction set is now the one to reuse.
+
+  **Verification:** 1,831 unit tests, six gates (68 mutants), clean build, eight smoke paths.
