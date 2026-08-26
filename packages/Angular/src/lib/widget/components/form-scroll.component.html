@@ -1,6 +1,9 @@
 <div class="mjf-scroll">
   <div class="mjf-scroll__progress">
     <mjf-form-progress [value]="progress()" />
+    @if (stepLabel(); as label) {
+      <span class="mjf-scroll__step" aria-live="polite">{{ label }}</span>
+    }
   </div>
 
   <!--
@@ -11,10 +14,18 @@
     down the component and aborting the in-flight submit mutation — every respondent lost
     their answers. The <form> element itself is kept for semantics (screen readers, and
     the mobile keyboard's "Go" affordance); `preventDefault` is now explicit.
+
+    The primary button is type="submit" on every section, not only the last, so that pressing
+    Enter in a field does the same thing the button does. `onSubmit` routes a mid-form submit
+    to `onNext`, which is what makes the two agree.
   -->
   <form class="mjf-scroll__body" (submit)="onSubmit($event)" novalidate>
-    @for (page of pages(); track page.id) {
-      <section class="mjf-page" [attr.aria-label]="page.title || 'Section'">
+    @if (current(); as page) {
+      <section
+        class="mjf-page"
+        tabindex="-1"
+        [attr.aria-label]="page.title || 'Section'"
+      >
         @if (page.title) {
           <h2 class="mjf-page__title">{{ page.title }}</h2>
         }
@@ -36,14 +47,25 @@
           }
         </div>
       </section>
+    } @else {
+      <p class="mjf-scroll__empty">This form has no questions to display.</p>
     }
 
-    <div class="mjf-scroll__actions">
-      <button type="submit" class="mjf-submit" [disabled]="submitting() || submitDisabled()">
-        @if (submitting()) {
-          <span>Submitting…</span>
+    <div class="mjf-scroll__actions" [class.mjf-scroll__actions--stepped]="!isFirst()">
+      @if (!isFirst()) {
+        <button type="button" class="mjf-back" [disabled]="submitting()" (click)="onBack()">
+          Back
+        </button>
+      }
+      <button type="submit" class="mjf-submit" [disabled]="primaryDisabled()">
+        @if (isLast()) {
+          @if (submitting()) {
+            <span>Submitting&hellip;</span>
+          } @else {
+            <span>Submit</span>
+          }
         } @else {
-          <span>Submit</span>
+          <span>Next</span>
         }
       </button>
     </div>

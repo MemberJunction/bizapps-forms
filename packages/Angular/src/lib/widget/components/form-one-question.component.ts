@@ -19,7 +19,7 @@ import {
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { FormRuntime } from '../core/form-runtime';
-import { clampCursor } from '../core/one-question-stepper';
+import { clampCursor } from '../core/stepper';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
 
