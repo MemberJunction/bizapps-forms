@@ -1668,9 +1668,12 @@ native entities. This is the reporting differentiator no incumbent has.
      `WHERE ID = '38ca5677…' OR (EntityID = … AND Name = 'Status')` — written that way precisely
      because a host that ran `mj codegen` first minted its own id. On such a host the FK fails and
      `mj app install` stops mid-migration, after the column was added and the CHECK constraint
-     swapped. Its companion `UPDATE … WHERE ID='719712D6-…'` was pure dev-box leakage: that id
-     appears in no migration in this repo, only in the database CodeGen ran against, so it could
-     never have matched anywhere else. Rewritten to resolve the field by NATURAL key, guard on
+     swapped. Its companion `UPDATE … WHERE ID='719712D6-…'` was dropped because appending
+     at `MAX+1` makes it unnecessary. **The reason I first gave for dropping it was false** — I
+     wrote that the id "appears in no migration in this repo", on the strength of a case-SENSITIVE
+     grep for `719712D6` against a baseline that spells it `719712d6`. It is the baseline's
+     `Partial` row (`B202606281200:8694`). Round eight caught it. A case-sensitive grep is the
+     wrong instrument for a hex GUID, and I asserted a negative on one. Rewritten to resolve the field by NATURAL key, guard on
      what the row IS, and append at `MAX(Sequence)+1`.
 
      **Both branches verified against the live database**, since Skyway will not re-run an applied
@@ -1714,3 +1717,44 @@ native entities. This is the reporting differentiator no incumbent has.
   **Verification:** 1,823 unit tests, six gates (mutation harness at 62 behaviours), clean build,
   eight smoke paths, plus the two live-database migration checks above and a self-run audit of
   every prior round's fix.
+
+- **2026-08-26 — round eight: the backstop had a hole in the one proc that mattered, and I asserted
+  a negative on a case-sensitive grep.** Three findings, and this reviewer cited the command behind
+  each one, which is why all three could be checked in a minute.
+
+  1. **The parse-accounting backstop added in round seven did not cover
+     `spDeleteUnneededEntityFields`** — the LAST sync call CodeGen emits. So deleting that one
+     call's exclusion list passed clean, while the same deletion on any other call was caught: the
+     exact hole the backstop was added to close, surviving in the one place a hand-written list of
+     proc names forgot. Fixed the way the schema list was fixed a round earlier — the proc names
+     are now DISCOVERED from the corpus, over a floor of the five CodeGen is known to emit. Two
+     further defects surfaced while testing it: pure discovery is empty in a corpus where no call
+     passes the argument (hence the floor), and requiring a specific character after the proc name
+     missed a call whose argument list had been left malformed — `[spX], @EntityIDs=…` — which is
+     precisely the shape a careless deletion produces. All four mutations now caught, and the
+     PostgreSQL call form with it.
+  2. **The reason I gave for deleting CodeGen's `UPDATE … WHERE ID='719712D6-…'` was false.** I
+     wrote that the id "exists in no migration in this repo". It is the baseline's `Partial` value
+     at `B202606281200:8694`. I had grepped for it — case-SENSITIVELY, for a hex GUID, against a
+     baseline that spells it lowercase — and then asserted a negative on that result, in the
+     migration comment and in this plan. The conclusion (append at `MAX+1`) was right; the
+     argument for it was invented by a bad search. Corrected in both places, with the mistake
+     named rather than quietly replaced.
+  3. **Cloning silently dropped an unconditional jump.** `remapGroup` returns `undefined` both for
+     "every condition failed to remap" and for "had no conditions to begin with", and the jump loop
+     read both as failure — so a `{ when: {}, toPageId: X }` rule (vacuously true, always fires;
+     authorable from mj-sync and the AI builder) vanished on clone, and the warning blamed "a
+     reference to a question that was not copied", which named nothing that had happened.
+
+  Also taken from the round's own below-the-bar notes: the report predicate now covers the MIRROR
+  race as well (a concurrent submit sealing the row `Complete` while these answers trip a knockout
+  would otherwise have handed the qualified copy to someone screened out), and the four CHECK 5
+  spec cases that had no mutant now have them — including one for the very proc that was missing.
+  Harness at 65 behaviours.
+
+  **On this reviewer, versus the last.** It was told to cite the tool output behind every claim, to
+  say plainly when a delegate did not report, and never to invent a score. It did all three,
+  including declining to claim a regression audit it had not run. The findings were correspondingly
+  cheap to verify. That instruction is worth keeping for any future round.
+
+  **Verification:** 1,825 unit tests, six gates (65 mutants), clean build, eight smoke paths.

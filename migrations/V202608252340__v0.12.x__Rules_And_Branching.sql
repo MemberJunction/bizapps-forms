@@ -134,9 +134,12 @@ EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sy
 
    So: resolve the field through its NATURAL key, guard on what the row IS rather than on its id,
    and append at the end of the sequence. CodeGen's companion
-   `UPDATE … WHERE ID='719712D6-…'` is dropped outright — that id exists in no migration in this
-   repo, only in the database this output was generated from, so it could never have matched
-   anywhere else. Appending makes it unnecessary: picklist Sequence is display order.
+   `UPDATE … WHERE ID='719712D6-…'` is dropped because appending makes it unnecessary — picklist
+   Sequence is display order, and the only thing that UPDATE did was open a gap at 2 for the row
+   above. (An earlier version of this comment claimed that id existed in no migration here. It
+   does: `B202606281200:8694` seeds it as the `Partial` value. The claim came from a
+   case-SENSITIVE grep for `719712D6` against a baseline that spells it lowercase — the wrong tool
+   for a hex GUID, and a negative asserted on it.)
 ------------------------------------------------------------------------------------------------ */
 DECLARE @FormResponseStatusFieldID UNIQUEIDENTIFIER = (
     SELECT ef.[ID]

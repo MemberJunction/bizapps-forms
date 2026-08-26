@@ -240,6 +240,12 @@ const MUTANTS = [
         '            if (calls > parsed) {', '            if (false) {'],
     ['schemasync/history-floor', 'CHECK 5 requires everything the repo has already shipped, not only the hand-written floor',
         '            ...previouslyExcluded(lists, list.stamp),', '            ...[],'],
+    ['schemasync/reports-the-narrowing', 'CHECK 5 reports a narrowed list rather than computing the difference and discarding it',
+        '        if (missing.length > 0) {', '        if (false) {'],
+    ['schemasync/watershed', 'CHECK 5 skips migrations older than the watershed instead of gating every file ever shipped',
+        '        if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;', '        if (false) continue;'],
+    ['schemasync/proc-floor', 'the accounting knows the procs CodeGen emits even when no call in the corpus passes the argument',
+        "        'spdeleteunneededentityfields',", "        'spnevermatches',"],
 ];
 
 /**

@@ -366,18 +366,63 @@ function schemaIdentity(name) {
 }
 
 /**
- * How many times shipped SQL invokes a proc that takes `@ExcludedSchemaNames`.
+ * The procs that this repo's shipped SQL is known to pass `@ExcludedSchemaNames` to.
  *
- * The backstop {@link checkSchemaSyncScope} needs and did not have. That check walks the LISTS it
- * can parse, so every way of making a list unparseable is a way of passing it: deleting the
- * argument outright, or rebinding it to a variable, both left the gate silent — on drift strictly
- * worse than the narrowing it was written to stop, since a sync with no exclusions sweeps `dbo`,
- * `staging` and every sibling Open App. CHECK 3 carries the same kind of counter for the same
- * reason, and its comment says why: a check that can only see what it can parse must also count
- * what it should have parsed.
+ * DISCOVERED, not enumerated. A hand-written list of proc names goes stale exactly the way a
+ * hand-written list of schema names does, and it did: the first version named four procs and
+ * missed `spDeleteUnneededEntityFields`, which is the one CodeGen emits LAST — so deleting that
+ * call's argument passed the accounting backstop clean, the very hole the backstop was added to
+ * close. Reading the names out of the corpus means a proc is covered from the first call that
+ * passes the argument, with nothing to keep up to date.
  */
-function countSchemaSyncCalls(sql) {
-    return [...sql.matchAll(/\[?(sp(?:UpdateExistingEntities|UpdateExistingEntityFields|SetDefaultColumnWidthWhereNeeded|UpdateSchemaInfo)\w*)\]?\s*\]?\s*@?/gi)].length;
+function schemaSyncProcNames(repoRoot) {
+    // The floor: every such proc CodeGen is known to emit today. Discovery alone is not enough —
+    // in a corpus where no call happens to pass the argument (a single-migration fixture, or a
+    // future paste that omits it everywhere) there would be nothing to discover, and the check
+    // would go quiet exactly when it is needed. The floor is what we know; discovery is for what
+    // we do not.
+    const names = new Set([
+        'spupdateexistingentitiesfromschema',
+        'spupdateexistingentityfieldsfromschema',
+        'spdeleteunneededentityfields',
+        'spsetdefaultcolumnwidthwhereneeded',
+        'spupdateschemainfofromdatabase',
+    ]);
+    for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
+            for (const call of sql.matchAll(/\[?(sp\w+)\]?\s*@ExcludedSchemaNames/gi)) {
+                names.add(call[1].toLowerCase());
+            }
+        }
+    }
+    return names;
+}
+
+/**
+ * How many times `sql` invokes one of `procNames` — with or without an argument.
+ *
+ * Counting the CALLS rather than the arguments is the whole point: {@link checkSchemaSyncScope}
+ * can only inspect lists it manages to parse, so every way of making one unparseable is a way of
+ * passing it silently. Comparing this count against the number parsed turns "not seen" into a
+ * violation instead of a pass.
+ */
+function countSchemaSyncCalls(sql, procNames) {
+    // Anchored on the NAME alone, indifferent to what follows it. Requiring a specific next
+    // character (`@`, `;`, whitespace) missed a call whose argument list had been left malformed —
+    // `[spDeleteUnneededEntityFields], @EntityIDs=…` — which is precisely the shape a careless
+    // deletion produces, so the one mutation that mattered slipped through. Being name-anchored
+    // also covers the PostgreSQL call form (`SELECT schema."spX"(…)`), which has no EXEC to anchor
+    // on. A name occurring inside a surviving string literal would over-count, which fails loudly;
+    // that is the right way round for a check whose whole purpose is to stop silent passes.
+    let calls = 0;
+    for (const call of sql.matchAll(/\b(sp\w+)\b/gi)) {
+        if (procNames.has(call[1].toLowerCase())) {
+            calls++;
+        }
+    }
+    return calls;
 }
 
 /**
@@ -435,13 +480,14 @@ function previouslyExcluded(lists, stamp) {
  * bound to a variable simply is not seen, and "not seen" reads identically to "correct".
  */
 function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
+    const procNames = schemaSyncProcNames(repoRoot);
     for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
             const stamp = /^[A-Z](\d{12})__/.exec(file);
             if (stamp === null || stamp[1] < SCHEMA_SYNC_GATE_FROM) continue;
             const path = join(dir, file);
-            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values);
+            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values, procNames);
             const parsed = lists.filter((l) => l.file === path).length;
             if (calls > parsed) {
                 violations.push(

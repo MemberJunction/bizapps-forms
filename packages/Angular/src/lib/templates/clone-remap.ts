@@ -39,6 +39,11 @@ export interface RemapResult {
   error?: string;
 }
 
+/** Whether a group carries any leaf condition — "was empty" is not "became empty". */
+function hasConditions(group: ConditionalGroup | undefined): boolean {
+  return (group?.all?.length ?? 0) > 0 || (group?.any?.length ?? 0) > 0;
+}
+
 export function remapConditionalRule(
   raw: string | null,
   idMap: ReadonlyMap<string, string>,
@@ -113,8 +118,15 @@ export function remapConditionalRule(
   const require = remapGroup(parsed.require);
   const jump: ConditionalJumpRule[] = [];
   for (const rule of parsed.jump ?? []) {
-    const when = remapGroup(rule.when);
     const toPageId = pageIdMap?.get(rule.toPageId);
+    // `remapGroup` returns `undefined` for two different things, and only one of them is a
+    // failure: a group whose every condition failed to remap, and a group that had no conditions
+    // to begin with. The second is an UNCONDITIONAL jump — `evaluateGroup({})` is vacuously true,
+    // so it always fires — which the editor cannot author but mj-sync metadata and the AI builder
+    // can, and the zod schema accepts. Reading it as failure dropped the rule silently, so the
+    // copy asked a page the original skipped and blamed "a reference to a question that was not
+    // copied", which named nothing that had happened.
+    const when = hasConditions(rule.when) ? remapGroup(rule.when) : rule.when;
     // A jump missing either half in the copy would point at the OLD form's page — the exact
     // hidden-forever failure this module exists to prevent. Dropped and counted, like a
     // dangling question reference.

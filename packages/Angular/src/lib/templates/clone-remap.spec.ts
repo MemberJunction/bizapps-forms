@@ -174,4 +174,27 @@ describe('remapConditionalRule — require and jump verbs (C1/C2)', () => {
     const rule = JSON.stringify({ show: { all: [{ op: 'isAnswered' }] } });
     expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 1 });
   });
+  it('edge: an UNCONDITIONAL jump survives the clone', () => {
+    // An empty `when` is vacuously true, so this jump always fires — `resolveVisiblePages` skips
+    // the pages between, which is a coherent thing to author and reachable from mj-sync metadata
+    // and the AI builder even though the editor cannot produce it. `remapGroup` returns
+    // `undefined` for a group with nothing in it AND for a group whose every condition failed to
+    // remap, and the jump loop read both as failure — so cloning silently dropped the rule and
+    // the copy asked a page the original skipped, reported as "a reference to a question that was
+    // not copied", which names nothing that happened here.
+    const rule = JSON.stringify({ jump: [{ when: {}, toPageId: 'p-old-3' }] });
+    const result = remapConditionalRule(rule, MAP, PAGE_MAP);
+    expect(result.dropped).toBe(0);
+    expect(JSON.parse(result.json as string)).toEqual({ jump: [{ when: {}, toPageId: 'p-new-3' }] });
+  });
+
+  it('worst: a jump whose conditions ALL fail to remap is still dropped', () => {
+    // The distinction the fix turns on: "was empty" is not "became empty". Two drops are counted
+    // because two things were genuinely lost — the dead condition, and the rule that can no
+    // longer be built from it.
+    const rule = JSON.stringify({
+      jump: [{ when: { all: [{ questionId: 'q-not-copied', op: 'isAnswered' }] }, toPageId: 'p-old-3' }],
+    });
+    expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 2 });
+  });
 });

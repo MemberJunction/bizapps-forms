@@ -1301,6 +1301,26 @@ withFixture(
         ),
 );
 
+// The proc round eight found missing. `spDeleteUnneededEntityFields` is the LAST sync call CodeGen
+// emits, and the first version of the accounting regex did not name it — so deleting that one
+// call's exclusion list passed clean while the same deletion on any other call was caught. A case
+// per proc would be noise; a case for the one that was actually missed is the case that matters.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        writeFileSync(
+            join(root, 'migrations', POST_GUARD),
+            'EXEC [\${mjSchema}].[spDeleteUnneededEntityFields];\n',
+        );
+    },
+    (violations) =>
+        check(
+            'CHECK 5 accounts for spDeleteUnneededEntityFields, not only the procs it happens to see used',
+            violations.some((v) => v.includes(POST_GUARD) && v.includes('this gate can read')),
+            JSON.stringify(violations.filter((v) => v.includes(POST_GUARD))),
+        ),
+);
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);
