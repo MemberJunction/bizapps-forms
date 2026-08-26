@@ -28,12 +28,12 @@ import {
   type QuestionSettingField,
 } from './question-settings';
 import { RulesPanelComponent } from './rules-panel.component';
-import { QUESTION_RULE_CARDS } from './rules-panel-model';
 import {
   toConditionalSource,
   type ConditionalSourceOption,
   type ConditionalSourceQuestion,
 } from './condition-sources';
+import type { JumpTargetOption } from './jump-target-options';
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
@@ -206,7 +206,16 @@ export class QuestionEditorComponent {
    * switching a row on and typing into it. Reset when the selected question changes, since the
    * next question's emptiness is not this question's.
    */
-  protected readonly ruleCards = QUESTION_RULE_CARDS;
+  /**
+   * Sources a jump's conditions may read — this question's OWN answer included.
+   *
+   * Not the same set as {@link conditionalSources}: a question's SHOW rule must not read its own
+   * answer (it would hide the field the respondent is typing into), but "if THIS answer is X, go
+   * to Y" is the whole point of a branching rule.
+   */
+  @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
+  /** Forward destinations for this question's rules — later questions, later sections, endings. */
+  @Input() jumpTargets: JumpTargetOption[] = [];
 
   private requested = { validation: false, placeholder: false, scoring: false };
 

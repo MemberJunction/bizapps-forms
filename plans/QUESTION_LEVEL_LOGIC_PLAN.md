@@ -1,7 +1,18 @@
 # Question-Level Logic Plan — two rules, one "Go to"
 
-**Status: Phase 1 ✅ · Phase 2 ✅ · Phase 3 next · Phase 4 pending.**
-Post-Phase-2 baseline: **1,969** tests (296 / 26 / 142 / 1004 / 501), widget 1199.1 kB.
+**Status: ALL PHASES COMPLETE.** Phase 1 `ff84141` · Phase 2 `6b46eb1` · Phases 3–4 this commit.
+Final baseline: **1,971** tests (296 / 26 / 142 / 1006 / 501), widget 1199.1 kB, six gates green.
+
+**Phases 3 and 4 shipped together, deliberately.** "Several rules per item" with no UI to author
+them is dead capability, and the If/Then dialog IS the multi-rule UI. Splitting them would have
+produced one commit that changed nothing an author could see and another that could not be
+reviewed without it.
+
+**One thing the plan did not anticipate.** §6 assumed the dialog would keep the per-verb card
+picker and gain an If/Then body. It does not: the picker is gone entirely, replaced by ONE
+"Edit logic" dialog per item holding the show gate and every jump rule together. The picker
+existed because logic was authored a verb at a time, which is exactly what made "what does this
+question do?" unanswerable without opening two dialogs.
 
 **One boundary moved.** Phase 1 step 5 said to delete `resolveDisqualification` and
 `isArmedKnockout`. It does not: both have live callers in the widget and the server, so deleting

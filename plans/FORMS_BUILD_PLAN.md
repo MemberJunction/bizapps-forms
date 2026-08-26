@@ -2158,3 +2158,46 @@ native entities. This is the reporting differentiator no incumbent has.
   **Verification:** 1,969 unit tests (296 / 26 / 142 / 1004 / 501). The count moved by −9 deleted
   knockout-arming cases, +7 `resolveFormOutcome` cases and +3 new tab cases. Build clean, widget
   1199.1 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants pass.
+
+- **2026-08-26 — question-level logic, Phases 3–4: one dialog, several rules, real destinations.**
+  Shipped together because "several rules per item" with no UI to author them is dead capability,
+  and the If/Then dialog IS that UI.
+
+  **The card picker is gone.** Logic used to be authored a verb at a time — pick "Show only if",
+  author it, close, pick "Jump to page", author that — so the commonest question an author has,
+  *what does this question actually do?*, could not be answered without opening two dialogs and
+  remembering the first. There is now one **Edit logic** dialog per item holding the show gate and
+  every branching rule together, and the rail beside it is a one-line-per-rule summary of what the
+  item does.
+
+  **Rules are numbered, and can be reordered.** `resolveFlow` takes the first rule whose
+  conditions pass, so order is meaning rather than presentation. Move-up/down and the numbering
+  say so; a bare list would let an author write two rules and be surprised by which one won.
+  `MAX_JUMP_RULES` is now enforced where an author can see it — it was in the contract and at the
+  server's zod boundary, but not in the editor, so an over-cap rule could be authored and would
+  then fail to parse on every public load.
+
+  **Destinations are picked from a grouped list** — Questions · Sections · Endings · Submit —
+  filtered forward-only to match the resolver, since a backward target is inert there and
+  offering one would let an author write a rule that reads correctly and never fires. A stored
+  target the picker no longer offers still renders, named, because a `<select>` whose value is
+  absent from its options goes BLANK.
+
+  **Two shipping bugs the dead-code sweep caught.** The Rules tab read only `rule.jump[0]` and
+  ignored question-level jumps entirely, so most of the new capability would have been invisible
+  in the one place built to show every rule. It now emits one row per rule, numbered when there is
+  more than one, and flags only the broken one rather than its healthy neighbours.
+
+  **What got deleted.** `RuleCardSpec`, the three card-set constants, `cardSpec`, `activeCards`,
+  `hasVerb`, `isGroupVerb`, `GroupVerb`, `RuleDraft`, `isDraftCommittable`, `isDraftDirty`,
+  `sameGroup`, `jumpRule`, `withJumpRule`, `summarizeJump`, `JumpTargetPage`. `rules-panel-model`
+  is down to the JSON accessors and `describeCondition`, which is the single source of prose the
+  rail and the hub both read.
+
+  **What was preserved, because it was hard-won.** Nothing persists until Save; a dirty close
+  warns and a clean one closes silently; dirty is value equality, not touched-ness; changing the
+  selected item closes the dialog. `commit` is now the ONLY writer — deleting a rule is an edit
+  to the draft, where it used to persist straight from the rail.
+
+  **Verification:** 1,971 unit tests (296 / 26 / 142 / 1006 / 501). Build clean, widget 1199.1 kB;
+  `lint:ui`, `lint:distribution` + 72 mutants, `lint:generated` and `lint:migrations` all pass.

@@ -528,6 +528,8 @@
             [selectedId]="selectedNode?.entity?.ID ?? ''"
             [formId]="record.ID"
             [conditionalSources]="conditionalSources"
+            [jumpConditionSources]="questionJumpSources"
+            [jumpTargets]="questionJumpTargets"
             (questionChanged)="onQuestionChanged($event)"
             (optionChanged)="onOptionChanged($event)"
             (addOptionRequested)="onAddOption($event)"

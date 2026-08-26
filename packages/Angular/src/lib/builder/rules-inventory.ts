@@ -22,7 +22,7 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 
 import { SCORE_SOURCE_ID, type ConditionalSourceQuestion } from './condition-sources';
-import { describeCondition, groupConditions, jumpRule, type RuleVerb } from './rules-panel-model';
+import { describeCondition, groupConditions, type RuleVerb } from './rules-panel-model';
 
 /** Which kind of item a rule hangs off — what the hub needs to route a click back to. */
 export type RuleItemKind = 'question' | 'page' | 'ending';
@@ -103,19 +103,7 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
   for (const page of form.pages) {
     entries.push(...pageEntries(page, form));
     for (const question of page.questions) {
-      const show = question.conditionalRule?.show;
-      if (show) {
-        entries.push({
-          id: `question:${question.id}:show`,
-          itemKind: 'question',
-          itemId: question.id,
-          pageId: page.id,
-          verb: 'show',
-          icon: ROW_ICONS.show,
-          sentence: `Show ${quoted(question.label)} ${whenClause(show, form.sources)}`,
-          broken: brokenIn(show, form.sources),
-        });
-      }
+      entries.push(...itemEntries('question', question, page.id, form));
     }
   }
 
@@ -131,37 +119,56 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
 
 /** A page's own rules: its show gate, then its forward jump. */
 function pageEntries(page: RuleInventoryPage, form: RuleInventoryForm): RuleEntry[] {
+  return itemEntries('page', page, page.id, form);
+}
+
+/**
+ * Every rule ONE item carries: its show gate, then each of its `Go to` rules in order.
+ *
+ * One row per rule rather than one per item, because an item can now carry several jumps and
+ * first-match-wins makes their ORDER meaning. A hub that collapsed them would hide the very
+ * thing an author most needs to check.
+ */
+function itemEntries(
+  kind: RuleItemKind,
+  item: RuleInventoryItem,
+  pageId: string,
+  form: RuleInventoryForm,
+): RuleEntry[] {
   const out: RuleEntry[] = [];
-  const show = page.conditionalRule?.show;
+  const show = item.conditionalRule?.show;
   if (show) {
     out.push({
-      id: `page:${page.id}:show`,
-      itemKind: 'page',
-      itemId: page.id,
-      pageId: page.id,
+      id: `${kind}:${item.id}:show`,
+      itemKind: kind,
+      itemId: item.id,
+      pageId,
       verb: 'show',
       icon: ROW_ICONS.show,
-      sentence: `Show ${quoted(page.label)} ${whenClause(show, form.sources)}`,
+      sentence: `Show ${quoted(item.label)} ${whenClause(show, form.sources)}`,
       broken: brokenIn(show, form.sources),
     });
   }
 
-  const jump = jumpRule(page.conditionalRule);
-  if (jump) {
+  const jumps = item.conditionalRule?.jump ?? [];
+  jumps.forEach((jump, index) => {
     const destination = describeTarget(jump.target, form);
+    // Numbered only when there is more than one, so the common case reads as a sentence rather
+    // than as an entry in a list.
+    const ordinal = jumps.length > 1 ? `Rule ${index + 1}: ` : '';
     out.push({
-      id: `page:${page.id}:jump`,
-      itemKind: 'page',
-      itemId: page.id,
-      pageId: page.id,
+      id: `${kind}:${item.id}:jump:${index}`,
+      itemKind: kind,
+      itemId: item.id,
+      pageId,
       verb: 'jump',
       icon: ROW_ICONS.jump,
       sentence:
-        `After ${quoted(page.label)}, ${destination.phrase} ` +
+        `${ordinal}After ${quoted(item.label)}, ${destination.phrase} ` +
         `${whenClause(jump.when, form.sources)}`,
       broken: [...brokenIn(jump.when, form.sources), ...destination.broken],
     });
-  }
+  });
   return out;
 }
 

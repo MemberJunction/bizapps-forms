@@ -1,20 +1,17 @@
 /**
- * The rules panel's model: which rule cards an item shows, which its "+ Add rule" picker still
- * offers, and how a card summarizes its conditions in one line. Pure functions, no Angular
- * (RULES_AND_BRANCHING_PLAN §3).
+ * Reading and writing an item's `ConditionalRule` JSON, and turning one condition into prose.
  *
- * A "verb" is one key of the {@link ConditionalRule} JSON — `show`, `require` (questions) and
- * `jump` (pages) — plus the one pseudo-verb, `disqualify`, which is a COLUMN on the screen
- * rather than a JSON key (see {@link RuleVerb}). A future verb belongs here too, rather than in
- * a parallel scheme of its own.
+ * This was the rules PANEL's model — which cards an item offered, which its picker still had
+ * left, how a card summarized itself. The picker is gone (one dialog holds every verb now, see
+ * `logic-draft.ts`), and what survives is the part that was never about the panel: the accessors
+ * every writer of a rule shares, and `describeCondition`, which is the single source of prose for
+ * a condition.
+ *
+ * That last one matters more than its size suggests. The rail summarises a rule in one line, the
+ * Rules tab spells it out in full, and an author who reads one wording in the panel and another
+ * in the hub has to work out whether the rule changed under them. Both call this.
  */
-import type {
-  ConditionalCondition,
-  ConditionalGroup,
-  ConditionalJumpRule,
-  ConditionalRule,
-  JumpTarget,
-} from '@mj-biz-apps/forms-entities';
+import type { ConditionalCondition, ConditionalGroup, ConditionalRule } from '@mj-biz-apps/forms-entities';
 import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } from './condition-sources';
 
 /**
@@ -27,160 +24,35 @@ import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } fro
  */
 export type RuleVerb = keyof ConditionalRule;
 
-/**
- * The verbs whose payload is a plain condition group (jump carries a target as well).
- *
- * One member today, and still worth its own type: `disqualify` also reads a group but writes a
- * flag alongside it, and `jump` writes a target — so "is this verb's payload just a group?" is
- * the question the panel actually asks, and it is not the same question as "is this verb
- * `show`?" even while the two happen to have the same answer.
- */
-export type GroupVerb = 'show';
-
-export function isGroupVerb(verb: RuleVerb): verb is GroupVerb {
-  return verb === 'show';
-}
-
-/** A page a jump card may target — later pages only; the caller enforces the ordering. */
-export interface JumpTargetPage {
-  id: string;
-  label: string;
-}
-
-/** One card the panel can offer: a verb plus the copy that sells it in the picker. */
-export interface RuleCardSpec {
-  verb: RuleVerb;
-  title: string;
-  /** Font Awesome classes for the card icon. */
-  icon: string;
-  /** One-line description shown on the picker card and as the open card's hint. */
-  description: string;
-}
-
-/**
- * The cards a QUESTION offers.
- *
- * There was a second, "Require if", writing a `require` group. It is gone: the question already
- * carries a Required toggle, so the card was a second answer to a question the editor had
- * already asked one field higher — and the toggle silently won when the two disagreed. "If
- * Other, please explain" is expressible without it: show the follow-up conditionally and mark
- * it required.
- */
-export const QUESTION_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
-  {
-    verb: 'show',
-    title: 'Show only if',
-    icon: 'fa-solid fa-eye',
-    description: 'Hide this question unless an earlier answer matches.',
-  },
-];
-
-/** The cards a PAGE offers. */
-export const PAGE_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
-  {
-    verb: 'show',
-    title: 'Show only if',
-    icon: 'fa-solid fa-eye',
-    description: 'Skip this whole page unless answers from earlier pages match.',
-  },
-  {
-    verb: 'jump',
-    title: 'Jump to page',
-    icon: 'fa-solid fa-arrow-turn-down',
-    description:
-      'After this page, skip ahead to a later page when answers match. The skipped pages are not asked and their answers are dropped.',
-  },
-];
-
-/**
- * The cards an ENDING SCREEN offers.
- *
- * There was a second, "Disqualify if". It is gone, and so is the `excludes` machinery that
- * existed for it: an ending's show group had to mean "which thank-you page at the end" or "who
- * gets screened out mid-form" depending on a flag one panel away, so offering both cards would
- * silently reinterpret a group the author had already written. Screening someone out is now a
- * `Go to` rule naming this screen, and whether arriving here disqualifies is a toggle on the
- * screen itself. One group, one meaning.
- */
-export const ENDING_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
-  {
-    verb: 'show',
-    title: 'Show only if',
-    icon: 'fa-solid fa-flag-checkered',
-    description:
-      'Endings are checked in order and the first match wins. One with no condition is only reachable as the default.',
-  },
-];
-
-/**
- * The spec for one verb among the ones THIS item offers, or undefined when it offers no such
- * card. Undefined rather than a fallback: the dialog titles itself from this, and titling a
- * require group "Show only if" because that happened to be first would mislabel the thing being
- * edited.
- */
-export function cardSpec(
-  verb: RuleVerb,
-  specs: ReadonlyArray<RuleCardSpec>,
-): RuleCardSpec | undefined {
-  return specs.find((spec) => spec.verb === verb);
-}
-
-/** The group a rule holds for one group verb, or undefined when the verb is not present. */
-export function verbGroup(rule: ConditionalRule | undefined, verb: GroupVerb): ConditionalGroup | undefined {
-  return rule?.[verb];
-}
-
-/** Whether the rule carries anything for this verb. */
-export function hasVerb(rule: ConditionalRule | undefined, verb: RuleVerb): boolean {
-  if (verb === 'jump') {
-    return (rule?.jump?.length ?? 0) > 0;
-  }
-  return verbGroup(rule, verb) !== undefined;
-}
-
-/**
- * The jump the UI edits — the FIRST rule in the list. The schema keeps a first-match-wins
- * list for forward compatibility; the panel authors a single jump per page, which covers the
- * business cases (role tracks, ticket tracks) without a rule-ordering UI.
- */
-export function jumpRule(rule: ConditionalRule | undefined): ConditionalJumpRule | undefined {
-  return rule?.jump?.[0];
-}
-
-/** The rule with its jump list replaced by the single given jump (or removed). */
-export function withJumpRule(
+/** The group a rule holds for one verb, or undefined when the verb is not present. */
+export function verbGroup(
   rule: ConditionalRule | undefined,
-  jump: ConditionalJumpRule | undefined,
-): ConditionalRule | undefined {
-  const next: ConditionalRule = { ...rule };
-  if (jump === undefined) {
-    delete next.jump;
-  } else {
-    next.jump = [jump];
-  }
-  return Object.keys(next).length > 0 ? next : undefined;
+  verb: RuleVerb,
+): ConditionalGroup | undefined {
+  const value = rule?.[verb];
+  return Array.isArray(value) ? undefined : value;
 }
 
 /**
- * The rule with one verb's group replaced. Setting a verb's only group to `undefined` collapses
- * the whole rule to `undefined` rather than leaving `{}` behind — an empty rule object would
- * serialize as a phantom "has a rule" marker every consumer then has to see through.
+ * The rule with one verb's group replaced.
+ *
+ * Setting a verb's only group to `undefined` collapses the whole rule to `undefined` rather than
+ * leaving `{}` behind — an empty rule object would serialize as a phantom "has a rule" marker
+ * every consumer then has to see through.
  */
 export function withVerbGroup(
   rule: ConditionalRule | undefined,
-  verb: GroupVerb,
+  verb: RuleVerb,
   group: ConditionalGroup | undefined,
 ): ConditionalRule | undefined {
   const next: ConditionalRule = { ...rule };
   if (group === undefined) {
     delete next[verb];
-  } else {
-    next[verb] = group;
+  } else if (verb === 'show') {
+    next.show = group;
   }
   return Object.keys(next).length > 0 ? next : undefined;
 }
-
-/* --------------------------------------------------------------- authoring a rule as a draft */
 
 /**
  * The conditions a group carries, whichever combinator holds them.
@@ -193,125 +65,8 @@ export function groupConditions(group: ConditionalGroup | undefined): ReadonlyAr
   return group?.all ?? group?.any ?? [];
 }
 
-/** Whether the author has actually said something. The test for "is this rule worth keeping". */
-export function isAuthoredGroup(group: ConditionalGroup | undefined): boolean {
-  return groupConditions(group).length > 0;
-}
-
-/** Which combinator a group uses — the part `groupConditions` deliberately drops. */
-function combinatorOf(group: ConditionalGroup | undefined): 'all' | 'any' | 'none' {
-  if (group?.all !== undefined) {
-    return 'all';
-  }
-  return group?.any !== undefined ? 'any' : 'none';
-}
-
-/** Value equality for a comparand, which is a scalar or a list of them. */
-function sameValue(a: ConditionalCondition['value'], b: ConditionalCondition['value']): boolean {
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
-      return false;
-    }
-    return a.every((entry, i) => entry === b[i]);
-  }
-  return a === b;
-}
-
-function sameCondition(a: ConditionalCondition, b: ConditionalCondition): boolean {
-  return (
-    a.source === b.source &&
-    a.questionId === b.questionId &&
-    a.op === b.op &&
-    sameValue(a.value, b.value)
-  );
-}
-
-/**
- * Value equality between two groups — what decides whether closing the dialog needs to ask.
- *
- * Field by field rather than `JSON.stringify`, because the two sides are built by different
- * code: the baseline is parsed out of a stored JSON column, the draft is assembled by the
- * condition editor, and neither promises the other's key order. Stringifying would report an
- * edit the author never made, and a discard warning that fires on an untouched rule is the kind
- * of dialog people learn to click through.
- */
-export function sameGroup(a: ConditionalGroup | undefined, b: ConditionalGroup | undefined): boolean {
-  if (combinatorOf(a) !== combinatorOf(b)) {
-    return false;
-  }
-  const left = groupConditions(a);
-  const right = groupConditions(b);
-  return left.length === right.length && left.every((cond, i) => sameCondition(cond, right[i]));
-}
-
-/**
- * A rule mid-authoring, before it is committed to the item.
- *
- * The dialog edits THIS and nothing else, so closing it can genuinely discard: the item's own
- * rule is not touched until {@link isDraftCommittable} passes and the author presses Done. It
- * replaces the `drafts: Set<RuleVerb>` marker the panel used to carry — that existed only
- * because edits were persisted as they were typed, which is what let a card be added empty.
- */
-export interface RuleDraft {
-  readonly verb: RuleVerb;
-  readonly group: ConditionalGroup | undefined;
-  /** A jump's target page; null for every other verb. */
-  readonly jumpTargetId: string | null;
-}
-
-/**
- * Whether this draft would persist anything. A jump needs BOTH halves — a target with no
- * conditions describes when to jump as "never", which `withJumpRule` correctly stores as
- * nothing at all, so committing it would close the dialog over an empty result.
- */
-export function isDraftCommittable(draft: RuleDraft): boolean {
-  if (!isAuthoredGroup(draft.group)) {
-    return false;
-  }
-  return draft.verb !== 'jump' || (draft.jumpTargetId ?? '').length > 0;
-}
-
-/** Whether this draft differs from what the item already had — the reason to warn on close. */
-export function isDraftDirty(draft: RuleDraft, baseline: RuleDraft): boolean {
-  return (
-    !sameGroup(draft.group, baseline.group) ||
-    (draft.jumpTargetId ?? '') !== (baseline.jumpTargetId ?? '')
-  );
-}
-
-/** The specs whose verb the rule actually carries, in spec order. */
-export function activeCards(
-  rule: ConditionalRule | undefined,
-  specs: ReadonlyArray<RuleCardSpec>,
-): RuleCardSpec[] {
-  return specs.filter((spec) => hasVerb(rule, spec.verb));
-}
-
-/**
- * One line of human-readable truth about a group, for the collapsed card header:
- * "Ticket type equals VIP", "Ticket type equals VIP · +2 more". A reference to a question that
- * no longer exists says so instead of vanishing — a summary that hides the breakage is how a
- * dead rule survives unnoticed.
- */
-export function summarizeGroup(
-  group: ConditionalGroup | undefined,
-  sources: ReadonlyArray<ConditionalSourceQuestion>,
-): string {
-  const conditions = group?.any ?? group?.all ?? [];
-  if (conditions.length === 0) {
-    return 'No conditions yet';
-  }
-  const head = describeCondition(conditions[0], sources);
-  const rest = conditions.length - 1;
-  return rest > 0 ? `${head} · +${rest} more` : head;
-}
-
 /**
  * One condition as a phrase: "Ticket type equals VIP", "Interests includes any of Sports".
- *
- * The single source of prose for a condition, shared by the rail's one-line summary and the
- * Rules tab's full sentences — two renderings that must agree, because an author who reads one
- * wording in the panel and another in the hub has to work out whether the rule changed.
  *
  * Labelled in the SOURCE's voice: `isMember` intersects for a set-valued answer, so `in` reads
  * "includes any of" on a multi-select and "is one of" on a single answer. Same operator, two
@@ -335,45 +90,4 @@ export function describeCondition(
     }
   }
   return parts.join(' ');
-}
-
-/**
- * One line of truth for a jump card: where it goes and on what. A target that no longer
- * exists is said out loud for the same reason a deleted question is.
- */
-export function summarizeJump(
-  rule: ConditionalRule | undefined,
-  sources: ReadonlyArray<ConditionalSourceQuestion>,
-  targets: ReadonlyArray<JumpTargetPage>,
-): string {
-  const jump = jumpRule(rule);
-  if (!jump) {
-    return 'No conditions yet';
-  }
-  return `Go to ${jumpTargetLabel(jump.target, targets)} · ${summarizeGroup(jump.when, sources)}`;
-}
-
-/**
- * A jump target in one phrase, for the rail's one-line summary.
- *
- * Only PAGE names can be resolved here: the panel is handed the pages a jump may target and
- * nothing else. A question or ending target therefore reads by kind rather than by name — the
- * Rules tab, which has the whole form, spells those out (`rules-inventory.ts`). Naming the kind
- * is still better than naming nothing, and far better than resolving a question id against the
- * page list and calling it "(deleted page)".
- */
-export function jumpTargetLabel(
-  target: JumpTarget,
-  pages: ReadonlyArray<JumpTargetPage>,
-): string {
-  switch (target.kind) {
-    case 'page':
-      return pages.find((t) => t.id === target.id)?.label ?? '(deleted page)';
-    case 'question':
-      return 'a later question';
-    case 'ending':
-      return 'an ending screen';
-    case 'submit':
-      return 'Submit';
-  }
 }

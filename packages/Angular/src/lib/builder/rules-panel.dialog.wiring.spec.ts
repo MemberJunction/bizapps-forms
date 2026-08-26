@@ -64,17 +64,19 @@ describe('the rule editor is a modal, not a rail expansion', () => {
     expect(dialog()).not.toMatch(/jump|disqualify|ConditionalGroup/);
   });
 
-  it('Done is disabled until the draft would persist something', () => {
-    expect(dialog()).toMatch(/\[disabled\]="!canConfirm"/);
-    expect(panelHtml()).toMatch(/\[canConfirm\]="canCommit"/);
-    expect(panel()).toMatch(/get canCommit\(\)[\s\S]{0,200}isDraftCommittable/);
+  it('an incomplete rule row is dropped on save rather than stored half-written', () => {
+    // Save is always offered — clearing every rule is a legitimate save. What must not happen
+    // is a half-authored row reaching the item: a jump with no target goes nowhere, and a jump
+    // with no CONDITIONS fires for everyone, which is the worst thing an unfinished edit can
+    // silently become. `ruleFromLogicDraft` is where both are dropped.
+    expect(panel()).toMatch(/commit\(\): void \{\s*this\.ruleChange\.emit\(ruleFromLogicDraft\(this\.draft\)\)/);
   });
 
-  it('the condition editor is reached only through the dialog', () => {
+  it('the logic editor is reached only through the dialog', () => {
     const html = panelHtml();
     expect(html).toMatch(/<mjf-rule-editor-dialog/);
     const dialogStart = html.indexOf('<mjf-rule-editor-dialog');
-    expect(html.indexOf('<mjf-conditional-rule-editor')).toBeGreaterThan(dialogStart);
+    expect(html.indexOf('<mjf-logic-editor')).toBeGreaterThan(dialogStart);
   });
 
   it('a card no longer expands in place', () => {
@@ -83,27 +85,26 @@ describe('the rule editor is a modal, not a rail expansion', () => {
     expect(panel()).not.toMatch(/toggleExpanded/);
   });
 
-  it('one nullable union replaces the two flags that were never legally both set', () => {
-    expect(panel()).toMatch(/type RuleDialog\s*=[\s\S]{0,200}'pick'[\s\S]{0,200}'edit'/);
-    expect(panel()).not.toMatch(/pickerOpen/);
-    expect(panel()).not.toMatch(/protected expanded/);
+  it('there is ONE dialog and no verb picker left to get out of step with it', () => {
+    // The picker existed because logic was authored a verb at a time. One dialog holds every
+    // verb now, so the pick/edit union, the per-verb draft and the card specs are all gone.
+    expect(panel()).not.toMatch(/pickerOpen|type RuleDialog|RuleCardSpec|availableCards/);
+    expect(panel()).toMatch(/protected dialogOpen = false;/);
   });
 
-  it('clicking an existing card opens that verb in the dialog', () => {
-    expect(panelHtml()).toMatch(/\(click\)="editCard\(card\.verb\)"/);
-    // editCard delegates, so assert the chain rather than a flattened body: both entry points
-    // go through openDraft, which is what snapshots the baseline the discard warning needs.
-    expect(panel()).toMatch(/editCard\(verb: RuleVerb\): void \{\s*this\.openDraft\(verb\);/);
-    expect(panel()).toMatch(/addCard\(verb: RuleVerb\): void \{[\s\S]{0,600}this\.openDraft\(verb\);/);
-    expect(panel()).toMatch(/openDraft\([\s\S]{0,600}mode:\s*'edit'/);
-  });
-
-  it('removing the card being edited closes the dialog rather than leaving it on a dead verb', () => {
-    expect(panel()).toMatch(/removeCard\([\s\S]{0,400}this\.dialog\s*=\s*null/);
+  it('every way in goes through the one open, which is what snapshots the baseline', () => {
+    // Both the header button and a summary row call `openDialog`, and `openDialog` is the only
+    // place the item is read. A second entry point that forgot the baseline would break the
+    // discard warning silently — it would simply never warn.
+    const html = panelHtml();
+    expect(html).toMatch(/class="rp-add"[\s\S]{0,200}\(click\)="openDialog\(\)"/);
+    expect(html).toMatch(/class="rp-row"[\s\S]{0,120}\(click\)="openDialog\(\)"/);
+    expect(panel()).toMatch(/openDialog\(\): void \{[\s\S]{0,400}this\.baseline = logicDraftOf\(this\.rule\)/);
   });
 
   it('changing the selected item closes the dialog', () => {
-    expect(panel()).toMatch(/set subjectId\([\s\S]{0,400}this\.dialog\s*=\s*null/);
+    // Otherwise a draft authored for one question would land on the next one selected.
+    expect(panel()).toMatch(/set subjectId\([\s\S]{0,400}this\.closeDialog\(\)/);
   });
 });
 
@@ -112,19 +113,19 @@ describe('the panel header is the only add affordance', () => {
     expect(panelHtml()).toMatch(/RULES/);
   });
 
-  it('the plus is an icon button with an accessible name, not a text button', () => {
+  it('the header button has an accessible name', () => {
     const html = panelHtml();
-    expect(html).toMatch(/class="rp-add"[\s\S]{0,300}fa-plus/);
-    expect(html).not.toMatch(/Add rule</);
-    expect(html).toMatch(/aria-label="Add rule"/);
+    expect(html).toMatch(/class="rp-add"/);
+    expect(html).toMatch(/aria-label="Edit logic"/);
   });
 
   it('the inline picker list is gone from the rail', () => {
     expect(panelHtml()).not.toMatch(/rp-picker|rp-cancel/);
   });
 
-  it('the plus is hidden once every verb is in use, rather than opening an empty picker', () => {
-    expect(panelHtml()).toMatch(/@if \(availableCards\.length > 0\)/);
+  it('the rail says what the item does, one line per rule', () => {
+    expect(panelHtml()).toMatch(/@for \(row of summaryRows; track \$index\)/);
+    expect(panelHtml()).toMatch(/rp-empty/);
   });
 });
 
@@ -146,29 +147,38 @@ describe('the section title is not written in four places', () => {
 
 describe('nothing is written until Done', () => {
   it('editing the draft does not touch the item', () => {
-    // THE DEFECT this replaces: `onGroupChange` emitted `ruleChange` on every keystroke, so
-    // opening a card and closing it left an empty rule behind — a card reading "No conditions
-    // yet" that the author never asked for and had to hunt down to remove.
-    expect(panel()).toMatch(/onGroupChange\([\s\S]{0,400}this\.draftGroup\s*=/);
-    const body = /onGroupChange\(([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
-    expect(body).not.toMatch(/ruleChange\.emit/);
-    expect(body).not.toMatch(/disqualifyChange\.emit/);
+    // THE DEFECT this replaces: the editor emitted `ruleChange` on every keystroke, so opening
+    // a card and closing it left an empty rule behind — one reading "No conditions yet" that the
+    // author never asked for and had to hunt down to remove. Every edit now lands on the draft.
+    expect(panel()).toMatch(/onDraftChange\(draft: LogicDraft\): void \{\s*this\.draft = draft;/);
+    const body = /onDraftChange\(([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
+    expect(body).not.toMatch(/emit/);
   });
 
-  it('setting a jump target does not touch the item either', () => {
-    const body = /setJumpTarget\(([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
-    expect(body).not.toMatch(/ruleChange\.emit/);
+  it('the logic editor writes to its own output and nowhere else', () => {
+    // It is presentational: it holds no state and cannot reach the item. Every path out of it
+    // is `draftChange`, which the panel catches into the draft.
+    const editor = stripped('logic-editor.component.ts');
+    expect(editor).not.toMatch(/ruleChange|BuilderStateService|\.Save\(/);
+    expect(editor).toMatch(/@Output\(\) readonly draftChange/);
   });
 
   it('commit is where an authored rule is written', () => {
     expect(panel()).toMatch(/commit\(\)[\s\S]{0,900}this\.ruleChange\.emit/);
   });
 
-  it('opening a draft writes nothing', () => {
-    // Deliberately not "commit is the only writer": removeCard persists too, and a removal IS
-    // a write. What must not write is any step on the way IN to editing.
-    const body = /openDraft\(([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
+  it('opening the dialog writes nothing', () => {
+    // The one place the item is READ, and it must not also be a place the item is written.
+    const body = /openDialog\(\): void \{([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
     expect(body).not.toMatch(/emit/);
+  });
+
+  it('commit is now the ONLY writer, because removal happens inside the dialog', () => {
+    // It used to not be: a card's ✕ persisted straight from the rail, and a removal IS a write.
+    // Deleting a rule is an edit to the draft now, so Save is the single write path.
+    const emits = panel().match(/this\.ruleChange\.emit/g) ?? [];
+    expect(emits).toHaveLength(1);
+    expect(panel()).toMatch(/commit\(\)[\s\S]{0,300}this\.ruleChange\.emit/);
   });
 
   it('the panel writes nothing but the rule — the screen flag is not its business', () => {
@@ -184,19 +194,22 @@ describe('nothing is written until Done', () => {
     expect(panel()).not.toMatch(/drafts/);
   });
 
-  it('a card shows only because the item carries the verb', () => {
-    expect(panel()).toMatch(/isOn\(verb: RuleVerb\): boolean \{\s*return hasVerb\(this\.rule, verb\);/);
+  it('the rail summarises the ITEM, never the draft', () => {
+    // Summarising the draft would make the rail change under an author who then cancelled.
+    expect(panel()).toMatch(/get summaryRows\(\)[\s\S]{0,600}this\.rule\?\.show/);
+    const body = /get summaryRows\(\)[\s\S]*?\n  \}/.exec(panel())?.[0] ?? '';
+    expect(body).not.toMatch(/this\.draft/);
   });
 });
 
 describe('closing asks only when there is something to lose', () => {
   it('a dismissal with no edits closes and adds nothing', () => {
-    expect(panel()).toMatch(/requestClose\(\)[\s\S]{0,500}isDraftDirty/);
+    expect(panel()).toMatch(/requestClose\(\)[\s\S]{0,500}isLogicDraftDirty/);
     // The clean path closes; closeDialog is the one place that tears the dialog down, so the
     // draft cannot outlive it and leak onto the next item.
     const body = /requestClose\(\): void \{([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
     expect(body).toMatch(/this\.closeDialog\(\)/);
-    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,300}this\.dialog\s*=\s*null[\s\S]{0,200}this\.clearDraft\(\)/);
+    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.dialogOpen = false;/);
   });
 
   it('a dismissal with edits raises the warning instead of closing', () => {
@@ -217,8 +230,8 @@ describe('closing asks only when there is something to lose', () => {
   });
 
   it('the draft is cleared on the way out, not left for the next item', () => {
-    expect(panel()).toMatch(/clearDraft\(\): void \{[\s\S]{0,300}this\.baseline\s*=\s*null/);
-    expect(panel()).toMatch(/set subjectId\([\s\S]{0,400}this\.clearDraft\(\)/);
+    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.draft = \{ show: undefined, jumps: \[\] \}/);
+    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.baseline = \{ show: undefined, jumps: \[\] \}/);
   });
 
   it('the warning names the consequence rather than asking "are you sure"', () => {
@@ -234,7 +247,11 @@ describe('closing asks only when there is something to lose', () => {
     expect(discard).toBeLessThan(keep);
   });
 
-  it('the picker has no draft to lose, so it never warns', () => {
-    expect(panel()).toMatch(/requestClose\(\)[\s\S]{0,200}mode\s*!==\s*'edit'/);
+  it('dirtiness is value equality, so an edit put back closes silently', () => {
+    // Touched-ness would warn about a dialog an author opened, changed their mind in, and put
+    // back exactly as it was — which trains people to click through the warning.
+    const draft = stripped('logic-draft.ts');
+    expect(draft).toMatch(/isLogicDraftDirty[\s\S]{0,300}ruleFromLogicDraft\(draft\)[\s\S]{0,120}ruleFromLogicDraft\(baseline\)/);
+    expect(draft).not.toMatch(/JSON\.stringify/);
   });
 });

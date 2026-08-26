@@ -59,7 +59,7 @@ import {
   type QuestionTypeMeta,
 } from './question-type-catalog';
 import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
-import type { JumpTargetPage } from './rules-panel-model';
+import { jumpTargetOptions, type JumpTargetOption } from './jump-target-options';
 import { RulesTabComponent } from './rules-tab.component';
 import {
   brokenRuleCount,
@@ -674,16 +674,85 @@ export class FormBuilderComponent extends BaseFormComponent {
       .flatMap((page) => page.questions.map((q) => toConditionalSource(q.entity, q.options)));
   }
 
-  /** Pages AFTER the selected one — jump targets are forward-only by contract. */
-  protected get pageJumpTargets(): JumpTargetPage[] {
+  /**
+   * Where the SELECTED PAGE's rules may send a respondent — forward only.
+   *
+   * Forward-only mirrors the resolver, which treats a backward or self target as inert. Offering
+   * one would let an author write a rule that silently never fires, which is worse than not
+   * offering it: the rule reads correctly and does nothing.
+   */
+  protected get pageJumpTargets(): JumpTargetOption[] {
     const index = this.selectedPageIndex;
     if (!this.tree || index < 0) {
       return [];
     }
-    return this.tree.pages.slice(index + 1).map((page, offset) => ({
-      id: page.entity.ID,
-      label: page.entity.Title || `Page ${index + 2 + offset}`,
-    }));
+    const later = this.tree.pages.slice(index + 1);
+    return jumpTargetOptions(
+      // Questions on later pages. A page's own questions are NOT offered: "after this page, go
+      // to a question on this page" is backward or sideways, and the resolver ignores it.
+      later.flatMap((page) => page.questions.map((q) => ({ id: q.entity.ID, label: q.entity.Prompt }))),
+      later.map((page, offset) => ({
+        id: page.entity.ID,
+        label: page.entity.Title || `Page ${index + 2 + offset}`,
+      })),
+      this.endingDestinations,
+    );
+  }
+
+  /**
+   * Where the SELECTED QUESTION's rules may send a respondent — everything after it, in flow
+   * order, plus every ending screen and Submit.
+   */
+  protected get questionJumpTargets(): JumpTargetOption[] {
+    if (!this.tree || !this.selectedQuestionId) {
+      return [];
+    }
+    const laterQuestions: Array<{ id: string; label: string }> = [];
+    const laterPages: Array<{ id: string; label: string }> = [];
+    let seen = false;
+    this.tree.pages.forEach((page, index) => {
+      if (seen) {
+        laterPages.push({ id: page.entity.ID, label: page.entity.Title || `Page ${index + 1}` });
+      }
+      for (const q of page.questions) {
+        if (q.entity.ID === this.selectedQuestionId) {
+          seen = true;
+          continue;
+        }
+        if (seen) {
+          laterQuestions.push({ id: q.entity.ID, label: q.entity.Prompt });
+        }
+      }
+    });
+    return jumpTargetOptions(laterQuestions, laterPages, this.endingDestinations);
+  }
+
+  /** Every ending screen, as a jump destination. */
+  private get endingDestinations(): Array<{ id: string; label: string }> {
+    return this.endScreens.map((screen) => ({ id: screen.ID, label: screen.Title || 'Ending screen' }));
+  }
+
+  /**
+   * Sources the SELECTED QUESTION's jump conditions may read — every question up to and
+   * INCLUDING itself.
+   *
+   * Its own answer is the whole point: "if this answer is X, go to Y". That is exactly what its
+   * SHOW rule must not read, which is why {@link conditionalSources} stops one question earlier.
+   */
+  protected get questionJumpSources(): ConditionalSourceQuestion[] {
+    if (!this.tree || !this.selectedQuestionId) {
+      return [];
+    }
+    const sources: ConditionalSourceQuestion[] = [];
+    for (const page of this.tree.pages) {
+      for (const q of page.questions) {
+        sources.push(toConditionalSource(q.entity, q.options));
+        if (q.entity.ID === this.selectedQuestionId) {
+          return sources;
+        }
+      }
+    }
+    return sources;
   }
 
   protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {

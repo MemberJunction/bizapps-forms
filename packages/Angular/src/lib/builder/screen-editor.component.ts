@@ -27,7 +27,6 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
 import { RulesPanelComponent } from './rules-panel.component';
-import { ENDING_RULE_CARDS } from './rules-panel-model';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
@@ -211,9 +210,10 @@ const SCREEN_EDITOR_CSS = /* css */ `
           <div class="se-section">
             <mjf-rules-panel
               [subjectId]="s.ID"
-              [cards]="ruleCards"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
+              [allowJumps]="false"
+              itemNoun="screen"
               (ruleChange)="onConditionalChange($event)"
             />
           </div>
@@ -237,7 +237,6 @@ export class ScreenEditorComponent {
   private current: mjBizAppsFormsFormScreenEntity | null = null;
 
   /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
-  protected readonly ruleCards = ENDING_RULE_CARDS;
 
   private requested = { redirect: false, social: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */

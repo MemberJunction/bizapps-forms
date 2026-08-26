@@ -413,3 +413,73 @@ describe('groupEntriesByPage', () => {
     });
   });
 });
+
+describe('an item carrying several Go to rules', () => {
+  const twoRules: ConditionalRule = {
+    jump: [
+      { when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, target: { kind: 'question', id: 'q2' } },
+      { when: { all: [{ questionId: 'q1', op: 'equals', value: 'staff' }] }, target: { kind: 'submit' } },
+    ],
+  };
+
+  describe('happy', () => {
+    it('lists every rule, numbered, in the order they are checked', () => {
+      // First-match-wins makes order the semantics. A hub that collapsed them, or listed only
+      // the first, would hide the very thing an author most needs to check.
+      const entries = collectRuleEntries(
+        form({ pages: [{ id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: twoRules }] }] }),
+      );
+
+      expect(entries.map((e) => e.sentence)).toEqual([
+        'Rule 1: After "Ticket type", skip to "Age" when Ticket type equals vip',
+        'Rule 2: After "Ticket type", submit the form when Ticket type equals staff',
+      ]);
+      expect(new Set(entries.map((e) => e.id)).size).toBe(2);
+    });
+
+    it('does not number a lone rule — it reads as a sentence, not a list entry', () => {
+      const entries = collectRuleEntries(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: { jump: [twoRules.jump![0]] } }],
+            },
+          ],
+        }),
+      );
+      expect(entries[0].sentence).toBe('After "Ticket type", skip to "Age" when Ticket type equals vip');
+    });
+  });
+
+  describe('worst', () => {
+    it('flags only the broken rule, not its healthy neighbours', () => {
+      const entries = collectRuleEntries(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [
+                {
+                  id: 'q1',
+                  label: 'Ticket type',
+                  conditionalRule: {
+                    jump: [
+                      twoRules.jump![0],
+                      { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'question', id: 'gone' } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      expect(entries[0].broken).toEqual([]);
+      expect(entries[1].broken).toEqual(['a question that no longer exists']);
+    });
+  });
+});

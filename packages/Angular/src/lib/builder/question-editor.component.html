@@ -156,9 +156,11 @@
     <div class="qe-section">
       <mjf-rules-panel
         [subjectId]="node.entity.ID"
-        [cards]="ruleCards"
         [rule]="conditionalRule"
         [sources]="conditionalSources"
+        [jumpSources]="jumpConditionSources"
+        [targets]="jumpTargets"
+        itemNoun="question"
         (ruleChange)="onConditionalChange($event)"
       />
     </div>

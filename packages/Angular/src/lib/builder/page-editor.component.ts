@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { RulesPanelComponent } from './rules-panel.component';
-import { PAGE_RULE_CARDS, type JumpTargetPage } from './rules-panel-model';
+import type { JumpTargetOption } from './jump-target-options';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { parseConditionalRule, serializeConditionalRule } from './json-fields';
 import type { PageNode } from './builder-models';
@@ -42,11 +42,11 @@ const PAGE_EDITOR_CSS = /* css */ `
           @if (conditionalSources.length > 0 || jumpConditionSources.length > 0) {
             <mjf-rules-panel
               [subjectId]="p.entity.ID"
-              [cards]="ruleCards"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
               [jumpSources]="jumpConditionSources"
-              [jumpTargets]="jumpTargets"
+              [targets]="jumpTargets"
+              itemNoun="section"
               (ruleChange)="onConditionalChange($event)"
             />
           } @else {
@@ -67,13 +67,12 @@ export class PageEditorComponent {
   /** Questions on pages BEFORE this one — the only sources a page rule may read. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
   /** Pages AFTER this one — the only places a jump may land (forward-only by contract). */
-  @Input() jumpTargets: JumpTargetPage[] = [];
+  @Input() jumpTargets: JumpTargetOption[] = [];
   /** Sources a jump's conditions may read: earlier pages AND this page's own questions. */
   @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
   /** Emitted whenever the page entity changed (parent persists). */
   @Output() pageChanged = new EventEmitter<PageNode>();
 
-  protected readonly ruleCards = PAGE_RULE_CARDS;
 
   protected get conditionalRule(): ConditionalRule | undefined {
     return this.page ? parseConditionalRule(this.page.entity.ConditionalRule) : undefined;

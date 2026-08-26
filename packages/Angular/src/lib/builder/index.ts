@@ -51,6 +51,32 @@ export { ConditionalRuleEditorComponent } from './conditional-rule-editor.compon
 export { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 export { RulesPanelComponent } from './rules-panel.component';
 export { RulesTabComponent } from './rules-tab.component';
+export { LogicEditorComponent } from './logic-editor.component';
+export {
+  addJumpRule,
+  canAddJumpRule,
+  emptyLogicDraft,
+  isCommittableJump,
+  isLogicDraftDirty,
+  jumpRules,
+  logicDraftOf,
+  moveJumpRule,
+  removeJumpRule,
+  ruleFromLogicDraft,
+  updateJumpRule,
+  type JumpDraft,
+  type LogicDraft,
+} from './logic-draft';
+export {
+  groupedJumpTargets,
+  jumpTargetOptions,
+  storedTargetLabel,
+  targetFromValue,
+  targetValue,
+  type JumpDestination,
+  type JumpTargetGroup,
+  type JumpTargetOption,
+} from './jump-target-options';
 export {
   brokenRuleCount,
   collectRuleEntries,
