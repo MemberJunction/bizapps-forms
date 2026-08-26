@@ -5,7 +5,6 @@ import type {
   ConditionalCondition,
   ConditionalGroup,
   ConditionalOperator,
-  ConditionValue,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import {
@@ -13,7 +12,10 @@ import {
   canAddCondition as groupHasRoom,
   SCORE_SOURCE_ID,
   coerceConditionValue,
+  conditionForSource,
+  defaultConditionSource,
   defaultOperatorFor,
+  newCondition,
   operatorChoicesFor,
   operatorNeedsValue as operatorTakesValue,
   operatorOfferedFor,
@@ -34,7 +36,7 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 /* Said where the picker would have been, on the row it belongs to — a note in the panel header
    would make the author hunt for which condition it meant. */
 .cre-note {
-  grid-column: 1 / -1;
+  grid-area: note;
   margin: 0;
   font-size: var(--mjf-meta);
   color: var(--mj-text-muted);
@@ -57,19 +59,28 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre-seg.is-on { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary, var(--mj-text-inverse)); border-color: var(--mj-brand-primary); }
 .cre-seg:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
-/* One condition per row on a wide dialog, stacked on a narrow one. The three controls are
-   given real widths rather than an equal split: the question prompt is the long one, and
-   truncating it to match the operator is what made the rail version unreadable. */
+/* One condition, on two lines: the question, then what must be true of its answer.
+   Three controls abreast made the one that carries a full sentence — the question prompt —
+   share a row with two that read as three words, so the sentence was the one that truncated.
+   Named areas rather than column counts, because the value control is one of three different
+   elements and the note appears only sometimes; auto-placement puts those wherever they land. */
 .cre-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.6fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  grid-template-areas:
+    "question question question"
+    "op       value    remove"
+    "note     note     note";
   gap: var(--mjf-gap-sm);
   align-items: center;
 }
 .cre-row + .cre-row { padding-top: var(--mjf-gap); border-top: 1px solid var(--mj-border-subtle); }
 .cre-input { min-width: 0; }
-.cre-value { min-width: 0; }
+.cre-question { grid-area: question; }
+.cre-op { grid-area: op; }
+.cre-value { grid-area: value; min-width: 0; }
 .cre-remove {
+  grid-area: remove;
   flex: none;
   width: var(--mjf-tap);
   height: var(--mjf-tap);
@@ -101,16 +112,22 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre-add:hover { background: var(--mj-bg-surface-hover); border-color: var(--mj-brand-primary); }
 .cre-add:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
 
-.cre-checklist { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); min-width: 0; }
+.cre-checklist { grid-area: value; display: flex; flex-direction: column; gap: var(--mjf-gap-sm); min-width: 0; }
 .cre-check { display: inline-flex; align-items: center; gap: var(--mjf-gap-sm); font-size: var(--mjf-meta); color: var(--mj-text-secondary); cursor: pointer; }
 .cre-check input { accent-color: var(--mj-brand-primary); }
 
-/* Below the dialog's two-column comfort the row becomes a stack: three side-by-side selects at
-   phone width are the cramped layout this whole change exists to escape. */
+/* Narrower still and the operator takes a line of its own too: at phone width two controls
+   sharing a row leave each about eight characters, which truncates "is greater than" and the
+   answer it is being compared against in the same breath. */
 @media (max-width: 640px) {
-  .cre-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .cre-row > .cre-input:first-child { grid-column: 1 / -1; }
-  .cre-row + .cre-row { padding-top: var(--mjf-gap); }
+  .cre-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "question question"
+      "op       op"
+      "value    remove"
+      "note     note";
+  }
 }
 `;
 
@@ -118,10 +135,14 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
  * Friendly editor for ONE {@link ConditionalGroup} — a single combinator (`all` / `any`) over a
  * flat list of leaf conditions, no nesting, in line with FORMS_BUILD_PLAN §6.
  *
- * Verb-agnostic on purpose (RULES_AND_BRANCHING_PLAN §3): the rules panel hosts one of these
- * inside every rule card — "Show only if", and in later phases "Require if" and the rest — so
- * this component knows nothing about which verb its group drives, and the card owns existence
- * (there is no enable toggle here; removing the card is how a rule is turned off).
+ * Verb-agnostic on purpose: the "Edit logic" dialog hosts one of these for the show gate and
+ * one per jump rule, so this component knows nothing about which of them its group drives. It
+ * owns no existence either — a rule is turned off by deleting it in the dialog, not here, which
+ * is why there is no enable toggle.
+ *
+ * It does know which ITEM the rule belongs to ({@link subjectSourceId}), and only for one
+ * reason: to open a NEW condition on the question the author is standing on rather than on the
+ * first question of the form.
  *
  * The editor never mutates the input; it rebuilds the group and emits it (or `undefined` while
  * no condition names a question), so change detection stays predictable and an unfinished rule
@@ -138,6 +159,15 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 export class ConditionalRuleEditorComponent {
   /** Questions that may be referenced (typically those preceding the current one). */
   @Input() sources: ConditionalSourceQuestion[] = [];
+
+  /**
+   * The item this rule belongs to — the question or page whose logic is being edited.
+   *
+   * It decides where a NEW row opens. The list alone cannot: a question's jump reads its own
+   * answer, while its show gate reads someone else's, and both arrive here as an array in form
+   * order. See {@link defaultConditionSource} for what happens when the subject is not on it.
+   */
+  @Input() subjectSourceId: string | null = null;
 
   @Input()
   set group(value: ConditionalGroup | undefined) {
@@ -253,14 +283,13 @@ export class ConditionalRuleEditorComponent {
     if (!this.canAddCondition) {
       return; // the button is hidden at the cap; this is the guard for every other route in
     }
-    // The starting operator comes from the first source's own kind. Hardcoding `equals` opened
-    // every new row on an operator that a multi-select source can never satisfy.
-    const first = this.sources[0];
-    const op = defaultOperatorFor(first?.kind ?? 'text');
-    this._conditions = [
-      ...this._conditions,
-      conditionForSource(first?.id ?? '', op, coerceConditionValue(op, '')),
-    ];
+    const source = defaultConditionSource(this.sources, this.subjectSourceId);
+    if (!source) {
+      // Nothing to read. A condition naming no question is filtered out of every emit, so
+      // adding one puts a row on screen that can never become a rule.
+      return;
+    }
+    this._conditions = [...this._conditions, newCondition(source)];
     this.emit();
   }
 
@@ -351,14 +380,3 @@ export class ConditionalRuleEditorComponent {
   }
 }
 
-/** Build a fresh condition for a selected source — the score sentinel or a question id. */
-function conditionForSource(
-  selectedId: string,
-  op: ConditionalOperator,
-  value: ConditionValue,
-): ConditionalCondition {
-  if (selectedId === SCORE_SOURCE_ID) {
-    return { source: 'score', op, value };
-  }
-  return { questionId: selectedId, op, value };
-}

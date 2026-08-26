@@ -55,9 +55,12 @@ describe('changing a source cannot strand the condition on it', () => {
   it('a new condition starts on an operator its own source offers', () => {
     // Hardcoding 'equals' is the same defect one step earlier: add a condition while the first
     // source is a multi-select and the row opens on an operator that can never fire.
+    // The choice itself now lives in `newCondition`, which reads the source's kind (proven in
+    // condition-sources.spec.ts). What must be true HERE is that adding a row goes through it
+    // rather than assembling a condition — and an operator — of its own.
     const source = editor();
-    expect(source).toMatch(/addCondition\(\)[\s\S]*?defaultOperatorFor\(/);
-    expect(source).not.toMatch(/conditionForSource\(this\.sources\[0\]\?\.id \?\? '', 'equals'/);
+    expect(source).toMatch(/addCondition\(\)[\s\S]*?newCondition\(/);
+    expect(source).not.toMatch(/addCondition\(\)[\s\S]*?op: 'equals'/);
   });
 });
 
@@ -79,5 +82,95 @@ describe('the value is picked, not typed, wherever the answer set is fixed', () 
     // With free text unreachable for a choice source, an unauthored options list would leave
     // only a disabled placeholder and no explanation of what to do about it.
     expect(editorHtml()).toMatch(/needsOptions\(cond\)/);
+  });
+});
+
+describe('a fresh condition opens on the item the rule is about', () => {
+  it('the editor is told which item that is', () => {
+    // Without it the component can only guess from the list, and the list alone cannot tell a
+    // question's own jump ("read MY answer") from a show gate that must read someone else's.
+    expect(editor()).toMatch(/@Input\(\) subjectSourceId/);
+  });
+
+  it('a new condition is pointed at the subject rather than the top of the form', () => {
+    // `this.sources[0]` is the FIRST question of the whole form. On a jump rule for question 12
+    // that is never what the author meant, and they had to repoint every row by hand.
+    const source = editor();
+    expect(source).toMatch(/addCondition\(\)[\s\S]*?defaultConditionSource\(/);
+    expect(source).not.toMatch(/addCondition\(\)[\s\S]*?this\.sources\[0\]/);
+  });
+
+  it('it refuses to add a row when there is no source to point it at', () => {
+    // A condition naming no question is dropped on emit anyway; adding one puts an unfillable
+    // row on screen and calls it a rule.
+    expect(editor()).toMatch(/addCondition\(\)[\s\S]*?return;[\s\S]*?newCondition\(/);
+  });
+
+  it('one builder makes the condition object, so the score sentinel is read in one place', () => {
+    const source = editor();
+    expect(source).toMatch(/conditionForSource\(/);
+    expect(source).not.toMatch(/function conditionForSource/);
+  });
+});
+
+describe('the condition reads as a sentence on two lines, not three columns', () => {
+  const areas = (): string =>
+    /grid-template-areas:([\s\S]*?);/.exec(stripped('conditional-rule-editor.component.ts'))?.[1] ?? '';
+
+  it('the question gets a line of its own', () => {
+    // Three side-by-side selects truncated the one control whose text is a full sentence — the
+    // question prompt — to match two that read as three words.
+    const rows = [...areas().matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+    expect(rows.length).toBeGreaterThan(0);
+    const cells = rows[0].split(/\s+/).filter(Boolean);
+    expect(cells.length).toBeGreaterThan(1);
+    expect(cells.every((cell) => cell === 'question')).toBe(true);
+  });
+
+  it('the operator and the value share the line below it', () => {
+    const rows = [...areas().matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    expect(rows[1]).toMatch(/\bop\b/);
+    expect(rows[1]).toMatch(/\bvalue\b/);
+  });
+
+  it('every control in the row is placed by name, so no cell can land by accident', () => {
+    const css = stripped('conditional-rule-editor.component.ts');
+    for (const area of ['question', 'op', 'value', 'remove']) {
+      expect(css).toMatch(new RegExp(`grid-area: ${area}`));
+    }
+  });
+});
+
+describe('every select shows the value its condition actually holds', () => {
+  // Angular compiles `<select [value]>` with `@for` options as: write the select's `value`,
+  // THEN create the options. Verified in the built output — `ɵɵproperty("value", …)` precedes
+  // `ɵɵrepeater(ctx.sources)`. A `value` written while the list is empty does not stick, and
+  // when the options arrive the browser's own "ask for a reset" step selects the FIRST one:
+  //
+  //   sel.value = 'q7'           -> value "",  selectedIndex -1
+  //   append q1, q4, q7          -> value "q1", selectedIndex 0     (confirmed in Chrome)
+  //
+  // So a rule reading question 7 rendered as question 1, and the author's only clue was that
+  // it looked wrong. `[selected]` on the option is what fixes it: it is written during the
+  // option's OWN update pass, which cannot run before the option exists.
+  const html = (): string => editorHtml();
+
+  it('the question option knows whether it is the one', () => {
+    expect(html()).toMatch(/\[selected\]="src\.id === questionSelectValue\(cond\)"/);
+  });
+
+  it('the operator option knows whether it is the one', () => {
+    expect(html()).toMatch(/\[selected\]="op\.op === cond\.op"/);
+  });
+
+  it('the value option knows whether it is the one, placeholder and deleted entry included', () => {
+    const source = html();
+    expect(source).toMatch(/\[selected\]="opt\.value === valueAsString\(cond\)"/);
+    // The disabled placeholder must claim the selection when there is no value, or the reset
+    // step skips it (it is disabled) and lands on the first REAL option — showing a value the
+    // rule does not hold.
+    expect(source).toMatch(/<option value="" disabled \[selected\]="valueAsString\(cond\) === ''"/);
+    expect(source).toMatch(/\[selected\]="true"[^>]*>\{\{ stale \}\}|\{\{ stale \}\}[^<]*<\/option>/);
   });
 });

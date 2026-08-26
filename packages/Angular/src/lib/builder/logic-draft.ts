@@ -16,11 +16,13 @@
  */
 import {
   MAX_JUMP_RULES,
+  type ConditionalCondition,
   type ConditionalGroup,
   type ConditionalJumpRule,
   type ConditionalRule,
   type JumpTarget,
 } from '@mj-biz-apps/forms-entities';
+import { operatorNeedsValue } from './condition-sources';
 
 /**
  * One row in the dialog. Its target is optional ONLY here: a row exists from the moment the
@@ -59,20 +61,35 @@ export function logicDraftOf(rule: ConditionalRule | undefined): LogicDraft {
 /**
  * The rule this draft would write, or `undefined` when it says nothing.
  *
- * Two kinds of row are dropped rather than stored, and both would otherwise be dangerous:
+ * UNFINISHED WORK IS DROPPED, NEVER STORED. Three things go, and each would otherwise be
+ * dangerous in its own direction:
  *
- *  - a row with no TARGET is a rule that goes nowhere;
- *  - a row with no CONDITIONS fires for everyone, because `evaluateGroup({})` is vacuously true.
- *    A half-finished row silently becoming "always" is the worst thing an unfinished edit can do.
+ *  - a CONDITION with no value yet reads as `equals ""`, which no answer matches, so a gate the
+ *    author never finished writing would hide the item from everyone. Since the dialog now opens
+ *    a rule with a row already filled in, reaching Save in that state takes no effort at all.
+ *  - a ROW with no conditions left fires for everyone, because `evaluateGroup({})` is vacuously
+ *    true. A half-finished row silently becoming "always" is the worst thing an unfinished edit
+ *    can do, and pruning conditions is a new way to arrive at one.
+ *  - a ROW with no TARGET is a rule that goes nowhere.
+ *
+ * The effect an author sees is that an abandoned edit leaves the form as it was, rather than
+ * quietly turning a gate all the way on or all the way off.
  *
  * An empty result collapses to `undefined` rather than `{}` — an empty rule object serializes as
  * a phantom "has a rule" marker every consumer then has to see through.
  */
 export function ruleFromLogicDraft(draft: LogicDraft): ConditionalRule | undefined {
-  const jump = draft.jumps.filter(isCommittableJump).map((j) => ({ when: j.when, target: j.target }));
   const rule: ConditionalRule = {};
-  if (draft.show !== undefined) {
-    rule.show = draft.show;
+  const show = finishedConditions(draft.show);
+  if (show !== undefined) {
+    rule.show = show;
+  }
+  const jump: ConditionalJumpRule[] = [];
+  for (const row of draft.jumps) {
+    const committed = committedJump(row);
+    if (committed !== undefined) {
+      jump.push(committed);
+    }
   }
   if (jump.length > 0) {
     rule.jump = jump;
@@ -81,13 +98,60 @@ export function ruleFromLogicDraft(draft: LogicDraft): ConditionalRule | undefin
 }
 
 /** Whether this row is finished enough to store — see {@link ruleFromLogicDraft}. */
-export function isCommittableJump(draft: JumpDraft): draft is JumpDraft & { target: JumpTarget } {
-  return draft.target !== undefined && groupHasConditions(draft.when);
+export function isCommittableJump(draft: JumpDraft): boolean {
+  return committedJump(draft) !== undefined;
 }
 
-/** Whether a group carries any leaf condition. `{}`, `{all:[]}` and `{any:[]}` all do not. */
-function groupHasConditions(group: ConditionalGroup | undefined): boolean {
-  return (group?.all?.length ?? 0) > 0 || (group?.any?.length ?? 0) > 0;
+/**
+ * The stored form of one row, or `undefined` when it must not be stored. The single decision
+ * behind both {@link ruleFromLogicDraft} and {@link isCommittableJump}, so the dialog cannot
+ * promise to keep a row that saving then drops.
+ */
+function committedJump(draft: JumpDraft): ConditionalJumpRule | undefined {
+  const when = finishedConditions(draft.when);
+  if (when === undefined || draft.target === undefined) {
+    return undefined;
+  }
+  return { when, target: draft.target };
+}
+
+/**
+ * A group with its unfinished conditions removed, or `undefined` if none survive.
+ *
+ * The combinator is carried across rather than rebuilt: pruning an `any` group must leave an
+ * `any` group, or two conditions the author joined with "or" quietly become "and".
+ */
+function finishedConditions(group: ConditionalGroup | undefined): ConditionalGroup | undefined {
+  if (group === undefined) {
+    return undefined;
+  }
+  const kept = (group.any ?? group.all ?? []).filter(isFinishedCondition);
+  if (kept.length === 0) {
+    return undefined;
+  }
+  return group.any ? { any: kept } : { all: kept };
+}
+
+/**
+ * Whether one condition says something a respondent's answer could actually be tested against.
+ *
+ * Emptiness is checked value by value rather than by truthiness: `0` and `false` are answers an
+ * author means, and `!value` would throw both away along with the blanks.
+ */
+function isFinishedCondition(condition: ConditionalCondition): boolean {
+  // A question condition naming no question is malformed, not merely unfinished: the server
+  // parses stored rules with zod, which rejects the whole rule — and a rule it cannot read
+  // becomes "no rule", so the gate is not applied at all.
+  if ((condition.source ?? 'question') === 'question' && !condition.questionId) {
+    return false;
+  }
+  if (!operatorNeedsValue(condition.op)) {
+    return true;
+  }
+  if (Array.isArray(condition.value)) {
+    return condition.value.length > 0;
+  }
+  return condition.value !== undefined && condition.value !== '';
 }
 
 /** Whether another rule may be added — the contract's cap, enforced where an author can see it. */
@@ -95,11 +159,18 @@ export function canAddJumpRule(draft: LogicDraft): boolean {
   return draft.jumps.length < MAX_JUMP_RULES;
 }
 
-export function addJumpRule(draft: LogicDraft): LogicDraft {
+/**
+ * Append a rule, optionally opening it on a condition the caller has already chosen.
+ *
+ * The seed is passed in rather than derived: which question a new rule should read is a
+ * question about the form's shape, and this module deliberately knows nothing about that. An
+ * unseeded rule is still legal — it is what a caller with no sources to offer produces.
+ */
+export function addJumpRule(draft: LogicDraft, when: ConditionalGroup = {}): LogicDraft {
   if (!canAddJumpRule(draft)) {
     return draft;
   }
-  return { ...draft, jumps: [...draft.jumps, { when: {} }] };
+  return { ...draft, jumps: [...draft.jumps, { when }] };
 }
 
 export function updateJumpRule(draft: LogicDraft, index: number, patch: Partial<JumpDraft>): LogicDraft {

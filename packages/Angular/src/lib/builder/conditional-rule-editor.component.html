@@ -27,25 +27,29 @@
         <div class="cre-row">
           <select
             #questionSelect
-            class="mjf-select cre-input"
+            class="mjf-select cre-input cre-question"
             [value]="questionSelectValue(cond)"
             (change)="setQuestion($index, questionSelect.value)"
             aria-label="Question"
           >
+            <!-- [selected] as well as the select's [value]: Angular writes that value BEFORE
+                 these options exist, so it does not stick, and the browser then selects the
+                 first option on its own. Without this a rule reading question 7 rendered as
+                 question 1. The [value] above stays as the intent; this is what makes it true. -->
             @for (src of sources; track src.id) {
-              <option [value]="src.id">{{ src.prompt }}</option>
+              <option [value]="src.id" [selected]="src.id === questionSelectValue(cond)">{{ src.prompt }}</option>
             }
           </select>
 
           <select
             #operatorSelect
-            class="mjf-select cre-input"
+            class="mjf-select cre-input cre-op"
             [value]="cond.op"
             (change)="setOperator($index, operatorSelect.value)"
             aria-label="Operator"
           >
             @for (op of operatorsFor(cond); track op.op) {
-              <option [value]="op.op">{{ op.label }}</option>
+              <option [value]="op.op" [selected]="op.op === cond.op">{{ op.label }}</option>
             }
           </select>
 
@@ -58,12 +62,13 @@
                 (change)="setValue($index, valueSelect.value)"
                 aria-label="Comparison value"
               >
-                <option value="" disabled>Choose an option&hellip;</option>
+                <option value="" disabled [selected]="valueAsString(cond) === ''">Choose an option&hellip;</option>
                 @for (opt of optionsFor(cond); track opt.value) {
-                  <option [value]="opt.value">{{ opt.label }}</option>
+                  <option [value]="opt.value" [selected]="opt.value === valueAsString(cond)">{{ opt.label }}</option>
                 }
                 @if (staleValue(cond); as stale) {
-                  <option [value]="stale">{{ stale }} (deleted option)</option>
+                  <!-- Reached only when the stored value matches no option, so it IS the one. -->
+                  <option [value]="stale" [selected]="true">{{ stale }} (deleted option)</option>
                 }
               </select>
             }

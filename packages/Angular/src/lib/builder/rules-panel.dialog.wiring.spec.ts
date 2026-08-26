@@ -255,3 +255,53 @@ describe('closing asks only when there is something to lose', () => {
     expect(draft).not.toMatch(/JSON\.stringify/);
   });
 });
+
+describe('a new rule starts where the author is already standing', () => {
+  const logicEditor = (): string => stripped('logic-editor.component.ts');
+
+  it('the panel hands the dialog the item being edited', () => {
+    // The panel already knows it — `subjectId` is what closes the dialog when the selection
+    // changes. It was simply never passed on to the thing that authors the conditions.
+    expect(panelHtml()).toMatch(/\[subjectSourceId\]="subjectSourceId"/);
+  });
+
+  it('adding a rule opens it on a condition rather than an empty shell', () => {
+    // "+ Add rule" used to produce a row with no condition at all: the author saw a destination
+    // picker and an "Add condition" button, and had to answer "which question?" from scratch.
+    expect(logicEditor()).toMatch(/addJumpRule\(this\.draft, this\.seedGroup\(/);
+  });
+
+  it('switching the show gate off Always does the same', () => {
+    expect(logicEditor()).toMatch(/setAlwaysShown[\s\S]*?this\.seedGroup\(this\.sources\)/);
+  });
+
+  it('a jump seeds from the sources a jump may read, which include the item itself', () => {
+    // Seeding a jump from `sources` would point it at the question BEFORE this one — the show
+    // gate's list — which is the one question a jump rule is least likely to mean.
+    expect(logicEditor()).toMatch(/seedGroup\(this\.jumpSources\)/);
+  });
+
+  it('with nothing to read, the seed is an empty group and not a broken condition', () => {
+    expect(logicEditor()).toMatch(/seedGroup\([\s\S]*?\{\}/);
+  });
+});
+
+describe('the destination select shows the destination the rule holds', () => {
+  // Same creation-order defect as the condition selects (see
+  // conditional-rule-editor.wiring.spec.ts): the select's `value` is written before its
+  // optgroups exist, so a saved rule rendered pointing at the first destination on the list.
+  // Here that is worse than cosmetic — the author reads it as where the respondent goes.
+  const logicEditor = (): string => stripped('logic-editor.component.ts');
+
+  it('each offered destination says whether it is the selected one', () => {
+    expect(logicEditor()).toMatch(/\[selected\]="option\.value === valueFor\(rule\)"/);
+  });
+
+  it('the placeholder claims the selection while the rule has no destination', () => {
+    expect(logicEditor()).toMatch(/<option value="" disabled \[selected\]="!rule\.target"/);
+  });
+
+  it('a stored destination the picker no longer offers still renders as the chosen one', () => {
+    expect(logicEditor()).toMatch(/\[selected\]="true"/);
+  });
+});

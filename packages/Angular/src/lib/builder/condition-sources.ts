@@ -7,6 +7,7 @@ import {
   MAX_CONDITIONS_PER_GROUP,
   isFormQuestionType,
   questionTypeBehavior,
+  type ConditionalCondition,
   type ConditionalOperator,
   type ConditionValue,
   type QuestionTypeBehavior,
@@ -318,6 +319,67 @@ export const SCORE_SOURCE: ConditionalSourceQuestion = {
   prompt: 'Total score',
   kind: 'score',
 };
+
+/**
+ * The source a NEW condition should open on, given the item whose rule is being written.
+ *
+ * The subject wins whenever it is on offer, which is the case that matters: a question's jump
+ * rule reads its own answer ("if THIS answer is X, go to Y"), and a page's reads the questions
+ * on it. Opening every fresh row on the form's first question instead made the author's first
+ * move always be "repoint this".
+ *
+ * When the subject is genuinely absent — a SHOW gate's sources stop one question short of the
+ * item, because a question cannot gate itself on its own answer — the nearest source is the
+ * fallback, not the first. Sources arrive in form order, so the last one is the question
+ * immediately before this item, which is what an author reaching for a show rule nearly always
+ * means.
+ *
+ * The score sentinel is skipped in that fallback even though an ending's list carries it last.
+ * It is not a question, and defaulting an ending's rule to "Total score" is a guess about the
+ * form's design rather than about proximity. It is still returned when it is all there is.
+ */
+export function defaultConditionSource(
+  sources: readonly ConditionalSourceQuestion[],
+  subjectId: string | null | undefined,
+): ConditionalSourceQuestion | undefined {
+  const subject = sources.find((s) => s.id === subjectId);
+  if (subject) {
+    return subject;
+  }
+  const nearestQuestion = [...sources].reverse().find((s) => s.id !== SCORE_SOURCE_ID);
+  return nearestQuestion ?? sources[sources.length - 1];
+}
+
+/**
+ * A fresh condition reading one source — the only place a condition object is built from
+ * scratch, so a new row can never open on an operator its own source cannot satisfy.
+ *
+ * The operator comes from the source's kind rather than a hardcoded `equals`: `equals` against a
+ * multi-select answer never matches, because the evaluator compares scalars and every array
+ * answer fails that comparison. The value is coerced to match the operator for the same reason
+ * membership and scalar operators are not interchangeable — `in` wants a list, the rest a
+ * scalar.
+ */
+export function newCondition(source: ConditionalSourceQuestion): ConditionalCondition {
+  const op = defaultOperatorFor(source.kind);
+  return conditionForSource(source.id, op, coerceConditionValue(op, ''));
+}
+
+/**
+ * Build a condition for a selected source id — the score sentinel authors a `source: 'score'`
+ * read, anything else a question read. One builder, so the sentinel is understood in exactly
+ * one place.
+ */
+export function conditionForSource(
+  selectedId: string,
+  op: ConditionalOperator,
+  value: ConditionValue,
+): ConditionalCondition {
+  if (selectedId === SCORE_SOURCE_ID) {
+    return { source: 'score', op, value };
+  }
+  return { questionId: selectedId, op, value };
+}
 
 /**
  * Whether a group may take another condition — the cap `MAX_CONDITIONS_PER_GROUP` declares.

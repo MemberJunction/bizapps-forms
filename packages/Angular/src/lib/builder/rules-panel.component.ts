@@ -110,6 +110,11 @@ export class RulesPanelComponent {
   }
   private _subjectId: string | null = null;
 
+  /** The item under edit, for the dialog: what a new condition opens on. */
+  protected get subjectSourceId(): string | null {
+    return this._subjectId;
+  }
+
   @Input() rule: ConditionalRule | undefined;
   /** What the SHOW gate may read — earlier questions only. */
   @Input() sources: ConditionalSourceQuestion[] = [];

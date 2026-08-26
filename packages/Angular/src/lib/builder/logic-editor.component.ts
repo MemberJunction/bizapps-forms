@@ -20,7 +20,11 @@ import { CommonModule } from '@angular/common';
 import type { ConditionalGroup } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
-import type { ConditionalSourceQuestion } from './condition-sources';
+import {
+  defaultConditionSource,
+  newCondition,
+  type ConditionalSourceQuestion,
+} from './condition-sources';
 import {
   addJumpRule,
   canAddJumpRule,
@@ -161,6 +165,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
           <mjf-conditional-rule-editor
             [group]="draft.show"
             [sources]="sources"
+            [subjectSourceId]="subjectSourceId"
             (groupChange)="onShowChange($event)"
           />
         }
@@ -206,6 +211,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
               <mjf-conditional-rule-editor
                 [group]="rule.when"
                 [sources]="jumpSources"
+                [subjectSourceId]="subjectSourceId"
                 (groupChange)="onWhenChange($index, $event)"
               />
 
@@ -218,18 +224,22 @@ const LOGIC_EDITOR_CSS = /* css */ `
                   (change)="onTargetChange($index, targetSelect.value)"
                   [attr.aria-label]="'Destination for rule ' + ($index + 1)"
                 >
-                  <option value="" disabled>Choose where to go&hellip;</option>
+                  <option value="" disabled [selected]="!rule.target">Choose where to go&hellip;</option>
+                  <!-- [selected] per option, not just the select's [value]: Angular writes that
+                       value before these optgroups exist, so it is discarded and the browser
+                       selects the first destination instead — a saved rule read as going
+                       somewhere it does not go. -->
                   @for (group of groupedTargets; track group.group) {
                     <optgroup [label]="group.group">
                       @for (option of group.options; track option.value) {
-                        <option [value]="option.value">{{ option.label }}</option>
+                        <option [value]="option.value" [selected]="option.value === valueFor(rule)">{{ option.label }}</option>
                       }
                     </optgroup>
                   }
                   <!-- A stored target the picker no longer offers. Without this entry the select
                        renders BLANK on a rule that reads perfectly well in the database. -->
                   @if (staleTarget(rule); as stale) {
-                    <option [value]="stale.value">{{ stale.label }}</option>
+                    <option [value]="stale.value" [selected]="true">{{ stale.label }}</option>
                   }
                 </select>
               </div>
@@ -260,6 +270,8 @@ export class LogicEditorComponent {
   @Input() allowJumps = true;
   /** "question" or "section", for copy that reads naturally either way. */
   @Input() itemNoun = 'question';
+  /** The item being edited — what a new condition opens on. See {@link seedGroup}. */
+  @Input() subjectSourceId: string | null = null;
 
   @Output() readonly draftChange = new EventEmitter<LogicDraft>();
 
@@ -283,7 +295,28 @@ export class LogicEditorComponent {
    * Cancel away.
    */
   protected setAlwaysShown(always: boolean): void {
-    this.emit({ ...this.draft, show: always ? undefined : (this.draft.show ?? {}) });
+    this.emit({
+      ...this.draft,
+      show: always ? undefined : (this.draft.show ?? this.seedGroup(this.sources)),
+    });
+  }
+
+  /**
+   * The condition a new rule opens on — one row, already pointed at the right question.
+   *
+   * An empty group is what a rule used to start as, and it read as a question with no answer:
+   * the author was shown a destination picker and an "Add condition" button, and had to work
+   * out for themselves which question the rule they had just asked for was about. The item is
+   * nearly always the answer, so it is the one offered — see {@link defaultConditionSource} for
+   * the show-gate case, where the item is not among its own sources.
+   *
+   * With nothing readable the seed stays empty rather than becoming a condition naming no
+   * question: the editor filters those out of every emit, so a seeded one would be a row on
+   * screen that can never become a rule.
+   */
+  private seedGroup(sources: ConditionalSourceQuestion[]): ConditionalGroup {
+    const source = defaultConditionSource(sources, this.subjectSourceId);
+    return source ? { all: [newCondition(source)] } : {};
   }
 
   protected onShowChange(group: ConditionalGroup | undefined): void {
@@ -303,7 +336,10 @@ export class LogicEditorComponent {
   }
 
   protected add(): void {
-    this.emit(addJumpRule(this.draft));
+    // Seeded from the JUMP sources, which include this item itself: "if THIS answer is X" is
+    // the shape of nearly every branching rule, and it is exactly what the show gate's list
+    // (which stops one question earlier) cannot express.
+    this.emit(addJumpRule(this.draft, this.seedGroup(this.jumpSources)));
   }
 
   protected remove(index: number): void {

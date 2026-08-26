@@ -18,7 +18,12 @@ import {
   toggleMembership,
   valueEditorKind,
   canAddCondition,
+  defaultConditionSource,
+  newCondition,
+  SCORE_SOURCE,
+  SCORE_SOURCE_ID,
   type ConditionalSourceKind,
+  type ConditionalSourceQuestion,
 } from './condition-sources';
 
 /** Structural fakes — the module deliberately reads plain fields, not BaseEntity. */
@@ -412,5 +417,79 @@ describe('the condition cap the contract declares', () => {
     // where a swallowed throw turned it into "no rule" and rendered the gated item to everyone.
     expect(canAddCondition(MAX_CONDITIONS_PER_GROUP)).toBe(false);
     expect(canAddCondition(MAX_CONDITIONS_PER_GROUP + 5)).toBe(false);
+  });
+});
+
+describe('defaultConditionSource', () => {
+  const q = (id: string, kind: ConditionalSourceKind = 'text'): ConditionalSourceQuestion => ({
+    id,
+    prompt: `${id}?`,
+    kind,
+  });
+
+  describe('happy', () => {
+    it('picks the item the rule belongs to, when the item is one of its own sources', () => {
+      // A question's JUMP rule reads its OWN answer — "if this answer is X, go to Y" is the
+      // whole shape of it. Opening on the first question of the form made an author repoint
+      // every rule they wrote before they could write it.
+      expect(defaultConditionSource([q('q1'), q('q2'), q('q3')], 'q3')?.id).toBe('q3');
+    });
+  });
+
+  describe('edge', () => {
+    it('falls back to the NEAREST source, not the first, when the subject is not among them', () => {
+      // A SHOW gate's source list stops one question early (a question cannot gate itself on
+      // its own answer), so the subject is genuinely absent here. The nearest preceding
+      // question is the one an author is overwhelmingly likely to mean.
+      expect(defaultConditionSource([q('q1'), q('q2')], 'q3')?.id).toBe('q2');
+    });
+
+    it('never opens on the running score while a real question is on offer', () => {
+      // An ending's source list carries SCORE_SOURCE last, so "the nearest" alone would open
+      // every ending rule on the score.
+      expect(defaultConditionSource([q('q1'), SCORE_SOURCE], null)?.id).toBe('q1');
+    });
+
+    it('still offers the score when it is the only source there is', () => {
+      expect(defaultConditionSource([SCORE_SOURCE], null)?.id).toBe(SCORE_SOURCE_ID);
+    });
+
+    it('a subject naming a deleted question falls back rather than returning the ghost', () => {
+      expect(defaultConditionSource([q('q1'), q('q2')], 'deleted-id')?.id).toBe('q2');
+    });
+  });
+
+  describe('worst', () => {
+    it('has nothing to offer when the item may read nothing', () => {
+      expect(defaultConditionSource([], 'q1')).toBeUndefined();
+    });
+  });
+});
+
+describe('newCondition', () => {
+  describe('happy', () => {
+    it('names the question and opens on an operator that question can actually satisfy', () => {
+      // `equals` against a multi-select answer never matches (the evaluator compares scalars
+      // and an array answer fails every one), so a fresh row must not start there.
+      expect(newCondition({ id: 'q7', prompt: 'Topics', kind: 'multiSelect' })).toEqual({
+        questionId: 'q7',
+        op: 'in',
+        value: [],
+      });
+    });
+  });
+
+  describe('edge', () => {
+    it('reads the running score through the score key, never through a questionId', () => {
+      expect(newCondition(SCORE_SOURCE)).toEqual({
+        source: 'score',
+        op: defaultOperatorFor('score'),
+        value: '',
+      });
+    });
+
+    it('gives a scalar source an empty scalar, not an empty list', () => {
+      expect(newCondition({ id: 'q1', prompt: 'Age', kind: 'number' }).value).toBe('');
+    });
   });
 });
