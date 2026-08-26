@@ -414,8 +414,8 @@ function countSchemaSyncCalls(sql, procNames) {
     // `[spDeleteUnneededEntityFields], @EntityIDs=…` — which is precisely the shape a careless
     // deletion produces, so the one mutation that mattered slipped through. Being name-anchored
     // also covers the PostgreSQL call form (`SELECT schema."spX"(…)`), which has no EXEC to anchor
-    // on. A name occurring inside a surviving string literal would over-count, which fails loudly;
-    // that is the right way round for a check whose whole purpose is to stop silent passes.
+    // on. Callers pass the STRUCTURE mask, so a name inside a string literal is already blanked
+    // before it reaches here — see the call site for the false failure that taught us that.
     let calls = 0;
     for (const call of sql.matchAll(/\b(sp\w+)\b/gi)) {
         if (procNames.has(call[1].toLowerCase())) {
@@ -435,13 +435,19 @@ function countSchemaSyncCalls(sql, procNames) {
  * accounting backstop was reporting those files as calls-it-could-not-parse; that was the check
  * working, and taking it for an over-count would have been the wrong lesson entirely.
  */
-function exclusionListsIn(sql) {
+function exclusionListsIn(sql, procNames) {
     const found = [];
     for (const named of sql.matchAll(/@ExcludedSchemaNames\s*=\s*'([^']*)'/g)) {
         found.push(named[1]);
     }
+    // Positional form, and ONLY for a proc known to take an exclusion list. Unfiltered, this would
+    // read the first string argument of any `"spSomething"('…')` as a schema list — there is no
+    // such call today, but `migrations-pg/` is full of generated `"spDeleteForm"(…)` functions and
+    // one of them growing a string parameter would silently become an "exclusion list".
     for (const positional of sql.matchAll(/"(sp\w+)"\s*\(\s*'([^']*)'/gi)) {
-        found.push(positional[2]);
+        if (procNames.has(positional[1].toLowerCase())) {
+            found.push(positional[2]);
+        }
     }
     return found;
 }
@@ -453,6 +459,7 @@ function exclusionListsIn(sql) {
  * about a schema nobody thought to add to a constant.
  */
 function shippedExclusionLists(repoRoot) {
+    const procNames = schemaSyncProcNames(repoRoot);
     const lists = [];
     for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
         if (!existsSync(dir)) continue;
@@ -465,7 +472,7 @@ function shippedExclusionLists(repoRoot) {
             // check then reported every real migration as "dropping" a schema called `s`. A
             // commented-out call also excludes nothing, so reading one is wrong twice over.
             const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
-            for (const raw of exclusionListsIn(sql)) {
+            for (const raw of exclusionListsIn(sql, procNames)) {
                 const names = raw.split(',').map((n) => n.trim()).filter((n) => n.length > 0);
                 lists.push({ stamp: stamp[1], file: join(dir, file), names, raw });
             }
@@ -508,7 +515,13 @@ function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
             const stamp = /^[A-Z](\d{12})__/.exec(file);
             if (stamp === null || stamp[1] < SCHEMA_SYNC_GATE_FROM) continue;
             const path = join(dir, file);
-            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values, procNames);
+            // The STRUCTURE mask, which blanks string-literal BODIES as well as comments. `values`
+            // keeps literals, so a compliant migration whose `sp_addextendedproperty` description
+            // happens to name a sync proc in prose was counted as making a call it never makes —
+            // a false FAILURE that blocks correct work and prescribes a fix already in place. The
+            // comment here used to defend that as "loud rather than silent, which is the right way
+            // round"; that was a false choice, since the structure mask is neither.
+            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).structure, procNames);
             const parsed = lists.filter((l) => l.file === path).length;
             if (calls > parsed) {
                 violations.push(

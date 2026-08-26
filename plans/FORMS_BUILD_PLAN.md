@@ -1786,3 +1786,43 @@ native entities. This is the reporting differentiator no incumbent has.
   logged backlog for a corrective migration; the gate covers everything from this PR forward.
 
   **Verification:** 1,827 unit tests, six gates (66 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round nine: four live findings, and one where being "defensive" made things
+  worse.** The reviewer independently proved the two I had just fixed (unconditional `require`,
+  CHECK 5's blind dialect) at the commit before them, which is the useful kind of corroboration.
+  Four were still live. It also scored everything below its own posting bar and therefore posted
+  nothing — the findings arrived only in its report, which is worth knowing about how that skill
+  behaves.
+
+  1. **`checkEverySyncCallWasParsed` counted over the wrong mask.** `maskSql().values` blanks
+     comments but KEEPS string-literal bodies, so a compliant migration whose
+     `sp_addextendedproperty` description merely names a sync proc in prose was counted as making
+     a call it never makes — a false FAILURE that blocks correct work and prescribes a fix already
+     in place. Not biting today (0 of 82 matches are inside literals) but a trap laid for the next
+     author. The in-code defence I had written — "fails loudly, which is the right way round" — was
+     a false choice: the STRUCTURE mask is neither loud nor silent, it is correct. One character of
+     fix, all 66 mutants still green.
+  2. **The "defensive" report predicate was worse than the thing it guarded against.** Round eight
+     suggested covering the mirror race (a concurrent submit sealing the row `Complete` while THESE
+     answers trip a knockout) and I added `|| disqualifiedBy !== undefined`. That paired a
+     `Complete` status with the knockout's copy — and the widget keys screened-out-ness on the
+     STATUS alone, so it ignored the copy, resolved a QUALIFIED ending screen, and could follow
+     that screen's redirect. A mismatched pair is not a safer pair; it is one the reader downstream
+     resolves in whichever direction it happens to look. Reverted to the single rule round seven
+     established: **the response describes the row.** If a concurrent request completed this
+     response, it IS complete, and saying so is accurate however these answers would have been
+     judged alone. Worth recording as a category error: I reached for "cover both cases" where the
+     right move was "have one rule".
+  3. **Another trimmed quote that inverted its source.** `scoring.ts` said the column was
+     documented "numeric weights; null when unscored". It actually reads "JSON scoring
+     configuration (e.g. LLM-judge prompt or numeric weights); null when unscored" — so the column
+     anticipated dual use from the start, which is precisely the thing the file's own tolerance is
+     designed around. Second instance of this exact failure mode in two rounds (after
+     `719712D6`), and the pattern is the same both times: quoting the half that supports the point
+     I was making.
+  4. `exclusionListsIn`'s positional matcher was not filtered to procs that take an exclusion list,
+     so any `"spX"('literal')` would have been read as one. No such call today; `migrations-pg/` is
+     full of generated `"spDeleteForm"(…)` functions, one of which growing a string parameter would
+     have made this real.
+
+  **Verification:** 1,827 unit tests, six gates (66 mutants), clean build, eight smoke paths.

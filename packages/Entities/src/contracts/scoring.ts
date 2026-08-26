@@ -3,10 +3,16 @@
  * `source: 'score'` conditions can read — the assessment archetype (points → total → bands →
  * the conditional ending picks the band).
  *
- * The configuration lives in `FormQuestion.ScoringConfig` — a column that shipped with the
- * schema, documented "numeric weights; null when unscored", and was never read until now — and
- * travels into the published snapshot as `PublishedFormQuestion.scoring`. Pure and shared:
- * widget and server MUST compute the same total from the same answers.
+ * The configuration lives in `FormQuestion.ScoringConfig` — a column that shipped with the schema
+ * and was never read until now — and travels into the published snapshot as
+ * `PublishedFormQuestion.scoring`. Its extended property reads, in full: "JSON scoring
+ * configuration (e.g. LLM-judge prompt or numeric weights); null when unscored". An earlier
+ * version of this comment quoted only the tail of that, which inverted the point: the column was
+ * documented from the start as holding EITHER an LLM-judge prompt or numeric weights, so the
+ * sibling-key tolerance in `parseQuestionScoring` honours the original design rather than working
+ * around it.
+ *
+ * Pure and shared: widget and server MUST compute the same total from the same answers.
  */
 import { isAnswerSupplied, type AnswerValue } from './conditional-rule';
 

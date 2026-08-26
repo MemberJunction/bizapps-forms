@@ -568,12 +568,19 @@ async function runSubmitPipelineInner(
     success: true,
     responseId: persisted.responseId,
     status: persisted.status,
-    // Either side is enough. The row's status covers a concurrent knockout this request did not
-    // see; `disqualifiedBy` covers the mirror image — a concurrent submit sealed the row
-    // `Complete` while THESE answers trip a rule — where following the row alone would hand the
-    // qualified copy and redirect to someone being screened out. Neither reading is safe on its
-    // own, and a knockout must never be told it succeeded.
-    ...(persisted.status === 'Disqualified' || disqualifiedBy !== undefined
+    // ONE rule: the response describes the ROW. Not this request's verdict, and not a mixture.
+    //
+    // A previous version added `|| disqualifiedBy !== undefined` to cover the mirror race — a
+    // concurrent submit sealing the row `Complete` while THESE answers trip a knockout — and that
+    // made things worse rather than safer. It paired a `Complete` status with the knockout's copy,
+    // and the widget keys screened-out-ness on the STATUS alone: it therefore ignored the copy,
+    // resolved a qualified ending screen, and could follow that screen's redirect. A mismatched
+    // pair is not a safer pair; it is one the reader downstream resolves in whichever direction it
+    // happens to look.
+    //
+    // The row is the record. If a concurrent request completed this response, it IS complete, and
+    // saying so is accurate however these answers would have been judged on their own.
+    ...(persisted.status === 'Disqualified'
       ? terminalRepeatFields(disqualifiedBy)
       : confirmationFields(resolved, validation.answerMap)),
   });
