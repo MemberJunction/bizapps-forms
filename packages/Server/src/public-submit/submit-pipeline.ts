@@ -22,7 +22,7 @@ import {
   endingRedirectUrl,
   hasUnreachableAutomations,
   computeScore,
-  resolveDisqualification,
+  resolveFormOutcome,
   resolveEndingScreen,
   SCREENED_OUT_MESSAGE,
   resolveVisibleQuestions,
@@ -334,9 +334,17 @@ async function runSubmitPipelineInner(
   // address spent the tight completion bucket (20/min, justified by the automations a knockout
   // explicitly never fires) and locked real completions out behind a NAT.
   const preliminaryMap = buildAnswerMap(submission.answers);
-  const knockout = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
-    score: scoreFor(resolved, preliminaryMap),
-  });
+  // The flow's whole verdict in one call, shared with the widget so the two cannot disagree
+  // about it. `disqualified` is what every gate below keys off; an ending jump to an UNFLAGGED
+  // screen is an ordinary completion and deliberately indistinguishable from one here — quota
+  // counts it, automations fire, and only the screen the respondent sees differs.
+  const outcome = resolveFormOutcome(
+    resolved.definition.pages,
+    resolved.definition.endScreens ?? [],
+    preliminaryMap,
+    { score: scoreFor(resolved, preliminaryMap) },
+  );
+  const knockout = outcome.disqualified ? outcome.screen : undefined;
   // Computed ONCE, here, and read by every gate below that distinguishes the two. It was derived
   // twice — the rate-limit gate said `complete && knockout === undefined` and the quota said
   // `terminalCompletion` — which is the same decision written in two places, so a later change to

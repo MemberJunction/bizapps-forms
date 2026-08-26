@@ -20,7 +20,6 @@ import {
   type JumpTargetPage,
   type RuleCardSpec,
   type RuleDraft,
-  type RuleFlags,
   type RuleVerb,
 } from './rules-panel-model';
 
@@ -141,11 +140,7 @@ export class RulesPanelComponent {
    * answered on it. Null means "same as sources".
    */
   @Input() jumpSources: ConditionalSourceQuestion[] | null = null;
-  /** The screen's disqualification flag — feeds the `disqualify` card (ending screens only). */
-  @Input() isDisqualification = false;
   @Output() ruleChange = new EventEmitter<ConditionalRule | undefined>();
-  /** Emitted when the disqualify card is committed (true) or removed (false). */
-  @Output() disqualifyChange = new EventEmitter<boolean>();
 
   protected dialog: RuleDialog | null = null;
   /** Whether the footer is asking about unsaved work rather than offering Done. */
@@ -157,12 +152,8 @@ export class RulesPanelComponent {
   /** What the item held when the dialog opened — what `isDraftDirty` compares against. */
   private baseline: RuleDraft | null = null;
 
-  private get flags(): RuleFlags {
-    return { disqualification: this.isDisqualification };
-  }
-
   private isOn(verb: RuleVerb): boolean {
-    return hasVerb(this.rule, verb, this.flags);
+    return hasVerb(this.rule, verb);
   }
 
   /** Cards rendered: every verb the item's persisted rule carries, in spec order. */
@@ -170,21 +161,22 @@ export class RulesPanelComponent {
     return this.cards.filter((c) => this.isOn(c.verb));
   }
 
-  /** Cards the picker still offers — minus any excluded by an active card. */
+  /**
+   * Cards the picker still offers — every verb the item does not already carry.
+   *
+   * There used to be an `excludes` pass here as well, because an ending's show group meant one
+   * thing under the disqualify card and another under the show card. Screening out is a `Go to`
+   * rule and a screen toggle now, so no two cards read the same group and nothing needs
+   * excluding.
+   */
   protected get availableCards(): RuleCardSpec[] {
-    return this.cards.filter(
-      (c) => !this.isOn(c.verb) && !(c.excludes ?? []).some((verb) => this.isOn(verb)),
-    );
+    return this.cards.filter((c) => !this.isOn(c.verb));
   }
 
   /** The group the ITEM holds for a verb — what a collapsed card summarizes. */
   private persistedGroup(verb: RuleVerb): ConditionalGroup | undefined {
     if (verb === 'jump') {
       return jumpRule(this.rule)?.when;
-    }
-    // The disqualify card edits the screen's own show group; the flag changes its meaning.
-    if (verb === 'disqualify') {
-      return verbGroup(this.rule, 'show');
     }
     return isGroupVerb(verb) ? verbGroup(this.rule, verb) : undefined;
   }
@@ -324,9 +316,6 @@ export class RulesPanelComponent {
     if (open?.mode !== 'edit' || !this.canCommit) {
       return;
     }
-    if (open.verb === 'disqualify') {
-      this.disqualifyChange.emit(true);
-    }
     this.ruleChange.emit(this.committedRule(open.verb));
     this.closeDialog();
   }
@@ -340,9 +329,6 @@ export class RulesPanelComponent {
         ? withJumpRule(this.rule, { when: group, target: { kind: 'page', id: target } })
         : withJumpRule(this.rule, undefined);
     }
-    if (verb === 'disqualify') {
-      return withVerbGroup(this.rule, 'show', group);
-    }
     return withVerbGroup(this.rule, verb, group);
   }
 
@@ -351,14 +337,6 @@ export class RulesPanelComponent {
       this.dialog = null;
       this.confirmingDiscard = false;
       this.clearDraft();
-    }
-    if (verb === 'disqualify') {
-      // Removing the card removes BOTH halves — the flag and the group authored for it.
-      this.disqualifyChange.emit(false);
-      if (verbGroup(this.rule, 'show') !== undefined) {
-        this.ruleChange.emit(withVerbGroup(this.rule, 'show', undefined));
-      }
-      return;
     }
     if (verb === 'jump') {
       if (hasVerb(this.rule, 'jump')) {

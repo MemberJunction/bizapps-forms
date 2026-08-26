@@ -135,6 +135,27 @@ const SCREEN_EDITOR_CSS = /* css */ `
             ></button>
           </mjf-setting-row>
 
+          <!-- What arriving here MEANS, which is the screen's business rather than any rule's.
+               A Go-to rule names this screen; this toggle decides how the response is recorded.
+               Keeping the two apart is what removed the old disqualify rule card, whose group
+               had to mean "which thank-you page" or "who is screened out" depending on a flag
+               one panel away. -->
+          <mjf-setting-row
+            label="Screened out"
+            hint="Responses that reach this screen are recorded as disqualified — they do not count toward your response limit, and no automations run. Send people here with a Go to rule."
+          >
+            <button
+              slot="control"
+              type="button"
+              class="mjf-switch"
+              role="switch"
+              [attr.aria-checked]="s.IsDisqualification"
+              [class.is-on]="s.IsDisqualification"
+              aria-label="Screened out"
+              (click)="toggleDisqualification()"
+            ></button>
+          </mjf-setting-row>
+
           <mjf-setting-row
             label="Redirect after submit"
             hint="Send the respondent to another page instead of showing this screen."
@@ -193,9 +214,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
               [cards]="ruleCards"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
-              [isDisqualification]="s.IsDisqualification"
               (ruleChange)="onConditionalChange($event)"
-              (disqualifyChange)="setDisqualification($event)"
             />
           </div>
         }
@@ -333,13 +352,10 @@ export class ScreenEditorComponent {
     });
   }
 
-  /** The disqualify card was added/removed — flip the flag; the rule flows via ruleChange. */
-  protected setDisqualification(on: boolean): void {
-    const s = this.screen;
-    if (s && s.IsDisqualification !== on) {
-      s.IsDisqualification = on;
-      this.screenChanged.emit(s);
-    }
+  protected toggleDisqualification(): void {
+    this.apply((s) => {
+      s.IsDisqualification = !s.IsDisqualification;
+    });
   }
 
   protected onConditionalChange(rule: ConditionalRule | undefined): void {

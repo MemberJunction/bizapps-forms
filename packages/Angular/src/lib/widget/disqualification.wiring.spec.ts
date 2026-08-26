@@ -55,13 +55,13 @@ function methodBody(declaration: string): string {
  * not", the other owns "send it once and report honestly".
  */
 function sealPair(): string {
-  return methodBody('private async sealDisqualified') + methodBody('private async trySeal');
+  return methodBody('private async sealEarlyEnd') + methodBody('private async trySeal');
 }
 
 /** The body of the method that ends the form on a knockout. */
 function knockoutMethod(): string {
   // The DECLARATION, not a call site that precedes it in the file.
-  return methodBody('private async endAsDisqualified');
+  return methodBody('private async endEarly');
 }
 
 describe('a knockout is judged on a finished answer, never a half-typed one', () => {
@@ -69,7 +69,7 @@ describe('a knockout is judged on a finished answer, never a half-typed one', ()
    * `Scroll` is the database default render mode, and there a text/number field is bound with
    * `(input)`, so `progressChange` fires on EVERY KEYSTROKE. Resolving the knockout from that
    * signal means a respondent answering `18` to a question gated on `age lessThan 18` is
-   * disqualified the instant they type `1` — irreversibly, since `endAsDisqualified` latches,
+   * disqualified the instant they type `1` — irreversibly, since `endEarly` latches,
    * seals the row and leaves intake. The re-entrancy latch guards the second trigger; nothing
    * guarded the first.
    *
@@ -80,14 +80,14 @@ describe('a knockout is judged on a finished answer, never a half-typed one', ()
    */
   it('does not resolve the knockout from the per-change progress signal', () => {
     const body = methodBody('protected onProgress');
-    expect(body).not.toMatch(/disqualifyingScreen\(\)/);
-    expect(body).not.toMatch(/endAsDisqualified/);
+    expect(body).not.toMatch(/earlyOutcome\(\)/);
+    expect(body).not.toMatch(/endEarly/);
   });
 
   it('resolves it from a commit signal instead', () => {
     const body = methodBody('protected onCommit');
-    expect(body).toMatch(/disqualifyingScreen\(\)/);
-    expect(body).toMatch(/endAsDisqualified/);
+    expect(body).toMatch(/earlyOutcome\(\)/);
+    expect(body).toMatch(/endEarly/);
   });
 
   it('both render modes report a commit, and the host listens for it', () => {
@@ -114,27 +114,27 @@ describe('a knockout records itself before it ends the form', () => {
     // carry. So the client's terminal write has to BE a completion; leaving this as a flush of
     // the autosave meant the row stayed `Partial` and the screening was never recorded.
     const body = knockoutMethod();
-    expect(body).toMatch(/this\.sealDisqualified\(\)/);
+    expect(body).toMatch(/this\.sealEarlyEnd\(\)/);
     expect(sealPair()).toMatch(/buildSubmission\(def, rt, false\)/);
   });
 
   it('awaits that write rather than firing it and moving on', () => {
     const body = knockoutMethod();
-    expect(body).toMatch(/await this\.sealDisqualified\(\)/);
-    expect(body).not.toMatch(/void this\.sealDisqualified\(\)/);
+    expect(body).toMatch(/await this\.sealEarlyEnd\(\)/);
+    expect(body).not.toMatch(/void this\.sealEarlyEnd\(\)/);
   });
 
   it('quiesces the autosave first, so two writes never share the response id', () => {
     const body = knockoutMethod();
     const settleAt = body.indexOf('settle()');
-    const sealAt = body.indexOf('sealDisqualified()');
+    const sealAt = body.indexOf('sealEarlyEnd()');
     expect(settleAt).toBeGreaterThan(-1);
     expect(settleAt).toBeLessThan(sealAt);
   });
 
   it('records before it leaves intake', () => {
     const body = knockoutMethod();
-    const sealAt = body.indexOf('sealDisqualified()');
+    const sealAt = body.indexOf('sealEarlyEnd()');
     const phaseAt = body.indexOf("this.phase.set('done')");
     expect(sealAt).toBeGreaterThan(-1);
     expect(phaseAt).toBeGreaterThan(-1);
@@ -143,7 +143,7 @@ describe('a knockout records itself before it ends the form', () => {
 
   it('navigates only after the write has resolved', () => {
     const body = knockoutMethod();
-    const sealAt = body.indexOf('sealDisqualified()');
+    const sealAt = body.indexOf('sealEarlyEnd()');
     const redirectAt = body.indexOf('this.redirect(');
     expect(redirectAt).toBeGreaterThan(-1);
     expect(sealAt).toBeLessThan(redirectAt);
@@ -162,9 +162,9 @@ describe('a knockout records itself before it ends the form', () => {
     // Asserting the GUARD, not merely that the word appears somewhere in the file: the previous
     // version of this test was `expect(source()).toMatch(/disqualifying/)`, which the latch's
     // own declaration satisfies — so deleting every early-return would have left it green.
-    expect(knockoutMethod()).toMatch(/this\.disqualifying = true/);
-    expect(methodBody('protected onCommit')).toMatch(/if \(this\.disqualifying\)\s*\{?\s*return/);
-    expect(methodBody('protected onProgress')).toMatch(/if \(this\.disqualifying\)\s*\{?\s*return/);
+    expect(knockoutMethod()).toMatch(/this\.endingEarly = true/);
+    expect(methodBody('protected onCommit')).toMatch(/if \(this\.endingEarly\)\s*\{?\s*return/);
+    expect(methodBody('protected onProgress')).toMatch(/if \(this\.endingEarly\)\s*\{?\s*return/);
   });
 });
 
@@ -199,10 +199,10 @@ describe('the knockout write knows whether it actually landed', () => {
 
 describe('a knockout in flight blocks a competing submit', () => {
   it('onSubmit refuses to run while the knockout is sealing', () => {
-    // `endAsDisqualified` awaits twice with the phase still 'ready', so the submit button stays
+    // `endEarly` awaits twice with the phase still 'ready', so the submit button stays
     // live throughout. Two completions on one clientResponseId is the primary-key collision the
     // submit path exists to avoid.
-    expect(methodBody('protected async onSubmit')).toMatch(/if \(this\.disqualifying\)\s*\{?\s*return/);
+    expect(methodBody('protected async onSubmit')).toMatch(/if \(this\.endingEarly\)\s*\{?\s*return/);
   });
 });
 
@@ -251,7 +251,7 @@ describe('the client judges exactly what it sends', () => {
   it('the knockout reads visibleAnswers, never the raw map', () => {
     // `buildAnswerInputs` sends only the visible set and the server judges from what arrives, so
     // any client verdict reached on `currentAnswers()` can disagree with the recorded outcome.
-    const body = methodBody('private disqualifyingScreen');
+    const body = methodBody('private earlyOutcome');
     expect(body).toMatch(/transmittedView\(\)/);
     expect(body).not.toMatch(/currentAnswers\(\)/);
     // Not the RENDERED question list either — that is derived from the raw map.

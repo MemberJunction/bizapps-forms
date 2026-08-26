@@ -144,11 +144,11 @@ describe('cardSpec', () => {
     // A question has no `jump` card. Returning QUESTION_RULE_CARDS[0] would title the dialog
     // "Show only if" while it edited a jump — the two are not interchangeable.
     expect(cardSpec('jump', QUESTION_RULE_CARDS)).toBeUndefined();
-    expect(cardSpec('disqualify', PAGE_RULE_CARDS)).toBeUndefined();
   });
 
-  it('reads disqualify off the ending cards, where it is a pseudo-verb rather than a JSON key', () => {
-    expect(cardSpec('disqualify', ENDING_RULE_CARDS)?.title).toBe('Disqualify if');
+  it('offers an ending nothing but its show rule — screening out is a screen toggle now', () => {
+    expect(ENDING_RULE_CARDS.map((c) => c.verb)).toEqual(['show']);
+    expect(cardSpec('show', ENDING_RULE_CARDS)?.title).toBe('Show only if');
   });
 
   it('is undefined for an empty spec list', () => {
@@ -267,8 +267,8 @@ describe('isDraftCommittable', () => {
   });
 
   it('a disqualify still needs a condition — the flag alone screens out everyone', () => {
-    expect(isDraftCommittable(draft({ verb: 'disqualify', group: undefined }))).toBe(false);
-    expect(isDraftCommittable(draft({ verb: 'disqualify' }))).toBe(true);
+    expect(isDraftCommittable(draft({ verb: 'show', group: undefined }))).toBe(false);
+    expect(isDraftCommittable(draft({ verb: 'show' }))).toBe(true);
   });
 });
 

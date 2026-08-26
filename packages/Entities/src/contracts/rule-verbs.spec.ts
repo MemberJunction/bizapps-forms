@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AnswerValue, ConditionalRule } from './conditional-rule';
 import { MAX_JUMP_RULES } from './conditional-rule';
 import type { PublishedFormPage, PublishedFormScreen } from './form-definition';
-import {
-  resolveDisqualification,
-  resolveVisiblePages,
-  resolveVisibleQuestions,
-} from './rule-verbs';
+import { resolveVisiblePages, resolveVisibleQuestions } from './rule-verbs';
 import type { PublishedFormQuestion } from './form-definition';
 
 function answers(record: Record<string, AnswerValue>): Map<string, AnswerValue> {
@@ -120,85 +116,19 @@ describe('resolveVisiblePages', () => {
   });
 });
 
-describe('resolveDisqualification', () => {
-  const failingAnswer = whenQ1Equals('fail');
-
-  describe('happy', () => {
-    it('fires on the matching armed screen', () => {
-      const dq = ending('dq', 0, { isDisqualification: true, conditionalRule: failingAnswer });
-      expect(resolveDisqualification([dq], answers({ q1: 'fail' }))?.id).toBe('dq');
-      expect(resolveDisqualification([dq], answers({ q1: 'pass' }))).toBeUndefined();
-      expect(resolveDisqualification([dq], answers({}))).toBeUndefined();
-    });
-  });
-
-  describe('edge', () => {
-    it('two matching disqualifications: display order wins, matching resolveEndingScreen', () => {
-      const second = ending('second', 5, { isDisqualification: true, conditionalRule: failingAnswer });
-      const first = ending('first', 1, { isDisqualification: true, conditionalRule: failingAnswer });
-      expect(resolveDisqualification([second, first], answers({ q1: 'fail' }))?.id).toBe('first');
-    });
-
-    it('the flag without a rule never fires — a rule is what arms it', () => {
-      const flagOnly = ending('dq', 0, { isDisqualification: true });
-      expect(resolveDisqualification([flagOnly], answers({ q1: 'fail' }))).toBeUndefined();
-    });
-  });
-
-  describe('worst', () => {
-    it('an ordinary conditional ending never disqualifies, however well it matches', () => {
-      const plain = ending('plain', 0, { conditionalRule: failingAnswer });
-      expect(resolveDisqualification([plain], answers({ q1: 'fail' }))).toBeUndefined();
-    });
-
-    it('no screens at all is simply no disqualification', () => {
-      expect(resolveDisqualification([], answers({ q1: 'fail' }))).toBeUndefined();
-    });
-  });
-});
-
-
-describe('an unarmed knockout screen never fires', () => {
-  const flagged = (rule?: ConditionalRule): PublishedFormScreen[] => [
-    ending('ko', 0, { isDisqualification: true, ...(rule ? { conditionalRule: rule } : {}) }),
-  ];
-
-  describe('worst', () => {
-    it('an EMPTY condition group disqualifies nobody', () => {
-      // `evaluateGroup` is vacuously true on an empty group — correct for `show`, where "no
-      // condition" means "always visible", and catastrophic here, where it means "disqualify
-      // everyone, before they have answered anything". The guard tested `show !== undefined`,
-      // which `{}` satisfies. Unauthorable through the builder, but rules also arrive from
-      // mj-sync metadata and the AI form builder, neither of which goes near it.
-      for (const empty of [{}, { all: [] }, { any: [] }, { all: [], any: [] }]) {
-        expect(resolveDisqualification(flagged({ show: empty }), answers({}))).toBeUndefined();
-        expect(resolveDisqualification(flagged({ show: empty }), answers({ q1: 'anything' }))).toBeUndefined();
-      }
-    });
-  });
-
-  describe('edge', () => {
-    it('a flag with no rule at all still fires nothing', () => {
-      expect(resolveDisqualification(flagged(), answers({ q1: 'x' }))).toBeUndefined();
-    });
-
-    it('a rule carrying only OTHER verbs is not armed either', () => {
-      // A jump group is a real, populated group — and not this screen's. Arming a knockout off
-      // it would disqualify on a condition the author wrote about page order.
-      const jumpOnly: ConditionalRule = {
-        jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'page' as const, id: 'p2' } }],
-      };
-      expect(resolveDisqualification(flagged(jumpOnly), answers({ q1: 'x' }))).toBeUndefined();
-    });
-  });
-
-  describe('happy', () => {
-    it('one real condition is all it takes to arm it', () => {
-      expect(resolveDisqualification(flagged(whenQ1Equals('No')), answers({ q1: 'No' }))?.id).toBe('ko');
-      expect(resolveDisqualification(flagged(whenQ1Equals('No')), answers({ q1: 'Yes' }))).toBeUndefined();
-    });
-  });
-});
+/*
+ * `resolveDisqualification` and `isArmedKnockout` used to live here, with two describes proving
+ * that a knockout needed BOTH the screen's `isDisqualification` flag and at least one leaf
+ * condition in the screen's own `show` group.
+ *
+ * Both are gone (QUESTION_LEVEL_LOGIC_PLAN decision 4). A screen no longer carries the rule that
+ * screens people out; a `Go to` rule names the screen, and the screen's flag says what arriving
+ * there means. There is therefore no group doing knockout duty, nothing to "arm", and no
+ * empty-group catastrophe to guard against — the whole class of defect the second describe
+ * existed for cannot be represented. What survives of those tests is in `flow-resolver.spec.ts`
+ * under `resolveFormOutcome`: only a flagged screen disqualifies, and an ordinary conditional
+ * ending never does however well it matches.
+ */
 
 describe('resolveVisibleQuestions', () => {
   function question(

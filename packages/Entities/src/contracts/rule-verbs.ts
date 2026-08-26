@@ -22,6 +22,7 @@ import {
 } from './conditional-rule';
 import type { PublishedFormPage, PublishedFormQuestion, PublishedFormScreen } from './form-definition';
 import { isAnswerableQuestionType } from './question-types';
+import { resolveEndingScreen } from './form-screens';
 
 /**
  * ONE forward walk over the whole form, producing everything that depends on where a
@@ -267,41 +268,53 @@ export function resolveVisibleQuestions(
 }
 
 /**
- * Whether a knockout screen's rule actually CONSTRAINS anything.
+ * What the form's flow decided: which ending screen to show, whether arriving there disqualifies,
+ * and whether a rule ended the form before it ran out of questions.
  *
- * `evaluateGroup` is vacuously true on an empty group, which is right for `show` — "no
- * condition" means "always visible" — and catastrophic for a knockout, where it means
- * "disqualify everyone, before they have answered anything". Testing that the group EXISTS is
- * not enough, because `{}`, `{all: []}` and `{any: []}` all exist and all evaluate true. So
- * armed means: at least one leaf condition to fail.
+ * ONE answer, shared by the widget and the server, because the two must agree about all three
+ * facts and a respondent shown a knockout screen while the server writes `Complete` is the worst
+ * kind of disagreement — quota counted, automations fired, and a screen saying none of that
+ * happened.
+ *
+ * This replaced `resolveDisqualification`, which read a knockout off an ending screen's OWN show
+ * group plus its `isDisqualification` flag. That entangled two meanings in one group — "which
+ * thank-you page at the end" versus "who gets screened out mid-form" — and needed an
+ * `isArmedKnockout` guard, because an empty group is vacuously true and "disqualify everyone
+ * before they have answered anything" is a catastrophic reading of a half-authored rule. The
+ * rule now says where to GO and the screen says what ARRIVING means, so there is no group doing
+ * double duty and nothing to arm.
  */
-function isArmedKnockout(rule: ConditionalRule | undefined): boolean {
-  const show = rule?.show;
-  if (show === undefined) {
-    return false;
-  }
-  return (show.all?.length ?? 0) > 0 || (show.any?.length ?? 0) > 0;
+export interface FormOutcome {
+  /** The screen to show, or undefined when the form has no ending to show at all. */
+  screen: PublishedFormScreen | undefined;
+  /** Whether the response is recorded as `Disqualified` rather than `Complete`. */
+  disqualified: boolean;
+  /** Whether a `Go to` rule ended the form early, rather than it running out of questions. */
+  endedEarly: boolean;
 }
 
-/**
- * The disqualification screen these answers have triggered, or undefined (C3).
- *
- * First match in display order — deliberately the same ordering promise as
- * {@link resolveEndingScreen} in form-screens.ts, so the two can never disagree about which
- * screen "comes first". A screen's flag alone never fires, and neither does an EMPTY rule:
- * see {@link isArmedKnockout} for why "has a show group" was the wrong test.
- */
-export function resolveDisqualification(
-  screens: readonly PublishedFormScreen[],
+export function resolveFormOutcome(
+  pages: readonly PublishedFormPage[],
+  endScreens: readonly PublishedFormScreen[],
   answers: ReadonlyMap<string, AnswerValue>,
   extras?: EvalExtras,
-): PublishedFormScreen | undefined {
-  return [...screens]
-    .sort((a, b) => a.displayOrder - b.displayOrder)
-    .find(
-      (s) =>
-        s.isDisqualification === true &&
-        isArmedKnockout(s.conditionalRule) &&
-        evaluateConditionalRule(s.conditionalRule, answers, extras),
-    );
+): FormOutcome {
+  const terminal = resolveTermination(pages, answers, extras);
+  const ordinary = (): PublishedFormScreen | undefined => resolveEndingScreen(endScreens, answers, extras);
+
+  if (terminal?.kind === 'ending') {
+    const named = endScreens.find((screen) => screen.id === terminal.id);
+    return {
+      // A dangling id falls back to the ordinary ending so the respondent still sees something.
+      screen: named ?? ordinary(),
+      // ...but the FLAG is read only off the screen that was actually named. We cannot know
+      // whether a missing screen was a knockout, and guessing "yes" would discard a real
+      // respondent's submission on the strength of a dangling id. `Complete` is the recoverable
+      // direction, and the Rules tab flags the rule as broken either way.
+      disqualified: named?.isDisqualification === true,
+      endedEarly: true,
+    };
+  }
+
+  return { screen: ordinary(), disqualified: false, endedEarly: terminal !== undefined };
 }

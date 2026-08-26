@@ -49,6 +49,17 @@ function knockoutDefinition(): PublishedFormDefinition {
             isRequired: true,
             displayOrder: 1,
             options: [],
+            // The knockout is a `Go to` on the QUESTION naming the screen, not a rule living on
+            // the screen (QUESTION_LEVEL_LOGIC_PLAN decision 4). What makes it a knockout rather
+            // than an early completion is the screen's own `isDisqualification` flag below.
+            conditionalRule: {
+              jump: [
+                {
+                  when: { all: [{ questionId: 'age', op: 'equals', value: 'No' }] },
+                  target: { kind: 'ending', id: 'end-ko' },
+                },
+              ],
+            },
           },
         ],
       },
@@ -61,7 +72,6 @@ function knockoutDefinition(): PublishedFormDefinition {
         title: 'Not eligible',
         displayOrder: 1,
         isDisqualification: true,
-        conditionalRule: { show: { all: [{ questionId: 'age', op: 'equals', value: 'No' }] } },
       },
       { id: 'end-ok', screenType: 'Ending', title: 'Thanks', displayOrder: 2, isDefault: true },
     ],

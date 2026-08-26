@@ -108,7 +108,9 @@ describe('collectRuleEntries', () => {
       expect(entries[0].sentence).toBe('After "Intro", skip to "VIP details" when Ticket type equals vip');
     });
 
-    it('reads a disqualification off the flag, not the show verb', () => {
+    it('says what a screened-out ending IS, and that its own condition is ignored', () => {
+      // `resolveEndingScreen` excludes flagged screens, so a show rule on one is never
+      // consulted — a fact worth saying out loud, because the author wrote that condition.
       const entries = collectRuleEntries(
         form({
           endings: [{ id: 's1', label: 'Not eligible', isDisqualification: true, conditionalRule: showVip }],
@@ -117,9 +119,40 @@ describe('collectRuleEntries', () => {
 
       expect(entries[0]).toMatchObject({
         itemKind: 'ending',
-        verb: 'disqualify',
-        sentence: 'Disqualify — show "Not eligible" — when Ticket type equals vip',
+        sentence: 'Record "Not eligible" as screened out (its own condition is ignored)',
       });
+      expect(entries[0].broken).toContain('nothing — no rule sends anyone to this screen');
+    });
+
+    it('does not flag a screened-out ending that a Go to rule actually targets', () => {
+      const entries = collectRuleEntries(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [
+                {
+                  id: 'q1',
+                  label: 'Ticket type',
+                  conditionalRule: {
+                    jump: [
+                      {
+                        when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] },
+                        target: { kind: 'ending', id: 's1' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+          endings: [{ id: 's1', label: 'Not eligible', isDisqualification: true }],
+        }),
+      );
+
+      const endingRow = entries.find((e) => e.itemKind === 'ending');
+      expect(endingRow?.broken).toEqual([]);
     });
 
     it('spells out EVERY condition, joined by the combinator word', () => {

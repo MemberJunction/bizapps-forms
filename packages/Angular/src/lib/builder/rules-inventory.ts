@@ -75,11 +75,16 @@ export interface RuleEntry {
   readonly broken: string[];
 }
 
-const VERB_ICONS: Record<'show' | 'jump' | 'disqualify', string> = {
+/**
+ * Row icons. `screenedOut` is not a verb — it is the ending-screen toggle — but it earns its own
+ * icon because a row that records someone as screened out reads nothing like a row that shows a
+ * thank-you page, and the eye would say the opposite of what it means.
+ */
+const ROW_ICONS = {
   show: 'fa-solid fa-eye',
   jump: 'fa-solid fa-arrow-turn-down',
-  disqualify: 'fa-solid fa-ban',
-};
+  screenedOut: 'fa-solid fa-ban',
+} as const;
 
 const MISSING_QUESTION = 'a question that no longer exists';
 const MISSING_PAGE = 'a page that no longer exists';
@@ -106,7 +111,7 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
           itemId: question.id,
           pageId: page.id,
           verb: 'show',
-          icon: VERB_ICONS.show,
+          icon: ROW_ICONS.show,
           sentence: `Show ${quoted(question.label)} ${whenClause(show, form.sources)}`,
           broken: brokenIn(show, form.sources),
         });
@@ -114,8 +119,9 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
     }
   }
 
+  const targeted = targetedEndings(form);
   for (const ending of form.endings) {
-    const entry = endingEntry(ending, form);
+    const entry = endingEntry(ending, form, targeted);
     if (entry) {
       entries.push(entry);
     }
@@ -134,7 +140,7 @@ function pageEntries(page: RuleInventoryPage, form: RuleInventoryForm): RuleEntr
       itemId: page.id,
       pageId: page.id,
       verb: 'show',
-      icon: VERB_ICONS.show,
+      icon: ROW_ICONS.show,
       sentence: `Show ${quoted(page.label)} ${whenClause(show, form.sources)}`,
       broken: brokenIn(show, form.sources),
     });
@@ -149,7 +155,7 @@ function pageEntries(page: RuleInventoryPage, form: RuleInventoryForm): RuleEntr
       itemId: page.id,
       pageId: page.id,
       verb: 'jump',
-      icon: VERB_ICONS.jump,
+      icon: ROW_ICONS.jump,
       sentence:
         `After ${quoted(page.label)}, ${destination.phrase} ` +
         `${whenClause(jump.when, form.sources)}`,
@@ -160,31 +166,77 @@ function pageEntries(page: RuleInventoryPage, form: RuleInventoryForm): RuleEntr
 }
 
 /**
- * An ending's rule, read through its disqualification flag.
+ * An ending screen's row, which is about two separate facts that used to be one.
  *
- * The flag decides which verb the SAME show group means — a disqualification screens the
- * respondent out mid-form, a plain conditional ending is chosen at the end. Reading the group
- * without the flag would describe a knockout as a thank-you page.
+ * Its `show` group decides which thank-you page a respondent who FINISHES the form lands on.
+ * Its `isDisqualification` flag decides what arriving there means. Those were entangled — the
+ * same group meant "which ending" or "who is screened out" depending on the flag — and pulling
+ * them apart is what let the disqualify rule verb be deleted.
+ *
+ * Two consequences the author needs told, because both are silent otherwise:
+ *
+ *  - `resolveEndingScreen` EXCLUDES flagged screens, so a show rule on one is never consulted.
+ *    A screened-out screen is a destination you are sent to, not one anybody reaches by
+ *    finishing, and a condition written on it does nothing at all.
+ *  - A flagged screen that no `Go to` rule targets is unreachable. Nothing sends anyone there,
+ *    so the screening the author thought they had configured does not happen.
  */
-function endingEntry(ending: RuleInventoryItem, form: RuleInventoryForm): RuleEntry | undefined {
+function endingEntry(
+  ending: RuleInventoryItem,
+  form: RuleInventoryForm,
+  targetedEndingIds: ReadonlySet<string>,
+): RuleEntry | undefined {
   const show = ending.conditionalRule?.show;
-  if (!show) {
-    return undefined;
-  }
   const knockout = ending.isDisqualification === true;
-  const clause = whenClause(show, form.sources);
+  if (!show && !knockout) {
+    return undefined; // an ordinary unconditional ending is the default, not a rule
+  }
+
+  const broken: string[] = [];
+  if (knockout && !targetedEndingIds.has(ending.id)) {
+    broken.push('nothing — no rule sends anyone to this screen');
+  }
+  if (knockout && show) {
+    broken.push('a condition that is never read, because screened-out screens are not chosen by finishing');
+  }
+  if (show) {
+    broken.push(...brokenIn(show, form.sources));
+  }
+
+  const sentence = knockout
+    ? `Record ${quoted(ending.label)} as screened out` +
+      (show ? ` (its own condition is ignored)` : '')
+    : `Show ${quoted(ending.label)} ${whenClause(show, form.sources)}`;
+
   return {
-    id: `ending:${ending.id}:${knockout ? 'disqualify' : 'show'}`,
+    id: `ending:${ending.id}:${knockout ? 'screened-out' : 'show'}`,
     itemKind: 'ending',
     itemId: ending.id,
     pageId: null,
-    verb: knockout ? 'disqualify' : 'show',
-    icon: knockout ? VERB_ICONS.disqualify : VERB_ICONS.show,
-    sentence: knockout
-      ? `Disqualify — show ${quoted(ending.label)} — ${clause}`
-      : `Show ${quoted(ending.label)} ${clause}`,
-    broken: brokenIn(show, form.sources),
+    verb: 'show',
+    icon: knockout ? ROW_ICONS.screenedOut : ROW_ICONS.show,
+    sentence,
+    broken,
   };
+}
+
+/** Every ending screen a `Go to` rule anywhere on the form points at. */
+function targetedEndings(form: RuleInventoryForm): Set<string> {
+  const ids = new Set<string>();
+  const collect = (rule: RuleInventoryItem['conditionalRule']): void => {
+    for (const jump of rule?.jump ?? []) {
+      if (jump.target.kind === 'ending') {
+        ids.add(jump.target.id);
+      }
+    }
+  };
+  for (const page of form.pages) {
+    collect(page.conditionalRule);
+    for (const question of page.questions) {
+      collect(question.conditionalRule);
+    }
+  }
+  return ids;
 }
 
 /**

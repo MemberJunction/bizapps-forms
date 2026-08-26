@@ -8,8 +8,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { AnswerValue, ConditionalRule } from './conditional-rule';
-import type { PublishedFormPage, PublishedFormQuestion } from './form-definition';
-import { resolveTermination, resolveVisiblePages, resolveVisibleQuestions } from './rule-verbs';
+import type { PublishedFormPage, PublishedFormQuestion, PublishedFormScreen } from './form-definition';
+import {
+  resolveFormOutcome,
+  resolveTermination,
+  resolveVisiblePages,
+  resolveVisibleQuestions,
+} from './rule-verbs';
 
 function answers(record: Record<string, AnswerValue>): Map<string, AnswerValue> {
   return new Map(Object.entries(record));
@@ -190,6 +195,93 @@ describe('resolveTermination', () => {
       // author had decided this respondent should not see.
       const pages = [page('p1', 0, [q('q1', 0, { conditionalRule: toEnding('gone') }), q('q2', 1)])];
       expect(resolveTermination(pages, answers({ q1: 'skip' }))).toEqual({ kind: 'ending', id: 'gone' });
+    });
+  });
+});
+
+describe('resolveFormOutcome', () => {
+  function ending(id: string, displayOrder: number, extra?: Partial<PublishedFormScreen>): PublishedFormScreen {
+    return { id, screenType: 'Ending', title: id, displayOrder, ...extra };
+  }
+
+  const thanks = ending('thanks', 1, { isDefault: true });
+  const notEligible = ending('not-eligible', 0, { isDisqualification: true });
+
+  describe('happy', () => {
+    it('a Go to naming a disqualifying screen ends the form AND disqualifies', () => {
+      const pages = [page('p1', 0, [q('q1', 0, { conditionalRule: toEnding('not-eligible') }), q('q2', 1)])];
+
+      expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'skip' }))).toEqual({
+        screen: notEligible,
+        disqualified: true,
+        endedEarly: true,
+      });
+    });
+
+    it('a Go to naming an ordinary screen ends the form as a COMPLETION', () => {
+      // The whole point of decision 4: the rule says where to go, the screen says what arriving
+      // means. An unflagged screen is a normal finish — quota counts it, automations fire.
+      const pages = [page('p1', 0, [q('q1', 0, { conditionalRule: toEnding('thanks') }), q('q2', 1)])];
+
+      expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'skip' }))).toEqual({
+        screen: thanks,
+        disqualified: false,
+        endedEarly: true,
+      });
+    });
+
+    it('a Go to Submit ends the form and lets the ending resolver pick', () => {
+      const pages = [page('p1', 0, [q('q1', 0, { conditionalRule: toSubmit() }), q('q2', 1)])];
+
+      expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'skip' }))).toEqual({
+        screen: thanks,
+        disqualified: false,
+        endedEarly: true,
+      });
+    });
+  });
+
+  describe('edge', () => {
+    it('with nothing terminal fired, it is the ordinary end-of-form answer', () => {
+      const pages = [page('p1', 0, [q('q1', 0, { conditionalRule: toEnding('not-eligible') })])];
+
+      expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'stay' }))).toEqual({
+        screen: thanks,
+        disqualified: false,
+        endedEarly: false,
+      });
+    });
+
+    it('never picks a disqualifying screen as the ordinary ending', () => {
+      // `resolveEndingScreen` excludes them, and it must stay that way: a knockout screen is a
+      // destination you are SENT to, not one anybody lands on by finishing.
+      expect(resolveFormOutcome([], [notEligible], answers({})).screen).toBeUndefined();
+    });
+  });
+
+  describe('worst', () => {
+    it('a Go to naming a deleted screen still ends the form, and does not disqualify', () => {
+      // We cannot know whether the missing screen was a knockout, and guessing "yes" would
+      // discard a real respondent's submission on the strength of a dangling id. Complete is the
+      // recoverable direction, and the Rules tab flags the rule as broken.
+      const pages = [page('p1', 0, [q('q1', 0, { conditionalRule: toEnding('gone') }), q('q2', 1)])];
+
+      expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'skip' }))).toEqual({
+        screen: thanks,
+        disqualified: false,
+        endedEarly: true,
+      });
+    });
+
+    it('the FIRST terminal reached decides, even when a later one would disqualify', () => {
+      const pages = [
+        page('p1', 0, [
+          q('q1', 0, { conditionalRule: toEnding('thanks') }),
+          q('q2', 1, { conditionalRule: toEnding('not-eligible') }),
+        ]),
+      ];
+
+      expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'skip' })).disqualified).toBe(false);
     });
   });
 });

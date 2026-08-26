@@ -23,9 +23,10 @@ import {
   computeScore,
   endingMessage,
   endingRedirectUrl,
-  resolveDisqualification,
+  resolveFormOutcome,
   resolveEndingScreen,
   SCREENED_OUT_MESSAGE,
+  type FormOutcome,
   type FormSubmissionInput,
   type FormSubmissionResult,
   type FormStyleTokens,
@@ -245,7 +246,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * still typing, and each one would otherwise start another knockout. Reset on {@link load},
    * with the rest of the per-fill state.
    */
-  private disqualifying = false;
+  private endingEarly = false;
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -279,7 +280,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingScreen.set(undefined);
       this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
-      this.disqualifying = false;
+      this.endingEarly = false;
       this.phase.set(initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
@@ -339,7 +340,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
   protected onProgress(): void {
     // A knockout already under way owns the rest of this response: its bank is on the wire and
     // another ping would re-arm the debounce behind it.
-    if (this.disqualifying) {
+    if (this.endingEarly) {
       return;
     }
     this.autosave?.ping();
@@ -352,7 +353,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * Knockout rules are judged here and nowhere else. They used to ride `onProgress`, which in
    * scroll mode arrives on every keystroke, so a rule like `age lessThan 18` disqualified an
    * eligible respondent the instant they typed the `1` of `18` — and irreversibly, because
-   * {@link endAsDisqualified} latches, seals the row and leaves intake. A rule that ends the
+   * {@link endEarly} latches, seals the row and leaves intake. A rule that ends the
    * form has to be judged on a finished answer; autosave keeps riding every change, because
    * saving a half-typed value costs nothing and is undone by the next save.
    *
@@ -360,23 +361,23 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the save regardless, so a client that never fired this is still disqualified.
    */
   protected onCommit(): void {
-    if (this.disqualifying) {
+    if (this.endingEarly) {
       return;
     }
-    const knockout = this.disqualifyingScreen();
-    if (knockout) {
-      void this.endAsDisqualified(knockout);
+    const outcome = this.earlyOutcome();
+    if (outcome) {
+      void this.endEarly(outcome);
     }
   }
 
   /**
-   * The knockout screen these answers trigger, or undefined.
+   * The verdict these answers have already reached, or undefined while the form is still going.
    *
-   * A pure query — it decides, it does not act. {@link endAsDisqualified} is the command half,
-   * and keeping them apart is what lets the command be awaited without the decision being
-   * re-made every time control comes back.
+   * A pure query — it decides, it does not act. {@link endEarly} is the command half, and keeping
+   * them apart is what lets the command be awaited without the decision being re-made every time
+   * control comes back.
    */
-  private disqualifyingScreen(): PublishedFormScreen | undefined {
+  private earlyOutcome(): FormOutcome | undefined {
     const def = this.definition();
     const rt = this.runtime();
     if (!def || !rt || this.phase() !== 'ready') {
@@ -393,9 +394,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // stays "visible" on the client when the rule that reveals it reads an answer that is no
     // longer being sent.
     const sent = rt.transmittedView();
-    return resolveDisqualification(def.endScreens ?? [], sent.answers, {
+    const outcome = resolveFormOutcome(def.pages, def.endScreens ?? [], sent.answers, {
       score: computeScore(sent.questions, sent.answers),
     });
+    return outcome.endedEarly ? outcome : undefined;
   }
 
   /**
@@ -423,15 +425,20 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * Fail-soft like every autosave — `flushNow()` never throws — so a failed bank still shows
    * the screen rather than stranding the respondent mid-form.
    */
-  private async endAsDisqualified(screen: PublishedFormScreen): Promise<void> {
-    this.disqualifying = true;
+  private async endEarly(outcome: FormOutcome): Promise<void> {
+    this.endingEarly = true;
     // Quiesce the autosave before writing, so two requests never carry the same
     // `clientResponseId` — the primary-key collision the submit path guards the same way.
     await this.autosave?.settle();
-    await this.sealDisqualified();
-    this.endingScreen.set(screen);
+    await this.sealEarlyEnd();
+    // Disqualifying or not, the client does the SAME thing here: seal a completion and show the
+    // screen. Which status gets written is the server's call, from the same shared outcome — an
+    // ending jump to an unflagged screen is an ordinary completion (quota counts it, automations
+    // fire) and only the screen differs. Deciding that twice, once per side, is how a respondent
+    // ends up looking at a knockout screen while the row says `Complete`.
+    this.endingScreen.set(outcome.screen);
     this.phase.set('done');
-    const redirectUrl = screen.redirectURL?.trim();
+    const redirectUrl = outcome.screen?.redirectURL?.trim();
     if (redirectUrl) {
       this.redirect(redirectUrl);
     }
@@ -450,7 +457,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * keeps whatever its last autosave left. Showing the respondent their screen anyway is the
    * better half of that trade; stranding them mid-form to protect a record is not.
    */
-  private async sealDisqualified(): Promise<void> {
+  private async sealEarlyEnd(): Promise<void> {
     const def = this.definition();
     const rt = this.runtime();
     if (!def || !rt) {
@@ -535,12 +542,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (shouldIgnoreSubmit(this.phase())) {
       return;
     }
-    // A knockout mid-seal is not visible to the phase guard above: `endAsDisqualified` awaits
+    // A knockout mid-seal is not visible to the phase guard above: `endEarly` awaits
     // twice while the phase is still 'ready', so the submit button stays live the whole time.
     // Without this, tapping the knockout option and then Submit puts two completions on the wire
     // carrying the same `clientResponseId` — exactly the primary-key collision the settle() below
     // exists to prevent.
-    if (this.disqualifying) {
+    if (this.endingEarly) {
       return;
     }
     // Captcha gate: when required, block final submit until the challenge is solved.

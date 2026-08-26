@@ -171,12 +171,13 @@ describe('nothing is written until Done', () => {
     expect(body).not.toMatch(/emit/);
   });
 
-  it('the disqualification flag is set on commit, not on picking the card', () => {
-    // It is a column on the screen: flipping it when the card was merely opened left a screen
-    // that screens people out with no condition to arm it.
-    const add = /addCard\(([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
-    expect(add).not.toMatch(/disqualifyChange\.emit/);
-    expect(panel()).toMatch(/commit\(\)[\s\S]{0,900}disqualifyChange\.emit\(true\)/);
+  it('the panel writes nothing but the rule — the screen flag is not its business', () => {
+    // The disqualify card used to flip `IsDisqualification` through a second output, and
+    // flipping it when the card was merely OPENED left a screen that screened people out with
+    // no condition to arm it. Screening out is a toggle in the screen's own settings now, so
+    // this panel has exactly one output and cannot reach the flag at all.
+    expect(panel()).not.toMatch(/disqualifyChange|isDisqualification/);
+    expect(panel()).toMatch(/@Output\(\) ruleChange/);
   });
 
   it('the drafts marker set is gone, along with the reason it existed', () => {
@@ -184,7 +185,7 @@ describe('nothing is written until Done', () => {
   });
 
   it('a card shows only because the item carries the verb', () => {
-    expect(panel()).toMatch(/isOn\(verb: RuleVerb\): boolean \{\s*return hasVerb\(this\.rule, verb, this\.flags\);/);
+    expect(panel()).toMatch(/isOn\(verb: RuleVerb\): boolean \{\s*return hasVerb\(this\.rule, verb\);/);
   });
 });
 

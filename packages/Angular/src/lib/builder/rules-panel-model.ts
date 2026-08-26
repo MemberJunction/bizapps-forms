@@ -18,16 +18,14 @@ import type {
 import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } from './condition-sources';
 
 /**
- * One rule verb. Most are keys of the ConditionalRule JSON; `disqualify` is the exception —
- * it is the screen's `IsDisqualification` flag plus the screen's OWN show group, so the card
- * reads/writes `rule.show` and toggles the flag through a separate output.
+ * One rule verb — a key of the ConditionalRule JSON, and nothing else.
+ *
+ * There used to be a pseudo-verb, `disqualify`, which was a screen COLUMN masquerading as a rule
+ * key: it read the screen's own show group and wrote `IsDisqualification` through a separate
+ * output. It is gone, along with the `RuleFlags` bag that carried that column into this model.
+ * Every verb here is now exactly what it says — something stored in the rule.
  */
-export type RuleVerb = keyof ConditionalRule | 'disqualify';
-
-/** Non-JSON state a card may depend on — today just the screen's disqualification flag. */
-export interface RuleFlags {
-  disqualification?: boolean;
-}
+export type RuleVerb = keyof ConditionalRule;
 
 /**
  * The verbs whose payload is a plain condition group (jump carries a target as well).
@@ -57,12 +55,6 @@ export interface RuleCardSpec {
   icon: string;
   /** One-line description shown on the picker card and as the open card's hint. */
   description: string;
-  /**
-   * Verbs this card cannot coexist with. An ending is EITHER a conditional ending OR a
-   * disqualification — both read the same show group, so offering the second while the first
-   * is active would silently flip the meaning of the group already authored.
-   */
-  excludes?: RuleVerb[];
 }
 
 /**
@@ -100,7 +92,16 @@ export const PAGE_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
   },
 ];
 
-/** The cards an ENDING SCREEN offers. */
+/**
+ * The cards an ENDING SCREEN offers.
+ *
+ * There was a second, "Disqualify if". It is gone, and so is the `excludes` machinery that
+ * existed for it: an ending's show group had to mean "which thank-you page at the end" or "who
+ * gets screened out mid-form" depending on a flag one panel away, so offering both cards would
+ * silently reinterpret a group the author had already written. Screening someone out is now a
+ * `Go to` rule naming this screen, and whether arriving here disqualifies is a toggle on the
+ * screen itself. One group, one meaning.
+ */
 export const ENDING_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
   {
     verb: 'show',
@@ -108,15 +109,6 @@ export const ENDING_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
     icon: 'fa-solid fa-flag-checkered',
     description:
       'Endings are checked in order and the first match wins. One with no condition is only reachable as the default.',
-    excludes: ['disqualify'],
-  },
-  {
-    verb: 'disqualify',
-    title: 'Disqualify if',
-    icon: 'fa-solid fa-ban',
-    description:
-      'End the form immediately when answers match — the respondent sees this screen mid-form and the response is recorded as Disqualified. No automations run.',
-    excludes: ['show'],
   },
 ];
 
@@ -138,17 +130,10 @@ export function verbGroup(rule: ConditionalRule | undefined, verb: GroupVerb): C
   return rule?.[verb];
 }
 
-/** Whether the rule (plus flags) carries anything for this verb. */
-export function hasVerb(rule: ConditionalRule | undefined, verb: RuleVerb, flags?: RuleFlags): boolean {
-  if (verb === 'disqualify') {
-    return flags?.disqualification === true;
-  }
+/** Whether the rule carries anything for this verb. */
+export function hasVerb(rule: ConditionalRule | undefined, verb: RuleVerb): boolean {
   if (verb === 'jump') {
     return (rule?.jump?.length ?? 0) > 0;
-  }
-  // On a disqualification screen the show group BELONGS to the disqualify card.
-  if (verb === 'show' && flags?.disqualification === true) {
-    return false;
   }
   return verbGroup(rule, verb) !== undefined;
 }
@@ -298,9 +283,8 @@ export function isDraftDirty(draft: RuleDraft, baseline: RuleDraft): boolean {
 export function activeCards(
   rule: ConditionalRule | undefined,
   specs: ReadonlyArray<RuleCardSpec>,
-  flags?: RuleFlags,
 ): RuleCardSpec[] {
-  return specs.filter((spec) => hasVerb(rule, spec.verb, flags));
+  return specs.filter((spec) => hasVerb(rule, spec.verb));
 }
 
 /**

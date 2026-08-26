@@ -2123,3 +2123,38 @@ native entities. This is the reporting differentiator no incumbent has.
   **Verification:** 1,970 unit tests (298 / 26 / 142 / 1003 / 501), +26 and all new — 10 for
   target normalization, 16 for the walk. Build clean, widget 1199.1 kB (+1.5), `lint:ui` 0
   violations, `lint:distribution` + 72 mutants pass.
+
+- **2026-08-26 — question-level logic, Phase 2: disqualification stops being a rule.** The rule
+  now says where to GO; the ending screen says what ARRIVING there means. `resolveDisqualification`
+  and `isArmedKnockout` are deleted, replaced by one shared `resolveFormOutcome` that both the
+  widget and the server call.
+
+  **What the entanglement cost.** An ending screen's `show` group meant two different things
+  depending on its `IsDisqualification` flag — "which thank-you page at the end" or "who gets
+  screened out mid-form". That is why the ending rule cards carried an `excludes` list: offering
+  both would silently reinterpret a group the author had already written. And it is why
+  `isArmedKnockout` existed at all — an empty group is vacuously true, which is right for `show`
+  and catastrophic for a knockout ("disqualify everyone before they have answered anything").
+  Decoupling the flag from the group deletes the guard, the `excludes` machinery, the `disqualify`
+  pseudo-verb, the `RuleFlags` bag and the panel's second output. The panel now has exactly one
+  output and cannot reach the screen flag at all.
+
+  **The widget path turned out to be identical either way.** `sealDisqualified` already sent a
+  COMPLETION and let the server decide the status, so an ending jump to an unflagged screen needed
+  no new client path — it seals, shows the screen, and the server writes `Complete` with quota
+  counted and automations fired. Renamed to `endEarly`/`sealEarlyEnd` to stop describing only half
+  of what it does.
+
+  **The UI moved in the same commit, deliberately.** Leaving the "Disqualify if" card in place
+  would have left an authoring path that writes a rule nothing reads — the exact silent failure
+  this work keeps closing. Screening out is now a **Screened out** toggle in the ending screen's
+  own settings, with copy saying what it costs (no quota, no automations).
+
+  **New in the Rules tab:** an ending marked screened-out that no `Go to` rule targets is flagged
+  as broken ("nothing sends anyone to this screen"), and so is a show rule written on one, since
+  `resolveEndingScreen` excludes flagged screens and never reads it. Both were previously
+  invisible.
+
+  **Verification:** 1,969 unit tests (296 / 26 / 142 / 1004 / 501). The count moved by −9 deleted
+  knockout-arming cases, +7 `resolveFormOutcome` cases and +3 new tab cases. Build clean, widget
+  1199.1 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants pass.

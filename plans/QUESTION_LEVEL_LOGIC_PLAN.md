@@ -1,7 +1,7 @@
 # Question-Level Logic Plan — two rules, one "Go to"
 
-**Status: Phase 1 ✅ · Phase 2 next · Phases 3–4 pending.**
-Post-Phase-1 baseline: **1,970** tests (298 / 26 / 142 / 1003 / 501), widget 1199.1 kB.
+**Status: Phase 1 ✅ · Phase 2 ✅ · Phase 3 next · Phase 4 pending.**
+Post-Phase-2 baseline: **1,969** tests (296 / 26 / 142 / 1004 / 501), widget 1199.1 kB.
 
 **One boundary moved.** Phase 1 step 5 said to delete `resolveDisqualification` and
 `isArmedKnockout`. It does not: both have live callers in the widget and the server, so deleting
