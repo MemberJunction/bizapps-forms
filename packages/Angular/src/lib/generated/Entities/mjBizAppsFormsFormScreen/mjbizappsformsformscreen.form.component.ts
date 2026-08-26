@@ -17,7 +17,7 @@ export class mjBizAppsFormsFormScreenFormComponent extends BaseFormComponent {
         this.initSections([
             { sectionKey: 'formAssociation', sectionName: 'Form Association', isExpanded: true },
             { sectionKey: 'screenConfiguration', sectionName: 'Screen Configuration', isExpanded: true },
-            { sectionKey: 'screenContent', sectionName: 'Screen Content', isExpanded: true },
+            { sectionKey: 'content', sectionName: 'Content', isExpanded: true },
             { sectionKey: 'behavioralRules', sectionName: 'Behavioral Rules', isExpanded: true },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false }
         ]);

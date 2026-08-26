@@ -196,3 +196,207 @@ describe('parseConditionalRule', () => {
     expect(() => parseConditionalRule('{ "show": { "all": [ { "questionId": "q1", "op": "bogus" } ] } }')).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// RULES_AND_BRANCHING_PLAN Phase A — new operators + date-aware ordering.
+// Each block follows the plan's happy / edge / worst structure (§5).
+// ---------------------------------------------------------------------------
+
+describe('date-aware greaterThan / lessThan (A2)', () => {
+  const after: ConditionalRule = {
+    show: { all: [{ questionId: 'start', op: 'greaterThan', value: '2026-01-01' }] },
+  };
+  const before: ConditionalRule = {
+    show: { all: [{ questionId: 'start', op: 'lessThan', value: '2026-01-01' }] },
+  };
+
+  describe('happy', () => {
+    it('a later ISO date is greater', () => {
+      expect(evaluateConditionalRule(after, answers({ start: '2026-08-25' }))).toBe(true);
+      expect(evaluateConditionalRule(before, answers({ start: '2026-08-25' }))).toBe(false);
+    });
+
+    it('an earlier ISO date is less', () => {
+      expect(evaluateConditionalRule(before, answers({ start: '2025-12-31' }))).toBe(true);
+      expect(evaluateConditionalRule(after, answers({ start: '2025-12-31' }))).toBe(false);
+    });
+
+    it('plain numbers still compare exactly as before', () => {
+      const gt: ConditionalRule = { show: { all: [{ questionId: 'n', op: 'greaterThan', value: 18 }] } };
+      expect(evaluateConditionalRule(gt, answers({ n: 21 }))).toBe(true);
+      expect(evaluateConditionalRule(gt, answers({ n: '21' }))).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('equal dates fire neither operator', () => {
+      expect(evaluateConditionalRule(after, answers({ start: '2026-01-01' }))).toBe(false);
+      expect(evaluateConditionalRule(before, answers({ start: '2026-01-01' }))).toBe(false);
+    });
+
+    it('datetime answers compare against date-only values on the same scale', () => {
+      expect(evaluateConditionalRule(after, answers({ start: '2026-01-01T10:30:00Z' }))).toBe(true);
+    });
+
+    it("the numeric string '0' is a number, not a date", () => {
+      const gt: ConditionalRule = { show: { all: [{ questionId: 'n', op: 'greaterThan', value: -1 }] } };
+      expect(evaluateConditionalRule(gt, answers({ n: '0' }))).toBe(true);
+    });
+  });
+
+  describe('worst', () => {
+    it('mixed kinds never fire: a number never compares against a date', () => {
+      const nonsense: ConditionalRule = {
+        show: { all: [{ questionId: 'start', op: 'greaterThan', value: 5 }] },
+      };
+      expect(evaluateConditionalRule(nonsense, answers({ start: '2026-08-25' }))).toBe(false);
+    });
+
+    it('garbage and empty strings are non-comparable, not NaN-poisoned', () => {
+      expect(evaluateConditionalRule(after, answers({ start: 'not a date' }))).toBe(false);
+      expect(evaluateConditionalRule(after, answers({ start: '' }))).toBe(false);
+      expect(evaluateConditionalRule(after, answers({ start: '9999-99-99' }))).toBe(false);
+    });
+
+    it('free text Date.parse would guess at stays non-comparable', () => {
+      expect(evaluateConditionalRule(after, answers({ start: 'March 3' }))).toBe(false);
+    });
+  });
+});
+
+describe('isNotAnswered (A3)', () => {
+  const rule: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'isNotAnswered' }] } };
+
+  describe('happy', () => {
+    it('fires when the question was skipped', () => {
+      expect(evaluateConditionalRule(rule, answers({}))).toBe(true);
+      expect(evaluateConditionalRule(rule, answers({ q1: null }))).toBe(true);
+    });
+
+    it('does not fire once answered', () => {
+      expect(evaluateConditionalRule(rule, answers({ q1: 'x' }))).toBe(false);
+    });
+  });
+
+  describe('edge', () => {
+    it('whitespace-only counts as not answered, agreeing with isAnswerSupplied', () => {
+      expect(evaluateConditionalRule(rule, answers({ q1: '   ' }))).toBe(true);
+      expect(evaluateConditionalRule(rule, answers({ q1: [] }))).toBe(true);
+    });
+
+    it('0 and false ARE answers', () => {
+      expect(evaluateConditionalRule(rule, answers({ q1: 0 }))).toBe(false);
+      expect(evaluateConditionalRule(rule, answers({ q1: false }))).toBe(false);
+    });
+  });
+
+  describe('worst', () => {
+    it('is the exact complement of isAnswered on every value shape', () => {
+      const answered: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'isAnswered' }] } };
+      const values: Array<Record<string, AnswerValue>> = [
+        {},
+        { q1: null },
+        { q1: '' },
+        { q1: ' ' },
+        { q1: [] },
+        { q1: 0 },
+        { q1: false },
+        { q1: 'x' },
+        { q1: ['a'] },
+        { q1: { line1: '' } },
+        { q1: { line1: 'a' } },
+      ];
+      for (const record of values) {
+        expect(evaluateConditionalRule(rule, answers(record))).toBe(
+          !evaluateConditionalRule(answered, answers(record)),
+        );
+      }
+    });
+  });
+});
+
+describe('equalsIgnoreCase (A3)', () => {
+  const rule: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equalsIgnoreCase', value: 'Yes' }] } };
+
+  describe('happy', () => {
+    it('matches across case', () => {
+      expect(evaluateConditionalRule(rule, answers({ q1: 'yes' }))).toBe(true);
+      expect(evaluateConditionalRule(rule, answers({ q1: 'YES' }))).toBe(true);
+      expect(evaluateConditionalRule(rule, answers({ q1: 'No' }))).toBe(false);
+    });
+  });
+
+  describe('edge', () => {
+    it('unicode case folds through toLowerCase', () => {
+      const unicode: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equalsIgnoreCase', value: 'STRASSE' }] } };
+      expect(evaluateConditionalRule(unicode, answers({ q1: 'strasse' }))).toBe(true);
+    });
+
+    it('non-strings fall back to strict equals', () => {
+      const num: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equalsIgnoreCase', value: 5 }] } };
+      expect(evaluateConditionalRule(num, answers({ q1: 5 }))).toBe(true);
+      expect(evaluateConditionalRule(num, answers({ q1: '5' }))).toBe(false);
+    });
+  });
+
+  describe('worst', () => {
+    it('arrays and missing values never match', () => {
+      expect(evaluateConditionalRule(rule, answers({ q1: ['Yes'] }))).toBe(false);
+      expect(evaluateConditionalRule(rule, answers({}))).toBe(false);
+    });
+  });
+});
+
+describe('startsWith / endsWith (A3)', () => {
+  const starts: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'startsWith', value: 'ACME' }] } };
+  const ends: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'endsWith', value: '.edu' }] } };
+
+  describe('happy', () => {
+    it('prefix-matches a string answer', () => {
+      expect(evaluateConditionalRule(starts, answers({ q1: 'ACME Corp' }))).toBe(true);
+      expect(evaluateConditionalRule(starts, answers({ q1: 'Not ACME' }))).toBe(false);
+    });
+
+    it('suffix-matches a string answer', () => {
+      expect(evaluateConditionalRule(ends, answers({ q1: 'dean@university.edu' }))).toBe(true);
+      expect(evaluateConditionalRule(ends, answers({ q1: 'ceo@company.com' }))).toBe(false);
+    });
+  });
+
+  describe('edge', () => {
+    it('matching is case-sensitive, like contains', () => {
+      expect(evaluateConditionalRule(starts, answers({ q1: 'acme corp' }))).toBe(false);
+    });
+
+    it('a numeric comparison value is stringified', () => {
+      const numeric: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'startsWith', value: 20 }] } };
+      expect(evaluateConditionalRule(numeric, answers({ q1: '2026 budget' }))).toBe(true);
+    });
+  });
+
+  describe('worst', () => {
+    it('array answers never match a string affix', () => {
+      expect(evaluateConditionalRule(starts, answers({ q1: ['ACME Corp'] }))).toBe(false);
+    });
+
+    it('an empty comparison value never matches — an unfinished rule must not fire', () => {
+      const blank: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'startsWith', value: '' }] } };
+      expect(evaluateConditionalRule(blank, answers({ q1: 'anything' }))).toBe(false);
+    });
+
+    it('non-string answers never match', () => {
+      expect(evaluateConditionalRule(starts, answers({ q1: 42 }))).toBe(false);
+      expect(evaluateConditionalRule(starts, answers({}))).toBe(false);
+    });
+  });
+});
+
+describe('new operators pass the untrusted-snapshot gate (A3)', () => {
+  it('parseConditionalRule accepts every new operator', () => {
+    const ops = ['equalsIgnoreCase', 'isNotAnswered', 'startsWith', 'endsWith'];
+    for (const op of ops) {
+      const json = `{ "show": { "all": [ { "questionId": "q1", "op": "${op}", "value": "x" } ] } }`;
+      expect(() => parseConditionalRule(json)).not.toThrow();
+    }
+  });
+});

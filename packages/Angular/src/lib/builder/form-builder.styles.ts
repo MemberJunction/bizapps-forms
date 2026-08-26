@@ -319,6 +319,14 @@ const LAYOUT_CSS = /* css */ `
   margin: var(--mjf-stack) 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--mjf-rule);
+  cursor: pointer;
+}
+.fb-page-head.is-selected {
+  border-bottom-color: var(--mj-brand-primary);
+}
+.fb-page-head.is-selected .fb-page-num {
+  background: var(--mj-brand-primary);
+  color: var(--mj-brand-on-primary, var(--mj-text-inverse));
 }
 .fb-page-num {
   flex: none;

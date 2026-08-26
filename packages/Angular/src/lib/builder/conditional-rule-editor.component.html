@@ -1,19 +1,8 @@
 <div class="cre">
-  <label class="cre-toggle">
-    <input
-      #enabledToggle
-      type="checkbox"
-      [checked]="_enabled"
-      (change)="toggleEnabled(enabledToggle.checked)"
-      aria-label="Only show this when conditions are met"
-    />
-    <span>Only show when&hellip;</span>
-  </label>
-
-  @if (_enabled) {
-    @if (sources.length === 0) {
-      <p class="cre-empty">Add an earlier question first to base a rule on its answer.</p>
-    } @else {
+  @if (sources.length === 0) {
+    <p class="cre-empty">Add an earlier question first to base a rule on its answer.</p>
+  } @else {
+    @if (_conditions.length > 0) {
       <div class="cre-combinator" role="group" aria-label="Match mode">
         <span>Match</span>
         <button
@@ -38,7 +27,7 @@
           <select
             #questionSelect
             class="cre-input"
-            [value]="cond.questionId"
+            [value]="questionSelectValue(cond)"
             (change)="setQuestion($index, questionSelect.value)"
             aria-label="Question"
           >
@@ -59,16 +48,49 @@
             }
           </select>
 
-          @if (operatorNeedsValue(cond.op)) {
-            <input
-              #valueInput
-              type="text"
-              class="cre-input cre-value"
-              [value]="valueAsString(cond)"
-              (input)="setValue($index, valueInput.value)"
-              [attr.placeholder]="cond.op === 'in' || cond.op === 'notIn' ? 'a, b, c' : 'value'"
-              aria-label="Comparison value"
-            />
+          @switch (kindFor(cond)) {
+            @case ('select') {
+              <select
+                #valueSelect
+                class="cre-input cre-value"
+                [value]="valueAsString(cond)"
+                (change)="setValue($index, valueSelect.value)"
+                aria-label="Comparison value"
+              >
+                <option value="" disabled>Choose an option&hellip;</option>
+                @for (opt of optionsFor(cond); track opt.value) {
+                  <option [value]="opt.value">{{ opt.label }}</option>
+                }
+                @if (staleValue(cond); as stale) {
+                  <option [value]="stale">{{ stale }} (deleted option)</option>
+                }
+              </select>
+            }
+            @case ('checklist') {
+              <div class="cre-checklist" role="group" aria-label="Comparison values">
+                @for (opt of optionsFor(cond); track opt.value) {
+                  <label class="cre-check">
+                    <input
+                      type="checkbox"
+                      [checked]="isChecked(cond, opt.value)"
+                      (change)="toggleValue($index, opt.value, $any($event.target).checked)"
+                    />
+                    <span>{{ opt.label }}</span>
+                  </label>
+                }
+              </div>
+            }
+            @case ('text') {
+              <input
+                #valueInput
+                type="text"
+                class="cre-input cre-value"
+                [value]="valueAsString(cond)"
+                (input)="setValue($index, valueInput.value)"
+                [attr.placeholder]="cond.op === 'in' || cond.op === 'notIn' ? 'a, b, c' : 'value'"
+                aria-label="Comparison value"
+              />
+            }
           }
 
           <button
@@ -82,9 +104,10 @@
         </div>
       }
 
-      <button type="button" class="cre-add" (click)="addCondition()">
-        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add condition
-      </button>
     }
+
+    <button type="button" class="cre-add" (click)="addCondition()">
+      <i class="fa-solid fa-plus" aria-hidden="true"></i> Add condition
+    </button>
   }
 </div>

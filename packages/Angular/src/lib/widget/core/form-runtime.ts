@@ -8,6 +8,7 @@ import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
   isAnswerableQuestionType,
+  resolveVisiblePages,
   answerCompleteness,
   isAnswerSupplied,
   type AnswerValue,
@@ -88,12 +89,12 @@ export class FormRuntime {
 
   // --- Visibility (conditional rules, S2) ---------------------------------
 
-  /** Pages whose page-level rule passes given current answers. */
+  /**
+   * Pages the respondent can currently reach — page show rules AND forward jumps (C2), via
+   * the shared resolver the server also uses.
+   */
   public readonly visiblePages = computed<PublishedFormPage[]>(() => {
-    const map = this.answers();
-    return this.orderedPages().filter((p) =>
-      evaluateConditionalRule(p.conditionalRule, map),
-    );
+    return resolveVisiblePages(this.orderedPages(), this.answers());
   });
 
   /** Visible questions on a given page (page must itself be visible to matter). */
@@ -121,7 +122,7 @@ export class FormRuntime {
 
   /** Validation message for a question, or `null` when valid. */
   public errorFor(question: PublishedFormQuestion): string | null {
-    return validateQuestion(question, this.valueFor(question.id)).message;
+    return validateQuestion(question, this.valueFor(question.id), this.answers()).message;
   }
 
   /** Error shown in the UI only after the field has been touched. */
@@ -140,12 +141,12 @@ export class FormRuntime {
     if (!this.isTouched(question.id)) {
       return {};
     }
-    return validateQuestion(question, this.valueFor(question.id)).parts ?? {};
+    return validateQuestion(question, this.valueFor(question.id), this.answers()).parts ?? {};
   }
 
   /** True when every supplied list of questions currently validates. */
   public areValid(questions: PublishedFormQuestion[]): boolean {
-    return questions.every((q) => validateQuestion(q, this.valueFor(q.id)).valid);
+    return questions.every((q) => validateQuestion(q, this.valueFor(q.id), this.answers()).valid);
   }
 
   /** Mark a set of questions touched (e.g. on a failed next/submit) to surface errors. */
@@ -160,7 +161,7 @@ export class FormRuntime {
   /** Whole-form validity over all currently-visible answerable questions. */
   public readonly isFormValid = computed(() =>
     this.visibleAnswerableQuestions().every(
-      (q) => validateQuestion(q, this.valueFor(q.id)).valid,
+      (q) => validateQuestion(q, this.valueFor(q.id), this.answers()).valid,
     ),
   );
 

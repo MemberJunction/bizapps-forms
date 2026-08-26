@@ -890,7 +890,7 @@ export const mjBizAppsFormsFormResponseSchema = z.object({
         * * Display Name: Form Version ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Versions (vwFormVersions.ID)`),
-    Status: z.union([z.literal('Complete'), z.literal('Partial')]).describe(`
+    Status: z.union([z.literal('Complete'), z.literal('Disqualified'), z.literal('Partial')]).describe(`
         * * Field Name: Status
         * * Display Name: Status
         * * SQL Data Type: nvarchar(20)
@@ -898,6 +898,7 @@ export const mjBizAppsFormsFormResponseSchema = z.object({
     * * Value List Type: List
     * * Possible Values 
     *   * Complete
+    *   * Disqualified
     *   * Partial
         * * Description: Completion status: Partial or Complete`),
     AnonymousSessionID: z.string().nullable().describe(`
@@ -958,7 +959,7 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form
+        * * Display Name: Form ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     ScreenType: z.union([z.literal('Ending'), z.literal('Welcome')]).describe(`
@@ -1027,9 +1028,15 @@ export const mjBizAppsFormsFormScreenSchema = z.object({
         * * Display Name: Social Links
         * * SQL Data Type: nvarchar(MAX)
         * * Description: Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`),
+    IsDisqualification: z.boolean().describe(`
+        * * Field Name: IsDisqualification
+        * * Display Name: Is Disqualification
+        * * SQL Data Type: bit
+        * * Default Value: 0
+        * * Description: Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -1283,12 +1290,12 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: Detailed description / purpose of the form`),
     CategoryID: z.string().nullable().describe(`
         * * Field Name: CategoryID
-        * * Display Name: Category
+        * * Display Name: Category ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Categories (vwFormCategories.ID)`),
     StyleID: z.string().nullable().describe(`
         * * Field Name: StyleID
-        * * Display Name: Style
+        * * Display Name: Style ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Styles (vwFormStyles.ID)`),
     Status: z.union([z.literal('Closed'), z.literal('Draft'), z.literal('Published')]).describe(`
@@ -1304,7 +1311,7 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: Lifecycle status: Draft, Published, or Closed`),
     OwnerUserID: z.string().nullable().describe(`
         * * Field Name: OwnerUserID
-        * * Display Name: Owner
+        * * Display Name: Owner User ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)`),
     RenderMode: z.union([z.literal('OneQuestion'), z.literal('Scroll')]).describe(`
@@ -1346,15 +1353,15 @@ export const mjBizAppsFormsFormSchema = z.object({
         * * Description: On a template row (IsTemplate = 1), the Form this template was saved from — what lets the builder show "Saved" instead of offering to save the same form twice. Never set on forms CREATED from a template: those are independent deep copies that diverge immediately, and a link would wrongly imply edits propagate. Null means the template has no living source`),
     Category: z.string().nullable().describe(`
         * * Field Name: Category
-        * * Display Name: Category Name
+        * * Display Name: Category
         * * SQL Data Type: nvarchar(255)`),
     Style: z.string().nullable().describe(`
         * * Field Name: Style
-        * * Display Name: Style Name
+        * * Display Name: Style
         * * SQL Data Type: nvarchar(255)`),
     OwnerUser: z.string().nullable().describe(`
         * * Field Name: OwnerUser
-        * * Display Name: Owner Name
+        * * Display Name: Owner
         * * SQL Data Type: nvarchar(100)`),
     TemplateSourceForm: z.string().nullable().describe(`
         * * Field Name: TemplateSourceForm
@@ -3621,13 +3628,14 @@ export class mjBizAppsFormsFormResponseEntity extends BaseEntity<mjBizAppsFormsF
     * * Value List Type: List
     * * Possible Values 
     *   * Complete
+    *   * Disqualified
     *   * Partial
     * * Description: Completion status: Partial or Complete
     */
-    get Status(): 'Complete' | 'Partial' {
+    get Status(): 'Complete' | 'Disqualified' | 'Partial' {
         return this.Get('Status');
     }
-    set Status(value: 'Complete' | 'Partial') {
+    set Status(value: 'Complete' | 'Disqualified' | 'Partial') {
         this.Set('Status', value);
     }
 
@@ -3781,7 +3789,7 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form
+    * * Display Name: Form ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -3949,8 +3957,22 @@ export class mjBizAppsFormsFormScreenEntity extends BaseEntity<mjBizAppsFormsFor
     }
 
     /**
+    * * Field Name: IsDisqualification
+    * * Display Name: Is Disqualification
+    * * SQL Data Type: bit
+    * * Default Value: 0
+    * * Description: Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it
+    */
+    get IsDisqualification(): boolean {
+        return this.Get('IsDisqualification');
+    }
+    set IsDisqualification(value: boolean) {
+        this.Set('IsDisqualification', value);
+    }
+
+    /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -4561,30 +4583,30 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * Validate() method override for MJ_BizApps_Forms: Forms entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: Templates cannot be published, and published items cannot be marked as templates.
+    * * Table-Level: Templates cannot be published. If an item is marked as a template, its status must be something other than 'Published'.
     * @public
     * @method
     * @override
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidateTemplateStatus(result);
+        this.ValidateTemplateStatusRestriction(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * Templates cannot be published, and published items cannot be marked as templates.
+    * Templates cannot be published. If an item is marked as a template, its status must be something other than 'Published'.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateTemplateStatus(result: ValidationResult) {
-    	if (this.IsTemplate && this.Status === "Published") {
+    public ValidateTemplateStatusRestriction(result: ValidationResult) {
+    	if (this.IsTemplate && this.Status === 'Published') {
     		result.Errors.push(new ValidationErrorInfo(
     			"Status",
-    			"An item cannot be marked as a template and have a status of Published at the same time.",
+    			"A template cannot have a 'Published' status.",
     			this.Status,
     			ValidationErrorType.Failure
     		));
@@ -4632,7 +4654,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: CategoryID
-    * * Display Name: Category
+    * * Display Name: Category ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Categories (vwFormCategories.ID)
     */
@@ -4645,7 +4667,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: StyleID
-    * * Display Name: Style
+    * * Display Name: Style ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Styles (vwFormStyles.ID)
     */
@@ -4677,7 +4699,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: OwnerUserID
-    * * Display Name: Owner
+    * * Display Name: Owner User ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ: Users (vwUsers.ID)
     */
@@ -4769,7 +4791,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: Category
-    * * Display Name: Category Name
+    * * Display Name: Category
     * * SQL Data Type: nvarchar(255)
     */
     get Category(): string | null {
@@ -4778,7 +4800,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: Style
-    * * Display Name: Style Name
+    * * Display Name: Style
     * * SQL Data Type: nvarchar(255)
     */
     get Style(): string | null {
@@ -4787,7 +4809,7 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * * Field Name: OwnerUser
-    * * Display Name: Owner Name
+    * * Display Name: Owner
     * * SQL Data Type: nvarchar(100)
     */
     get OwnerUser(): string | null {

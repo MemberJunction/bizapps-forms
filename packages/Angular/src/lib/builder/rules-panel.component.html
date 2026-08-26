@@ -1,0 +1,83 @@
+<div class="rp">
+  @for (card of shownCards; track card.verb) {
+    <div class="rp-card">
+      <div class="rp-head">
+        <button
+          type="button"
+          class="rp-head-main"
+          [attr.aria-expanded]="isExpanded(card.verb)"
+          (click)="toggleExpanded(card.verb)"
+        >
+          <span class="rp-icon"><i [class]="card.icon" aria-hidden="true"></i></span>
+          <span class="rp-titles">
+            <span class="rp-title">{{ card.title }}</span>
+            <span class="rp-summary">{{ summaryFor(card.verb) }}</span>
+          </span>
+          <i
+            class="fa-solid rp-chevron"
+            [class.fa-chevron-down]="!isExpanded(card.verb)"
+            [class.fa-chevron-up]="isExpanded(card.verb)"
+            aria-hidden="true"
+          ></i>
+        </button>
+        <button
+          type="button"
+          class="rp-remove"
+          [attr.aria-label]="'Remove rule: ' + card.title"
+          (click)="removeCard(card.verb)"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+      @if (isExpanded(card.verb)) {
+        <div class="rp-body">
+          <p class="rp-hint">{{ card.description }}</p>
+          @if (card.verb === 'jump') {
+            <label class="rp-jump">
+              <span class="rp-jump-label">Go to</span>
+              <select
+                #jumpSelect
+                class="rp-jump-select"
+                [value]="jumpTargetId()"
+                (change)="setJumpTarget(jumpSelect.value)"
+                aria-label="Jump target page"
+              >
+                <option value="" disabled>Choose a later page&hellip;</option>
+                @for (target of jumpTargets; track target.id) {
+                  <option [value]="target.id">{{ target.label }}</option>
+                }
+              </select>
+              <span class="rp-jump-label">when&hellip;</span>
+            </label>
+          }
+          <mjf-conditional-rule-editor
+            [group]="groupFor(card.verb)"
+            [sources]="sourcesFor(card.verb)"
+            (groupChange)="onGroupChange(card.verb, $event)"
+          />
+        </div>
+      }
+    </div>
+  }
+
+  @if (availableCards.length > 0) {
+    @if (!pickerOpen) {
+      <button type="button" class="rp-add" (click)="openPicker()">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add rule
+      </button>
+    } @else {
+      <div class="rp-picker" role="menu" aria-label="Add a rule">
+        @for (card of availableCards; track card.verb) {
+          <button type="button" class="rp-pick" role="menuitem" (click)="addCard(card.verb)">
+            <span class="rp-icon"><i [class]="card.icon" aria-hidden="true"></i></span>
+            <span class="rp-titles">
+              <span class="rp-title">{{ card.title }}</span>
+              <span class="rp-pick-desc">{{ card.description }}</span>
+            </span>
+          </button>
+        }
+        <button type="button" class="rp-cancel" (click)="closePicker()">Cancel</button>
+      </div>
+    }
+  }
+</div>

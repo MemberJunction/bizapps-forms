@@ -116,10 +116,10 @@ export class FormCloneService {
     const automations = await this.copyAutomations(sourceFormId, copy.ID, bindings.idMap);
 
     // Pass two — every id-bearing payload, now that the map is complete.
-    await this.rewriteConditionalRules(pages.copies, questions.idMap, warnings, 'page');
-    await this.rewriteConditionalRules(questions.copies, questions.idMap, warnings, 'question');
-    await this.rewriteConditionalRules(screens.copies, questions.idMap, warnings, 'screen');
-    await this.rewriteConditionalRules(automations.copies, questions.idMap, warnings, 'automation');
+    await this.rewriteConditionalRules(pages.copies, questions.idMap, warnings, 'page', pages.idMap);
+    await this.rewriteConditionalRules(questions.copies, questions.idMap, warnings, 'question', pages.idMap);
+    await this.rewriteConditionalRules(screens.copies, questions.idMap, warnings, 'screen', pages.idMap);
+    await this.rewriteConditionalRules(automations.copies, questions.idMap, warnings, 'automation', pages.idMap);
     await this.rewriteFieldMappings(bindings.copies, questions.idMap, warnings);
 
     return {
@@ -396,13 +396,14 @@ export class FormCloneService {
     questionIdMap: ReadonlyMap<string, string>,
     warnings: string[],
     label: string,
+    pageIdMap?: ReadonlyMap<string, string>,
   ): Promise<void> {
     for (const copy of copies) {
       const original = copy.ConditionalRule;
       if (original === null || original.trim() === '') {
         continue;
       }
-      const result = remapConditionalRule(original, questionIdMap);
+      const result = remapConditionalRule(original, questionIdMap, pageIdMap);
       this.collect(result, warnings, `${label} visibility rule`);
       if (result.json === original) {
         continue;

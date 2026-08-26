@@ -120,3 +120,58 @@ describe('remapConditionalRule — emptied arms', () => {
     expect(result.dropped).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// RULES_AND_BRANCHING_PLAN Phase C — the new verbs survive a clone.
+// ---------------------------------------------------------------------------
+
+describe('remapConditionalRule — require and jump verbs (C1/C2)', () => {
+  const PAGE_MAP = new Map([['p-old-3', 'p-new-3']]);
+
+  it('happy: remaps a require group like a show group, and both together', () => {
+    const rule = JSON.stringify({
+      show: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] },
+      require: { any: [{ questionId: 'q-old-2', op: 'equals', value: 'Other' }] },
+    });
+    const result = remapConditionalRule(rule, MAP, PAGE_MAP);
+    expect(JSON.parse(result.json as string)).toEqual({
+      show: { all: [{ questionId: 'q-new-1', op: 'isAnswered' }] },
+      require: { any: [{ questionId: 'q-new-2', op: 'equals', value: 'Other' }] },
+    });
+    expect(result.dropped).toBe(0);
+  });
+
+  it('happy: remaps a jump — both its when-group and its target page id', () => {
+    const rule = JSON.stringify({
+      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'equals', value: 'skip' }] }, toPageId: 'p-old-3' }],
+    });
+    const result = remapConditionalRule(rule, MAP, PAGE_MAP);
+    expect(JSON.parse(result.json as string)).toEqual({
+      jump: [{ when: { all: [{ questionId: 'q-new-1', op: 'equals', value: 'skip' }] }, toPageId: 'p-new-3' }],
+    });
+  });
+
+  it('edge: a score condition copies verbatim — the running total is form-relative', () => {
+    const rule = JSON.stringify({
+      show: { all: [{ source: 'score', op: 'greaterThan', value: 70 }] },
+    });
+    const result = remapConditionalRule(rule, MAP, PAGE_MAP);
+    expect(JSON.parse(result.json as string)).toEqual({
+      show: { all: [{ source: 'score', op: 'greaterThan', value: 70 }] },
+    });
+    expect(result.dropped).toBe(0);
+  });
+
+  it('worst: a jump with no page map (or an unmappable target) is dropped and counted, never dangling', () => {
+    const rule = JSON.stringify({
+      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] }, toPageId: 'p-old-3' }],
+    });
+    expect(remapConditionalRule(rule, MAP)).toEqual({ json: null, dropped: 1 });
+    expect(remapConditionalRule(rule, MAP, new Map())).toEqual({ json: null, dropped: 1 });
+  });
+
+  it('worst: a question condition with no questionId is dropped, not resurrected', () => {
+    const rule = JSON.stringify({ show: { all: [{ op: 'isAnswered' }] } });
+    expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 1 });
+  });
+});

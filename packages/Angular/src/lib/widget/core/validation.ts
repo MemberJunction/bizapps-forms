@@ -7,6 +7,7 @@ import {
   coerceAnswerToNumber,
   isAnswerableQuestionType,
   isAnswerSupplied,
+  isRequiredNow,
   isRequiredSatisfied,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -47,13 +48,20 @@ export function hasValue(value: AnswerValue): boolean {
   return isAnswerSupplied(value);
 }
 
+/** No answers at all — the requiredness a caller gets when it cannot supply the live map. */
+const NO_ANSWERS: ReadonlyMap<string, AnswerValue> = new Map();
+
 /**
  * Validate one question's current value. Only call for VISIBLE questions — hidden
  * questions (failed conditional rule) are never required and never validated.
+ *
+ * `answers` feeds the conditional `require` verb (C1): without it only the static
+ * `isRequired` applies, so callers that have the live answer map must pass it.
  */
 export function validateQuestion(
   question: PublishedFormQuestion,
   value: AnswerValue,
+  answers?: ReadonlyMap<string, AnswerValue>,
 ): FieldValidationResult {
   if (!isAnswerableQuestionType(question.type)) {
     return VALID;
@@ -61,7 +69,7 @@ export function validateQuestion(
   const present = hasValue(value);
   // Not `present`: a required consent box is only satisfied by a TICK, and an unticked one is
   // `false`, which counts as supplied. See isRequiredSatisfied.
-  if (question.isRequired && !isRequiredSatisfied(question.type, value)) {
+  if (isRequiredNow(question, answers ?? NO_ANSWERS) && !isRequiredSatisfied(question.type, value)) {
     return {
       valid: false,
       message:

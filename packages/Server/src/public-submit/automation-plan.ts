@@ -27,6 +27,8 @@ export interface AutomationPlanContext {
   complete: boolean;
   /** The response's answers, keyed by question id — the conditional evaluator's input. */
   answers: ReadonlyMap<string, AnswerValue>;
+  /** The response's running score (C4), for automations whose condition bands on it. */
+  score?: number;
 }
 
 /**
@@ -94,5 +96,5 @@ function triggerMatches(automation: PublishedFormAutomation, complete: boolean):
 }
 
 function shouldRun(automation: PublishedFormAutomation, context: AutomationPlanContext): boolean {
-  return evaluateConditionalRule(automation.conditionalRule, context.answers);
+  return evaluateConditionalRule(automation.conditionalRule, context.answers, { score: context.score });
 }

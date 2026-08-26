@@ -6,7 +6,7 @@
  * redirected never renders a screen at all. Two implementations of "which ending applies"
  * would let a form redirect to one ending's URL while showing another's copy.
  */
-import { evaluateConditionalRule, type AnswerValue } from './conditional-rule';
+import { evaluateConditionalRule, type AnswerValue, type EvalExtras } from './conditional-rule';
 import type { FormSettings, PublishedFormScreen } from './form-definition';
 
 /**
@@ -31,11 +31,17 @@ import type { FormSettings, PublishedFormScreen } from './form-definition';
 export function resolveEndingScreen(
   endScreens: readonly PublishedFormScreen[],
   answers: ReadonlyMap<string, AnswerValue>,
+  extras?: EvalExtras,
 ): PublishedFormScreen | undefined {
-  const ordered = [...endScreens].sort((a, b) => a.displayOrder - b.displayOrder);
+  // Disqualification screens never compete here: they are resolved FIRST, by
+  // `resolveDisqualification` (rule-verbs.ts), and a disqualify screen with no rule or a
+  // stray isDefault must not become the fallback everyone lands on.
+  const ordered = [...endScreens]
+    .filter((s) => s.isDisqualification !== true)
+    .sort((a, b) => a.displayOrder - b.displayOrder);
 
   const conditionalMatch = ordered.find(
-    (s) => s.conditionalRule !== undefined && evaluateConditionalRule(s.conditionalRule, answers),
+    (s) => s.conditionalRule !== undefined && evaluateConditionalRule(s.conditionalRule, answers, extras),
   );
   if (conditionalMatch) {
     return conditionalMatch;

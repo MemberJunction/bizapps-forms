@@ -6,7 +6,8 @@
  * structure:
  *
  *   - `FormPage.ConditionalRule`, `FormQuestion.ConditionalRule`, `FormScreen.ConditionalRule`
- *     and `FormAutomation.ConditionalRule` — `{ show: { all: [{ questionId, op, value }] } }`
+ *     and `FormAutomation.ConditionalRule` — `{ show / require: { all | any: [{ questionId, op,
+ *     value }] }, jump: [{ when, toPageId }] }` (question ids in the groups, page ids in jumps)
  *   - `FormEntityBinding.FieldMappings` — `{ version, fields: [{ source: { questionId } }] }`
  *
  * Copy those verbatim and the new form's branching points at the OLD form's questions. Nothing
@@ -23,6 +24,9 @@
  */
 import type {
   ConditionalCondition,
+  ConditionalGroup,
+  ConditionalJumpRule,
+  ConditionalRule,
   FieldMapping,
   FieldMappings,
 } from '@mj-biz-apps/forms-entities';
@@ -38,6 +42,8 @@ export interface RemapResult {
 export function remapConditionalRule(
   raw: string | null,
   idMap: ReadonlyMap<string, string>,
+  /** Page-id counterparts, for `jump.toPageId` — jumps are dropped (and counted) without it. */
+  pageIdMap?: ReadonlyMap<string, string>,
 ): RemapResult {
   if (raw === null || raw.trim() === '') {
     return { json: null, dropped: 0 };
@@ -66,7 +72,13 @@ export function remapConditionalRule(
     }
     const kept: ConditionalCondition[] = [];
     for (const condition of arm) {
-      const mapped = idMap.get(condition.questionId);
+      // A score condition references no question — the running total is form-relative and
+      // copies verbatim.
+      if (condition.source === 'score') {
+        kept.push({ ...condition });
+        continue;
+      }
+      const mapped = condition.questionId === undefined ? undefined : idMap.get(condition.questionId);
       if (mapped === undefined) {
         dropped++;
         continue;
@@ -76,45 +88,105 @@ export function remapConditionalRule(
     return kept;
   };
 
-  const all = remapArm(parsed.show?.all);
-  const any = remapArm(parsed.show?.any);
-  const survivors = (all?.length ?? 0) + (any?.length ?? 0);
-  if (survivors === 0) {
-    return { json: null, dropped };
-  }
-  const show: { all?: ConditionalCondition[]; any?: ConditionalCondition[] } = {};
   // An arm that lost every condition is REMOVED, not left as `[]`. The evaluator treats both
   // identically (an empty `all` is vacuously true, and so is an empty `any`), so this is about
   // what a human reads back: `"any": []` looks like a rule someone forgot to finish.
-  if (all !== undefined && all.length > 0) {
-    show.all = all;
+  const remapGroup = (
+    group: { all?: ConditionalCondition[]; any?: ConditionalCondition[] } | undefined,
+  ): ConditionalGroup | undefined => {
+    if (group === undefined) {
+      return undefined;
+    }
+    const all = remapArm(group.all);
+    const any = remapArm(group.any);
+    const out: ConditionalGroup = {};
+    if (all !== undefined && all.length > 0) {
+      out.all = all;
+    }
+    if (any !== undefined && any.length > 0) {
+      out.any = any;
+    }
+    return out.all !== undefined || out.any !== undefined ? out : undefined;
+  };
+
+  const show = remapGroup(parsed.show);
+  const require = remapGroup(parsed.require);
+  const jump: ConditionalJumpRule[] = [];
+  for (const rule of parsed.jump ?? []) {
+    const when = remapGroup(rule.when);
+    const toPageId = pageIdMap?.get(rule.toPageId);
+    // A jump missing either half in the copy would point at the OLD form's page — the exact
+    // hidden-forever failure this module exists to prevent. Dropped and counted, like a
+    // dangling question reference.
+    if (when === undefined || toPageId === undefined) {
+      dropped++;
+      continue;
+    }
+    jump.push({ when, toPageId });
   }
-  if (any !== undefined && any.length > 0) {
-    show.any = any;
+
+  const result: ConditionalRule = {};
+  if (show !== undefined) {
+    result.show = show;
   }
-  return { json: JSON.stringify({ show }), dropped };
+  if (require !== undefined) {
+    result.require = require;
+  }
+  if (jump.length > 0) {
+    result.jump = jump;
+  }
+  if (Object.keys(result).length === 0) {
+    return { json: null, dropped };
+  }
+  return { json: JSON.stringify(result), dropped };
 }
 
-type RuleShape = { show?: { all?: ConditionalCondition[]; any?: ConditionalCondition[] } };
+type GroupShape = { all?: ConditionalCondition[]; any?: ConditionalCondition[] };
+type RuleShape = {
+  show?: GroupShape;
+  require?: GroupShape;
+  jump?: Array<{ when: GroupShape; toPageId: string }>;
+};
 
 /**
- * A stored rule is usable only if it is a plain object whose `show` arms are arrays. Anything
- * else (an array, a string, a number, `{show: 5}`) is data we cannot rewrite, and copying it
- * verbatim would carry the source form's question ids into the copy.
+ * A stored rule is usable only if it is a plain object whose group arms are arrays (and whose
+ * jump list, if any, is an array of `{ when, toPageId }`). Anything else (an array, a string,
+ * a number, `{show: 5}`) is data we cannot rewrite, and copying it verbatim would carry the
+ * source form's question ids into the copy.
  */
 function isRuleShaped(value: unknown): value is RuleShape {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
-  const show = (value as RuleShape).show;
-  if (show === undefined) {
+  const rule = value as RuleShape;
+  if (!isGroupShaped(rule.show) || !isGroupShaped(rule.require)) {
+    return false;
+  }
+  if (rule.jump === undefined) {
     return true;
   }
-  if (typeof show !== 'object' || show === null || Array.isArray(show)) {
+  if (!Array.isArray(rule.jump)) {
+    return false;
+  }
+  return rule.jump.every(
+    (j) =>
+      typeof j === 'object' &&
+      j !== null &&
+      typeof j.toPageId === 'string' &&
+      isGroupShaped(j.when) &&
+      j.when !== undefined,
+  );
+}
+
+function isGroupShaped(group: GroupShape | undefined): boolean {
+  if (group === undefined) {
+    return true;
+  }
+  if (typeof group !== 'object' || group === null || Array.isArray(group)) {
     return false;
   }
   const armsAreArrays = (arm: unknown): boolean => arm === undefined || Array.isArray(arm);
-  return armsAreArrays(show.all) && armsAreArrays(show.any);
+  return armsAreArrays(group.all) && armsAreArrays(group.any);
 }
 
 function asText(err: unknown): string {

@@ -9,7 +9,15 @@
  * schema ever drifts from its interface.
  */
 import { z } from 'zod';
-import type { ConditionalCondition, ConditionalGroup, ConditionalOperator, ConditionalRule, ValidationRule } from './conditional-rule';
+import {
+  MAX_CONDITIONS_PER_GROUP,
+  MAX_JUMP_RULES,
+  type ConditionalCondition,
+  type ConditionalGroup,
+  type ConditionalOperator,
+  type ConditionalRule,
+  type ValidationRule,
+} from './conditional-rule';
 import type { FormSettings } from './form-definition';
 
 // --- ConditionalRule -------------------------------------------------------
@@ -17,12 +25,16 @@ import type { FormSettings } from './form-definition';
 const conditionalOperatorSchema = z.enum([
   'equals',
   'notEquals',
+  'equalsIgnoreCase',
   'in',
   'notIn',
   'isAnswered',
+  'isNotAnswered',
   'greaterThan',
   'lessThan',
   'contains',
+  'startsWith',
+  'endsWith',
 ]);
 
 const conditionValueSchema = z.union([
@@ -33,19 +45,39 @@ const conditionValueSchema = z.union([
   z.array(z.number()),
 ]);
 
-export const conditionalConditionSchema = z.object({
-  questionId: z.string(),
-  op: conditionalOperatorSchema,
-  value: conditionValueSchema.optional(),
-});
+export const conditionalConditionSchema = z
+  .object({
+    source: z.enum(['question', 'score']).optional(),
+    questionId: z.string().optional(),
+    op: conditionalOperatorSchema,
+    value: conditionValueSchema.optional(),
+  })
+  .superRefine((condition, ctx) => {
+    // A question condition that names no question is malformed — rejected here at the
+    // untrusted boundary; the evaluator additionally treats it as never-firing (defense in
+    // depth for pre-validation callers).
+    if ((condition.source ?? 'question') === 'question' && !condition.questionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'questionId is required unless source is "score"',
+      });
+    }
+  });
 
 export const conditionalGroupSchema = z.object({
-  all: z.array(conditionalConditionSchema).optional(),
-  any: z.array(conditionalConditionSchema).optional(),
+  all: z.array(conditionalConditionSchema).max(MAX_CONDITIONS_PER_GROUP).optional(),
+  any: z.array(conditionalConditionSchema).max(MAX_CONDITIONS_PER_GROUP).optional(),
+});
+
+const conditionalJumpRuleSchema = z.object({
+  when: conditionalGroupSchema,
+  toPageId: z.string(),
 });
 
 export const conditionalRuleSchema = z.object({
   show: conditionalGroupSchema.optional(),
+  require: conditionalGroupSchema.optional(),
+  jump: z.array(conditionalJumpRuleSchema).max(MAX_JUMP_RULES).optional(),
 });
 
 // --- ValidationRule --------------------------------------------------------

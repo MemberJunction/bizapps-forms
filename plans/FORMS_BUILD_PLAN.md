@@ -529,13 +529,16 @@ flowchart LR
 ## 6. Conditional Logic (Phase 1 basics only)
 
 Stored as **declarative JSON `ConditionalRule`** on FormPage and FormQuestion. Phase 1
-supports show/hide and skip-to-page based on prior answers:
+supports show/hide based on prior answers (skip-to-page and the other rule verbs ship with
+`plans/RULES_AND_BRANCHING_PLAN.md` — this section previously claimed skip-to-page, which
+never existed in the code):
 
 ```jsonc
 { "show": { "all": [ { "questionId": "<q>", "op": "equals", "value": "Other" } ] } }
 ```
 
-Operators: `equals, notEquals, in, notIn, isAnswered, greaterThan, lessThan, contains`.
+Operators: `equals, notEquals, equalsIgnoreCase, in, notIn, isAnswered, isNotAnswered,
+greaterThan, lessThan, contains, startsWith, endsWith`.
 Combinators: `all` / `any`. Evaluated client-side in the widget and re-validated server-side
 on submit. **Out of scope for P1:** calculated fields, expression language, quotas, visual
 flow-graph. Anything heavier is a Phase-2 candidate or an MJ Action.
@@ -1302,3 +1305,39 @@ native entities. This is the reporting differentiator no incumbent has.
     `packages/Server/src/generated/generated.ts` **byte-identically** to what is checked in. The
     regeneration artifacts were discarded: the DisplayName drift they also carry belongs to
     `chore/resync-codegen-output`, which this unblocks.
+- **2026-08-25 (evening) — rules & branching: verbs, not just visibility.** Branch
+  `feat/rules-and-branching`, driven end-to-end by `plans/RULES_AND_BRANCHING_PLAN.md` (which
+  carries the per-task implementation notes; read it before touching any rule code). The one-verb
+  show/hide engine grew into a rules system, in three shipped phases:
+  - **A — trust fixes.** Option picker for condition values (values come from
+    `publishedOptionIdentities`, the SAME function the publish path uses, uniqueness rewrite
+    included — a typo'd value can no longer silently kill a rule); date `greaterThan`/`lessThan`
+    fixed (`Number('2026-08-25')` is NaN — kind-tagged coercion via `Date.parse`, mixed
+    number-vs-date never fires); four operators (`isNotAnswered`, `equalsIgnoreCase`,
+    `startsWith`, `endsWith`); §6 above corrected (it promised skip-to-page that did not exist).
+  - **B — the rules panel.** Rules are authored as CARDS in the right properties panel: "+ Add
+    rule" opens a card picker, each card hosts the shared condition-group editor. Pages are now
+    selectable (`BuilderSelection` grew a `page` arm) with their own editor — the page-level
+    ConditionalRule that was evaluated on both sides since S2 finally has authoring UI.
+  - **C — the verbs.** `require` (conditional requiredness; static `isRequired` stays the
+    stronger promise; hidden still dominates required), `jump` (forward-only page skips,
+    compiled to visibility via `resolveVisiblePages` — one shared resolver replacing both sides'
+    page filters; cycles unrepresentable), disqualify/knockout (`FormScreen.IsDisqualification` +
+    `FormResponse.Status='Disqualified'` via migration `V202608252340__v0.12.x`; evaluated
+    mid-form by the widget, ENFORCED server-side on every save; no quota, no automations, no
+    SubmittedAt; `resolveEndingScreen` excludes knockout screens from every arm), and scoring
+    (the dead `FormQuestion.ScoringConfig` column finally read: per-option points →
+    `computeScore` → `source:'score'` conditions banding ending screens; per-option points UI in
+    the question editor).
+  - **Blast-radius fixes:** `clone-remap` now remaps `require`/`jump` (with the page-id map) and
+    copies score conditions verbatim — cloning no longer silently drops the new verbs. The zod
+    gate (`schemas.ts`) grew the new operators/verbs plus `MAX_CONDITIONS_PER_GROUP`/
+    `MAX_JUMP_RULES` caps (reject, never truncate).
+  - **Verification:** every new pure function specced happy/edge/worst
+    (`rule-verbs.spec`, `scoring.spec`, `condition-sources.spec`, `rules-panel-model.spec`,
+    server `rule-verbs-validation.spec` proving require/jump enforcement + jumped-over answers
+    dropped). Full suite green: 262 entities / 26 core-entities-server / 831 ng / 142 actions /
+    464 server (+8 new server specs). CodeGen ran clean (443 entities); `lint:distribution`
+    passes. NOTE for the next session: the shared MJ workspace needed a manual
+    `network-utils` symlink under `MJ/packages/AI/Providers/HeyGen/node_modules/@memberjunction`
+    before CodeGen would boot — that is workspace drift in the sibling repo, not this branch.

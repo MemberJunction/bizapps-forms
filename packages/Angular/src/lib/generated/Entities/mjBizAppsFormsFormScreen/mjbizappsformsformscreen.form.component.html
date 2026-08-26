@@ -47,11 +47,11 @@
 
     </mj-collapsible-panel>
 
-    <!-- Screen Content Section -->
+    <!-- Content Section -->
     <mj-collapsible-panel
-        SectionKey="screenContent"
-        SectionName="Screen Content"
-        Icon="fa fa-align-left"
+        SectionKey="content"
+        SectionName="Content"
+        Icon="fa fa-info-circle"
         [Form]="this"
         [FormContext]="formContext">
         <mj-form-field 
@@ -135,6 +135,14 @@
             [ShowLabel]="true"
             FieldName="SocialLinks"
             Type="code"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="IsDisqualification"
+            Type="checkbox"
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>

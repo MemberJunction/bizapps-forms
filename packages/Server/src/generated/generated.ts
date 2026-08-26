@@ -2720,6 +2720,9 @@ export class mjBizAppsFormsFormScreen_ {
     @Field({nullable: true, description: `Ending screens only: JSON array of { platform, url } social links rendered as icons under the ending message. Absent or empty means no social links are shown; there is no separate enabled flag`}) 
     SocialLinks?: string;
         
+    @Field(() => Boolean, {description: `Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it`}) 
+    IsDisqualification: boolean;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -2767,6 +2770,9 @@ export class CreatemjBizAppsFormsFormScreenInput {
     @Field({ nullable: true })
     SocialLinks: string | null;
 
+    @Field(() => Boolean, { nullable: true })
+    IsDisqualification?: boolean;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -2812,6 +2818,9 @@ export class UpdatemjBizAppsFormsFormScreenInput {
 
     @Field({ nullable: true })
     SocialLinks?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    IsDisqualification?: boolean;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

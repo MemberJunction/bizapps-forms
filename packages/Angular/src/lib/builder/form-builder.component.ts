@@ -29,6 +29,7 @@ import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
+import { PageEditorComponent } from './page-editor.component';
 import { ImportQuestionsComponent } from './import-questions.component';
 import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
@@ -57,7 +58,8 @@ import {
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
-import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
+import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
+import type { JumpTargetPage } from './rules-panel-model';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
   definitionFingerprint,
@@ -69,10 +71,13 @@ import { isValidReorder } from './reorder';
 import { nextOptionLabel } from './option-labels';
 import {
   NOTHING_SELECTED,
+  clearIfPage,
   clearIfQuestion,
   clearIfScreen,
+  pageId,
   questionId,
   screenId,
+  selectPage as pageSelection,
   selectQuestion as questionSelection,
   selectScreen as screenSelection,
   type BuilderSelection,
@@ -129,6 +134,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     CdkDragPreview,
     QuestionEditorComponent,
     ScreenEditorComponent,
+    PageEditorComponent,
     ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
@@ -164,6 +170,10 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected get selectedScreenId(): string | null {
     return screenId(this.selection);
+  }
+
+  protected get selectedPageId(): string | null {
+    return pageId(this.selection);
   }
 
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
@@ -544,6 +554,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = true;
     if (await this.state.deletePage(page)) {
       this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
+      this.selection = clearIfPage(this.selection, page.entity.ID);
       for (const q of page.questions) {
         this.selection = clearIfQuestion(this.selection, q.entity.ID);
       }
@@ -591,6 +602,79 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected selectScreen(screen: mjBizAppsFormsFormScreenEntity): void {
     this.selection = screenSelection(screen.ID);
     this.cdr.markForCheck();
+  }
+
+  // -- page selection (RULES_AND_BRANCHING_PLAN B2) ---------------------------
+
+  protected get selectedPage(): PageNode | null {
+    if (!this.tree || !this.selectedPageId) {
+      return null;
+    }
+    return this.tree.pages.find((p) => p.entity.ID === this.selectedPageId) ?? null;
+  }
+
+  /** 0-based position of the selected page, or -1. */
+  protected get selectedPageIndex(): number {
+    if (!this.tree || !this.selectedPageId) {
+      return -1;
+    }
+    return this.tree.pages.findIndex((p) => p.entity.ID === this.selectedPageId);
+  }
+
+  protected selectPage(page: PageNode): void {
+    this.selection = pageSelection(page.entity.ID);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Conditional sources for a PAGE: questions on pages strictly BEFORE it.
+   *
+   * Not "questions before this one" (a question's rule) and not "everything" (an ending's):
+   * a page rule referencing its own questions would hide the page out from under a respondent
+   * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
+   * questions are never offered.
+   */
+  protected get pageConditionalSources(): ConditionalSourceQuestion[] {
+    const index = this.selectedPageIndex;
+    if (!this.tree || index <= 0) {
+      return [];
+    }
+    return this.tree.pages
+      .slice(0, index)
+      .flatMap((page) => page.questions.map((q) => toConditionalSource(q.entity, q.options)));
+  }
+
+  protected onPageChanged(page: PageNode): void {
+    this.state.saveDebounced(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Sources for the selected page's JUMP conditions: earlier pages AND the page's own
+   * questions — leaving a page is decided by what was just answered on it, which is exactly
+   * what the show rule must NOT read (see {@link pageConditionalSources}).
+   */
+  protected get pageJumpConditionSources(): ConditionalSourceQuestion[] {
+    const index = this.selectedPageIndex;
+    if (!this.tree || index < 0) {
+      return [];
+    }
+    return this.tree.pages
+      .slice(0, index + 1)
+      .flatMap((page) => page.questions.map((q) => toConditionalSource(q.entity, q.options)));
+  }
+
+  /** Pages AFTER the selected one — jump targets are forward-only by contract. */
+  protected get pageJumpTargets(): JumpTargetPage[] {
+    const index = this.selectedPageIndex;
+    if (!this.tree || index < 0) {
+      return [];
+    }
+    return this.tree.pages.slice(index + 1).map((page, offset) => ({
+      id: page.entity.ID,
+      label: page.entity.Title || `Page ${index + 2 + offset}`,
+    }));
   }
 
   protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {
@@ -647,9 +731,14 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree) {
       return [];
     }
-    return this.tree.pages.flatMap((page) =>
-      page.questions.map((q) => ({ id: q.entity.ID, prompt: q.entity.Prompt })),
-    );
+    return [
+      ...this.tree.pages.flatMap((page) =>
+        page.questions.map((q) => toConditionalSource(q.entity, q.options)),
+      ),
+      // Endings may also band on the running score (C4) — "score > 70 → pass screen". Only
+      // endings get this: mid-form rules reading a mid-form score would be circular.
+      SCORE_SOURCE,
+    ];
   }
 
   // -- import ---------------------------------------------------------------
@@ -765,7 +854,7 @@ export class FormBuilderComponent extends BaseFormComponent {
         if (q.entity.ID === this.selectedQuestionId) {
           return sources;
         }
-        sources.push({ id: q.entity.ID, prompt: q.entity.Prompt });
+        sources.push(toConditionalSource(q.entity, q.options));
       }
     }
     return sources;

@@ -42,6 +42,12 @@ export interface PersistenceInputs {
   formVersionId: string;
   distributionId: string;
   complete: boolean;
+  /**
+   * C3: this save is a DISQUALIFICATION — a knockout rule matched. Terminal like Complete,
+   * but never quota-counted, never SubmittedAt-stamped, and it wins over `complete`: a final
+   * submit whose answers disqualify persists as `Disqualified`, whatever the client claimed.
+   */
+  disqualified?: boolean;
   startedAt?: string;
   sessionId: string;
   sourceMetadata: JSONValue;
@@ -70,7 +76,7 @@ export interface PersistenceInputs {
 export interface PersistenceResult {
   ok: boolean;
   responseId?: string;
-  status?: 'Complete' | 'Partial';
+  status?: mjBizAppsFormsFormResponseEntity['Status'];
   message?: string;
   /**
    * True when this submission was an idempotent no-op against a row a CONCURRENT request had
@@ -137,17 +143,36 @@ export function isValidUuid(value: string | undefined | null): boolean {
   return typeof value === 'string' && UUID_RE.test(value);
 }
 
+/** The status this save writes. Disqualification wins over everything else. */
+function statusFor(inputs: PersistenceInputs): mjBizAppsFormsFormResponseEntity['Status'] {
+  if (inputs.disqualified) {
+    return 'Disqualified';
+  }
+  return inputs.complete ? 'Complete' : 'Partial';
+}
+
+/** Terminal statuses: rows nothing may downgrade or rewrite. */
+function isTerminalStatus(status: mjBizAppsFormsFormResponseEntity['Status']): boolean {
+  return status === 'Complete' || status === 'Disqualified';
+}
+
+/** Whether this save counts toward completion quotas — a disqualification never does. */
+function countsCompletion(inputs: PersistenceInputs): boolean {
+  return inputs.complete && !inputs.disqualified;
+}
+
 /** Apply the (non-answer) column values common to create + update onto the response row. */
 function applyResponseFields(response: mjBizAppsFormsFormResponseEntity, inputs: PersistenceInputs): void {
   response.FormID = inputs.formId;
   response.FormVersionID = inputs.formVersionId;
-  response.Status = inputs.complete ? 'Complete' : 'Partial';
+  response.Status = statusFor(inputs);
   response.AnonymousSessionID = inputs.sessionId;
   if (inputs.startedAt) {
     response.StartedAt = new Date(inputs.startedAt);
   }
-  // Set SubmittedAt only on completion; a re-saved Partial must never claim it was submitted.
-  if (inputs.complete) {
+  // Set SubmittedAt only on completion; a re-saved Partial must never claim it was submitted,
+  // and a disqualified respondent never submitted at all.
+  if (inputs.complete && !inputs.disqualified) {
     response.SubmittedAt = new Date();
   }
   response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
@@ -172,7 +197,7 @@ async function createResponse(
   }
   applyResponseFields(response, inputs);
   if (await response.Save()) {
-    return { ok: true, entity: response, replacedExisting: false, countable: inputs.complete };
+    return { ok: true, entity: response, replacedExisting: false, countable: countsCompletion(inputs) };
   }
   // Save failed. If a CONCURRENT request already created the row at our adopted client id, the
   // dedupe/adopt SELECTs missed it (they ran before that insert committed) and we collided on
@@ -206,8 +231,9 @@ async function reconcileDuplicate(
     // The colliding row could not be loaded (vanished again) — surface the original failure.
     return { ok: false, message: 'Failed to save form response (duplicate id could not be reconciled).' };
   }
-  if (response.Status === 'Complete') {
-    // Terminal: a concurrent final submit already recorded this response. Return it as-is.
+  if (isTerminalStatus(response.Status)) {
+    // Terminal (Complete or Disqualified): a concurrent request already sealed this response —
+    // never downgrade it, never rewrite its answers. Return it as-is.
     return { ok: true, entity: response, replacedExisting: false, countable: false, skipAnswers: true };
   }
   // The existing row is Partial: update it in place, or promote it to Complete. It was never
@@ -216,7 +242,7 @@ async function reconcileDuplicate(
   if (!(await response.Save())) {
     return { ok: false, message: saveError(response, 'Failed to reconcile form response.') };
   }
-  return { ok: true, entity: response, replacedExisting: true, countable: inputs.complete };
+  return { ok: true, entity: response, replacedExisting: true, countable: countsCompletion(inputs) };
 }
 
 /** UPDATE/PROMOTE an existing parent FormResponse row in place; returns it or a failure. */
@@ -240,7 +266,7 @@ async function updateResponse(
   if (!(await response.Save())) {
     return { ok: false, message: saveError(response, 'Failed to update form response.') };
   }
-  return { ok: true, entity: response, replacedExisting: true, countable: inputs.complete && !wasComplete };
+  return { ok: true, entity: response, replacedExisting: true, countable: countsCompletion(inputs) && !wasComplete };
 }
 
 /** Map one validated answer onto the FormResponseAnswer typed columns and Save it. */
@@ -426,7 +452,7 @@ export async function persistSubmission(
   // A concurrent request already Completed this row (duplicate-key recovery): it is terminal, so
   // its answers and count are already recorded — return the existing id/status untouched.
   if (saved.skipAnswers) {
-    return { ok: true, responseId, status: saved.entity.Status as 'Complete' | 'Partial', deduped: true };
+    return { ok: true, responseId, status: saved.entity.Status, deduped: true };
   }
 
   // When this write targeted a pre-existing row (upsert or duplicate-key recovery), clear its
@@ -455,5 +481,5 @@ export async function persistSubmission(
   if (saved.countable) {
     await incrementResponseCount(provider, inputs.distributionId, contextUser);
   }
-  return { ok: true, responseId, status: inputs.complete ? 'Complete' : 'Partial' };
+  return { ok: true, responseId, status: statusFor(inputs) };
 }

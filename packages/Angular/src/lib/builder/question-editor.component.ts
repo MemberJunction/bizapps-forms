@@ -8,11 +8,14 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
+  parseQuestionScoring,
   questionTypeBehavior,
+  serializeQuestionScoring,
   type ConditionalRule,
   type JSONValue,
   type mjBizAppsFormsFormQuestionOptionEntity,
   type QuestionOptionMode,
+  type QuestionScoring,
   type ValidationRule,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
@@ -24,10 +27,13 @@ import {
   withSetting,
   type QuestionSettingField,
 } from './question-settings';
+import { RulesPanelComponent } from './rules-panel.component';
+import { QUESTION_RULE_CARDS } from './rules-panel-model';
 import {
-  ConditionalRuleEditorComponent,
+  toConditionalSource,
+  type ConditionalSourceOption,
   type ConditionalSourceQuestion,
-} from './conditional-rule-editor.component';
+} from './condition-sources';
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
@@ -60,6 +66,11 @@ const QUESTION_EDITOR_CSS = /* css */ `
    panel title is enough structure; four more make a 340px column look like a form
    made of forms. */
 .qe-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
+.qe-points { display: flex; flex-direction: column; gap: 8px; }
+.qe-points-row { display: flex; align-items: center; gap: 10px; }
+.qe-points-label { flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--mj-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qe-points-input { flex: none; width: 84px; text-align: right; }
+
 .qe-section-title {
   margin: 0;
   font-size: var(--mjf-label);
@@ -143,7 +154,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
   imports: [
     CommonModule,
     FormsModule,
-    ConditionalRuleEditorComponent,
+    RulesPanelComponent,
     ValidationRuleEditorComponent,
     ImageFieldComponent,
     SettingRowComponent,
@@ -195,13 +206,15 @@ export class QuestionEditorComponent {
    * switching a row on and typing into it. Reset when the selected question changes, since the
    * next question's emptiness is not this question's.
    */
-  private requested = { validation: false, placeholder: false, conditional: false };
+  protected readonly ruleCards = QUESTION_RULE_CARDS;
+
+  private requested = { validation: false, placeholder: false, scoring: false };
 
   @Input()
   public set selectedId(id: string) {
     if (id !== this.lastSelectedId) {
       this.lastSelectedId = id;
-      this.requested = { validation: false, placeholder: false, conditional: false };
+      this.requested = { validation: false, placeholder: false, scoring: false };
     }
   }
   private lastSelectedId = '';
@@ -212,10 +225,6 @@ export class QuestionEditorComponent {
 
   protected get placeholderOpen(): boolean {
     return isOptionalOpen(this.settingValue(this.placeholderField).trim() !== '', this.requested.placeholder);
-  }
-
-  protected get conditionalOpen(): boolean {
-    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
   }
 
   protected toggleValidation(): void {
@@ -232,14 +241,6 @@ export class QuestionEditorComponent {
     this.requested.placeholder = next.requested;
     if (next.clear) {
       this.setSetting(field, '');
-    }
-  }
-
-  protected toggleConditional(): void {
-    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
-    this.requested.conditional = next.requested;
-    if (next.clear) {
-      this.onConditionalChange(undefined);
     }
   }
 
@@ -413,6 +414,60 @@ export class QuestionEditorComponent {
   protected onValidationChange(rule: ValidationRule | undefined): void {
     if (!this.node) return;
     this.node.entity.ValidationRule = serializeValidationRule(rule);
+    this.questionChanged.emit(this.node);
+  }
+
+  // -- scoring (C4) -----------------------------------------------------------
+
+  /**
+   * The choices points can be assigned to — the PUBLISHED option identities, via the same
+   * mapper the condition picker uses, because points are keyed by the value a published form
+   * actually stores as the answer (`Value ?? Label`, uniquified).
+   */
+  protected get scoringChoices(): ConditionalSourceOption[] {
+    if (!this.node) return [];
+    return toConditionalSource(this.node.entity, this.node.options).options ?? [];
+  }
+
+  protected get scoring(): QuestionScoring | undefined {
+    return this.node ? parseQuestionScoring(this.node.entity.ScoringConfig) : undefined;
+  }
+
+  protected get scoringOpen(): boolean {
+    return isOptionalOpen(!!this.scoring, this.requested.scoring);
+  }
+
+  protected toggleScoring(): void {
+    const next = toggleOptional(!!this.scoring, this.requested.scoring);
+    this.requested.scoring = next.requested;
+    if (next.clear) {
+      this.writeScoring(undefined);
+    }
+  }
+
+  protected pointsFor(optionValue: string): string {
+    const points = this.scoring?.points;
+    if (!points || !Object.prototype.hasOwnProperty.call(points, optionValue)) {
+      return '';
+    }
+    return String(points[optionValue]);
+  }
+
+  protected setPoints(optionValue: string, raw: string): void {
+    const parsed = raw.trim() === '' ? undefined : Number(raw);
+    const points: Record<string, number> = { ...(this.scoring?.points ?? {}) };
+    if (parsed === undefined || !Number.isFinite(parsed)) {
+      delete points[optionValue];
+    } else {
+      points[optionValue] = parsed;
+    }
+    this.writeScoring(Object.keys(points).length > 0 ? { points } : undefined);
+  }
+
+  /** Merge-preserving write: sibling ScoringConfig content (an LLM-judge prompt) survives. */
+  private writeScoring(scoring: QuestionScoring | undefined): void {
+    if (!this.node) return;
+    this.node.entity.ScoringConfig = serializeQuestionScoring(this.node.entity.ScoringConfig, scoring);
     this.questionChanged.emit(this.node);
   }
 }

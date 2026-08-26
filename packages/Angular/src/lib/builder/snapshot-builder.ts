@@ -12,7 +12,7 @@ import type {
   mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { withUniqueValues } from './option-labels';
+import { publishedOptionIdentities } from './option-labels';
 import { endScreensOf, welcomeScreenOf } from './builder-models';
 import {
   parseConditionalRule,
@@ -21,7 +21,7 @@ import {
   parseFormSettings,
   buildStyleTokens,
 } from './json-fields';
-import { parseSocialLinks } from '@mj-biz-apps/forms-entities';
+import { parseQuestionScoring, parseSocialLinks } from '@mj-biz-apps/forms-entities';
 
 /**
  * Pure transform from the live builder tree to the immutable
@@ -126,6 +126,9 @@ function buildScreen(
   if (screen.IsDefault) {
     built.isDefault = true;
   }
+  if (screen.IsDisqualification) {
+    built.isDisqualification = true;
+  }
   const conditional = parseConditionalRule(screen.ConditionalRule);
   if (conditional) {
     built.conditionalRule = conditional;
@@ -185,6 +188,12 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
   if (validation) {
     result.validationRule = validation;
   }
+  // Per-option points (C4). Tolerant parse: a ScoringConfig holding non-scoring content (the
+  // documented LLM-judge use) publishes no scoring rather than failing the snapshot.
+  const scoring = parseQuestionScoring(q.ScoringConfig);
+  if (scoring) {
+    result.scoring = scoring;
+  }
   const settings = parseQuestionSettings(q.Settings);
   if (Object.keys(settings).length > 0) {
     result.settings = settings;
@@ -202,28 +211,22 @@ function buildQuestion(node: QuestionNode, displayOrder: number): PublishedFormQ
  * was already ambiguous, and the ambiguity would survive into the stored response.
  */
 function buildOptions(node: QuestionNode): PublishedFormQuestionOption[] {
-  return withUniqueValues(buildRawOptions(node));
-}
-
-function buildRawOptions(node: QuestionNode): PublishedFormQuestionOption[] {
-  return [...node.options]
-    .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
-    .map((opt, index) => {
-      const built: PublishedFormQuestionOption = {
-        id: opt.ID,
-        label: opt.Label,
-        value: opt.Value ?? opt.Label,
-        displayOrder: index,
-      };
-      if (opt.IsDefault) {
-        built.isDefault = true;
-      }
-      if (opt.ImageURL) {
-        built.imageURL = opt.ImageURL;
-      }
-      if (opt.MatrixAxis) {
-        built.matrixAxis = opt.MatrixAxis;
-      }
-      return built;
-    });
+  return publishedOptionIdentities(node.options).map(({ source, label, value }, index) => {
+    const built: PublishedFormQuestionOption = {
+      id: source.ID,
+      label,
+      value,
+      displayOrder: index,
+    };
+    if (source.IsDefault) {
+      built.isDefault = true;
+    }
+    if (source.ImageURL) {
+      built.imageURL = source.ImageURL;
+    }
+    if (source.MatrixAxis) {
+      built.matrixAxis = source.MatrixAxis;
+    }
+    return built;
+  });
 }

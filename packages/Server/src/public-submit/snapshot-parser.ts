@@ -12,6 +12,7 @@
 import {
   parseConditionalRule,
   parseFormSettings,
+  parseQuestionScoring,
   parseValidationRule,
   isFormQuestionType,
   type ConditionalRule,
@@ -162,6 +163,7 @@ function parseScreen(
     displayOrder: asNumber(obj.displayOrder) ?? 0,
     conditionalRule: parseOptionalConditional(obj.conditionalRule),
     isDefault: asBoolean(obj.isDefault),
+    isDisqualification: asBoolean(obj.isDisqualification),
     socialLinks: parseScreenSocialLinks(obj.socialLinks),
   };
 }
@@ -338,6 +340,9 @@ function parseQuestion(obj: JSONObject | undefined): PublishedFormQuestion | und
     displayOrder,
     conditionalRule: parseOptionalConditional(obj.conditionalRule),
     validationRule: parseOptionalValidation(obj.validationRule),
+    // Tolerant by contract: an unusable scoring blob means "does not score", never a failed
+    // snapshot — same posture as automations (side-effect config must not take the form down).
+    scoring: parseQuestionScoring(obj.scoring),
     settings: asObject(obj.settings),
     options: parseOptions(obj.options),
   };

@@ -3,11 +3,22 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import type {
   ConditionalCondition,
+  ConditionalGroup,
   ConditionalOperator,
-  ConditionalRule,
   ConditionValue,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
+import {
+  OPERATOR_CHOICES,
+  SCORE_SOURCE_ID,
+  coerceConditionValue,
+  operatorNeedsValue as operatorTakesValue,
+  toggleMembership,
+  valueEditorKind,
+  type ConditionalSourceOption,
+  type ConditionalSourceQuestion,
+  type ValueEditorKind,
+} from './condition-sources';
 
 const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre { display: flex; flex-direction: column; gap: 10px; }
@@ -23,40 +34,23 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre-remove:hover { background: var(--mj-bg-surface-hover); color: var(--mj-status-error, var(--mj-color-error-600)); }
 .cre-add { align-self: flex-start; font: inherit; font-size: 0.8125rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; border-radius: var(--mj-radius-md, 8px); border: 1px dashed var(--mj-border-default); background: transparent; color: var(--mj-brand-primary); }
 .cre-add:hover { background: var(--mj-bg-surface-hover); }
+.cre-checklist { flex: 1 1 140px; display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+.cre-check { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--mj-text-secondary); cursor: pointer; }
+.cre-check input { accent-color: var(--mj-brand-primary); }
 `;
 
-/** A question the rule can reference (preceding questions only). */
-export interface ConditionalSourceQuestion {
-  id: string;
-  prompt: string;
-}
-
-interface OperatorOption {
-  op: ConditionalOperator;
-  label: string;
-  /** Whether this operator needs a comparison value entered. */
-  needsValue: boolean;
-}
-
-const OPERATORS: ReadonlyArray<OperatorOption> = [
-  { op: 'equals', label: 'equals', needsValue: true },
-  { op: 'notEquals', label: 'does not equal', needsValue: true },
-  { op: 'contains', label: 'contains', needsValue: true },
-  { op: 'in', label: 'is one of', needsValue: true },
-  { op: 'notIn', label: 'is not one of', needsValue: true },
-  { op: 'greaterThan', label: 'is greater than', needsValue: true },
-  { op: 'lessThan', label: 'is less than', needsValue: true },
-  { op: 'isAnswered', label: 'is answered', needsValue: false },
-];
-
 /**
- * Friendly editor for a {@link ConditionalRule} `show` group (S2). Emits a new rule
- * object on every change; the parent persists it. Phase-1 supports a single
- * combinator (`all` / `any`) over a flat list of leaf conditions — no nesting, in
- * line with FORMS_BUILD_PLAN §6.
+ * Friendly editor for ONE {@link ConditionalGroup} — a single combinator (`all` / `any`) over a
+ * flat list of leaf conditions, no nesting, in line with FORMS_BUILD_PLAN §6.
  *
- * The editor never mutates the input; it rebuilds the rule and emits it, so change
- * detection stays predictable.
+ * Verb-agnostic on purpose (RULES_AND_BRANCHING_PLAN §3): the rules panel hosts one of these
+ * inside every rule card — "Show only if", and in later phases "Require if" and the rest — so
+ * this component knows nothing about which verb its group drives, and the card owns existence
+ * (there is no enable toggle here; removing the card is how a rule is turned off).
+ *
+ * The editor never mutates the input; it rebuilds the group and emits it (or `undefined` while
+ * no condition names a question), so change detection stays predictable and an unfinished rule
+ * never persists.
  */
 @Component({
   selector: 'mjf-conditional-rule-editor',
@@ -71,29 +65,62 @@ export class ConditionalRuleEditorComponent {
   @Input() sources: ConditionalSourceQuestion[] = [];
 
   @Input()
-  set rule(value: ConditionalRule | undefined) {
-    this._enabled = !!value?.show;
-    this._combinator = value?.show?.any ? 'any' : 'all';
-    const group = value?.show?.any ?? value?.show?.all ?? [];
-    this._conditions = group.map((c) => ({ ...c }));
+  set group(value: ConditionalGroup | undefined) {
+    this._combinator = value?.any ? 'any' : 'all';
+    const conditions = value?.any ?? value?.all ?? [];
+    this._conditions = conditions.map((c) => ({ ...c }));
   }
 
-  @Output() ruleChange = new EventEmitter<ConditionalRule | undefined>();
+  @Output() groupChange = new EventEmitter<ConditionalGroup | undefined>();
 
-  protected readonly operators = OPERATORS;
-  protected _enabled = false;
+  protected readonly operators = OPERATOR_CHOICES;
   protected _combinator: 'all' | 'any' = 'all';
   protected _conditions: ConditionalCondition[] = [];
 
   protected operatorNeedsValue(op: ConditionalOperator): boolean {
-    return OPERATORS.find((o) => o.op === op)?.needsValue ?? true;
+    return operatorTakesValue(op);
   }
 
-  protected toggleEnabled(enabled: boolean): void {
-    this._enabled = enabled;
-    if (enabled && this._conditions.length === 0) {
-      this.addCondition();
+  /** Which editor this condition's value gets — see {@link valueEditorKind}. */
+  protected kindFor(condition: ConditionalCondition): ValueEditorKind {
+    return valueEditorKind(condition.op, this.optionsFor(condition).length > 0);
+  }
+
+  /** The selectable options of this condition's source question ([] for free-input sources). */
+  protected optionsFor(condition: ConditionalCondition): ConditionalSourceOption[] {
+    if (condition.source === 'score') {
+      return [];
     }
+    return this.sources.find((s) => s.id === condition.questionId)?.options ?? [];
+  }
+
+  /**
+   * A stored scalar value no longer among the source's options — surfaced as an extra select
+   * entry so the picker shows the truth instead of silently blanking, and the rule keeps its
+   * (now never-matching) value until the author changes it.
+   */
+  protected staleValue(condition: ConditionalCondition): string | null {
+    if (Array.isArray(condition.value)) {
+      return null;
+    }
+    const current = this.valueAsString(condition);
+    if (current.length === 0) {
+      return null;
+    }
+    return this.optionsFor(condition).some((o) => o.value === current) ? null : current;
+  }
+
+  protected isChecked(condition: ConditionalCondition, optionValue: string): boolean {
+    if (!Array.isArray(condition.value)) {
+      return false;
+    }
+    return condition.value.some((v) => String(v) === optionValue);
+  }
+
+  protected toggleValue(index: number, optionValue: string, checked: boolean): void {
+    this._conditions = this._conditions.map((c, i) =>
+      i === index ? { ...c, value: toggleMembership(c.value, optionValue, checked) } : c,
+    );
     this.emit();
   }
 
@@ -103,26 +130,32 @@ export class ConditionalRuleEditorComponent {
   }
 
   protected addCondition(): void {
-    const firstSource = this.sources[0];
     this._conditions = [
       ...this._conditions,
-      { questionId: firstSource?.id ?? '', op: 'equals', value: '' },
+      conditionForSource(this.sources[0]?.id ?? '', 'equals', ''),
     ];
     this.emit();
   }
 
+  /** What the question <select> shows for a condition — the score sentinel for score reads. */
+  protected questionSelectValue(condition: ConditionalCondition): string {
+    return condition.source === 'score' ? SCORE_SOURCE_ID : (condition.questionId ?? '');
+  }
+
   protected removeCondition(index: number): void {
     this._conditions = this._conditions.filter((_, i) => i !== index);
-    if (this._conditions.length === 0) {
-      this._enabled = false;
-    }
     this.emit();
   }
 
-  protected setQuestion(index: number, questionId: string): void {
-    this._conditions = this._conditions.map((c, i) =>
-      i === index ? { ...c, questionId } : c,
-    );
+  protected setQuestion(index: number, selectedId: string): void {
+    this._conditions = this._conditions.map((c, i) => {
+      if (i !== index || this.questionSelectValue(c) === selectedId) {
+        return c;
+      }
+      // A new source means a new value domain — carrying the old value across would leave the
+      // picker showing one question's option against another question's answers.
+      return conditionForSource(selectedId, c.op, coerceConditionValue(c.op, ''));
+    });
     this.emit();
   }
 
@@ -131,20 +164,22 @@ export class ConditionalRuleEditorComponent {
     if (!op) {
       return;
     }
+    // Re-coerce the value for the new operator, so switching scalar <-> membership does not
+    // strand an array value on `equals` (which compares it as never-matching).
     this._conditions = this._conditions.map((c, i) =>
-      i === index ? { ...c, op } : c,
+      i === index ? { ...c, op, value: coerceConditionValue(op, this.valueAsString(c)) } : c,
     );
     this.emit();
   }
 
   /** Narrow a raw <select> value to a known operator (it always is, from our own list). */
   private toOperator(raw: string): ConditionalOperator | undefined {
-    return OPERATORS.find((o) => o.op === raw)?.op;
+    return OPERATOR_CHOICES.find((o) => o.op === raw)?.op;
   }
 
   protected setValue(index: number, raw: string): void {
     this._conditions = this._conditions.map((c, i) =>
-      i === index ? { ...c, value: this.coerceValue(c.op, raw) } : c,
+      i === index ? { ...c, value: coerceConditionValue(c.op, raw) } : c,
     );
     this.emit();
   }
@@ -159,40 +194,38 @@ export class ConditionalRuleEditorComponent {
     return String(condition.value);
   }
 
-  /** `in` / `notIn` take a comma-separated list; everything else a scalar string. */
-  private coerceValue(op: ConditionalOperator, raw: string): ConditionValue {
-    if (op === 'in' || op === 'notIn') {
-      return raw
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    }
-    return raw;
-  }
-
   private emit(): void {
-    if (!this._enabled || this._conditions.length === 0) {
-      this.ruleChange.emit(undefined);
-      return;
-    }
     const conditions = this._conditions
-      .filter((c) => c.questionId.length > 0)
+      .filter((c) => c.source === 'score' || (c.questionId ?? '').length > 0)
       .map((c) => this.normaliseCondition(c));
     if (conditions.length === 0) {
-      this.ruleChange.emit(undefined);
+      this.groupChange.emit(undefined);
       return;
     }
-    const rule: ConditionalRule = {
-      show: this._combinator === 'any' ? { any: conditions } : { all: conditions },
-    };
-    this.ruleChange.emit(rule);
+    this.groupChange.emit(
+      this._combinator === 'any' ? { any: conditions } : { all: conditions },
+    );
   }
 
-  /** Drop the value entirely for value-less operators (e.g. `isAnswered`). */
+  /** Drop the value for value-less operators, and every key the condition's source doesn't use. */
   private normaliseCondition(c: ConditionalCondition): ConditionalCondition {
+    const base: ConditionalCondition =
+      c.source === 'score' ? { source: 'score', op: c.op } : { questionId: c.questionId, op: c.op };
     if (!this.operatorNeedsValue(c.op)) {
-      return { questionId: c.questionId, op: c.op };
+      return base;
     }
-    return { questionId: c.questionId, op: c.op, value: c.value };
+    return { ...base, value: c.value };
   }
+}
+
+/** Build a fresh condition for a selected source — the score sentinel or a question id. */
+function conditionForSource(
+  selectedId: string,
+  op: ConditionalOperator,
+  value: ConditionValue,
+): ConditionalCondition {
+  if (selectedId === SCORE_SOURCE_ID) {
+    return { source: 'score', op, value };
+  }
+  return { questionId: selectedId, op, value };
 }

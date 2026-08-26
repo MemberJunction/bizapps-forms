@@ -281,7 +281,11 @@
                  setting. Shown only when there IS more than one page, so a simple one-page form
                  gains no chrome it has no use for. -->
             @if (pages.length > 1) {
-              <div class="fb-page-head">
+              <div
+                class="fb-page-head"
+                [class.is-selected]="selectedPageId === page.entity.ID"
+                (click)="selectPage(page)"
+              >
                 <span class="fb-page-num">{{ $index + 1 }}</span>
                 <input
                   #pageTitle
@@ -308,10 +312,17 @@
                 </label>
                 <button
                   type="button"
+                  class="fb-q-btn fb-reveal"
+                  [disabled]="busy"
+                  [attr.aria-label]="'Rules for section ' + ($index + 1)"
+                  (click)="selectPage(page)"
+                ><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
+                <button
+                  type="button"
                   class="fb-q-btn fb-q-btn--danger fb-reveal"
                   [disabled]="busy"
                   [attr.aria-label]="'Delete section ' + ($index + 1)"
-                  (click)="deletePage(page)"
+                  (click)="$event.stopPropagation(); deletePage(page)"
                 ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </div>
               <!-- The widget has always rendered this under the section heading; nothing in the
@@ -476,6 +487,15 @@
             [screen]="screen"
             [conditionalSources]="endingConditionalSources"
             (screenChanged)="onScreenChanged($event)"
+          />
+        } @else if (selectedPage; as page) {
+          <mjf-page-editor
+            [page]="page"
+            [pageNumber]="selectedPageIndex + 1"
+            [conditionalSources]="pageConditionalSources"
+            [jumpConditionSources]="pageJumpConditionSources"
+            [jumpTargets]="pageJumpTargets"
+            (pageChanged)="onPageChanged($event)"
           />
         } @else {
           <mjf-question-editor

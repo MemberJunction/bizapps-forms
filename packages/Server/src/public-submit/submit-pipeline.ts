@@ -17,12 +17,16 @@ import {
   endingMessage,
   endingRedirectUrl,
   hasUnreachableAutomations,
+  computeScore,
+  resolveDisqualification,
   resolveEndingScreen,
+  resolveVisiblePages,
   resolveOnSubmitDispatch,
   type AnswerValue,
   type FormAnswerInput,
   type FormSubmissionResult,
   type FieldError,
+  type PublishedFormScreen,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
@@ -200,12 +204,26 @@ function isNonEmptyString(value: unknown): value is string {
  * respondent ever sees in that scenario, "they already followed the right redirect" is exactly
  * what did not happen.
  */
+/**
+ * The running score for these answers (C4): computed over the pages the respondent could
+ * actually reach, so a hidden or jumped-over page's stale answers score nothing — the same
+ * basis the widget uses, via the same shared functions.
+ */
+function scoreFor(resolved: ResolvedDefinition, answers: ReadonlyMap<string, AnswerValue>): number {
+  const reachable = resolveVisiblePages(resolved.definition.pages, answers);
+  return computeScore(
+    reachable.flatMap((page) => page.questions),
+    answers,
+  );
+}
+
 function confirmationFields(
   resolved: ResolvedDefinition,
   answers?: ReadonlyMap<string, AnswerValue>,
 ): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
   const { settings, endScreens } = resolved.definition;
-  const ending = resolveEndingScreen(endScreens ?? [], answers ?? new Map());
+  const map = answers ?? new Map<string, AnswerValue>();
+  const ending = resolveEndingScreen(endScreens ?? [], map, { score: scoreFor(resolved, map) });
   const redirectUrl = endingRedirectUrl(ending, settings);
   return {
     // A redirect and a confirmation message are alternatives, not companions: sending both lets
@@ -363,8 +381,24 @@ async function runSubmitPipelineInner(
 
   timer.mark('quota');
 
-  // 7. Server-side re-validation (conditional visibility + required + format).
-  const validation = validateSubmission(resolved.definition, submission.answers, !complete);
+  // 6b. Disqualification (C3) — evaluated on EVERY save, before validation. The widget's own
+  //     detection is advisory; THIS is the enforcement (the mutation is reachable without the
+  //     widget, and a client that "forgets" it was disqualified must still be disqualified).
+  //     Evaluated on the raw answer map: a knockout answer disqualifies whether or not later
+  //     visibility would have kept it.
+  const preliminaryMap = buildAnswerMap(submission.answers);
+  const disqualifiedBy = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
+    score: scoreFor(resolved, preliminaryMap),
+  });
+
+  // 7. Server-side re-validation (conditional visibility + required + format). A disqualified
+  //    respondent legitimately stopped mid-form, so required questions they never reached must
+  //    not block the terminal write — validation runs in partial mode for them.
+  const validation = validateSubmission(
+    resolved.definition,
+    submission.answers,
+    !complete || disqualifiedBy !== undefined,
+  );
   if (validation.errors.length > 0) {
     return report({ success: false, errors: validation.errors });
   }
@@ -418,6 +452,7 @@ async function runSubmitPipelineInner(
       formVersionId: resolved.version.ID,
       distributionId: resolved.distribution.ID,
       complete,
+      disqualified: disqualifiedBy !== undefined,
       startedAt: submission.startedAt,
       sessionId: ctx.sessionId,
       sourceMetadata: buildSourceMetadata({
@@ -441,7 +476,10 @@ async function runSubmitPipelineInner(
   // 10. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
   //     persistence reports a `deduped` no-op — a concurrent request already Completed this row
   //     and fired its hooks, so re-firing here would double-run on-submit automations.
-  if (complete && !persisted.deduped) {
+  // Disqualified responses fire NO automations: OnComplete promised a completion this was not,
+  // and side effects on a screened-out respondent (confirmation emails, entity upserts) are the
+  // loud, hard-to-undo way to be wrong about a knockout.
+  if (complete && !persisted.deduped && disqualifiedBy === undefined) {
     // DETACHED, deliberately. The response row and its answers are already written by the
     // time we get here, and nothing the respondent is shown comes from a hook — the
     // confirmation is built from the definition. Awaiting the automation chain made every
@@ -473,8 +511,27 @@ async function runSubmitPipelineInner(
     success: true,
     responseId: persisted.responseId,
     status: persisted.status,
-    ...confirmationFields(resolved, validation.answerMap),
+    ...(disqualifiedBy !== undefined
+      ? disqualificationFields(disqualifiedBy)
+      : confirmationFields(resolved, validation.answerMap)),
   });
+}
+
+/**
+ * What a disqualified respondent is shown: the knockout screen's own copy and redirect ONLY.
+ * Deliberately not {@link confirmationFields} — the form-wide confirmation message and redirect
+ * are promises made to people who completed, and "thanks, your response has been recorded" to
+ * someone who was screened out is a lie on both counts.
+ */
+function disqualificationFields(
+  screen: PublishedFormScreen,
+): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
+  const redirectUrl = screen.redirectURL?.trim() || undefined;
+  const copy = [screen.title, screen.body].filter((t) => !!t?.trim()).join('\n\n');
+  return {
+    confirmationMessage: redirectUrl ? undefined : copy || 'Thanks for your time.',
+    redirectUrl,
+  };
 }
 
 /**
@@ -807,7 +864,11 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     }
 
     const answers = buildConditionAnswers(resolved.definition, context.canonicalAnswers);
-    const plan = planAutomations(resolved.definition.automations, { complete: true, answers });
+    const plan = planAutomations(resolved.definition.automations, {
+      complete: true,
+      answers,
+      score: scoreFor(resolved, answers),
+    });
 
     await runAutomations({
       plan,

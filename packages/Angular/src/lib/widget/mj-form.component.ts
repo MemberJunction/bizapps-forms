@@ -20,8 +20,10 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  computeScore,
   endingMessage,
   endingRedirectUrl,
+  resolveDisqualification,
   resolveEndingScreen,
   type FormSubmissionInput,
   type FormSubmissionResult,
@@ -326,8 +328,41 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /** Progress checkpoint from a child render mode → schedule a debounced partial save. */
   protected onProgress(): void {
+    if (this.checkDisqualification()) {
+      return;
+    }
     this.autosave?.ping();
     void this.bankPassedSubmitPoints();
+  }
+
+  /**
+   * A knockout rule that matches ends the form NOW (C3) — the whole point of a
+   * disqualification is that an ineligible respondent does not fill the rest in first.
+   *
+   * Banks what exists via the autosave path (fail-soft, like every autosave; the server
+   * re-evaluates the same shared rule on that save and marks the row Disqualified — this
+   * client-side verdict is a courtesy, not the enforcement), shows the knockout screen, and
+   * follows its redirect only after 'done', the same order a submit redirect uses.
+   */
+  private checkDisqualification(): boolean {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt || this.phase() !== 'ready') {
+      return false;
+    }
+    const score = computeScore(rt.visibleAnswerableQuestions(), rt.currentAnswers());
+    const screen = resolveDisqualification(def.endScreens ?? [], rt.currentAnswers(), { score });
+    if (!screen) {
+      return false;
+    }
+    void this.autosave?.flushNow();
+    this.endingScreen.set(screen);
+    this.phase.set('done');
+    const redirectUrl = screen.redirectURL?.trim();
+    if (redirectUrl) {
+      this.redirect(redirectUrl);
+    }
+    return true;
   }
 
   /**
@@ -477,7 +512,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (!def || !rt) {
       return;
     }
-    this.endingScreen.set(resolveEndingScreen(def.endScreens ?? [], rt.currentAnswers()));
+    // Score over the questions the respondent could reach (C4) — the same basis the server
+    // uses, so both sides band on the same number.
+    const score = computeScore(rt.visibleAnswerableQuestions(), rt.currentAnswers());
+    this.endingScreen.set(resolveEndingScreen(def.endScreens ?? [], rt.currentAnswers(), { score }));
   }
 
   /**

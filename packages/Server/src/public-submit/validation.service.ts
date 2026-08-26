@@ -38,7 +38,9 @@ import {
   evaluateConditionalRule,
   isAnswerableQuestionType,
   isAnswerSupplied,
+  isRequiredNow,
   isRequiredSatisfied,
+  resolveVisiblePages,
   coerceAnswerToNumber,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -148,10 +150,9 @@ export function validateSubmission(
   const errors: FieldError[] = [];
   const visible: ValidatedAnswer[] = [];
 
-  for (const page of definition.pages) {
-    if (!evaluateConditionalRule(page.conditionalRule, answerMap)) {
-      continue;
-    }
+  // Page reachability — show rules AND forward jumps — comes from the one shared resolver, so
+  // a page the widget skipped over is equally unreachable here (its answers are dropped).
+  for (const page of resolveVisiblePages(definition.pages, answerMap)) {
     for (const question of page.questions) {
       collectVisibleQuestion(question, answerMap, inputByQuestion, partial, errors, visible);
     }
@@ -182,8 +183,10 @@ function collectVisibleQuestion(
   // Required is asked SEPARATELY from answered, because the two disagree on consent: an
   // unticked box is `false`, which is a supplied answer, so a required "I agree to the terms"
   // used to pass here as well as in the widget. A rule enforced only in the browser is not
-  // enforced at all — this mutation is reachable without it.
-  if (question.isRequired && !partial && !isRequiredSatisfied(question.type, value)) {
+  // enforced at all — this mutation is reachable without it. `isRequiredNow` folds in the
+  // conditional `require` verb; the visibility return above is what keeps hidden ⇒ never
+  // required true (plan invariant 2).
+  if (!partial && isRequiredNow(question, answerMap) && !isRequiredSatisfied(question.type, value)) {
     errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
     return;
   }

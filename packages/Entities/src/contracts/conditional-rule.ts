@@ -14,16 +14,27 @@
  */
 import type { JSONObject } from './json-value';
 
-/** Comparison operators supported by a single condition (FORMS_BUILD_PLAN §6). */
+/**
+ * Comparison operators supported by a single condition (FORMS_BUILD_PLAN §6).
+ *
+ * The last four landed with plans/RULES_AND_BRANCHING_PLAN.md Phase A3. `isNotAnswered` is the
+ * one that matters most: before it, "show this only when the respondent skipped that" was
+ * inexpressible — `notEquals` fails on an unanswered question (see `scalarsEqual`), so no
+ * combination of the original eight could say it.
+ */
 export type ConditionalOperator =
   | 'equals'
   | 'notEquals'
+  | 'equalsIgnoreCase'
   | 'in'
   | 'notIn'
   | 'isAnswered'
+  | 'isNotAnswered'
   | 'greaterThan'
   | 'lessThan'
-  | 'contains';
+  | 'contains'
+  | 'startsWith'
+  | 'endsWith';
 
 /**
  * The value a condition compares against. Scalars for equality/ordering/substring
@@ -57,9 +68,21 @@ export type AnswerValue =
   | null
   | undefined;
 
-/** A single leaf condition: "does `questionId`'s answer satisfy `op` vs `value`?". */
+/** What a condition reads: a question's answer (the default), or the running score (C4). */
+export type ConditionSource = 'question' | 'score';
+
+/**
+ * A single leaf condition: "does `questionId`'s answer (or the score) satisfy `op` vs `value`?".
+ *
+ * `source` is absent for the original question-reading conditions — every stored rule predates
+ * it — and `'score'` for a condition that reads the running total instead of an answer. A
+ * score condition has no `questionId`; a question condition without one is malformed and never
+ * fires (see {@link evaluateCondition}).
+ */
 export interface ConditionalCondition {
-  questionId: string;
+  source?: ConditionSource;
+  /** The question whose answer is read. Required unless `source` is `'score'`. */
+  questionId?: string;
   op: ConditionalOperator;
   /** Omitted for `isAnswered`; required for every other operator. */
   value?: ConditionValue;
@@ -78,12 +101,52 @@ export interface ConditionalGroup {
 }
 
 /**
- * A declarative visibility rule. Phase 1 supports `show`: the page/question is shown
- * only when the group evaluates true. Absence of a rule (or of `show`) means
- * "always visible".
+ * One forward jump: when `when` passes, skip ahead to the page `toPageId` (pages between are
+ * hidden). Forward-only — a backward or unknown target is inert, never an error — which is
+ * what makes jump cycles unrepresentable (RULES_AND_BRANCHING_PLAN §2.2).
+ */
+export interface ConditionalJumpRule {
+  when: ConditionalGroup;
+  toPageId: string;
+}
+
+/**
+ * A declarative rule object — one JSON column, several verbs (RULES_AND_BRANCHING_PLAN §2.1).
+ *
+ * `show` (any item): visible only when the group passes; absent means "always visible".
+ * `require` (questions): required when the group passes, on top of the static `isRequired` —
+ * see `isRequiredNow` in rule-verbs.ts. `jump` (pages): forward skips, first match wins — see
+ * `resolveVisiblePages` there. Absent keys mean exactly the pre-verb behavior, so every
+ * already-published snapshot keeps meaning what it meant.
  */
 export interface ConditionalRule {
   show?: ConditionalGroup;
+  require?: ConditionalGroup;
+  jump?: ConditionalJumpRule[];
+}
+
+/**
+ * Caps on rule size (design principle: every unbounded shape gets an explicit limit).
+ *
+ * Enforced at the untrusted boundary — the zod schema REJECTS an over-cap rule (an explicit
+ * publish-time failure, never a silent truncation that would weaken an `all` group) — and in
+ * the editor, which stops offering "Add condition" at the cap. `resolveVisiblePages`
+ * additionally ignores jump rules beyond the cap as a defense in depth for pre-validation
+ * callers.
+ */
+export const MAX_CONDITIONS_PER_GROUP = 20;
+export const MAX_JUMP_RULES = 10;
+
+/**
+ * Context beyond the answers that a condition may read — today just the running score.
+ *
+ * Supplied only where the pipeline has actually computed a score (ending resolution and
+ * on-submit automations, both after visibility settled). Where it is not supplied, a score
+ * condition simply never fires — it does NOT default to zero, because "score unknown here"
+ * and "scored zero" are different claims and only the second may satisfy a band.
+ */
+export interface EvalExtras {
+  score?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,51 +164,98 @@ export interface ConditionalRule {
 export function evaluateConditionalRule(
   rule: ConditionalRule | undefined,
   answers: ReadonlyMap<string, AnswerValue>,
+  extras?: EvalExtras,
 ): boolean {
   if (!rule || !rule.show) {
     return true;
   }
-  return evaluateGroup(rule.show, answers);
+  return evaluateGroup(rule.show, answers, extras);
 }
 
 /**
  * Evaluate a single group. `all` conditions are AND-ed; `any` conditions are OR-ed;
  * when both are present, both must hold. An empty/absent group is vacuously true.
  */
-export function evaluateGroup(group: ConditionalGroup, answers: ReadonlyMap<string, AnswerValue>): boolean {
+export function evaluateGroup(
+  group: ConditionalGroup,
+  answers: ReadonlyMap<string, AnswerValue>,
+  extras?: EvalExtras,
+): boolean {
   const allPass =
-    group.all === undefined || group.all.every((c) => evaluateCondition(c, answers));
+    group.all === undefined || group.all.every((c) => evaluateCondition(c, answers, extras));
   const anyPass =
-    group.any === undefined || group.any.length === 0 || group.any.some((c) => evaluateCondition(c, answers));
+    group.any === undefined || group.any.length === 0 || group.any.some((c) => evaluateCondition(c, answers, extras));
   return allPass && anyPass;
 }
 
-/** Evaluate one leaf condition against the supplied answers. */
+/** Evaluate one leaf condition against the supplied answers (and score, where provided). */
 export function evaluateCondition(
   condition: ConditionalCondition,
   answers: ReadonlyMap<string, AnswerValue>,
+  extras?: EvalExtras,
 ): boolean {
-  const answer = answers.get(condition.questionId);
+  const answer = conditionOperand(condition, answers, extras);
+  if (answer === NOT_EVALUABLE) {
+    return false;
+  }
   switch (condition.op) {
     case 'isAnswered':
       return isAnswerSupplied(answer);
+    case 'isNotAnswered':
+      return !isAnswerSupplied(answer);
     case 'equals':
       return scalarsEqual(answer, condition.value);
     case 'notEquals':
       return !scalarsEqual(answer, condition.value);
+    case 'equalsIgnoreCase':
+      return scalarsEqualIgnoreCase(answer, condition.value);
     case 'in':
       return isMember(answer, condition.value);
     case 'notIn':
       return isAnswerSupplied(answer) && !isMember(answer, condition.value);
     case 'greaterThan':
-      return compareNumeric(answer, condition.value) === 'greater';
+      return compareOrdered(answer, condition.value) === 'greater';
     case 'lessThan':
-      return compareNumeric(answer, condition.value) === 'less';
+      return compareOrdered(answer, condition.value) === 'less';
     case 'contains':
       return answerContains(answer, condition.value);
+    case 'startsWith':
+      return stringAffixMatch(answer, condition.value, 'start');
+    case 'endsWith':
+      return stringAffixMatch(answer, condition.value, 'end');
     default:
       return assertNever(condition.op);
   }
+}
+
+/**
+ * Sentinel for "this condition cannot be evaluated at all" — distinct from every real
+ * {@link AnswerValue}, including `undefined` (which legitimately means "unanswered" and is
+ * what `isNotAnswered` exists to match).
+ */
+const NOT_EVALUABLE: unique symbol = Symbol('condition not evaluable');
+
+/**
+ * The value a condition's operator runs against: the named question's answer, or the running
+ * score for a `source: 'score'` condition.
+ *
+ * Two malformed/unavailable shapes are refused outright rather than degraded to `undefined`:
+ * a question condition with no `questionId` (degrading it would make `isNotAnswered` fire on a
+ * condition that names nothing), and a score condition evaluated where no score was computed
+ * (see {@link EvalExtras} — "unknown" must not pass for "zero").
+ */
+function conditionOperand(
+  condition: ConditionalCondition,
+  answers: ReadonlyMap<string, AnswerValue>,
+  extras: EvalExtras | undefined,
+): AnswerValue | typeof NOT_EVALUABLE {
+  if (condition.source === 'score') {
+    return extras?.score === undefined ? NOT_EVALUABLE : extras.score;
+  }
+  if (condition.questionId === undefined || condition.questionId.length === 0) {
+    return NOT_EVALUABLE;
+  }
+  return answers.get(condition.questionId);
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +308,42 @@ function scalarsEqual(answer: AnswerValue, value: ConditionValue | undefined): b
 }
 
 /**
+ * `equals`, but case-insensitive when both sides are strings. Any other pairing falls back to
+ * {@link scalarsEqual} — numbers and booleans have no case, and treating them differently here
+ * would make the two equals operators disagree on non-string answers for no reason an author
+ * could see.
+ */
+function scalarsEqualIgnoreCase(answer: AnswerValue, value: ConditionValue | undefined): boolean {
+  if (typeof answer === 'string' && typeof value === 'string') {
+    return answer.toLowerCase() === value.toLowerCase();
+  }
+  return scalarsEqual(answer, value);
+}
+
+/**
+ * `startsWith` / `endsWith`: prefix/suffix match for a STRING answer only — arrays and
+ * composites are "no match", same posture as every other operator here.
+ *
+ * An empty comparison value never matches, deliberately: `''.startsWith('')` is true, so a
+ * half-typed condition would otherwise flip from "never fires" to "always fires" the moment the
+ * operator is picked — the silent inversion of what an unfinished rule should do.
+ */
+function stringAffixMatch(
+  answer: AnswerValue,
+  value: ConditionValue | undefined,
+  where: 'start' | 'end',
+): boolean {
+  if (typeof answer !== 'string' || value === undefined || Array.isArray(value)) {
+    return false;
+  }
+  const needle = String(value);
+  if (needle.length === 0) {
+    return false;
+  }
+  return where === 'start' ? answer.startsWith(needle) : answer.endsWith(needle);
+}
+
+/**
  * Membership test for `in` / `notIn`. The condition value is the array of allowed
  * options; a scalar answer passes if it is one of them, and an array answer passes
  * if it intersects them.
@@ -216,33 +362,67 @@ function isMember(answer: AnswerValue, value: ConditionValue | undefined): boole
   return false;
 }
 
-/** Numeric comparison result, or `undefined` when either side is non-numeric. */
-function compareNumeric(
+/**
+ * Ordered comparison for `greaterThan` / `lessThan`, or `undefined` when either side is
+ * non-comparable OR the two sides are different kinds.
+ *
+ * Dates are the reason this is kind-tagged. A Date question's answer travels as an ISO string
+ * (`answer-value.ts` `dateValue: String(value)`), and `Number('2026-08-25')` is `NaN` — so
+ * before this existed, greaterThan/lessThan on a Date question could NEVER fire, while `equals`
+ * on the same question worked, making the field look supported. ISO strings now coerce through
+ * `Date.parse`. The kinds must MATCH: without that, the number `5` would compare against a
+ * date's epoch-milliseconds and fire a nonsense rule ("Start Date greater than 5") that no
+ * author meant.
+ */
+function compareOrdered(
   answer: AnswerValue,
   value: ConditionValue | undefined,
 ): 'greater' | 'less' | 'equal' | undefined {
-  const a = toNumber(answer);
-  const b = toNumber(value);
-  if (a === undefined || b === undefined) {
+  const a = toComparable(answer);
+  const b = toComparable(value);
+  if (a === undefined || b === undefined || a.kind !== b.kind) {
     return undefined;
   }
-  if (a > b) {
+  if (a.n > b.n) {
     return 'greater';
   }
-  if (a < b) {
+  if (a.n < b.n) {
     return 'less';
   }
   return 'equal';
 }
 
-/** Coerce an answer/condition value to a finite number, or `undefined`. */
-function toNumber(value: AnswerValue | ConditionValue | undefined): number | undefined {
+/** A value reduced to something orderable, tagged with which scale it lives on. */
+interface Comparable {
+  kind: 'number' | 'date';
+  n: number;
+}
+
+/** ISO-8601 calendar-date prefix (`2026-08-25`, `2026-08-25T10:00`, …). */
+const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
+
+/**
+ * Coerce an answer/condition value to a {@link Comparable}, or `undefined`.
+ *
+ * Numeric strings stay numbers (`'42'` compares as 42, as it always did); only strings shaped
+ * like an ISO date take the `Date.parse` path, so free text like `'March 3'` — which
+ * `Date.parse` would happily guess at — stays non-comparable rather than firing by locale
+ * accident.
+ */
+function toComparable(value: AnswerValue | ConditionValue | undefined): Comparable | undefined {
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : undefined;
+    return Number.isFinite(value) ? { kind: 'number', n: value } : undefined;
   }
   if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
+    const trimmed = value.trim();
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return { kind: 'number', n: parsed };
+    }
+    if (ISO_DATE_PREFIX.test(trimmed)) {
+      const ms = Date.parse(trimmed);
+      return Number.isFinite(ms) ? { kind: 'date', n: ms } : undefined;
+    }
   }
   return undefined;
 }

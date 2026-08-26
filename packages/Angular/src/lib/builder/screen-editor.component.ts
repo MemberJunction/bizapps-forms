@@ -26,10 +26,9 @@ import {
   type mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
-import {
-  ConditionalRuleEditorComponent,
-  type ConditionalSourceQuestion,
-} from './conditional-rule-editor.component';
+import { RulesPanelComponent } from './rules-panel.component';
+import { ENDING_RULE_CARDS } from './rules-panel-model';
+import type { ConditionalSourceQuestion } from './condition-sources';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
@@ -64,6 +63,13 @@ const SCREEN_EDITOR_CSS = /* css */ `
   color: var(--mj-text-secondary);
 }
 
+.se-rules-title {
+  margin: 0;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  color: var(--mj-text-secondary);
+}
+
 `;
 
 @Component({
@@ -73,7 +79,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
   imports: [
     CommonModule,
     FormsModule,
-    ConditionalRuleEditorComponent,
+    RulesPanelComponent,
     ImageFieldComponent,
     SettingRowComponent,
   ],
@@ -188,27 +194,18 @@ const SCREEN_EDITOR_CSS = /* css */ `
             </div>
           </mjf-setting-row>
 
-          <mjf-setting-row
-            label="Show only if"
-            hint="Endings are checked in order and the first match wins. One with no condition is only reachable as the default."
-            [open]="conditionalOpen"
-          >
-            <button
-              slot="control"
-              type="button"
-              class="mjf-switch"
-              [class.is-on]="conditionalOpen"
-              role="switch"
-              [attr.aria-checked]="conditionalOpen"
-              aria-label="Show only if"
-              (click)="toggleConditional()"
-            ></button>
-            <mjf-conditional-rule-editor
+          <div class="se-section">
+            <p class="se-rules-title">Rules</p>
+            <mjf-rules-panel
+              [subjectId]="s.ID"
+              [cards]="ruleCards"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
+              [isDisqualification]="s.IsDisqualification"
               (ruleChange)="onConditionalChange($event)"
+              (disqualifyChange)="setDisqualification($event)"
             />
-          </mjf-setting-row>
+          </div>
         }
       </div>
     }
@@ -219,7 +216,7 @@ export class ScreenEditorComponent {
   public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
     if (value?.ID !== this.current?.ID) {
       // A new screen's emptiness is not the previous screen's — start its rows closed.
-      this.requested = { redirect: false, conditional: false, social: false };
+      this.requested = { redirect: false, social: false };
     }
     this.current = value;
   }
@@ -229,7 +226,9 @@ export class ScreenEditorComponent {
   private current: mjBizAppsFormsFormScreenEntity | null = null;
 
   /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
-  private requested = { redirect: false, conditional: false, social: false };
+  protected readonly ruleCards = ENDING_RULE_CARDS;
+
+  private requested = { redirect: false, social: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 
@@ -240,9 +239,6 @@ export class ScreenEditorComponent {
     return isOptionalOpen(!!this.screen?.RedirectURL, this.requested.redirect);
   }
 
-  protected get conditionalOpen(): boolean {
-    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
-  }
 
   protected toggleRedirect(): void {
     const next = toggleOptional(!!this.screen?.RedirectURL, this.requested.redirect);
@@ -252,13 +248,6 @@ export class ScreenEditorComponent {
     }
   }
 
-  protected toggleConditional(): void {
-    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
-    this.requested.conditional = next.requested;
-    if (next.clear) {
-      this.onConditionalChange(undefined);
-    }
-  }
 
   // --- Social links ---------------------------------------------------------
 
@@ -350,6 +339,15 @@ export class ScreenEditorComponent {
     this.apply((s) => {
       s.IsDefault = !s.IsDefault;
     });
+  }
+
+  /** The disqualify card was added/removed — flip the flag; the rule flows via ruleChange. */
+  protected setDisqualification(on: boolean): void {
+    const s = this.screen;
+    if (s && s.IsDisqualification !== on) {
+      s.IsDisqualification = on;
+      this.screenChanged.emit(s);
+    }
   }
 
   protected onConditionalChange(rule: ConditionalRule | undefined): void {
