@@ -33,9 +33,10 @@ export function resolveEndingScreen(
   answers: ReadonlyMap<string, AnswerValue>,
   extras?: EvalExtras,
 ): PublishedFormScreen | undefined {
-  // Disqualification screens never compete here: they are resolved FIRST, by
-  // `resolveDisqualification` (rule-verbs.ts), and a disqualify screen with no rule or a
-  // stray isDefault must not become the fallback everyone lands on.
+  // Disqualification screens never compete here. A screened-out screen is a destination a
+  // `Go to` rule SENDS someone to, not one anybody reaches by finishing the form, so letting one
+  // win the conditional arm — or, worse, become the `isDefault` fallback — would screen out
+  // every respondent who simply completed the form.
   const ordered = [...endScreens]
     .filter((s) => s.isDisqualification !== true)
     .sort((a, b) => a.displayOrder - b.displayOrder);

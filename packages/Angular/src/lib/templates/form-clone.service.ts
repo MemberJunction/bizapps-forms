@@ -312,13 +312,12 @@ export class FormCloneService {
       copy.IsDefault = source.IsDefault;
       copy.SocialLinks = source.SocialLinks;
       copy.ConditionalRule = source.ConditionalRule;
-      // The disqualification flag lives on the COLUMN, not in the ConditionalRule JSON that
-      // `rewriteConditionalRules` handles below — so copying the rule alone left the copy with a
-      // knockout's condition and none of its meaning: `resolveDisqualification` requires the
-      // flag, `resolveEndingScreen` excludes only flagged screens, so the cloned screen became a
-      // NORMAL conditional ending. The screened-out respondent still saw "not eligible", while
-      // the response was recorded Complete, stamped SubmittedAt, counted against the quota and
-      // fired every on-submit automation.
+      // The screened-out flag lives on the COLUMN, not in the ConditionalRule JSON that
+      // `rewriteConditionalRules` handles below. Copying the rule alone left the copy with a
+      // knockout's wiring and none of its meaning: `resolveEndingScreen` excludes only flagged
+      // screens, so the cloned screen became a NORMAL ending. The respondent still saw "not
+      // eligible", while the response was recorded Complete, stamped SubmittedAt, counted
+      // against the quota and fired every on-submit automation.
       copy.IsDisqualification = source.IsDisqualification;
       await this.save(copy, `${source.ScreenType.toLowerCase()} screen "${source.Title}"`);
       copies.push(copy);
