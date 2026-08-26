@@ -149,6 +149,21 @@
       [attr.aria-selected]="activeTab === 'design'"
       (click)="setTab('design')"
     ><i class="fa-solid fa-palette" aria-hidden="true"></i> Design</button>
+    <!-- The badge is the reason this tab is worth opening: a rule pointing at a deleted
+         question hides the item it guards from every respondent, and nothing else in the
+         builder says so. -->
+    <button
+      type="button"
+      class="fb-tab"
+      role="tab"
+      [class.is-on]="activeTab === 'rules'"
+      [attr.aria-selected]="activeTab === 'rules'"
+      (click)="setTab('rules')"
+    ><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Rules
+      @if (brokenRules > 0) {
+        <span class="mjf-badge mjf-badge--warning fb-tab-badge">{{ brokenRules }}</span>
+      }
+    </button>
     <button
       type="button"
       class="fb-tab"
@@ -174,6 +189,16 @@
       (click)="setTab('responses')"
     ><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses</button>
   </nav>
+
+  @if (activeTab === 'rules' && tree) {
+    <mjf-rules-tab
+      class="fb-pane-host"
+      [entries]="ruleEntries"
+      [pages]="rulePages"
+      (openRequested)="openRuleEntry($event)"
+      (addRequested)="setTab('build')"
+    />
+  }
 
   @if (activeTab === 'automate' && tree) {
     <mjf-automation-tab class="fb-pane-host" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />

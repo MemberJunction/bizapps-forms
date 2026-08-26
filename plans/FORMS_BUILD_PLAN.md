@@ -2043,3 +2043,40 @@ native entities. This is the reporting differentiator no incumbent has.
   Build clean, widget 1197.6 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants pass.
   The ✅ evaluator rows (jump, disqualification, scoring, ending resolution, fixed-point
   visibility) were re-run rather than re-implemented and are unchanged.
+
+- **2026-08-26 — rules simplification, Phase 3: one place to see every rule.** A new builder
+  "Rules" tab lists every rule on the form as a full sentence — *Show "Email" when Ticket type
+  equals VIP*, *After "Intro", skip to "VIP details" when …*, *Disqualify — show "Not eligible"
+  — when Age is less than 18* — grouped by the page the respondent meets them on.
+
+  **The capability that is genuinely new is not the list, it is the badge.** A condition naming a
+  question that was since deleted is `NOT_EVALUABLE`, which the evaluator reads as `false`, so
+  the item it guarded is hidden from every respondent — permanently, silently, with the form
+  still looking correct in the builder. The tab carries a count of broken rules and each row says
+  in words what it points at that no longer exists. Nothing in the product said this before.
+
+  **The hub is a view, and one plan point was deviated from to keep it one.** §6 said each row
+  opens the same dialog the per-item panels open; instead a row selects its item and switches to
+  Build, where that panel already is. Embedding the panel would have meant a second place that
+  knows how to write a rule to a question versus a page versus a screen — the "two write paths
+  for one thing" the same section forbids. `rules-tab.component.ts` has no persistence, no
+  `BuilderStateService`, and no import of the authoring components; `rules-hub.wiring.spec.ts`
+  pins all three.
+
+  **Prose has one source.** `describeCondition` was extracted out of `summarizeGroup`, so the
+  rail's one-line summary and the hub's full sentences are the same renderer — an author who
+  reads one wording in the panel and another in the hub has to work out whether the rule changed
+  under them. The rail still truncates to "+2 more" (it is one line in a 300px column); the hub
+  never does, because it is the one screen where a rule can be read whole.
+
+  **One existing spec was retargeted, not deleted.** `registration.spec.ts` pinned the literal
+  `BuilderTab` union to assert "responses is last"; adding any tab failed it, which reads as a
+  Responses regression and is not one. It now parses the union and asserts the ordering claim its
+  own title makes.
+
+  **Verification:** 1,943 unit tests (272 / 26 / 142 / 1002 / 501), +29 over Phase 2. The ten
+  structural guards in `rules-hub.wiring.spec.ts` were written after the component, so four
+  deliberate mutations (a write method on the hub, a flat list, a hardcoded colour, a missing tab
+  switch) were applied and each was caught before the file was kept. Build clean, widget
+  1197.6 kB; `lint:ui`, `lint:distribution` + 72 mutants, `lint:generated` and `lint:migrations`
+  all pass.

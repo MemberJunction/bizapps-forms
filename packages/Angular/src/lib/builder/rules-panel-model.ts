@@ -316,21 +316,40 @@ export function summarizeGroup(
   if (conditions.length === 0) {
     return 'No conditions yet';
   }
-  const first = conditions[0];
-  const source = first.source === 'score' ? undefined : sources.find((s) => s.id === first.questionId);
-  const prompt = first.source === 'score' ? 'Total score' : (source?.prompt ?? '(deleted question)');
-  // Labelled in the source's voice, so the summary reads back exactly what the operator dropdown
-  // offered — "Interests includes any of Sports", not "Interests is one of Sports".
-  const parts = [prompt, operatorLabel(first.op, source?.kind)];
-  if (operatorNeedsValue(first.op) && first.value !== undefined) {
-    const value = Array.isArray(first.value) ? first.value.join(', ') : String(first.value);
+  const head = describeCondition(conditions[0], sources);
+  const rest = conditions.length - 1;
+  return rest > 0 ? `${head} · +${rest} more` : head;
+}
+
+/**
+ * One condition as a phrase: "Ticket type equals VIP", "Interests includes any of Sports".
+ *
+ * The single source of prose for a condition, shared by the rail's one-line summary and the
+ * Rules tab's full sentences — two renderings that must agree, because an author who reads one
+ * wording in the panel and another in the hub has to work out whether the rule changed.
+ *
+ * Labelled in the SOURCE's voice: `isMember` intersects for a set-valued answer, so `in` reads
+ * "includes any of" on a multi-select and "is one of" on a single answer. Same operator, two
+ * honest readings, one function that knows which.
+ *
+ * A reference to a question that no longer exists says so rather than vanishing. A summary that
+ * hides the breakage is how a dead rule survives unnoticed — and a show rule on a deleted source
+ * evaluates false, hiding the item from everyone.
+ */
+export function describeCondition(
+  condition: ConditionalCondition,
+  sources: ReadonlyArray<ConditionalSourceQuestion>,
+): string {
+  const source = condition.source === 'score' ? undefined : sources.find((s) => s.id === condition.questionId);
+  const prompt = condition.source === 'score' ? 'Total score' : (source?.prompt ?? '(deleted question)');
+  const parts = [prompt, operatorLabel(condition.op, source?.kind)];
+  if (operatorNeedsValue(condition.op) && condition.value !== undefined) {
+    const value = Array.isArray(condition.value) ? condition.value.join(', ') : String(condition.value);
     if (value.length > 0) {
       parts.push(value);
     }
   }
-  const head = parts.join(' ');
-  const rest = conditions.length - 1;
-  return rest > 0 ? `${head} · +${rest} more` : head;
+  return parts.join(' ');
 }
 
 /**

@@ -1,7 +1,17 @@
 # Rules Simplification Plan
 
-**Status: Phase 0 ✅ (`7cd1146`) · Phase 1 ✅ (`9d08b10`) · Phase 2 ✅ · Phase 3 next.**
-Post-Phase-2 baseline: **1,914** tests (272 / 26 / 142 / 973 / 501), widget 1197.6 kB. Supersedes the *authoring-surface* parts of
+**Status: ALL PHASES COMPLETE.** Phase 0 `7cd1146` · Phase 1 `9d08b10` · Phase 2 `770b9fc` ·
+Phase 3 this commit. Final baseline: **1,943** tests (272 / 26 / 142 / 1002 / 501), widget
+1197.6 kB, six gates green.
+
+**One deviation from §6, recorded deliberately.** The plan said each hub row opens the same
+`RuleEditorDialogComponent` the per-item panels open. It does not: a row **selects its item and
+switches to the Build tab**, where that panel — and that dialog — already are. Embedding the
+panel in the hub would have meant a second place that knows how to write a rule to a question
+versus a page versus a screen, which is exactly the "two write paths for one thing" the same
+section forbids two bullets later ("no new write paths"). Navigation keeps the authoring surface
+singular, gives the hub zero write code, and lands the author on the item in its own context.
+`rules-hub.wiring.spec.ts` pins the no-write property rather than the dialog. Supersedes the *authoring-surface* parts of
 `RULES_AND_BRANCHING_PLAN.md` (its C1 `require` verb is **removed** by this plan; its evaluators,
 disqualification, jump, and scoring engines stay). Branch: `feat/rules-and-branching` → PR #72.
 

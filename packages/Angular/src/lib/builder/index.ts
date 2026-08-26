@@ -50,6 +50,20 @@ export { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
 export { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 export { RulesPanelComponent } from './rules-panel.component';
+export { RulesTabComponent } from './rules-tab.component';
+export {
+  brokenRuleCount,
+  collectRuleEntries,
+  describeCondition,
+  groupEntriesByPage,
+  type RuleEntry,
+  type RuleEntryGroup,
+  type RuleGroupPage,
+  type RuleInventoryForm,
+  type RuleInventoryItem,
+  type RuleInventoryPage,
+  type RuleItemKind,
+} from './rules-inventory';
 export { PageEditorComponent } from './page-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';

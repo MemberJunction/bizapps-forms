@@ -171,6 +171,9 @@ const LAYOUT_CSS = /* css */ `
    own sizing below; these two are whole components, so they get it from the host. */
 .fb-pane-host { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
+/* The count of broken rules, carried on the tab so the problem is visible without opening it. */
+.fb-tab-badge { margin-left: var(--mjf-gap-xs); }
+
 /* ----------------------------------------------------------------- build body */
 
 .fb-body { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 340px; min-height: 0; overflow: hidden; }
