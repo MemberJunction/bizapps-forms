@@ -344,3 +344,77 @@ describe('a knockout is still a row, and the row ceiling still applies', () => {
     });
   });
 });
+
+describe('only a finished submission seals a knockout', () => {
+  /**
+   * The server judges a knockout on whatever the request carries, and an AUTOSAVE carries a value
+   * the respondent has not finished typing. With the seal applied to partials, a respondent
+   * answering `18` under `age lessThan 18` who paused for the 1500ms debounce after the `1` had
+   * their response sealed `Disqualified` — and sealed is sealed, so correcting it to `18` was
+   * impossible: dedupe hands the terminal row straight back.
+   *
+   * This is the server half of the same defect the widget had. Fixing only the client left the
+   * authoritative side still judging half-typed values, which is the half that actually persists.
+   *
+   * A partial therefore records the answer and stays `Partial`. Enforcement is unaffected: the
+   * final submit is what a client cannot avoid, and that pass still seals — a caller that
+   * "forgets" it was disqualified is still disqualified the moment it tries to finish.
+   */
+  describe('happy', () => {
+    it('a partial carrying a knockout answer stays Partial', async () => {
+      const { ctx, saved } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+      const result = await runSubmitPipeline(ctx, {
+        distributionSlug: 'slug-1',
+        formVersionId: 'ver-1',
+        partial: true,
+        answers: [{ questionId: 'age', textValue: 'No' }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe('Partial');
+      // The answer is still recorded — this is about the STATUS, not about dropping progress.
+      expect(saved().some((r) => r.entityName.includes('Form Response Answers'))).toBe(true);
+    });
+
+    it('the final submit still seals it', async () => {
+      const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+      const result = await runSubmitPipeline(ctx, {
+        distributionSlug: 'slug-1',
+        formVersionId: 'ver-1',
+        answers: [{ questionId: 'age', textValue: 'No' }],
+      });
+
+      expect(result.status).toBe('Disqualified');
+    });
+  });
+
+  describe('worst', () => {
+    it('a half-typed value banked by autosave does not lock the respondent out', async () => {
+      // `1` on its way to `18`. The rule fires on it, the autosave carries it, and the respondent
+      // must still be able to finish.
+      const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+      const client = '99999999-8888-4777-8666-555555555555';
+
+      const banked = await runSubmitPipeline(ctx, {
+        distributionSlug: 'slug-1',
+        formVersionId: 'ver-1',
+        partial: true,
+        clientResponseId: client,
+        answers: [{ questionId: 'age', textValue: 'No' }],
+      });
+      expect(banked.status).toBe('Partial');
+
+      const corrected = await runSubmitPipeline(ctx, {
+        distributionSlug: 'slug-1',
+        formVersionId: 'ver-1',
+        clientResponseId: client,
+        answers: [{ questionId: 'age', textValue: 'Yes' }],
+      });
+
+      expect(corrected.status).toBe('Complete');
+      expect(corrected.confirmationMessage).toBe('Thanks');
+    });
+  });
+});

@@ -412,12 +412,45 @@ export class MjFormComponent implements OnInit, OnDestroy {
    */
   private async endAsDisqualified(screen: PublishedFormScreen): Promise<void> {
     this.disqualifying = true;
-    await this.autosave?.flushNow();
+    // Quiesce the autosave before writing, so two requests never carry the same
+    // `clientResponseId` — the primary-key collision the submit path guards the same way.
+    await this.autosave?.settle();
+    await this.sealDisqualified();
     this.endingScreen.set(screen);
     this.phase.set('done');
     const redirectUrl = screen.redirectURL?.trim();
     if (redirectUrl) {
       this.redirect(redirectUrl);
+    }
+  }
+
+  /**
+   * Record the knockout: ONE finished submission, sent before the form leaves intake.
+   *
+   * A finished submission, not an autosave, because only a completion seals a knockout
+   * server-side — a partial deliberately does not, since the rule would otherwise be judged on
+   * whatever half-typed value the debounce happened to catch. For this respondent the form IS
+   * over, so a completion is also the honest description of it.
+   *
+   * Fail-soft, like every other background write here. A captcha-gated form whose challenge is
+   * unsolved lands in the catch — the server refuses a completion without a token — and the row
+   * keeps whatever its last autosave left. Showing the respondent their screen anyway is the
+   * better half of that trade; stranding them mid-form to protect a record is not.
+   */
+  private async sealDisqualified(): Promise<void> {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt) {
+      return;
+    }
+    try {
+      const res = await this.api.submitResponse(this.buildSubmission(def, rt, false), this.responseTarget());
+      if (res.success && res.responseId) {
+        this.responseId = res.responseId;
+      }
+    } catch {
+      // Deliberately swallowed: see above. The screen is shown either way, and the server
+      // re-evaluates the same rule on whatever this respondent's next write turns out to be.
     }
   }
 

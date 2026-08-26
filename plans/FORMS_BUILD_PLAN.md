@@ -1487,3 +1487,31 @@ native entities. This is the reporting differentiator no incumbent has.
   **Verification:** 1,801 unit tests green, five lint gates, clean build, eight smoke paths. One
   smoke run hit a transient 502 from the magic-link provisioner mid-burst and passed on retry —
   worth knowing before anyone reads a single red run as a regression.
+
+- **2026-08-26 (later) — the half of the keystroke defect my own fix left behind.** Before running
+  a fourth review I re-read round three's own change, on the principle that had already paid twice
+  (the fix commits are where the defects now live), and found that the keystroke fix was only half
+  a fix. Round three moved the CLIENT off judging half-typed values. The SERVER still judged them:
+  it resolved the knockout on every save, autosaves included, and `statusFor` sealed the row
+  regardless of `complete`. So a respondent answering `18` under `age lessThan 18` who paused for
+  the 1500ms autosave debounce after the `1` still had their response sealed `Disqualified` — by
+  the authoritative side, permanently, since dedupe hands a terminal row straight back. Fixing the
+  client alone had moved the defect, not removed it.
+
+  **A knockout now seals only on a FINISHED submission.** A partial records the answer and stays
+  `Partial`. Enforcement is untouched, which is the only reason the server evaluates the rule at
+  all: the final submit is the pass a client cannot avoid, and it still seals, so a caller that
+  "forgets" it was disqualified is disqualified the moment it tries to finish.
+
+  That change made the widget's own terminal write wrong, and worth naming because it is the kind
+  of coupling that is easy to miss: `endAsDisqualified` banked through the AUTOSAVE, so under the
+  new rule the knockout would have been recorded as an ordinary partial and never sealed at all.
+  It now sends one finished submission (`sealDisqualified`), after quiescing the autosave so two
+  writes never share a `clientResponseId`, and before leaving intake. Fail-soft: a captcha-gated
+  form with an unsolved challenge is refused by the server, and showing the respondent their
+  screen anyway beats stranding them mid-form to protect a record.
+
+  **Verification:** 1,807 unit tests green, five lint gates, clean build, eight smoke paths. The
+  magic-link provisioner returns intermittent 502s on `/f/:slug` under burst load — it recovered
+  on retry every time and the route touches none of this work, but it is worth knowing before
+  anyone reads a single red smoke run as a regression.

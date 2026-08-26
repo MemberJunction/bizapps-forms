@@ -372,9 +372,19 @@ async function runSubmitPipelineInner(
   //    accepting responses" and wrote nothing, so the one fact worth keeping about that person
   //    — that they were screened out — was the fact we discarded.
   const preliminaryMap = buildAnswerMap(submission.answers);
-  const disqualifiedBy = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
+  const knockout = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
     score: scoreFor(resolved, preliminaryMap),
   });
+  //    A knockout SEALS the response only on a finished submission. The rule is evaluated on
+  //    whatever the request carries, and an autosave carries a value the respondent is still
+  //    typing: `1` on the way to `18`, under `age lessThan 18`, fired the rule and — because
+  //    sealed is sealed — left them unable to ever correct it, since dedupe hands the terminal
+  //    row straight back. A partial therefore records the answer and stays `Partial`.
+  //
+  //    This costs nothing in enforcement, which is the only reason the server evaluates this at
+  //    all: the FINAL submit is the pass a client cannot avoid, and it still seals. A caller that
+  //    "forgets" it was disqualified is disqualified the moment it tries to finish.
+  const disqualifiedBy = complete ? knockout : undefined;
   const terminalCompletion = complete && disqualifiedBy === undefined;
 
   // 6. Dedupe (Task 1) — only on a completion. If this session (or this client response id)

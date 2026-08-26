@@ -98,28 +98,53 @@ describe('a knockout is judged on a finished answer, never a half-typed one', ()
   });
 });
 
-describe('a knockout banks before it ends the form', () => {
-  it('awaits the flush rather than firing it and moving on', () => {
+describe('a knockout records itself before it ends the form', () => {
+  it('sends a FINISHED submission, not just an autosave', () => {
+    // Only a finished submission seals a knockout server-side — a partial deliberately does not,
+    // because the rule would otherwise be judged on a half-typed value the autosave happened to
+    // carry. So the client's terminal write has to BE a completion; leaving this as a flush of
+    // the autosave meant the row stayed `Partial` and the screening was never recorded.
     const body = knockoutMethod();
-    expect(body).toMatch(/await this\.autosave\?\.flushNow\(\)/);
-    expect(body).not.toMatch(/void this\.autosave\?\.flushNow\(\)/);
+    expect(body).toMatch(/this\.sealDisqualified\(\)/);
+    const seal = methodBody('private async sealDisqualified');
+    expect(seal).toMatch(/buildSubmission\(def, rt, false\)/);
   });
 
-  it('banks while the phase still permits a partial save', () => {
+  it('awaits that write rather than firing it and moving on', () => {
     const body = knockoutMethod();
-    const flushAt = body.indexOf('flushNow()');
+    expect(body).toMatch(/await this\.sealDisqualified\(\)/);
+    expect(body).not.toMatch(/void this\.sealDisqualified\(\)/);
+  });
+
+  it('quiesces the autosave first, so two writes never share the response id', () => {
+    const body = knockoutMethod();
+    const settleAt = body.indexOf('settle()');
+    const sealAt = body.indexOf('sealDisqualified()');
+    expect(settleAt).toBeGreaterThan(-1);
+    expect(settleAt).toBeLessThan(sealAt);
+  });
+
+  it('records before it leaves intake', () => {
+    const body = knockoutMethod();
+    const sealAt = body.indexOf('sealDisqualified()');
     const phaseAt = body.indexOf("this.phase.set('done')");
-    expect(flushAt).toBeGreaterThan(-1);
+    expect(sealAt).toBeGreaterThan(-1);
     expect(phaseAt).toBeGreaterThan(-1);
-    expect(flushAt).toBeLessThan(phaseAt);
+    expect(sealAt).toBeLessThan(phaseAt);
   });
 
-  it('navigates only after the bank has resolved', () => {
+  it('navigates only after the write has resolved', () => {
     const body = knockoutMethod();
-    const flushAt = body.indexOf('flushNow()');
+    const sealAt = body.indexOf('sealDisqualified()');
     const redirectAt = body.indexOf('this.redirect(');
     expect(redirectAt).toBeGreaterThan(-1);
-    expect(flushAt).toBeLessThan(redirectAt);
+    expect(sealAt).toBeLessThan(redirectAt);
+  });
+
+  it('is fail-soft — a refused write still shows the respondent their screen', () => {
+    // A captcha-gated form with an unsolved challenge lands here: the server refuses a
+    // completion without a token. Stranding the respondent mid-form would be the worse outcome.
+    expect(methodBody('private async sealDisqualified')).toMatch(/catch/);
   });
 
   it('cannot be re-entered while its own bank is in flight', () => {
