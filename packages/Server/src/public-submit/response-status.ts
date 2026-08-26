@@ -27,3 +27,13 @@ export const TERMINAL_RESPONSE_STATUSES: ReadonlyArray<FormResponseStatus> = ['C
 export function isTerminalResponseStatus(status: FormResponseStatus): boolean {
   return TERMINAL_RESPONSE_STATUSES.includes(status);
 }
+
+/**
+ * The statuses no quota bounds — every row an ungated write can leave behind.
+ *
+ * Deliberately NOT the complement of "terminal": `Disqualified` is both terminal AND uncounted,
+ * which is exactly the pairing that hid the hole. Terminal answers "may I write over this row?";
+ * this answers "did anything limit how many of these exist?", and for a knockout the answer is
+ * no — the quota counts completions, and a knockout is not one.
+ */
+export const UNCOUNTED_BY_QUOTA: ReadonlyArray<FormResponseStatus> = ['Partial', 'Disqualified'];

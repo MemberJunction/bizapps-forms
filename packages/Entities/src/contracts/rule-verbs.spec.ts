@@ -201,6 +201,44 @@ describe('resolveDisqualification', () => {
 });
 
 
+describe('an unarmed knockout screen never fires', () => {
+  const flagged = (rule?: ConditionalRule): PublishedFormScreen[] => [
+    ending('ko', 0, { isDisqualification: true, ...(rule ? { conditionalRule: rule } : {}) }),
+  ];
+
+  describe('worst', () => {
+    it('an EMPTY condition group disqualifies nobody', () => {
+      // `evaluateGroup` is vacuously true on an empty group — correct for `show`, where "no
+      // condition" means "always visible", and catastrophic here, where it means "disqualify
+      // everyone, before they have answered anything". The guard tested `show !== undefined`,
+      // which `{}` satisfies. Unauthorable through the builder, but rules also arrive from
+      // mj-sync metadata and the AI form builder, neither of which goes near it.
+      for (const empty of [{}, { all: [] }, { any: [] }, { all: [], any: [] }]) {
+        expect(resolveDisqualification(flagged({ show: empty }), answers({}))).toBeUndefined();
+        expect(resolveDisqualification(flagged({ show: empty }), answers({ q1: 'anything' }))).toBeUndefined();
+      }
+    });
+  });
+
+  describe('edge', () => {
+    it('a flag with no rule at all still fires nothing', () => {
+      expect(resolveDisqualification(flagged(), answers({ q1: 'x' }))).toBeUndefined();
+    });
+
+    it('a rule carrying only OTHER verbs is not armed either', () => {
+      const requireOnly: ConditionalRule = { require: { all: [{ questionId: 'q1', op: 'isAnswered' }] } };
+      expect(resolveDisqualification(flagged(requireOnly), answers({ q1: 'x' }))).toBeUndefined();
+    });
+  });
+
+  describe('happy', () => {
+    it('one real condition is all it takes to arm it', () => {
+      expect(resolveDisqualification(flagged(whenQ1Equals('No')), answers({ q1: 'No' }))?.id).toBe('ko');
+      expect(resolveDisqualification(flagged(whenQ1Equals('No')), answers({ q1: 'Yes' }))).toBeUndefined();
+    });
+  });
+});
+
 describe('resolveVisibleQuestions', () => {
   function question(
     id: string,

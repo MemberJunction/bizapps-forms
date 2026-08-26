@@ -341,13 +341,31 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.disqualifying) {
       return;
     }
+    this.autosave?.ping();
+    void this.bankPassedSubmitPoints();
+  }
+
+  /**
+   * The respondent has FINISHED with a question — they left it, or advanced past it.
+   *
+   * Knockout rules are judged here and nowhere else. They used to ride `onProgress`, which in
+   * scroll mode arrives on every keystroke, so a rule like `age lessThan 18` disqualified an
+   * eligible respondent the instant they typed the `1` of `18` — and irreversibly, because
+   * {@link endAsDisqualified} latches, seals the row and leaves intake. A rule that ends the
+   * form has to be judged on a finished answer; autosave keeps riding every change, because
+   * saving a half-typed value costs nothing and is undone by the next save.
+   *
+   * This is only about when the client NOTICES. The server re-evaluates the same shared rule on
+   * the save regardless, so a client that never fired this is still disqualified.
+   */
+  protected onCommit(): void {
+    if (this.disqualifying) {
+      return;
+    }
     const knockout = this.disqualifyingScreen();
     if (knockout) {
       void this.endAsDisqualified(knockout);
-      return;
     }
-    this.autosave?.ping();
-    void this.bankPassedSubmitPoints();
   }
 
   /**

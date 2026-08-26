@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import {
+  countPartialResponses,
   findAdoptableResponseById,
   findResponseById,
   findSessionResponse,
@@ -131,5 +132,31 @@ describe('findResponseById', () => {
     expect(filter).toContain("ID='resp-9'");
     expect(filter).not.toContain("Status='Partial'"); // any status
     expect(filter).toContain('SourceMetadata LIKE');
+  });
+});
+
+
+describe('countPartialResponses (the durable row ceiling)', () => {
+  /**
+   * This count IS the ceiling — the rate limiters above it bound a rate, not a total. So what it
+   * counts has to be every row an ungated write can create, which is every row a QUOTA will not
+   * count. `Complete` rows are quota-bounded; `Partial` and `Disqualified` are not, and counting
+   * only the first of those two left a caller answering a knockout able to create rows without
+   * limit while the ceiling read zero.
+   */
+  it('counts every row no quota bounds, not just Partial', async () => {
+    let captured: RunViewParams | undefined;
+    const provider = makeProvider({ capture: (p) => (captured = p) });
+
+    await countPartialResponses(provider, { formVersionId: 'ver-1' }, USER);
+
+    expect(captured?.ExtraFilter).toContain("FormVersionID='ver-1'");
+    expect(captured?.ExtraFilter).toContain("Status IN ('Partial', 'Disqualified')");
+    expect(captured?.ResultType).toBe('count_only');
+  });
+
+  it('fails CLOSED on a query error, so a database blip cannot become an unbounded hole', async () => {
+    const provider = makeProvider({ success: false });
+    expect((await countPartialResponses(provider, { formVersionId: 'v' }, USER)).ok).toBe(false);
   });
 });

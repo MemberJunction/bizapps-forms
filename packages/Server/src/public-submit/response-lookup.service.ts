@@ -24,6 +24,7 @@ import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './definition-loader.service';
 import { FORM_RESPONSE_ENTITY } from './entity-names';
+import { UNCOUNTED_BY_QUOTA } from './response-status';
 import type { FormResponseStatus } from './response-status';
 
 /** The identity of the session+form whose response we are looking up. */
@@ -134,7 +135,8 @@ export async function findResponseById(
 }
 
 /**
- * Count the `Partial` (in-flight autosave) rows for a published version.
+ * Count the rows for a published version that NO QUOTA bounds — the in-flight autosaves, and
+ * the knockouts.
  *
  * The durable, request-context-independent bound on partial-write abuse. The per-caller ceilings
  * are sliding windows held in one process's memory, so they bound a RATE and nothing else: a
@@ -142,6 +144,12 @@ export async function findResponseById(
  * rows for as long as they care to. Partial writes are otherwise ungated entirely — Turnstile and
  * both quotas apply only to COMPLETE submissions — so this count is what actually stops the table
  * growing without limit.
+ *
+ * `Disqualified` belongs in the count for the same reason `Partial` does, and it is easy to miss
+ * because the status is TERMINAL: terminal only means nothing more is coming for that respondent,
+ * not that anything bounded how many were created. A knockout is never a completion, so no quota
+ * ever counts it — leaving this ceiling reading zero while a caller answering "no" created rows
+ * without limit, needing neither a session nor a client id.
  *
  * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
  * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal
@@ -158,7 +166,9 @@ export async function countPartialResponses(
   const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
     {
       EntityName: FORM_RESPONSE_ENTITY,
-      ExtraFilter: `FormVersionID=${quoteSqlString(key.formVersionId)} AND Status='Partial'`,
+      ExtraFilter:
+        `FormVersionID=${quoteSqlString(key.formVersionId)} ` +
+        `AND Status IN (${UNCOUNTED_BY_QUOTA.map(quoteSqlString).join(', ')})`,
       ResultType: 'count_only',
     },
     contextUser,

@@ -264,6 +264,15 @@ async function updateResponse(
     // The row vanished between lookup and save — fall back to creating a fresh one.
     return createResponse(provider, inputs, contextUser);
   }
+  // Sealed since the caller looked it up: leave it exactly as it is. The lookups that produce
+  // `existingResponseId` all filter `Status='Partial'`, so arriving here means the row WAS a
+  // partial a moment ago — a knockout flush, a second tab or a retry landing in between is the
+  // whole window. Without this the row was downgraded, its answers deleted and rewritten, and
+  // the quota counted it again, because the promotion check below asks only about `Complete`.
+  // `reconcileDuplicate` has always made this check; this is the path that never learned it.
+  if (isTerminalStatus(response.Status)) {
+    return { ok: true, entity: response, replacedExisting: false, countable: false, skipAnswers: true };
+  }
   // Count a promotion once: only when this write flips a not-yet-Complete row to Complete.
   const wasComplete = response.Status === 'Complete';
   applyResponseFields(response, inputs);

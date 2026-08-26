@@ -30,6 +30,16 @@ export class FormScrollComponent {
   public readonly submit = output<void>();
   /** Fires when the respondent has made progress worth autosaving (debounced upstream). */
   public readonly progressChange = output<void>();
+  /**
+   * Fires when the respondent has FINISHED with a question, not merely changed it.
+   *
+   * Separate from {@link progressChange} because the two feed decisions of very different
+   * weight. Autosave is cheap and reversible, so it rides every change. A knockout rule is
+   * neither: it ends the form. A text field here is bound with `(input)`, so `progressChange`
+   * arrives on every keystroke — judging `age lessThan 18` on that signal disqualifies someone
+   * typing `18` the moment they press `1`.
+   */
+  public readonly commitChange = output<void>();
 
   protected readonly pages = computed(() => this.runtime().visiblePages());
   protected readonly progress = computed(() => this.runtime().progress());
@@ -64,6 +74,9 @@ export class FormScrollComponent {
       return;
     }
     this.runtime().markTouched(question.id);
+    // Focus has genuinely left, so whatever is in the field is what the respondent meant. This
+    // is the same moment validation messages become fair to show, and for the same reason.
+    this.commitChange.emit();
   }
 
   /**

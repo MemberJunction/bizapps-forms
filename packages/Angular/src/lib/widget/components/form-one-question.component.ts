@@ -43,6 +43,12 @@ export class FormOneQuestionComponent {
   public readonly submit = output<void>();
   /** Fires when the respondent advances a step — a natural autosave checkpoint. */
   public readonly progressChange = output<void>();
+  /**
+   * Fires when the respondent has FINISHED with a question. In this mode that is unambiguous:
+   * they answered it and advanced. See the scroll renderer for why knockout rules need a signal
+   * distinct from {@link progressChange}.
+   */
+  public readonly commitChange = output<void>();
 
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
 
@@ -143,8 +149,10 @@ export class FormOneQuestionComponent {
       this.submit.emit();
     } else {
       this.setIndex(this.index() + 1);
-      // Advancing a step is a natural, non-chatty autosave checkpoint.
+      // Advancing a step is a natural, non-chatty autosave checkpoint — and, since the answer
+      // behind us is now final, the moment to judge a knockout on it.
       this.progressChange.emit();
+      this.commitChange.emit();
     }
   }
 

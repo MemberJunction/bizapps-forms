@@ -1438,3 +1438,52 @@ native entities. This is the reporting differentiator no incumbent has.
   so and names where each cap is actually enforced.
 
   **Verification:** 1,784 unit tests green, all five lint gates, clean build, eight smoke paths.
+
+- **2026-08-26 — round three: five more, and the one that would have hurt real people.** The
+  third pass of the same adversarial review found five defects, every one of them in the
+  disqualification path the two previous rounds had already worked over. Three of the five are
+  the same root cause wearing different hats, which is the useful thing to record: `Disqualified`
+  is TERMINAL, and rounds one and two taught that to the gates while leaving it invisible to the
+  three places that COUNT and LOOK UP rows.
+
+  1. **The knockout was judged on every keystroke** (critical). `Scroll` is the database-default
+     render mode, and there a text field is bound with `(input)` — so a respondent answering `18`
+     to a question gated on `age lessThan 18` was disqualified the moment they pressed `1`, and
+     irreversibly, because the round-one fix had made the seal actually work. The re-entrancy
+     latch guards the second trigger; nothing guarded the first. Knockouts now hang off a COMMIT
+     signal (the respondent left the question, or advanced past it) while autosave keeps its own
+     per-change signal — a rule that ends the form has to be judged on a finished answer. Note
+     the irony worth remembering: round one's fix is what turned this from "usually harmless
+     because the save was lost anyway" into a defect that bites every time.
+  2. **An empty `show` group disqualified everyone.** The guard tested `show !== undefined`, and
+     `{}`, `{all: []}` and `{any: []}` all satisfy it while `evaluateGroup` is vacuously true on
+     each — so a knockout screen with no conditions screened out every respondent before they had
+     answered anything. Unauthorable through the builder, reachable from mj-sync metadata and the
+     AI form builder, both of which the contract explicitly expects. Armed now means "has at
+     least one leaf condition".
+  3. **The row ceiling could not see the rows it existed to bound.** `countPartialResponses`
+     counted `Status='Partial'` only, and a knockout row is `Disqualified` — so an anonymous
+     caller answering "no" created rows without limit while the ceiling read zero, needing
+     neither a session nor a client id. Worse, a DISQUALIFYING FINAL submit passed through every
+     gate: the quota skips it (not a completion) and the ceiling skipped it (`!complete` was
+     false). The ceiling now counts every status no quota bounds, and gates every save that would
+     create a row no quota will count.
+  4. **`updateResponse` was the one writer never told.** Its sibling `reconcileDuplicate` has
+     always checked for a terminal row before writing over one; this path still asked only about
+     `Complete`, so a row sealed between the caller's lookup and the write was downgraded, had
+     its answers deleted and replaced, and was counted toward the quota a second time.
+
+  Also fixed from the report's own below-threshold list: a stale `checkDuplicate` docstring, and
+  a re-entrancy assertion of mine that only checked whether a word appeared anywhere in the file
+  — it would have stayed green with every guard deleted. Both were fair hits.
+
+  **Deliberately not "fixed":** the report wanted the knockout exempted from the row ceiling, by
+  analogy with the quota exemption round one added. Declined, with the reason recorded in the
+  code: a quota counts completions and a knockout is not one, so exempting it there corrected a
+  category error — but the ceiling counts ROWS, and a knockout creates one, so exempting it there
+  would reopen the unbounded-write hole above. A saturated form refusing a new knockout row is
+  the ceiling working.
+
+  **Verification:** 1,801 unit tests green, five lint gates, clean build, eight smoke paths. One
+  smoke run hit a transient 502 from the magic-link provisioner mid-burst and passed on retry —
+  worth knowing before anyone reads a single red run as a regression.

@@ -131,12 +131,29 @@ export function resolveVisibleQuestions(
 }
 
 /**
+ * Whether a knockout screen's rule actually CONSTRAINS anything.
+ *
+ * `evaluateGroup` is vacuously true on an empty group, which is right for `show` — "no
+ * condition" means "always visible" — and catastrophic for a knockout, where it means
+ * "disqualify everyone, before they have answered anything". Testing that the group EXISTS is
+ * not enough, because `{}`, `{all: []}` and `{any: []}` all exist and all evaluate true. So
+ * armed means: at least one leaf condition to fail.
+ */
+function isArmedKnockout(rule: ConditionalRule | undefined): boolean {
+  const show = rule?.show;
+  if (show === undefined) {
+    return false;
+  }
+  return (show.all?.length ?? 0) > 0 || (show.any?.length ?? 0) > 0;
+}
+
+/**
  * The disqualification screen these answers have triggered, or undefined (C3).
  *
  * First match in display order — deliberately the same ordering promise as
  * {@link resolveEndingScreen} in form-screens.ts, so the two can never disagree about which
- * screen "comes first". A screen's flag alone never fires: a rule is what arms it, because a
- * disqualification with no condition would disqualify everyone on their first keystroke.
+ * screen "comes first". A screen's flag alone never fires, and neither does an EMPTY rule:
+ * see {@link isArmedKnockout} for why "has a show group" was the wrong test.
  */
 export function resolveDisqualification(
   screens: readonly PublishedFormScreen[],
@@ -148,7 +165,7 @@ export function resolveDisqualification(
     .find(
       (s) =>
         s.isDisqualification === true &&
-        s.conditionalRule?.show !== undefined &&
+        isArmedKnockout(s.conditionalRule) &&
         evaluateConditionalRule(s.conditionalRule, answers, extras),
     );
 }

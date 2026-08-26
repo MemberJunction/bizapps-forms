@@ -103,6 +103,7 @@ function submit(ctx: PipelineContext, answer: string) {
 
 beforeEach(() => {
   FormsRateLimiter.Instance.resetForTests();
+  delete process.env.FORMS_MAX_PARTIALS_PER_VERSION;
   resetPublicSubmitConfigForTests();
 });
 
@@ -271,6 +272,75 @@ describe('retrying a submission that was already disqualified', () => {
       expect(result.status).toBe('Disqualified');
       // Idempotent means idempotent: no second row.
       expect(saved().filter((r) => r.entityName.includes('Form Responses'))).toHaveLength(0);
+    });
+  });
+});
+
+describe('a knockout is still a row, and the row ceiling still applies', () => {
+  /**
+   * `Disqualified` is terminal, which is what makes it slip past the gates that bound growth:
+   * the quota counts completions (a knockout is not one) and the row ceiling counted only
+   * `Status='Partial'`. Between them, a caller who answers a knockout could create rows without
+   * limit — as a partial, whose ceiling could not see the resulting status, and as a COMPLETE
+   * submit, which skips the ceiling by construction and skips the quota because it is not a
+   * completion. Neither needs a session or a client id.
+   */
+  function contextWithRows(existingRows: number) {
+    const fake = makeFakeProvider({
+      distribution: makeDistribution({ CaptchaRequired: false, MaxResponses: null, ResponseCount: 0 }),
+      version: makeVersion(knockoutDefinition()),
+      createPermissions: respondentPermissions(),
+      formResponseCount: existingRows,
+    });
+    return {
+      ctx: {
+        provider: fake.provider,
+        contextUser: makeContextUser(),
+        elevatedUser: makeContextUser(),
+        sessionId: '',
+        fireHooks: async () => {},
+      } satisfies PipelineContext,
+      saved: () => fake.saved,
+    };
+  }
+
+  function knockoutSubmit(ctx: PipelineContext, partial: boolean) {
+    return runSubmitPipeline(ctx, {
+      distributionSlug: 'slug-1',
+      formVersionId: 'ver-1',
+      partial,
+      answers: [{ questionId: 'age', textValue: 'No' }],
+    });
+  }
+
+  describe('worst', () => {
+    it('refuses a knockout that would create a row past the ceiling — as a FINAL submit', async () => {
+      process.env.FORMS_MAX_PARTIALS_PER_VERSION = '5';
+      const { ctx, saved } = contextWithRows(5);
+
+      const result = await knockoutSubmit(ctx, false);
+
+      expect(result.success).toBe(false);
+      expect(saved().filter((r) => r.entityName.includes('Form Responses'))).toHaveLength(0);
+    });
+
+    it('refuses it as a PARTIAL too', async () => {
+      process.env.FORMS_MAX_PARTIALS_PER_VERSION = '5';
+      const { ctx, saved } = contextWithRows(5);
+
+      const result = await knockoutSubmit(ctx, true);
+
+      expect(result.success).toBe(false);
+      expect(saved().filter((r) => r.entityName.includes('Form Responses'))).toHaveLength(0);
+    });
+  });
+
+  describe('happy', () => {
+    it('records a knockout normally while there is room', async () => {
+      process.env.FORMS_MAX_PARTIALS_PER_VERSION = '5';
+      const { ctx } = contextWithRows(1);
+
+      expect((await knockoutSubmit(ctx, false)).status).toBe('Disqualified');
     });
   });
 });

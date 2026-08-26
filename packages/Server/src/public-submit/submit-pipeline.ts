@@ -443,14 +443,28 @@ async function runSubmitPipelineInner(
 
   timer.mark('find-partial');
 
-  // 9b. Hard ceiling on NEW Partial rows per version — the durable bound on partial-write abuse.
-  //     Only a partial submit that would CREATE a fresh row is capped: a COMPLETE submit is already
-  //     gated by dedupe + quota, and a partial UPDATING an existing row adds none. This is the only
-  //     DURABLE bound of the three: the ceilings above are per-window and per-process, so a caller
-  //     pacing themselves under all of them — or spread across addresses — still accumulates rows
-  //     without limit. This one counts what is actually in the table. Fail-CLOSED
-  //     (a count error refuses the partial) — autosave is fail-soft, so the widget simply retries.
-  if (!complete && !existingPartial.response) {
+  // 9b. Hard ceiling on rows this version has accumulated that NO QUOTA bounds — the durable
+  //     bound on write abuse. It applies to any save that would CREATE a row the quota will not
+  //     count: an autosave, and a knockout. A save UPDATING an existing row adds none, and a
+  //     qualifying completion is the quota's business, not this one.
+  //
+  //     The condition used to be `!complete`, from when a final submit always meant a completion.
+  //     A DISQUALIFYING final submit is neither: `terminalCompletion` is false so the quota skips
+  //     it, and `!complete` was false so this skipped it too — leaving an anonymous caller who
+  //     answers a knockout able to create rows through every gate, with no session and no client
+  //     id. Both halves of that are closed here and in `countPartialResponses`.
+  //
+  //     This is the only DURABLE bound of the three: the ceilings above are per-window and
+  //     per-process, so a caller pacing themselves under all of them — or spread across addresses
+  //     — still accumulates rows without limit. This one counts what is actually in the table.
+  //     Fail-CLOSED (a count error refuses the save) — autosave is fail-soft, so the widget
+  //     simply retries.
+  //
+  //     A knockout IS refused once the ceiling is reached, and that is deliberate: it creates a
+  //     row like any other, so exempting it would reopen the hole above. The respondent still
+  //     sees their screen — the client's verdict does not wait on this save — but a saturated
+  //     form records nothing new, which is what a ceiling is for.
+  if (!existingPartial.response && !terminalCompletion) {
     const capped = await partialCapExceeded(ctx, resolved);
     if (capped) {
       return report(capped);
@@ -658,10 +672,16 @@ async function resolveExistingPartial(
 }
 
 /**
- * Detect a duplicate FINAL submission for this (session, published version). Returns a
- * success-shaped "already submitted" result (carrying the existing responseId) when a prior
- * Complete row exists, so the client sees a clean idempotent outcome rather than an error or
- * a second row. Returns a hard failure if the dedupe lookup itself errored (fail-closed).
+ * Detect a repeat of a submission this caller has already had sealed, and short-circuit to it.
+ *
+ * "Sealed" is any TERMINAL status — `Complete` or `Disqualified` — checked two ways, because the
+ * two identities a caller carries have different lifetimes. The client response id is per-load
+ * (the widget mints a fresh one every time, and a caller reaching this mutation directly sends
+ * whatever it likes); the session outlives it. Either one recognising the row is enough, and the
+ * result reports the row's OWN status and copy rather than a generic confirmation — a respondent
+ * whose first attempt was screened out must not be told on their retry that it was recorded.
+ *
+ * Fail-CLOSED on a lookup error: a resubmit is refused rather than risking a second row.
  */
 async function checkDuplicate(
   ctx: PipelineContext,
