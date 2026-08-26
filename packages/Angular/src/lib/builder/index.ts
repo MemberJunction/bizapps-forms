@@ -54,7 +54,6 @@ export { RulesTabComponent } from './rules-tab.component';
 export {
   brokenRuleCount,
   collectRuleEntries,
-  describeCondition,
   groupEntriesByPage,
   type RuleEntry,
   type RuleEntryGroup,

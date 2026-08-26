@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import type { ConditionalSourceQuestion } from './condition-sources';
+import { describeCondition } from './rules-panel-model';
 import {
   brokenRuleCount,
   collectRuleEntries,
-  describeCondition,
   groupEntriesByPage,
   type RuleInventoryForm,
 } from './rules-inventory';
@@ -158,6 +158,30 @@ describe('collectRuleEntries', () => {
   });
 
   describe('edge', () => {
+    it('says an unconditional rule applies to everyone, in plain English', () => {
+      // `evaluateGroup({})` is vacuously TRUE, so a rule with no conditions fires for every
+      // respondent. The builder's Done button refuses to author one, but mj-sync metadata and
+      // the AI builder both can, and a jump that always fires silently skips pages for
+      // everyone — which is precisely the kind of rule this tab exists to surface.
+      const entries = collectRuleEntries(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Intro',
+              questions: [],
+              conditionalRule: { jump: [{ when: {}, toPageId: 'p2' }] },
+            },
+            { id: 'p2', label: 'Page 2', questions: [] },
+          ],
+        }),
+      );
+
+      expect(entries[0].sentence).toBe(
+        'After "Intro", skip to "Page 2" always — this rule has no conditions, so it applies to everyone',
+      );
+    });
+
     it('is empty for a form with no rules at all', () => {
       expect(collectRuleEntries(form())).toEqual([]);
     });

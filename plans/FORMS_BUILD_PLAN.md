@@ -2074,7 +2074,15 @@ native entities. This is the reporting differentiator no incumbent has.
   Responses regression and is not one. It now parses the union and asserts the ordering claim its
   own title makes.
 
-  **Verification:** 1,943 unit tests (272 / 26 / 142 / 1002 / 501), +29 over Phase 2. The ten
+  **One thing the self-review pass caught.** The hub rendered an unconditional rule as *Show
+  "Age" when always* — bad English burying a real fact. `evaluateGroup({})` is vacuously TRUE, so
+  a rule with no conditions fires for every respondent, and a jump like that silently skips pages
+  for everyone. The builder's Done button refuses to author one (`isDraftCommittable` requires a
+  populated group), but mj-sync metadata and the AI builder both can, so it is a rule an author
+  can inherit and never have written — exactly what the tab exists to surface. It now reads
+  *"…always — this rule has no conditions, so it applies to everyone"*.
+
+  **Verification:** 1,944 unit tests (272 / 26 / 142 / 1003 / 501), +30 over Phase 2. The ten
   structural guards in `rules-hub.wiring.spec.ts` were written after the component, so four
   deliberate mutations (a write method on the hub, a flat list, a hardcoded colour, a missing tab
   switch) were applied and each was caught before the file was kept. Build clean, widget

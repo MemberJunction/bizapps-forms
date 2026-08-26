@@ -19,8 +19,6 @@ import type { ConditionalCondition, ConditionalGroup, ConditionalRule } from '@m
 import { SCORE_SOURCE_ID, type ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition, groupConditions, jumpRule, type RuleVerb } from './rules-panel-model';
 
-export { describeCondition };
-
 /** Which kind of item a rule hangs off — what the hub needs to route a click back to. */
 export type RuleItemKind = 'question' | 'page' | 'ending';
 
@@ -104,7 +102,7 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
           pageId: page.id,
           verb: 'show',
           icon: VERB_ICONS.show,
-          sentence: `Show ${quoted(question.label)} when ${describeGroup(show, form.sources)}`,
+          sentence: `Show ${quoted(question.label)} ${whenClause(show, form.sources)}`,
           broken: brokenIn(show, form.sources),
         });
       }
@@ -136,7 +134,7 @@ function pageEntries(
       pageId: page.id,
       verb: 'show',
       icon: VERB_ICONS.show,
-      sentence: `Show ${quoted(page.label)} when ${describeGroup(show, form.sources)}`,
+      sentence: `Show ${quoted(page.label)} ${whenClause(show, form.sources)}`,
       broken: brokenIn(show, form.sources),
     });
   }
@@ -153,7 +151,7 @@ function pageEntries(
       icon: VERB_ICONS.jump,
       sentence:
         `After ${quoted(page.label)}, skip to ${quoted(target?.label ?? '(deleted page)')} ` +
-        `when ${describeGroup(jump.when, form.sources)}`,
+        `${whenClause(jump.when, form.sources)}`,
       broken: [
         ...brokenIn(jump.when, form.sources),
         ...(pageIds.has(jump.toPageId) ? [] : [MISSING_PAGE]),
@@ -176,7 +174,7 @@ function endingEntry(ending: RuleInventoryItem, form: RuleInventoryForm): RuleEn
     return undefined;
   }
   const knockout = ending.isDisqualification === true;
-  const conditions = describeGroup(show, form.sources);
+  const clause = whenClause(show, form.sources);
   return {
     id: `ending:${ending.id}:${knockout ? 'disqualify' : 'show'}`,
     itemKind: 'ending',
@@ -185,31 +183,36 @@ function endingEntry(ending: RuleInventoryItem, form: RuleInventoryForm): RuleEn
     verb: knockout ? 'disqualify' : 'show',
     icon: knockout ? VERB_ICONS.disqualify : VERB_ICONS.show,
     sentence: knockout
-      ? `Disqualify — show ${quoted(ending.label)} — when ${conditions}`
-      : `Show ${quoted(ending.label)} when ${conditions}`,
+      ? `Disqualify — show ${quoted(ending.label)} — ${clause}`
+      : `Show ${quoted(ending.label)} ${clause}`,
     broken: brokenIn(show, form.sources),
   };
 }
 
 /**
- * A whole group, every condition spelled out and joined by its combinator.
+ * The trailing clause of a sentence: when this rule applies.
  *
- * `summarizeGroup` truncates to "+2 more" because it is one line in a 300px rail. This does not:
- * the hub is the one screen where a rule can be read in full, and truncating here would leave
- * nowhere in the product that shows the whole thing.
+ * Returns the whole clause, "when …" included, rather than just the conditions, because the
+ * unconditional case is not a "when" at all. `evaluateGroup({})` is vacuously TRUE, so a rule
+ * with no conditions fires for EVERY respondent — a jump like that silently skips pages for
+ * everyone. The builder's Done button refuses to author one, but mj-sync metadata and the AI
+ * builder both can, so it is a rule an author can inherit and never have written. Saying
+ * "when always" would read as a rendering bug and bury the fact.
+ *
+ * Every condition is spelled out. `summarizeGroup` truncates to "+2 more" because it is one line
+ * in a 300px rail; this does not, because the hub is the one screen where a rule can be read in
+ * full and truncating here would leave nowhere in the product that shows the whole thing.
  */
-function describeGroup(
+function whenClause(
   group: ConditionalGroup | undefined,
   sources: ReadonlyArray<ConditionalSourceQuestion>,
 ): string {
   const conditions = groupConditions(group);
   if (conditions.length === 0) {
-    // A group with no conditions is vacuously true, so the rule fires for everyone. Said out
-    // loud rather than rendered as an empty clause, which would read as a truncation bug.
-    return 'always';
+    return 'always — this rule has no conditions, so it applies to everyone';
   }
   const joiner = group?.any ? ' or ' : ' and ';
-  return conditions.map((condition) => describeCondition(condition, sources)).join(joiner);
+  return `when ${conditions.map((condition) => describeCondition(condition, sources)).join(joiner)}`;
 }
 
 /** The references in a group that no longer resolve, deduplicated. */
@@ -221,7 +224,15 @@ function brokenIn(
   return missing ? [MISSING_QUESTION] : [];
 }
 
-/** Whether a condition's source still exists. Score conditions reference no question. */
+/**
+ * Whether a condition's source still exists. A `source: 'score'` condition references no
+ * question at all and is always resolvable.
+ *
+ * The `SCORE_SOURCE_ID` exclusion is for a caller that hands us the ENDING screens' source list,
+ * which appends the score pseudo-source. A malformed condition naming that id as a `questionId`
+ * would otherwise resolve against it and be reported healthy, when no answer map will ever
+ * carry an entry under it.
+ */
 function resolves(
   condition: ConditionalCondition,
   sources: ReadonlyArray<ConditionalSourceQuestion>,

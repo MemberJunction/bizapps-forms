@@ -1,8 +1,8 @@
 # Rules Simplification Plan
 
 **Status: ALL PHASES COMPLETE.** Phase 0 `7cd1146` · Phase 1 `9d08b10` · Phase 2 `770b9fc` ·
-Phase 3 this commit. Final baseline: **1,943** tests (272 / 26 / 142 / 1002 / 501), widget
-1197.6 kB, six gates green.
+Phase 3 `8f7a6bb` + this commit. Final baseline: **1,944** tests (272 / 26 / 142 / 1003 / 501),
+widget 1197.6 kB, six gates green.
 
 **One deviation from §6, recorded deliberately.** The plan said each hub row opens the same
 `RuleEditorDialogComponent` the per-item panels open. It does not: a row **selects its item and
