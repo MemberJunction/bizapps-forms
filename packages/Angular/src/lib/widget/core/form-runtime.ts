@@ -23,6 +23,36 @@ import { toAnswerInputs } from './answer-value';
 import { computeProgress } from './progress';
 import { validateQuestion } from './validation';
 
+/**
+ * How many times visibility is re-derived before giving up.
+ *
+ * Visibility is NOT monotone: `isNotAnswered` means removing an answer can REVEAL a question, so
+ * "restrict, then re-derive" is not guaranteed to converge — a pair of rules can oscillate. A cap
+ * with an explicit outcome is the honest shape for that, per this repo's design principles: every
+ * loop bounded, and the limit case handled rather than assumed unreachable. Five is far above any
+ * real form (the scenario that motivated this settles in two) and small enough to stay cheap.
+ */
+const MAX_VISIBILITY_PASSES = 5;
+
+/** The answers belonging to `questions`, dropping every other entry. */
+function restrictAnswers(
+  answers: ReadonlyMap<string, AnswerValue>,
+  questions: readonly PublishedFormQuestion[],
+): ReadonlyMap<string, AnswerValue> {
+  const restricted = new Map<string, AnswerValue>();
+  for (const question of questions) {
+    if (answers.has(question.id)) {
+      restricted.set(question.id, answers.get(question.id));
+    }
+  }
+  return restricted;
+}
+
+/** Whether two derivations picked the same questions, in the same order. */
+function sameQuestions(a: readonly PublishedFormQuestion[], b: readonly PublishedFormQuestion[]): boolean {
+  return a.length === b.length && a.every((question, index) => question.id === b[index].id);
+}
+
 export class FormRuntime {
   private readonly answers = signal<Map<string, AnswerValue>>(new Map());
   private readonly touched = signal<Set<string>>(new Set());
@@ -114,13 +144,45 @@ export class FormRuntime {
   }
 
   /**
-   * Every visible, answer-collecting question across the form, in document order — from the
-   * shared resolver, so the set this widget renders, submits and scores over is the same set
-   * the server scores over.
+   * Every visible, answer-collecting question across the form, in document order — and a FIXED
+   * POINT of the server's own derivation, which is the property that makes the two sides agree.
+   *
+   * Resolving once over the raw map is not enough, and the failure is worse than a wrong number.
+   * The raw map keeps an answer whose question is hidden (nothing prunes on a visibility change),
+   * the payload carries only the visible set, and the server re-derives visibility FROM that
+   * payload. A rule reading an answer that is not being sent therefore reaches a different verdict
+   * on each side — and with `isNotAnswered`, removing an answer can REVEAL a question, so the
+   * server could make a question visible and REQUIRED that the widget never rendered. The
+   * respondent then gets "«prompt» is required" for a field that is not on screen, and every retry
+   * sends the identical payload: unrecoverable, on the anonymous path.
+   *
+   * So this iterates until the set is stable under "restrict the answers to this set, then re-derive
+   * from them". At a fixed point the server's single pass over the payload reproduces this set
+   * exactly, so the two cannot disagree. See {@link MAX_VISIBILITY_PASSES} for why it is capped
+   * rather than looped until stable.
    */
-  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() =>
-    resolveVisibleQuestions(this.orderedPages(), this.answers()),
-  );
+  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() => {
+    const pages = this.orderedPages();
+    const raw = this.answers();
+    let set = resolveVisibleQuestions(pages, raw);
+    for (let pass = 0; pass < MAX_VISIBILITY_PASSES; pass++) {
+      const next = resolveVisibleQuestions(pages, restrictAnswers(raw, set));
+      if (sameQuestions(next, set)) {
+        return set;
+      }
+      set = next;
+    }
+    // Cap reached: the rules do not settle, so no client set can match the server's single pass.
+    // Say so once and use the last derivation — the alternative is looping forever on a form whose
+    // own rules contradict each other.
+    console.warn(
+      '[mj-form] visibility did not settle after ' +
+        `${MAX_VISIBILITY_PASSES} passes; this form's show rules depend on each other in a way ` +
+        'that has no stable answer (an `is not answered` rule revealing a question whose own answer ' +
+        'then hides it). The server may disagree with what is on screen.',
+    );
+    return set;
+  });
 
   /**
    * Exactly the answers this widget will transmit — derived FROM the payload builder, not

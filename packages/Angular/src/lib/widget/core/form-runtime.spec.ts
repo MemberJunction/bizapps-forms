@@ -263,27 +263,54 @@ describe('FormRuntime.transmittedView', () => {
     // so the widget would render and send `risk` — but the server, resolving over the payload,
     // sees no `sector` and drops `risk`. That gap is the divergence.
     rt.setValue('type', 'Individual');
-    // The two halves are deliberately different, and they mirror the server exactly. The payload
-    // still carries `risk` — the widget rendered it, so it sends it — and the server evaluates
-    // CONDITIONS against that raw payload (`buildAnswerMap(submission.answers)`). But the question
-    // SET it derives from the payload excludes `risk`, because the rule revealing it reads a
-    // `sector` answer that is no longer there, and that set is what the score folds over. Asserting
-    // both is the point: agreeing on one and not the other is the bug.
-    expect([...rt.transmittedView().answers.keys()]).toEqual(['type', 'risk']);
+    // Both halves now agree, and an earlier version of this case asserted that they would NOT —
+    // it expected the payload to carry an orphaned `risk` while the server dropped it, which
+    // described the divergence rather than the fix. Once the rendered set is a fixed point, `risk`
+    // is not rendered, so it is not sent, so there is nothing for the server to disagree about.
+    expect([...rt.transmittedView().answers.keys()]).toEqual(['type']);
     expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type']);
   });
 
-  it('is stable: re-deriving from its own output changes nothing', () => {
-    // The server makes exactly one pass over the payload, so the client must agree after one.
+  it('renders the same set the server will derive from the payload', () => {
+    // THE invariant, and the one an earlier version of this case could not test: it compared
+    // `resolveVisibleQuestions(pages, view.answers)` against `view.questions`, which is how
+    // `view.questions` is defined — `f(x) === f(x)`, unfailable. What actually matters is whether
+    // the RENDERED set agrees, because that is the set whose answers get sent.
     const rt = new FormRuntime(chained());
     rt.setValue('type', 'Company');
     rt.setValue('sector', 'Energy');
     rt.setValue('risk', 'High');
     rt.setValue('type', 'Individual');
 
-    const once = rt.transmittedView();
-    const twice = resolveVisibleQuestions([...chained().pages], once.answers);
-    expect(twice.map((q) => q.id)).toEqual(once.questions.map((q) => q.id));
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(
+      rt.transmittedView().questions.map((q) => q.id),
+    );
+  });
+
+  it('renders a question the server will REQUIRE, even when the raw map hides it', () => {
+    // The mirror of the divergence `transmittedView` fixed, and it is unrecoverable rather than
+    // merely wrong. `why` is shown when `detail isNotAnswered` — an operator this PR added. The
+    // respondent picks Company, types a detail, switches to Individual: nothing prunes `detail`
+    // from the raw map, so the widget reads it as answered and hides `why`, and sends neither.
+    // The server, seeing no `detail`, finds `isNotAnswered` true, makes `why` visible AND required,
+    // and rejects the submission naming a field that was never on screen. Every retry sends the
+    // identical payload, so the respondent cannot get out of it.
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gate' },
+        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+        {
+          id: 'why',
+          isRequired: true,
+          conditionalRule: { show: { all: [{ questionId: 'detail', op: 'isNotAnswered' }] } },
+        },
+      ]),
+    );
+    rt.setValue('gate', 'Company');
+    rt.setValue('detail', 'Acme');
+    rt.setValue('gate', 'Individual');
+
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(['gate', 'why']);
   });
 });
 

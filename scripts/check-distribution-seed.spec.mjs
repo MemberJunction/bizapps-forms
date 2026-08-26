@@ -1414,6 +1414,33 @@ withFixture(
         ),
 );
 
+// The prose shape that a punctuation anchor could not distinguish from a call. Kept as a case
+// because the fix for it has now been got wrong twice in opposite directions: once by counting
+// prose as a call, once by going blind to a call inside a literal.
+withMigration(
+    POST_GUARD,
+    `EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames=${FULL_EXCLUSIONS};\n` +
+        "EXEC sp_addextendedproperty @value = N'See dbo.spUpdateExistingEntitiesFromSchema for how this is populated.';\n",
+    (violations) =>
+        check(
+            'a DOT-qualified procedure name in prose is not counted as a call',
+            !violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+// Flyway accepts versions this gate cannot order. It used to skip them, which exempted them; the
+// other watershed helpers in this file fail safe instead, and now so does this one.
+for (const name of ['V1__Unstamped.sql', 'V2026_08__Unstamped.sql']) {
+    withMigration(name, 'EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema];\n', (violations) =>
+        check(
+            `an unstamped but Flyway-legal name (${name}) is GATED, not exempt`,
+            violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+    );
+}
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

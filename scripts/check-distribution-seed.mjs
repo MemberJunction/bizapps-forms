@@ -427,30 +427,48 @@ function countSchemaSyncCalls(sql, procNames) {
     // `[spDeleteUnneededEntityFields], @EntityIDs=…` — which is precisely the shape a careless
     // deletion produces, so the one mutation that mattered slipped through. Being name-anchored
     // also covers the PostgreSQL call form (`SELECT schema."spX"(…)`), which has no EXEC to anchor
-    // What counts as a CALL, across both dialects and all three spellings that actually occur:
+    // What counts as a CALL. Every real invocation in either dialect is introduced by a keyword —
+    // `EXEC`/`EXECUTE` in T-SQL, a `SELECT` of a quoted function in PostgreSQL — and that keyword
+    // is what separates a call from a MENTION. Anchoring on the punctuation before the name was
+    // not enough: an `sp_addextendedproperty` description reading "See dbo.spUpdate… for how this
+    // is populated" has a dot before the name and is not a call, and the comment here used to
+    // claim the anchor prevented exactly that shape. It did not.
     //
-    //   EXEC [schema].[spX] @Excl=…        bracketed, T-SQL
-    //   EXEC schema.spX;                   UNbracketed — bracketing is optional in T-SQL, and
-    //                                      requiring it made this silent on a real call
-    //   SELECT schema."spX"('…')           quoted, PostgreSQL
-    //
-    // Anchored on the punctuation that precedes the name — `.`, `[` or `"` — because that is what
-    // separates a call from an `sp_addextendedproperty` description that merely NAMES a procedure
-    // in prose, where the name follows a space. Anchoring before rather than after also survives a
-    // malformed argument list (`[spX], @EntityIDs=…`, the shape a careless deletion leaves), which
-    // an earlier version did not. The unqualified `EXEC spX` form is matched separately below.
+    // Counted on the `values` mask (see the call site), so a call written inside a dynamic-SQL
+    // literal still counts — which is the point of not sharing the parser's mask.
     let calls = 0;
-    for (const call of sql.matchAll(/[.["](sp\w+)/gi)) {
+    for (const call of sql.matchAll(/\bEXEC(?:UTE)?\s+(?:\[[^\]]*\]|[\w$.{}]+)?\s*\.?\s*\[?"?(sp\w+)/gi)) {
         if (procNames.has(call[1].toLowerCase())) {
             calls++;
         }
     }
-    for (const call of sql.matchAll(/\bEXEC(?:UTE)?\s+(sp\w+)/gi)) {
+    // PostgreSQL: `SELECT schema."spX"(…)`. The parenthesis is what makes it a call rather than a
+    // name in prose; `exclusionListsIn` reads the argument itself.
+    for (const call of sql.matchAll(/"(sp\w+)"\s*\(/gi)) {
         if (procNames.has(call[1].toLowerCase())) {
             calls++;
         }
     }
     return calls;
+}
+
+/**
+ * The version a shipped SQL file sorts under, or `null` if it is not shipped SQL at all.
+ *
+ * Fails SAFE on anything it cannot order, which is the convention the other two watershed helpers
+ * in this file already document — "an unorderable file is the one most likely to land last". This
+ * previously demanded a 12-digit stamp and skipped everything else, so `V1__Foo.sql`, `V1_0__Foo.sql`
+ * and `V2026_08__Foo.sql` — all legal Flyway versions, and `V1__Metadata_Sync.sql` is this repo's
+ * own spec fixture — were exempt from CHECK 5 entirely. `R__` repeatables sort last because that is
+ * when Flyway runs them; every other unparseable name sorts last too, so it is gated rather than
+ * ignored.
+ */
+function gatedVersionOf(file) {
+    if (!file.endsWith('.sql')) {
+        return null;
+    }
+    const stamp = /^[A-Z](\d{12})__/.exec(file);
+    return stamp === null ? '999999999999' : stamp[1];
 }
 
 /**
@@ -492,12 +510,7 @@ function shippedExclusionLists(repoRoot) {
     for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
-            // `R__` repeatables carry no version stamp and were skipped entirely — flagged as an
-            // open carry-over for several rounds. A repeatable runs on EVERY migrate, so a sync
-            // call in one is the last place this should be blind. They sort after every versioned
-            // file, which is also when Flyway runs them.
-            const stamp = /^[A-Z](\d{12})__/.exec(file);
-            const version = stamp === null ? (/^R__/.test(file) ? '999999999999' : null) : stamp[1];
+            const version = gatedVersionOf(file);
             if (version === null) continue;
             // The STRUCTURE mask, so `--` comments do not count. `migrations-pg/` documents the
             // statements its conversion skipped in comments, wrapped mid-literal — scanning raw
@@ -545,8 +558,7 @@ function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
     for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
-            const stamp = /^[A-Z](\d{12})__/.exec(file);
-            const version = stamp === null ? (/^R__/.test(file) ? '999999999999' : null) : stamp[1];
+            const version = gatedVersionOf(file);
             if (version === null || version < SCHEMA_SYNC_GATE_FROM) continue;
             const path = join(dir, file);
             // The `values` mask, deliberately — the same choice, for the same reason, that

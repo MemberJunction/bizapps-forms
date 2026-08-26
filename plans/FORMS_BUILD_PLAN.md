@@ -1908,3 +1908,63 @@ native entities. This is the reporting differentiator no incumbent has.
      ten moved off it.
 
   **Verification:** 1,833 unit tests, six gates (71 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round twelve: the payload was built from a set the server disagreed with, and it
+  was unrecoverable.** One high finding plus two gate defects, all in round eleven's fix.
+
+  1. **The widget could send a payload that makes the server require a question it never
+     rendered.** Round eleven aligned the VERDICT basis via `transmittedView()` and left
+     `buildAnswerInputs` feeding on `visibleAnswerableQuestions`, which still resolved over the raw
+     map. The failure runs OPPOSITE to the one round eleven fixed, which is why that fix did not
+     catch it: `why` is shown when `detail isNotAnswered` — an operator this PR added — so removing
+     an answer REVEALS a question. Respondent picks Company, types a detail, switches to
+     Individual; nothing prunes `detail` from the raw map, so the widget reads it as answered,
+     hides `why`, and sends neither. The server sees no `detail`, finds `isNotAnswered` true, makes
+     `why` visible AND required, and rejects the submission naming a field that was never on
+     screen. Every retry sends the identical payload, so the respondent cannot get out of it — on
+     the anonymous path, with the error rendered as one banner that maps to no field.
+
+     The rendered set is now a FIXED POINT of "restrict the answers to this set, then re-derive
+     from them". At a fixed point the server's single pass over the payload reproduces the set
+     exactly, so the two cannot disagree. Because `isNotAnswered` makes visibility non-monotone,
+     convergence is not guaranteed, so the loop is capped at five passes with an explicit warning
+     on non-convergence — a form whose rules have no stable answer is a real thing, and looping
+     forever or pretending otherwise are both worse than saying so.
+
+     Two of my own tests were wrong here, in opposite directions. Round eleven's "is stable" case
+     asserted `resolveVisibleQuestions(pages, view.answers) === view.questions`, which is how
+     `view.questions` is DEFINED — `f(x) === f(x)`, unfailable; it now asserts the RENDERED set
+     agrees, which is the thing that matters. And round eleven's payload assertion expected an
+     orphaned answer to be sent, describing the divergence rather than the fix; with the fixed
+     point there is no orphan to send.
+  2. **My round-eleven punctuation anchor counted prose as a call.** Adding `.` to the anchor made
+     an `sp_addextendedproperty` description reading "See dbo.spUpdate… for how this is populated"
+     count as an invocation — failing `lint:distribution` on correct SQL, and the comment five lines
+     above claimed the anchor was precisely what prevented that shape. Counting now requires CALL
+     SYNTAX (an `EXEC`/`EXECUTE` keyword, or a PostgreSQL quoted function with its parenthesis),
+     which is what actually separates a call from a mention. Both directions — prose ignored, a call
+     inside a dynamic-SQL literal still counted — are cases with mutants.
+  3. **CHECK 5 exempted any migration whose filename it could not order.** `V1__Foo.sql`,
+     `V1_0__Foo.sql` and `V2026_08__Foo.sql` are all legal Flyway versions, and `V1__Metadata_Sync.sql`
+     is this repo's own spec fixture — all silently skipped. The other two watershed helpers in the
+     same file deliberately fail SAFE on an unorderable name ("the one most likely to land last");
+     mine failed open. Now shares that convention, and `R__` is a case of it rather than a special
+     case.
+
+  Four stale mutant anchors surfaced when this rewrote the code they pinned — the harness doing its
+  job. Two were superseded and removed, two retargeted; 72 behaviours, all killed.
+
+  **Smoke, honestly:** six of eight paths green. `resume-arc-path` failed on a stale metadata cache
+  in a long-running MJAPI (the credential it named exists in the database) and passes after a
+  restart — worth knowing, because the error reads like missing data. `automation-semantics-path`
+  and `binding-path` are blocked by dev-DB fixture drift: the seeded automation is wired to a form
+  whose questions do not satisfy its Email mapping, producing exactly the
+  `Submission is missing required value(s): Email` symptom `.claude/rules/testing.md` documents as a
+  fixture mismatch and "never was" a product defect. I tried repointing the fixture, made it worse
+  (six active automations where the assertion wants one), and reverted. **Nothing in this change can
+  reach those paths: `git diff --name-only 23f82a0 -- packages/Server packages/Actions apps
+  migrations metadata` returns zero files.** A fresh dev database would clear it; that is not this
+  PR's work.
+
+  **Verification:** 1,834 unit tests, six gates (72 mutants), clean build, six of eight smoke paths
+  with the other two characterised above.
