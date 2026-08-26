@@ -6,7 +6,8 @@
  */
 import { computed, signal } from '@angular/core';
 import {
-  evaluateConditionalRule,
+  isAnswerableQuestionType,
+  resolveRenderedQuestions,
   resolveVisiblePages,
   resolveVisibleQuestions,
   answerCompleteness,
@@ -131,20 +132,27 @@ export class FormRuntime {
    * the shared resolver the server also uses.
    */
   public readonly visiblePages = computed<PublishedFormPage[]>(() => {
-    return resolveVisiblePages(this.orderedPages(), this.answers());
+    return resolveVisiblePages(this.orderedPages(), this.settledAnswers());
   });
 
-  /** Visible questions on a given page (page must itself be visible to matter). */
+  /**
+   * The questions the scroll renderer puts on THIS page, display-only types included.
+   *
+   * A slice of {@link renderedQuestions}, not its own derivation. It used to filter the page's
+   * own list on the question's `show` rule alone, which meant a `Go to` rule changed what the
+   * form submitted without changing what it displayed: the skipped question stayed on screen
+   * with its required asterisk, was never validated (submit judges the flow's set), and
+   * whatever was typed into it was dropped from the payload. Reading the walk is what keeps
+   * "on screen" and "in the payload" the same sentence.
+   */
   public visibleQuestions(page: PublishedFormPage): PublishedFormQuestion[] {
-    const map = this.answers();
-    return [...page.questions]
-      .sort((a, b) => a.displayOrder - b.displayOrder)
-      .filter((q) => evaluateConditionalRule(q.conditionalRule, map));
+    const onThisPage = new Set(page.questions.map((q) => q.id));
+    return this.renderedQuestions().filter((q) => onThisPage.has(q.id));
   }
 
   /**
-   * Every visible, answer-collecting question across the form, in document order — and a FIXED
-   * POINT of the server's own derivation, which is the property that makes the two sides agree.
+   * The answers the whole widget derives from: a FIXED POINT of the server's own derivation,
+   * which is the property that makes the two sides agree.
    *
    * Resolving once over the raw map is not enough, and the failure is worse than a wrong number.
    * The raw map keeps an answer whose question is hidden (nothing prunes on a visibility change),
@@ -156,18 +164,20 @@ export class FormRuntime {
    * sends the identical payload: unrecoverable, on the anonymous path.
    *
    * So this iterates until the set is stable under "restrict the answers to this set, then re-derive
-   * from them". At a fixed point the server's single pass over the payload reproduces this set
-   * exactly, so the two cannot disagree. See {@link MAX_VISIBILITY_PASSES} for why it is capped
-   * rather than looped until stable.
+   * from them", and returns THE RESTRICTED MAP — the answers whose single-pass derivation is that
+   * set, which is exactly the pass the server makes over the payload. Everything else here is a
+   * reading of this map. See {@link MAX_VISIBILITY_PASSES} for why it is capped rather than
+   * looped until stable.
    */
-  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() => {
+  private readonly settledAnswers = computed<ReadonlyMap<string, AnswerValue>>(() => {
     const pages = this.orderedPages();
     const raw = this.answers();
     let set = resolveVisibleQuestions(pages, raw);
     for (let pass = 0; pass < MAX_VISIBILITY_PASSES; pass++) {
-      const next = resolveVisibleQuestions(pages, restrictAnswers(raw, set));
+      const restricted = restrictAnswers(raw, set);
+      const next = resolveVisibleQuestions(pages, restricted);
       if (sameQuestions(next, set)) {
-        return set;
+        return restricted;
       }
       set = next;
     }
@@ -180,8 +190,23 @@ export class FormRuntime {
         'that has no stable answer (an `is not answered` rule revealing a question whose own answer ' +
         'then hides it). The server may disagree with what is on screen.',
     );
-    return set;
+    return restrictAnswers(raw, set);
   });
+
+  /**
+   * Every question that RENDERS, in document order — display-only types included.
+   *
+   * The one walk both renderers read. Derived from {@link settledAnswers} rather than the raw
+   * map so that what renders, what submits and what the server re-derives are three readings of
+   * one answer set instead of three derivations that agree most of the time.
+   */
+  public readonly renderedQuestions = computed<PublishedFormQuestion[]>(() =>
+    resolveRenderedQuestions(this.orderedPages(), this.settledAnswers()),
+  );
+
+  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() =>
+    this.renderedQuestions().filter((question) => isAnswerableQuestionType(question.type)),
+  );
 
   /**
    * Exactly the answers this widget will transmit — derived FROM the payload builder, not

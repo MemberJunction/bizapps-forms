@@ -65,7 +65,7 @@ describe('validateSubmission — FileUpload answered via fileId', () => {
   it('accepts a required FileUpload answered through fileId, and keeps the answer for persistence', () => {
     const answers: FormAnswerInput[] = [{ questionId: 'q-resume', fileId: 'file-guid-1' } as unknown as FormAnswerInput];
 
-    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, false);
+    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, 'complete');
 
     // Before this was fixed, the file answer read as unanswered: the submit was rejected with
     // `"Resume" is required.` even though the upload had already succeeded, and — on an OPTIONAL
@@ -79,7 +79,7 @@ describe('validateSubmission — FileUpload answered via fileId', () => {
   it('still reports a required FileUpload that carries no file', () => {
     const answers: FormAnswerInput[] = [{ questionId: 'q-resume' } as unknown as FormAnswerInput];
 
-    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, false);
+    const outcome = validateSubmission(fileUploadRequiredDefinition(), answers, 'complete');
 
     expect(outcome.errors).toEqual([{ questionId: 'q-resume', message: '"Resume" is required.' }]);
     expect(outcome.answers).toEqual([]);
@@ -91,7 +91,7 @@ describe('validateSubmission — required MultiChoice via jsonValue', () => {
     const answers: FormAnswerInput[] = [
       { questionId: 'q-diet', textValue: null, jsonValue: ['none'] } as unknown as FormAnswerInput,
     ];
-    const outcome = validateSubmission(multiChoiceRequiredDefinition(), answers, false);
+    const outcome = validateSubmission(multiChoiceRequiredDefinition(), answers, 'complete');
     expect(outcome.errors).toEqual([]);
   });
 });
@@ -129,7 +129,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
     const outcome = validateSubmission(
       typedQuestionsWithoutRulesDefinition(),
       [{ questionId: 'q-email', textValue: 'not-an-email' }],
-      false,
+      'complete',
     );
     expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-email']);
     expect(outcome.errors[0].message).toBe('Enter a valid email address.');
@@ -139,7 +139,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
     const outcome = validateSubmission(
       typedQuestionsWithoutRulesDefinition(),
       [{ questionId: 'q-email', textValue: 'someone@example.com' }],
-      false,
+      'complete',
     );
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-email']);
@@ -152,7 +152,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
         { questionId: 'q-email', textValue: 'someone@example.com' },
         { questionId: 'q-num', textValue: 'lots' },
       ],
-      false,
+      'complete',
     );
     expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-num']);
   });
@@ -165,7 +165,7 @@ describe('validateSubmission — type-derived format (the client/server asymmetr
         { questionId: 'q-email', textValue: 'someone@example.com' },
         { questionId: 'q-num', textValue: '' },
       ],
-      false,
+      'complete',
     );
     expect(outcome.errors).toEqual([]);
   });
@@ -240,7 +240,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
     const outcome = validateSubmission(
       partialSaveDefinition(),
       [{ questionId: 'q-email', textValue: 'someone@examp' }],
-      true,
+      'draft',
     );
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-email']);
@@ -252,7 +252,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
     const outcome = validateSubmission(
       partialSaveDefinition(),
       [{ questionId: 'q-code', textValue: 'AB' }],
-      true,
+      'draft',
     );
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-code']);
@@ -269,7 +269,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
     const outcome = validateSubmission(
       cappedDefinition(),
       [{ questionId: 'q-capped', textValue: 'x'.repeat(500) }],
-      true,
+      'draft',
     );
     expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at most 50 characters.']);
   });
@@ -278,7 +278,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
     const outcome = validateSubmission(
       cappedDefinition(),
       [{ questionId: 'q-capped', textValue: 'still typing' }],
-      true,
+      'draft',
     );
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-capped']);
@@ -291,7 +291,7 @@ describe('validateSubmission — partial (autosave) saves', () => {
         { questionId: 'q-email', textValue: 'someone@examp' },
         { questionId: 'q-code', textValue: 'AB' },
       ],
-      false,
+      'complete',
     );
     expect(outcome.errors.map((e) => e.questionId).sort()).toEqual(['q-code', 'q-email']);
   });
@@ -329,13 +329,13 @@ function conditionalDefinition(): PublishedFormDefinition {
 
 describe('validateSubmission', () => {
   it('drops a hidden conditional answer and does not require it', () => {
-    const outcome = validateSubmission(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Yes' }], false);
+    const outcome = validateSubmission(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Yes' }], 'complete');
     expect(outcome.errors).toHaveLength(0);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-choice']);
   });
 
   it('requires the conditional answer when its trigger condition is met', () => {
-    const outcome = validateSubmission(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Other' }], false);
+    const outcome = validateSubmission(conditionalDefinition(), [{ questionId: 'q-choice', textValue: 'Other' }], 'complete');
     expect(outcome.errors.some((e) => e.questionId === 'q-other')).toBe(true);
   });
 
@@ -346,7 +346,7 @@ describe('validateSubmission', () => {
         { questionId: 'q-choice', textValue: 'Other' },
         { questionId: 'q-other', textValue: 'Detail' },
       ],
-      false,
+      'complete',
     );
     expect(outcome.errors).toHaveLength(0);
     expect(outcome.answers).toHaveLength(2);
@@ -384,15 +384,15 @@ describe('validateSubmission', () => {
       ],
     };
     for (const over of [{ numericValue: 9999 }, { textValue: '9999' }]) {
-      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...over }], false);
+      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...over }], 'complete');
       expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at most 100.']);
     }
     for (const under of [{ numericValue: 0 }, { textValue: '0' }]) {
-      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...under }], false);
+      const outcome = validateSubmission(def, [{ questionId: 'q-num', ...under }], 'complete');
       expect(outcome.errors.map((e) => e.message)).toEqual(['Must be at least 1.']);
     }
     for (const good of [{ numericValue: 42 }, { textValue: '42' }]) {
-      expect(validateSubmission(def, [{ questionId: 'q-num', ...good }], false).errors).toEqual([]);
+      expect(validateSubmission(def, [{ questionId: 'q-num', ...good }], 'complete').errors).toEqual([]);
     }
   });
 
@@ -422,15 +422,15 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const bad = validateSubmission(def, [{ questionId: 'q-zip', textValue: 'abc' }], false);
+    const bad = validateSubmission(def, [{ questionId: 'q-zip', textValue: 'abc' }], 'complete');
     expect(bad.errors[0].message).toBe('Five digits required.');
 
-    const good = validateSubmission(def, [{ questionId: 'q-zip', textValue: '12345' }], false);
+    const good = validateSubmission(def, [{ questionId: 'q-zip', textValue: '12345' }], 'complete');
     expect(good.errors).toHaveLength(0);
   });
 
   it('skips required enforcement for partial submissions', () => {
-    const outcome = validateSubmission(conditionalDefinition(), [], true);
+    const outcome = validateSubmission(conditionalDefinition(), [], 'draft');
     expect(outcome.errors).toHaveLength(0);
   });
 
@@ -464,7 +464,7 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const outcome = validateSubmission(def, [{ questionId: 'q-code', textValue: 'ABC' }], false);
+    const outcome = validateSubmission(def, [{ questionId: 'q-code', textValue: 'ABC' }], 'complete');
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-code']);
   });
@@ -500,7 +500,7 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const outcome = validateSubmission(def, [{ questionId: 'q-trigger', textValue: '   ' }], false);
+    const outcome = validateSubmission(def, [{ questionId: 'q-trigger', textValue: '   ' }], 'complete');
     expect(outcome.errors).toEqual([]);
     expect(outcome.answers).toEqual([]);
   });
@@ -527,8 +527,72 @@ describe('validateSubmission', () => {
         },
       ],
     };
-    const outcome = validateSubmission(def, [{ questionId: 'q-date', numericValue: 999999 }], false);
+    const outcome = validateSubmission(def, [{ questionId: 'q-date', numericValue: 999999 }], 'complete');
     expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-date']);
     expect(outcome.answers).toEqual([]);
+  });
+});
+
+/**
+ * The three things a submission can be, and how much of the rulebook each is held to.
+ *
+ * This was a boolean, `partial`, and the pipeline passed `true` for two unrelated situations: an
+ * autosaved draft, and a COMPLETED submission from someone a knockout rule screened out. They
+ * are not the same claim. A draft is unfinished, so judging its half-typed values would be
+ * unfair. A screened-out submission is finished — it is a terminal write that seals the response
+ * — and the only thing it legitimately needs waived is `isRequired` on questions the respondent
+ * never reached. Waiving format as well meant the one path where an author's own validation was
+ * silently off was the path that writes a permanent row.
+ */
+describe('validateSubmission — what each mode waives', () => {
+  function emailForm(): PublishedFormDefinition {
+    return {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Screening',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-email', type: 'Email', prompt: 'Email', isRequired: false, displayOrder: 1, options: [] },
+            { id: 'q-name', type: 'ShortText', prompt: 'Name', isRequired: true, displayOrder: 2, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  const malformed = [{ questionId: 'q-email', textValue: 'not-an-email' }];
+
+  describe('happy', () => {
+    it("'screened-out' does not ask for what the respondent never reached", () => {
+      const outcome = validateSubmission(emailForm(), [{ questionId: 'q-email', textValue: 'a@b.com' }], 'screened-out');
+      expect(outcome.errors).toEqual([]);
+    });
+
+    it("'complete' asks for everything", () => {
+      const outcome = validateSubmission(emailForm(), [{ questionId: 'q-email', textValue: 'a@b.com' }], 'complete');
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-name']);
+    });
+  });
+
+  describe('edge', () => {
+    it("'draft' waives the format of a value still being typed", () => {
+      expect(validateSubmission(emailForm(), malformed, 'draft').errors).toEqual([]);
+    });
+  });
+
+  describe('worst', () => {
+    it("'screened-out' still refuses a malformed answer the respondent DID supply", () => {
+      // The terminal write that seals a disqualification is the last chance to catch this; the
+      // row it writes is permanent and nothing revalidates it afterwards.
+      expect(validateSubmission(emailForm(), malformed, 'screened-out').errors.map((e) => e.questionId)).toEqual([
+        'q-email',
+      ]);
+    });
   });
 });

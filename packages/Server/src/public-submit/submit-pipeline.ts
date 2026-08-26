@@ -62,7 +62,7 @@ import {
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
 import { captchaRequired, verifyTurnstile } from './turnstile.service';
-import { buildAnswerMap, validateSubmission } from './validation.service';
+import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
 import {
   evaluateProvenance,
   loadUploadLedger,
@@ -176,6 +176,24 @@ function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
  * always gets a rendered error rather than a blank screen. This is the loud-failure backstop for
  * contract drift between the widget mapping, the GraphQL DTO, and this pipeline.
  */
+/**
+ * How much of the rulebook this submission is held to.
+ *
+ * A disqualified respondent legitimately stopped mid-form, so `isRequired` must not block the
+ * terminal write that records the screening — but the answers they DID give are final, and are
+ * held to their format. That distinction used to be a single boolean shared with autosave, which
+ * turned format checking off on the one path that writes a permanent, never-revalidated row.
+ */
+export function validationModeFor(
+  complete: boolean,
+  disqualifiedBy: PublishedFormScreen | undefined,
+): ValidationMode {
+  if (!complete) {
+    return 'draft';
+  }
+  return disqualifiedBy !== undefined ? 'screened-out' : 'complete';
+}
+
 export function validateSubmissionShape(submission: PipelineSubmission): FormSubmissionResult | undefined {
   if (!submission || typeof submission !== 'object') {
     return fail('Malformed submission.');
@@ -430,14 +448,9 @@ async function runSubmitPipelineInner(
 
   timer.mark('quota');
 
-  // 8. Server-side re-validation (conditional visibility + required + format). A disqualified
-  //    respondent legitimately stopped mid-form, so required questions they never reached must
-  //    not block the terminal write — validation runs in partial mode for them.
-  const validation = validateSubmission(
-    resolved.definition,
-    submission.answers,
-    !complete || disqualifiedBy !== undefined,
-  );
+  // 8. Server-side re-validation (conditional visibility + required + format). Which mode, and
+  //    why, is `validationModeFor`.
+  const validation = validateSubmission(resolved.definition, submission.answers, validationModeFor(complete, disqualifiedBy));
   if (validation.errors.length > 0) {
     return report({ success: false, errors: validation.errors });
   }

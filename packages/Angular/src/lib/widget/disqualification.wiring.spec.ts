@@ -86,7 +86,7 @@ describe('a knockout is judged on a finished answer, never a half-typed one', ()
 
   it('resolves it from a commit signal instead', () => {
     const body = methodBody('protected onCommit');
-    expect(body).toMatch(/earlyOutcome\(\)/);
+    expect(body).toMatch(/outcomeForAnswers\(\)/);
     expect(body).toMatch(/endEarly/);
   });
 
@@ -163,7 +163,9 @@ describe('a knockout records itself before it ends the form', () => {
     // version of this test was `expect(source()).toMatch(/disqualifying/)`, which the latch's
     // own declaration satisfies — so deleting every early-return would have left it green.
     expect(knockoutMethod()).toMatch(/this\.endingEarly = true/);
-    expect(methodBody('protected onCommit')).toMatch(/if \(this\.endingEarly\)\s*\{?\s*return/);
+    // `onCommit` guards on the latch AND the phase, so match the condition it opens with rather
+    // than an exact spelling of it.
+    expect(methodBody('protected onCommit')).toMatch(/if \(this\.endingEarly[\s\S]*?\)\s*\{\s*return/);
     expect(methodBody('protected onProgress')).toMatch(/if \(this\.endingEarly\)\s*\{?\s*return/);
   });
 });
@@ -251,17 +253,59 @@ describe('the client judges exactly what it sends', () => {
   it('the knockout reads visibleAnswers, never the raw map', () => {
     // `buildAnswerInputs` sends only the visible set and the server judges from what arrives, so
     // any client verdict reached on `currentAnswers()` can disagree with the recorded outcome.
-    const body = methodBody('private earlyOutcome');
+    const body = methodBody('private outcomeForAnswers');
     expect(body).toMatch(/transmittedView\(\)/);
     expect(body).not.toMatch(/currentAnswers\(\)/);
     // Not the RENDERED question list either — that is derived from the raw map.
     expect(body).not.toMatch(/visibleAnswerableQuestions\(\)/);
   });
 
-  it('and so does the ending resolution', () => {
+  it('and so does the ending resolution, through the same one query', () => {
+    // It reached `transmittedView()` itself until both paths were folded into
+    // `outcomeForAnswers`. The guarantee is unchanged and now has one place to hold: the ending
+    // shown must be resolved from the payload the server judges, never from the raw map.
+    expect(methodBody('private resolveEnding')).toMatch(/outcomeForAnswers\(\)/);
+  });
+});
+
+/**
+ * Who ends the response — the respondent, or the rule.
+ *
+ * `endedEarly` means the FLOW is over. It was also being read as "so send it now", which turned
+ * an author's `Go to → Submit` into an auto-send: in scroll mode a commit is a BLUR, so clicking
+ * out of the text box transmitted a completed response and left the form. The respondent never
+ * pressed anything.
+ *
+ * The rule that replaces it lives in the contract as `endsWithoutSubmit`, tested for real in
+ * `flow-resolver.spec.ts`. What has to be true HERE is that the component asks it rather than
+ * re-deciding, and that the two paths a finished flow can take — sealed by the widget, or
+ * submitted by the respondent — land on the SAME ending screen.
+ */
+describe('an early finish waits for Submit unless it is a screening', () => {
+  it('the commit handler asks the contract who ends it, rather than reading endedEarly', () => {
+    const body = methodBody('protected onCommit');
+    expect(body).toMatch(/endsWithoutSubmit\(/);
+    expect(source()).not.toMatch(/outcome\.endedEarly \? outcome : undefined/);
+  });
+
+  it('the decision itself is not re-spelled in the component', () => {
+    // `outcome.disqualified` at the call site answers "what status is written", not "who ends
+    // it". They coincide today; spelling it out here is what makes them impossible to separate.
+    expect(methodBody('protected onCommit')).not.toMatch(/\.disqualified/);
+  });
+
+  it('a rule that named an ending screen still lands on it when the respondent submits', () => {
+    // Without this the manual-submit path called `resolveEndingScreen`, which resolves by
+    // CONDITION and knows nothing about a jump's named target — so "Go to → Thanks for applying"
+    // showed whichever ending the conditions happened to pick instead.
     const body = methodBody('private resolveEnding');
-    expect(body).toMatch(/transmittedView\(\)/);
-    expect(body).not.toMatch(/currentAnswers\(\)/);
-    expect(body).not.toMatch(/visibleAnswerableQuestions\(\)/);
+    expect(body).toMatch(/outcomeForAnswers\(\)/);
+    expect(body).not.toMatch(/resolveEndingScreen\(/);
+  });
+
+  it('both paths read one resolver, so the sealed and submitted endings cannot differ', () => {
+    expect(methodBody('private outcomeForAnswers')).toMatch(/resolveFormOutcome\(/);
+    // ...and it is the ONLY place the component resolves an outcome.
+    expect(source().match(/resolveFormOutcome\(/g) ?? []).toHaveLength(1);
   });
 });

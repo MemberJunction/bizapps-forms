@@ -458,3 +458,107 @@ describe('FormRuntime progress edge cases', () => {
     }
   });
 });
+
+/**
+ * What the SCROLL renderer puts on screen.
+ *
+ * Scroll mode asks the runtime for one page's questions at a time, and that reader applied the
+ * question's own `show` rule and nothing else — so a `Go to` rule changed what the form SUBMITS
+ * without changing what it DISPLAYS. Three things came apart at once, all silent:
+ *
+ *  - a skipped question stayed on screen, asterisk and all, and was never validated on submit;
+ *  - whatever the respondent typed into it was dropped from the payload;
+ *  - the progress bar counted the flow's set, so it could read 100% with visibly empty
+ *    required fields still on the page.
+ *
+ * One walk decides what renders, and the renderer reads that walk. `visibleAnswerableQuestions`
+ * is the same walk narrowed to answerable types, so the two cannot disagree by construction.
+ */
+function jumpDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f1',
+    formVersionId: 'v1',
+    name: 'Jump',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          {
+            id: 'q-first',
+            type: 'ShortText',
+            prompt: 'First name',
+            isRequired: false,
+            displayOrder: 1,
+            options: [],
+            conditionalRule: {
+              jump: [
+                {
+                  when: { all: [{ questionId: 'q-first', op: 'equals', value: 'Soham' }] },
+                  target: { kind: 'question', id: 'q-email' },
+                },
+              ],
+            },
+          },
+          { id: 'q-last', type: 'ShortText', prompt: 'Last name', isRequired: true, displayOrder: 2, options: [] },
+          { id: 'q-note', type: 'Statement', prompt: 'Nearly there', isRequired: false, displayOrder: 3, options: [] },
+          { id: 'q-email', type: 'ShortText', prompt: 'Email', isRequired: true, displayOrder: 4, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('FormRuntime — the scroll renderer follows the flow, not just show rules', () => {
+  describe('happy', () => {
+    it('takes a jumped-over question off the page', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      const page = rt.visiblePages()[0];
+      expect(rt.visibleQuestions(page).map((q) => q.id)).toEqual(['q-first', 'q-last', 'q-note', 'q-email']);
+
+      rt.setValue('q-first', 'Soham');
+      expect(rt.visibleQuestions(page).map((q) => q.id)).toEqual(['q-first', 'q-email']);
+    });
+
+    it('still renders display-only questions the flow reaches', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      const page = rt.visiblePages()[0];
+      expect(rt.visibleQuestions(page).some((q) => q.type === 'Statement')).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('what renders and what submits describe the same questions', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      rt.setValue('q-first', 'Soham');
+      const rendered = rt.visibleQuestions(rt.visiblePages()[0]).filter((q) => q.type !== 'Statement');
+      expect(rendered.map((q) => q.id)).toEqual(rt.visibleAnswerableQuestions().map((q) => q.id));
+    });
+  });
+
+  describe('worst', () => {
+    it('a skipped REQUIRED question neither blocks the submit nor sits on the page asking', () => {
+      // The two halves have to move together. Off the page but still required is an unsubmittable
+      // form; on the page but no longer required is a question the respondent answers for nothing.
+      const rt = new FormRuntime(jumpDefinition());
+      rt.setValue('q-first', 'Soham');
+      rt.setValue('q-email', 'a@b.com');
+      expect(rt.visibleQuestions(rt.visiblePages()[0]).map((q) => q.id)).not.toContain('q-last');
+      expect(rt.isFormValid()).toBe(true);
+    });
+
+    it('a full progress bar means nothing on the page is still being asked for', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      rt.setValue('q-first', 'Soham');
+      rt.setValue('q-email', 'a@b.com');
+      expect(rt.progress()).toBe(1);
+      const unanswered = rt
+        .visibleQuestions(rt.visiblePages()[0])
+        .filter((q) => q.isRequired && !rt.valueFor(q.id));
+      expect(unanswered).toEqual([]);
+    });
+  });
+});

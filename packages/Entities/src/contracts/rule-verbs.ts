@@ -36,10 +36,11 @@ import { resolveEndingScreen } from './form-screens';
  * did). Two folds computing halves of one interdependent answer is how the two come to
  * disagree, and the sides that must agree here are on opposite ends of the wire.
  *
- * THE WALK. Pages in display order, each page's questions in display order, as one flat
- * sequence of stops. A fired jump sets a marker at the target's position and every stop before
- * it is skipped. Because the marker only ever moves forward, the walk is linear and cycles are
- * unrepresentable rather than merely unlikely.
+ * THE WALK. Pages in display order, each page entered, then its questions in display order,
+ * then left — one flat sequence of stops. A fired jump sets a marker at the target's position
+ * and every stop before it is skipped. Because the marker only ever moves forward, the walk is
+ * linear and cycles are unrepresentable rather than merely unlikely. A page's own `Go to` fires
+ * at the stop where the page is LEFT; see {@link flattenStops} for why that is load-bearing.
  *
  * INERTNESS. A non-terminal target at or before the current position — backward, self, or
  * unknown — is skipped, never an error. A TERMINAL target has no ordering to violate, so it
@@ -62,7 +63,15 @@ function resolveFlow(
     // Page ids and question ids share this map. They are distinct id spaces in practice, and a
     // collision could only make a jump land on the wrong stop of the SAME position, which the
     // forward-only check already bounds.
-    positionOf.set(stop.question?.id ?? stop.page.id, stop.position);
+    //
+    // A page is keyed to where it is ENTERED, never to where it is left: a jump aimed at a page
+    // must land before that page's questions, not after them. The exit stop carries no key, so
+    // it can never be a destination.
+    if (stop.kind === 'question') {
+      positionOf.set(stop.question.id, stop.position);
+    } else if (stop.kind === 'enter') {
+      positionOf.set(stop.page.id, stop.position);
+    }
   }
 
   const shownPage = new Map<string, boolean>();
@@ -80,7 +89,6 @@ function resolveFlow(
   const visiblePages: PublishedFormPage[] = [];
   const seenPages = new Set<string>();
   const rendered: PublishedFormQuestion[] = [];
-  const enteredPages = new Set<string>();
   let skipUntil: number | null = null;
   let termination: JumpTarget | undefined;
 
@@ -99,32 +107,20 @@ function resolveFlow(
     }
 
     // A page is entered by its header OR by a jump landing on one of its questions. Either way
-    // it renders, and its own jump gets exactly one chance to fire.
+    // it renders.
     if (!seenPages.has(stop.page.id)) {
       seenPages.add(stop.page.id);
       visiblePages.push(stop.page);
     }
-    if (!enteredPages.has(stop.page.id)) {
-      enteredPages.add(stop.page.id);
-      const fired = firedJump(stop.page.conditionalRule, stop.position, positionOf, answers, extras);
-      if (fired !== null) {
-        if (isTerminalTarget(fired)) {
-          termination = fired;
-          continue;
-        }
-        skipUntil = positionOf.get(fired.id) ?? null;
+
+    if (stop.kind === 'question') {
+      if (!evaluateConditionalRule(stop.question.conditionalRule, answers, extras)) {
+        continue; // hidden by its own show rule: it renders nothing, and its jump never runs
       }
+      rendered.push(stop.question);
     }
 
-    if (stop.question === undefined) {
-      continue; // the page header itself collects nothing
-    }
-    if (!evaluateConditionalRule(stop.question.conditionalRule, answers, extras)) {
-      continue;
-    }
-    rendered.push(stop.question);
-
-    const fired = firedJump(stop.question.conditionalRule, stop.position, positionOf, answers, extras);
+    const fired = firedJump(ruleAt(stop), stop.position, positionOf, answers, extras);
     if (fired !== null) {
       if (isTerminalTarget(fired)) {
         termination = fired;
@@ -147,21 +143,50 @@ interface FlowResult {
   termination: JumpTarget | undefined;
 }
 
-/** One position in the walk: a page header, or a question on that page. */
-interface FlowStop {
-  position: number;
-  page: PublishedFormPage;
-  question?: PublishedFormQuestion;
+/**
+ * One position in the walk.
+ *
+ * A page occupies TWO of them — it is arrived at and it is left — because those are two
+ * different moments and the page's own rules belong to different ones. `enter` is where its
+ * `show` gate and its position as a jump DESTINATION live; `exit` is where its `Go to` fires.
+ */
+type FlowStop =
+  | { kind: 'enter'; position: number; page: PublishedFormPage }
+  | { kind: 'question'; position: number; page: PublishedFormPage; question: PublishedFormQuestion }
+  | { kind: 'exit'; position: number; page: PublishedFormPage };
+
+/** The rule whose `Go to` this stop may fire: the question's own, or the page's on its exit. */
+function ruleAt(stop: FlowStop): ConditionalRule | undefined {
+  switch (stop.kind) {
+    case 'question':
+      return stop.question.conditionalRule;
+    case 'exit':
+      return stop.page.conditionalRule;
+    case 'enter':
+      return undefined; // arriving decides nothing; see FlowStop
+  }
 }
 
-/** Pages in display order, each followed by its questions in display order. */
+/**
+ * Pages in display order — entered, then their questions in display order, then left.
+ *
+ * THE EXIT STOP IS THE POINT. A page's `Go to` reads "After this page, go to…", and the builder
+ * offers the page's OWN questions as its condition sources, because leaving a page is decided by
+ * what was just answered on it. Firing that rule on arrival made the commonest authoring
+ * self-defeating: the answer that satisfies the condition belongs to a question the jump then
+ * skipped, so the page rendered as an empty header, the trigger's answer was never transmitted,
+ * and the widget's fixed point oscillated forever between the two readings. Leaving the page is
+ * when the rule was always meant to run, and it is the only position from which the page's own
+ * questions are already behind the walk.
+ */
 function flattenStops(pages: readonly PublishedFormPage[]): FlowStop[] {
   const stops: FlowStop[] = [];
   for (const page of [...pages].sort((a, b) => a.displayOrder - b.displayOrder)) {
-    stops.push({ position: stops.length, page });
+    stops.push({ kind: 'enter', position: stops.length, page });
     for (const question of [...page.questions].sort((a, b) => a.displayOrder - b.displayOrder)) {
-      stops.push({ position: stops.length, page, question });
+      stops.push({ kind: 'question', position: stops.length, page, question });
     }
+    stops.push({ kind: 'exit', position: stops.length, page });
   }
   return stops;
 }
@@ -291,6 +316,32 @@ export interface FormOutcome {
   disqualified: boolean;
   /** Whether a `Go to` rule ended the form early, rather than it running out of questions. */
   endedEarly: boolean;
+}
+
+/**
+ * Whether reaching this outcome ends the response WITHOUT the respondent pressing Submit.
+ *
+ * `endedEarly` says the FLOW is over — nothing further will be asked, so the widget stops
+ * rendering questions and the Submit control is what is left. It does not say who finishes the
+ * response, and reading it as though it did is how a `Go to → Submit` came to transmit a
+ * completed submission the moment a respondent clicked out of a text box: in scroll mode a
+ * commit is a blur, so the rule fired, sealed and navigated away from a form the respondent was
+ * still looking at.
+ *
+ * Only a SCREENING seals itself. That asymmetry is the point of a knockout: it is done TO the
+ * respondent, they are ineligible, and the whole reason to fire it early is that they should not
+ * fill in the rest first — so waiting for their consent to send would be waiting for something
+ * they have no reason to give. Every other finish is done BY them, and Submit is where they say
+ * so. The server draws the same line: `disqualifiedBy` is what lets a terminal write skip the
+ * required checks, and nothing else does.
+ *
+ * Named here rather than spelled `outcome.disqualified` at the call site because the field
+ * answers "what status is written" and this answers "who ends it", and the two only happen to
+ * coincide. A future outcome that seals for some other reason changes this function, not every
+ * caller.
+ */
+export function endsWithoutSubmit(outcome: FormOutcome): boolean {
+  return outcome.disqualified;
 }
 
 export function resolveFormOutcome(

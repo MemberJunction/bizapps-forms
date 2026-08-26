@@ -23,8 +23,8 @@ import {
   computeScore,
   endingMessage,
   endingRedirectUrl,
+  endsWithoutSubmit,
   resolveFormOutcome,
-  resolveEndingScreen,
   SCREENED_OUT_MESSAGE,
   type FormOutcome,
   type FormSubmissionInput,
@@ -361,26 +361,40 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * the save regardless, so a client that never fired this is still disqualified.
    */
   protected onCommit(): void {
-    if (this.endingEarly) {
+    if (this.endingEarly || this.phase() !== 'ready') {
       return;
     }
-    const outcome = this.earlyOutcome();
-    if (outcome) {
+    const outcome = this.outcomeForAnswers();
+    // Not every finished flow is the widget's to send. `endsWithoutSubmit` is where that line is
+    // drawn and why: a screening is done TO the respondent, so it seals itself, and everything
+    // else waits for them to press Submit. Reading `endedEarly` here instead made a
+    // `Go to -> Submit` fire on a BLUR — click out of a text box and the response was gone.
+    if (outcome && endsWithoutSubmit(outcome)) {
       void this.endEarly(outcome);
     }
   }
 
   /**
-   * The verdict these answers have already reached, or undefined while the form is still going.
+   * The verdict these answers have already reached.
    *
    * A pure query — it decides, it does not act. {@link endEarly} is the command half, and keeping
    * them apart is what lets the command be awaited without the decision being re-made every time
    * control comes back.
+   *
+   * The ONE place this component resolves an outcome, read by both paths a finished form can
+   * take: sealed by a screening, or submitted by the respondent. They used to be two calls to two
+   * different resolvers — this one, and `resolveEndingScreen` on the submit path, which resolves
+   * by CONDITION and knows nothing about a jump's named target. So a rule saying "Go to -> Thanks
+   * for applying" showed that screen when it sealed itself and a different one when the
+   * respondent pressed Submit.
+   *
+   * No phase guard: WHEN it is fair to ask is the caller's business, and the submit path asks
+   * after the phase has already left `ready`.
    */
-  private earlyOutcome(): FormOutcome | undefined {
+  private outcomeForAnswers(): FormOutcome | undefined {
     const def = this.definition();
     const rt = this.runtime();
-    if (!def || !rt || this.phase() !== 'ready') {
+    if (!def || !rt) {
       return undefined;
     }
     // `visibleAnswers()`, not the raw map — the set this widget will SEND, which is the set the
@@ -394,10 +408,9 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // stays "visible" on the client when the rule that reveals it reads an answer that is no
     // longer being sent.
     const sent = rt.transmittedView();
-    const outcome = resolveFormOutcome(def.pages, def.endScreens ?? [], sent.answers, {
+    return resolveFormOutcome(def.pages, def.endScreens ?? [], sent.answers, {
       score: computeScore(sent.questions, sent.answers),
     });
-    return outcome.endedEarly ? outcome : undefined;
   }
 
   /**
@@ -663,22 +676,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Pick the ending screen for the answers as submitted. */
+  /**
+   * Pick the ending screen for the answers as submitted.
+   *
+   * Through {@link outcomeForAnswers}, which reads the payload the server will judge AND honours
+   * a `Go to` that named a screen. It used to call `resolveEndingScreen` directly — condition
+   * banding only — so a terminal jump's destination was simply lost on the manual-submit path:
+   * the same rule showed one screen when it sealed itself and another when the respondent
+   * pressed Submit.
+   */
   private resolveEnding(): void {
-    const def = this.definition();
-    const rt = this.runtime();
-    if (!def || !rt) {
-      return;
-    }
-    // The same one set the knockout uses, and for the same reason: the server resolves the ending
-    // from the payload, so banding here on answers that were never sent picks a different screen
-    // than the one the response is recorded against.
-    const sent = rt.transmittedView();
-    this.endingScreen.set(
-      resolveEndingScreen(def.endScreens ?? [], sent.answers, {
-        score: computeScore(sent.questions, sent.answers),
-      }),
-    );
+    this.endingScreen.set(this.outcomeForAnswers()?.screen);
   }
 
   /**

@@ -1,6 +1,8 @@
 # Question-Level Logic Plan — two rules, one "Go to"
 
-**Status: ALL PHASES COMPLETE.** Phase 1 `ff84141` · Phase 2 `6b46eb1` · Phases 3–4 this commit.
+**Status: ALL PHASES COMPLETE**, with a correction — Phase 2 step 2 (server validation) was
+never actually done and shipped broken; see the note in §4. Phase 1 `ff84141` · Phase 2
+`6b46eb1` · Phases 3–4 `dda2677`-era.
 Final baseline: **1,971** tests (296 / 26 / 142 / 1006 / 501), widget 1199.1 kB, six gates green.
 
 **Phases 3 and 4 shipped together, deliberately.** "Several rules per item" with no UI to author
@@ -229,6 +231,26 @@ failure the fixed point exists to prevent.
 
 **Second worst:** an ending jump must fire quota and `OnComplete` automations exactly once, and
 a disqualified one must fire neither. That is the behavioural heart of decision 4.
+
+> **Step 2 was not done, and the worst case above was live in production until 2026-08-26.**
+> `validation.service.ts` kept iterating `resolveVisiblePages` and re-filtering each page's own
+> question list on its `show` rule — which drops a skipped PAGE (so the page-jump specs passed)
+> and silently restores every question a QUESTION-level jump skipped. The plan was marked ALL
+> PHASES COMPLETE with this open, and no spec covered the case: `rule-verbs-validation.spec.ts`
+> tested page jumps only. Found by a user testing `Go to → Submit` on a form whose next question
+> was required, and reported as "the rule took me to Submit but Submit says Last Name is
+> required."
+>
+> Fixed by iterating `resolveRenderedQuestions` — which this repo had exported, documented and
+> never called from anywhere. Three lessons worth keeping: a resolver with **zero callers** is
+> the strongest possible signal that the step which was meant to call it did not happen; a plan
+> step that says "it already does X, so this is free" is the one to verify rather than tick; and
+> a spec suite that covers the easy half of a generalisation (pages) will pass while the hard
+> half (questions) is broken. Two more consumers were derived from pages the same way and had to
+> move with it — the widget's scroll renderer, and the page-jump firing position (§Phase 1's
+> forward walk fired a page's `Go to` on ARRIVAL, so a section rule reading its own section
+> skipped the question that triggered it and the fixed point never settled).
+
 
 ## §5 Phase 3 — several rules per item
 

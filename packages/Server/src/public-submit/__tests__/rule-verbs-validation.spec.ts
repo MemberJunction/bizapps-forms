@@ -77,7 +77,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
       const parsed = parsePublishedDefinition(legacySnapshot());
       expect(parsed).toBeDefined();
 
-      const outcome = validateSubmission(parsed!, [{ questionId: 'q1', textValue: 'Other' }], false);
+      const outcome = validateSubmission(parsed!, [{ questionId: 'q1', textValue: 'Other' }], 'complete');
 
       expect(outcome.errors).toEqual([]);
     });
@@ -127,7 +127,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
       const outcome = validateSubmission(
         definition(hiddenButRequired),
         [{ questionId: 'q1', textValue: 'something-else' }],
-        false,
+        'complete',
       );
 
       expect(outcome.errors).toEqual([]);
@@ -153,7 +153,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
       const outcome = validateSubmission(
         definition(shownAndRequired),
         [{ questionId: 'q1', textValue: 'yes' }],
-        false,
+        'complete',
       );
 
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2']);
@@ -181,12 +181,12 @@ describe('jump-to-page on the server (C2)', () => {
 
   describe('happy', () => {
     it('a fired jump waives the skipped page, required questions included', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'skip' }], false);
+      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'skip' }], 'complete');
       expect(outcome.errors).toEqual([]);
     });
 
     it('with no jump the skipped page is reachable and its required question enforced', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'stay' }], false);
+      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'stay' }], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2']);
     });
   });
@@ -200,10 +200,108 @@ describe('jump-to-page on the server (C2)', () => {
           { questionId: 'q2b', textValue: 'smuggled' },
           { questionId: 'q3', textValue: 'kept' },
         ],
-        false,
+        'complete',
       );
       expect(outcome.errors).toEqual([]);
       expect(outcome.answers.map((a) => a.question.id).sort()).toEqual(['q1', 'q3']);
+    });
+  });
+});
+
+/**
+ * Question-level `Go to` on the server (QUESTION_LEVEL_LOGIC_PLAN §4).
+ *
+ * The page-level cases above pass for a reason that does not generalise: a skipped PAGE
+ * disappears from `resolveVisiblePages`, so iterating that resolver's output happens to drop it.
+ * A question jump hides questions WITHIN a page the walk already entered, and a terminal jump
+ * ends the form mid-page — neither is expressible as "which pages are reachable".
+ *
+ * This is the plan's own named worst case: the server must not reject a submission naming a
+ * field the respondent never saw. On the anonymous path that failure is unrecoverable — every
+ * retry sends the identical payload — so it is the one class of validation bug that cannot be
+ * worked around by the respondent.
+ */
+describe('question-level Go to on the server', () => {
+  /** One page: a trigger, then two required questions after it. */
+  function onePage(target: PublishedFormQuestion['conditionalRule']): PublishedFormPage[] {
+    return [
+      {
+        id: 'p1',
+        displayOrder: 0,
+        questions: [
+          question('q1', { conditionalRule: target }),
+          question('q2', { isRequired: true, displayOrder: 1 }),
+          question('q3', { isRequired: true, displayOrder: 2 }),
+        ],
+      },
+      { id: 'p2', displayOrder: 1, questions: [question('q4', { isRequired: true })] },
+    ];
+  }
+
+  const toSubmit = onePage({
+    jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'Soham' }] }, target: { kind: 'submit' } }],
+  });
+  const toQ3 = onePage({
+    jump: [
+      { when: { all: [{ questionId: 'q1', op: 'equals', value: 'Soham' }] }, target: { kind: 'question', id: 'q3' } },
+    ],
+  });
+
+  describe('happy', () => {
+    it('a jump to Submit waives every required question after it, on its own page and beyond', () => {
+      const outcome = validateSubmission(definition(toSubmit), [{ questionId: 'q1', textValue: 'Soham' }], 'complete');
+      expect(outcome.errors).toEqual([]);
+    });
+
+    it('a jump to a later question waives only what it skipped over', () => {
+      const outcome = validateSubmission(
+        definition(toQ3),
+        [
+          { questionId: 'q1', textValue: 'Soham' },
+          { questionId: 'q3', textValue: 'answered' },
+        ],
+        'complete',
+      );
+      // q2 was jumped over; q3 (the landing point) and q4 are still asked.
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q4']);
+    });
+  });
+
+  describe('edge', () => {
+    it('an unfired jump leaves every required question in force', () => {
+      const outcome = validateSubmission(definition(toSubmit), [{ questionId: 'q1', textValue: 'someone else' }], 'complete');
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2', 'q3', 'q4']);
+    });
+  });
+
+  describe('worst', () => {
+    it('a skipped question\'s answer is DROPPED, so a crafted payload cannot revive it', () => {
+      const outcome = validateSubmission(
+        definition(toQ3),
+        [
+          { questionId: 'q1', textValue: 'Soham' },
+          { questionId: 'q2', textValue: 'smuggled' },
+          { questionId: 'q3', textValue: 'answered' },
+          { questionId: 'q4', textValue: 'answered' },
+        ],
+        'complete',
+      );
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers.map((a) => a.question.id)).toEqual(['q1', 'q3', 'q4']);
+    });
+
+    it('nothing after a terminal jump is persisted, whatever the payload claims', () => {
+      const outcome = validateSubmission(
+        definition(toSubmit),
+        [
+          { questionId: 'q1', textValue: 'Soham' },
+          { questionId: 'q2', textValue: 'smuggled' },
+          { questionId: 'q4', textValue: 'smuggled' },
+        ],
+        'complete',
+      );
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers.map((a) => a.question.id)).toEqual(['q1']);
     });
   });
 });

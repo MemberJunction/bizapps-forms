@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { AnswerValue, ConditionalRule } from './conditional-rule';
 import type { PublishedFormPage, PublishedFormQuestion, PublishedFormScreen } from './form-definition';
 import {
+  endsWithoutSubmit,
   resolveFormOutcome,
   resolveTermination,
   resolveVisiblePages,
@@ -282,6 +283,121 @@ describe('resolveFormOutcome', () => {
       ];
 
       expect(resolveFormOutcome(pages, [notEligible, thanks], answers({ q1: 'skip' })).disqualified).toBe(false);
+    });
+  });
+});
+
+/**
+ * A `Go to` rule on a PAGE fires when the respondent LEAVES the page, not when they arrive.
+ *
+ * The builder offers a page's own questions as sources for its jump conditions — "leaving a page
+ * is decided by what was just answered on it" — so a page rule reading its own page is the
+ * NORMAL authoring, not an exotic one. Firing at the header made that shape self-destructive:
+ * the only answer that can satisfy the condition belongs to a question the jump then skips.
+ *
+ * Three things went wrong at once, which is why this is tested at the resolver rather than
+ * anywhere downstream:
+ *
+ *  1. The page rendered as an empty header — every question on it, INCLUDING the trigger, gone.
+ *  2. The trigger's own answer stopped being transmitted, so it was never persisted.
+ *  3. The widget's fixed point could not settle: dropping the trigger un-fires the jump, which
+ *     puts the questions back, which fires it again. It hit MAX_VISIBILITY_PASSES, warned, and
+ *     left the client and the server deriving different question sets from the same answers.
+ */
+describe('a Go to rule on a page', () => {
+  const trigger = q('q1', 0, {});
+  const pages = [
+    page('p1', 0, [trigger, q('q2', 1)], toPage('p3')),
+    page('p2', 1, [q('q3', 0)]),
+    page('p3', 2, [q('q4', 0)]),
+  ];
+
+  describe('happy', () => {
+    it('asks the whole page first, then skips what it was pointed past', () => {
+      expect(ids(resolveVisibleQuestions(pages, answers({ q1: 'skip' })))).toEqual(['q1', 'q2', 'q4']);
+    });
+
+    it('changes nothing when its condition does not hold', () => {
+      expect(ids(resolveVisibleQuestions(pages, answers({ q1: 'stay' })))).toEqual(['q1', 'q2', 'q3', 'q4']);
+    });
+  });
+
+  describe('edge', () => {
+    it('a page with no questions still fires its jump', () => {
+      const empty = [page('p1', 0, [], toPage('p3')), page('p2', 1, [q('q3', 0)]), page('p3', 2, [q('q4', 0)])];
+      expect(ids(resolveVisibleQuestions(empty, answers({ q1: 'skip' })))).toEqual(['q4']);
+    });
+
+    it('a target on its own page is backward from the exit, so it stays inert', () => {
+      const selfTarget = [page('p1', 0, [q('q1', 0), q('q2', 1)], toQ('q2')), page('p2', 1, [q('q3', 0)])];
+      expect(ids(resolveVisibleQuestions(selfTarget, answers({ q1: 'skip' })))).toEqual(['q1', 'q2', 'q3']);
+    });
+  });
+
+  describe('worst', () => {
+    it('settles in one pass — restricting the answers to the visible set reproduces it', () => {
+      // The widget's own convergence check, run here because a resolver that cannot settle
+      // cannot be made to agree with the server by any amount of iteration downstream.
+      const first = resolveVisibleQuestions(pages, answers({ q1: 'skip' }));
+      const restricted = new Map(first.filter((x) => x.id === 'q1').map((x) => [x.id, 'skip' as AnswerValue]));
+      expect(ids(resolveVisibleQuestions(pages, restricted))).toEqual(ids(first));
+    });
+
+    it('a terminal page jump ends the form AFTER its own page, not before it', () => {
+      const ending = [page('p1', 0, [q('q1', 0), q('q2', 1)], toSubmit()), page('p2', 1, [q('q3', 0)])];
+      expect(ids(resolveVisibleQuestions(ending, answers({ q1: 'skip' })))).toEqual(['q1', 'q2']);
+      expect(resolveTermination(ending, answers({ q1: 'skip' }))).toEqual({ kind: 'submit' });
+    });
+  });
+});
+
+/**
+ * Who ends the response: the respondent, or the rule.
+ *
+ * `endedEarly` says the FLOW is over — nothing more will be asked. It was also being read as
+ * "so send it now", and those are different claims. A screening is done TO a respondent: they
+ * are ineligible, the rest of the form is not for them, and the whole point of a knockout is
+ * that they do not fill it in first, so the widget seals it on their behalf. Every other finish
+ * is done BY them, and pressing Submit is the moment they say so.
+ *
+ * Conflating the two meant a `Go to → Submit` — an author's way of saying "stop asking, they
+ * are done" — transmitted a completed response the instant the respondent clicked out of a text
+ * box. In scroll mode, where a commit is a blur, that is one keystroke and one stray click away
+ * from a finished submission nobody chose to make.
+ */
+describe('endsWithoutSubmit', () => {
+  const screen = (extra?: Partial<PublishedFormScreen>): PublishedFormScreen => ({
+    id: 's',
+    screenType: 'Ending',
+    title: 's',
+    displayOrder: 0,
+    ...extra,
+  });
+
+  describe('happy', () => {
+    it('a screening seals itself — the respondent never agreed to anything', () => {
+      expect(
+        endsWithoutSubmit({ screen: screen({ isDisqualification: true }), disqualified: true, endedEarly: true }),
+      ).toBe(true);
+    });
+
+    it('an ordinary early finish waits for Submit', () => {
+      expect(endsWithoutSubmit({ screen: screen(), disqualified: false, endedEarly: true })).toBe(false);
+    });
+  });
+
+  describe('edge', () => {
+    it('a form still in progress ends nothing', () => {
+      expect(endsWithoutSubmit({ screen: undefined, disqualified: false, endedEarly: false })).toBe(false);
+    });
+  });
+
+  describe('worst', () => {
+    it('a dangling ending id does not seal — a broken rule must not submit for someone', () => {
+      // `resolveFormOutcome` reports `disqualified: false` for a screen it cannot find, because
+      // guessing "screened out" would discard a real respondent. That same caution has to carry
+      // here: an unresolvable rule is the last thing that should send a response unasked.
+      expect(endsWithoutSubmit({ screen: undefined, disqualified: false, endedEarly: true })).toBe(false);
     });
   });
 });
