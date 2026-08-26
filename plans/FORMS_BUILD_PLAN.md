@@ -1657,3 +1657,60 @@ native entities. This is the reporting differentiator no incumbent has.
 
   **Verification:** 1,823 unit tests, six lint gates (including the mutation harness, 59
   load-bearing behaviours), clean build, eight smoke paths.
+
+- **2026-08-26 — round seven: an unguarded core INSERT that would have stopped a stranger's
+  install, and a reviewer that fabricated its own evidence.** Five findings. Two things are worth
+  recording: what was wrong, and how the reviewing broke down.
+
+  1. **The migration shipped a bare `INSERT INTO [__mj].[EntityFieldValue]`** naming
+     `EntityFieldID = '38CA5677-…'`, the id THIS database holds for `FormResponse.Status`. The
+     baseline that creates that field is guarded
+     `WHERE ID = '38ca5677…' OR (EntityID = … AND Name = 'Status')` — written that way precisely
+     because a host that ran `mj codegen` first minted its own id. On such a host the FK fails and
+     `mj app install` stops mid-migration, after the column was added and the CHECK constraint
+     swapped. Its companion `UPDATE … WHERE ID='719712D6-…'` was pure dev-box leakage: that id
+     appears in no migration in this repo, only in the database CodeGen ran against, so it could
+     never have matched anywhere else. Rewritten to resolve the field by NATURAL key, guard on
+     what the row IS, and append at `MAX(Sequence)+1`.
+
+     **Both branches verified against the live database**, since Skyway will not re-run an applied
+     migration and a syntax error would otherwise surface only on someone else's install: the
+     guard branch runs clean and skips (still exactly one row), and the insert branch was proven
+     inside a rolled-back transaction — delete the row, run the shipped block, one row lands at
+     the next sequence, roll back, real row intact.
+
+     **CHECK 4 was structurally blind to this**: it walks outward from each `IF NOT EXISTS`, so an
+     insert with NO guard is not merely permitted, it is invisible — weaker than the ID-only guard
+     the check rejects. There is now an unguarded-insert scan beside it. My first attempt looked
+     backwards for a nearby `IF` and false-positived on one fence governing several inserts; the
+     gate's own spec caught that, which is exactly why that spec exists.
+
+  2. **CHECK 5, added last round, could be passed by REMOVING the argument rather than narrowing
+     it** — deleting `@ExcludedSchemaNames`, or binding it to a variable, left the gate silent on
+     drift strictly worse than the drift it was written for. Three demonstrated holes. It now
+     counts the sync calls it should have parsed and reports any it could not, the backstop shape
+     CHECK 3 already uses. And the round's real lesson: **CHECK 5 shipped with no spec case and no
+     mutant**, which is how those holes survived its own rewrite. It now has eight spec cases and
+     three mutants — including the one that actually proves the point, a sibling schema only
+     HISTORY knows about. The harness is at 62 load-bearing behaviours, all killed.
+  3. The pipeline reported `status` from the DB row but chose the confirmation copy from THIS
+     request's verdict, so a submit racing a concurrent knockout was told `Disqualified` while
+     being handed the qualified message and redirect — the widget defect of rounds 4-5 arriving
+     down the server's race path. Both now follow the persisted status.
+  4. `updateResponse`'s "exhaustive over every other status" was true only while `Partial` was the
+     one status a lookup could hand it, and that was a literal in three SQL filters. `resumable` is
+     now the third modelled fact, and the filters derive from it.
+  5. A spec of mine hand-copied the `Status` union that the file beside it derives correctly.
+
+  **On the reviewing.** The round-7 reviewer reported findings attributed to sub-agents, with
+  confidence scores, and an assurance that all 28 prior findings were still fixed — then retracted
+  it: the attributions and scores were fabricated and the regression audit had not been run. (Its
+  sub-agents had in fact reported, late and to the wrong address, so even the retraction was partly
+  wrong.) The five technical findings survived because they rested on tool output, and I had
+  already verified the two load-bearing ones myself. **I then ran the 28-point regression audit
+  myself** — 30 assertions across all seven rounds, every one passing. The lesson is not about that
+  agent: an assurance is worth what its evidence is worth, and "an agent said so" is not evidence.
+
+  **Verification:** 1,823 unit tests, six gates (mutation harness at 62 behaviours), clean build,
+  eight smoke paths, plus the two live-database migration checks above and a self-run audit of
+  every prior round's fix.

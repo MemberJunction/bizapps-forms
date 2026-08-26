@@ -1206,6 +1206,101 @@ IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE ID = '855
     );
 }
 
+// ------------------------------------------------------------------------------------------------
+// CHECK 5 and the unguarded-insert scan. Both shipped without a case here, and that gap is exactly
+// how CHECK 5's three silent passes survived its own rewrite: narrowing a list was covered by hand,
+// REMOVING one was not, and "not seen" reads identically to "correct".
+// ------------------------------------------------------------------------------------------------
+
+const FULL_EXCLUSIONS =
+    "'sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks," +
+    "${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber'";
+
+/** A gated migration whose only content is one schema-sync call with the given argument text. */
+function syncMigration(argument) {
+    return `EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema]${argument};\n`;
+}
+
+withMigration(POST_GUARD, syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS}`), (violations) =>
+    check('CHECK 5 passes a sync that excludes the full baseline', violations.length === 0, JSON.stringify(violations)),
+);
+
+withMigration(POST_GUARD, syncMigration(" @ExcludedSchemaNames='sys,staging,dbo,${mjSchema}'"), (violations) =>
+    check('CHECK 5 catches a NARROWED exclusion list', violations.some((v) => v.includes('drops')), JSON.stringify(violations)),
+);
+
+withMigration(POST_GUARD, syncMigration(''), (violations) =>
+    check(
+        'CHECK 5 catches a sync call with NO exclusion argument at all',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(POST_GUARD, syncMigration(' @ExcludedSchemaNames=@Excl'), (violations) =>
+    check(
+        'CHECK 5 catches an exclusion list bound to a variable',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(
+    PRE_GUARD,
+    syncMigration(" @ExcludedSchemaNames='sys'"),
+    (violations) => check('CHECK 5 leaves pre-watershed migrations alone', violations.length === 0, JSON.stringify(violations)),
+);
+
+withMigration(
+    POST_GUARD,
+    `INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [Value]) VALUES ('1', 'x');\n`,
+    (violations) =>
+        check(
+            'an unguarded core insert is caught',
+            violations.some((v) => v.includes('no `IF NOT EXISTS` guard at all')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityFieldValue] WHERE [EntityFieldID] = '1' AND [Value] = 'x')
+BEGIN
+   INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [Value]) VALUES ('1', 'x');
+   INSERT INTO [\${mjSchema}].[EntityPermission] ([ID]) VALUES ('2');
+END;
+`,
+    (violations) =>
+        check(
+            'one fence over a BEGIN…END covers every insert inside it',
+            !violations.some((v) => v.includes('no `IF NOT EXISTS` guard at all')),
+            JSON.stringify(violations),
+        ),
+);
+
+// The case that proves the point of reading history at all: a schema NO constant here names.
+// `bizapps-somethingelse` stands for the Open App this repo has not heard of — `mj.config.cjs`
+// says of `__mj_BizAppsCaliber` that no hand-written deny-list "could ever have named it in
+// advance", which is why the requirement is derived from what the repo has already shipped. An
+// earlier migration excludes it; a later one must not quietly stop.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        writeFileSync(
+            join(root, 'migrations', PRE_GUARD),
+            syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS.slice(0, -1)},\${mjSchema}_BizAppsSomethingElse'`),
+        );
+        writeFileSync(join(root, 'migrations', POST_GUARD), syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS}`));
+    },
+    (violations) =>
+        check(
+            'CHECK 5 catches dropping a sibling schema only HISTORY knows about',
+            violations.some((v) => v.includes(POST_GUARD) && v.includes('BizAppsSomethingElse')),
+            JSON.stringify(violations.filter((v) => v.includes(POST_GUARD))),
+        ),
+);
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

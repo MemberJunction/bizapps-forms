@@ -26,6 +26,16 @@ interface StatusFacts {
   readonly sealed: boolean;
   /** Whether some quota bounded how many of these may exist. */
   readonly quotaBounded: boolean;
+  /**
+   * Whether a later save may pick this row up and carry on writing to it.
+   *
+   * The third fact, and it was the one hiding: `updateResponse`'s terminal guard is documented as
+   * "exhaustive over every other status", which is only true while `Partial` is the ONLY status a
+   * lookup can hand it. That was a literal `'Partial'` in three SQL filters, so a future status
+   * that is neither sealed nor resumable would have compiled clean, fallen past the guard, had its
+   * answers deleted and re-inserted, and been counted. Modelled here so it cannot.
+   */
+  readonly resumable: boolean;
 }
 
 /**
@@ -40,9 +50,9 @@ interface StatusFacts {
  * fails the build until somebody states both facts about it, which is what the comment claimed.
  */
 const STATUS_FACTS: { readonly [K in FormResponseStatus]: StatusFacts } = {
-  Partial: { sealed: false, quotaBounded: false },
-  Complete: { sealed: true, quotaBounded: true },
-  Disqualified: { sealed: true, quotaBounded: false },
+  Partial: { sealed: false, quotaBounded: false, resumable: true },
+  Complete: { sealed: true, quotaBounded: true, resumable: false },
+  Disqualified: { sealed: true, quotaBounded: false, resumable: false },
 };
 
 const STATUSES = Object.keys(STATUS_FACTS) as FormResponseStatus[];
@@ -72,3 +82,16 @@ export const UNCOUNTED_BY_QUOTA: ReadonlyArray<FormResponseStatus> = STATUSES.fi
 export function isTerminalResponseStatus(status: FormResponseStatus): boolean {
   return STATUS_FACTS[status].sealed;
 }
+
+/**
+ * The statuses a later save may adopt and continue writing to — the in-flight drafts.
+ *
+ * Used by the lookups that resolve "is there a row this submission should update?", so that the
+ * terminal guard downstream really is exhaustive over everything else. A status that is neither
+ * sealed nor resumable is a contradiction this repo has no handling for; if one is ever added,
+ * both this and {@link TERMINAL_RESPONSE_STATUSES} exclude it and the guard sends it to a fresh
+ * row rather than silently overwriting.
+ */
+export const RESUMABLE_RESPONSE_STATUSES: ReadonlyArray<FormResponseStatus> = STATUSES.filter(
+  (s) => STATUS_FACTS[s].resumable,
+);

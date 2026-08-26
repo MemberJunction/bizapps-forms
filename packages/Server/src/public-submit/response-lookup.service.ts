@@ -24,7 +24,7 @@ import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './definition-loader.service';
 import { FORM_RESPONSE_ENTITY } from './entity-names';
-import { UNCOUNTED_BY_QUOTA } from './response-status';
+import { RESUMABLE_RESPONSE_STATUSES, UNCOUNTED_BY_QUOTA } from './response-status';
 import type { FormResponseStatus } from './response-status';
 
 /** The identity of the session+form whose response we are looking up. */
@@ -213,7 +213,7 @@ export async function findAdoptableResponseById(
       ExtraFilter:
         `ID=${quoteSqlString(key.responseId)} ` +
         `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
-        `AND Status='Partial' ` +
+        `AND Status IN (${RESUMABLE_RESPONSE_STATUSES.map(quoteSqlString).join(', ')}) ` +
         // Require the row to carry this exact client id in its SourceMetadata JSON — proves the
         // PK was minted by the widget (not a guessed/foreign id), the ownership capability when
         // there is no session to key on.
@@ -257,7 +257,7 @@ export async function findOwnedResponseById(
         `ID=${quoteSqlString(key.responseId)} ` +
         `AND AnonymousSessionID=${quoteSqlString(key.sessionId)} ` +
         `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
-        `AND Status='Partial'`,
+        `AND Status IN (${RESUMABLE_RESPONSE_STATUSES.map(quoteSqlString).join(', ')})`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',
       MaxRows: 1,

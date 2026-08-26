@@ -101,7 +101,10 @@ describe('findAdoptableResponseById', () => {
     const filter = captured?.ExtraFilter ?? '';
     expect(filter).toContain("ID='resp-1'");
     expect(filter).toContain("FormVersionID='ver-1'");
-    expect(filter).toContain("Status='Partial'");
+    // The RESUMABLE set, rendered as an IN list. A draft is "a row a later save may adopt", and
+    // that is now one classification in `response-status.ts` rather than a literal repeated in
+    // three SQL filters — which is what makes the terminal guard downstream genuinely exhaustive.
+    expect(filter).toContain("Status IN ('Partial')");
     expect(filter).toContain('SourceMetadata LIKE');
     expect(filter).toContain('"clientResponseId":"resp-1"');
   });

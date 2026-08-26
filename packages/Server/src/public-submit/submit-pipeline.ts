@@ -47,7 +47,11 @@ import {
 } from './response-lookup.service';
 import { InFlightLimiter } from '../http/in-flight-limiter';
 import { checkRespondentScope } from './scope-check.service';
-import { TERMINAL_RESPONSE_STATUSES, isTerminalResponseStatus } from './response-status';
+import {
+  RESUMABLE_RESPONSE_STATUSES,
+  TERMINAL_RESPONSE_STATUSES,
+  isTerminalResponseStatus,
+} from './response-status';
 import {
   abuseIdentity,
   buildSourceMetadata,
@@ -552,12 +556,20 @@ async function runSubmitPipelineInner(
 
   timer.mark('hooks');
 
+  // The copy follows the PERSISTED status, not this request's own verdict. They can disagree: the
+  // row may have been sealed `Disqualified` by a concurrent save whose answers tripped a rule
+  // these answers do not, in which case `persistSubmission` returns the row's status while
+  // `disqualifiedBy` here is undefined. Reporting a `Disqualified` status alongside the QUALIFIED
+  // confirmation and redirect sent the screened-out respondent to the qualified destination —
+  // which is precisely the defect the widget was fixed for twice, arriving instead down the
+  // server's race path. `checkDuplicate` already branches on the row's own status; this was the
+  // one site that never adopted the pattern.
   return report({
     success: true,
     responseId: persisted.responseId,
     status: persisted.status,
-    ...(disqualifiedBy !== undefined
-      ? disqualificationFields(disqualifiedBy)
+    ...(persisted.status === 'Disqualified'
+      ? terminalRepeatFields(disqualifiedBy)
       : confirmationFields(resolved, validation.answerMap)),
   });
 }
@@ -698,7 +710,7 @@ async function resolveExistingPartial(
   return findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
-    ['Partial'],
+    RESUMABLE_RESPONSE_STATUSES,
     ctx.elevatedUser,
   );
 }

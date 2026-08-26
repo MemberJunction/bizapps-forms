@@ -265,7 +265,7 @@ async function updateResponse(
     return createResponse(provider, inputs, contextUser);
   }
   // Sealed since the caller looked it up: leave it exactly as it is. The lookups that produce
-  // `existingResponseId` all filter `Status='Partial'`, so arriving here means the row WAS a
+  // `existingResponseId` all filter on `RESUMABLE_RESPONSE_STATUSES`, so arriving here means the row WAS a
   // partial a moment ago — a knockout flush, a second tab or a retry landing in between is the
   // whole window. Without this the row was downgraded, its answers deleted and rewritten, and
   // the quota counted it again, because the promotion check below asks only about `Complete`.

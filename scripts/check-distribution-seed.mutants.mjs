@@ -233,6 +233,13 @@ const MUTANTS = [
         '    const { structure } = maskSql(sql);', '    const structure = sql;'],
     ['idguard/stops-at-any-statement', 'the scan stops at the FIRST statement of any kind, so a guard over a PRINT cannot reach forward and blame the next insert',
         '            if (!GOVERNED_DML.has(keyword)) return [i, i];', '            if (!GOVERNED_DML.has(keyword)) continue;'],
+    ['idguard/unguarded-inserts', 'a core insert with NO guard at all is reported, not merely invisible to a walk that starts from guards',
+        '        if (guarded.some(([from, to]) => insert.index >= from && insert.index < to)) continue;',
+        '        continue;'],
+    ['schemasync/parse-accounting', 'CHECK 5 counts the sync calls it should have parsed, so a removed or variable-bound list is caught instead of unseen',
+        '            if (calls > parsed) {', '            if (false) {'],
+    ['schemasync/history-floor', 'CHECK 5 requires everything the repo has already shipped, not only the hand-written floor',
+        '            ...previouslyExcluded(lists, list.stamp),', '            ...[],'],
 ];
 
 /**

@@ -301,6 +301,12 @@ const SCHEMAS_NEVER_SYNCED = [
     '${mjSchema}_BizAppsTasks',
     '${mjSchema}_bizappscommon',
     '${mjSchema}_bizappstasks',
+    // Named explicitly even though history also supplies them: the history half derives from the
+    // WORKING TREE, and exactly one tracked file names these two, so renaming or squashing
+    // `V202608191400` would have silently relaxed the floor back to the six above. History is for
+    // the apps nobody here has heard of; this list is for the ones we have.
+    '${mjSchema}_BizAppsATS',
+    '${mjSchema}_BizAppsCaliber',
 ];
 
 /**
@@ -317,11 +323,18 @@ const SCHEMAS_NEVER_SYNCED = [
  */
 const SCHEMA_SYNC_GATE_FROM = '202608252340';
 
-/** Whether a migration filename's version stamp is at or after {@link SCHEMA_SYNC_GATE_FROM}. */
-function gatedForSchemaSync(file) {
-    const stamp = /^[A-Z](\d{12})__/.exec(file);
-    return stamp !== null && stamp[1] >= SCHEMA_SYNC_GATE_FROM;
-}
+/**
+ * The same watershed, as a number, for the checks that compare with {@link landsAfter}.
+ *
+ * Both of this repo's newest checks — the schema-sync scope above and the unguarded-core-insert
+ * scan below — are deliberately forward-looking for the same reason: older migrations carry known
+ * instances of both gaps and are already applied on hosts, where editing them changes nothing
+ * while making the shipped history disagree with what ran. Remediating those means a corrective
+ * migration, which is its own change with its own verification, and it is logged in
+ * plans/FORMS_BUILD_PLAN.md rather than smuggled into an unrelated one.
+ */
+const NEWER_GATES_WATERSHED = Number(SCHEMA_SYNC_GATE_FROM) - 1;
+
 
 /**
  * CHECK 5 — every `@ExcludedSchemaNames` in shipped SQL excludes at least the baseline above.
@@ -350,6 +363,21 @@ function gatedForSchemaSync(file) {
  */
 function schemaIdentity(name) {
     return name.replace(/\$\{mjSchema\}/g, '__mj');
+}
+
+/**
+ * How many times shipped SQL invokes a proc that takes `@ExcludedSchemaNames`.
+ *
+ * The backstop {@link checkSchemaSyncScope} needs and did not have. That check walks the LISTS it
+ * can parse, so every way of making a list unparseable is a way of passing it: deleting the
+ * argument outright, or rebinding it to a variable, both left the gate silent — on drift strictly
+ * worse than the narrowing it was written to stop, since a sync with no exclusions sweeps `dbo`,
+ * `staging` and every sibling Open App. CHECK 3 carries the same kind of counter for the same
+ * reason, and its comment says why: a check that can only see what it can parse must also count
+ * what it should have parsed.
+ */
+function countSchemaSyncCalls(sql) {
+    return [...sql.matchAll(/\[?(sp(?:UpdateExistingEntities|UpdateExistingEntityFields|SetDefaultColumnWidthWhereNeeded|UpdateSchemaInfo)\w*)\]?\s*\]?\s*@?/gi)].length;
 }
 
 /**
@@ -400,8 +428,36 @@ function previouslyExcluded(lists, stamp) {
     return seen;
 }
 
+/**
+ * Every schema-sync call in a gated migration must have yielded a parseable exclusion list.
+ *
+ * Without this the check is only as strong as its regex: an argument that is absent, renamed or
+ * bound to a variable simply is not seen, and "not seen" reads identically to "correct".
+ */
+function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
+    for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const stamp = /^[A-Z](\d{12})__/.exec(file);
+            if (stamp === null || stamp[1] < SCHEMA_SYNC_GATE_FROM) continue;
+            const path = join(dir, file);
+            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values);
+            const parsed = lists.filter((l) => l.file === path).length;
+            if (calls > parsed) {
+                violations.push(
+                    `${relative(repoRoot, path)} invokes a schema-sync procedure ${calls} time(s) but only ` +
+                        `${parsed} carry an @ExcludedSchemaNames this gate can read. An unreadable list is not a safe ` +
+                        'one: a sync with no exclusions sweeps dbo, staging and every sibling Open App on the host. ' +
+                        "Write the list as a literal on the call, the way the rest of the file's calls do.",
+                );
+            }
+        }
+    }
+}
+
 function checkSchemaSyncScope(repoRoot, violations) {
     const lists = shippedExclusionLists(repoRoot);
+    checkEverySyncCallWasParsed(repoRoot, lists, violations);
     for (const list of lists) {
         if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;
         const required = new Set([
@@ -1084,6 +1140,44 @@ export function findIdOnlyGuardedInserts(sql) {
     return found;
 }
 
+/**
+ * Core-metadata INSERTs that carry no `IF NOT EXISTS` guard at all.
+ *
+ * {@link findIdOnlyGuardedInserts} walks outward from each guard, which means an insert with NO
+ * guard is not merely allowed — it is invisible. That is the wrong way round: an unguarded insert
+ * is strictly weaker than the ID-only guard CHECK 4 rejects, since it cannot even claim to have
+ * asked. It shipped: the Rules & Branching migration carried a bare
+ * `INSERT INTO [__mj].[EntityFieldValue]` naming an `EntityFieldID` that only exists on the
+ * database CodeGen ran against, so a host that had run `mj codegen` first would have hit a foreign
+ * key and stopped mid-migration.
+ *
+ * "Guarded" is read structurally rather than semantically: an insert counts as guarded when an
+ * `IF`/`IF NOT EXISTS` governs it, or when it is inside a `BEGIN…END` that one does. Judging the
+ * predicate is CHECK 4's job; this only asks whether anything was asked at all.
+ */
+export function findUnguardedCoreInserts(sql) {
+    const masked = maskSql(sql).structure;
+    // The ranges an `IF NOT EXISTS (…)` actually governs, computed with the same
+    // `governedStatement` walk CHECK 4 uses — so a single fence around a `BEGIN…END` covers every
+    // insert inside it. A first attempt looked backwards from each insert for a nearby `IF`, which
+    // reported the SECOND insert under one fence as unguarded: the gate's own spec caught it,
+    // which is the whole reason that spec exists.
+    const guarded = [];
+    for (const guard of masked.matchAll(/\bIF\s+NOT\s+EXISTS\s*\(/gi)) {
+        const open = guard.index + guard[0].length - 1;
+        const close = matchingParen(masked, open);
+        if (close === -1) continue;
+        guarded.push(governedStatement(masked, close + 1));
+    }
+    const found = [];
+    for (const insert of masked.matchAll(CORE_INSERT)) {
+        if (!CORE_METADATA_TABLES.has(insert[1].toLowerCase())) continue;
+        if (guarded.some(([from, to]) => insert.index >= from && insert.index < to)) continue;
+        found.push({ table: insert[1], line: masked.slice(0, insert.index).split('\n').length });
+    }
+    return found;
+}
+
 /** A migration's position relative to `watershed`, read from the `V<YYYYMMDDHHMM>` in its name. */
 function landsAfter(file, watershed) {
     const stamp = file.match(/^[VB](\d{12})__/);
@@ -1099,7 +1193,18 @@ function checkIdOnlyGuards(repoRoot, violations) {
             .sort();
         for (const file of files) {
             const rel = relative(repoRoot, join(dir, file));
-            for (const { table, line } of findIdOnlyGuardedInserts(readFileSync(join(dir, file), 'utf-8'))) {
+            const sql = readFileSync(join(dir, file), 'utf-8');
+            for (const { table, line } of landsAfter(file, NEWER_GATES_WATERSHED) ? findUnguardedCoreInserts(sql) : []) {
+                violations.push(
+                    `${rel}:${line} INSERTs into \`${table}\` with no \`IF NOT EXISTS\` guard at all. That is ` +
+                        'weaker than the ID-only guard this check rejects below — it cannot even claim to have asked ' +
+                        'whether the thing already exists. CodeGen emits these bare, naming ids that exist only on the ' +
+                        'database it ran against, so on a host that ran `mj codegen` first the foreign key fails and ' +
+                        '`mj app install` stops mid-migration. Guard on the natural key: resolve the parent through its ' +
+                        'own name and test what the row IS.',
+                );
+            }
+            for (const { table, line } of findIdOnlyGuardedInserts(sql)) {
                 violations.push(
                     `${rel}:${line} guards an INSERT into \`${table}\` on \`[ID] = '<guid>'\` alone. That asks whether ` +
                         'THIS ROW was inserted before; what makes an insert safe is whether the THING IT DESCRIBES already ' +

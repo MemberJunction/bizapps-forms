@@ -117,14 +117,58 @@ EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames
 /* SQL text to set default column width where needed */
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
-/* SQL text to insert entity field value with ID 772dbdf0-b7c7-43ac-bd26-659bd8b20e84 */
-INSERT INTO [${mjSchema}].[EntityFieldValue]
-                                       ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
-                                    VALUES
-                                       ('772dbdf0-b7c7-43ac-bd26-659bd8b20e84', '38CA5677-5A04-4121-AA5C-D8FD325FEF67', 2, 'Disqualified', 'Disqualified', GETUTCDATE(), GETUTCDATE());
+/* ------------------------------------------------------------------------------------------------
+   The picklist value for FormResponse.Status = 'Disqualified'.
 
-/* SQL text to update entity field value sequence */
-UPDATE [${mjSchema}].[EntityFieldValue] SET Sequence=3 WHERE ID='719712D6-558C-4087-8C3C-A1254801E211';
+   HAND-CORRECTED from the CodeGen output, and the reason is the same one CHECK 4 of
+   `npm run lint:distribution` exists for. CodeGen emitted this as a bare INSERT naming
+   `EntityFieldID = '38CA5677-…'` — the id THIS database happens to hold for that field. The
+   baseline that creates it is guarded
+   `WHERE ID = '38ca5677…' OR (EntityID = … AND Name = 'Status')`, written that way deliberately
+   because a host that ran `mj codegen` before installing Forms minted its own id. On such a host
+   `38CA5677` does not exist, `EntityFieldValue.EntityFieldID` is a real foreign key, and
+   `mj app install` would stop here — after the column above was added and the CHECK constraint
+   swapped, and before the regenerated view and procedures below. On a host that already carries a
+   `Disqualified` row under a different id it would instead land a duplicate, which is issue #64's
+   failure and makes the next CodeGen run emit the union member twice (#66).
+
+   So: resolve the field through its NATURAL key, guard on what the row IS rather than on its id,
+   and append at the end of the sequence. CodeGen's companion
+   `UPDATE … WHERE ID='719712D6-…'` is dropped outright — that id exists in no migration in this
+   repo, only in the database this output was generated from, so it could never have matched
+   anywhere else. Appending makes it unnecessary: picklist Sequence is display order.
+------------------------------------------------------------------------------------------------ */
+DECLARE @FormResponseStatusFieldID UNIQUEIDENTIFIER = (
+    SELECT ef.[ID]
+    FROM [${mjSchema}].[EntityField] ef
+    INNER JOIN [${mjSchema}].[Entity] e ON e.[ID] = ef.[EntityID]
+    WHERE e.[Name] = 'MJ_BizApps_Forms: Form Responses' AND ef.[Name] = 'Status'
+);
+
+IF @FormResponseStatusFieldID IS NULL
+BEGIN
+    THROW 51172, 'Cannot seed the Disqualified status value: no Status field found on MJ_BizApps_Forms: Form Responses. Run `mj codegen` so the entity metadata exists, then re-run this migration.', 1;
+END;
+
+IF NOT EXISTS (
+    SELECT 1 FROM [${mjSchema}].[EntityFieldValue]
+    WHERE [ID] = '772dbdf0-b7c7-43ac-bd26-659bd8b20e84'
+       OR ([EntityFieldID] = @FormResponseStatusFieldID AND [Value] = 'Disqualified')
+)
+BEGIN
+    INSERT INTO [${mjSchema}].[EntityFieldValue]
+        ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
+    VALUES
+        (
+            '772dbdf0-b7c7-43ac-bd26-659bd8b20e84',
+            @FormResponseStatusFieldID,
+            (SELECT COALESCE(MAX([Sequence]), 0) + 1 FROM [${mjSchema}].[EntityFieldValue] WHERE [EntityFieldID] = @FormResponseStatusFieldID),
+            'Disqualified',
+            'Disqualified',
+            GETUTCDATE(),
+            GETUTCDATE()
+        );
+END;
 
 /* SQL text to sync schema info from database schemas */
 EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';

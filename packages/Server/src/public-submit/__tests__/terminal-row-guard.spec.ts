@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import { persistSubmission } from '../persistence.service';
 import { makeContextUser, makeFakeProvider, respondentPermissions } from './fakes';
 
@@ -18,7 +19,7 @@ import { makeContextUser, makeFakeProvider, respondentPermissions } from './fake
  * flush, a second tab, or a retry landing in between is all it takes.
  */
 
-function contextFor(existingStatus: 'Partial' | 'Complete' | 'Disqualified') {
+function contextFor(existingStatus: mjBizAppsFormsFormResponseEntityType['Status']) {
   const responseId = '33333333-4444-4555-8666-777777777777';
   const fake = makeFakeProvider({
     createPermissions: respondentPermissions(),
