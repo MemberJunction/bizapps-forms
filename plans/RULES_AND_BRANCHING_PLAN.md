@@ -246,8 +246,17 @@ still gets disqualified server-side; jump-hidden pages' answers are **dropped** 
 hidden-answer drop covers it — add the test that proves it).
 
 Caps (design-principles non-negotiable): `MAX_CONDITIONS_PER_GROUP` and `MAX_JUMP_RULES`
-constants enforced at parse time with explicit over-limit behavior (truncate + authoring-time
-warning), each with a worst-case spec.
+constants with explicit over-limit behavior, each with a worst-case spec. **As built this is
+REJECT, not truncate** — the planned "truncate + authoring-time warning" was the wrong call and
+was not implemented: silently dropping a condition from an `all` group weakens the gate the
+author wrote, which is the one direction a rule must never fail. Enforcement, precisely: the
+EDITOR stops offering "Add condition" at the cap (`canAddCondition`), so an over-cap group is
+unauthorable through the UI; the zod schema `.max()`s and throws, but on the SERVER's snapshot
+parse, not on the builder's publish path, so it is a boundary check on untrusted input rather
+than a publish-time failure an author sees; and `resolveVisiblePages` ignores jump rules past
+the cap for callers that went through neither. See the caps' own comment in `conditional-rule.ts`
+for the residual this leaves (a hand-authored over-cap rule still parses to "no rule", and an
+absent show group means VISIBLE).
 
 ## 6. MJ framework adoption (checklist, not aspiration)
 

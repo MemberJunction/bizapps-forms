@@ -291,12 +291,30 @@ function matchesResponseFilter(row: ExistingResponseRow, filter: string): boolea
   // A bare `Status='Partial'` predicate (no explicit `=`) is emitted literally by the adopt/by-id
   // lookups; the eq() form above already covers it.
   return (
+    matchesStatusIn(row, filter) &&
     eq('Status', row.Status) &&
     eq('ID', row.ID) &&
     eq('AnonymousSessionID', row.AnonymousSessionID) &&
     eq('FormVersionID', row.FormVersionID) &&
     matchesSourceMetadataLike(row, filter)
   );
+}
+
+/**
+ * Emulate the `Status IN ('A','B')` predicate the session lookup emits.
+ *
+ * A real test double has to model the query it stands in for. When this fake only understood
+ * `Status='X'`, an `IN` filter matched every row regardless of status — so the very test written
+ * to prove dedupe recognises a sealed session would have passed against a lookup that recognised
+ * nothing. Absent from the filter => matches (the `=` form is checked separately).
+ */
+function matchesStatusIn(row: ExistingResponseRow, filter: string): boolean {
+  const m = filter.match(/(?:^|\W)Status\s+IN\s*\(([^)]*)\)/i);
+  if (m === null) {
+    return true;
+  }
+  const allowed = [...m[1].matchAll(/'([^']*)'/g)].map((q) => q[1]);
+  return allowed.includes(row.Status);
 }
 
 /**

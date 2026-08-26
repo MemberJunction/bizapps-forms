@@ -41,7 +41,7 @@ describe('findSessionResponse', () => {
     const result = await findSessionResponse(
       provider,
       { formVersionId: 'ver-1', sessionId: 'sess-1' },
-      'Complete',
+      ['Complete', 'Disqualified'],
       USER,
     );
 
@@ -49,26 +49,29 @@ describe('findSessionResponse', () => {
     expect(result.response?.ID).toBe('resp-1');
     expect(captured?.ExtraFilter).toContain("FormVersionID='ver-1'");
     expect(captured?.ExtraFilter).toContain("AnonymousSessionID='sess-1'");
-    expect(captured?.ExtraFilter).toContain("Status='Complete'");
+    // A SET, rendered as an IN list: dedupe asks "already sealed?", which is every terminal
+    // status. Asserting the rendered SQL because that string is the whole contract with the
+    // database, and a filter that silently matched every status would make dedupe a no-op.
+    expect(captured?.ExtraFilter).toContain("Status IN ('Complete', 'Disqualified')");
     expect(captured?.MaxRows).toBe(1);
   });
 
   it('returns ok with no response when nothing matches', async () => {
     const provider = makeProvider({ rows: [] });
-    const result = await findSessionResponse(provider, { formVersionId: 'v', sessionId: 's' }, 'Partial', USER);
+    const result = await findSessionResponse(provider, { formVersionId: 'v', sessionId: 's' }, ['Partial'], USER);
     expect(result.ok).toBe(true);
     expect(result.response).toBeUndefined();
   });
 
   it('reports NOT ok when the lookup query fails (so callers can fail closed)', async () => {
     const provider = makeProvider({ success: false });
-    const result = await findSessionResponse(provider, { formVersionId: 'v', sessionId: 's' }, 'Complete', USER);
+    const result = await findSessionResponse(provider, { formVersionId: 'v', sessionId: 's' }, ['Complete'], USER);
     expect(result.ok).toBe(false);
   });
 
   it('never correlates a blank session id (returns no match without querying a real row)', async () => {
     const provider = makeProvider({ rows: [{ ID: 'should-not-be-returned' }] });
-    const result = await findSessionResponse(provider, { formVersionId: 'v', sessionId: '' }, 'Partial', USER);
+    const result = await findSessionResponse(provider, { formVersionId: 'v', sessionId: '' }, ['Partial'], USER);
     expect(result.ok).toBe(true);
     expect(result.response).toBeUndefined();
   });
@@ -76,7 +79,7 @@ describe('findSessionResponse', () => {
   it('escapes single quotes in the session id (no filter injection)', async () => {
     let captured: RunViewParams | undefined;
     const provider = makeProvider({ capture: (p) => (captured = p) });
-    await findSessionResponse(provider, { formVersionId: 'v', sessionId: "a'b" }, 'Partial', USER);
+    await findSessionResponse(provider, { formVersionId: 'v', sessionId: "a'b" }, ['Partial'], USER);
     expect(captured?.ExtraFilter).toContain("AnonymousSessionID='a''b'");
   });
 });

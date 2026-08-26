@@ -1400,3 +1400,41 @@ native entities. This is the reporting differentiator no incumbent has.
   (`binding-path`, `automation-semantics-path`) are order-sensitive around
   `seed-binding-smoke` — they fail identically with the branch's changes stashed, so that is
   pre-existing fixture behaviour, not a regression here.
+
+- **2026-08-26 — round two of the same review, two more defects, both in what round one
+  touched.** Re-running the adversarial review against the fixed head found two the first pass
+  had not, and both sit exactly where a fix had just been made — which is the argument for
+  reviewing the fix rather than the original:
+
+  1. **Only half of dedupe learned about `Disqualified`.** Round one taught the client-id branch;
+     the session-keyed fallback still asked for `Complete`, and `findSessionResponse`'s parameter
+     was typed `'Complete' | 'Partial'` so it could not have expressed anything else. The client
+     id is not stable — the widget mints a fresh one on every load, and the mutation is reachable
+     without the widget — so the session is the only thing tying a retry to the row it already
+     has. A session sealed by a knockout was not recognised as sealed, and a second terminal row
+     was written for it, repeatably, consuming a quota slot whenever the retry qualified. The
+     lookup now takes a SET of statuses (`Status IN (...)`), and "terminal" is one derived
+     definition (`response-status.ts`) shared by the lookup, the pipeline and persistence — which
+     also removes the hand-restated union the style rules forbid.
+  2. **Cloning a form silently disarmed every knockout screen.** `copyScreens` hand-lists the
+     columns it carries and never learned `IsDisqualification`. The clone kept the rule and lost
+     the flag, so `resolveDisqualification` never fired and `resolveEndingScreen` — which filters
+     out only FLAGGED screens — happily selected it as an ordinary conditional ending. The
+     screened-out respondent still saw "not eligible" while the response was recorded `Complete`,
+     stamped `SubmittedAt`, counted against the quota, and fired every on-submit automation. The
+     plan had even flagged clone as blast radius; the JSON half was fixed and the column missed.
+
+  The second one is a class, not an incident: six `copy*` methods hand-list columns and there was
+  no spec for the file at all. `form-clone-columns.spec.ts` now derives the expected column set
+  from the generated ORM classes and fails until each new column is copied or excluded with a
+  stated reason. It immediately found a second, older instance — `copyPages` had never carried
+  `IsPartialSubmitPoint`, so a cloned page silently stopped banking a partial where its author
+  put a checkpoint. Both fixed.
+
+  Also corrected from the round-two report: a stale `persistence.service` header (its PROMOTE
+  bullet described only completions), duplicate step numbers left by the gate reorder, a
+  `rules-panel-model` header still claiming `show` is the only verb, and this plan's own claim
+  that the caps "truncate + authoring-time warning" — they reject, deliberately, and §5 now says
+  so and names where each cap is actually enforced.
+
+  **Verification:** 1,784 unit tests green, all five lint gates, clean build, eight smoke paths.

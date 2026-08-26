@@ -206,6 +206,30 @@ describe('retrying a submission that was already disqualified', () => {
     });
   });
 
+  describe('edge', () => {
+    it('recognises the sealed row from the SESSION when the client id is new', async () => {
+      // The client id is NOT stable across a widget reload — `MjFormComponent.load()` mints a
+      // fresh one every time — while the session id is. And the mutation is reachable without
+      // the widget at all, so "send a new client id" is a one-line way to ask for a second bite.
+      // Session dedupe is what closes that, and it only ever looked for `Complete`: a session
+      // already sealed as `Disqualified` was not recognised, so the pipeline ran on and wrote a
+      // SECOND terminal row for it — repeatably, and consuming a quota slot each time the retry
+      // happened to qualify.
+      const { ctx, saved } = contextWithExistingKnockout({ maxResponses: null, responseCount: 0 });
+
+      const result = await runSubmitPipeline(ctx, {
+        distributionSlug: 'slug-1',
+        formVersionId: 'ver-1',
+        clientResponseId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        answers: [{ questionId: 'age', textValue: 'Yes' }],
+      });
+
+      expect(result.responseId).toBe(CLIENT_ID);
+      expect(result.status).toBe('Disqualified');
+      expect(saved().filter((r) => r.entityName.includes('Form Responses'))).toHaveLength(0);
+    });
+  });
+
   describe('worst', () => {
     it('holds a changed retry to the terminal row, not to the quota', async () => {
       // The distinguishing case. The row is already `Disqualified`, but THESE answers no longer

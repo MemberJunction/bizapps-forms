@@ -193,6 +193,9 @@ export class FormCloneService {
       copy.Description = source.Description;
       copy.DisplayOrder = source.DisplayOrder;
       copy.ConditionalRule = source.ConditionalRule;
+      // Pre-dates the rule verbs and was missed the same way `IsDisqualification` was: a cloned
+      // page that loses this silently stops banking a partial where its author put a checkpoint.
+      copy.IsPartialSubmitPoint = source.IsPartialSubmitPoint;
       await this.save(copy, `page "${source.Title ?? source.ID}"`);
       idMap.set(source.ID, copy.ID);
       copies.push(copy);
@@ -309,6 +312,14 @@ export class FormCloneService {
       copy.IsDefault = source.IsDefault;
       copy.SocialLinks = source.SocialLinks;
       copy.ConditionalRule = source.ConditionalRule;
+      // The disqualification flag lives on the COLUMN, not in the ConditionalRule JSON that
+      // `rewriteConditionalRules` handles below — so copying the rule alone left the copy with a
+      // knockout's condition and none of its meaning: `resolveDisqualification` requires the
+      // flag, `resolveEndingScreen` excludes only flagged screens, so the cloned screen became a
+      // NORMAL conditional ending. The screened-out respondent still saw "not eligible", while
+      // the response was recorded Complete, stamped SubmittedAt, counted against the quota and
+      // fired every on-submit automation.
+      copy.IsDisqualification = source.IsDisqualification;
       await this.save(copy, `${source.ScreenType.toLowerCase()} screen "${source.Title}"`);
       copies.push(copy);
     }

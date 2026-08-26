@@ -5,8 +5,12 @@
  * fully unit-testable without a GraphQL server.
  *
  * Order (fail-closed at each gate):
- *   scope check -> resolve definition -> Turnstile -> rate-limit -> quota
- *   -> server re-validation -> Save response+answers -> fire on-submit hooks.
+ *   scope check -> resolve definition -> rate-limit -> Turnstile -> disqualification
+ *   -> dedupe -> quota -> server re-validation -> file provenance -> Save response+answers
+ *   -> fire on-submit hooks.
+ *
+ * Disqualification sits ahead of dedupe and quota because it is pure and because both of those
+ * gates police COMPLETIONS, which a knockout is not — see step 5.
  */
 import { LogError, LogStatus } from '@memberjunction/core';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
@@ -42,6 +46,7 @@ import {
 } from './response-lookup.service';
 import { InFlightLimiter } from '../http/in-flight-limiter';
 import { checkRespondentScope } from './scope-check.service';
+import { TERMINAL_RESPONSE_STATUSES, isTerminalResponseStatus } from './response-status';
 import {
   abuseIdentity,
   buildSourceMetadata,
@@ -425,7 +430,7 @@ async function runSubmitPipelineInner(
 
   timer.mark('validate');
 
-  // 8. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
+  // 9. Find this session's in-flight Partial row so a partial autosave UPDATES it in place
   //    (idempotent — no duplicate Partial rows) and a final submit PROMOTES it to Complete
   //    instead of creating a second row (Task 4). A lookup error here is non-fatal: we fall
   //    back to creating a fresh row (the dedupe gate above already guards double-Completes).
@@ -438,7 +443,7 @@ async function runSubmitPipelineInner(
 
   timer.mark('find-partial');
 
-  // 8b. Hard ceiling on NEW Partial rows per version — the durable bound on partial-write abuse.
+  // 9b. Hard ceiling on NEW Partial rows per version — the durable bound on partial-write abuse.
   //     Only a partial submit that would CREATE a fresh row is capped: a COMPLETE submit is already
   //     gated by dedupe + quota, and a partial UPDATING an existing row adds none. This is the only
   //     DURABLE bound of the three: the ceilings above are per-window and per-process, so a caller
@@ -454,7 +459,7 @@ async function runSubmitPipelineInner(
 
   timer.mark('partial-cap');
 
-  // 9. Persist response + answers (CREATE, UPDATE partial, or PROMOTE partial→complete).
+  // 10. Persist response + answers (CREATE, UPDATE partial, or PROMOTE partial→complete).
   const persisted = await persistSubmission(
     ctx.provider,
     {
@@ -483,7 +488,7 @@ async function runSubmitPipelineInner(
 
   timer.mark('persist');
 
-  // 10. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
+  // 11. Fire on-submit hooks (complete only; best-effort, never fails the submit). Skipped when
   //     persistence reports a `deduped` no-op — a concurrent request already Completed this row
   //     and fired its hooks, so re-firing here would double-run on-submit automations.
   // Disqualified responses fire NO automations: OnComplete promised a completion this was not,
@@ -525,15 +530,6 @@ async function runSubmitPipelineInner(
       ? disqualificationFields(disqualifiedBy)
       : confirmationFields(resolved, validation.answerMap)),
   });
-}
-
-/**
- * Statuses nothing further will come from. Mirrors `isTerminalStatus` in persistence.service —
- * they answer the same question on either side of the write, and a status that is terminal for
- * one and not the other is how a sealed response gets a second pipeline run.
- */
-function isTerminalResponseStatus(status: string): status is 'Complete' | 'Disqualified' {
-  return status === 'Complete' || status === 'Disqualified';
 }
 
 /**
@@ -656,7 +652,7 @@ async function resolveExistingPartial(
   return findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
-    'Partial',
+    ['Partial'],
     ctx.elevatedUser,
   );
 }
@@ -700,10 +696,15 @@ async function checkDuplicate(
     }
   }
 
+  // Every TERMINAL status, not just `Complete`. The client response id is not stable — the
+  // widget mints a fresh one on every load, and a caller reaching the mutation directly can send
+  // whatever they like — so the session is the only thing tying a retry back to the row it
+  // already has. Looking only for `Complete` meant a session sealed as `Disqualified` was not
+  // recognised as sealed at all, and the pipeline ran on to write a second terminal row for it.
   const existing = await findSessionResponse(
     ctx.provider,
     { formVersionId: resolved.version.ID, sessionId: ctx.sessionId },
-    'Complete',
+    TERMINAL_RESPONSE_STATUSES,
     ctx.elevatedUser,
   );
   if (!existing.ok) {
@@ -719,8 +720,12 @@ async function checkDuplicate(
     return {
       success: true,
       responseId: existing.response.ID,
-      status: 'Complete',
-      ...confirmationFields(resolved, buildAnswerMap(submission.answers)),
+      // The row's OWN status and copy, for the same reason the by-id branch above uses them: a
+      // session sealed by a knockout must not be told its response has been recorded.
+      status: existing.response.Status,
+      ...(existing.response.Status === 'Disqualified'
+        ? terminalRepeatFields(disqualifiedBy)
+        : confirmationFields(resolved, buildAnswerMap(submission.answers))),
     };
   }
   return undefined;

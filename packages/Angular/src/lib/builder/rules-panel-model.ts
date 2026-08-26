@@ -3,8 +3,10 @@
  * offers, and how a card summarizes its conditions in one line. Pure functions, no Angular
  * (RULES_AND_BRANCHING_PLAN §3).
  *
- * A "verb" is one key of the {@link ConditionalRule} JSON — `show` today; later phases add
- * `require` (questions) and `jump` (pages) here rather than inventing a parallel scheme.
+ * A "verb" is one key of the {@link ConditionalRule} JSON — `show`, `require` (questions) and
+ * `jump` (pages) — plus the one pseudo-verb, `disqualify`, which is a COLUMN on the screen
+ * rather than a JSON key (see {@link RuleVerb}). A future verb belongs here too, rather than in
+ * a parallel scheme of its own.
  */
 import type { ConditionalGroup, ConditionalJumpRule, ConditionalRule } from '@mj-biz-apps/forms-entities';
 import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } from './condition-sources';

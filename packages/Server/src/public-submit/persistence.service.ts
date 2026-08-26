@@ -8,9 +8,14 @@
  *   - CREATE   — first save for a session (Partial autosave or one-shot Complete).
  *   - UPDATE   — a Partial autosave re-hits the SAME session row: update it in place and
  *                REPLACE its answers (idempotent — no duplicate Partial rows). (Task 4)
- *   - PROMOTE  — a final submit finds the session's existing Partial row: flip it to
- *                Complete + set SubmittedAt, replace answers, and increment the count.
- *                No second row is created. (Task 4)
+ *   - PROMOTE  — a final submit finds the session's existing Partial row: flip it to its
+ *                terminal status, replace answers, and — for a COMPLETION — set SubmittedAt and
+ *                increment the count. No second row is created. (Task 4)
+ *
+ * "Terminal status" is two things now, and the difference is the whole point of the second one:
+ * a `Disqualified` promotion is still terminal and still replaces answers, but it never stamps
+ * `SubmittedAt` and never counts toward a quota — the respondent was screened out, not finished.
+ * See {@link statusFor} / {@link countsCompletion}.
  *
  * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)`
  * (never `new`), passing the anonymous `contextUser`. Every `Save()`/`Delete()` boolean is
@@ -34,6 +39,7 @@ import {
   FORM_RESPONSE_ANSWER_ENTITY,
   FORM_RESPONSE_ENTITY,
 } from './entity-names';
+import { isTerminalResponseStatus } from './response-status';
 import type { ValidatedAnswer } from './validation.service';
 
 /** Everything the persistence step needs from the resolved/validated submission. */
@@ -151,10 +157,8 @@ function statusFor(inputs: PersistenceInputs): mjBizAppsFormsFormResponseEntity[
   return inputs.complete ? 'Complete' : 'Partial';
 }
 
-/** Terminal statuses: rows nothing may downgrade or rewrite. */
-function isTerminalStatus(status: mjBizAppsFormsFormResponseEntity['Status']): boolean {
-  return status === 'Complete' || status === 'Disqualified';
-}
+/** Terminal statuses: rows nothing may downgrade or rewrite. One definition, three callers. */
+const isTerminalStatus = isTerminalResponseStatus;
 
 /** Whether this save counts toward completion quotas — a disqualification never does. */
 function countsCompletion(inputs: PersistenceInputs): boolean {

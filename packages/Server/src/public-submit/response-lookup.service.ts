@@ -24,6 +24,7 @@ import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './definition-loader.service';
 import { FORM_RESPONSE_ENTITY } from './entity-names';
+import type { FormResponseStatus } from './response-status';
 
 /** The identity of the session+form whose response we are looking up. */
 export interface ResponseLookupKey {
@@ -45,18 +46,22 @@ export interface ResponseLookupResult {
 }
 
 /**
- * Load the most-recent response for `(session, version)` in the given status, or none.
- * `status` narrows to 'Complete' (dedupe) or 'Partial' (upsert/promote).
+ * Load the most-recent response for `(session, version)` in any of `statuses`, or none.
+ *
+ * A SET rather than one status because the two callers ask different questions: the partial
+ * upsert wants exactly `Partial`, while dedupe wants "already sealed" — which is every terminal
+ * status, not just `Complete`. Passing one status meant dedupe could only ever name one of them,
+ * and the one it named was the one that predated `Disqualified`.
  */
 export async function findSessionResponse(
   provider: DefinitionRunViewProvider,
   key: ResponseLookupKey,
-  status: 'Complete' | 'Partial',
+  statuses: ReadonlyArray<FormResponseStatus>,
   contextUser: UserInfo,
 ): Promise<ResponseLookupResult> {
   // A blank session id cannot be correlated to a prior row — treat as "no match" (never
   // collapse distinct un-sessioned submissions into one).
-  if (!key.sessionId) {
+  if (!key.sessionId || statuses.length === 0) {
     return { ok: true, response: undefined };
   }
   const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
@@ -65,7 +70,7 @@ export async function findSessionResponse(
       ExtraFilter:
         `FormVersionID=${quoteSqlString(key.formVersionId)} ` +
         `AND AnonymousSessionID=${quoteSqlString(key.sessionId)} ` +
-        `AND Status=${quoteSqlString(status)}`,
+        `AND Status IN (${statuses.map(quoteSqlString).join(', ')})`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',
       MaxRows: 1,
