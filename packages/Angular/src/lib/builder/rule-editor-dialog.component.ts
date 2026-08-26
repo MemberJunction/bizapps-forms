@@ -41,8 +41,10 @@ const RULE_DIALOG_CSS = /* css */ `
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(720px, 100%);
-  max-height: min(680px, calc(100vh - 2 * var(--mjf-gap)));
+  /* Three quarters of the viewport, a quarter of backdrop — see the note above the media
+     query for what each term is holding off. */
+  width: min(92vw, max(75vw, 720px));
+  max-height: min(92vh, max(75vh, 560px));
   background: var(--mj-bg-surface);
   border: 1px solid var(--mjf-rule);
   border-radius: var(--mjf-radius);
@@ -124,6 +126,17 @@ const RULE_DIALOG_CSS = /* css */ `
 }
 .red-ghost:hover { color: var(--mj-text-primary); background: var(--mj-bg-surface-hover); }
 .red-ghost:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
+
+/* WHY THREE TERMS AND NOT JUST 75vw. The proportion is the point — the card should read as a
+   workspace, not a tooltip — but a proportion alone fails at both ends. 75% of a 900px window is
+   675px, NARROWER than the fixed card this replaced, so small laptops would have been punished
+   by a rule written for large monitors: hence the 720px floor. And a floor with nothing above it
+   can exceed the window, so 92vw caps it and leaves the backdrop visible enough to click. The
+   height is a max-height rather than a fixed height, so a dialog holding one rule still shrinks
+   to it rather than opening as three quarters of empty.
+
+   Resulting widths: 1920 -> 1440 (75%) · 1440 -> 1080 (75%) · 1280 -> 960 (75%) ·
+   1024 -> 768 (75%) · 900 -> 720 (80%, floor) · 700 -> 644 (92%, cap) · <=640 -> full screen. */
 
 /* A phone gets the whole viewport: a centered card with side padding wastes the only axis a
    condition row needs, and the body already scrolls. */

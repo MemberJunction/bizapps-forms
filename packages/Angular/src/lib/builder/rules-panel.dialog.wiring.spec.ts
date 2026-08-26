@@ -35,10 +35,28 @@ describe('the rule editor is a modal, not a rail expansion', () => {
     expect(css).toMatch(/justify-content:\s*center/);
   });
 
-  it('it is wider than the rail it replaces — the whole point of the change', () => {
-    const width = /width:\s*min\((\d+)px,\s*100%\)/.exec(dialog());
-    expect(width).not.toBeNull();
-    expect(Number(width?.[1])).toBeGreaterThan(600);
+  it('it takes three quarters of the viewport, leaving a quarter of backdrop', () => {
+    // It used to be a 720px card, which on a large display is a third of the width and reads
+    // as a tooltip rather than a workspace — while the rule list inside it scrolled.
+    const css = dialog();
+    expect(css).toMatch(/width:\s*min\(92vw,\s*max\(75vw,\s*\d+px\)\)/);
+    expect(css).toMatch(/max-height:\s*min\(92vh,\s*max\(75vh,\s*\d+px\)\)/);
+  });
+
+  it('a small laptop gets a floor instead of a proportion, so the card is never cramped', () => {
+    // 75% of a 900px-wide window is 675px, narrower than the card this replaced. The floor is
+    // what keeps a small screen from being punished by a rule written for a large one.
+    const floor = /width:\s*min\(92vw,\s*max\(75vw,\s*(\d+)px\)\)/.exec(dialog());
+    expect(Number(floor?.[1])).toBeGreaterThanOrEqual(720);
+    // …and 92vw caps it, so the floor can never push the card wider than the window itself.
+    expect(dialog()).toMatch(/width:\s*min\(92vw,/);
+  });
+
+  it('a phone gets the whole screen, where a quarter of backdrop is a quarter wasted', () => {
+    const phone = /@media \(max-width: 640px\) \{([\s\S]*?)\n\}/.exec(dialog())?.[1] ?? '';
+    expect(phone).toMatch(/width:\s*100%/);
+    expect(phone).toMatch(/height:\s*100%/);
+    expect(phone).toMatch(/max-height:\s*100vh/);
   });
 
   it('it is dismissible three ways, so nothing can trap an author mid-rule', () => {
