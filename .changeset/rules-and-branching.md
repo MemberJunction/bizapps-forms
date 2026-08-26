@@ -1,0 +1,15 @@
+---
+"@mj-biz-apps/forms-entities": minor
+"@mj-biz-apps/forms-ng": minor
+"@mj-biz-apps/forms-server": minor
+---
+
+Rules & branching (`plans/RULES_AND_BRANCHING_PLAN.md` Phase C): conditional `require`, page `jump`, per-option scoring, and disqualification screening — authored from a rules panel in the builder's right-hand inspector, where "+ Add rule" opens a card per verb.
+
+**One evaluator, two consumers.** Every verb is a pure function in `forms-entities` (`rule-verbs.ts`, `scoring.ts`, `form-screens.ts`) that the widget and the server both call: `evaluateConditionalRule`, `isRequiredNow`, `resolveVisiblePages`, `resolveVisibleQuestions`, `resolveDisqualification`, `computeScore`, `resolveEndingScreen`. That is not tidiness — the two ends must agree on which questions are on screen, or the server rejects a submission by naming a field the respondent was never shown, and every retry sends the identical payload. The widget's rendered question set is now a fixed point of "restrict the answers to this set, then re-derive from them", so the server's single pass reproduces it. Capped at five passes with an explicit warning rather than looped to convergence, because `isNotAnswered` makes visibility non-monotone: removing an answer can reveal a question, and a form whose rules have no stable answer is a real thing to say out loud.
+
+**A knockout is not a completion.** `FormResponse.Status` gains `Disqualified`, deliberately kept out of `Complete`: it is terminal (the row is sealed, the session is not resumable) but it counts toward no quota, fires no `OnComplete` automation, and gets no `SubmittedAt`. The three call sites that had each decided "terminal" for themselves — the dedupe lookup, the pipeline, and persistence — now read one exhaustive mapped type in `response-status.ts`, so widening the CHECK constraint fails the build until the new status is classified. They had already drifted: persistence knew about `Disqualified` and neither dedupe path did, so one knockout could be written twice for one session.
+
+**Two authoring bugs found on the way, both silent.** `serializeConditionalRule` returned `null` unless the rule had a `show` group, so a jump-only or require-only rule was discarded on save with no error. And the form-clone service copied neither `IsDisqualification` nor `IsPartialSubmitPoint`, so duplicating a form quietly dropped its screening — `form-clone-columns.spec.ts` now derives each entity's settable columns from the generated subclasses and fails when a `copy*` method omits one, with an exclusion list that has to carry a reason.
+
+**Deploy the migration first.** `V202608252340` adds `FormScreen.IsDisqualification`, widens `CK_FormResponse_Status` to three values, and carries the CodeGen output for both. In the reverse order the failures are quiet rather than loud: the `EntityField` row is missing, so `BaseEntity` drops `IsDisqualification` on every save and an author can toggle screening, save successfully, and publish a form that never screens anyone — while a submit that does try to seal `Disqualified` is rejected by the old CHECK constraint.
