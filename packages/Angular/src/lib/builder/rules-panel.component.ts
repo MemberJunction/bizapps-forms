@@ -148,6 +148,17 @@ export class RulesPanelComponent {
     return this.jumpSources ?? this.sources;
   }
 
+  /**
+   * Whether this item carries any rule — what the header button and the empty state both read.
+   *
+   * Deliberately "is the rail showing any rows?" rather than "is `rule` non-empty": a rule blob
+   * can be a phantom (`{}`, or a `show` group whose conditions were all dropped as unfinished),
+   * and an item whose rail lists nothing must not be offered a pencil.
+   */
+  protected get hasRules(): boolean {
+    return this.summaryRows.length > 0;
+  }
+
   /** One line per rule the item actually carries — the rail's whole content. */
   protected get summaryRows(): Array<{ icon: string; text: string }> {
     const rows: Array<{ icon: string; text: string }> = [];

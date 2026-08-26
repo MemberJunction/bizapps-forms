@@ -131,10 +131,10 @@ describe('the panel header is the only add affordance', () => {
     expect(panelHtml()).toMatch(/RULES/);
   });
 
-  it('the header button has an accessible name', () => {
+  it('the header button has an accessible name for whichever face it is showing', () => {
     const html = panelHtml();
     expect(html).toMatch(/class="rp-add"/);
-    expect(html).toMatch(/aria-label="Edit logic"/);
+    expect(html).toMatch(/\[attr\.aria-label\]="hasRules \? 'Edit logic' : 'Add a rule'"/);
   });
 
   it('the inline picker list is gone from the rail', () => {
@@ -321,5 +321,32 @@ describe('the destination select shows the destination the rule holds', () => {
 
   it('a stored destination the picker no longer offers still renders as the chosen one', () => {
     expect(logicEditor()).toMatch(/\[selected\]="true"/);
+  });
+});
+
+
+describe('the header button offers the move the item actually needs', () => {
+  it('an item with rules offers Edit; an item with none offers a plus', () => {
+    // A pencil on an item that has nothing to edit asks the author to open a dialog to find out
+    // there is nothing in it. The empty state below already says "No rules yet" — the button
+    // beside it should be the way to write the first one.
+    const html = panelHtml();
+    expect(html).toMatch(/@if \(hasRules\)/);
+    expect(html).toMatch(/fa-pen/);
+    expect(html).toMatch(/fa-plus/);
+  });
+
+  it('the button and the empty-state message cannot disagree', () => {
+    // Two independent reads of "does this item have rules?" is two chances to contradict each
+    // other on screen — a plus above a list of rules, or "No rules yet" beside a pencil.
+    const html = panelHtml();
+    expect(html).toMatch(/@if \(!hasRules\) \{[\s\S]{0,160}No rules yet/);
+    expect(html).not.toMatch(/summaryRows\.length === 0/);
+  });
+
+  it('having rules means the rail is showing some, not that the blob is non-empty', () => {
+    // `rule` can be a phantom — `{}`, or a `show` group with no conditions left in it. What
+    // decides the button is what the author can actually see listed underneath it.
+    expect(panel()).toMatch(/get hasRules\(\): boolean \{[\s\S]{0,140}this\.summaryRows\.length > 0/);
   });
 });

@@ -3,12 +3,23 @@
        which put the label and the affordance that belongs beside it in different files. -->
   <div class="rp-bar">
     <p class="rp-bar-title">RULES</p>
-    <button type="button" class="rp-add" aria-label="Edit logic" (click)="openDialog()">
-      <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+    <!-- One button, two faces. A pencil on an item with no rules asks the author to open a
+         dialog to discover it is empty; the message right below it has already said so. -->
+    <button
+      type="button"
+      class="rp-add"
+      [attr.aria-label]="hasRules ? 'Edit logic' : 'Add a rule'"
+      (click)="openDialog()"
+    >
+      @if (hasRules) {
+        <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+      } @else {
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add
+      }
     </button>
   </div>
 
-  @if (summaryRows.length === 0) {
+  @if (!hasRules) {
     <p class="rp-empty">No rules yet. This item always shows.</p>
   }
 
