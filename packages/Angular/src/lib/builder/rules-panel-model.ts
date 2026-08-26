@@ -72,6 +72,11 @@ export function groupConditions(group: ConditionalGroup | undefined): ReadonlyAr
  * "includes any of" on a multi-select and "is one of" on a single answer. Same operator, two
  * honest readings, one function that knows which.
  *
+ * The VALUE is in the source's voice too — the label the author picked, not the identity the
+ * form stores. It used to read back the stored value, which on a boolean question is the word
+ * "true" (nobody clicked "true") and on an option question is whatever the author put in the
+ * Value column, often an id nobody has ever read.
+ *
  * A reference to a question that no longer exists says so rather than vanishing. A summary that
  * hides the breakage is how a dead rule survives unnoticed — and a show rule on a deleted source
  * evaluates false, hiding the item from everyone.
@@ -84,10 +89,28 @@ export function describeCondition(
   const prompt = condition.source === 'score' ? 'Total score' : (source?.prompt ?? '(deleted question)');
   const parts = [prompt, operatorLabel(condition.op, source?.kind)];
   if (operatorNeedsValue(condition.op) && condition.value !== undefined) {
-    const value = Array.isArray(condition.value) ? condition.value.join(', ') : String(condition.value);
+    const value = Array.isArray(condition.value)
+      ? condition.value.map((entry) => valueLabel(entry, source)).join(', ')
+      : valueLabel(condition.value, source);
     if (value.length > 0) {
       parts.push(value);
     }
   }
   return parts.join(' ');
+}
+
+/**
+ * One stored value as the author reads it.
+ *
+ * A value the source cannot explain — a deleted option, a scale since narrowed — is shown
+ * exactly as stored. That is deliberate: the summary's job is to say what the rule SAYS, and a
+ * value with no label showing up verbatim is visibly odd, which is how an author notices. The
+ * value picker takes the same posture with its "(deleted option)" entry.
+ */
+function valueLabel(
+  value: string | number | boolean,
+  source: ConditionalSourceQuestion | undefined,
+): string {
+  const spelling = String(value);
+  return source?.options?.find((option) => String(option.value) === spelling)?.label ?? spelling;
 }

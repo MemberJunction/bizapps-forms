@@ -32,7 +32,9 @@ import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
   isAnswerableQuestionType,
+  numericScalePoints,
   opinionScaleBounds,
+  ratingScaleMax,
   type AnswerValue,
   type PublishedFormQuestion,
   type PublishedFormQuestionOption,
@@ -192,15 +194,18 @@ export class FormQuestionComponent {
     return [];
   });
 
-  /** Rating scale max (default 5); NPS is fixed 0–10 handled in template. */
-  protected readonly ratingMax = computed(() => {
-    const raw = this.question().settings?.['max'];
-    return typeof raw === 'number' && raw > 0 ? raw : 5;
-  });
-  protected readonly ratingScale = computed(() =>
-    Array.from({ length: this.ratingMax() }, (_, i) => i + 1),
+  // Both scales come from the shared contract, for the reason `opinionScaleBounds` already
+  // carries: derived twice, they drift, and the respondent is told that the number they were
+  // just shown and allowed to click is out of range. The second reader is now the condition
+  // editor, which offers exactly these points as a rule's comparison value — a rule naming a
+  // sixth star on a five-star question can never fire, and neither screen would say why.
+  /** Rating scale max — the author's `settings.max`, or the shared default. */
+  protected readonly ratingMax = computed(() => ratingScaleMax(this.question().settings));
+  protected readonly ratingScale = computed(
+    () => numericScalePoints('Rating', this.question().settings) ?? [],
   );
-  protected readonly npsScale = Array.from({ length: 11 }, (_, i) => i);
+  /** NPS is 0–10 by definition, not by configuration. */
+  protected readonly npsScale = numericScalePoints('NPS') ?? [];
 
   protected readonly placeholder = computed(() => {
     const raw = this.question().settings?.['placeholder'];

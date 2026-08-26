@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  evaluateCondition,
   evaluateConditionalRule,
   type AnswerValue,
+  type ConditionalOperator,
   type ConditionalRule,
+  type ConditionValue,
 } from './conditional-rule';
 import { parseConditionalRule } from './schemas';
 
@@ -375,10 +378,138 @@ describe('score conditions compare as numbers (C4)', () => {
       expect(evaluateConditionalRule(scoreRule('notEquals', '0'), answers({}))).toBe(false);
     });
 
-    it('question conditions are untouched — "5" and 5 stay different answers', () => {
+    // This used to assert the opposite — that `5` and `'5'` stayed different answers to a
+    // question — on the reasoning that collapsing them would change what published rules meant.
+    // It does change it, and the change is the point: a Rating, NPS, OpinionScale or Number
+    // question can ONLY answer with a number, so a rule naming `'5'` was not "a different
+    // question", it was a dead one, whose negation fired for every respondent alive. The
+    // comparand below is still untouched for question conditions; the tolerance moved to
+    // `scalarsEqual`, where it applies to the OPERATOR rather than to the stored value.
+    it('a question condition reads either spelling of the same answer', () => {
       const q: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equals', value: '5' }] } };
-      expect(evaluateConditionalRule(q, answers({ q1: 5 }))).toBe(false);
+      expect(evaluateConditionalRule(q, answers({ q1: 5 }))).toBe(true);
       expect(evaluateConditionalRule(q, answers({ q1: '5' }))).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Comparing an answer against a value that was SPELLED differently.
+//
+// An answer's type comes from its question's column: a Rating answers `5`, a YesNo answers
+// `true`. A condition's value comes from wherever the rule was written — the builder's own
+// editor now stores those typed, but mj-sync metadata, the AI form builder and every rule
+// authored before this all carry `'5'` and `'true'` as strings. Strict `===` made those rules
+// not merely wrong but wrong in BOTH directions at once: `equals` could never fire and
+// `notEquals`, its negation, fired for everyone — including respondents who answered exactly
+// what the author named.
+// ---------------------------------------------------------------------------
+
+describe('equality across spellings of the same answer', () => {
+  const evaluate = (answer: AnswerValue, value: ConditionValue, op: ConditionalOperator): boolean =>
+    evaluateCondition({ questionId: 'q', op, value }, answers({ q: answer }));
+
+  describe('happy', () => {
+    it('a rating answered 5 equals the string a text box stored', () => {
+      expect(evaluate(5, '5', 'equals')).toBe(true);
+      expect(evaluate(5, '5', 'notEquals')).toBe(false);
+    });
+
+    it('a Yes answer equals the boolean it is stored as, and its written spelling', () => {
+      expect(evaluate(true, true, 'equals')).toBe(true);
+      expect(evaluate(true, 'true', 'equals')).toBe(true);
+      expect(evaluate(false, 'false', 'equals')).toBe(true);
+    });
+
+    it('a date answer equals the same instant written another way', () => {
+      expect(evaluate('2026-08-25', '2026-08-25', 'equals')).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('still says no when the two are genuinely different', () => {
+      expect(evaluate(5, '6', 'equals')).toBe(false);
+      expect(evaluate(true, 'false', 'equals')).toBe(false);
+      expect(evaluate('Sports', 'Music', 'equals')).toBe(false);
+    });
+
+    it('leaves free text alone — two strings compare as strings', () => {
+      expect(evaluate('VIP', 'VIP', 'equals')).toBe(true);
+      expect(evaluate('vip', 'VIP', 'equals')).toBe(false);
+    });
+
+    it('an unanswered question equals nothing', () => {
+      expect(evaluate(undefined, '5', 'equals')).toBe(false);
+      expect(evaluate(null, 'true', 'equals')).toBe(false);
+    });
+  });
+
+  describe('worst', () => {
+    // JavaScript would have `0 == false` and `1 == true`. A respondent who rated a form 1 star
+    // has not said "yes" to anything, and a scale that starts at 0 is not "no".
+    it('never lets a number stand in for a boolean, in either direction', () => {
+      expect(evaluate(true, '1', 'equals')).toBe(false);
+      expect(evaluate(true, 1, 'equals')).toBe(false);
+      expect(evaluate(false, 0, 'equals')).toBe(false);
+      expect(evaluate(1, 'true', 'equals')).toBe(false);
+      expect(evaluate(0, 'false', 'equals')).toBe(false);
+    });
+
+    it('never lets a date stand in for the number of milliseconds it is', () => {
+      expect(evaluate('2026-08-25', Date.parse('2026-08-25'), 'equals')).toBe(false);
+    });
+
+    it('a composite answer equals no scalar, however it is spelled', () => {
+      expect(evaluate({ line1: '12 Main' }, '12 Main', 'equals')).toBe(false);
+      expect(evaluate({ line1: '12 Main' }, 'true', 'equals')).toBe(false);
+    });
+
+    it('blank is not zero — an empty condition value matches nothing numeric', () => {
+      expect(evaluate(0, '', 'equals')).toBe(false);
+    });
+  });
+});
+
+describe('ordering a time-of-day answer', () => {
+  const compare = (answer: AnswerValue, value: ConditionValue, op: ConditionalOperator): boolean =>
+    evaluateCondition({ questionId: 'q', op, value }, answers({ q: answer }));
+
+  describe('happy', () => {
+    // `<input type="time">` gives `"14:30"`, which `Number()` reads as NaN and the ISO-date
+    // pattern does not match — so before this, greaterThan/lessThan on a Time question were
+    // offered in the editor and could never fire, for any answer, ever.
+    it('an afternoon is later than a morning', () => {
+      expect(compare('14:30', '09:00', 'greaterThan')).toBe(true);
+      expect(compare('09:00', '14:30', 'lessThan')).toBe(true);
+    });
+
+    it('reads the seconds some browsers add', () => {
+      expect(compare('14:30:00', '09:00', 'greaterThan')).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('orders by the clock, not by the string', () => {
+      // '9:00' > '14:30' as text; 09:00 is earlier as a time.
+      expect(compare('09:00', '14:30', 'greaterThan')).toBe(false);
+    });
+
+    it('the same time is neither greater nor less', () => {
+      expect(compare('14:30', '14:30', 'greaterThan')).toBe(false);
+      expect(compare('14:30', '14:30', 'lessThan')).toBe(false);
+      expect(compare('14:30', '14:30', 'equals')).toBe(true);
+    });
+  });
+
+  describe('worst', () => {
+    it('a time is not a number of minutes, and not a date', () => {
+      expect(compare('14:30', 870, 'greaterThan')).toBe(false);
+      expect(compare('14:30', '2026-08-25', 'greaterThan')).toBe(false);
+    });
+
+    it('refuses an impossible clock reading rather than guessing at it', () => {
+      expect(compare('25:00', '09:00', 'greaterThan')).toBe(false);
+      expect(compare('14:60', '09:00', 'greaterThan')).toBe(false);
     });
   });
 });

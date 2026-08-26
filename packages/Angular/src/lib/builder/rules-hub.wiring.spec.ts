@@ -87,3 +87,22 @@ describe('the tab is built for reading', () => {
     expect(tab()).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(\s*\d/);
   });
 });
+
+describe('what the builder offers a rule to read', () => {
+  it('builds every source list through one helper, so the same questions are excluded everywhere', () => {
+    // There were six places assembling a source list — a page's show gate, its jump, a
+    // question's show gate, its jump, an ending's, and the Rules tab's — each mapping the tree
+    // itself. Six copies of "which questions can a rule read" is six places for the answer to
+    // drift, and the first thing that had to be excluded (a Statement, which collects no
+    // answer) would have needed adding to all six.
+    const source = builder();
+    expect(source).toMatch(/private sourcesOf\(/);
+    expect(source.match(/toConditionalSource\(/g) ?? []).toHaveLength(1);
+  });
+
+  it('drops a question that cannot be a source rather than rendering a ghost', () => {
+    // `toConditionalSource` returns undefined for a question that collects no answer. Mapping
+    // it straight into the array would put `undefined` in a list every consumer then indexes.
+    expect(builder()).toMatch(/sourcesOf\([\s\S]{0,220}?toConditionalSource\([\s\S]{0,80}?\?\?\s*\[\]/);
+  });
+});

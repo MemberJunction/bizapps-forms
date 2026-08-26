@@ -73,15 +73,54 @@ describe('the value is picked, not typed, wherever the answer set is fixed', () 
     expect(source).not.toMatch(/valueEditorKind\(condition\.op, this\.optionsFor/);
   });
 
-  it('a number condition raises a numeric keypad', () => {
-    expect(editorHtml()).toMatch(/inputmode/);
-    expect(editor()).toMatch(/valueInputMode\(/);
+  it('every editor kind has an arm to render it', () => {
+    // A kind with no @case renders NOTHING — a condition row with an operator, no value box and
+    // no explanation. Silent, and the row still saves.
+    const html = editorHtml();
+    for (const kind of ['select', 'checklist', 'text', 'number', 'date', 'time']) {
+      expect(html, kind).toMatch(new RegExp(`@case \\('${kind}'\\)`));
+    }
+  });
+
+  it('an open number is typed into a number box, not a text box with a keyboard hint', () => {
+    // `inputmode` suggests a keypad and accepts letters anyway. `type="number"` is what stops
+    // "excellent" being stored as the comparison value for a numeric answer.
+    const html = editorHtml();
+    expect(html).toMatch(/type="number"/);
+    expect(html).toMatch(/type="date"/);
+    expect(html).toMatch(/type="time"/);
+  });
+
+  it('a value the author picks is stored as the option carries it, not as its spelling', () => {
+    // A Rating answers the NUMBER 5. A condition holding the string '5' can never match it, and
+    // `notEquals` — its negation — then matches everyone.
+    const source = editor();
+    expect(source).toMatch(/conditionValueFor\(/);
+    expect(source).not.toMatch(/setValue\([\s\S]{0,200}?coerceConditionValue\(c\.op, raw\)/);
   });
 
   it('an option question with no options authored yet says so instead of dead-ending', () => {
     // With free text unreachable for a choice source, an unauthored options list would leave
     // only a disabled placeholder and no explanation of what to do about it.
     expect(editorHtml()).toMatch(/needsOptions\(cond\)/);
+  });
+});
+
+describe('a condition naming a source the list no longer carries', () => {
+  it('says so in the question picker instead of pointing somewhere else', () => {
+    // Two ways to get here: the question was deleted, or it stopped being readable at all —
+    // a `Statement` collects no answer and is no longer offered, so a rule written against one
+    // before that is now dangling. Either way the select has no option matching the stored id,
+    // and a select whose value matches no option falls back to the FIRST one: the row would
+    // read "Full name" while storing a rule about something else entirely. Same failure the
+    // value picker's "(deleted option)" entry exists to prevent, one control to the left.
+    const source = editor();
+    expect(source).toMatch(/staleQuestion\(/);
+    expect(editorHtml()).toMatch(/staleQuestion\(cond\)/);
+  });
+
+  it('does not let the author choose it again', () => {
+    expect(editorHtml()).toMatch(/staleQuestion\(cond\); as gone[\s\S]{0,200}?disabled/);
   });
 });
 
@@ -166,7 +205,11 @@ describe('every select shows the value its condition actually holds', () => {
 
   it('the value option knows whether it is the one, placeholder and deleted entry included', () => {
     const source = html();
-    expect(source).toMatch(/\[selected\]="opt\.value === valueAsString\(cond\)"/);
+    // Compared through `isChosen`, not inline: an option's value is `5` or `true` on a scale
+    // or boolean source, and `5 === '5'` in a template is false — which blanks the select and
+    // loses the author's stored choice on every render. The DOM spelling is the comparable one.
+    expect(source).toMatch(/\[selected\]="isChosen\(cond, opt\)"/);
+    expect(source).toMatch(/\[value\]="optionValue\(opt\)"/);
     // The disabled placeholder must claim the selection when there is no value, or the reset
     // step skips it (it is disabled) and lands on the first REAL option — showing a value the
     // rule does not hold.

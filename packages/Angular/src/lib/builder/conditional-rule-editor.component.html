@@ -39,6 +39,13 @@
             @for (src of sources; track src.id) {
               <option [value]="src.id" [selected]="src.id === questionSelectValue(cond)">{{ src.prompt }}</option>
             }
+            @if (staleQuestion(cond); as gone) {
+              <!-- Reached only when the stored id matches no source, so it IS the selection.
+                   Disabled: re-choosing a question a rule can no longer read is never the move.
+                   Without this the select falls back to its first option and the row reads as a
+                   rule about the top of the form. -->
+              <option [value]="gone" disabled [selected]="true">(question no longer available)</option>
+            }
           </select>
 
           <select
@@ -64,7 +71,7 @@
               >
                 <option value="" disabled [selected]="valueAsString(cond) === ''">Choose an option&hellip;</option>
                 @for (opt of optionsFor(cond); track opt.value) {
-                  <option [value]="opt.value" [selected]="opt.value === valueAsString(cond)">{{ opt.label }}</option>
+                  <option [value]="optionValue(opt)" [selected]="isChosen(cond, opt)">{{ opt.label }}</option>
                 }
                 @if (staleValue(cond); as stale) {
                   <!-- Reached only when the stored value matches no option, so it IS the one. -->
@@ -78,8 +85,8 @@
                   <label class="cre-check">
                     <input
                       type="checkbox"
-                      [checked]="isChecked(cond, opt.value)"
-                      (change)="toggleValue($index, opt.value, $any($event.target).checked)"
+                      [checked]="isChecked(cond, optionValue(opt))"
+                      (change)="toggleValue($index, optionValue(opt), $any($event.target).checked)"
                     />
                     <span>{{ opt.label }}</span>
                   </label>
@@ -93,9 +100,43 @@
                 class="mjf-input cre-input cre-value"
                 [value]="valueAsString(cond)"
                 (input)="setValue($index, valueInput.value)"
-                [attr.inputmode]="inputModeFor(cond)"
                 [attr.placeholder]="cond.op === 'in' || cond.op === 'notIn' ? 'a, b, c' : 'value'"
                 aria-label="Comparison value"
+              />
+            }
+            <!-- Native input types, not a text box with an `inputmode` hint: a hint suggests a
+                 keyboard and accepts anything typed anyway, which is how a numeric answer came
+                 to be compared against a word. The browser also gives a date and a time their
+                 own pickers, in the respondent's own locale, for free. -->
+            @case ('number') {
+              <input
+                #numberInput
+                type="number"
+                class="mjf-input cre-input cre-value"
+                [value]="valueAsString(cond)"
+                (input)="setValue($index, numberInput.value)"
+                placeholder="0"
+                aria-label="Comparison value"
+              />
+            }
+            @case ('date') {
+              <input
+                #dateInput
+                type="date"
+                class="mjf-input cre-input cre-value"
+                [value]="valueAsString(cond)"
+                (input)="setValue($index, dateInput.value)"
+                aria-label="Comparison date"
+              />
+            }
+            @case ('time') {
+              <input
+                #timeInput
+                type="time"
+                class="mjf-input cre-input cre-value"
+                [value]="valueAsString(cond)"
+                (input)="setValue($index, timeInput.value)"
+                aria-label="Comparison time"
               />
             }
           }

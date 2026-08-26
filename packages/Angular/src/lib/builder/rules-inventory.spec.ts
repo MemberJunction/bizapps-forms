@@ -33,10 +33,10 @@ describe('describeCondition', () => {
   describe('happy', () => {
     it('reads as a phrase, in the voice of the source it read', () => {
       expect(describeCondition({ questionId: 'q1', op: 'equals', value: 'vip' }, SOURCES)).toBe(
-        'Ticket type equals vip',
+        'Ticket type equals VIP',
       );
       expect(describeCondition({ questionId: 'q3', op: 'in', value: ['sports'] }, SOURCES)).toBe(
-        'Interests includes any of sports',
+        'Interests includes any of Sports',
       );
     });
 
@@ -83,7 +83,7 @@ describe('collectRuleEntries', () => {
         itemId: 'q2',
         pageId: 'p1',
         verb: 'show',
-        sentence: 'Show "Age" when Ticket type equals vip',
+        sentence: 'Show "Age" when Ticket type equals VIP',
         broken: [],
       });
     });
@@ -105,7 +105,7 @@ describe('collectRuleEntries', () => {
         }),
       );
 
-      expect(entries[0].sentence).toBe('After "Intro", skip to "VIP details" when Ticket type equals vip');
+      expect(entries[0].sentence).toBe('After "Intro", skip to "VIP details" when Ticket type equals VIP');
     });
 
     it('says what a screened-out ending IS, and that its own condition is ignored', () => {
@@ -185,7 +185,7 @@ describe('collectRuleEntries', () => {
       );
 
       expect(entries[0].sentence).toBe(
-        'Show "Age" when Ticket type equals vip or Age is greater than 18',
+        'Show "Age" when Ticket type equals VIP or Age is greater than 18',
       );
     });
   });
@@ -431,7 +431,7 @@ describe('an item carrying several Go to rules', () => {
       );
 
       expect(entries.map((e) => e.sentence)).toEqual([
-        'Rule 1: After "Ticket type", skip to "Age" when Ticket type equals vip',
+        'Rule 1: After "Ticket type", skip to "Age" when Ticket type equals VIP',
         'Rule 2: After "Ticket type", submit the form when Ticket type equals staff',
       ]);
       expect(new Set(entries.map((e) => e.id)).size).toBe(2);
@@ -449,7 +449,7 @@ describe('an item carrying several Go to rules', () => {
           ],
         }),
       );
-      expect(entries[0].sentence).toBe('After "Ticket type", skip to "Age" when Ticket type equals vip');
+      expect(entries[0].sentence).toBe('After "Ticket type", skip to "Age" when Ticket type equals VIP');
     });
   });
 

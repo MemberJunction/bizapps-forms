@@ -643,14 +643,28 @@ export class FormBuilderComponent extends BaseFormComponent {
    * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
    * questions are never offered.
    */
+  /**
+   * The questions in this list that a rule may actually read.
+   *
+   * ONE definition, for all six source lists — a page's show gate and its jump, a question's
+   * show gate and its jump, an ending's, and the Rules tab's inventory. Each of those used to
+   * map the tree itself, so "which questions can a rule read" was answered six times, and the
+   * first exclusion to arrive would have had to be remembered in all six.
+   *
+   * `toConditionalSource` returns `undefined` for a question that collects no answer — a
+   * `Statement` renders prose and never reaches the answer map, so every operator on it is a
+   * constant, and it was offered in the question dropdown all the same.
+   */
+  private sourcesOf(questions: readonly QuestionNode[]): ConditionalSourceQuestion[] {
+    return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
+  }
+
   protected get pageConditionalSources(): ConditionalSourceQuestion[] {
     const index = this.selectedPageIndex;
     if (!this.tree || index <= 0) {
       return [];
     }
-    return this.tree.pages
-      .slice(0, index)
-      .flatMap((page) => page.questions.map((q) => toConditionalSource(q.entity, q.options)));
+    return this.tree.pages.slice(0, index).flatMap((page) => this.sourcesOf(page.questions));
   }
 
   protected onPageChanged(page: PageNode): void {
@@ -669,9 +683,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree || index < 0) {
       return [];
     }
-    return this.tree.pages
-      .slice(0, index + 1)
-      .flatMap((page) => page.questions.map((q) => toConditionalSource(q.entity, q.options)));
+    return this.tree.pages.slice(0, index + 1).flatMap((page) => this.sourcesOf(page.questions));
   }
 
   /**
@@ -746,7 +758,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     const sources: ConditionalSourceQuestion[] = [];
     for (const page of this.tree.pages) {
       for (const q of page.questions) {
-        sources.push(toConditionalSource(q.entity, q.options));
+        sources.push(...this.sourcesOf([q]));
         if (q.entity.ID === this.selectedQuestionId) {
           return sources;
         }
@@ -810,9 +822,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return [];
     }
     return [
-      ...this.tree.pages.flatMap((page) =>
-        page.questions.map((q) => toConditionalSource(q.entity, q.options)),
-      ),
+      ...this.tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
       // Endings may also band on the running score (C4) — "score > 70 → pass screen". Only
       // endings get this: mid-form rules reading a mid-form score would be circular.
       SCORE_SOURCE,
@@ -932,7 +942,7 @@ export class FormBuilderComponent extends BaseFormComponent {
         if (q.entity.ID === this.selectedQuestionId) {
           return sources;
         }
-        sources.push(toConditionalSource(q.entity, q.options));
+        sources.push(...this.sourcesOf([q]));
       }
     }
     return sources;
@@ -952,9 +962,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return [];
     }
     return collectRuleEntries({
-      sources: this.tree.pages.flatMap((page) =>
-        page.questions.map((q) => toConditionalSource(q.entity, q.options)),
-      ),
+      sources: this.tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
       pages: this.tree.pages.map((page, index) => ({
         id: page.entity.ID,
         label: page.entity.Title || `Page ${index + 1}`,

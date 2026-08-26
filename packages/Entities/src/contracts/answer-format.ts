@@ -23,7 +23,7 @@
  */
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
-import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS } from './question-types';
+import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, questionTypeBehavior } from './question-types';
 import type { FormQuestionType } from './question-types';
 import type { JSONValue } from './json-value';
 
@@ -73,6 +73,103 @@ export function opinionScaleBounds(settings?: Record<string, JSONValue>): { min:
   const parsedMax = typeof rawMax === 'number' ? Math.trunc(rawMax) : OPINION_SCALE_DEFAULT_MAX;
   return { min, max: parsedMax > min ? parsedMax : min + 1 };
 }
+
+/**
+ * The most points any implied answer set may carry.
+ *
+ * Every point becomes something rendered — a clickable star in the widget, an `<option>` in the
+ * condition editor — and the bound comes from `Settings`, which is an open JSON blob reachable
+ * by paste, by API and by typo. Without a cap, `{"max": 1000000}` is a form that hangs the
+ * respondent's browser and a rule dropdown that hangs the author's. Well above any real scale
+ * (NPS, the widest fixed one, is eleven points).
+ */
+export const MAX_IMPLIED_SCALE_POINTS = 101;
+
+/** Default `Rating` star count when the author set none. Must match what the widget renders. */
+const RATING_DEFAULT_MAX = 5;
+
+/** `NPS` is 0–10 by definition, not by configuration — the scale IS the question. */
+const NPS_MIN = 0;
+const NPS_MAX = 10;
+
+/**
+ * How many stars a `Rating` offers.
+ *
+ * Shared for the same reason {@link opinionScaleBounds} is: the widget renders this many stars
+ * and the condition editor offers this many values to compare against, and a rule naming a star
+ * the form does not render can never fire. A non-positive setting falls back rather than
+ * pinning the scale to zero — `question-settings.ts` deletes a blank key precisely so the
+ * default applies, and a zero-star rating renders nothing to click.
+ */
+export function ratingScaleMax(settings?: Record<string, JSONValue>): number {
+  const raw = settings?.['max'];
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 1) {
+    return RATING_DEFAULT_MAX;
+  }
+  return Math.min(Math.trunc(raw), MAX_IMPLIED_SCALE_POINTS);
+}
+
+/**
+ * The discrete numbers a scale question can be answered with, or `undefined` for a type that
+ * does not answer on a scale.
+ *
+ * `Number` is deliberately absent: any number is an answer to it, so there is nothing to offer.
+ * That absence is what the condition editor reads to decide between a picker and a number box.
+ */
+export function numericScalePoints(
+  type: FormQuestionType,
+  settings?: Record<string, JSONValue>,
+): readonly number[] | undefined {
+  switch (type) {
+    case 'Rating':
+      return countFrom(1, ratingScaleMax(settings));
+    case 'NPS':
+      return countFrom(NPS_MIN, NPS_MAX);
+    case 'OpinionScale': {
+      const { min, max } = opinionScaleBounds(settings);
+      return countFrom(min, max);
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** The integers from `min` to `max` inclusive, never more than the cap allows. */
+function countFrom(min: number, max: number): readonly number[] {
+  const length = Math.min(max - min + 1, MAX_IMPLIED_SCALE_POINTS);
+  return Array.from({ length }, (_, i) => min + i);
+}
+
+/**
+ * Every value a question of this type can be answered with — when the TYPE fixes them.
+ *
+ * The point is the distinction, not the list: a question whose answers are fixed is one whose
+ * comparison value should be PICKED, and a question whose answers are open is one where it must
+ * be typed. Until this existed only AUTHORED options carried that signal (`optionMode`), so a
+ * `Rating` and a `ShortText` looked identical to anything asking "is this answer set known?" —
+ * which is why the condition editor offered a free-text box for a five-star rating and let an
+ * author compare it against `"excellent"`.
+ *
+ * Values come back in the type the answer is STORED as — `5` and `true`, never `'5'` and
+ * `'true'` — because that is what an `equals` condition has to hold to ever match. Their LABELS
+ * are not here: "Yes" / "Accepted" / "Checked" are presentation, and belong with the rest of the
+ * chrome in `forms-ng`.
+ *
+ * Returns `undefined`, not `[]`, for a type with no implied set. An empty array would read as
+ * "this question has no possible answers", which is a different and much stranger claim.
+ */
+export function impliedAnswerValues(
+  type: FormQuestionType,
+  settings?: Record<string, JSONValue>,
+): readonly (number | boolean)[] | undefined {
+  if (questionTypeBehavior(type).answerColumn === 'boolean') {
+    return BOOLEAN_ANSWER_VALUES;
+  }
+  return numericScalePoints(type, settings);
+}
+
+/** True before false, so a picker reads "Yes / No" rather than "No / Yes". */
+const BOOLEAN_ANSWER_VALUES: readonly boolean[] = [true, false];
 
 /**
  * Check an answered value against the format its question TYPE implies.

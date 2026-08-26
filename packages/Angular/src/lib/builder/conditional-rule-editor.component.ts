@@ -11,8 +11,8 @@ import {
   OPERATOR_CHOICES,
   canAddCondition as groupHasRoom,
   SCORE_SOURCE_ID,
-  coerceConditionValue,
   conditionForSource,
+  conditionValueFor,
   defaultConditionSource,
   defaultOperatorFor,
   newCondition,
@@ -21,7 +21,6 @@ import {
   operatorOfferedFor,
   toggleMembership,
   valueEditorKind,
-  valueInputMode,
   type ConditionalSourceKind,
   type ConditionalSourceOption,
   type ConditionalSourceQuestion,
@@ -212,23 +211,31 @@ export class ConditionalRuleEditorComponent {
     return valueEditorKind(condition.op, this.sourceKind(condition));
   }
 
-  /** The keyboard a free-text value box asks for — see {@link valueInputMode}. */
-  protected inputModeFor(condition: ConditionalCondition): string | null {
-    return valueInputMode(this.sourceKind(condition));
-  }
-
   /**
-   * Whether this row is pointed at a choice question whose options are not written yet.
+   * Whether this row is pointed at a question whose value must be picked and has nothing to
+   * pick from — a choice question whose options the author has not written yet.
    *
-   * With free text unreachable for an option source, the picker would otherwise be a disabled
-   * placeholder and nothing else — a dead end whose cause is one screen away and unstated.
+   * Asks the EDITOR kind rather than re-deriving from the source kind: "this row renders a
+   * picker" is the fact that matters, and it is already decided one line up. A scale or a
+   * boolean also renders a picker and can never reach here, because their sets come from the
+   * type and are never empty.
    */
   protected needsOptions(condition: ConditionalCondition): boolean {
-    const kind = this.sourceKind(condition);
-    if (kind !== 'singleChoice' && kind !== 'multiSelect') {
+    const kind = this.kindFor(condition);
+    if (kind !== 'select' && kind !== 'checklist') {
       return false;
     }
-    return operatorTakesValue(condition.op) && this.optionsFor(condition).length === 0;
+    return this.optionsFor(condition).length === 0;
+  }
+
+  /** One option's value as the DOM spells it — `<option value>` and `<select>.value` are text. */
+  protected optionValue(option: ConditionalSourceOption): string {
+    return String(option.value);
+  }
+
+  /** Whether this option is the one the condition currently names. */
+  protected isChosen(condition: ConditionalCondition, option: ConditionalSourceOption): boolean {
+    return this.optionValue(option) === this.valueAsString(condition);
   }
 
   /** The selectable options of this condition's source question ([] for free-input sources). */
@@ -237,6 +244,25 @@ export class ConditionalRuleEditorComponent {
       return [];
     }
     return this.sources.find((s) => s.id === condition.questionId)?.options ?? [];
+  }
+
+  /**
+   * The source id this row names when the list does not carry it, or `null`.
+   *
+   * Two ways a row gets here: the question was deleted, or it stopped being readable at all —
+   * a `Statement` collects no answer, so it is no longer offered as a source and a rule written
+   * against one before that is now dangling. Either way the `<select>` has no option matching
+   * the stored id, and a select whose value matches nothing falls back to its FIRST option: the
+   * row would read as a rule about the top of the form while storing one about something else.
+   * Surfaced as an extra entry for the same reason {@link staleValue} is — show the truth, keep
+   * the stored value, and let the author be the one who changes it.
+   */
+  protected staleQuestion(condition: ConditionalCondition): string | null {
+    const named = this.questionSelectValue(condition);
+    if (named.length === 0 || this.sourceFor(condition) !== undefined) {
+      return null;
+    }
+    return named;
   }
 
   /**
@@ -252,7 +278,7 @@ export class ConditionalRuleEditorComponent {
     if (current.length === 0) {
       return null;
     }
-    return this.optionsFor(condition).some((o) => o.value === current) ? null : current;
+    return this.optionsFor(condition).some((o) => this.optionValue(o) === current) ? null : current;
   }
 
   protected isChecked(condition: ConditionalCondition, optionValue: string): boolean {
@@ -314,9 +340,10 @@ export class ConditionalRuleEditorComponent {
       // And a new source may not offer the old OPERATOR either: repointing a text condition at
       // a multi-select would leave `equals` selected, which on an array answer can never match.
       // Keeping it would also blank the operator box, since it is no longer among the options.
-      const kind = this.sources.find((s) => s.id === selectedId)?.kind ?? 'text';
+      const next = this.sources.find((s) => s.id === selectedId);
+      const kind = next?.kind ?? 'text';
       const op = operatorOfferedFor(c.op, kind) ? c.op : defaultOperatorFor(kind);
-      return conditionForSource(selectedId, op, coerceConditionValue(op, ''));
+      return conditionForSource(selectedId, op, conditionValueFor(next, op, ''));
     });
     this.emit();
   }
@@ -329,7 +356,7 @@ export class ConditionalRuleEditorComponent {
     // Re-coerce the value for the new operator, so switching scalar <-> membership does not
     // strand an array value on `equals` (which compares it as never-matching).
     this._conditions = this._conditions.map((c, i) =>
-      i === index ? { ...c, op, value: coerceConditionValue(op, this.valueAsString(c)) } : c,
+      i === index ? { ...c, op, value: conditionValueFor(this.sourceFor(c), op, this.valueAsString(c)) } : c,
     );
     this.emit();
   }
@@ -341,7 +368,7 @@ export class ConditionalRuleEditorComponent {
 
   protected setValue(index: number, raw: string): void {
     this._conditions = this._conditions.map((c, i) =>
-      i === index ? { ...c, value: coerceConditionValue(c.op, raw) } : c,
+      i === index ? { ...c, value: conditionValueFor(this.sourceFor(c), c.op, raw) } : c,
     );
     this.emit();
   }

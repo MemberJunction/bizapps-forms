@@ -91,6 +91,17 @@ export interface QuestionTypeBehavior {
    * joins a collection with `; ` and flattens a composite into named sub-columns.
    */
   readonly multiValued: boolean;
+  /**
+   * Whether one answer ORDERS every option rather than selecting among them (`Ranking`).
+   *
+   * Distinct from `multiValued`, which only says an answer may hold several values. A
+   * MultiChoice answer holds the options the respondent chose; a Ranking answer holds ALL of
+   * them, in the order they were put. That difference is invisible in every other column —
+   * the two rows were byte-identical — and it decides what a comparison can mean: membership
+   * against a ranking is satisfied by every respondent who ranked anything at all, so `in`
+   * reads as a real question and is in fact a constant.
+   */
+  readonly ordered: boolean;
 }
 
 /**
@@ -105,45 +116,45 @@ export interface QuestionTypeBehavior {
  */
 export const QUESTION_TYPE_BEHAVIOR = {
   // --- Text ---------------------------------------------------------------
-  ShortText: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false },
-  LongText: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false },
-  Email: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false },
-  Phone: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false },
-  Website: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false },
-  Number: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false },
+  ShortText: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false, ordered: false },
+  LongText: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false, ordered: false },
+  Email: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false, ordered: false },
+  Phone: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false, ordered: false },
+  Website: { answerable: true, optionMode: 'none', answerColumn: 'text', analysis: 'text', multiValued: false, ordered: false },
+  Number: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false, ordered: false },
 
   // --- Choice -------------------------------------------------------------
-  SingleChoice: { answerable: true, optionMode: 'values', answerColumn: 'text', analysis: 'choice', multiValued: false },
-  MultiChoice: { answerable: true, optionMode: 'values', answerColumn: 'json', analysis: 'choice', multiValued: true },
-  Dropdown: { answerable: true, optionMode: 'values', answerColumn: 'text', analysis: 'choice', multiValued: false },
-  PictureChoice: { answerable: true, optionMode: 'images', answerColumn: 'text', analysis: 'choice', multiValued: false },
+  SingleChoice: { answerable: true, optionMode: 'values', answerColumn: 'text', analysis: 'choice', multiValued: false, ordered: false },
+  MultiChoice: { answerable: true, optionMode: 'values', answerColumn: 'json', analysis: 'choice', multiValued: true, ordered: false },
+  Dropdown: { answerable: true, optionMode: 'values', answerColumn: 'text', analysis: 'choice', multiValued: false, ordered: false },
+  PictureChoice: { answerable: true, optionMode: 'images', answerColumn: 'text', analysis: 'choice', multiValued: false, ordered: false },
 
   // --- Scale & ranking ----------------------------------------------------
-  Rating: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false },
-  NPS: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false },
-  OpinionScale: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false },
-  Ranking: { answerable: true, optionMode: 'values', answerColumn: 'json', analysis: 'choice', multiValued: true },
-  Matrix: { answerable: true, optionMode: 'matrix', answerColumn: 'json', analysis: 'composite', multiValued: true },
+  Rating: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false, ordered: false },
+  NPS: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false, ordered: false },
+  OpinionScale: { answerable: true, optionMode: 'none', answerColumn: 'numeric', analysis: 'numeric', multiValued: false, ordered: false },
+  Ranking: { answerable: true, optionMode: 'values', answerColumn: 'json', analysis: 'choice', multiValued: true, ordered: true },
+  Matrix: { answerable: true, optionMode: 'matrix', answerColumn: 'json', analysis: 'composite', multiValued: true, ordered: false },
 
   // --- Boolean ------------------------------------------------------------
-  YesNo: { answerable: true, optionMode: 'none', answerColumn: 'boolean', analysis: 'boolean', multiValued: false },
-  Checkbox: { answerable: true, optionMode: 'none', answerColumn: 'boolean', analysis: 'boolean', multiValued: false },
-  Legal: { answerable: true, optionMode: 'none', answerColumn: 'boolean', analysis: 'boolean', multiValued: false },
+  YesNo: { answerable: true, optionMode: 'none', answerColumn: 'boolean', analysis: 'boolean', multiValued: false, ordered: false },
+  Checkbox: { answerable: true, optionMode: 'none', answerColumn: 'boolean', analysis: 'boolean', multiValued: false, ordered: false },
+  Legal: { answerable: true, optionMode: 'none', answerColumn: 'boolean', analysis: 'boolean', multiValued: false, ordered: false },
 
   // --- Date & time --------------------------------------------------------
-  Date: { answerable: true, optionMode: 'none', answerColumn: 'date', analysis: 'none', multiValued: false },
-  Time: { answerable: true, optionMode: 'none', answerColumn: 'date', analysis: 'none', multiValued: false },
+  Date: { answerable: true, optionMode: 'none', answerColumn: 'date', analysis: 'none', multiValued: false, ordered: false },
+  Time: { answerable: true, optionMode: 'none', answerColumn: 'date', analysis: 'none', multiValued: false, ordered: false },
 
   // --- Composite ----------------------------------------------------------
-  Address: { answerable: true, optionMode: 'none', answerColumn: 'json', analysis: 'composite', multiValued: false },
-  ContactInfo: { answerable: true, optionMode: 'none', answerColumn: 'json', analysis: 'composite', multiValued: false },
+  Address: { answerable: true, optionMode: 'none', answerColumn: 'json', analysis: 'composite', multiValued: false, ordered: false },
+  ContactInfo: { answerable: true, optionMode: 'none', answerColumn: 'json', analysis: 'composite', multiValued: false, ordered: false },
 
   // --- Files --------------------------------------------------------------
-  FileUpload: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false },
-  Signature: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false },
+  FileUpload: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false, ordered: false },
+  Signature: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false, ordered: false },
 
   // --- Display-only -------------------------------------------------------
-  Statement: { answerable: false, optionMode: 'none', answerColumn: 'text', analysis: 'none', multiValued: false },
+  Statement: { answerable: false, optionMode: 'none', answerColumn: 'text', analysis: 'none', multiValued: false, ordered: false },
 } as const satisfies Record<string, QuestionTypeBehavior>;
 
 /**

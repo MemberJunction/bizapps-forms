@@ -29,8 +29,8 @@ import {
 } from './question-settings';
 import { RulesPanelComponent } from './rules-panel.component';
 import {
-  toConditionalSource,
-  type ConditionalSourceOption,
+  authoredAnswerOptions,
+  type AuthoredAnswerOption,
   type ConditionalSourceQuestion,
 } from './condition-sources';
 import type { JumpTargetOption } from './jump-target-options';
@@ -429,13 +429,19 @@ export class QuestionEditorComponent {
   // -- scoring (C4) -----------------------------------------------------------
 
   /**
-   * The choices points can be assigned to — the PUBLISHED option identities, via the same
-   * mapper the condition picker uses, because points are keyed by the value a published form
-   * actually stores as the answer (`Value ?? Label`, uniquified).
+   * The choices points can be assigned to — the PUBLISHED option identities, because points are
+   * keyed by the value a published form actually stores as the answer (`Value ?? Label`,
+   * uniquified).
+   *
+   * Reads {@link authoredAnswerOptions} rather than the condition source's option list, which
+   * it used to share. They have since parted company: a condition source also carries the
+   * options a TYPE implies — a rating's stars, a yes/no's two answers — so that a comparison
+   * value is picked rather than typed. Scoring wants none of those. Sharing the list would
+   * have put a points box against every star on every rating on every form, unasked.
    */
-  protected get scoringChoices(): ConditionalSourceOption[] {
+  protected get scoringChoices(): AuthoredAnswerOption[] {
     if (!this.node) return [];
-    return toConditionalSource(this.node.entity, this.node.options).options ?? [];
+    return authoredAnswerOptions(this.node.entity, this.node.options);
   }
 
   protected get scoring(): QuestionScoring | undefined {

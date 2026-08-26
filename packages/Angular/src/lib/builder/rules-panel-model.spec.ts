@@ -7,6 +7,24 @@ const SOURCES: ConditionalSourceQuestion[] = [
   { id: 'q1', prompt: 'Ticket type', kind: 'singleChoice', options: [{ label: 'VIP', value: 'vip' }] },
   { id: 'q2', prompt: 'Company size', kind: 'number' },
   { id: 'q3', prompt: 'Interests', kind: 'multiSelect', options: [{ label: 'Sports', value: 'sports' }] },
+  {
+    id: 'q4',
+    prompt: 'Consent',
+    kind: 'boolean',
+    options: [
+      { label: 'Yes', value: true },
+      { label: 'No', value: false },
+    ],
+  },
+  {
+    id: 'q5',
+    prompt: 'Rating',
+    kind: 'scale',
+    options: [
+      { label: '1', value: 1 },
+      { label: '2', value: 2 },
+    ],
+  },
 ];
 
 const showVip: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] } };
@@ -70,9 +88,28 @@ describe('groupConditions', () => {
 
 describe('describeCondition speaks in the voice of the source it read', () => {
   describe('happy', () => {
-    it('names the question, the operator and the value', () => {
+    it('names the question, the operator and the value as the author reads it', () => {
+      // The LABEL, not the stored value. This used to read back 'vip' — the identity a
+      // published form stores — which is the one spelling the author never chose and, on a
+      // question whose values are ids, is unreadable.
       expect(describeCondition({ questionId: 'q1', op: 'equals', value: 'vip' }, SOURCES)).toBe(
-        'Ticket type equals vip',
+        'Ticket type equals VIP',
+      );
+    });
+
+    it('reads a boolean condition as the answer the respondent gave', () => {
+      // "Consent equals true" is the database's account of it. Nobody clicked "true".
+      expect(describeCondition({ questionId: 'q4', op: 'equals', value: true }, SOURCES)).toBe(
+        'Consent equals Yes',
+      );
+      expect(describeCondition({ questionId: 'q4', op: 'notEquals', value: false }, SOURCES)).toBe(
+        'Consent does not equal No',
+      );
+    });
+
+    it('reads a scale condition as the point on the scale', () => {
+      expect(describeCondition({ questionId: 'q5', op: 'greaterThan', value: 2 }, SOURCES)).toBe(
+        'Rating is greater than 2',
       );
     });
 
@@ -81,18 +118,30 @@ describe('describeCondition speaks in the voice of the source it read', () => {
       // author who picked "includes any of" and reads back "is one of" has to work out whether
       // the rule changed under them.
       expect(describeCondition({ questionId: 'q3', op: 'in', value: ['sports'] }, SOURCES)).toBe(
-        'Interests includes any of sports',
+        'Interests includes any of Sports',
       );
     });
 
     it('keeps the canonical wording on a single-answer source', () => {
       expect(describeCondition({ questionId: 'q1', op: 'in', value: ['vip'] }, SOURCES)).toBe(
-        'Ticket type is one of vip',
+        'Ticket type is one of VIP',
       );
     });
   });
 
   describe('edge', () => {
+    it('shows a value the source cannot explain exactly as it is stored', () => {
+      // A deleted option, or a scale the author has since narrowed. The summary's job is to
+      // show what the rule SAYS, so a value with no label reads back verbatim — visibly odd,
+      // which is the point, rather than quietly relabelled to a neighbour.
+      expect(describeCondition({ questionId: 'q1', op: 'equals', value: 'gone' }, SOURCES)).toBe(
+        'Ticket type equals gone',
+      );
+      expect(describeCondition({ questionId: 'q5', op: 'equals', value: 9 }, SOURCES)).toBe(
+        'Rating equals 9',
+      );
+    });
+
     it('omits the value for operators that take none', () => {
       expect(describeCondition({ questionId: 'q2', op: 'isAnswered' }, SOURCES)).toBe('Company size is answered');
     });
@@ -105,7 +154,7 @@ describe('describeCondition speaks in the voice of the source it read', () => {
 
     it('joins a list value so a membership condition reads as one phrase', () => {
       expect(describeCondition({ questionId: 'q1', op: 'in', value: ['vip', 'staff'] }, SOURCES)).toBe(
-        'Ticket type is one of vip, staff',
+        'Ticket type is one of VIP, staff',
       );
     });
   });

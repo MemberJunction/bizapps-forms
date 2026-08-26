@@ -305,8 +305,11 @@ export function evaluateCondition(
  * that is not a number stays exactly as written, so authorable nonsense ("score equals banana")
  * remains inert rather than coercing to `NaN` and firing by accident.
  *
- * Question conditions are returned untouched: `'5'` and `5` are genuinely different answers to
- * a question, and collapsing them would change the meaning of every rule already published.
+ * Question conditions are returned untouched — but no longer because their spellings are
+ * meaningful. A question's answer type is fixed by its column, so `'5'` and `5` were never two
+ * different answers to a Rating; the string was simply a rule that could not match. That is
+ * handled one level up, in {@link scalarsEqual}, where widening the OPERATOR fixes every
+ * authoring path at once and leaves the stored rule saying exactly what its author wrote.
  */
 function conditionComparand(condition: ConditionalCondition): ConditionValue | undefined {
   const value = condition.value;
@@ -412,12 +415,68 @@ export function isAnswerSupplied(answer: AnswerValue): boolean {
   return true;
 }
 
-/** Strict scalar equality after normalizing both sides to a comparable primitive. */
+/**
+ * Scalar equality, tolerant of how the same answer was SPELLED — and of nothing else.
+ *
+ * An answer's runtime type is decided by its question's column: a Rating answers the number
+ * `5`, a YesNo the boolean `true`. A condition's value is decided by whoever wrote the rule,
+ * and three of the four authoring paths write strings — mj-sync metadata, the AI form builder,
+ * and every rule authored before the editor learned to store typed values. Strict `===` made
+ * those rules wrong in BOTH directions at once: `equals` could never match, and `notEquals`,
+ * being its negation, matched everyone — including the respondents the author meant to exclude.
+ * On a `show` gate that reads as "visible to all", which is the permissive direction, silently.
+ *
+ * The tolerance is deliberately narrow, and {@link sameScale} is where the narrowness lives:
+ * two values are equal only when they resolve to the same point on the SAME scale. `1` is not
+ * `true` and `0` is not `false`, however hard JavaScript's `==` wants them to be — a respondent
+ * who gave one star has not consented to anything. `'2026-08-25'` is not its own epoch
+ * milliseconds either, for the same reason `compareOrdered` tags its kinds.
+ *
+ * Only equality is widened. `isMember` keeps strict membership: the operators that use it are
+ * offered on option questions alone, whose values are strings on both sides.
+ */
 function scalarsEqual(answer: AnswerValue, value: ConditionValue | undefined): boolean {
   if (value === undefined || Array.isArray(answer) || Array.isArray(value)) {
     return false;
   }
-  return answer === value;
+  if (answer === value) {
+    return true;
+  }
+  return sameScale(answer, value);
+}
+
+/**
+ * Whether two differently-spelled scalars name the same point on one scale.
+ *
+ * Booleans first and exclusively: once EITHER side is a boolean the comparison is a boolean
+ * one, and a number on the other side is a mismatch rather than an invitation to coerce. Doing
+ * it the other way round — trying the numeric scale first — is how `true` comes to equal `1`.
+ */
+function sameScale(answer: AnswerValue, value: ConditionValue): boolean {
+  if (typeof answer === 'boolean' || typeof value === 'boolean') {
+    const a = asBoolean(answer);
+    return a !== undefined && a === asBoolean(value);
+  }
+  const a = toComparable(answer);
+  const b = toComparable(value);
+  return a !== undefined && b !== undefined && a.kind === b.kind && a.n === b.n;
+}
+
+/**
+ * A value read as a boolean, or `undefined` when it has no boolean reading.
+ *
+ * `'true'` / `'false'` only — the spellings `String(true)` produces, which is what a text box
+ * or a JSON-authored rule would have stored. Not `'Yes'`, `'1'` or `'on'`: those are LABELS a
+ * form chose to show, and a contract that matched them would be guessing at presentation.
+ */
+function asBoolean(value: AnswerValue | ConditionValue): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  return value === 'false' ? false : undefined;
 }
 
 /**
@@ -471,12 +530,19 @@ function compareOrdered(
 
 /** A value reduced to something orderable, tagged with which scale it lives on. */
 interface Comparable {
-  kind: 'number' | 'date';
+  kind: 'number' | 'date' | 'time';
   n: number;
 }
 
 /** ISO-8601 calendar-date prefix (`2026-08-25`, `2026-08-25T10:00`, …). */
 const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
+
+/**
+ * A whole 24-hour clock reading, as `<input type="time">` emits it (`14:30`, some browsers
+ * `14:30:00`). Anchored and range-checked rather than loose, so `25:00` and `14:60` stay
+ * non-comparable instead of ordering as if they were times somebody could have answered.
+ */
+const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
 
 /**
  * Coerce an answer/condition value to a {@link Comparable}, or `undefined`.
@@ -495,6 +561,14 @@ function toComparable(value: AnswerValue | ConditionValue | undefined): Comparab
     const parsed = Number(trimmed);
     if (Number.isFinite(parsed)) {
       return { kind: 'number', n: parsed };
+    }
+    const clock = CLOCK_TIME.exec(trimmed);
+    if (clock) {
+      // Minutes since midnight, on its own scale. A Time answer is a point on a 24-hour clock
+      // with no date attached, so it can be ordered against another time and against nothing
+      // else — comparing it with a number would order "2:30pm" against "870" and fire a rule
+      // no author meant.
+      return { kind: 'time', n: Number(clock[1]) * 60 + Number(clock[2]) + Number(clock[3] ?? 0) / 60 };
     }
     if (ISO_DATE_PREFIX.test(trimmed)) {
       const ms = Date.parse(trimmed);

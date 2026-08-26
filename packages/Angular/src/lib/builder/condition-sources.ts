@@ -5,17 +5,38 @@
  */
 import {
   MAX_CONDITIONS_PER_GROUP,
+  impliedAnswerValues,
   isFormQuestionType,
   questionTypeBehavior,
   type ConditionalCondition,
   type ConditionalOperator,
   type ConditionValue,
+  type FormQuestionType,
   type QuestionTypeBehavior,
 } from '@mj-biz-apps/forms-entities';
+import { parseQuestionSettings } from './json-fields';
 import { publishedOptionIdentities, type PublishableOptionFields } from './option-labels';
 
-/** A selectable answer the value picker offers — label shown, value stored. */
+/**
+ * A selectable answer the value picker offers — label shown, value STORED.
+ *
+ * The value is not always a string, and that is the whole point of the field's type. An
+ * option-driven question stores its answer as text, but a `Rating` stores `5` and a `YesNo`
+ * stores `true`; a condition holding `'5'` against an answer of `5` is a rule that can never
+ * fire, and whose negation fires for everyone. The label is what a human reads ("Yes",
+ * "Accepted", "3"); the value is what the evaluator compares.
+ */
 export interface ConditionalSourceOption {
+  label: string;
+  value: string | number | boolean;
+}
+
+/**
+ * An option an AUTHOR wrote — narrower than {@link ConditionalSourceOption} in the one way that
+ * matters to its other caller: its value is always the text a published form stores, because
+ * that is what an option row holds. Scoring keys its points by exactly this string.
+ */
+export interface AuthoredAnswerOption {
   label: string;
   value: string;
 }
@@ -28,8 +49,32 @@ export interface ConditionalSourceOption {
  * the next time a question type ships, and the failure is silent (the new type quietly gets
  * whatever the fallback arm gives it). `'score'` is the running total, which is not a question
  * at all but appears in the same menu.
+ *
+ * The kinds divide three ways, and the division is what every table below turns on:
+ *
+ *  - **Picked** — `singleChoice`, `multiSelect`, `scale`, `boolean`. The answer set is known,
+ *    so the comparison value is chosen from it and can never be a value the question cannot
+ *    produce. `scale` and `boolean` are new here: their sets come from the TYPE (1..max,
+ *    true/false) rather than from options an author wrote, which is exactly why they used to
+ *    fall through to free text — a five-star rating offered a box you could type "excellent"
+ *    into, and the rule then never fired.
+ *  - **Typed** — `number`, `date`, `time`, `text`, `score`. The answer is open, so the value
+ *    is entered, in the control that matches it. `time` is separate from `date` because they
+ *    are different HTML inputs and different comparison scales.
+ *  - **Neither** — `presence`. The answer is an object, a file id, or a full ranking; no
+ *    operator but the answered-pair can say anything true about it.
  */
-export type ConditionalSourceKind = 'singleChoice' | 'multiSelect' | 'number' | 'date' | 'text' | 'score';
+export type ConditionalSourceKind =
+  | 'singleChoice'
+  | 'multiSelect'
+  | 'scale'
+  | 'boolean'
+  | 'number'
+  | 'date'
+  | 'time'
+  | 'text'
+  | 'presence'
+  | 'score';
 
 /** A question a rule may reference (for questions: preceding ones only; for endings: all). */
 export interface ConditionalSourceQuestion {
@@ -56,63 +101,178 @@ export interface ConditionSourceQuestionFields {
   ID: string;
   Prompt: string;
   QuestionType: string;
+  /** Per-type settings JSON — where a scale question keeps the bounds of its answer set. */
+  Settings: string | null;
 }
 
 /**
- * Map a builder question (entity + option rows) to what the condition editor can offer.
+ * Map a builder question (entity + option rows) to what the condition editor can offer — or
+ * `undefined` when the question cannot be the subject of a condition at all.
  *
- * Options are attached only for `values`/`images` option modes: a Matrix's options are axes,
- * and a Matrix answer is an object no operator can match an option value against — offering
- * them would fill the picker with values that can never fire. An unknown question type (a
- * stale row, an unshipped type) degrades to a plain source rather than guessing.
+ * A `Statement` collects no answer, so it never reaches the answer map, so every operator on it
+ * is a constant: `isAnswered` false for everyone, `notEquals` true for everyone. It was offered
+ * in the question dropdown all the same, which is a rule that reads like a decision and is one.
+ * Returning `undefined` is what keeps it off the list without every caller remembering to filter.
+ *
+ * Two kinds of option list can end up on a source, and they arrive from opposite directions.
+ * AUTHORED options come from `values`/`images` questions (never `matrix` — a Matrix's options
+ * are axes, and its answer an object no operator can match an option against). IMPLIED options
+ * come from the type itself, for the scale and boolean questions whose answer sets nobody wrote
+ * down. Both end in the same field because the editor's question is the same either way: is this
+ * value picked, or typed?
+ *
+ * An unknown question type (a stale row, an unshipped type) degrades to a plain text source
+ * rather than guessing.
  */
 export function toConditionalSource(
   question: ConditionSourceQuestionFields,
   options: readonly PublishableOptionFields[],
-): ConditionalSourceQuestion {
+): ConditionalSourceQuestion | undefined {
   const base = { id: question.ID, prompt: question.Prompt };
   if (!isFormQuestionType(question.QuestionType)) {
     return { ...base, kind: 'text' };
   }
-  const behavior = questionTypeBehavior(question.QuestionType);
-  const source: ConditionalSourceQuestion = { ...base, kind: sourceKindOf(behavior) };
-  if (behavior.optionMode !== 'values' && behavior.optionMode !== 'images') {
+  const type = question.QuestionType;
+  const behavior = questionTypeBehavior(type);
+  if (!behavior.answerable) {
+    return undefined;
+  }
+  const implied = impliedOptions(type, question.Settings);
+  const source: ConditionalSourceQuestion = { ...base, kind: sourceKindOf(type, behavior, implied !== undefined) };
+  if (implied !== undefined) {
+    source.options = implied;
     return source;
   }
-  const identities = publishedOptionIdentities(options).map(({ label, value }) => ({ label, value }));
-  if (identities.length > 0) {
-    source.options = identities;
+  const authored = authoredAnswerOptions(question, options);
+  if (authored.length > 0) {
+    source.options = authored;
   }
   return source;
 }
 
+/**
+ * The options a published form will store as answers — the ones an AUTHOR wrote, never the ones
+ * a type implies.
+ *
+ * Exactly the values a published form stores: same display-order sort, same `Value ?? Label`
+ * fallback, same uniqueness rewrite as the snapshot builder, all via
+ * {@link publishedOptionIdentities}. Empty for a type whose options are not answers — a
+ * Matrix's are axes, and a Matrix answer is an object matching none of them.
+ *
+ * Separate from {@link toConditionalSource} because two callers want different halves of it.
+ * Per-option SCORING keys its points by authored option value and must not grow entries for a
+ * rating's stars or a checkbox's two states; the condition editor wants both kinds, because to
+ * it they answer the same question — is this value picked or typed? Scoring used to borrow the
+ * condition mapper for this, which quietly made it the same decision as the editor's.
+ */
+export function authoredAnswerOptions(
+  question: ConditionSourceQuestionFields,
+  options: readonly PublishableOptionFields[],
+): AuthoredAnswerOption[] {
+  if (!isFormQuestionType(question.QuestionType)) {
+    return [];
+  }
+  const { optionMode } = questionTypeBehavior(question.QuestionType);
+  if (optionMode !== 'values' && optionMode !== 'images') {
+    return [];
+  }
+  return publishedOptionIdentities(options).map(({ label, value }) => ({ label, value }));
+}
+
 /** The fields of a question-type behavior row {@link sourceKindOf} reads. */
-type SourceKindInputs = Pick<QuestionTypeBehavior, 'optionMode' | 'answerColumn' | 'multiValued'>;
+type SourceKindInputs = Pick<QuestionTypeBehavior, 'optionMode' | 'answerColumn' | 'multiValued' | 'ordered'>;
 
 /**
  * Classify a question type from its capabilities.
  *
- * Option modes first, because being option-driven is what decides whether a value is picked or
- * typed, and that is the decision with teeth. Then the answer column, which is what decides
- * whether ordering means anything: `compareOrdered` coerces numeric strings AND ISO dates, so a
- * Date question genuinely supports greater/less than — dropping it into `'text'` would take
- * working operators away.
+ * Read top to bottom; each arm takes what the ones below it would get wrong.
  *
- * Everything else is `'text'`, including booleans and composites. A composite answer is an
- * object no operator compares, so its only useful conditions are the answered-pair, which every
- * kind offers.
+ *  - **`ordered` first.** A Ranking's row is byte-identical to a MultiChoice's in every other
+ *    column, and it is not a multi-select: its answer is EVERY option in the order they were
+ *    put, so `includes any of` is satisfied by any respondent who ranked anything. The checklist
+ *    read as a real question and was a constant.
+ *  - **Then authored options**, because being option-driven is what decides whether a value is
+ *    picked or typed, and that is the decision with teeth.
+ *  - **Then the shapes no operator can compare** — json objects (Address, ContactInfo, Matrix)
+ *    and file ids. `equals` against an object is false for everyone and `notEquals` true for
+ *    everyone, which is worse than offering nothing.
+ *  - **Then booleans**, whose two answers are an implied set: picked, never typed.
+ *  - **Then numbers**, split by whether the type fixes the answers. A `Rating` is a scale with
+ *    a known set; a `Number` is open, so its value is entered.
+ *  - **Then dates**, split into calendar and clock. They are different HTML controls and, in
+ *    `compareOrdered`, different scales — a time was ordered as a date before this and could
+ *    never fire.
+ *
+ * Everything left is `'text'`.
  */
-function sourceKindOf(behavior: SourceKindInputs): ConditionalSourceKind {
+function sourceKindOf(
+  type: FormQuestionType,
+  behavior: SourceKindInputs,
+  hasImpliedSet: boolean,
+): ConditionalSourceKind {
+  if (behavior.ordered) {
+    return 'presence';
+  }
   if (behavior.optionMode === 'values' || behavior.optionMode === 'images') {
     return behavior.multiValued ? 'multiSelect' : 'singleChoice';
   }
+  if (behavior.answerColumn === 'json' || behavior.answerColumn === 'file') {
+    return 'presence';
+  }
+  if (behavior.answerColumn === 'boolean') {
+    return 'boolean';
+  }
   if (behavior.answerColumn === 'numeric') {
-    return 'number';
+    return hasImpliedSet ? 'scale' : 'number';
   }
   if (behavior.answerColumn === 'date') {
-    return 'date';
+    // The one arm the behaviour table cannot answer: `Date` and `Time` share a column, and what
+    // separates them is which HTML control edits them — presentation, which is this package's
+    // business and not the contract's (the widget's `input-mode.ts` draws the same line for the
+    // same reason). Their comparison scales differ too, but the evaluator reads that off the
+    // VALUE's shape, not off the type.
+    return type === 'Time' ? 'time' : 'date';
   }
   return 'text';
+}
+
+/**
+ * Labels for the two answers a boolean question has, in that question's own words.
+ *
+ * The VALUES are the contract's (`true` / `false`, from `impliedAnswerValues`); these are the
+ * chrome, and they live here because "Accepted" is what a Legal question calls `true` on screen
+ * and a contract package has no business knowing that. A `Checkbox` reads as checked rather
+ * than as "yes" because that is the control the respondent actually saw.
+ */
+const BOOLEAN_LABELS: Partial<Record<FormQuestionType, readonly [string, string]>> = {
+  YesNo: ['Yes', 'No'],
+  Legal: ['Accepted', 'Declined'],
+  Checkbox: ['Checked', 'Not checked'],
+};
+
+/** The default reading of a boolean answer, for a type with no wording of its own. */
+const DEFAULT_BOOLEAN_LABELS: readonly [string, string] = ['Yes', 'No'];
+
+/**
+ * The picker entries a type IMPLIES, or `undefined` when its answers are not fixed by its type.
+ *
+ * Settings are parsed with the builder's forgiving reader: `Settings` is open JSON reachable by
+ * API, by paste and by hand-edit, and a rating whose settings are corrupt is still a five-star
+ * rating. Throwing here would take the whole rules dialog down over a stray brace.
+ */
+function impliedOptions(
+  type: FormQuestionType,
+  settings: string | null,
+): ConditionalSourceOption[] | undefined {
+  const values = impliedAnswerValues(type, parseQuestionSettings(settings));
+  if (values === undefined) {
+    return undefined;
+  }
+  const [whenTrue, whenFalse] = BOOLEAN_LABELS[type] ?? DEFAULT_BOOLEAN_LABELS;
+  return values.map((value) => ({
+    label: typeof value === 'boolean' ? (value ? whenTrue : whenFalse) : String(value),
+    value,
+  }));
 }
 
 /** One operator with its human-readable label. */
@@ -190,13 +350,35 @@ export function operatorLabel(op: ConditionalOperator, kind?: ConditionalSourceK
  *    menu that offers two ways to say the same thing costs a decision at every rule.
  *  - **score** gets no answered-pair. The running total is always a number; asking whether it
  *    is answered is a question with one answer.
+ *  - **boolean** gets no ordering. There is no "greater than yes". It gets no membership pair
+ *    either: "is one of Yes, No" is every respondent who answered.
+ *  - **scale** gets ordering — "rated 3 or more" is most of why a rating is on a form — but no
+ *    membership, for the same reason as boolean. Its equality now WORKS, which it did not while
+ *    the value was typed: an answer of `5` never equalled the string `'5'`, and `notEquals`
+ *    fired for the whole audience.
+ *  - **presence** gets the answered-pair and nothing else. Its answers are objects, file ids
+ *    and full rankings; every other operator on those is a constant, and a rule that always
+ *    fires is worse than no rule because it reads like a decision.
  */
+const ORDERED_OPERATORS: ReadonlyArray<ConditionalOperator> = [
+  'equals',
+  'notEquals',
+  'greaterThan',
+  'lessThan',
+  'isAnswered',
+  'isNotAnswered',
+];
+
 const OPERATORS_BY_KIND: Record<ConditionalSourceKind, ReadonlyArray<ConditionalOperator>> = {
   singleChoice: ['equals', 'notEquals', 'in', 'isAnswered', 'isNotAnswered'],
   multiSelect: ['in', 'notIn', 'isAnswered', 'isNotAnswered'],
-  number: ['equals', 'notEquals', 'greaterThan', 'lessThan', 'isAnswered', 'isNotAnswered'],
-  date: ['equals', 'notEquals', 'greaterThan', 'lessThan', 'isAnswered', 'isNotAnswered'],
+  scale: ORDERED_OPERATORS,
+  boolean: ['equals', 'notEquals', 'isAnswered', 'isNotAnswered'],
+  number: ORDERED_OPERATORS,
+  date: ORDERED_OPERATORS,
+  time: ORDERED_OPERATORS,
   text: ['equals', 'notEquals', 'isAnswered', 'isNotAnswered'],
+  presence: ['isAnswered', 'isNotAnswered'],
   score: ['greaterThan', 'lessThan', 'equals'],
 };
 
@@ -242,8 +424,14 @@ export function operatorNeedsValue(op: ConditionalOperator): boolean {
   return !VALUELESS_OPERATORS.has(op);
 }
 
-/** How one condition's comparison value should be edited. */
-export type ValueEditorKind = 'none' | 'text' | 'select' | 'checklist';
+/**
+ * How one condition's comparison value should be edited.
+ *
+ * `'number'`, `'date'` and `'time'` are native input types rather than a plain box with a
+ * keyboard hint: an `inputmode` suggests a keyboard and accepts anything typed anyway, which is
+ * how a five-star rating came to accept "excellent" as a comparison value.
+ */
+export type ValueEditorKind = 'none' | 'text' | 'number' | 'date' | 'time' | 'select' | 'checklist';
 
 /**
  * Pick the value editor for a condition.
@@ -261,21 +449,77 @@ export function valueEditorKind(op: ConditionalOperator, kind: ConditionalSource
   if (!operatorNeedsValue(op)) {
     return 'none';
   }
-  if (kind !== 'singleChoice' && kind !== 'multiSelect') {
-    return 'text';
+  switch (kind) {
+    case 'singleChoice':
+    case 'multiSelect':
+      return op === 'in' || op === 'notIn' ? 'checklist' : 'select';
+    case 'scale':
+    case 'boolean':
+      return 'select';
+    case 'number':
+    case 'score':
+      return 'number';
+    case 'date':
+      return 'date';
+    case 'time':
+      return 'time';
+    case 'text':
+      return 'text';
+    case 'presence':
+      // Unreachable through the menu, which offers this kind nothing that takes a value. Stated
+      // anyway, because a value box on an answer nothing can compare is precisely the failure
+      // this switch exists to prevent, and the next operator added to the menu is where it
+      // would come back.
+      return 'none';
+    default:
+      return assertNeverKind(kind);
   }
-  return op === 'in' || op === 'notIn' ? 'checklist' : 'select';
+}
+
+/** Exhaustiveness guard: a new source kind must be given a value editor before it compiles. */
+function assertNeverKind(kind: never): never {
+  throw new Error(`Unhandled ConditionalSourceKind: ${String(kind)}`);
 }
 
 /**
- * The `inputmode` hint for a free-text value box, or `null` for the default keyboard.
+ * What a condition should STORE for a value the author just entered or picked.
  *
- * Mobile-first is a repo rule, and this is where it costs nothing: a number condition on a
- * phone should raise a keypad. Dates deliberately do not — the value is an ISO string, and a
- * numeric keypad has no `-`.
+ * The whole point is the type of the result, not its content. An answer's runtime type is fixed
+ * by its question's column — a Rating answers `5`, a YesNo answers `true` — and a condition
+ * holding the string `'5'` against an answer of `5` is a rule that can never fire, whose
+ * negation fires for every respondent. Storing what the source can actually produce is what
+ * makes `equals` mean equals.
+ *
+ * Three rules, in order:
+ *
+ *  - Membership operators take a list, whatever the source. (See {@link coerceConditionValue}.)
+ *  - A source with a known answer set hands back the option's OWN value, looked up by the
+ *    spelling the `<select>` gave us. A raw value that matches no option is kept verbatim
+ *    rather than coerced — it can only be a stored rule pointing at a deleted option or a scale
+ *    that has since been narrowed, and rewriting it would silently move the rule to a
+ *    neighbouring answer.
+ *  - An open numeric source parses, and keeps the text when it does not parse. `Number('')` is
+ *    `0` and `Number('eighteen')` is `NaN`; storing either would turn an empty box into a real
+ *    condition and a typo into one that can never match. Blank stays blank, which is what
+ *    `isFinishedCondition` reads to drop an abandoned row on save.
  */
-export function valueInputMode(kind: ConditionalSourceKind): 'numeric' | null {
-  return kind === 'number' || kind === 'score' ? 'numeric' : null;
+export function conditionValueFor(
+  source: ConditionalSourceQuestion | undefined,
+  op: ConditionalOperator,
+  raw: string,
+): ConditionValue {
+  if (op === 'in' || op === 'notIn') {
+    return coerceConditionValue(op, raw);
+  }
+  const picked = source?.options?.find((option) => String(option.value) === raw);
+  if (picked !== undefined) {
+    return picked.value;
+  }
+  if (raw === '' || (source?.kind !== 'number' && source?.kind !== 'score')) {
+    return raw;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : raw;
 }
 
 /** `in` / `notIn` take a list (comma-separated when typed); everything else a scalar string. */
@@ -362,7 +606,7 @@ export function defaultConditionSource(
  */
 export function newCondition(source: ConditionalSourceQuestion): ConditionalCondition {
   const op = defaultOperatorFor(source.kind);
-  return conditionForSource(source.id, op, coerceConditionValue(op, ''));
+  return conditionForSource(source.id, op, conditionValueFor(source, op, ''));
 }
 
 /**

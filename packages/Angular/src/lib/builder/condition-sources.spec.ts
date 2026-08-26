@@ -14,7 +14,7 @@ import {
   operatorNeedsValue,
   operatorOfferedFor,
   toConditionalSource,
-  valueInputMode,
+  conditionValueFor,
   toggleMembership,
   valueEditorKind,
   canAddCondition,
@@ -27,8 +27,25 @@ import {
 } from './condition-sources';
 
 /** Structural fakes — the module deliberately reads plain fields, not BaseEntity. */
-function question(type: string): { ID: string; Prompt: string; QuestionType: string } {
-  return { ID: 'q1', Prompt: 'Ticket type?', QuestionType: type };
+function question(
+  type: string,
+  settings?: Record<string, number>,
+): { ID: string; Prompt: string; QuestionType: string; Settings: string | null } {
+  return {
+    ID: 'q1',
+    Prompt: 'Ticket type?',
+    QuestionType: type,
+    Settings: settings ? JSON.stringify(settings) : null,
+  };
+}
+
+/** The source a type produces, for specs that only care about one field of it. */
+function sourceOf(type: string, settings?: Record<string, number>) {
+  const source = toConditionalSource(question(type, settings), []);
+  if (!source) {
+    throw new Error(`${type} produced no source`);
+  }
+  return source;
 }
 function option(
   label: string,
@@ -37,6 +54,27 @@ function option(
 ): { Label: string; Value: string | null; DisplayOrder: number } {
   return { Label: label, Value: value, DisplayOrder: order };
 }
+
+/**
+ * Every source kind there is, spelled out ONCE.
+ *
+ * Written by hand rather than derived, deliberately: this is the list a spec parameterizes over
+ * to prove no kind was left unhandled, and deriving it from the same module under test would
+ * make it agree with a bug. Adding a kind without adding it here is caught by the exhaustiveness
+ * spec below, which counts.
+ */
+const EVERY_KIND: ConditionalSourceKind[] = [
+  'singleChoice',
+  'multiSelect',
+  'scale',
+  'boolean',
+  'number',
+  'date',
+  'time',
+  'text',
+  'presence',
+  'score',
+];
 
 describe('toConditionalSource', () => {
   describe('happy', () => {
@@ -121,52 +159,110 @@ describe('source kinds', () => {
 
   describe('happy', () => {
     it('a multi-valued option question is a multi-select', () => {
-      expect(toConditionalSource(question('MultiChoice'), [option('A', 'a')]).kind).toBe('multiSelect');
-      expect(toConditionalSource(question('Ranking'), [option('A', 'a')]).kind).toBe('multiSelect');
+      expect(toConditionalSource(question('MultiChoice'), [option('A', 'a')])?.kind).toBe('multiSelect');
     });
 
     it('a single-valued option question is a single choice', () => {
       for (const type of ['SingleChoice', 'Dropdown', 'PictureChoice']) {
-        expect(toConditionalSource(question(type), [option('A', 'a')]).kind).toBe('singleChoice');
+        expect(toConditionalSource(question(type), [option('A', 'a')])?.kind).toBe('singleChoice');
       }
     });
 
-    it('a numeric question is numeric, and a date question is a date', () => {
-      for (const type of ['Number', 'Rating', 'NPS', 'OpinionScale']) {
-        expect(toConditionalSource(question(type), []).kind).toBe('number');
+    it('an open number is a number, and a scale question is a scale', () => {
+      // The difference is whether the TYPE fixes the answers. Any number answers a `Number`;
+      // only 1..max answers a `Rating`, which makes its comparison value something to pick.
+      expect(sourceOf('Number').kind).toBe('number');
+      for (const type of ['Rating', 'NPS', 'OpinionScale']) {
+        expect(sourceOf(type).kind).toBe('scale');
       }
-      expect(toConditionalSource(question('Date'), []).kind).toBe('date');
-      expect(toConditionalSource(question('Time'), []).kind).toBe('date');
+    });
+
+    it('a date is a date and a time is a time — they are not the same control', () => {
+      expect(sourceOf('Date').kind).toBe('date');
+      expect(sourceOf('Time').kind).toBe('time');
+    });
+
+    it('a yes/no question is a boolean, not free text', () => {
+      for (const type of ['YesNo', 'Checkbox', 'Legal']) {
+        expect(sourceOf(type).kind).toBe('boolean');
+      }
+    });
+
+    it('an answer nothing can be compared against offers presence only', () => {
+      // Composites and files are objects and GUIDs; a Ranking answer is EVERY option in the
+      // order they were put, so membership against it is true for anyone who answered at all.
+      for (const type of ['Address', 'ContactInfo', 'Matrix', 'FileUpload', 'Signature', 'Ranking']) {
+        expect(sourceOf(type).kind).toBe('presence');
+      }
     });
   });
 
   describe('edge', () => {
     it('every answerable question type gets a kind — none falls through unclassified', () => {
       for (const type of answerableTypes) {
-        expect(toConditionalSource(question(type), [option('A', 'a')]).kind).toBeDefined();
+        expect(toConditionalSource(question(type), [option('A', 'a')])?.kind).toBeDefined();
       }
+    });
+
+    it('a question that collects no answer is not a source at all', () => {
+      // A Statement never reaches the answer map, so every operator on it is a constant:
+      // `isAnswered` false for everyone, `notEquals` true for everyone. Offering it in the
+      // question dropdown is offering a rule that cannot mean anything.
+      const unanswerable = (Object.keys(QUESTION_TYPE_BEHAVIOR) as FormQuestionType[]).filter(
+        (t) => !isAnswerableQuestionType(t),
+      );
+      expect(unanswerable.length).toBeGreaterThan(0);
+      for (const type of unanswerable) {
+        expect(toConditionalSource(question(type), [])).toBeUndefined();
+      }
+    });
+
+    it('a scale question carries its points as typed values, ready to be picked', () => {
+      expect(sourceOf('Rating', { max: 3 }).options).toEqual([
+        { label: '1', value: 1 },
+        { label: '2', value: 2 },
+        { label: '3', value: 3 },
+      ]);
+    });
+
+    it('a boolean question carries the two answers it has, labelled for a human', () => {
+      expect(sourceOf('YesNo').options).toEqual([
+        { label: 'Yes', value: true },
+        { label: 'No', value: false },
+      ]);
+      expect(sourceOf('Legal').options?.map((o) => o.label)).toEqual(['Accepted', 'Declined']);
+      expect(sourceOf('Checkbox').options?.map((o) => o.label)).toEqual(['Checked', 'Not checked']);
     });
 
     it('a choice question with no options authored yet is still a choice, not free text', () => {
       // Its kind comes from the type, not from whether the author has filled the options in.
       // Reading it off the option list would flip the question to free text mid-authoring and
       // let a value be typed that the finished question can never produce.
-      expect(toConditionalSource(question('SingleChoice'), []).kind).toBe('singleChoice');
+      expect(toConditionalSource(question('SingleChoice'), [])?.kind).toBe('singleChoice');
     });
   });
 
   describe('worst', () => {
     it('an unknown question type degrades to text rather than guessing', () => {
-      expect(toConditionalSource(question('Hologram'), []).kind).toBe('text');
+      expect(toConditionalSource(question('Hologram'), [])?.kind).toBe('text');
+    });
+
+    it('an unreadable Settings blob leaves the scale on its defaults, never throws', () => {
+      // Settings is open JSON reached by API, paste and hand-edit. A rating whose settings are
+      // corrupt is still a five-star rating; a builder that threw here would take the whole
+      // rules dialog down with it.
+      const broken = { ID: 'q1', Prompt: 'Rate us', QuestionType: 'Rating', Settings: '{not json' };
+      expect(() => toConditionalSource(broken, [])).not.toThrow();
+      expect(toConditionalSource(broken, [])?.options).toHaveLength(5);
     });
 
     it('a Matrix is not offered as an option source — its options are axes', () => {
       // A Matrix answer is an object; no operator can match an option value against it, so the
       // picker would be full of values that can never fire.
       const source = toConditionalSource(question('Matrix'), [option('Row 1', 'r1')]);
-      expect(source.options).toBeUndefined();
-      expect(source.kind).not.toBe('singleChoice');
-      expect(source.kind).not.toBe('multiSelect');
+      expect(source?.options).toBeUndefined();
+      expect(source?.kind).not.toBe('singleChoice');
+      expect(source?.kind).not.toBe('multiSelect');
     });
   });
 });
@@ -194,7 +290,7 @@ describe('operatorChoicesFor', () => {
 
   describe('edge', () => {
     it('every kind offers a non-empty menu of operators the contract supports', () => {
-      const kinds: ConditionalSourceKind[] = ['singleChoice', 'multiSelect', 'number', 'date', 'text', 'score'];
+      const kinds: ConditionalSourceKind[] = EVERY_KIND;
       for (const kind of kinds) {
         const ops = menu(kind);
         expect(ops.length).toBeGreaterThan(0);
@@ -221,7 +317,7 @@ describe('operatorChoicesFor', () => {
     });
 
     it('defaultOperatorFor always returns an operator that kind actually offers', () => {
-      const kinds: ConditionalSourceKind[] = ['singleChoice', 'multiSelect', 'number', 'date', 'text', 'score'];
+      const kinds: ConditionalSourceKind[] = EVERY_KIND;
       for (const kind of kinds) {
         expect(operatorOfferedFor(defaultOperatorFor(kind), kind)).toBe(true);
       }
@@ -246,7 +342,7 @@ describe('operatorChoicesFor', () => {
     });
 
     it('every kind can render every operator without blanking', () => {
-      const kinds: ConditionalSourceKind[] = ['singleChoice', 'multiSelect', 'number', 'date', 'text', 'score'];
+      const kinds: ConditionalSourceKind[] = EVERY_KIND;
       for (const kind of kinds) {
         for (const choice of OPERATOR_CHOICES) {
           expect(operatorChoicesFor(kind, choice.op).map((c) => c.op)).toContain(choice.op);
@@ -304,22 +400,29 @@ describe('valueEditorKind', () => {
       expect(valueEditorKind('notIn', 'multiSelect')).toBe('checklist');
     });
 
-    it('free-input kinds get free text', () => {
+    it('a fixed answer set is always picked, never typed', () => {
+      expect(valueEditorKind('equals', 'scale')).toBe('select');
+      expect(valueEditorKind('greaterThan', 'scale')).toBe('select');
+      expect(valueEditorKind('equals', 'boolean')).toBe('select');
+    });
+
+    it('an open answer gets the control its own keyboard belongs to', () => {
       expect(valueEditorKind('equals', 'text')).toBe('text');
-      expect(valueEditorKind('greaterThan', 'number')).toBe('text');
-      expect(valueEditorKind('lessThan', 'date')).toBe('text');
-      expect(valueEditorKind('greaterThan', 'score')).toBe('text');
+      expect(valueEditorKind('greaterThan', 'number')).toBe('number');
+      expect(valueEditorKind('greaterThan', 'score')).toBe('number');
+      expect(valueEditorKind('lessThan', 'date')).toBe('date');
+      expect(valueEditorKind('lessThan', 'time')).toBe('time');
     });
   });
 
   describe('edge', () => {
-    it('a number gets a numeric keypad, and a free-text answer does not', () => {
-      // Mobile-first: the difference between a phone showing a keypad and a full keyboard is
-      // the difference between typing "18" and typing "1" then giving up.
-      expect(valueInputMode('number')).toBe('numeric');
-      expect(valueInputMode('score')).toBe('numeric');
-      expect(valueInputMode('text')).toBeNull();
-      expect(valueInputMode('date')).toBeNull();
+    it('a presence-only source never asks for a value, whatever it is asked', () => {
+      // Belt as well as braces: its operator menu offers nothing that takes a value, so this
+      // is unreachable through the UI — and it is exactly the sort of thing a later operator
+      // added to the menu would break silently.
+      for (const choice of OPERATOR_CHOICES) {
+        expect(valueEditorKind(choice.op, 'presence')).toBe('none');
+      }
     });
   });
 
@@ -328,7 +431,7 @@ describe('valueEditorKind', () => {
       // THE "Soahm" HOLE. On a question with a fixed answer set the value must be picked: a
       // hand-typed value that misses an option's spelling fails `===` forever, silently, and
       // the author's own test submission is what convinces them the rule works.
-      for (const kind of ['singleChoice', 'multiSelect'] as const) {
+      for (const kind of ['singleChoice', 'multiSelect', 'scale', 'boolean'] as const) {
         for (const choice of operatorChoicesFor(kind)) {
           expect(valueEditorKind(choice.op, kind)).not.toBe('text');
         }
@@ -336,7 +439,7 @@ describe('valueEditorKind', () => {
     });
 
     it('valueless operators get no editor at all, whatever the kind', () => {
-      const kinds: ConditionalSourceKind[] = ['singleChoice', 'multiSelect', 'number', 'date', 'text', 'score'];
+      const kinds: ConditionalSourceKind[] = EVERY_KIND;
       for (const kind of kinds) {
         expect(valueEditorKind('isAnswered', kind)).toBe('none');
         expect(valueEditorKind('isNotAnswered', kind)).toBe('none');
@@ -491,5 +594,148 @@ describe('newCondition', () => {
     it('gives a scalar source an empty scalar, not an empty list', () => {
       expect(newCondition({ id: 'q1', prompt: 'Age', kind: 'number' }).value).toBe('');
     });
+  });
+});
+
+
+describe('every kind is accounted for', () => {
+  // The three tables that switch on kind — the operator menu, the value editor, the default
+  // operator — are the ones a new kind gets forgotten in. A miss is silent: the source falls
+  // to whatever the fallback arm gives it, which is how a five-star rating came to offer a
+  // free-text box in the first place.
+  it('offers a menu, an editor and a starting operator for each', () => {
+    for (const kind of EVERY_KIND) {
+      const menu = operatorChoicesFor(kind);
+      expect(menu.length, kind).toBeGreaterThan(0);
+      expect(operatorOfferedFor(defaultOperatorFor(kind), kind), kind).toBe(true);
+      for (const choice of menu) {
+        expect(valueEditorKind(choice.op, kind), `${kind}/${choice.op}`).toBeDefined();
+      }
+    }
+  });
+
+  it('gives every answerable question type one of them', () => {
+    const kinds = new Set(EVERY_KIND);
+    for (const type of Object.keys(QUESTION_TYPE_BEHAVIOR) as FormQuestionType[]) {
+      if (!isAnswerableQuestionType(type)) {
+        continue;
+      }
+      const source = toConditionalSource(question(type, { max: 4 }), [option('A', 'a')]);
+      expect(source, type).toBeDefined();
+      expect(kinds.has(source!.kind), `${type} -> ${source!.kind}`).toBe(true);
+    }
+  });
+});
+
+describe('the operators a kind offers are the ones that can fire', () => {
+  const menu = (kind: ConditionalSourceKind) => operatorChoicesFor(kind).map((c) => c.op);
+
+  describe('happy', () => {
+    it('a scale can be equalled and ordered — "rated 3 or more" is the point of it', () => {
+      expect(menu('scale')).toContain('equals');
+      expect(menu('scale')).toContain('greaterThan');
+      expect(menu('scale')).toContain('lessThan');
+    });
+
+    it('a time can be ordered, now that a clock reading compares as one', () => {
+      expect(menu('time')).toContain('greaterThan');
+      expect(menu('time')).toContain('lessThan');
+    });
+  });
+
+  describe('edge', () => {
+    it('a boolean is equalled, never ordered — there is no "greater than yes"', () => {
+      expect(menu('boolean')).toContain('equals');
+      expect(menu('boolean')).not.toContain('greaterThan');
+      expect(menu('boolean')).not.toContain('lessThan');
+    });
+
+    it('a scale is not a menu of options — "is one of these stars" is not a question', () => {
+      expect(menu('scale')).not.toContain('in');
+      expect(menu('boolean')).not.toContain('in');
+    });
+  });
+
+  describe('worst', () => {
+    it('a presence-only source offers the answered pair and NOTHING else', () => {
+      // Every other operator on an object, a file id or a full ranking is a constant: `equals`
+      // false for everyone, `notEquals` true for everyone. A rule that always fires is worse
+      // than no rule, because it reads like a decision.
+      expect(menu('presence')).toEqual(['isAnswered', 'isNotAnswered']);
+    });
+  });
+});
+
+describe('conditionValueFor', () => {
+  const scale = toConditionalSource(question('Rating', { max: 5 }), [])!;
+  const yesNo = toConditionalSource(question('YesNo'), [])!;
+  const number = toConditionalSource(question('Number'), [])!;
+  const text = toConditionalSource(question('ShortText'), [])!;
+  const choice = toConditionalSource(question('SingleChoice'), [option('VIP', 'vip')])!;
+
+  describe('happy', () => {
+    it('stores a scale value as the number the answer is stored as', () => {
+      expect(conditionValueFor(scale, 'equals', '3')).toBe(3);
+    });
+
+    it('stores a boolean value as a boolean', () => {
+      expect(conditionValueFor(yesNo, 'equals', 'true')).toBe(true);
+      expect(conditionValueFor(yesNo, 'equals', 'false')).toBe(false);
+    });
+
+    it('stores an open number as a number', () => {
+      expect(conditionValueFor(number, 'greaterThan', '18')).toBe(18);
+    });
+
+    it('leaves text, dates and option values as the strings they are stored as', () => {
+      expect(conditionValueFor(text, 'equals', 'Acme')).toBe('Acme');
+      expect(conditionValueFor(choice, 'equals', 'vip')).toBe('vip');
+    });
+  });
+
+  describe('edge', () => {
+    it('an empty box is empty, not zero — the row is unfinished and gets dropped on save', () => {
+      expect(conditionValueFor(scale, 'equals', '')).toBe('');
+      expect(conditionValueFor(number, 'equals', '')).toBe('');
+      expect(conditionValueFor(yesNo, 'equals', '')).toBe('');
+    });
+
+    it('membership still splits a comma list, on any source', () => {
+      expect(conditionValueFor(choice, 'in', 'a, b')).toEqual(['a', 'b']);
+      expect(conditionValueFor(undefined, 'in', 'a, b')).toEqual(['a', 'b']);
+    });
+
+    it('a condition on a deleted question keeps whatever it is given', () => {
+      expect(conditionValueFor(undefined, 'equals', '5')).toBe('5');
+    });
+  });
+
+  describe('worst', () => {
+    it('never invents a value the source cannot produce', () => {
+      // A select can only hand back one of its own option values, but the setter is reachable
+      // from a stored rule and from a repointed row too. Anything off the list stays as it
+      // arrived rather than being coerced into a neighbouring point.
+      expect(conditionValueFor(scale, 'equals', '9')).toBe('9');
+      expect(conditionValueFor(yesNo, 'equals', 'Yes')).toBe('Yes');
+    });
+
+    it('never turns unparseable text into NaN', () => {
+      expect(conditionValueFor(number, 'greaterThan', 'eighteen')).toBe('eighteen');
+      expect(Number.isNaN(conditionValueFor(number, 'greaterThan', 'eighteen'))).toBe(false);
+    });
+  });
+});
+
+describe('a new condition on a fixed-answer source', () => {
+  it('opens on an operator that source can satisfy, with nothing picked yet', () => {
+    const scale = toConditionalSource(question('Rating', { max: 5 }), [])!;
+    const condition = newCondition(scale);
+    expect(operatorOfferedFor(condition.op, 'scale')).toBe(true);
+    expect(condition.value).toBe('');
+  });
+
+  it('opens a presence-only source on an operator that needs no value', () => {
+    const upload = toConditionalSource(question('FileUpload'), [])!;
+    expect(operatorNeedsValue(newCondition(upload).op)).toBe(false);
   });
 });
