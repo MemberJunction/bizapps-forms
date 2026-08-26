@@ -520,7 +520,11 @@ async function runSubmitPipelineInner(
   // Disqualified responses fire NO automations: OnComplete promised a completion this was not,
   // and side effects on a screened-out respondent (confirmation emails, entity upserts) are the
   // loud, hard-to-undo way to be wrong about a knockout.
-  if (complete && !persisted.deduped && disqualifiedBy === undefined) {
+  // `terminalCompletion`, not a third spelling of it. This gate governs the irreversible side
+  // effects a knockout must never fire, and it was deriving the same decision the rate-limit and
+  // quota gates derive — a fourth reading of "is this a real completion" is a fourth place for a
+  // later change to disagree.
+  if (terminalCompletion && !persisted.deduped) {
     // DETACHED, deliberately. The response row and its answers are already written by the
     // time we get here, and nothing the respondent is shown comes from a hook — the
     // confirmation is built from the definition. Awaiting the automation chain made every
@@ -592,7 +596,9 @@ function disqualificationFields(
 /**
  * Which buckets this submission has to satisfy.
  *
- * Three, answering different questions, and only two of them are abuse controls:
+ * Four, answering different questions. Only (a) is not an abuse control — it is keyed on a header
+ * the caller chooses, so it shapes a real widget's behaviour and bounds nothing. The other three
+ * are keyed on the resolved peer IP, and they are listed here in the order the body pushes them:
  *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
  *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
  *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
@@ -600,13 +606,13 @@ function disqualificationFields(
  *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
  *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
  *       ADDRESSES, which is the only currency a public endpoint can charge.
- *   (d) per (caller, distribution), DISQUALIFYING submits only — its own counter, for the reason
- *       spelled out at the push site below.
  *   (c) per (caller, distribution), completions only — the same identity against a much tighter
  *       cap, because a completion fires the on-submit automations (a confirmation email to an
  *       address the submission chose, an LLM run, entity upserts) and an autosave does not. One
  *       counter over both could only be tight enough to interrupt someone still typing, or loose
  *       enough to leave the expensive path effectively unlimited.
+ *   (d) per (caller, distribution), DISQUALIFYING submits only — its own counter, for the reason
+ *       spelled out at the push site below.
  */
 function rateLimitGatesFor(
   ctx: PipelineContext,

@@ -20,6 +20,12 @@
  *
  *   Regenerate both together:  npm run seed:manifest   (after regenerating the seed migration)
  *
+ * CHECK 5 — A SHIPPED SCHEMA SYNC NEVER REACHES A SCHEMA THIS APP DOES NOT OWN.
+ *   CodeGen writes `@ExcludedSchemaNames` from whatever schemas the DEV database happened to hold,
+ *   so the list is only ever as good as one developer's install. It must never be NARROWER than a
+ *   list the repo already shipped — which is checked against history rather than a constant,
+ *   because a hand-written deny-list cannot name an Open App nobody here has heard of.
+ *
  * CHECK 4 — A CORE-METADATA INSERT IS NEVER GUARDED ON ITS OWN ID ALONE.
  *   `IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityRelationship] WHERE [ID] = '<guid>')` asks
  *   whether THIS ROW was inserted before. What makes an insert safe is whether the THING IT
@@ -273,14 +279,18 @@ function checkPlaceholders(repoRoot, violations) {
 // ---------------------------------------------------------------------------
 
 /**
- * Schemas `spUpdateExistingEntitiesFromSchema` must always be told to leave alone.
+ * The FLOOR of schemas `spUpdateExistingEntitiesFromSchema` must always be told to leave alone.
  *
- * Two kinds, and both matter for a stranger's database rather than ours. The `__mj_BizApps*`
- * schemas belong to SIBLING Open Apps — `bizapps-tasks` is a hard dependency of this one and
- * `mj app install` installs it FIRST, so a sync that includes it rewrites another app's entity
- * metadata on every host that installs Forms. `dbo` and `staging` belong to the HOST: sweeping
- * them registers the customer's own tables as MJ entities. Both case variants are listed because
- * the collation a host uses is not ours to assume.
+ * A floor, not the answer. The `__mj_BizApps*` schemas belong to SIBLING Open Apps —
+ * `bizapps-tasks` is a hard dependency of this one and `mj app install` installs it FIRST, so a
+ * sync that includes it rewrites another app's entity metadata on every host that installs Forms.
+ * `dbo` and `staging` belong to the HOST: sweeping them registers the customer's own tables as MJ
+ * entities. Both case variants, because the collation a host uses is not ours to assume.
+ *
+ * What a hand-written list CANNOT do is name an Open App nobody here has heard of — `mj.config.cjs`
+ * makes exactly this point about `__mj_BizAppsCaliber`, "which no deny-list maintained here could
+ * ever have named in advance". So this floor is only half the check; {@link previouslyExcluded}
+ * supplies the other half by reading what the repo has already shipped.
  */
 const SCHEMAS_NEVER_SYNCED = [
     'sys',
@@ -324,25 +334,91 @@ function gatedForSchemaSync(file) {
  * while the migration immediately before it named all three, and nothing caught the difference —
  * `check-generated-schema-scope.mjs` reads `mj.config.cjs` and generated TypeScript, not SQL.
  */
-function checkSchemaSyncScope(repoRoot, violations) {
+/**
+ * A schema name reduced to its IDENTITY, so two spellings of one schema compare equal.
+ *
+ * Only the PLACEHOLDER is normalized, deliberately, and case is NOT. Shipped lists disagree on the
+ * placeholder — most write `${mjSchema}_BizAppsTasks`, one older CodeGen run baked the literal
+ * `__mj_BizAppsTasks` — and treating those as different schemas would report a drop that is purely
+ * a spelling difference, which is how a real check turns into noise somebody switches off.
+ *
+ * Case is a different thing entirely. CodeGen emits BOTH `_BizAppsTasks` and `_bizappstasks`
+ * because the host's collation is not knowable from here, so the two spellings are two separate
+ * protections and losing one is a real narrowing on a case-sensitive host. Folding case here made
+ * the check accept dropping either — the first version of this function did exactly that, and
+ * removing `${mjSchema}_BizAppsTasks` outright passed clean.
+ */
+function schemaIdentity(name) {
+    return name.replace(/\$\{mjSchema\}/g, '__mj');
+}
+
+/**
+ * Every `@ExcludedSchemaNames` a migration ships, keyed by its version stamp.
+ *
+ * Read from the repo rather than maintained, because that is the only way the check can know
+ * about a schema nobody thought to add to a constant.
+ */
+function shippedExclusionLists(repoRoot) {
+    const lists = [];
     for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
-            if (!gatedForSchemaSync(file)) continue;
-            const sql = readFileSync(join(dir, file), 'utf-8');
+            const stamp = /^[A-Z](\d{12})__/.exec(file);
+            if (stamp === null) continue;
+            // The STRUCTURE mask, so `--` comments do not count. `migrations-pg/` documents the
+            // statements its conversion skipped in comments, wrapped mid-literal — scanning raw
+            // text captured `'s` from a line break as if it were a whole exclusion list, and the
+            // check then reported every real migration as "dropping" a schema called `s`. A
+            // commented-out call also excludes nothing, so reading one is wrong twice over.
+            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
             for (const match of sql.matchAll(/@ExcludedSchemaNames\s*=\s*'([^']*)'/g)) {
-                const listed = new Set(match[1].split(',').map((n) => n.trim()));
-                const missing = SCHEMAS_NEVER_SYNCED.filter((n) => !listed.has(n));
-                if (missing.length > 0) {
-                    violations.push(
-                        `${relative(repoRoot, join(dir, file))} calls spUpdateExistingEntitiesFromSchema without ` +
-                            `excluding ${missing.join(', ')}. CodeGen writes this list from whatever schemas the DEV ` +
-                            'database happened to hold, so it must be normalized before the output is shipped: a sync ' +
-                            "that reaches a sibling Open App's schema rewrites its entity metadata on every host, and one " +
-                            'that reaches dbo/staging registers the host\'s own tables as entities. See migrations/README.md.',
-                    );
-                }
+                const names = match[1].split(',').map((n) => n.trim()).filter((n) => n.length > 0);
+                lists.push({ stamp: stamp[1], file: join(dir, file), names, raw: match[1] });
             }
+        }
+    }
+    return lists;
+}
+
+/**
+ * Everything the repo has ALREADY shipped an exclusion for, before `stamp`.
+ *
+ * This is what makes the check self-maintaining. Once any migration excludes a schema, no later
+ * migration may drop it — so an Open App this repo has never heard of is still protected the
+ * moment one CodeGen run happens to name it. That is the failure this gate exists for: the list
+ * is regenerated from whatever schemas the DEV BOX held, so a developer without Caliber installed
+ * silently emits a narrower list than the one before it. That has already happened twice
+ * (`V202608211000` and `V202608211600` both dropped ATS and Caliber, which `V202608191400` had).
+ */
+function previouslyExcluded(lists, stamp) {
+    const seen = new Set();
+    for (const list of lists) {
+        if (list.stamp < stamp) {
+            for (const name of list.names) seen.add(schemaIdentity(name));
+        }
+    }
+    return seen;
+}
+
+function checkSchemaSyncScope(repoRoot, violations) {
+    const lists = shippedExclusionLists(repoRoot);
+    for (const list of lists) {
+        if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;
+        const required = new Set([
+            ...SCHEMAS_NEVER_SYNCED.map(schemaIdentity),
+            ...previouslyExcluded(lists, list.stamp),
+        ]);
+        const listed = new Set(list.names.map(schemaIdentity));
+        const missing = [...required].filter((n) => !listed.has(n));
+        if (missing.length > 0) {
+            violations.push(
+                `${relative(repoRoot, list.file)} ships an @ExcludedSchemaNames that drops ` +
+                    `${missing.join(', ')}. CodeGen writes this list from whatever schemas the DEV database ` +
+                    'happened to hold, so it must be normalized before the output is shipped — and it may never ' +
+                    'be NARROWER than one the repo already shipped: a sync reaching a sibling Open App\'s schema ' +
+                    "rewrites its entity metadata on every host, and one reaching dbo/staging registers the host's " +
+                    'own tables as entities. Copy the list from the previous migration and add anything new.',
+            );
         }
     }
 }
@@ -1068,6 +1144,7 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
     console.log(
         '✅ Distribution gate passed — metadata seed is present and current; shipped SQL uses only install-supplied ' +
             'placeholders; no post-hardening seed re-grants the Form Respondent role unfiltered access; no new ' +
-            'core-metadata insert is guarded on its own ID alone.',
+            'core-metadata insert is guarded on its own ID alone; no shipped schema sync reaches a schema this ' +
+            'app does not own.',
     );
 }

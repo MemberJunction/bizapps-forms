@@ -1621,3 +1621,39 @@ native entities. This is the reporting differentiator no incumbent has.
 
   **Verification:** 1,824 unit tests green, five lint gates, clean build, eight smoke paths. The
   magic-link 502 is now characterised: it is burst-triggered and clears after ~20s idle.
+
+- **2026-08-26 — round six: the gate I added in round five was weaker than the file it guarded.**
+  Four findings, all in `d483847`. The first is the sharpest lesson of the series.
+
+  1. **CHECK 5's baseline listed 8 schemas; the migration it guards excludes 10.** It omitted
+     `__mj_BizAppsATS` and `__mj_BizAppsCaliber`, so stripping both from all seven calls passed the
+     gate clean. A check written to stop a regression, which does not stop that regression, is
+     worse than none: it converts an unexamined risk into a examined-and-cleared one. And the
+     regression it would have missed **has already happened twice** — `V202608211000` and
+     `V202608211600` both dropped ATS and Caliber after `V202608191400` had them.
+
+     The real problem was that I wrote a hand-maintained deny-list, when `mj.config.cjs` says of
+     this exact schema that "no deny-list maintained here could ever have named it in advance."
+     CHECK 5 now derives its requirement from **shipped history**: a migration may never exclude
+     LESS than one the repo already shipped. That protects an Open App nobody here has heard of the
+     moment one CodeGen run names it, with no constant to keep up to date. Two further defects
+     surfaced while making it work, both caught by mutation rather than reading: comparing raw
+     strings reported a schema as dropped when an older run had baked a literal `__mj_` prefix
+     where mine used the placeholder (fixed by normalizing the placeholder ONLY), and folding case
+     made the check accept dropping either of the two case variants CodeGen deliberately emits
+     because the host's collation is unknowable (so case is now significant). Verified by five
+     mutations — dropping ATS+Caliber, `_BizAppsTasks`, `_bizappstasks`, `dbo`, `staging` — each
+     firing all seven violations, and the clean tree passing.
+  2. **`response-status.ts` promised compile-time safety it did not provide.** Its header said a
+     widened `Status` union would be caught "loudly, at compile time"; the two hand-written arrays
+     it described compile fine when the union grows, so a future `Abandoned` would have become
+     silently non-terminal AND quota-bounded — a partial save overwriting a sealed row. Both sets
+     now derive from a MAPPED TYPE over the union, which is exhaustive: verified with `tsc` that
+     adding a status fails with `TS2741` until it is classified.
+  3. The rate-limit doc still said "Three" over four buckets and listed them in an order the body
+     does not push, and
+  4. the on-submit hooks gate — which governs the irreversible side effects a knockout must never
+     fire — was deriving "is this a real completion" a third way. One derivation now.
+
+  **Verification:** 1,823 unit tests, six lint gates (including the mutation harness, 59
+  load-bearing behaviours), clean build, eight smoke paths.
