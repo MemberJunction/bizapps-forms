@@ -18,6 +18,11 @@
  * is hidden from every respondent — permanently, silently, and with the form still looking
  * correct in the builder. {@link collectRuleEntries} surfaces exactly that as `broken`.
  *
+ * It also answers the one question next to those sentences that is not itself a rule: how a
+ * respondent REACHES an ending screen ({@link endingReachFor}). That lives here because the
+ * answer depends on which endings the form's `Go to` rules point at, which this module already
+ * has to walk.
+ *
  * Pure and Angular-free: the component renders these sentences, it does not compose them.
  */
 import type {
@@ -41,6 +46,8 @@ export interface RuleInventoryItem {
   conditionalRule?: ConditionalRule;
   /** Ending screens only — the flag that turns a show group into a knockout. */
   isDisqualification?: boolean;
+  /** Ending screens only — the one a respondent lands on when no condition picks another. */
+  isDefault?: boolean;
 }
 
 export interface RuleInventoryPage extends RuleInventoryItem {
@@ -231,6 +238,58 @@ function endingEntry(
     sentence,
     broken,
   };
+}
+
+/**
+ * How a respondent reaches one ending screen, in the words the endings list shows above its
+ * title.
+ *
+ * There are exactly three routes to an ending and the list has to tell them apart: it is the
+ * DEFAULT, a condition on the screen picks it when someone finishes, or a `Go to` rule sends
+ * them there. Only the first two existed when this line was first written, so it was derived
+ * from the screen alone — and a screen wired up as a rule's destination read "Never shown — add
+ * a condition", which is wrong about the screen and wrong about the fix.
+ */
+export interface EndingReach {
+  /** The short line above the title: how a respondent gets here. */
+  readonly label: string;
+  /** True when nothing can send anyone here — something for the author to fix. */
+  readonly unreachable: boolean;
+}
+
+/**
+ * Every ending screen's reach, keyed by id.
+ *
+ * Read off the same {@link targetedEndings} walk the broken-rule badges use. A second
+ * implementation of "which endings does a rule point at" is a second answer that can disagree
+ * with the first, and these two are shown side by side on the same row.
+ */
+export function endingReachFor(form: RuleInventoryForm): Map<string, EndingReach> {
+  const targeted = targetedEndings(form);
+  return new Map(form.endings.map((ending) => [ending.id, reachOf(ending, targeted.has(ending.id))]));
+}
+
+function reachOf(ending: RuleInventoryItem, targeted: boolean): EndingReach {
+  if (ending.isDefault) {
+    return { label: 'Default ending', unreachable: false };
+  }
+  if (ending.isDisqualification === true) {
+    // Asked BEFORE the condition, because a screened-out screen's condition is never read:
+    // `resolveEndingScreen` excludes these screens entirely, so a rule is the only way in and
+    // "add a condition" would be advice to configure a control that does nothing.
+    return targeted
+      ? { label: 'Screened out', unreachable: false }
+      : { label: 'Never shown — no rule sends anyone here', unreachable: true };
+  }
+  if (ending.conditionalRule?.show) {
+    return { label: 'Conditional ending', unreachable: false };
+  }
+  if (targeted) {
+    return { label: 'Reached by a rule', unreachable: false };
+  }
+  // Endings are checked in order and the first match wins, so one with no condition is only ever
+  // reachable as the default — and there already is one.
+  return { label: 'Never shown — add a condition', unreachable: true };
 }
 
 /** Every ending screen a `Go to` rule anywhere on the form points at. */

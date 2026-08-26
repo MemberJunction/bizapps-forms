@@ -462,18 +462,18 @@
                 <span class="fb-screen-icon mjf-viz-2"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
                 <div class="fb-screen-main">
                   <div class="fb-screen-kind">
-                    @if (es.IsDefault) {
-                      Default ending
-                    } @else if (es.ConditionalRule) {
-                      Conditional ending
-                    } @else {
-                      <!-- Endings are checked in order and the first match wins, so one with no
-                           condition is only ever reachable as the default — and there already is
-                           one. Saying "Ending" here made a dead screen look like a normal screen. -->
+                    <!-- Three routes reach an ending — the default, a condition on the screen, or
+                         a `Go to` rule naming it — and `endingReachFor` is what knows which apply.
+                         This used to read the screen alone, so a screen deliberately wired up as a
+                         rule's destination was labelled unreachable and told to add a condition. -->
+                    @let reach = endingReach.get(es.ID);
+                    @if (reach?.unreachable) {
                       <span class="fb-screen-warn">
                         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                        Never shown — add a condition
+                        {{ reach?.label }}
                       </span>
+                    } @else {
+                      {{ reach?.label }}
                     }
                     <!-- An ending already says it is conditional; what it could not say is
                          that its condition stopped working. A broken ending rule is the worst

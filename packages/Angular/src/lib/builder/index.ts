@@ -78,7 +78,9 @@ export {
 } from './jump-target-options';
 export {
   collectRuleEntries,
+  endingReachFor,
   ruleBadgesFor,
+  type EndingReach,
   type RuleBadge,
   type RuleEntry,
   type RuleInventoryForm,

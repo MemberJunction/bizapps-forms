@@ -4,7 +4,9 @@ import type { ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition } from './rules-panel-model';
 import {
   collectRuleEntries,
+  endingReachFor,
   ruleBadgesFor,
+  type EndingReach,
   type RuleInventoryForm,
 } from './rules-inventory';
 
@@ -550,6 +552,93 @@ describe('ruleBadgesFor', () => {
         ['Conditional', false],
         ['Rule is broken', true],
       ]);
+    });
+  });
+});
+
+/**
+ * How a respondent reaches an ending screen — the line the endings list shows above its title.
+ *
+ * That line used to be derived from the screen ALONE: default, or has a condition, or "Never
+ * shown — add a condition". It was right when a condition on the screen was the only way to
+ * reach one. A `Go to` rule can now name an ending directly, so a screen an author had
+ * deliberately wired up as a rule's destination was labelled unreachable and told to add a
+ * condition — advice that is merely unnecessary on an ordinary screen and actively wrong on a
+ * screened-out one, where `resolveEndingScreen` never consults the condition at all.
+ *
+ * Reachability is read off the same `targetedEndings` walk the broken-rule badges use, because a
+ * second answer to "which endings does a rule point at" is a second answer that can disagree.
+ */
+describe('endingReachFor', () => {
+  const goToEnding = (id: string): ConditionalRule => ({
+    jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, target: { kind: 'ending', id } }],
+  });
+
+  function withEndings(
+    endings: RuleInventoryForm['endings'],
+    rule?: ConditionalRule,
+  ): Map<string, EndingReach> {
+    return endingReachFor(
+      form({
+        endings,
+        pages: [{ id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: rule }] }],
+      }),
+    );
+  }
+
+  describe('happy', () => {
+    it('a screen a rule points at is reached by that rule, not unreachable', () => {
+      const reach = withEndings([{ id: 'e1', label: 'Thanks' }], goToEnding('e1'));
+      expect(reach.get('e1')).toEqual({ label: 'Reached by a rule', unreachable: false });
+    });
+
+    it('the default and the conditional ones read as they always did', () => {
+      const reach = withEndings([
+        { id: 'e0', label: 'Thanks', isDefault: true },
+        { id: 'e1', label: 'VIP', conditionalRule: showVip },
+      ]);
+      expect(reach.get('e0')).toEqual({ label: 'Default ending', unreachable: false });
+      expect(reach.get('e1')).toEqual({ label: 'Conditional ending', unreachable: false });
+    });
+
+    it('a screen nothing reaches still says so', () => {
+      const reach = withEndings([{ id: 'e1', label: 'Orphan' }]);
+      expect(reach.get('e1')).toEqual({ label: 'Never shown — add a condition', unreachable: true });
+    });
+  });
+
+  describe('edge', () => {
+    it('a screened-out screen is named for what it is, once a rule sends people there', () => {
+      const reach = withEndings([{ id: 'e1', label: 'Not eligible', isDisqualification: true }], goToEnding('e1'));
+      expect(reach.get('e1')).toEqual({ label: 'Screened out', unreachable: false });
+    });
+
+    it('a page rule counts as a route, the same as a question rule', () => {
+      const reach = endingReachFor(
+        form({
+          endings: [{ id: 'e1', label: 'Thanks' }],
+          pages: [{ id: 'p1', label: 'Page 1', conditionalRule: goToEnding('e1'), questions: [] }],
+        }),
+      );
+      expect(reach.get('e1')?.unreachable).toBe(false);
+    });
+  });
+
+  describe('worst', () => {
+    it('an unreached screened-out screen is NOT told to add a condition', () => {
+      // Its condition is never read — `resolveEndingScreen` excludes screened-out screens — so
+      // "add a condition" sends the author to spend an afternoon on a control that does nothing.
+      // What is actually missing is a rule pointing here.
+      const reach = withEndings([{ id: 'e1', label: 'Not eligible', isDisqualification: true }]);
+      expect(reach.get('e1')).toEqual({
+        label: 'Never shown — no rule sends anyone here',
+        unreachable: true,
+      });
+    });
+
+    it('a rule naming a screen that no longer exists reaches nothing', () => {
+      const reach = withEndings([{ id: 'e1', label: 'Thanks' }], goToEnding('deleted'));
+      expect(reach.get('e1')?.unreachable).toBe(true);
     });
   });
 });

@@ -62,9 +62,12 @@ import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } fro
 import { jumpTargetOptions, type JumpTargetOption } from './jump-target-options';
 import {
   collectRuleEntries,
+  endingReachFor,
   ruleBadgesFor,
+  type EndingReach,
   type RuleBadge,
   type RuleEntry,
+  type RuleInventoryForm,
 } from './rules-inventory';
 import { parseConditionalRule } from './json-fields';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
@@ -963,14 +966,39 @@ export class FormBuilderComponent extends BaseFormComponent {
     return ruleBadgesFor(this.ruleEntries);
   }
 
+  /**
+   * How each ending screen is reached, keyed by id — see `endingReachFor`.
+   *
+   * Read once per render through `@let`, for the same reason {@link ruleBadges} is: it walks
+   * every rule on the form to find out which endings they point at.
+   */
+  protected get endingReach(): Map<string, EndingReach> {
+    return this.tree ? endingReachFor(this.ruleInventoryForm) : new Map<string, EndingReach>();
+  }
+
   /** Every rule on the form as a sentence — see `rules-inventory.ts` for why this exists. */
   private get ruleEntries(): RuleEntry[] {
-    if (!this.tree) {
-      return [];
+    return this.tree ? collectRuleEntries(this.ruleInventoryForm) : [];
+  }
+
+  /**
+   * The whole form as the inventory reads it.
+   *
+   * One shape, two readers — the sentences on the canvas and the reach line on each ending. They
+   * have to be built from the same walk: the badges say a rule is broken and the reach line says
+   * whether anyone arrives, and a row showing two answers assembled from two different views of
+   * the form is a row that can contradict itself.
+   *
+   * Only called with a tree present; the getters above guard for it.
+   */
+  private get ruleInventoryForm(): RuleInventoryForm {
+    const tree = this.tree;
+    if (!tree) {
+      return { sources: [], pages: [], endings: [] };
     }
-    return collectRuleEntries({
-      sources: this.tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
-      pages: this.tree.pages.map((page, index) => ({
+    return {
+      sources: tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      pages: tree.pages.map((page, index) => ({
         id: page.entity.ID,
         label: page.entity.Title || `Page ${index + 1}`,
         conditionalRule: parseConditionalRule(page.entity.ConditionalRule),
@@ -985,8 +1013,9 @@ export class FormBuilderComponent extends BaseFormComponent {
         label: screen.Title || 'Ending screen',
         conditionalRule: parseConditionalRule(screen.ConditionalRule),
         isDisqualification: screen.IsDisqualification === true,
+        isDefault: screen.IsDefault === true,
       })),
-    });
+    };
   }
 
   /** Every question on the form, in page/display order — what the Automate tab maps from. */
