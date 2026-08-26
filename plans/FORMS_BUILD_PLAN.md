@@ -1324,11 +1324,15 @@ native entities. This is the reporting differentiator no incumbent has.
     compiled to visibility via `resolveVisiblePages` — one shared resolver replacing both sides'
     page filters; cycles unrepresentable), disqualify/knockout (`FormScreen.IsDisqualification` +
     `FormResponse.Status='Disqualified'` via migration `V202608252340__v0.12.x`; evaluated
-    mid-form by the widget, ENFORCED server-side on every save; no quota, no automations, no
+    mid-form by the widget, ENFORCED server-side; no quota, no automations, no
     SubmittedAt; `resolveEndingScreen` excludes knockout screens from every arm), and scoring
     (the dead `FormQuestion.ScoringConfig` column finally read: per-option points →
     `computeScore` → `source:'score'` conditions banding ending screens; per-option points UI in
     the question editor).
+  > **Superseded in part by the review rounds below.** As shipped, a knockout is evaluated on a
+  > COMMITTED answer (not every keystroke) and seals the response only on a FINISHED submission
+  > (not every save) — both corrections came out of the adversarial review, and the entries below
+  > carry the reasoning. Read this bullet as what was built, not as what is true.
   - **Blast-radius fixes:** `clone-remap` now remaps `require`/`jump` (with the page-id map) and
     copies score conditions verbatim — cloning no longer silently drops the new verbs. The zod
     gate (`schemas.ts`) grew the new operators/verbs plus `MAX_CONDITIONS_PER_GROUP`/
@@ -1515,3 +1519,59 @@ native entities. This is the reporting differentiator no incumbent has.
   magic-link provisioner returns intermittent 502s on `/f/:slug` under burst load — it recovered
   on retry every time and the route touches none of this work, but it is worth knowing before
   anyone reads a single red smoke run as a regression.
+
+- **2026-08-26 — round four: five of the seven were in the two commits before it.** The pattern
+  from round three held and sharpened: reviewing the FIX finds more than reviewing the original.
+  Seven defects, five of them in `b1656a0`/`4b0674c` — the commits that had just fixed the
+  knockout path.
+
+  1. **The knockout write treated a refusal as success** (the worst of the seven). `submitResponse`
+     RESOLVES with `{success:false}` for anything the pipeline refuses and throws only on a
+     transport failure — so the `try/catch` I had wrapped it in never fired, and a refused seal was
+     indistinguishable from a recorded one, with nothing logged anywhere. It also skipped the
+     `submitAllowed()` check `onSubmit` makes, so on a captcha-gated form it sent a tokenless
+     completion the server was guaranteed to reject: such a form could never record a
+     disqualification at all. Now it checks the result, warns when the write does not land, and
+     does not send a completion it knows will be refused.
+  2. **And losing the seal lost the ANSWER too.** Swapping `flushNow()` for `settle()` was right
+     for avoiding a double write and wrong about everything else: `settle()` cancels the pending
+     debounce WITHOUT firing it — its own docstring warns about this — so a refused seal left
+     nothing written at all, where the previous code had at least banked a `Partial`. The seal now
+     falls back to `flushNow()` when it does not land.
+  3. **`onSubmit` had no knockout guard.** `endAsDisqualified` awaits twice with the phase still
+     `ready`, so the submit button stays live: tapping the knockout option and then Submit put two
+     completions on the wire under one `clientResponseId` — the primary-key collision the adjacent
+     comment claims to prevent.
+  4. **Knockouts spent the completion rate budget.** The tightest of the three ceilings (20/min)
+     is justified in its own docstring by the automations a completion fires — none of which a
+     knockout fires — and it was charged at step 3, before the knockout was known at step 5. A
+     burst of ineligible respondents behind one NAT locked real completions out. The knockout is
+     now resolved before any gate charges anything, which is possible because it is pure.
+  5. **A server-only knockout showed the wrong screen and followed the wrong redirect.** When the
+     server screens someone out on a rule the client had not reached, `applySubmitResult`
+     re-resolved the ending — and `resolveEndingScreen` deliberately excludes knockout screens, so
+     it picked one written for someone who QUALIFIED, then `endingRedirect` fell back to that
+     screen's URL. A screened-out respondent was sent to the qualified destination.
+  6. Dead code left by round three's terminal guard (`wasComplete` became unreachable), and
+  7. both plan files still describing the pre-fix model. Fixed, including the stale
+     `FORMS_MAX_PARTIALS_PER_VERSION` doc, which still called the ceiling `Partial`-only.
+
+  Two things worth recording beyond the fixes. `FormSubmissionResult.status` was `string` with a
+  comment naming only `Partial` and `Complete`; it is now derived from the entity, which is what
+  let finding 5's branch be type-checked rather than stringly compared — and the change tripped
+  the `graphql-types.ts` `AssertExact` lock, which is that lock earning its keep. And two of my
+  own new tests were passing for the wrong reason: `rateLimitGatesFor` OMITS the per-IP and
+  completion ceilings entirely when no address resolves, so a fixture without a `clientIpHash`
+  cannot exercise them. The fixture now supplies one, and reverting the fix turns those tests red.
+
+  **Knowingly accepted, not fixed:** the row ceiling counts permanent `Disqualified` rows, so a
+  high-rejection screener will approach 10,000 over its life and then stop recording. The
+  alternative — exempting knockouts — reopens the unbounded anonymous-write hole round three
+  closed, so the trade is deliberate; the operator lever is documented in `config.ts` and the
+  reviewer scored it below its own posting bar. Also left: a disqualifying final submit validates
+  in partial mode, which skips format checks on answers it does persist. Both are follow-ups, not
+  silent omissions.
+
+  **Verification:** 1,816 unit tests green, five lint gates, clean build, eight smoke paths. The
+  magic-link provisioner 502s under BURST load specifically (five rapid requests fail, one
+  succeeds) — unrelated to this work, and the reason a smoke path needs a retry.

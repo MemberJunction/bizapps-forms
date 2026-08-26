@@ -135,8 +135,13 @@ export class FormSubmissionResultType {
   @Field(() => ID, { nullable: true })
   responseId?: string;
 
-  @Field({ nullable: true })
-  status?: string;
+  /**
+   * Derived from the contract (which derives it from the entity) so the lock below keeps holding
+   * as the CHECK constraint's value list grows. `() => String` is explicit because TypeGraphQL
+   * cannot infer a runtime type from a union of string literals.
+   */
+  @Field(() => String, { nullable: true })
+  status?: FormSubmissionResult['status'];
 
   @Field({ nullable: true })
   confirmationMessage?: string;

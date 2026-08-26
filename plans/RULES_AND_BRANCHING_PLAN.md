@@ -245,6 +245,15 @@ with partial answers and passes no required-errors; a client that "forgets" it w
 still gets disqualified server-side; jump-hidden pages' answers are **dropped** (existing
 hidden-answer drop covers it — add the test that proves it).
 
+**Two corrections to this section, from the adversarial review — the plan as written was wrong
+about WHEN a knockout applies, and both errors reached shipped code before being caught.** A
+knockout is judged on a COMMITTED answer, never on every change: a text field emits on every
+keystroke, so `age lessThan 18` fired on the `1` of `18`. And it SEALS the response only on a
+finished submission, never on an autosave: the debounce catches half-typed values too, and a
+sealed row cannot be corrected. Enforcement is unaffected — the final submit is the pass a client
+cannot avoid, and it still seals — which is the only thing "ENFORCED server-side" ever needed to
+mean.
+
 Caps (design-principles non-negotiable): `MAX_CONDITIONS_PER_GROUP` and `MAX_JUMP_RULES`
 constants with explicit over-limit behavior, each with a worst-case spec. **As built this is
 REJECT, not truncate** — the planned "truncate + authoring-time warning" was the wrong call and

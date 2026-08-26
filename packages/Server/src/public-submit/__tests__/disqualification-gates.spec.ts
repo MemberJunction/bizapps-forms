@@ -68,9 +68,15 @@ function knockoutDefinition(): PublishedFormDefinition {
   };
 }
 
+/**
+ * `clientIpHash` is supplied by default and deliberately: `rateLimitGatesFor` OMITS the per-IP
+ * and completion ceilings entirely when no address resolves, so a context without one cannot
+ * exercise them — a test of the completion budget would pass against a gate that never ran.
+ */
 function contextFor(
   definition: PublishedFormDefinition,
   quota: { maxResponses: number | null; responseCount: number },
+  clientIpHash = 'ip-hash-ko',
 ): { ctx: PipelineContext; saved: () => ReturnType<typeof makeFakeProvider>['saved'] } {
   const fake = makeFakeProvider({
     distribution: makeDistribution({
@@ -87,6 +93,7 @@ function contextFor(
       contextUser: makeContextUser(),
       elevatedUser: makeContextUser(),
       sessionId: 'sess-ko',
+      clientIpHash,
       fireHooks: async () => {},
     },
     saved: () => fake.saved,
@@ -104,6 +111,7 @@ function submit(ctx: PipelineContext, answer: string) {
 beforeEach(() => {
   FormsRateLimiter.Instance.resetForTests();
   delete process.env.FORMS_MAX_PARTIALS_PER_VERSION;
+  delete process.env.FORMS_COMPLETION_MAX;
   resetPublicSubmitConfigForTests();
 });
 
@@ -415,6 +423,58 @@ describe('only a finished submission seals a knockout', () => {
 
       expect(corrected.status).toBe('Complete');
       expect(corrected.confirmationMessage).toBe('Thanks');
+    });
+  });
+});
+
+describe('a knockout does not spend the completion budget', () => {
+  /**
+   * Three rate ceilings guard this endpoint, and the tightest — the COMPLETION bucket — is tight
+   * precisely because a completion is expensive: it fires on-submit automations, sends
+   * confirmation emails, upserts bound records. A knockout does none of that; it is explicitly
+   * excluded from every one of them. Charging it to that bucket anyway meant a burst of
+   * ineligible respondents behind one NAT locked real completions out of a form for a minute.
+   *
+   * The knockout is now resolved before any gate charges anything, which is possible because it
+   * is pure — it needs the definition and the answers, and nothing else.
+   */
+  describe('worst', () => {
+    it('knockouts past the completion ceiling are still recorded', async () => {
+      process.env.FORMS_COMPLETION_MAX = '2';
+      resetPublicSubmitConfigForTests();
+      const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+      for (let i = 0; i < 5; i++) {
+        const result = await submit(ctx, 'No');
+        expect(result.success, `knockout ${i + 1} was refused`).toBe(true);
+        expect(result.status).toBe('Disqualified');
+      }
+    });
+
+    it('and leave the ceiling intact for real completions', async () => {
+      process.env.FORMS_COMPLETION_MAX = '2';
+      resetPublicSubmitConfigForTests();
+      const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+      // Three knockouts would have exhausted a ceiling of two.
+      for (let i = 0; i < 3; i++) {
+        await submit(ctx, 'No');
+      }
+
+      expect((await submit(ctx, 'Yes')).success).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('a real completion still spends it', async () => {
+      process.env.FORMS_COMPLETION_MAX = '1';
+      resetPublicSubmitConfigForTests();
+      const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+      expect((await submit(ctx, 'Yes')).success).toBe(true);
+      const second = await submit(ctx, 'Yes');
+      expect(second.success).toBe(false);
+      expect(second.errors?.[0]?.message ?? '').toMatch(/too many|wait/i);
     });
   });
 });

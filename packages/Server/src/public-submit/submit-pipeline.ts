@@ -5,12 +5,12 @@
  * fully unit-testable without a GraphQL server.
  *
  * Order (fail-closed at each gate):
- *   scope check -> resolve definition -> rate-limit -> Turnstile -> disqualification
+ *   scope check -> resolve definition (+ resolve the knockout) -> rate-limit -> Turnstile
  *   -> dedupe -> quota -> server re-validation -> file provenance -> Save response+answers
  *   -> fire on-submit hooks.
  *
- * Disqualification sits ahead of dedupe and quota because it is pure and because both of those
- * gates police COMPLETIONS, which a knockout is not — see step 5.
+ * The knockout is resolved before every gate because it is pure and because three of them — the
+ * completion rate ceiling, dedupe and the quota — police COMPLETIONS, which a knockout is not.
  */
 import { LogError, LogStatus } from '@memberjunction/core';
 import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
@@ -321,12 +321,23 @@ async function runSubmitPipelineInner(
   const resolved = loaded.value;
   const complete = submission.partial !== true;
 
+  // Resolve the knockout HERE, before any gate charges anything. It is a pure function of the
+  // definition and the submitted answers, so nothing forces it to wait for I/O — and two gates
+  // below need to know: the completion rate ceiling and the response quota both exist to bound
+  // COMPLETIONS, which a knockout is not. Charged after the fact, a burst of knockouts from one
+  // address spent the tight completion bucket (20/min, justified by the automations a knockout
+  // explicitly never fires) and locked real completions out behind a NAT.
+  const preliminaryMap = buildAnswerMap(submission.answers);
+  const knockout = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
+    score: scoreFor(resolved, preliminaryMap),
+  });
+
   timer.mark('resolve-form');
 
   // 3. Rate-limit. `charge` consults every bucket before spending any of them, so a request one
   //    gate refuses does not silently eat the respondent's budget in another.
   warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
-  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete);
+  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete && knockout === undefined);
   const limit = FormsRateLimiter.Instance.charge(gates);
   if (!limit.allowed) {
     return report(fail(rateLimitedMessage(limit.retryAfterMs)));
@@ -371,10 +382,6 @@ async function runSubmitPipelineInner(
   //    meant a full form answered "no" by an ineligible respondent came back "no longer
   //    accepting responses" and wrote nothing, so the one fact worth keeping about that person
   //    — that they were screened out — was the fact we discarded.
-  const preliminaryMap = buildAnswerMap(submission.answers);
-  const knockout = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
-    score: scoreFor(resolved, preliminaryMap),
-  });
   //    A knockout SEALS the response only on a finished submission. The rule is evaluated on
   //    whatever the request carries, and an autosave carries a value the respondent is still
   //    typing: `1` on the way to `18`, under `age lessThan 18`, fired the rule and — because

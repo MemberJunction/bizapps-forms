@@ -28,8 +28,14 @@
  *                                     than rate, which no sliding window can do at any setting —
  *                                     a caller inside every limit can still open many requests at
  *                                     once. Orthogonal to the ceilings above, not a substitute.
- *  - `FORMS_MAX_PARTIALS_PER_VERSION` Hard ceiling on the number of `Partial` (autosave) rows a
- *                                     single published version may accumulate. Default 10000.
+ *  - `FORMS_MAX_PARTIALS_PER_VERSION` Hard ceiling on the rows a single published version may
+ *                                     accumulate that NO QUOTA bounds — `Partial` autosaves and
+ *                                     `Disqualified` knockouts alike, since the response quota
+ *                                     counts completions and a knockout is not one. Default
+ *                                     10000. Raise it on a high-rejection screener: knockout
+ *                                     rows are permanent, so a form that rejects most applicants
+ *                                     will approach this over its life, and reaching it stops
+ *                                     new drafts AND new knockout records for that version.
  *                                     The only DURABLE bound here: the caps above are per-window
  *                                     and per-process, so a caller pacing themselves under all of
  *                                     them, or spread across addresses, still accumulates rows

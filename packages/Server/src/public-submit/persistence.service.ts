@@ -273,13 +273,15 @@ async function updateResponse(
   if (isTerminalStatus(response.Status)) {
     return { ok: true, entity: response, replacedExisting: false, countable: false, skipAnswers: true };
   }
-  // Count a promotion once: only when this write flips a not-yet-Complete row to Complete.
-  const wasComplete = response.Status === 'Complete';
+  // The row is `Partial` — the guard above is exhaustive over every other status — so this write
+  // can only ever be an update in place or a promotion, and a promotion counts once. The old
+  // `!wasComplete` term was unreachable the moment that guard landed; leaving it would have read
+  // like a live safeguard.
   applyResponseFields(response, inputs);
   if (!(await response.Save())) {
     return { ok: false, message: saveError(response, 'Failed to update form response.') };
   }
-  return { ok: true, entity: response, replacedExisting: true, countable: countsCompletion(inputs) && !wasComplete };
+  return { ok: true, entity: response, replacedExisting: true, countable: countsCompletion(inputs) };
 }
 
 /** Map one validated answer onto the FormResponseAnswer typed columns and Save it. */

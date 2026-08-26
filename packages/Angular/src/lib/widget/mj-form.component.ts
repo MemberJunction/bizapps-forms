@@ -443,14 +443,41 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (!def || !rt) {
       return;
     }
+    // Don't send a completion the server is certain to refuse. The captcha gate applies to every
+    // completion, and a knockout can fire long before the challenge is solved — `onSubmit` makes
+    // this same check, and skipping it here meant a captcha-gated form could never record one.
+    if (this.submitAllowed() && (await this.trySeal(def, rt))) {
+      return;
+    }
+    // The seal did not land. Bank what exists as a draft so the knockout ANSWER survives even
+    // though its status did not — `settle()` above cancelled the pending debounce without firing
+    // it, and nothing else will write: the latch is set and every other entry point returns early.
+    await this.autosave?.flushNow();
+  }
+
+  /**
+   * One attempt at the terminal write. True when the server accepted it.
+   *
+   * `submitResponse` RESOLVES with `success: false` for anything the pipeline refuses — a
+   * captcha, the row ceiling, a rate limit — and throws only on a transport failure. A bare
+   * `try/catch` therefore treated every refusal as a successful seal, silently, which is the
+   * worst of the three possible outcomes: no record, and nothing anywhere saying so.
+   */
+  private async trySeal(def: PublishedFormDefinition, rt: FormRuntime): Promise<boolean> {
     try {
       const res = await this.api.submitResponse(this.buildSubmission(def, rt, false), this.responseTarget());
-      if (res.success && res.responseId) {
-        this.responseId = res.responseId;
+      if (res.success) {
+        if (res.responseId) {
+          this.responseId = res.responseId;
+        }
+        return true;
       }
-    } catch {
-      // Deliberately swallowed: see above. The screen is shown either way, and the server
-      // re-evaluates the same rule on whatever this respondent's next write turns out to be.
+      const why = (res.errors ?? []).map((e) => e.message).join(' ').trim();
+      console.warn(`[mj-form] the disqualification could not be recorded: ${why || 'refused'}`);
+      return false;
+    } catch (err) {
+      console.warn(`[mj-form] the disqualification could not be recorded: ${String(err)}`);
+      return false;
     }
   }
 
@@ -493,6 +520,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // done. Without this, a double-tap (or an Enter + click) fires two mutations and can
     // leave the UI stuck between phases.
     if (shouldIgnoreSubmit(this.phase())) {
+      return;
+    }
+    // A knockout mid-seal is not visible to the phase guard above: `endAsDisqualified` awaits
+    // twice while the phase is still 'ready', so the submit button stays live the whole time.
+    // Without this, tapping the knockout option and then Submit puts two completions on the wire
+    // carrying the same `clientResponseId` — exactly the primary-key collision the settle() below
+    // exists to prevent.
+    if (this.disqualifying) {
       return;
     }
     // Captcha gate: when required, block final submit until the challenge is solved.
@@ -582,6 +617,20 @@ export class MjFormComponent implements OnInit, OnDestroy {
       if (message) {
         this.errorText.set(message);
         this.handlePossibleTurnstileFailure(message);
+      }
+      return;
+    }
+    if (res.status === 'Disqualified') {
+      // The SERVER screened this respondent out on a rule the client had not reached: the last
+      // question before Submit, a client that never fired a commit, or a caller with no widget at
+      // all. Do not re-resolve the ending — `resolveEndingScreen` deliberately excludes knockout
+      // screens, so it would pick one written for someone who QUALIFIED, and `endingRedirect`
+      // would then fall back to that screen's URL and send a screened-out respondent to the
+      // qualified destination. The server sent the knockout's own copy and redirect; they are the
+      // only correct answer here, and `confirmationMessage()` already prefers the echoed one.
+      this.endingScreen.set(undefined);
+      if (res.redirectUrl) {
+        this.redirect(res.redirectUrl);
       }
       return;
     }
