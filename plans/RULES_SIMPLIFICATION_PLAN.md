@@ -15,6 +15,17 @@ singular, gives the hub zero write code, and lands the author on the item in its
 `RULES_AND_BRANCHING_PLAN.md` (its C1 `require` verb is **removed** by this plan; its evaluators,
 disqualification, jump, and scoring engines stay). Branch: `feat/rules-and-branching` → PR #72.
 
+**§6's Rules hub is gone, on the user's call (2026-08-26).** The tab shipped and worked; it was
+in the wrong place. Everything it said about a question belonged BESIDE that question, and it was
+a second surface an author had to know existed before they could learn a question was conditional
+at all. What replaced it is a badge on the item itself — "Conditional", "Branches", or **"Rule is
+broken"** — with the hub's own sentences as its tooltip. `rules-inventory.ts` survives unchanged
+in purpose: it still composes every rule into a sentence, and `ruleBadgesFor` groups those per
+item. `groupEntriesByPage` and `brokenRuleCount` went with the tab, having no other reader.
+`rules-tab.component.ts` is deleted; `rule-badges.wiring.spec.ts` replaces
+`rules-hub.wiring.spec.ts` and carries forward the one property that mattered — the silent-hide
+warning of §6's third bullet is still shown, now on the item it is about.
+
 **User decisions, 2026-08-26** (recorded verbatim so nobody re-litigates them):
 
 1. `require` — **full removal**: contract, evaluator, builder card, widget + server enforcement.

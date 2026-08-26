@@ -172,7 +172,6 @@ const LAYOUT_CSS = /* css */ `
 .fb-pane-host { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
 /* The count of broken rules, carried on the tab so the problem is visible without opening it. */
-.fb-tab-badge { margin-left: var(--mjf-gap-xs); }
 
 /* ----------------------------------------------------------------- build body */
 
@@ -533,6 +532,12 @@ const LAYOUT_CSS = /* css */ `
 .fb-q-help { font-size: var(--mjf-meta); color: var(--mj-text-muted); word-break: break-word; }
 .fb-q-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .fb-q-tags .mjf-badge { padding: 1px 8px; font-size: 0.6875rem; }
+
+/* What a rule looks like on the canvas. A help cursor rather than the default one, because the
+   badge is two words and the sentences it stands for are in its tooltip — the cursor is the only
+   thing that says there is more to read. */
+.fb-rule-badge { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+.fb-rule-badge i { font-size: 0.625rem; opacity: 0.8; }
 
 /* Actions live in the card's top-right corner and appear on hover. They stay visible
    whenever focus is inside the card, so the keyboard path never depends on hover. */

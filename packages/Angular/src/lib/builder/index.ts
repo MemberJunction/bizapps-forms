@@ -50,7 +50,6 @@ export { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
 export { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 export { RulesPanelComponent } from './rules-panel.component';
-export { RulesTabComponent } from './rules-tab.component';
 export { LogicEditorComponent } from './logic-editor.component';
 export {
   addJumpRule,
@@ -78,12 +77,10 @@ export {
   type JumpTargetOption,
 } from './jump-target-options';
 export {
-  brokenRuleCount,
   collectRuleEntries,
-  groupEntriesByPage,
+  ruleBadgesFor,
+  type RuleBadge,
   type RuleEntry,
-  type RuleEntryGroup,
-  type RuleGroupPage,
   type RuleInventoryForm,
   type RuleInventoryItem,
   type RuleInventoryPage,

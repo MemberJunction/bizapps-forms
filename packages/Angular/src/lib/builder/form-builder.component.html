@@ -149,21 +149,6 @@
       [attr.aria-selected]="activeTab === 'design'"
       (click)="setTab('design')"
     ><i class="fa-solid fa-palette" aria-hidden="true"></i> Design</button>
-    <!-- The badge is the reason this tab is worth opening: a rule pointing at a deleted
-         question hides the item it guards from every respondent, and nothing else in the
-         builder says so. -->
-    <button
-      type="button"
-      class="fb-tab"
-      role="tab"
-      [class.is-on]="activeTab === 'rules'"
-      [attr.aria-selected]="activeTab === 'rules'"
-      (click)="setTab('rules')"
-    ><i class="fa-solid fa-code-branch" aria-hidden="true"></i> Rules
-      @if (brokenRules > 0) {
-        <span class="mjf-badge mjf-badge--warning fb-tab-badge">{{ brokenRules }}</span>
-      }
-    </button>
     <button
       type="button"
       class="fb-tab"
@@ -189,16 +174,6 @@
       (click)="setTab('responses')"
     ><i class="fa-solid fa-inbox" aria-hidden="true"></i> Responses</button>
   </nav>
-
-  @if (activeTab === 'rules' && tree) {
-    <mjf-rules-tab
-      class="fb-pane-host"
-      [entries]="ruleEntries"
-      [pages]="rulePages"
-      (openRequested)="openRuleEntry($event)"
-      (addRequested)="setTab('build')"
-    />
-  }
 
   @if (activeTab === 'automate' && tree) {
     <mjf-automation-tab class="fb-pane-host" [FormID]="tree.form.ID" [Questions]="mappableQuestions" />
@@ -300,6 +275,11 @@
             </button>
           }
 
+          <!-- Read once, indexed per item. A getter called per question would walk every rule
+               on the form once per question, and the form long enough to need this is the one
+               that can least afford it. -->
+          @let badges = ruleBadges;
+
           @for (page of pages; track page.entity.ID) {
             <!-- Pages were invisible on the canvas: a multi-page form rendered as one
                  undifferentiated question list, and there was nowhere to put a page-level
@@ -335,6 +315,15 @@
                     Save progress here
                   </span>
                 </label>
+                <!-- A page rule hides every question on the page. Nothing on the canvas said
+                     so, and the tab that did is gone. -->
+                @for (badge of badges.get(page.entity.ID) ?? []; track badge.icon) {
+                  <span
+                    class="mjf-badge fb-rule-badge"
+                    [class.mjf-badge--warning]="badge.broken"
+                    [title]="badge.detail"
+                  ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                }
                 <button
                   type="button"
                   class="fb-q-btn fb-reveal"
@@ -408,6 +397,19 @@
                     @if (node.entity.IsRequired) {
                       <span class="mjf-badge">Required</span>
                     }
+                    <!-- Where the Rules tab used to be. It said things about a question that
+                         belonged beside that question, and an author had to know it existed to
+                         find out a question was conditional at all. The tooltip carries the
+                         rules in full; a broken one says so instead of saying what it does,
+                         because a rule whose source was deleted hides this question from every
+                         respondent, silently, with the form still looking correct. -->
+                    @for (badge of badges.get(node.entity.ID) ?? []; track badge.icon) {
+                      <span
+                        class="mjf-badge fb-rule-badge"
+                        [class.mjf-badge--warning]="badge.broken"
+                        [title]="badge.detail"
+                      ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                    }
                   </div>
                 </div>
                 <div class="fb-q-side fb-reveal">
@@ -472,6 +474,18 @@
                         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
                         Never shown — add a condition
                       </span>
+                    }
+                    <!-- An ending already says it is conditional; what it could not say is
+                         that its condition stopped working. A broken ending rule is the worst
+                         of the three, because the screen it guards is where a respondent was
+                         supposed to LAND. -->
+                    @for (badge of badges.get(es.ID) ?? []; track badge.icon) {
+                      @if (badge.broken) {
+                        <span
+                          class="mjf-badge mjf-badge--warning fb-rule-badge"
+                          [title]="badge.detail"
+                        ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                      }
                     }
                   </div>
                   <div class="fb-screen-title">{{ es.Title }}</div>

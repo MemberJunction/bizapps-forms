@@ -3,9 +3,8 @@ import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition } from './rules-panel-model';
 import {
-  brokenRuleCount,
   collectRuleEntries,
-  groupEntriesByPage,
+  ruleBadgesFor,
   type RuleInventoryForm,
 } from './rules-inventory';
 
@@ -325,94 +324,6 @@ describe('collectRuleEntries', () => {
   });
 });
 
-describe('groupEntriesByPage', () => {
-  const PAGES = [
-    { id: 'p1', label: 'Page 1' },
-    { id: 'p2', label: 'Page 2' },
-  ];
-
-  function entriesFor(): ReturnType<typeof collectRuleEntries> {
-    return collectRuleEntries(
-      form({
-        pages: [
-          { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: showVip }] },
-          { id: 'p2', label: 'Page 2', questions: [{ id: 'q2', label: 'Age', conditionalRule: showVip }] },
-        ],
-        endings: [{ id: 's1', label: 'Thanks', conditionalRule: showVip }],
-      }),
-    );
-  }
-
-  describe('happy', () => {
-    it('groups by page, in page order, and puts the endings last', () => {
-      // Miller: a flat list of every rule on a long form is a wall. Grouped by the page the
-      // respondent meets them on, each group is small enough to hold in one look.
-      const groups = groupEntriesByPage(entriesFor(), PAGES);
-      expect(groups.map((g) => g.label)).toEqual(['Page 1', 'Page 2', 'Ending screens']);
-      expect(groups.map((g) => g.entries.length)).toEqual([1, 1, 1]);
-    });
-  });
-
-  describe('edge', () => {
-    it('omits a page that carries no rules rather than showing an empty group', () => {
-      const groups = groupEntriesByPage(
-        collectRuleEntries(
-          form({
-            pages: [
-              { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: showVip }] },
-              { id: 'p2', label: 'Page 2', questions: [{ id: 'q2', label: 'Age' }] },
-            ],
-          }),
-        ),
-        PAGES,
-      );
-      expect(groups.map((g) => g.label)).toEqual(['Page 1']);
-    });
-
-    it('is empty for a form with no rules', () => {
-      expect(groupEntriesByPage([], PAGES)).toEqual([]);
-    });
-  });
-
-  describe('worst', () => {
-    it('counts the broken rules across the whole form, for the tab badge', () => {
-      const entries = collectRuleEntries(
-        form({
-          pages: [
-            {
-              id: 'p1',
-              label: 'Page 1',
-              questions: [
-                { id: 'q2', label: 'Age', conditionalRule: { show: { all: [{ questionId: 'gone', op: 'isAnswered' }] } } },
-                { id: 'q1', label: 'Ticket type', conditionalRule: showVip },
-              ],
-            },
-          ],
-        }),
-      );
-      expect(brokenRuleCount(entries)).toBe(1);
-    });
-
-    it('counts a rule with two breakages once — the author opens it once', () => {
-      const entries = collectRuleEntries(
-        form({
-          pages: [
-            {
-              id: 'p1',
-              label: 'Page 1',
-              questions: [],
-              conditionalRule: {
-                jump: [{ when: { all: [{ questionId: 'gone', op: 'isAnswered' }] }, target: { kind: 'page', id: 'nowhere' } }],
-              },
-            },
-          ],
-        }),
-      );
-      expect(entries[0].broken).toHaveLength(2);
-      expect(brokenRuleCount(entries)).toBe(1);
-    });
-  });
-});
 
 describe('an item carrying several Go to rules', () => {
   const twoRules: ConditionalRule = {
@@ -480,6 +391,165 @@ describe('an item carrying several Go to rules', () => {
 
       expect(entries[0].broken).toEqual([]);
       expect(entries[1].broken).toEqual(['a question that no longer exists']);
+    });
+  });
+});
+
+describe('ruleBadgesFor', () => {
+  const jumpToP2: ConditionalRule = {
+    jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, target: { kind: 'page', id: 'p2' } }],
+  };
+  const badges = (f: RuleInventoryForm) => ruleBadgesFor(collectRuleEntries(f));
+
+  describe('happy', () => {
+    it('says a question is conditional, and says what the condition is', () => {
+      const map = badges(
+        form({
+          pages: [
+            { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: showVip }] },
+          ],
+        }),
+      );
+      const [badge] = map.get('q1') ?? [];
+      expect(badge.label).toBe('Conditional');
+      expect(badge.detail).toContain('Ticket type equals VIP');
+      expect(badge.broken).toBe(false);
+    });
+
+    it('says a question branches, separately from whether it is conditional', () => {
+      const map = badges(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: { ...showVip, ...jumpToP2 } }],
+            },
+            { id: 'p2', label: 'Page 2', questions: [] },
+          ],
+        }),
+      );
+      expect((map.get('q1') ?? []).map((b) => b.label)).toEqual(['Conditional', 'Branches']);
+    });
+
+    it('labels a page rule the same way it labels a question rule', () => {
+      // A page rule hides every question on it. With the hub gone, the canvas is the only place
+      // that could say so.
+      const map = badges(form({ pages: [{ id: 'p1', label: 'Page 1', questions: [], conditionalRule: showVip }] }));
+      expect((map.get('p1') ?? [])[0]?.label).toBe('Conditional');
+    });
+  });
+
+  describe('edge', () => {
+    it('gives an item with no rules no badge at all', () => {
+      expect(badges(form()).get('q1')).toBeUndefined();
+    });
+
+    it('collapses several Go to rules into one badge that carries them all', () => {
+      // Three badges reading "Branches" says nothing three times. The tooltip is where the
+      // order lives, and order is what first-match-wins makes matter.
+      const three: ConditionalRule = {
+        jump: [
+          { when: { all: [{ questionId: 'q1', op: 'equals', value: 'a' }] }, target: { kind: 'page', id: 'p2' } },
+          { when: { all: [{ questionId: 'q1', op: 'equals', value: 'b' }] }, target: { kind: 'page', id: 'p2' } },
+          { when: { all: [{ questionId: 'q1', op: 'equals', value: 'c' }] }, target: { kind: 'page', id: 'p2' } },
+        ],
+      };
+      const map = badges(
+        form({
+          pages: [
+            { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: three }] },
+            { id: 'p2', label: 'Page 2', questions: [] },
+          ],
+        }),
+      );
+      const badge = (map.get('q1') ?? [])[0];
+      expect(badge.label).toBe('Branches');
+      expect(badge.detail.split('\n')).toHaveLength(3);
+    });
+  });
+
+  describe('worst', () => {
+    it('says a broken rule is broken, in place of saying what it does', () => {
+      // THE reason the Rules tab existed: a condition naming a deleted question evaluates
+      // false, so the item it guards is hidden from every respondent — permanently, silently,
+      // with the form still looking correct. The canvas now carries that warning.
+      const map = badges(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [
+                {
+                  id: 'q2',
+                  label: 'Age',
+                  conditionalRule: { show: { all: [{ questionId: 'gone', op: 'equals', value: 'x' }] } },
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const badge = (map.get('q2') ?? [])[0];
+      expect(badge.broken).toBe(true);
+      expect(badge.label).toBe('Rule is broken');
+      expect(badge.detail).toContain('a question that no longer exists');
+    });
+
+    it('a rule with two breakages is one badge naming both — the author opens it once', () => {
+      // Counting REFERENCES rather than rules would have said "2" about one thing to fix. The
+      // badge is per rule for the same reason the old count was: one decision, one line.
+      const map = badges(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [],
+              conditionalRule: {
+                jump: [
+                  { when: { all: [{ questionId: 'gone', op: 'isAnswered' }] }, target: { kind: 'page', id: 'nowhere' } },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+      const found = map.get('p1') ?? [];
+      expect(found).toHaveLength(1);
+      expect(found[0].detail).toContain('a question that no longer exists');
+      expect(found[0].detail).toContain('a page that no longer exists');
+    });
+
+    it('a healthy rule beside a broken one still reads as itself', () => {
+      const map = badges(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [
+                {
+                  id: 'q1',
+                  label: 'Ticket type',
+                  conditionalRule: {
+                    show: { all: [{ questionId: 'q2', op: 'isAnswered' }] },
+                    jump: [
+                      { when: { all: [{ questionId: 'gone', op: 'equals', value: 'x' }] }, target: { kind: 'page', id: 'p2' } },
+                    ],
+                  },
+                },
+              ],
+            },
+            { id: 'p2', label: 'Page 2', questions: [] },
+          ],
+        }),
+      );
+      expect((map.get('q1') ?? []).map((b) => [b.label, b.broken])).toEqual([
+        ['Conditional', false],
+        ['Rule is broken', true],
+      ]);
     });
   });
 });

@@ -60,12 +60,11 @@ import {
 } from './question-type-catalog';
 import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, type JumpTargetOption } from './jump-target-options';
-import { RulesTabComponent } from './rules-tab.component';
 import {
-  brokenRuleCount,
   collectRuleEntries,
+  ruleBadgesFor,
+  type RuleBadge,
   type RuleEntry,
-  type RuleGroupPage,
 } from './rules-inventory';
 import { parseConditionalRule } from './json-fields';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
@@ -104,7 +103,7 @@ import {
  */
 type EventSubscription = ReturnType<ReturnType<MJGlobal['GetEventListener']>['subscribe']>;
 
-type BuilderTab = 'build' | 'design' | 'rules' | 'distribute' | 'automate' | 'responses';
+type BuilderTab = 'build' | 'design' | 'distribute' | 'automate' | 'responses';
 
 /**
  * Stand-in version id used only while fingerprinting.
@@ -148,7 +147,6 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     DesignPanelComponent,
     FormPreviewModalComponent,
     AutomationTabComponent,
-    RulesTabComponent,
     ResponsesTabComponent,
     SaveAsTemplateDialogComponent,
   ],
@@ -948,16 +946,25 @@ export class FormBuilderComponent extends BaseFormComponent {
     return sources;
   }
 
-  // -- the Rules tab (RULES_SIMPLIFICATION_PLAN Phase 3) ---------------------
+  // -- rule badges on the canvas (RULES_SIMPLIFICATION_PLAN Phase 3) ---------
 
   /**
-   * Every rule on the form as a sentence — see `rules-inventory.ts` for why this exists.
+   * The badges each item on the canvas wears, keyed by item id — see `rules-inventory.ts`.
    *
-   * Recomputed per read rather than cached: rules change from the panels beside the canvas, and
-   * a cache would need invalidating from every one of those write paths. The form's rules number
-   * in the tens, and the tab is not on screen while they are being edited.
+   * Read ONCE per render, through `@let` at the top of the canvas, and indexed per item from
+   * there. A getter called per question would walk the whole form once per question, which on a
+   * form long enough to need a rule hub is exactly the form that can least afford it.
+   *
+   * Recomputed per read rather than cached: rules change from the panel beside the canvas, from
+   * the item's own delete, and from a question being dragged to another page, so a cache would
+   * need invalidating from every one of those write paths. The form's rules number in the tens.
    */
-  protected get ruleEntries(): RuleEntry[] {
+  protected get ruleBadges(): Map<string, RuleBadge[]> {
+    return ruleBadgesFor(this.ruleEntries);
+  }
+
+  /** Every rule on the form as a sentence — see `rules-inventory.ts` for why this exists. */
+  private get ruleEntries(): RuleEntry[] {
     if (!this.tree) {
       return [];
     }
@@ -980,47 +987,6 @@ export class FormBuilderComponent extends BaseFormComponent {
         isDisqualification: screen.IsDisqualification === true,
       })),
     });
-  }
-
-  /** The page headings the Rules tab groups under. */
-  protected get rulePages(): RuleGroupPage[] {
-    if (!this.tree) {
-      return [];
-    }
-    return this.tree.pages.map((page, index) => ({
-      id: page.entity.ID,
-      label: page.entity.Title || `Page ${index + 1}`,
-    }));
-  }
-
-  /** How many rules are broken — shown on the tab itself, so the tab is worth opening. */
-  protected get brokenRules(): number {
-    return brokenRuleCount(this.ruleEntries);
-  }
-
-  /**
-   * A row in the Rules tab was clicked: select the item the rule belongs to and go to Build,
-   * where its rules panel is.
-   *
-   * Deliberately navigation rather than an editor of its own. The hub would otherwise be a
-   * second place that knows how to write a rule to a question versus a page versus a screen —
-   * and two write paths for one thing is how a hub and a panel come to disagree. This way the
-   * authoring surface stays singular and the author lands on the item in its own context, which
-   * is also where they can see what the rule is about.
-   */
-  protected openRuleEntry(entry: RuleEntry): void {
-    if (!this.tree) {
-      return;
-    }
-    if (entry.itemKind === 'question') {
-      this.selection = questionSelection(entry.itemId);
-    } else if (entry.itemKind === 'page') {
-      this.selection = pageSelection(entry.itemId);
-    } else {
-      this.selection = screenSelection(entry.itemId);
-    }
-    this.activeTab = 'build';
-    this.cdr.markForCheck();
   }
 
   /** Every question on the form, in page/display order — what the Automate tab maps from. */

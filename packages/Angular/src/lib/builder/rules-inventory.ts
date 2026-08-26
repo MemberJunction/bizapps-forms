@@ -1,11 +1,17 @@
 /**
- * Every rule on a form, as sentences — the model behind the builder's Rules tab
- * (plans/RULES_SIMPLIFICATION_PLAN.md Phase 3).
+ * Every rule on a form, as sentences — the model behind the badges the canvas puts on the items
+ * that carry them (plans/RULES_SIMPLIFICATION_PLAN.md Phase 3).
  *
  * Rules are authored one item at a time, in a panel attached to the question, page or ending
  * screen they belong to. That is the right place to WRITE one and the wrong place to understand
- * a form: nothing anywhere showed how many rules a form had, what they said together, or which
- * of them had quietly stopped working. An author had to click every item to find out.
+ * a form: nothing anywhere showed which items had rules, what they said, or which of them had
+ * quietly stopped working. An author had to click every item to find out.
+ *
+ * This was a whole workspace tab for a while — a hub listing every rule in reading order. The
+ * hub read well and was in the wrong place: it said things about a question that belonged
+ * BESIDE that question, and it was a second surface an author had to know existed. What it
+ * produced is now read by {@link ruleBadgesFor}, so the same sentences appear on the canvas
+ * against the item they are about.
  *
  * The failure that makes this more than a convenience: a condition naming a question that was
  * since deleted is NOT_EVALUABLE, which the evaluator reads as `false`, so the item it guarded
@@ -345,56 +351,92 @@ function quoted(label: string): string {
   return `"${label}"`;
 }
 
-/** A page's worth of rules, ready to render as one titled block. */
-export interface RuleEntryGroup {
-  /** `null` for the ending-screens group, which belongs to no page. */
-  readonly pageId: string | null;
+/**
+ * One line the canvas puts on an item that carries rules.
+ *
+ * The Rules tab used to be where a form's logic was legible — every rule, in reading order,
+ * with the broken ones called out. A whole workspace tab is a lot of room to say something that
+ * belongs beside the thing it is about, and it was a second place to look that an author had to
+ * remember existed. The badges say it where the rules live.
+ *
+ * What must NOT be lost with the tab is the warning: a condition naming a question that was
+ * since deleted is NOT_EVALUABLE, which the evaluator reads as `false`, so the item it guards is
+ * hidden from every respondent — permanently, silently, with the form still looking correct.
+ * That is what {@link RuleBadge.broken} carries, and it is why a broken badge says so INSTEAD of
+ * saying what the rule does: what the rule was meant to do stopped being the useful fact about
+ * it.
+ */
+export interface RuleBadge {
+  /** Font Awesome classes — the same icon the rule carries everywhere else. */
+  readonly icon: string;
+  /** Two or three words on the canvas: what this item does. */
   readonly label: string;
-  readonly entries: RuleEntry[];
+  /** Every rule the badge stands for, one per line — the tooltip. */
+  readonly detail: string;
+  /** Whether any rule behind this badge references something that no longer exists. */
+  readonly broken: boolean;
 }
 
-/** The page identity the grouping reads — id and the title shown above its rules. */
-export interface RuleGroupPage {
-  id: string;
-  label: string;
-}
+/** What a healthy badge is called, per verb. */
+const BADGE_LABELS: Record<RuleVerb, string> = {
+  show: 'Conditional',
+  jump: 'Branches',
+};
 
-/**
- * Rules grouped into one block per page, in page order, with the ending screens last.
- *
- * A flat list of every rule on a long form is a wall of sentences. Grouped by the page the
- * respondent meets them on, each block stays small enough to take in at once — and the order
- * matches the order the rules actually run in, which is the only order they can be reasoned
- * about together.
- *
- * A page with no rules is omitted rather than shown empty: an empty block says "look here" about
- * a place with nothing to look at, and on a twelve-page form that is eleven of them.
- */
-export function groupEntriesByPage(
-  entries: ReadonlyArray<RuleEntry>,
-  pages: ReadonlyArray<RuleGroupPage>,
-): RuleEntryGroup[] {
-  const groups: RuleEntryGroup[] = [];
-  for (const page of pages) {
-    const forPage = entries.filter((entry) => entry.pageId === page.id);
-    if (forPage.length > 0) {
-      groups.push({ pageId: page.id, label: page.label, entries: forPage });
-    }
-  }
-  const endings = entries.filter((entry) => entry.pageId === null);
-  if (endings.length > 0) {
-    groups.push({ pageId: null, label: 'Ending screens', entries: endings });
-  }
-  return groups;
-}
+/** What any badge is called once one of its rules has stopped working. */
+const BROKEN_LABEL = 'Rule is broken';
 
 /**
- * How many rules are broken — the number the tab badge carries.
+ * The badges each item should wear, keyed by item id — questions, pages and ending screens
+ * alike, because the id space is shared and every one of them can carry a rule.
  *
- * RULES, not references: a rule whose source question AND jump target are both gone is still
- * one thing for the author to open and one decision for them to make. Counting references would
- * inflate the badge and misdescribe the work.
+ * ONE badge per verb, not per rule. An item may carry several `Go to` rules and three badges
+ * reading "Branches" say nothing three times; the tooltip carries them in order, which is where
+ * order belongs, first-match-wins being what makes it matter.
+ *
+ * An item with no rules gets no entry rather than an empty array — "nothing to say" and "an
+ * empty list of things to say" read the same on screen and differently in code, and every caller
+ * would have to remember which this was.
  */
-export function brokenRuleCount(entries: ReadonlyArray<RuleEntry>): number {
-  return entries.filter((entry) => entry.broken.length > 0).length;
+export function ruleBadgesFor(entries: ReadonlyArray<RuleEntry>): Map<string, RuleBadge[]> {
+  const byItem = new Map<string, RuleBadge[]>();
+  for (const entry of entries) {
+    const badges = byItem.get(entry.itemId) ?? [];
+    const existing = badges.find((badge) => badge.icon === entry.icon);
+    byItem.set(entry.itemId, existing ? merged(badges, existing, entry) : [...badges, badgeFor(entry)]);
+  }
+  return byItem;
+}
+
+/** A badge standing for one rule. */
+function badgeFor(entry: RuleEntry): RuleBadge {
+  const broken = entry.broken.length > 0;
+  return {
+    icon: entry.icon,
+    label: broken ? BROKEN_LABEL : BADGE_LABELS[entry.verb],
+    detail: detailFor(entry),
+    broken,
+  };
+}
+
+/** The badge list with one more rule folded into the badge that already speaks for its verb. */
+function merged(badges: RuleBadge[], existing: RuleBadge, entry: RuleEntry): RuleBadge[] {
+  const broken = existing.broken || entry.broken.length > 0;
+  const next: RuleBadge = {
+    icon: existing.icon,
+    // Breakage wins the label outright. An item with a working jump and a dead one is an item
+    // whose author has something to fix, and "Branches" is a reassuring word for that state.
+    label: broken ? BROKEN_LABEL : existing.label,
+    detail: `${existing.detail}\n${detailFor(entry)}`,
+    broken,
+  };
+  return badges.map((badge) => (badge === existing ? next : badge));
+}
+
+/** One rule as a line of the tooltip: what it says, and what it can no longer reach. */
+function detailFor(entry: RuleEntry): string {
+  if (entry.broken.length === 0) {
+    return entry.sentence;
+  }
+  return `${entry.sentence} — references ${entry.broken.join(', ')}`;
 }
