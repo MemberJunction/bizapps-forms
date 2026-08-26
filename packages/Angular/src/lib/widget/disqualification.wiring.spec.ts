@@ -252,13 +252,16 @@ describe('the client judges exactly what it sends', () => {
     // `buildAnswerInputs` sends only the visible set and the server judges from what arrives, so
     // any client verdict reached on `currentAnswers()` can disagree with the recorded outcome.
     const body = methodBody('private disqualifyingScreen');
-    expect(body).toMatch(/visibleAnswers\(\)/);
+    expect(body).toMatch(/transmittedView\(\)/);
     expect(body).not.toMatch(/currentAnswers\(\)/);
+    // Not the RENDERED question list either — that is derived from the raw map.
+    expect(body).not.toMatch(/visibleAnswerableQuestions\(\)/);
   });
 
   it('and so does the ending resolution', () => {
     const body = methodBody('private resolveEnding');
-    expect(body).toMatch(/visibleAnswers\(\)/);
+    expect(body).toMatch(/transmittedView\(\)/);
     expect(body).not.toMatch(/currentAnswers\(\)/);
+    expect(body).not.toMatch(/visibleAnswerableQuestions\(\)/);
   });
 });

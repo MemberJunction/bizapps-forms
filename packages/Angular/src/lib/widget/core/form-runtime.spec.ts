@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { resolveVisibleQuestions } from '@mj-biz-apps/forms-entities';
 import { FormRuntime } from './form-runtime';
 
 /** A small two-page form with a conditional follow-up + a required field. */
@@ -193,7 +194,7 @@ function formOf(
   return def;
 }
 
-describe('FormRuntime.visibleAnswers', () => {
+describe('FormRuntime.transmittedAnswers', () => {
   /**
    * The set the widget SENDS is `visibleAnswerableQuestions` (see `buildAnswerInputs`), and the
    * server judges knockouts, endings and score from exactly what arrives. So any client-side
@@ -213,12 +214,12 @@ describe('FormRuntime.visibleAnswers', () => {
     );
     rt.setValue('gate', 'Company');
     rt.setValue('detail', 'left over');
-    expect([...rt.visibleAnswers().keys()].sort()).toEqual(['detail', 'gate']);
+    expect([...rt.transmittedAnswers().keys()].sort()).toEqual(['detail', 'gate']);
 
     rt.setValue('gate', 'Individual');
     // Still in the raw map — nothing prunes it — but no longer part of what this form is saying.
     expect(rt.currentAnswers().has('detail')).toBe(true);
-    expect([...rt.visibleAnswers().keys()]).toEqual(['gate']);
+    expect([...rt.transmittedAnswers().keys()]).toEqual(['gate']);
   });
 
   it('is exactly what buildAnswerInputs will send', () => {
@@ -232,7 +233,57 @@ describe('FormRuntime.visibleAnswers', () => {
     rt.setValue('gate', 'Individual');
     rt.setValue('detail', 'left over');
 
-    expect([...rt.visibleAnswers().keys()].sort()).toEqual(rt.buildAnswerInputs().map((a) => a.questionId).sort());
+    expect([...rt.transmittedAnswers().keys()].sort()).toEqual(rt.buildAnswerInputs().map((a) => a.questionId).sort());
+  });
+});
+
+describe('FormRuntime.transmittedView', () => {
+  /**
+   * The server does TWO things with a submission: it reads the answers that arrive, and it
+   * re-derives the visible question set FROM those answers. Matching only the first is not
+   * matching. `visibleAnswers()` restricted the values while `visibleAnswerableQuestions` still
+   * resolved over the RAW map, so a show-rule naming a question that is itself hidden made the two
+   * sets differ — and the client's verdict was reached on a set the server would never compute.
+   */
+  const chained = () =>
+    formOf([
+      { id: 'type' },
+      { id: 'sector', conditionalRule: { show: { all: [{ questionId: 'type', op: 'equals', value: 'Company' }] } } },
+      { id: 'risk', conditionalRule: { show: { all: [{ questionId: 'sector', op: 'equals', value: 'Energy' }] } } },
+    ]);
+
+  it('derives the question set from what will be SENT, not from the raw map', () => {
+    const rt = new FormRuntime(chained());
+    rt.setValue('type', 'Company');
+    rt.setValue('sector', 'Energy');
+    rt.setValue('risk', 'High');
+    expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type', 'sector', 'risk']);
+
+    // Hiding `sector` orphans `risk`'s rule: it reads `sector` from the raw map and still passes,
+    // so the widget would render and send `risk` — but the server, resolving over the payload,
+    // sees no `sector` and drops `risk`. That gap is the divergence.
+    rt.setValue('type', 'Individual');
+    // The two halves are deliberately different, and they mirror the server exactly. The payload
+    // still carries `risk` — the widget rendered it, so it sends it — and the server evaluates
+    // CONDITIONS against that raw payload (`buildAnswerMap(submission.answers)`). But the question
+    // SET it derives from the payload excludes `risk`, because the rule revealing it reads a
+    // `sector` answer that is no longer there, and that set is what the score folds over. Asserting
+    // both is the point: agreeing on one and not the other is the bug.
+    expect([...rt.transmittedView().answers.keys()]).toEqual(['type', 'risk']);
+    expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type']);
+  });
+
+  it('is stable: re-deriving from its own output changes nothing', () => {
+    // The server makes exactly one pass over the payload, so the client must agree after one.
+    const rt = new FormRuntime(chained());
+    rt.setValue('type', 'Company');
+    rt.setValue('sector', 'Energy');
+    rt.setValue('risk', 'High');
+    rt.setValue('type', 'Individual');
+
+    const once = rt.transmittedView();
+    const twice = resolveVisibleQuestions([...chained().pages], once.answers);
+    expect(twice.map((q) => q.id)).toEqual(once.questions.map((q) => q.id));
   });
 });
 

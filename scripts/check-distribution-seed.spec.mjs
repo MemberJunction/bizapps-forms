@@ -1367,6 +1367,53 @@ withMigration(
         ),
 );
 
+// `syncMigration()` hardcodes brackets, so every case above reached only ONE of the three spellings
+// a real call takes. That is how requiring a bracket went silent on `EXEC schema.spX` — the suite
+// could not see the difference. One case per spelling now, plus the repeatable.
+withMigration(POST_GUARD, 'EXEC ${mjSchema}.spUpdateExistingEntitiesFromSchema;\n', (violations) =>
+    check(
+        'an UNBRACKETED T-SQL call is counted',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(POST_GUARD, 'EXEC spUpdateExistingEntitiesFromSchema;\n', (violations) =>
+    check(
+        'an UNQUALIFIED `EXEC spX` call is counted',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration('R__Repeatable_Sync.sql', 'EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema];\n', (violations) =>
+    check(
+        'a repeatable migration is gated too — it runs on every migrate',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+// The poison the positional matcher must not swallow: a generated CRUD function whose first
+// argument is a GUID, not a schema list. Discovering through the positional form would read that
+// GUID as an exclusion list and corrupt the history floor for every later migration.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202609030000__v0.12.x__Probe.pg.sql'),
+            `SELECT \${mjSchema}."spCreateFormQuestion"('11111111-2222-3333-4444-555555555555');\n`,
+        );
+    },
+    (violations) =>
+        check(
+            'a generated CRUD function is not mistaken for a schema sync',
+            !violations.some((v) => v.includes('Probe.pg.sql')),
+            JSON.stringify(violations.filter((v) => v.includes('Probe.pg.sql'))),
+        ),
+);
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

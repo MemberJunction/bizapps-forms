@@ -401,9 +401,13 @@ function schemaSyncProcNames(repoRoot) {
             for (const call of sql.matchAll(/\[?(sp\w+)\]?\s*@ExcludedSchemaNames/gi)) {
                 names.add(call[1].toLowerCase());
             }
-            for (const call of sql.matchAll(/"(sp\w+)"\s*\(\s*'[^']*'/gi)) {
-                names.add(call[1].toLowerCase());
-            }
+            // Deliberately NOT the positional form. That regex is character-identical to the one
+            // this set gates, so discovering through it would populate the filter with the very
+            // pattern the filter exists to restrict: `migrations-pg/` is full of generated
+            // `"spCreateFormQuestion"('<guid>', …)` calls, and one of those would be discovered as
+            // a sync proc and its GUID read as an exclusion list — poisoning the history floor so
+            // that every later correct migration failed. The named form is unambiguous, and the
+            // floor above already covers every sync proc that exists in either dialect.
         }
     }
     return names;
@@ -423,15 +427,25 @@ function countSchemaSyncCalls(sql, procNames) {
     // `[spDeleteUnneededEntityFields], @EntityIDs=…` — which is precisely the shape a careless
     // deletion produces, so the one mutation that mattered slipped through. Being name-anchored
     // also covers the PostgreSQL call form (`SELECT schema."spX"(…)`), which has no EXEC to anchor
-    // Matched only where the name is QUOTED as a callee — `[spX]` in T-SQL, `"spX"` in
-    // PostgreSQL. Both dialects always quote it, and prose never does, which is what separates a
-    // real call from an `sp_addextendedproperty` description that merely names one. Anchoring on
-    // the punctuation BEFORE the name rather than after is what makes this robust: an earlier
-    // version required a particular character after it and missed `[spX], @EntityIDs=…`, the
-    // shape a careless deletion leaves behind. This also still sees a call inside a dynamic-SQL
-    // literal, which is the reason the caller hands us the `values` mask.
+    // What counts as a CALL, across both dialects and all three spellings that actually occur:
+    //
+    //   EXEC [schema].[spX] @Excl=…        bracketed, T-SQL
+    //   EXEC schema.spX;                   UNbracketed — bracketing is optional in T-SQL, and
+    //                                      requiring it made this silent on a real call
+    //   SELECT schema."spX"('…')           quoted, PostgreSQL
+    //
+    // Anchored on the punctuation that precedes the name — `.`, `[` or `"` — because that is what
+    // separates a call from an `sp_addextendedproperty` description that merely NAMES a procedure
+    // in prose, where the name follows a space. Anchoring before rather than after also survives a
+    // malformed argument list (`[spX], @EntityIDs=…`, the shape a careless deletion leaves), which
+    // an earlier version did not. The unqualified `EXEC spX` form is matched separately below.
     let calls = 0;
-    for (const call of sql.matchAll(/[["](sp\w+)/gi)) {
+    for (const call of sql.matchAll(/[.["](sp\w+)/gi)) {
+        if (procNames.has(call[1].toLowerCase())) {
+            calls++;
+        }
+    }
+    for (const call of sql.matchAll(/\bEXEC(?:UTE)?\s+(sp\w+)/gi)) {
         if (procNames.has(call[1].toLowerCase())) {
             calls++;
         }
@@ -478,8 +492,13 @@ function shippedExclusionLists(repoRoot) {
     for (const dir of SHIPPED_MIGRATION_DIRS.map((d) => join(repoRoot, d))) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            // `R__` repeatables carry no version stamp and were skipped entirely — flagged as an
+            // open carry-over for several rounds. A repeatable runs on EVERY migrate, so a sync
+            // call in one is the last place this should be blind. They sort after every versioned
+            // file, which is also when Flyway runs them.
             const stamp = /^[A-Z](\d{12})__/.exec(file);
-            if (stamp === null) continue;
+            const version = stamp === null ? (/^R__/.test(file) ? '999999999999' : null) : stamp[1];
+            if (version === null) continue;
             // The STRUCTURE mask, so `--` comments do not count. `migrations-pg/` documents the
             // statements its conversion skipped in comments, wrapped mid-literal — scanning raw
             // text captured `'s` from a line break as if it were a whole exclusion list, and the
@@ -488,7 +507,7 @@ function shippedExclusionLists(repoRoot) {
             const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
             for (const raw of exclusionListsIn(sql, procNames)) {
                 const names = raw.split(',').map((n) => n.trim()).filter((n) => n.length > 0);
-                lists.push({ stamp: stamp[1], file: join(dir, file), names, raw });
+                lists.push({ stamp: version, file: join(dir, file), names, raw });
             }
         }
     }
@@ -527,7 +546,8 @@ function checkEverySyncCallWasParsed(repoRoot, lists, violations) {
         if (!existsSync(dir)) continue;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
             const stamp = /^[A-Z](\d{12})__/.exec(file);
-            if (stamp === null || stamp[1] < SCHEMA_SYNC_GATE_FROM) continue;
+            const version = stamp === null ? (/^R__/.test(file) ? '999999999999' : null) : stamp[1];
+            if (version === null || version < SCHEMA_SYNC_GATE_FROM) continue;
             const path = join(dir, file);
             // The `values` mask, deliberately — the same choice, for the same reason, that
             // `countPermissionProcedureMentions` documents above: a backstop that read `structure`

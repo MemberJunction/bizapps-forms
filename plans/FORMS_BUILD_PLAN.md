@@ -1868,3 +1868,43 @@ native entities. This is the reporting differentiator no incumbent has.
   itself. That instruction set is now the one to reuse.
 
   **Verification:** 1,831 unit tests, six gates (68 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round eleven: "by construction" was only half a construction.** Both high findings
+  were in round ten's fix, which is now the eighth consecutive round where that has been true.
+
+  1. **`visibleAnswers()` restricted the answer VALUES and left the question SET reading the raw
+     map.** The server does two things with a submission — reads the answers that arrive, and
+     RE-DERIVES the visible question set from them — and I had matched only the first.
+     `visibleAnswerableQuestions` still called `resolveVisibleQuestions(pages, this.answers())`, so
+     a show-rule naming a question that is itself hidden left an ORPHANED question visible on the
+     client while the server, seeing no answer for the rule's referent, dropped it. Client and
+     server then scored and judged over different sets — the exact failure round ten's commit
+     claimed to have removed "by construction". It had removed one of the two constructions.
+
+     `transmittedView()` now returns both halves: the payload, and the question set the server will
+     derive from it. One pass, deliberately, because that is what the server makes — iterating to a
+     fixed point here would be a different answer from the authoritative one, and the goal is to
+     agree, not to be independently cleverer. The payload map is also now derived FROM
+     `buildAnswerInputs` rather than re-filtered beside it, which closes a second reported gap (a
+     blank answer is a map entry but not submittable, so the two filters disagreed on it).
+
+     My test expectation was wrong before the code was: I asserted the payload would exclude the
+     orphan. It does not — the widget rendered it, so it sends it, and the server evaluates
+     CONDITIONS against that raw payload while folding the SCORE over the set it derives. The
+     assertions now pin both halves, because agreeing on one and not the other is the bug.
+  2. **Requiring a bracketed procedure name made the accounting silent on a real call.** Bracketing
+     is optional in T-SQL, so `EXEC schema.spX;` slipped past — a regression from the regex it
+     replaced, and unreachable by the suite because the fixture helper hardcodes brackets. All
+     three spellings that actually occur (bracketed, unbracketed-qualified, unqualified `EXEC spX`)
+     plus the PostgreSQL quoted form are now matched and each has its own case.
+  3. **Discovery was gating the positional matcher with the positional matcher.** The two regexes
+     were character-identical, so a generated `"spCreateFormQuestion"('<guid>', …)` — of which
+     `migrations-pg/` is full — would have been discovered as a sync proc and its GUID read as an
+     exclusion list, poisoning the history floor so that every later correct migration failed.
+     Discovery now uses the unambiguous named form only; the floor covers both dialects.
+  4. Also closed: `R__` repeatables were skipped entirely for lacking a version stamp — flagged as
+     an open carry-over since round seven, and the last place a gate should be blind, since a
+     repeatable runs on every migrate. And `currentAnswers()`' doc still named the call site round
+     ten moved off it.
+
+  **Verification:** 1,833 unit tests, six gates (71 mutants), clean build, eight smoke paths.

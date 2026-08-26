@@ -388,9 +388,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // fire here on an answer to a question the respondent had since hidden, be omitted from the
     // payload, and leave the server writing `Complete` — SubmittedAt stamped, quota counted, every
     // on-submit automation fired — while the respondent was shown the knockout screen.
-    const answers = rt.visibleAnswers();
-    return resolveDisqualification(def.endScreens ?? [], answers, {
-      score: computeScore(rt.visibleAnswerableQuestions(), answers),
+    // The server's view — the answers it will receive AND the question set it will derive from
+    // them. Using the rendered question list here instead was the divergence: an orphaned question
+    // stays "visible" on the client when the rule that reveals it reads an answer that is no
+    // longer being sent.
+    const sent = rt.transmittedView();
+    return resolveDisqualification(def.endScreens ?? [], sent.answers, {
+      score: computeScore(sent.questions, sent.answers),
     });
   }
 
@@ -662,10 +666,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // The same one set the knockout uses, and for the same reason: the server resolves the ending
     // from the payload, so banding here on answers that were never sent picks a different screen
     // than the one the response is recorded against.
-    const answers = rt.visibleAnswers();
+    const sent = rt.transmittedView();
     this.endingScreen.set(
-      resolveEndingScreen(def.endScreens ?? [], answers, {
-        score: computeScore(rt.visibleAnswerableQuestions(), answers),
+      resolveEndingScreen(def.endScreens ?? [], sent.answers, {
+        score: computeScore(sent.questions, sent.answers),
       }),
     );
   }
