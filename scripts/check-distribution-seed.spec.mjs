@@ -1321,6 +1321,26 @@ withFixture(
         ),
 );
 
+// The PostgreSQL call form. `migrations-pg/` passes the exclusion list POSITIONALLY, so a check
+// that only reads `@ExcludedSchemaNames=` cannot see that path at all — and the lists there name
+// no sibling Open App, which is exactly the drift CHECK 5 exists to catch. Both dialects now.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202609010000__v0.12.x__Probe.pg.sql'),
+            `SELECT \${mjSchema}."spUpdateExistingEntitiesFromSchema"('sys,staging,dbo,\${mjSchema}');\n`,
+        );
+    },
+    (violations) =>
+        check(
+            'CHECK 5 reads the PostgreSQL positional exclusion list, not only the named T-SQL form',
+            violations.some((v) => v.includes('Probe.pg.sql') && v.includes('drops')),
+            JSON.stringify(violations.filter((v) => v.includes('Probe.pg.sql'))),
+        ),
+);
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

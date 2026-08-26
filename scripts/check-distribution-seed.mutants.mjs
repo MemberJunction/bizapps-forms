@@ -246,6 +246,9 @@ const MUTANTS = [
         '        if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;', '        if (false) continue;'],
     ['schemasync/proc-floor', 'the accounting knows the procs CodeGen emits even when no call in the corpus passes the argument',
         "        'spdeleteunneededentityfields',", "        'spnevermatches',"],
+    ['schemasync/pg-positional', 'exclusion lists are read in BOTH dialects, so the PostgreSQL positional form is not invisible',
+        '    for (const positional of sql.matchAll(/"(sp\\w+)"\\s*\\(\\s*\'([^\']*)\'/gi)) {',
+        '    for (const positional of []) {'],
 ];
 
 /**

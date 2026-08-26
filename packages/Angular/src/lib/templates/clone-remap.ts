@@ -114,8 +114,16 @@ export function remapConditionalRule(
     return out.all !== undefined || out.any !== undefined ? out : undefined;
   };
 
+  // `show` and `require` are NOT symmetric here, and the difference is the whole point.
+  //
+  // Both are vacuously true when empty, but that means different things. For `show`, "always
+  // visible" is exactly what having no rule means, so collapsing an empty group loses nothing. For
+  // `require`, it does not: `isRequiredNow` returns the group's verdict for any group that EXISTS
+  // — so `require: {}` means "always required", while no rule at all falls back to the static
+  // `isRequired`. Collapsing that one silently made a cloned question optional. Same class as the
+  // unconditional jump below; I fixed that instance first and left this one standing.
   const show = remapGroup(parsed.show);
-  const require = remapGroup(parsed.require);
+  const require = hasConditions(parsed.require) ? remapGroup(parsed.require) : parsed.require;
   const jump: ConditionalJumpRule[] = [];
   for (const rule of parsed.jump ?? []) {
     const toPageId = pageIdMap?.get(rule.toPageId);

@@ -1758,3 +1758,31 @@ native entities. This is the reporting differentiator no incumbent has.
   cheap to verify. That instruction is worth keeping for any future round.
 
   **Verification:** 1,825 unit tests, six gates (65 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — my own pass on round eight's fix, before round nine reported.** Two findings, both
+  from asking the question that has paid every round: did I fix the class, or the instance?
+
+  1. **I fixed the unconditional JUMP and left its sibling standing.** `remapGroup` returns
+     `undefined` both for "every condition failed to remap" and for "had no conditions", and round
+     eight taught the jump loop to tell those apart — but `require` goes through the same helper and
+     was left alone. An empty `require` group is NOT inert: `isRequiredNow` returns the group's
+     verdict for any group that EXISTS, and an empty group is vacuously true, so `require: {}`
+     means "always required" while no rule at all falls back to the static `isRequired`. Verified
+     against the built contract before writing the fix (`require:{}` → true, no rule → false).
+     Cloning silently made such a question optional. `show` deliberately keeps the old behaviour
+     and the asymmetry is now stated in the code: for visibility, "always visible" IS what having
+     no rule means, so collapsing an empty group loses nothing.
+  2. **CHECK 5 could not read the PostgreSQL path at all — and that path ships narrower lists than
+     the T-SQL one.** `migrations-pg/` passes the exclusion list POSITIONALLY
+     (`SELECT schema."spUpdateExistingEntitiesFromSchema"('sys,staging,dbo,${mjSchema}')`), so a
+     check matching only `@ExcludedSchemaNames=` was blind to it. Worth recording HOW this surfaced,
+     because I nearly drew the wrong conclusion: the accounting backstop was reporting those files
+     as "calls it could not parse", and my first reading was that my name-anchored regex
+     over-counted. It did not. The backstop was working, and the over-count was the symptom of a
+     real gap. Chasing it to the line (`V202606301400:1430`) showed lists naming no sibling Open
+     App at all. CHECK 5 now reads both dialects, with a spec case and a mutant for the PG form.
+
+  Both pre-existing offenders — the four T-SQL migrations and now three PG ones — remain on the
+  logged backlog for a corrective migration; the gate covers everything from this PR forward.
+
+  **Verification:** 1,827 unit tests, six gates (66 mutants), clean build, eight smoke paths.

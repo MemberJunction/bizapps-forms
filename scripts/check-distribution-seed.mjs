@@ -426,6 +426,27 @@ function countSchemaSyncCalls(sql, procNames) {
 }
 
 /**
+ * Every exclusion list `sql` passes to a schema-sync proc, in either dialect.
+ *
+ * T-SQL names the argument (`@ExcludedSchemaNames='…'`); PostgreSQL passes it POSITIONALLY
+ * (`SELECT schema."spUpdateExistingEntitiesFromSchema"('…')`). Reading only the named form meant
+ * CHECK 5 could not see the PG path at all — and the lists there are narrower than the T-SQL ones,
+ * naming no sibling Open App, which is precisely the drift the check exists to catch. The
+ * accounting backstop was reporting those files as calls-it-could-not-parse; that was the check
+ * working, and taking it for an over-count would have been the wrong lesson entirely.
+ */
+function exclusionListsIn(sql) {
+    const found = [];
+    for (const named of sql.matchAll(/@ExcludedSchemaNames\s*=\s*'([^']*)'/g)) {
+        found.push(named[1]);
+    }
+    for (const positional of sql.matchAll(/"(sp\w+)"\s*\(\s*'([^']*)'/gi)) {
+        found.push(positional[2]);
+    }
+    return found;
+}
+
+/**
  * Every `@ExcludedSchemaNames` a migration ships, keyed by its version stamp.
  *
  * Read from the repo rather than maintained, because that is the only way the check can know
@@ -444,9 +465,9 @@ function shippedExclusionLists(repoRoot) {
             // check then reported every real migration as "dropping" a schema called `s`. A
             // commented-out call also excludes nothing, so reading one is wrong twice over.
             const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
-            for (const match of sql.matchAll(/@ExcludedSchemaNames\s*=\s*'([^']*)'/g)) {
-                const names = match[1].split(',').map((n) => n.trim()).filter((n) => n.length > 0);
-                lists.push({ stamp: stamp[1], file: join(dir, file), names, raw: match[1] });
+            for (const raw of exclusionListsIn(sql)) {
+                const names = raw.split(',').map((n) => n.trim()).filter((n) => n.length > 0);
+                lists.push({ stamp: stamp[1], file: join(dir, file), names, raw });
             }
         }
     }

@@ -197,4 +197,23 @@ describe('remapConditionalRule — require and jump verbs (C1/C2)', () => {
     });
     expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 2 });
   });
+  it('edge: an UNCONDITIONAL require survives the clone', () => {
+    // Same class as the jump above, in its sibling — I fixed the instance and left this one.
+    // `isRequiredNow` returns `evaluateGroup(requireGroup)` for any group that EXISTS, and an
+    // empty group is vacuously true, so `require: {}` means "always required" and is NOT the same
+    // as having no rule (which falls back to the static `isRequired`). Verified against the built
+    // contract: `require:{}` -> true, no rule -> false. Dropping it on clone silently makes the
+    // copy's question optional.
+    const rule = JSON.stringify({ require: {} });
+    const result = remapConditionalRule(rule, MAP, PAGE_MAP);
+    expect(result.dropped).toBe(0);
+    expect(JSON.parse(result.json as string)).toEqual({ require: {} });
+  });
+
+  it('edge: an empty SHOW group is still collapsed, and that asymmetry is deliberate', () => {
+    // `show: {}` is vacuously true too, but for visibility that means "always visible" — which is
+    // exactly what having no rule means. Collapsing it loses nothing, where collapsing an empty
+    // `require` or `jump` changes what the form does.
+    expect(remapConditionalRule(JSON.stringify({ show: {} }), MAP, PAGE_MAP)).toEqual({ json: null, dropped: 0 });
+  });
 });
