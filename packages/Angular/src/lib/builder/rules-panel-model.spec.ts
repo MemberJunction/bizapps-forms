@@ -22,8 +22,8 @@ const C1: ConditionalCondition = { questionId: 'q1', op: 'equals', value: 'vip' 
 const C2: ConditionalCondition = { questionId: 'q2', op: 'greaterThan', value: 10 };
 
 const SOURCES: ConditionalSourceQuestion[] = [
-  { id: 'q1', prompt: 'Ticket type?', options: [{ label: 'VIP', value: 'vip' }] },
-  { id: 'q2', prompt: 'Company size?' },
+  { id: 'q1', prompt: 'Ticket type?', kind: 'singleChoice', options: [{ label: 'VIP', value: 'vip' }] },
+  { id: 'q2', prompt: 'Company size?', kind: 'number' },
 ];
 
 describe('withVerbGroup', () => {
@@ -107,6 +107,30 @@ describe('summarizeGroup', () => {
       expect(summarizeGroup(undefined, SOURCES)).toBe('No conditions yet');
       expect(summarizeGroup({ all: [] }, SOURCES)).toBe('No conditions yet');
     });
+  });
+});
+
+describe('summarizeGroup speaks in the voice of the source it read', () => {
+  const MULTI: ConditionalSourceQuestion[] = [
+    { id: 'q3', prompt: 'Interests', kind: 'multiSelect', options: [{ label: 'Sports', value: 'sports' }] },
+  ];
+
+  it('reads a membership condition on a multi-select as "includes"', () => {
+    // The summary and the operator dropdown must name the same operator the same way — an
+    // author who picked "includes any of" and reads back "is one of" has to work out whether
+    // the rule changed under them.
+    const group = { all: [{ questionId: 'q3', op: 'in' as const, value: ['sports'] }] };
+    expect(summarizeGroup(group, MULTI)).toBe('Interests includes any of sports');
+  });
+
+  it('keeps the canonical wording on a single-answer source', () => {
+    const group = { all: [{ questionId: 'q1', op: 'in' as const, value: ['vip'] }] };
+    expect(summarizeGroup(group, SOURCES)).toBe('Ticket type? is one of vip');
+  });
+
+  it('a deleted source says so and keeps the canonical wording', () => {
+    const group = { all: [{ questionId: 'gone', op: 'in' as const, value: ['x'] }] };
+    expect(summarizeGroup(group, SOURCES)).toBe('(deleted question) is one of x');
   });
 });
 

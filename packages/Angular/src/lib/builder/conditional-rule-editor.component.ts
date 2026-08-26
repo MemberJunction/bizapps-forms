@@ -13,17 +13,32 @@ import {
   canAddCondition as groupHasRoom,
   SCORE_SOURCE_ID,
   coerceConditionValue,
+  defaultOperatorFor,
+  operatorChoicesFor,
   operatorNeedsValue as operatorTakesValue,
+  operatorOfferedFor,
   toggleMembership,
   valueEditorKind,
+  valueInputMode,
+  type ConditionalSourceKind,
   type ConditionalSourceOption,
   type ConditionalSourceQuestion,
+  type OperatorChoice,
   type ValueEditorKind,
 } from './condition-sources';
 
 const CONDITIONAL_EDITOR_CSS = /* css */ `
 .cre { display: flex; flex-direction: column; gap: var(--mjf-gap); }
 .cre-empty { font-size: var(--mjf-meta); color: var(--mj-text-muted); margin: 0; }
+
+/* Said where the picker would have been, on the row it belongs to — a note in the panel header
+   would make the author hunt for which condition it meant. */
+.cre-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--mjf-meta);
+  color: var(--mj-text-muted);
+}
 
 /* The conditions live in their own framed group, the way the reference designs box "If" apart
    from "Then": it says where the rule starts and stops, which a bare stack of selects does not. */
@@ -133,7 +148,6 @@ export class ConditionalRuleEditorComponent {
 
   @Output() groupChange = new EventEmitter<ConditionalGroup | undefined>();
 
-  protected readonly operators = OPERATOR_CHOICES;
   protected _combinator: 'all' | 'any' = 'all';
   protected _conditions: ConditionalCondition[] = [];
 
@@ -141,9 +155,50 @@ export class ConditionalRuleEditorComponent {
     return operatorTakesValue(op);
   }
 
+  /** The source this condition reads, or `undefined` if it names one that no longer exists. */
+  private sourceFor(condition: ConditionalCondition): ConditionalSourceQuestion | undefined {
+    if (condition.source === 'score') {
+      return this.sources.find((s) => s.id === SCORE_SOURCE_ID);
+    }
+    return this.sources.find((s) => s.id === condition.questionId);
+  }
+
+  /**
+   * What kind of answer this condition reads. A condition naming a deleted question falls back
+   * to `'text'`, the widest menu — the row is already broken and the author's next move is to
+   * repoint it, so the last thing to do is also take their operator away.
+   */
+  protected sourceKind(condition: ConditionalCondition): ConditionalSourceKind {
+    return this.sourceFor(condition)?.kind ?? 'text';
+  }
+
+  /** The operators this row may pick from — see {@link operatorChoicesFor} for the stale entry. */
+  protected operatorsFor(condition: ConditionalCondition): ReadonlyArray<OperatorChoice> {
+    return operatorChoicesFor(this.sourceKind(condition), condition.op);
+  }
+
   /** Which editor this condition's value gets — see {@link valueEditorKind}. */
   protected kindFor(condition: ConditionalCondition): ValueEditorKind {
-    return valueEditorKind(condition.op, this.optionsFor(condition).length > 0);
+    return valueEditorKind(condition.op, this.sourceKind(condition));
+  }
+
+  /** The keyboard a free-text value box asks for — see {@link valueInputMode}. */
+  protected inputModeFor(condition: ConditionalCondition): string | null {
+    return valueInputMode(this.sourceKind(condition));
+  }
+
+  /**
+   * Whether this row is pointed at a choice question whose options are not written yet.
+   *
+   * With free text unreachable for an option source, the picker would otherwise be a disabled
+   * placeholder and nothing else — a dead end whose cause is one screen away and unstated.
+   */
+  protected needsOptions(condition: ConditionalCondition): boolean {
+    const kind = this.sourceKind(condition);
+    if (kind !== 'singleChoice' && kind !== 'multiSelect') {
+      return false;
+    }
+    return operatorTakesValue(condition.op) && this.optionsFor(condition).length === 0;
   }
 
   /** The selectable options of this condition's source question ([] for free-input sources). */
@@ -198,9 +253,13 @@ export class ConditionalRuleEditorComponent {
     if (!this.canAddCondition) {
       return; // the button is hidden at the cap; this is the guard for every other route in
     }
+    // The starting operator comes from the first source's own kind. Hardcoding `equals` opened
+    // every new row on an operator that a multi-select source can never satisfy.
+    const first = this.sources[0];
+    const op = defaultOperatorFor(first?.kind ?? 'text');
     this._conditions = [
       ...this._conditions,
-      conditionForSource(this.sources[0]?.id ?? '', 'equals', ''),
+      conditionForSource(first?.id ?? '', op, coerceConditionValue(op, '')),
     ];
     this.emit();
   }
@@ -222,7 +281,13 @@ export class ConditionalRuleEditorComponent {
       }
       // A new source means a new value domain — carrying the old value across would leave the
       // picker showing one question's option against another question's answers.
-      return conditionForSource(selectedId, c.op, coerceConditionValue(c.op, ''));
+      //
+      // And a new source may not offer the old OPERATOR either: repointing a text condition at
+      // a multi-select would leave `equals` selected, which on an array answer can never match.
+      // Keeping it would also blank the operator box, since it is no longer among the options.
+      const kind = this.sources.find((s) => s.id === selectedId)?.kind ?? 'text';
+      const op = operatorOfferedFor(c.op, kind) ? c.op : defaultOperatorFor(kind);
+      return conditionForSource(selectedId, op, coerceConditionValue(op, ''));
     });
     this.emit();
   }

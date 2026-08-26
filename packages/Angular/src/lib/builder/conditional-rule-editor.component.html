@@ -44,7 +44,7 @@
             (change)="setOperator($index, operatorSelect.value)"
             aria-label="Operator"
           >
-            @for (op of operators; track op.op) {
+            @for (op of operatorsFor(cond); track op.op) {
               <option [value]="op.op">{{ op.label }}</option>
             }
           </select>
@@ -88,10 +88,15 @@
                 class="mjf-input cre-input cre-value"
                 [value]="valueAsString(cond)"
                 (input)="setValue($index, valueInput.value)"
+                [attr.inputmode]="inputModeFor(cond)"
                 [attr.placeholder]="cond.op === 'in' || cond.op === 'notIn' ? 'a, b, c' : 'value'"
                 aria-label="Comparison value"
               />
             }
+          }
+
+          @if (needsOptions(cond)) {
+            <p class="cre-note">Add answer choices to this question first.</p>
           }
 
           <button

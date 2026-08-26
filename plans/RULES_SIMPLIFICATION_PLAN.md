@@ -1,7 +1,7 @@
 # Rules Simplification Plan
 
-**Status: Phase 0 ✅ (`7cd1146`) · Phase 1 ✅ · Phase 2 next · Phase 3 pending.**
-Post-Phase-1 baseline: **1,884** tests (272 / 26 / 142 / 943 / 501), widget 1197.6 kB. Supersedes the *authoring-surface* parts of
+**Status: Phase 0 ✅ (`7cd1146`) · Phase 1 ✅ (`9d08b10`) · Phase 2 ✅ · Phase 3 next.**
+Post-Phase-2 baseline: **1,914** tests (272 / 26 / 142 / 973 / 501), widget 1197.6 kB. Supersedes the *authoring-surface* parts of
 `RULES_AND_BRANCHING_PLAN.md` (its C1 `require` verb is **removed** by this plan; its evaluators,
 disqualification, jump, and scoring engines stay). Branch: `feat/rules-and-branching` → PR #72.
 

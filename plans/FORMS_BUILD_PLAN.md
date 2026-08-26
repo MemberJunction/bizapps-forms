@@ -2011,3 +2011,35 @@ native entities. This is the reporting differentiator no incumbent has.
   zero. Build clean, widget 1197.6 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants
   pass. The dev-DB fixture drift affecting `automation-semantics-path` / `binding-path` is
   unchanged and untouched by this work.
+
+- **2026-08-26 — rules simplification, Phase 2: the value is picked, never typed.** A source now
+  carries a `kind` (`singleChoice` / `multiSelect` / `number` / `date` / `text` / `score`),
+  derived from `QUESTION_TYPE_BEHAVIOR` rather than any hardcoded type list, and the operator
+  menu and value control both turn on it.
+
+  **The defect this closes is the one the user hit by hand.** They authored "First name equals
+  Soham", typed "Soahm" into the runtime, and the submit went through — correctly, because
+  `equals` is exact. The editor had let them type a value on a question where a mistyped value is
+  indistinguishable from a rule that does not apply. On any option-bearing source the value is
+  now picked; a spec walks every operator such a source offers and asserts none of them can ask
+  for free text, so the hole cannot reopen by adding an operator.
+
+  **The narrowing is correctness, not taste.** A multi-select is offered neither equality
+  operator: `scalarsEqual` returns `false` for any array answer, so `equals` can never match one
+  and `notEquals` — its negation — always does. Both were on the menu, both silently wrong, in
+  opposite directions. Free text loses ordering (`compareOrdered` on two arbitrary strings is a
+  question no author asked). Dates KEEP ordering, because `compareOrdered` coerces ISO strings —
+  classifying them as text would have taken working operators away.
+
+  **Three ways a narrowed menu can strand a rule, all closed.** Repointing a condition at a
+  source that does not offer its operator re-picks the operator; a new condition starts on
+  `defaultOperatorFor(kind)` rather than a hardcoded `equals`; and a STORED operator the kind no
+  longer offers stays in the menu labelled "(not available here)" — a `<select>` whose `[value]`
+  is absent from its options renders blank, which would have shown an empty operator box on a
+  rule that reads fine in the database. `summarizeGroup` labels in the source's voice too, so the
+  dropdown and the summary cannot name the same operator differently.
+
+  **Verification:** 1,914 unit tests (272 / 26 / 142 / 973 / 501), +30 over Phase 1 and all new.
+  Build clean, widget 1197.6 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants pass.
+  The ✅ evaluator rows (jump, disqualification, scoring, ending resolution, fixed-point
+  visibility) were re-run rather than re-implemented and are unchanged.

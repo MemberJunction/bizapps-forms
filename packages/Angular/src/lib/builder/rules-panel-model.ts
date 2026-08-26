@@ -317,11 +317,11 @@ export function summarizeGroup(
     return 'No conditions yet';
   }
   const first = conditions[0];
-  const prompt =
-    first.source === 'score'
-      ? 'Total score'
-      : (sources.find((s) => s.id === first.questionId)?.prompt ?? '(deleted question)');
-  const parts = [prompt, operatorLabel(first.op)];
+  const source = first.source === 'score' ? undefined : sources.find((s) => s.id === first.questionId);
+  const prompt = first.source === 'score' ? 'Total score' : (source?.prompt ?? '(deleted question)');
+  // Labelled in the source's voice, so the summary reads back exactly what the operator dropdown
+  // offered — "Interests includes any of Sports", not "Interests is one of Sports".
+  const parts = [prompt, operatorLabel(first.op, source?.kind)];
   if (operatorNeedsValue(first.op) && first.value !== undefined) {
     const value = Array.isArray(first.value) ? first.value.join(', ') : String(first.value);
     if (value.length > 0) {
