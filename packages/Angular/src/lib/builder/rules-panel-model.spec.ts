@@ -117,10 +117,10 @@ describe('cardSpec', () => {
   });
 
   it('is undefined for a verb this item does not offer, rather than falling back to the first', () => {
-    // A page has no `require` card. Returning PAGE_RULE_CARDS[0] would title the dialog
-    // "Show only if" while it edited a require group — the two are not interchangeable.
-    expect(cardSpec('require', PAGE_RULE_CARDS)).toBeUndefined();
+    // A question has no `jump` card. Returning QUESTION_RULE_CARDS[0] would title the dialog
+    // "Show only if" while it edited a jump — the two are not interchangeable.
     expect(cardSpec('jump', QUESTION_RULE_CARDS)).toBeUndefined();
+    expect(cardSpec('disqualify', PAGE_RULE_CARDS)).toBeUndefined();
   });
 
   it('reads disqualify off the ending cards, where it is a pseudo-verb rather than a JSON key', () => {

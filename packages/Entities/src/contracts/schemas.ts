@@ -25,16 +25,12 @@ import type { FormSettings } from './form-definition';
 const conditionalOperatorSchema = z.enum([
   'equals',
   'notEquals',
-  'equalsIgnoreCase',
   'in',
   'notIn',
   'isAnswered',
   'isNotAnswered',
   'greaterThan',
   'lessThan',
-  'contains',
-  'startsWith',
-  'endsWith',
 ]);
 
 const conditionValueSchema = z.union([
@@ -76,7 +72,6 @@ const conditionalJumpRuleSchema = z.object({
 
 export const conditionalRuleSchema = z.object({
   show: conditionalGroupSchema.optional(),
-  require: conditionalGroupSchema.optional(),
   jump: z.array(conditionalJumpRuleSchema).max(MAX_JUMP_RULES).optional(),
 });
 

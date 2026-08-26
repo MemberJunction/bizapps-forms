@@ -28,11 +28,18 @@ export interface RuleFlags {
   disqualification?: boolean;
 }
 
-/** The verbs whose payload is a plain condition group (jump carries a target as well). */
-export type GroupVerb = 'show' | 'require';
+/**
+ * The verbs whose payload is a plain condition group (jump carries a target as well).
+ *
+ * One member today, and still worth its own type: `disqualify` also reads a group but writes a
+ * flag alongside it, and `jump` writes a target — so "is this verb's payload just a group?" is
+ * the question the panel actually asks, and it is not the same question as "is this verb
+ * `show`?" even while the two happen to have the same answer.
+ */
+export type GroupVerb = 'show';
 
 export function isGroupVerb(verb: RuleVerb): verb is GroupVerb {
-  return verb === 'show' || verb === 'require';
+  return verb === 'show';
 }
 
 /** A page a jump card may target — later pages only; the caller enforces the ordering. */
@@ -57,20 +64,21 @@ export interface RuleCardSpec {
   excludes?: RuleVerb[];
 }
 
-/** The cards a QUESTION offers. */
+/**
+ * The cards a QUESTION offers.
+ *
+ * There was a second, "Require if", writing a `require` group. It is gone: the question already
+ * carries a Required toggle, so the card was a second answer to a question the editor had
+ * already asked one field higher — and the toggle silently won when the two disagreed. "If
+ * Other, please explain" is expressible without it: show the follow-up conditionally and mark
+ * it required.
+ */
 export const QUESTION_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
   {
     verb: 'show',
     title: 'Show only if',
     icon: 'fa-solid fa-eye',
     description: 'Hide this question unless an earlier answer matches.',
-  },
-  {
-    verb: 'require',
-    title: 'Require if',
-    icon: 'fa-solid fa-asterisk',
-    description:
-      'Make this question required when earlier answers match — "if Other, please explain". The Required toggle above always wins when it is on.',
   },
 ];
 

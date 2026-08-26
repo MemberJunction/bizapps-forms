@@ -165,19 +165,6 @@ describe('evaluateConditionalRule', () => {
     });
   });
 
-  describe('contains', () => {
-    it('substring-matches a string answer', () => {
-      const rule: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'contains', value: 'cat' }] } };
-      expect(evaluateConditionalRule(rule, answers({ q1: 'concatenate' }))).toBe(true);
-      expect(evaluateConditionalRule(rule, answers({ q1: 'dog' }))).toBe(false);
-    });
-
-    it('membership-matches an array answer', () => {
-      const rule: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'contains', value: 'A' }] } };
-      expect(evaluateConditionalRule(rule, answers({ q1: ['A', 'B'] }))).toBe(true);
-      expect(evaluateConditionalRule(rule, answers({ q1: ['B', 'C'] }))).toBe(false);
-    });
-  });
 });
 
 describe('parseConditionalRule', () => {
@@ -315,87 +302,16 @@ describe('isNotAnswered (A3)', () => {
   });
 });
 
-describe('equalsIgnoreCase (A3)', () => {
-  const rule: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equalsIgnoreCase', value: 'Yes' }] } };
-
-  describe('happy', () => {
-    it('matches across case', () => {
-      expect(evaluateConditionalRule(rule, answers({ q1: 'yes' }))).toBe(true);
-      expect(evaluateConditionalRule(rule, answers({ q1: 'YES' }))).toBe(true);
-      expect(evaluateConditionalRule(rule, answers({ q1: 'No' }))).toBe(false);
-    });
-  });
-
-  describe('edge', () => {
-    it('unicode case folds through toLowerCase', () => {
-      const unicode: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equalsIgnoreCase', value: 'STRASSE' }] } };
-      expect(evaluateConditionalRule(unicode, answers({ q1: 'strasse' }))).toBe(true);
-    });
-
-    it('non-strings fall back to strict equals', () => {
-      const num: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equalsIgnoreCase', value: 5 }] } };
-      expect(evaluateConditionalRule(num, answers({ q1: 5 }))).toBe(true);
-      expect(evaluateConditionalRule(num, answers({ q1: '5' }))).toBe(false);
-    });
-  });
-
-  describe('worst', () => {
-    it('arrays and missing values never match', () => {
-      expect(evaluateConditionalRule(rule, answers({ q1: ['Yes'] }))).toBe(false);
-      expect(evaluateConditionalRule(rule, answers({}))).toBe(false);
-    });
-  });
-});
-
-describe('startsWith / endsWith (A3)', () => {
-  const starts: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'startsWith', value: 'ACME' }] } };
-  const ends: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'endsWith', value: '.edu' }] } };
-
-  describe('happy', () => {
-    it('prefix-matches a string answer', () => {
-      expect(evaluateConditionalRule(starts, answers({ q1: 'ACME Corp' }))).toBe(true);
-      expect(evaluateConditionalRule(starts, answers({ q1: 'Not ACME' }))).toBe(false);
-    });
-
-    it('suffix-matches a string answer', () => {
-      expect(evaluateConditionalRule(ends, answers({ q1: 'dean@university.edu' }))).toBe(true);
-      expect(evaluateConditionalRule(ends, answers({ q1: 'ceo@company.com' }))).toBe(false);
-    });
-  });
-
-  describe('edge', () => {
-    it('matching is case-sensitive, like contains', () => {
-      expect(evaluateConditionalRule(starts, answers({ q1: 'acme corp' }))).toBe(false);
-    });
-
-    it('a numeric comparison value is stringified', () => {
-      const numeric: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'startsWith', value: 20 }] } };
-      expect(evaluateConditionalRule(numeric, answers({ q1: '2026 budget' }))).toBe(true);
-    });
-  });
-
-  describe('worst', () => {
-    it('array answers never match a string affix', () => {
-      expect(evaluateConditionalRule(starts, answers({ q1: ['ACME Corp'] }))).toBe(false);
-    });
-
-    it('an empty comparison value never matches — an unfinished rule must not fire', () => {
-      const blank: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'startsWith', value: '' }] } };
-      expect(evaluateConditionalRule(blank, answers({ q1: 'anything' }))).toBe(false);
-    });
-
-    it('non-string answers never match', () => {
-      expect(evaluateConditionalRule(starts, answers({ q1: 42 }))).toBe(false);
-      expect(evaluateConditionalRule(starts, answers({}))).toBe(false);
-    });
-  });
-});
-
-describe('new operators pass the untrusted-snapshot gate (A3)', () => {
-  it('parseConditionalRule accepts every new operator', () => {
-    const ops = ['equalsIgnoreCase', 'isNotAnswered', 'startsWith', 'endsWith'];
+describe('every operator passes the untrusted-snapshot gate', () => {
+  it('parseConditionalRule accepts each of the eight, and nothing else', () => {
+    // The gate is the reason a removal is a breaking change rather than dead code: an operator
+    // off this list is a PARSE FAILURE on the server, and a parse failure is a fail-open on a
+    // show rule. See legacy-rules.spec.ts for what that costs and why it is still the right
+    // posture.
+    const ops = ['equals', 'notEquals', 'in', 'notIn', 'isAnswered', 'isNotAnswered', 'greaterThan', 'lessThan'];
     for (const op of ops) {
-      const json = `{ "show": { "all": [ { "questionId": "q1", "op": "${op}", "value": "x" } ] } }`;
+      const value = op === 'in' || op === 'notIn' ? '["x"]' : '"x"';
+      const json = `{ "show": { "all": [ { "questionId": "q1", "op": "${op}", "value": ${value} } ] } }`;
       expect(() => parseConditionalRule(json)).not.toThrow();
     }
   });

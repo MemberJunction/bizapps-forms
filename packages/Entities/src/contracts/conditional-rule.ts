@@ -17,29 +17,32 @@ import type { JSONObject } from './json-value';
 /**
  * Comparison operators supported by a single condition (FORMS_BUILD_PLAN §6).
  *
- * The last four landed with plans/RULES_AND_BRANCHING_PLAN.md Phase A3. `isNotAnswered` is the
- * one that matters most: before it, "show this only when the respondent skipped that" was
- * inexpressible — `notEquals` fails on an unanswered question (see `scalarsEqual`), so no
- * combination of the original eight could say it.
+ * Eight, down from twelve (plans/RULES_SIMPLIFICATION_PLAN.md §2). `equalsIgnoreCase`,
+ * `contains`, `startsWith` and `endsWith` are gone: all four only ever did something on a
+ * FREE-TEXT answer, and a condition on free text is a rule that fires on whether the
+ * respondent's spelling matched the author's. The author who wrote "First name equals Soham"
+ * and typed "Soahm" in the runtime is the case that killed them — the affix operators make
+ * that failure mode more likely, not less, because they read as fuzzy while matching exactly.
+ * Conditions now belong on questions with a fixed answer set, where the value is picked.
+ *
+ * `isNotAnswered` is the one worth keeping in mind: without it, "show this only when the
+ * respondent skipped that" is inexpressible — `notEquals` fails on an unanswered question (see
+ * `scalarsEqual`), so no combination of the others can say it.
  */
 export type ConditionalOperator =
   | 'equals'
   | 'notEquals'
-  | 'equalsIgnoreCase'
   | 'in'
   | 'notIn'
   | 'isAnswered'
   | 'isNotAnswered'
   | 'greaterThan'
-  | 'lessThan'
-  | 'contains'
-  | 'startsWith'
-  | 'endsWith';
+  | 'lessThan';
 
 /**
- * The value a condition compares against. Scalars for equality/ordering/substring
- * checks; arrays for the membership operators (`in` / `notIn`). `isAnswered` ignores
- * the value entirely (hence `value?` on the condition).
+ * The value a condition compares against. Scalars for equality/ordering checks; arrays for
+ * the membership operators (`in` / `notIn`). `isAnswered` ignores the value entirely (hence
+ * `value?` on the condition).
  */
 export type ConditionValue = string | number | boolean | string[] | number[];
 
@@ -111,17 +114,25 @@ export interface ConditionalJumpRule {
 }
 
 /**
- * A declarative rule object — one JSON column, several verbs (RULES_AND_BRANCHING_PLAN §2.1).
+ * A declarative rule object — one JSON column, two verbs (RULES_AND_BRANCHING_PLAN §2.1, as
+ * narrowed by RULES_SIMPLIFICATION_PLAN §2).
  *
  * `show` (any item): visible only when the group passes; absent means "always visible".
- * `require` (questions): required when the group passes, on top of the static `isRequired` —
- * see `isRequiredNow` in rule-verbs.ts. `jump` (pages): forward skips, first match wins — see
- * `resolveVisiblePages` there. Absent keys mean exactly the pre-verb behavior, so every
- * already-published snapshot keeps meaning what it meant.
+ * `jump` (pages): forward skips, first match wins — see `resolveVisiblePages` in rule-verbs.ts.
+ * Absent keys mean exactly the pre-verb behavior, so every already-published snapshot keeps
+ * meaning what it meant.
+ *
+ * There was a third verb, `require`, which made an optional question required when a group
+ * fired. It is gone: every question already carries a static Required toggle, so the verb was
+ * a second answer to a question the form had already answered — two places to look, able to
+ * disagree, with the toggle silently winning. The asterisk and `aria-required` in the widget
+ * never knew about it either, so a conditionally-required question looked optional right up
+ * until submit refused it. A rule that has to be a rule can say the same thing by showing the
+ * question conditionally and marking it required. Legacy blobs carrying the key still parse —
+ * zod strips it (see `legacy-rules.spec.ts`).
  */
 export interface ConditionalRule {
   show?: ConditionalGroup;
-  require?: ConditionalGroup;
   jump?: ConditionalJumpRule[];
 }
 
@@ -221,8 +232,6 @@ export function evaluateCondition(
       return scalarsEqual(answer, value);
     case 'notEquals':
       return !scalarsEqual(answer, value);
-    case 'equalsIgnoreCase':
-      return scalarsEqualIgnoreCase(answer, value);
     case 'in':
       return isMember(answer, value);
     case 'notIn':
@@ -231,12 +240,6 @@ export function evaluateCondition(
       return compareOrdered(answer, value) === 'greater';
     case 'lessThan':
       return compareOrdered(answer, value) === 'less';
-    case 'contains':
-      return answerContains(answer, value);
-    case 'startsWith':
-      return stringAffixMatch(answer, value, 'start');
-    case 'endsWith':
-      return stringAffixMatch(answer, value, 'end');
     default:
       return assertNever(condition.op);
   }
@@ -373,42 +376,6 @@ function scalarsEqual(answer: AnswerValue, value: ConditionValue | undefined): b
 }
 
 /**
- * `equals`, but case-insensitive when both sides are strings. Any other pairing falls back to
- * {@link scalarsEqual} — numbers and booleans have no case, and treating them differently here
- * would make the two equals operators disagree on non-string answers for no reason an author
- * could see.
- */
-function scalarsEqualIgnoreCase(answer: AnswerValue, value: ConditionValue | undefined): boolean {
-  if (typeof answer === 'string' && typeof value === 'string') {
-    return answer.toLowerCase() === value.toLowerCase();
-  }
-  return scalarsEqual(answer, value);
-}
-
-/**
- * `startsWith` / `endsWith`: prefix/suffix match for a STRING answer only — arrays and
- * composites are "no match", same posture as every other operator here.
- *
- * An empty comparison value never matches, deliberately: `''.startsWith('')` is true, so a
- * half-typed condition would otherwise flip from "never fires" to "always fires" the moment the
- * operator is picked — the silent inversion of what an unfinished rule should do.
- */
-function stringAffixMatch(
-  answer: AnswerValue,
-  value: ConditionValue | undefined,
-  where: 'start' | 'end',
-): boolean {
-  if (typeof answer !== 'string' || value === undefined || Array.isArray(value)) {
-    return false;
-  }
-  const needle = String(value);
-  if (needle.length === 0) {
-    return false;
-  }
-  return where === 'start' ? answer.startsWith(needle) : answer.endsWith(needle);
-}
-
-/**
  * Membership test for `in` / `notIn`. The condition value is the array of allowed
  * options; a scalar answer passes if it is one of them, and an array answer passes
  * if it intersects them.
@@ -490,24 +457,6 @@ function toComparable(value: AnswerValue | ConditionValue | undefined): Comparab
     }
   }
   return undefined;
-}
-
-/**
- * `contains`: substring match for a string answer, or membership for a multi-select
- * array answer. The condition value must be a scalar.
- */
-function answerContains(answer: AnswerValue, value: ConditionValue | undefined): boolean {
-  if (value === undefined || Array.isArray(value)) {
-    return false;
-  }
-  if (typeof answer === 'string') {
-    return answer.includes(String(value));
-  }
-  if (Array.isArray(answer)) {
-    const needle: string | number | boolean = value;
-    return (answer as Array<string | number>).some((a) => a === needle);
-  }
-  return false;
 }
 
 /** Exhaustiveness guard for the operator switch. */

@@ -38,7 +38,6 @@ import {
   evaluateConditionalRule,
   isAnswerableQuestionType,
   isAnswerSupplied,
-  isRequiredNow,
   isRequiredSatisfied,
   resolveVisiblePages,
   coerceAnswerToNumber,
@@ -183,10 +182,9 @@ function collectVisibleQuestion(
   // Required is asked SEPARATELY from answered, because the two disagree on consent: an
   // unticked box is `false`, which is a supplied answer, so a required "I agree to the terms"
   // used to pass here as well as in the widget. A rule enforced only in the browser is not
-  // enforced at all — this mutation is reachable without it. `isRequiredNow` folds in the
-  // conditional `require` verb; the visibility return above is what keeps hidden ⇒ never
-  // required true (plan invariant 2).
-  if (!partial && isRequiredNow(question, answerMap) && !isRequiredSatisfied(question.type, value)) {
+  // enforced at all — this mutation is reachable without it. The visibility return above is
+  // what keeps hidden ⇒ never required true (plan invariant 2).
+  if (!partial && question.isRequired && !isRequiredSatisfied(question.type, value)) {
     errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
     return;
   }

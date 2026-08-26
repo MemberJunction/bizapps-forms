@@ -3,7 +3,6 @@ import type { AnswerValue, ConditionalRule } from './conditional-rule';
 import { MAX_JUMP_RULES } from './conditional-rule';
 import type { PublishedFormPage, PublishedFormScreen } from './form-definition';
 import {
-  isRequiredNow,
   resolveDisqualification,
   resolveVisiblePages,
   resolveVisibleQuestions,
@@ -30,48 +29,6 @@ function ending(
 function whenQ1Equals(value: string): ConditionalRule {
   return { show: { all: [{ questionId: 'q1', op: 'equals', value }] } };
 }
-
-describe('isRequiredNow', () => {
-  const requireIfOther: ConditionalRule = {
-    require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] },
-  };
-
-  describe('happy', () => {
-    it('an optional question becomes required when its require group fires', () => {
-      const q = { isRequired: false, conditionalRule: requireIfOther };
-      expect(isRequiredNow(q, answers({ q1: 'Other' }))).toBe(true);
-      expect(isRequiredNow(q, answers({ q1: 'Red' }))).toBe(false);
-      expect(isRequiredNow(q, answers({}))).toBe(false);
-    });
-  });
-
-  describe('edge', () => {
-    it('static isRequired stays the stronger promise — a failing group cannot un-require', () => {
-      const q = { isRequired: true, conditionalRule: requireIfOther };
-      expect(isRequiredNow(q, answers({ q1: 'Red' }))).toBe(true);
-    });
-
-    it('a rule with only a show group adds no requiredness', () => {
-      const q = { isRequired: false, conditionalRule: whenQ1Equals('Other') };
-      expect(isRequiredNow(q, answers({ q1: 'Other' }))).toBe(false);
-    });
-  });
-
-  describe('worst', () => {
-    it('a require group naming an unknown question never fires', () => {
-      const q = {
-        isRequired: false,
-        conditionalRule: { require: { all: [{ questionId: 'gone', op: 'isAnswered' as const }] } },
-      };
-      expect(isRequiredNow(q, answers({ q1: 'x' }))).toBe(false);
-    });
-
-    it('no rule at all means exactly the static flag', () => {
-      expect(isRequiredNow({ isRequired: false }, answers({}))).toBe(false);
-      expect(isRequiredNow({ isRequired: true }, answers({}))).toBe(true);
-    });
-  });
-});
 
 describe('resolveVisiblePages', () => {
   const jumpTo = (toPageId: string, value = 'skip'): ConditionalRule => ({
@@ -226,8 +183,12 @@ describe('an unarmed knockout screen never fires', () => {
     });
 
     it('a rule carrying only OTHER verbs is not armed either', () => {
-      const requireOnly: ConditionalRule = { require: { all: [{ questionId: 'q1', op: 'isAnswered' }] } };
-      expect(resolveDisqualification(flagged(requireOnly), answers({ q1: 'x' }))).toBeUndefined();
+      // A jump group is a real, populated group — and not this screen's. Arming a knockout off
+      // it would disqualify on a condition the author wrote about page order.
+      const jumpOnly: ConditionalRule = {
+        jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, toPageId: 'p2' }],
+      };
+      expect(resolveDisqualification(flagged(jumpOnly), answers({ q1: 'x' }))).toBeUndefined();
     });
   });
 

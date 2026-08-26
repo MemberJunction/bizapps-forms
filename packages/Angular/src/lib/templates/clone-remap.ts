@@ -6,8 +6,8 @@
  * structure:
  *
  *   - `FormPage.ConditionalRule`, `FormQuestion.ConditionalRule`, `FormScreen.ConditionalRule`
- *     and `FormAutomation.ConditionalRule` — `{ show / require: { all | any: [{ questionId, op,
- *     value }] }, jump: [{ when, toPageId }] }` (question ids in the groups, page ids in jumps)
+ *     and `FormAutomation.ConditionalRule` — `{ show: { all | any: [{ questionId, op, value }] },
+ *     jump: [{ when, toPageId }] }` (question ids in the groups, page ids in jumps)
  *   - `FormEntityBinding.FieldMappings` — `{ version, fields: [{ source: { questionId } }] }`
  *
  * Copy those verbatim and the new form's branching points at the OLD form's questions. Nothing
@@ -114,16 +114,15 @@ export function remapConditionalRule(
     return out.all !== undefined || out.any !== undefined ? out : undefined;
   };
 
-  // `show` and `require` are NOT symmetric here, and the difference is the whole point.
+  // An empty `show` group collapses to no rule at all: `evaluateGroup({})` is vacuously true, so
+  // `show: {}` means "always visible", which is exactly what having no rule means. Collapsing it
+  // loses nothing. That is NOT true of the unconditional jump below — see the comment there for
+  // the asymmetry, which is real and deliberate.
   //
-  // Both are vacuously true when empty, but that means different things. For `show`, "always
-  // visible" is exactly what having no rule means, so collapsing an empty group loses nothing. For
-  // `require`, it does not: `isRequiredNow` returns the group's verdict for any group that EXISTS
-  // — so `require: {}` means "always required", while no rule at all falls back to the static
-  // `isRequired`. Collapsing that one silently made a cloned question optional. Same class as the
-  // unconditional jump below; I fixed that instance first and left this one standing.
+  // A legacy `require` key is not read at all. The verb is gone, so carrying it into the copy
+  // would plant a key nothing evaluates in a brand-new form — worse than dropping it, because a
+  // future reader would take it for a live rule.
   const show = remapGroup(parsed.show);
-  const require = hasConditions(parsed.require) ? remapGroup(parsed.require) : parsed.require;
   const jump: ConditionalJumpRule[] = [];
   for (const rule of parsed.jump ?? []) {
     const toPageId = pageIdMap?.get(rule.toPageId);
@@ -149,9 +148,6 @@ export function remapConditionalRule(
   if (show !== undefined) {
     result.show = show;
   }
-  if (require !== undefined) {
-    result.require = require;
-  }
   if (jump.length > 0) {
     result.jump = jump;
   }
@@ -164,7 +160,6 @@ export function remapConditionalRule(
 type GroupShape = { all?: ConditionalCondition[]; any?: ConditionalCondition[] };
 type RuleShape = {
   show?: GroupShape;
-  require?: GroupShape;
   jump?: Array<{ when: GroupShape; toPageId: string }>;
 };
 
@@ -179,7 +174,7 @@ function isRuleShaped(value: unknown): value is RuleShape {
     return false;
   }
   const rule = value as RuleShape;
-  if (!isGroupShaped(rule.show) || !isGroupShaped(rule.require)) {
+  if (!isGroupShaped(rule.show)) {
     return false;
   }
   if (rule.jump === undefined) {

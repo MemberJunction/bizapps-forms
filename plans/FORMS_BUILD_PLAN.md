@@ -1968,3 +1968,46 @@ native entities. This is the reporting differentiator no incumbent has.
 
   **Verification:** 1,834 unit tests, six gates (72 mutants), clean build, six of eight smoke paths
   with the other two characterised above.
+
+- **2026-08-26 — rules simplification planned; nothing implemented yet.** After hands-on testing
+  the user cut the rules model down: `require` and 4 of 12 operators go (full contract removal —
+  nothing shipped uses either; legacy rules fail open with a logged error), values on choice
+  questions are picked rather than typed, and every rule on a form becomes visible in one new
+  builder "Rules" tab. Verification for the plan surfaced the deciding fact: `scalarsEqual`
+  returns false for array answers, so on a multi-select `equals` never matches and `notEquals`
+  always does — the operator menu must be source-aware, and `notIn` (which intersects) stays.
+  Full phased plan with TDD matrix and agent operating rules:
+  `plans/RULES_SIMPLIFICATION_PLAN.md`. Phase 0 commits the currently-uncommitted modal
+  draft/commit work (12 files, verified green at 1,893 tests).
+
+- **2026-08-26 — rules simplification, Phases 0–1 landed.** Phase 0 committed the modal
+  draft/commit work as its own commit (`7cd1146`, 12 files, no behaviour change beyond what that
+  commit describes). Phase 1 removed the `require` verb and four operators, contract-outward.
+
+  **No migration, and that is the point.** Everything removed lives inside a JSON column.
+  `conditionalRuleSchema` is a plain `z.object`, which **strips** unknown keys, so a stored rule
+  carrying `require` still parses and the key vanishes. `op` is a required enum, so a stored rule
+  using a removed operator **fails** parse — a different outcome on purpose, because the server's
+  `parseOptionalConditional` already logs loudly, names the item and treats it as unruled, which
+  for a `show` rule means visible to everyone. Both paths are pinned in the new
+  `legacy-rules.spec.ts`; nothing shipped uses either (`grep '"op"' migrations/ metadata/` empty).
+
+  **What the removal simplified beyond the deletions.** `validateQuestion` lost its third
+  parameter: it took the live answer map only because requiredness could depend on other answers,
+  which it no longer can, so validating one question now needs only that question. The progress
+  bar and the submit button had two different readings of "required" that could disagree; there is
+  one flag left and both read it. `clone-remap` stopped inspecting `require` at all, so a legacy
+  blob with a malformed `require` no longer takes the whole rule down with it. And
+  `OPERATOR_CHOICES` gained a compile-time exhaustiveness assertion — adding an operator to the
+  contract without a label is now a build error rather than a menu row reading `notIn`.
+
+  **What was deliberately NOT changed.** The widget's five `aria-required="q.isRequired"` bindings
+  and the asterisk. An earlier session called them a bug; they were only ever wrong because
+  `require` could diverge from the flag, and with the verb gone they are correct.
+
+  **Verification:** 1,884 unit tests (272 entities / 26 core-entities-server / 142 actions /
+  943 ng / 501 server), down 9 from 1,893 and fully accounted for: −18 entities cases describing
+  the removed verb and operators, +7 legacy-rule cases; −3 ng cases retargeted, +5 new; server net
+  zero. Build clean, widget 1197.6 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants
+  pass. The dev-DB fixture drift affecting `automation-semantics-path` / `binding-path` is
+  unchanged and untouched by this work.

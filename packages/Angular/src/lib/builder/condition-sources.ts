@@ -76,20 +76,29 @@ export interface OperatorChoice {
  * is edited or summarized. One list — the operator dropdown and the rule-card summaries must
  * never name the same operator differently.
  */
-export const OPERATOR_CHOICES: ReadonlyArray<OperatorChoice> = [
+export const OPERATOR_CHOICES = [
   { op: 'equals', label: 'equals' },
   { op: 'notEquals', label: 'does not equal' },
-  { op: 'equalsIgnoreCase', label: 'equals (any case)' },
-  { op: 'contains', label: 'contains' },
-  { op: 'startsWith', label: 'starts with' },
-  { op: 'endsWith', label: 'ends with' },
   { op: 'in', label: 'is one of' },
   { op: 'notIn', label: 'is not one of' },
   { op: 'greaterThan', label: 'is greater than' },
   { op: 'lessThan', label: 'is less than' },
   { op: 'isAnswered', label: 'is answered' },
   { op: 'isNotAnswered', label: 'is not answered' },
-];
+] as const satisfies ReadonlyArray<OperatorChoice>;
+
+/**
+ * Adding an operator to the contract without a label here is a compile error.
+ *
+ * {@link operatorLabel} falls back to the raw operator name, which is a reasonable runtime
+ * posture and a terrible way to find out: the menu quietly gains a row reading `notIn` and
+ * every summary of a rule using it reads back in code. This assignment fails to typecheck the
+ * moment `ConditionalOperator` gains a member the list does not carry.
+ */
+const _everyOperatorHasALabel: Record<ConditionalOperator, true> = Object.fromEntries(
+  OPERATOR_CHOICES.map((choice) => [choice.op, true]),
+) as Record<(typeof OPERATOR_CHOICES)[number]['op'], true>;
+void _everyOperatorHasALabel;
 
 /** The label for one operator (falls back to the raw name for an operator not in the list). */
 export function operatorLabel(op: ConditionalOperator): string {
@@ -113,11 +122,11 @@ export type ValueEditorKind = 'none' | 'text' | 'select' | 'checklist';
 /**
  * Pick the value editor for a condition.
  *
- * Equality-family operators against an option-driven source get a picker — this is the A1 fix:
- * a hand-typed value that mismatches an option's case or wording fails `===` forever with no
+ * Equality operators against an option-driven source get a picker — this is the A1 fix: a
+ * hand-typed value that mismatches an option's case or wording fails `===` forever with no
  * warning, so the author should never have to type one. Membership operators get a checklist.
- * Ordering and affix operators keep free text even when options exist, because their natural
- * operand (a number, a date, a fragment) is not an option identity.
+ * Ordering operators keep free text even when options exist, because their natural operand
+ * (a number, a date) is not an option identity.
  */
 export function valueEditorKind(op: ConditionalOperator, hasOptions: boolean): ValueEditorKind {
   if (!operatorNeedsValue(op)) {
@@ -132,8 +141,6 @@ export function valueEditorKind(op: ConditionalOperator, hasOptions: boolean): V
       return 'checklist';
     case 'equals':
     case 'notEquals':
-    case 'equalsIgnoreCase':
-    case 'contains':
       return 'select';
     default:
       return 'text';

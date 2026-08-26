@@ -1,8 +1,14 @@
 /**
- * The rule verbs beyond plain show/hide (RULES_AND_BRANCHING_PLAN §2.2): conditional
- * requiredness and forward page jumps. Pure, framework-free, shared by the widget and the
- * server exactly like {@link evaluateConditionalRule} — one implementation, two callers, so
- * the two sides cannot drift on what a rule means.
+ * The rule verbs beyond plain show/hide (RULES_AND_BRANCHING_PLAN §2.2, as narrowed by
+ * RULES_SIMPLIFICATION_PLAN §2): forward page jumps, disqualification and screen resolution.
+ * Pure, framework-free, shared by the widget and the server exactly like
+ * {@link evaluateConditionalRule} — one implementation, two callers, so the two sides cannot
+ * drift on what a rule means.
+ *
+ * There was a fourth, `isRequiredNow`, folding a `require` group in on top of the static
+ * `isRequired` toggle. Both the verb and the helper are gone: requiredness is the toggle, and
+ * only the toggle, so there is one place to read it and nothing that can disagree with the
+ * asterisk the respondent sees.
  */
 import {
   MAX_JUMP_RULES,
@@ -14,29 +20,6 @@ import {
 } from './conditional-rule';
 import type { PublishedFormPage, PublishedFormQuestion, PublishedFormScreen } from './form-definition';
 import { isAnswerableQuestionType } from './question-types';
-
-/**
- * Whether a question is required RIGHT NOW, given the answers so far.
- *
- * The static `isRequired` toggle stays the stronger promise: when it is on, the question is
- * always required and any `require` group is ignored. The group only ADDS requiredness to an
- * optional question ("if Other, please explain").
- *
- * Callers must gate on visibility first — a question hidden by its `show` rule is never
- * required, whatever `require` says (invariant 2 of the plan). Both existing required checks
- * already sit behind the visibility check; keep it that way.
- */
-export function isRequiredNow(
-  question: { isRequired: boolean; conditionalRule?: ConditionalRule },
-  answers: ReadonlyMap<string, AnswerValue>,
-  extras?: EvalExtras,
-): boolean {
-  if (question.isRequired) {
-    return true;
-  }
-  const requireGroup = question.conditionalRule?.require;
-  return requireGroup !== undefined && evaluateGroup(requireGroup, answers, extras);
-}
 
 /**
  * The pages a respondent can currently reach, in display order — the single source of truth

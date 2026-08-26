@@ -7,7 +7,6 @@
 import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
-  isRequiredNow,
   resolveVisiblePages,
   resolveVisibleQuestions,
   answerCompleteness,
@@ -232,7 +231,7 @@ export class FormRuntime {
 
   /** Validation message for a question, or `null` when valid. */
   public errorFor(question: PublishedFormQuestion): string | null {
-    return validateQuestion(question, this.valueFor(question.id), this.answers()).message;
+    return validateQuestion(question, this.valueFor(question.id)).message;
   }
 
   /** Error shown in the UI only after the field has been touched. */
@@ -251,12 +250,12 @@ export class FormRuntime {
     if (!this.isTouched(question.id)) {
       return {};
     }
-    return validateQuestion(question, this.valueFor(question.id), this.answers()).parts ?? {};
+    return validateQuestion(question, this.valueFor(question.id)).parts ?? {};
   }
 
   /** True when every supplied list of questions currently validates. */
   public areValid(questions: PublishedFormQuestion[]): boolean {
-    return questions.every((q) => validateQuestion(q, this.valueFor(q.id), this.answers()).valid);
+    return questions.every((q) => validateQuestion(q, this.valueFor(q.id)).valid);
   }
 
   /** Mark a set of questions touched (e.g. on a failed next/submit) to surface errors. */
@@ -271,7 +270,7 @@ export class FormRuntime {
   /** Whole-form validity over all currently-visible answerable questions. */
   public readonly isFormValid = computed(() =>
     this.visibleAnswerableQuestions().every(
-      (q) => validateQuestion(q, this.valueFor(q.id), this.answers()).valid,
+      (q) => validateQuestion(q, this.valueFor(q.id)).valid,
     ),
   );
 
@@ -280,16 +279,21 @@ export class FormRuntime {
   /**
    * How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`.
    *
-   * Requiredness comes from `isRequiredNow`, the same judge `errorFor`/`isFormValid` use, NOT
-   * from the static `isRequired` flag. `computeProgress` returns 1 as soon as every required
-   * question is satisfied, so reading the static flag showed a full bar on a form whose submit
-   * button was disabled by a `require` group that had just fired — the one state in which the
-   * bar is the respondent's only clue that something is still missing.
+   * Requiredness is `isRequired` — the same judge `errorFor`/`isFormValid` use, which is the
+   * property that matters. `computeProgress` returns 1 as soon as every required question is
+   * satisfied, so a bar reading a different notion of "required" than the submit button reads
+   * can show full on a form that will not submit, which is the one state where the bar is the
+   * respondent's only clue that something is missing. The two used to be able to disagree
+   * (the bar read the static flag, validity read the `require` verb); with the verb gone there
+   * is only one flag left to read, and both read it.
+   *
+   * Visibility still gates it: the map runs over `visibleAnswerableQuestions`, so a required
+   * question hidden by its show rule is not counted against the bar.
    */
   public readonly progress = computed(() =>
     computeProgress(
       this.visibleAnswerableQuestions().map((q) => ({
-        required: isRequiredNow(q, this.answers()),
+        required: q.isRequired,
         completeness: answerCompleteness(q.type, this.valueFor(q.id)),
       })),
     ),

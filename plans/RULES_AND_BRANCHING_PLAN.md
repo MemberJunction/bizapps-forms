@@ -1,5 +1,11 @@
 # Rules & Branching Plan — verbs, not just visibility
 
+> **PARTLY SUPERSEDED, 2026-08-26** by [`RULES_SIMPLIFICATION_PLAN.md`](RULES_SIMPLIFICATION_PLAN.md).
+> The **C1 `require` verb was removed**, along with four operators this plan's Phase A3 shipped
+> (`equalsIgnoreCase`, `contains`, `startsWith`, `endsWith`). The evaluators, `jump`,
+> disqualification and scoring all stand. Read C1 and the A3 operator notes below as history:
+> they record what was built and why, not what the code does now.
+
 **Status: IMPLEMENTED (Phases A, B, C) on `feat/rules-and-branching`, 2026-08-25.** Written and
 verified against the working tree the same day. All phase tasks below are checked off with
 implementation notes; §7's open decisions are resolved inline. Phase D remains backlog.
@@ -176,9 +182,13 @@ Concretely, in the pane at `form-builder.component.html:473` (aside `fb-pane--ri
 - [x] **A2. Fix date comparison** (V3 defect): `toNumber` (`conditional-rule.ts:239`) falls back
       to `Date.parse` for ISO date strings on both sides of the comparison; document why in the
       function comment. Both operands must coerce through the same path.
-- [x] **A3. Four operators**: `isNotAnswered` (the inexpressible one), `equalsIgnoreCase`,
-      `startsWith`, `endsWith`. One arm each in `evaluateCondition` (compiler-enforced via
-      `assertNever`), one row each in the editor's `OPERATORS`.
+- [~] **A3. Four operators**: `isNotAnswered` (the inexpressible one), ~~`equalsIgnoreCase`,
+      `startsWith`, `endsWith`~~. One arm each in `evaluateCondition` (compiler-enforced via
+      `assertNever`), one row each in the editor's `OPERATORS`. **Three of the four removed
+      2026-08-26** (with `contains`, which predated this plan) — RULES_SIMPLIFICATION_PLAN §2.
+      `isNotAnswered` stands and remains the one that mattered. The others only ever did anything
+      on a free-text answer, which is where a rule fires on whether the respondent's spelling
+      matched the author's.
 - [x] **A4. Correct FORMS_BUILD_PLAN.md:532** — until Phase C lands, §6 must say show/hide only
       (it currently promises skip-to-page that does not exist).
 
@@ -193,9 +203,13 @@ Concretely, in the pane at `form-builder.component.html:473` (aside `fb-pane--ri
 ### Phase C — the missing verbs (PR 3+; contract + migration + CodeGen first)
 
 - [x] **C0.** Migration + CodeGen per §2.3. No TS against new columns before CodeGen runs.
-- [x] **C1. Require-if**: `require` group in the contract; `isRequiredNow` used at
+- [~] **C1. Require-if**: ~~`require` group in the contract; `isRequiredNow` used at
       `validation.ts:64` (client) and the `question.isRequired` check in
-      `validation.service.ts` (server); "Require if" card.
+      `validation.service.ts` (server); "Require if" card.~~ **REMOVED 2026-08-26** —
+      RULES_SIMPLIFICATION_PLAN Phase 1. Requiredness is the static toggle and only the toggle:
+      the verb was a second answer to a question the editor had already asked, it lost silently
+      to the toggle when the two disagreed, and neither the asterisk nor `aria-required` ever
+      knew about it. Both call sites now read `question.isRequired` directly.
 - [x] **C2. Jump to page**: `jump` rules on FormPage; `resolveVisiblePages` replacing both
       page-visibility call sites; authoring UI offers only **later** pages; "Jump to page" card
       (page editor only).

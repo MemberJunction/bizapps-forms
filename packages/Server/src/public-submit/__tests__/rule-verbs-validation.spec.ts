@@ -4,6 +4,7 @@ import type {
   PublishedFormPage,
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
+import { parsePublishedDefinition } from '../snapshot-parser';
 import { validateSubmission } from '../validation.service';
 
 /**
@@ -39,53 +40,76 @@ function definition(pages: PublishedFormPage[]): PublishedFormDefinition {
   };
 }
 
-describe('require-if on the server (C1)', () => {
-  const pages: PublishedFormPage[] = [
-    {
-      id: 'p1',
-      displayOrder: 0,
-      questions: [
-        question('q1'),
-        question('q2', {
-          conditionalRule: { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
-        }),
-      ],
-    },
-  ];
+describe('requiredness on the server, after the require verb was removed (C1)', () => {
+  /**
+   * A published snapshot is a frozen JSON blob that no migration rewrites, so forms published
+   * before RULES_SIMPLIFICATION_PLAN Phase 1 still carry `require` groups. This is the path
+   * those forms take now, end to end: raw snapshot -> parse -> validate. It goes through
+   * `parsePublishedDefinition` deliberately rather than hand-building a definition, because the
+   * strip is the parser's doing and a hand-built fixture could not express the legacy shape at
+   * all now that the key is off the type.
+   */
+  function legacySnapshot(extraRule: Record<string, unknown> = {}): string {
+    return JSON.stringify(
+      definition([
+        {
+          id: 'p1',
+          displayOrder: 0,
+          questions: [
+            question('q1'),
+            {
+              ...question('q2'),
+              conditionalRule: {
+                ...extraRule,
+                require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] },
+              },
+            },
+          ],
+        },
+      ]),
+    );
+  }
 
   describe('happy', () => {
-    it('an unmet require group leaves the question optional', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'Red' }], false);
+    it('a legacy require group no longer makes an optional question required', () => {
+      // Before the removal this submission was rejected: q1 answered 'Other' armed q2's require
+      // group, and q2 is blank. The static Required toggle is the whole truth now, and it is off.
+      const parsed = parsePublishedDefinition(legacySnapshot());
+      expect(parsed).toBeDefined();
+
+      const outcome = validateSubmission(parsed!, [{ questionId: 'q1', textValue: 'Other' }], false);
+
       expect(outcome.errors).toEqual([]);
     });
 
-    it('a met require group makes the unanswered question an error', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'Other' }], false);
-      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2']);
+    it('the parse drops the key rather than the question', () => {
+      const parsed = parsePublishedDefinition(legacySnapshot());
+      const q2 = parsed!.pages[0].questions[1];
+
+      expect(q2.id).toBe('q2');
+      expect(q2.conditionalRule).toEqual({});
     });
   });
 
   describe('edge', () => {
-    it('answering the now-required question satisfies it', () => {
-      const outcome = validateSubmission(
-        definition(pages),
-        [
-          { questionId: 'q1', textValue: 'Other' },
-          { questionId: 'q2', textValue: 'details' },
-        ],
-        false,
+    it('a show rule on the same item survives the strip', () => {
+      // The worst way to get this wrong is to reject the whole rule: q2's show gate would
+      // vanish and the question would be visible to everyone.
+      const parsed = parsePublishedDefinition(
+        legacySnapshot({ show: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } }),
       );
-      expect(outcome.errors).toEqual([]);
-    });
 
-    it('partial saves never enforce requiredness, conditional or not', () => {
-      const outcome = validateSubmission(definition(pages), [{ questionId: 'q1', textValue: 'Other' }], true);
-      expect(outcome.errors).toEqual([]);
+      expect(parsed!.pages[0].questions[1].conditionalRule).toEqual({
+        show: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] },
+      });
     });
   });
 
   describe('worst', () => {
     it('hidden dominates required: a question hidden by show is never required (invariant 2)', () => {
+      // The invariant that outlived the verb. It reads on the static flag now, and it is the
+      // one that actually matters in production: a required question the respondent cannot see
+      // is an unsubmittable form with no visible cause.
       const hiddenButRequired: PublishedFormPage[] = [
         {
           id: 'p1',
@@ -93,20 +117,46 @@ describe('require-if on the server (C1)', () => {
           questions: [
             question('q1'),
             question('q2', {
-              conditionalRule: {
-                show: { all: [{ questionId: 'q1', op: 'equals', value: 'never' }] },
-                require: { all: [{ questionId: 'q1', op: 'isAnswered' }] },
-              },
+              isRequired: true,
+              conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'never' }] } },
             }),
           ],
         },
       ];
+
       const outcome = validateSubmission(
         definition(hiddenButRequired),
         [{ questionId: 'q1', textValue: 'something-else' }],
         false,
       );
+
       expect(outcome.errors).toEqual([]);
+    });
+
+    it('a required question that IS visible still fails the submission', () => {
+      // The other half of the same invariant — without this, "hidden dominates" would be
+      // indistinguishable from "requiredness stopped being enforced at all".
+      const shownAndRequired: PublishedFormPage[] = [
+        {
+          id: 'p1',
+          displayOrder: 0,
+          questions: [
+            question('q1'),
+            question('q2', {
+              isRequired: true,
+              conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'yes' }] } },
+            }),
+          ],
+        },
+      ];
+
+      const outcome = validateSubmission(
+        definition(shownAndRequired),
+        [{ questionId: 'q1', textValue: 'yes' }],
+        false,
+      );
+
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q2']);
     });
   });
 });

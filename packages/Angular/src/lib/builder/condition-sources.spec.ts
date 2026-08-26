@@ -1,7 +1,9 @@
 import { MAX_CONDITIONS_PER_GROUP } from '@mj-biz-apps/forms-entities';
 import { describe, expect, it } from 'vitest';
 import {
+  OPERATOR_CHOICES,
   coerceConditionValue,
+  operatorLabel,
   operatorNeedsValue,
   toConditionalSource,
   toggleMembership,
@@ -89,10 +91,44 @@ describe('toConditionalSource', () => {
   });
 });
 
+describe('OPERATOR_CHOICES', () => {
+  /**
+   * The editor's menu IS the operator surface an author can reach. Twelve operators became eight
+   * (RULES_SIMPLIFICATION_PLAN §2), and the four that went were the ones that only ever did
+   * anything on free text — where a rule fires on whether the respondent's spelling matched the
+   * author's. Pinned as a set, not a count, so dropping one and adding another cannot pass.
+   */
+  it('offers exactly the eight operators the contract supports', () => {
+    expect(OPERATOR_CHOICES.map((choice) => choice.op)).toEqual([
+      'equals',
+      'notEquals',
+      'in',
+      'notIn',
+      'greaterThan',
+      'lessThan',
+      'isAnswered',
+      'isNotAnswered',
+    ]);
+  });
+
+  it('gives no two operators the same label', () => {
+    // Two menu rows reading identically is unauthorable-by-accident territory: the author picks
+    // one, the summary reads back the other's meaning, and nothing about the screen says which.
+    const labels = OPERATOR_CHOICES.map((choice) => choice.label);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('resolves a label for every operator it offers', () => {
+    for (const choice of OPERATOR_CHOICES) {
+      expect(operatorLabel(choice.op)).toBe(choice.label);
+    }
+  });
+});
+
 describe('valueEditorKind', () => {
   describe('happy', () => {
-    it('equality-family operators get a picker when options exist', () => {
-      for (const op of ['equals', 'notEquals', 'equalsIgnoreCase', 'contains'] as const) {
+    it('equality operators get a picker when options exist', () => {
+      for (const op of ['equals', 'notEquals'] as const) {
         expect(valueEditorKind(op, true)).toBe('select');
       }
     });
@@ -109,8 +145,9 @@ describe('valueEditorKind', () => {
   });
 
   describe('edge', () => {
-    it('ordering and affix operators keep free text even with options', () => {
-      for (const op of ['greaterThan', 'lessThan', 'startsWith', 'endsWith'] as const) {
+    it('ordering operators keep free text even with options', () => {
+      // Their natural operand is a number or a date, which is not an option identity.
+      for (const op of ['greaterThan', 'lessThan'] as const) {
         expect(valueEditorKind(op, true)).toBe('text');
       }
     });
@@ -129,7 +166,7 @@ describe('operatorNeedsValue', () => {
     expect(operatorNeedsValue('isAnswered')).toBe(false);
     expect(operatorNeedsValue('isNotAnswered')).toBe(false);
     expect(operatorNeedsValue('equals')).toBe(true);
-    expect(operatorNeedsValue('startsWith')).toBe(true);
+    expect(operatorNeedsValue('in')).toBe(true);
   });
 });
 

@@ -42,11 +42,6 @@ describe('conditional rule round-trip', () => {
     expect(parseConditionalRule(serializeConditionalRule(rule))).toEqual(rule);
   });
 
-  it('keeps a rule whose only verb is require', () => {
-    const rule: ConditionalRule = { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } };
-    expect(parseConditionalRule(serializeConditionalRule(rule))).toEqual(rule);
-  });
-
   it('removing the show verb leaves the other verbs standing', () => {
     // The destructive half of the same defect: `withVerbGroup` correctly returns the remaining
     // verbs, and the serializer then threw them away because `show` was gone.

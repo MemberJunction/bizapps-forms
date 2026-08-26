@@ -125,21 +125,8 @@ describe('remapConditionalRule — emptied arms', () => {
 // RULES_AND_BRANCHING_PLAN Phase C — the new verbs survive a clone.
 // ---------------------------------------------------------------------------
 
-describe('remapConditionalRule — require and jump verbs (C1/C2)', () => {
+describe('remapConditionalRule — the jump verb (C2)', () => {
   const PAGE_MAP = new Map([['p-old-3', 'p-new-3']]);
-
-  it('happy: remaps a require group like a show group, and both together', () => {
-    const rule = JSON.stringify({
-      show: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] },
-      require: { any: [{ questionId: 'q-old-2', op: 'equals', value: 'Other' }] },
-    });
-    const result = remapConditionalRule(rule, MAP, PAGE_MAP);
-    expect(JSON.parse(result.json as string)).toEqual({
-      show: { all: [{ questionId: 'q-new-1', op: 'isAnswered' }] },
-      require: { any: [{ questionId: 'q-new-2', op: 'equals', value: 'Other' }] },
-    });
-    expect(result.dropped).toBe(0);
-  });
 
   it('happy: remaps a jump — both its when-group and its target page id', () => {
     const rule = JSON.stringify({
@@ -197,23 +184,31 @@ describe('remapConditionalRule — require and jump verbs (C1/C2)', () => {
     });
     expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 2 });
   });
-  it('edge: an UNCONDITIONAL require survives the clone', () => {
-    // Same class as the jump above, in its sibling — I fixed the instance and left this one.
-    // `isRequiredNow` returns `evaluateGroup(requireGroup)` for any group that EXISTS, and an
-    // empty group is vacuously true, so `require: {}` means "always required" and is NOT the same
-    // as having no rule (which falls back to the static `isRequired`). Verified against the built
-    // contract: `require:{}` -> true, no rule -> false. Dropping it on clone silently makes the
-    // copy's question optional.
-    const rule = JSON.stringify({ require: {} });
+  it('edge: a legacy require key is dropped by the clone, not carried into the copy', () => {
+    // The require verb is gone (RULES_SIMPLIFICATION_PLAN Phase 1), but a source form authored
+    // before that still carries the key. The copy must not inherit it — a key nothing evaluates
+    // is a rule a future reader would believe. Not counted as a drop: nothing was LOST, because
+    // the key no longer means anything on either side of the clone.
+    const rule = JSON.stringify({ require: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] } });
+    expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 0 });
+  });
+
+  it('worst: a legacy require key does not take the show rule down with it', () => {
+    const rule = JSON.stringify({
+      show: { all: [{ questionId: 'q-old-1', op: 'equals', value: 'Yes' }] },
+      require: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] },
+    });
     const result = remapConditionalRule(rule, MAP, PAGE_MAP);
     expect(result.dropped).toBe(0);
-    expect(JSON.parse(result.json as string)).toEqual({ require: {} });
+    expect(JSON.parse(result.json as string)).toEqual({
+      show: { all: [{ questionId: 'q-new-1', op: 'equals', value: 'Yes' }] },
+    });
   });
 
   it('edge: an empty SHOW group is still collapsed, and that asymmetry is deliberate', () => {
     // `show: {}` is vacuously true too, but for visibility that means "always visible" — which is
     // exactly what having no rule means. Collapsing it loses nothing, where collapsing an empty
-    // `require` or `jump` changes what the form does.
+    // `jump` changes what the form does.
     expect(remapConditionalRule(JSON.stringify({ show: {} }), MAP, PAGE_MAP)).toEqual({ json: null, dropped: 0 });
   });
 });

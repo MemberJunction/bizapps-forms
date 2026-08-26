@@ -378,20 +378,26 @@ describe('FormRuntime progress and conditional questions', () => {
   });
 });
 
-describe('FormRuntime progress and conditional requiredness', () => {
+describe('FormRuntime progress agrees with the submit button', () => {
   /**
    * The bar must agree with the submit button (progress.ts states this invariant outright).
-   * `computeProgress` short-circuits to 1 once every REQUIRED question is satisfied, so feeding
-   * it the static `isRequired` while validity is judged by `isRequiredNow` reports a full bar on
-   * a form the respondent cannot submit — and gives them no clue which field is holding it.
+   * `computeProgress` short-circuits to 1 once every REQUIRED question is satisfied, so a bar
+   * that reads a different notion of "required" than validity does reports a full bar on a form
+   * the respondent cannot submit — and gives them no clue which field is holding it.
+   *
+   * These cases used to exercise the `require` verb, which was the way the two readings could
+   * diverge. Visibility is the way they still can: `progress` counts only visible questions, and
+   * `isFormValid` judges only visible questions, so the pair has to move together as a show rule
+   * opens and closes.
    */
-  it('counts a conditionally-required question as required', () => {
+  it('a required question revealed by a show rule holds both the bar and the button back', () => {
     const rt = new FormRuntime(
       formOf([
         { id: 'q1', isRequired: true },
         {
           id: 'q2',
-          conditionalRule: { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
+          isRequired: true,
+          conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
         },
       ]),
     );
@@ -401,13 +407,14 @@ describe('FormRuntime progress and conditional requiredness', () => {
     expect(rt.progress()).toBeLessThan(1);
   });
 
-  it('stops counting it once the require group no longer fires', () => {
+  it('and stops counting once the show rule no longer fires', () => {
     const rt = new FormRuntime(
       formOf([
         { id: 'q1', isRequired: true },
         {
           id: 'q2',
-          conditionalRule: { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
+          isRequired: true,
+          conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
         },
       ]),
     );
