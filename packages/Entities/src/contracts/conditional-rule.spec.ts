@@ -400,3 +400,69 @@ describe('new operators pass the untrusted-snapshot gate (A3)', () => {
     }
   });
 });
+
+describe('score conditions compare as numbers (C4)', () => {
+  /**
+   * The score is always a NUMBER; the condition editor's value input is a TEXT box, so it stores
+   * "70". `70 === '70'` is false, which made every equality-family operator on the Total score
+   * source silently wrong in the two worst directions at once: "equals 70" could never fire, and
+   * "does not equal 70" fired for everyone. Only greaterThan/lessThan happened to work, because
+   * their comparison already coerced numeric strings.
+   *
+   * Normalizing lives in the evaluator rather than the editor because rules also arrive from
+   * mj-sync metadata and the AI form builder, which never touch the editor at all.
+   */
+  const scoreRule = (op: 'equals' | 'notEquals' | 'in' | 'notIn', value: string | string[]): ConditionalRule => ({
+    show: { all: [{ source: 'score', op, value }] },
+  });
+
+  describe('happy', () => {
+    it('equals matches a numeric string value', () => {
+      expect(evaluateConditionalRule(scoreRule('equals', '70'), answers({}), { score: 70 })).toBe(true);
+      expect(evaluateConditionalRule(scoreRule('equals', '70'), answers({}), { score: 69 })).toBe(false);
+    });
+
+    it('in matches a list of numeric strings', () => {
+      expect(evaluateConditionalRule(scoreRule('in', ['70', '80']), answers({}), { score: 80 })).toBe(true);
+      expect(evaluateConditionalRule(scoreRule('in', ['70', '80']), answers({}), { score: 75 })).toBe(false);
+    });
+  });
+
+  describe('edge', () => {
+    it('notEquals is the negation it reads as, not an always-true rule', () => {
+      expect(evaluateConditionalRule(scoreRule('notEquals', '70'), answers({}), { score: 70 })).toBe(false);
+      expect(evaluateConditionalRule(scoreRule('notEquals', '70'), answers({}), { score: 71 })).toBe(true);
+    });
+
+    it('notIn excludes the listed totals', () => {
+      expect(evaluateConditionalRule(scoreRule('notIn', ['70']), answers({}), { score: 70 })).toBe(false);
+      expect(evaluateConditionalRule(scoreRule('notIn', ['70']), answers({}), { score: 71 })).toBe(true);
+    });
+
+    it('a value already stored as a number keeps working', () => {
+      const numeric: ConditionalRule = { show: { all: [{ source: 'score', op: 'equals', value: 70 }] } };
+      expect(evaluateConditionalRule(numeric, answers({}), { score: 70 })).toBe(true);
+    });
+  });
+
+  describe('worst', () => {
+    it('a non-numeric value never matches, and its negation always does', () => {
+      // "Total score equals banana" is authorable nonsense. It must stay inert rather than
+      // coerce to NaN or 0 and start firing on a real total.
+      expect(evaluateConditionalRule(scoreRule('equals', 'banana'), answers({}), { score: 0 })).toBe(false);
+      expect(evaluateConditionalRule(scoreRule('notEquals', 'banana'), answers({}), { score: 0 })).toBe(true);
+    });
+
+    it('an unknown score still fires nothing, whatever the value spelling', () => {
+      // EvalExtras' contract: "score unknown here" must never pass for "scored zero".
+      expect(evaluateConditionalRule(scoreRule('equals', '0'), answers({}))).toBe(false);
+      expect(evaluateConditionalRule(scoreRule('notEquals', '0'), answers({}))).toBe(false);
+    });
+
+    it('question conditions are untouched — "5" and 5 stay different answers', () => {
+      const q: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equals', value: '5' }] } };
+      expect(evaluateConditionalRule(q, answers({ q1: 5 }))).toBe(false);
+      expect(evaluateConditionalRule(q, answers({ q1: '5' }))).toBe(true);
+    });
+  });
+});

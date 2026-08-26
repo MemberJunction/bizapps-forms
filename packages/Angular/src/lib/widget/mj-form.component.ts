@@ -238,6 +238,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private autosave: AutosaveController | null = null;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
   private bankedSubmitPoints = new Set<string>();
+  /**
+   * Latched the moment a knockout starts ending the form, and never cleared: awaiting the bank
+   * hands control back to a template that keeps firing progress events at a respondent who is
+   * still typing, and each one would otherwise start another knockout. Reset on {@link load},
+   * with the rest of the per-fill state.
+   */
+  private disqualifying = false;
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -271,6 +278,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingScreen.set(undefined);
       this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
+      this.disqualifying = false;
       this.phase.set(initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
@@ -328,7 +336,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /** Progress checkpoint from a child render mode → schedule a debounced partial save. */
   protected onProgress(): void {
-    if (this.checkDisqualification()) {
+    // A knockout already under way owns the rest of this response: its bank is on the wire and
+    // another ping would re-arm the debounce behind it.
+    if (this.disqualifying) {
+      return;
+    }
+    const knockout = this.disqualifyingScreen();
+    if (knockout) {
+      void this.endAsDisqualified(knockout);
       return;
     }
     this.autosave?.ping();
@@ -336,33 +351,56 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * A knockout rule that matches ends the form NOW (C3) — the whole point of a
-   * disqualification is that an ineligible respondent does not fill the rest in first.
+   * The knockout screen these answers trigger, or undefined.
    *
-   * Banks what exists via the autosave path (fail-soft, like every autosave; the server
-   * re-evaluates the same shared rule on that save and marks the row Disqualified — this
-   * client-side verdict is a courtesy, not the enforcement), shows the knockout screen, and
-   * follows its redirect only after 'done', the same order a submit redirect uses.
+   * A pure query — it decides, it does not act. {@link endAsDisqualified} is the command half,
+   * and keeping them apart is what lets the command be awaited without the decision being
+   * re-made every time control comes back.
    */
-  private checkDisqualification(): boolean {
+  private disqualifyingScreen(): PublishedFormScreen | undefined {
     const def = this.definition();
     const rt = this.runtime();
     if (!def || !rt || this.phase() !== 'ready') {
-      return false;
+      return undefined;
     }
     const score = computeScore(rt.visibleAnswerableQuestions(), rt.currentAnswers());
-    const screen = resolveDisqualification(def.endScreens ?? [], rt.currentAnswers(), { score });
-    if (!screen) {
-      return false;
-    }
-    void this.autosave?.flushNow();
+    return resolveDisqualification(def.endScreens ?? [], rt.currentAnswers(), { score });
+  }
+
+  /**
+   * End the form on a knockout (C3) — the whole point of a disqualification is that an
+   * ineligible respondent does not fill the rest in first.
+   *
+   * THE ORDER HERE IS THE FEATURE. This client-side verdict is a courtesy; the enforcement is
+   * the server re-evaluating the same shared rule on the save below and writing
+   * `Status = 'Disqualified'`. That makes this one save the only thing standing between a
+   * knockout and a response row that still claims to be an abandoned `Partial` — and it can be
+   * lost two ways that both pass a hand test:
+   *
+   *   - `savePartial()` no-ops unless the phase is still 'ready', and `flushNow()` yields
+   *     before issuing its write whenever a save is already in flight. Firing it unawaited and
+   *     setting the phase in the same tick therefore dropped the write exactly when the
+   *     respondent had been typing, and worked whenever the autosave happened to be idle.
+   *   - `window.location.assign` aborts requests still on the wire, so navigating first
+   *     cancels it.
+   *
+   * So: bank while intake still permits it, await that, and only then show the screen and
+   * follow the redirect — the same order {@link applySubmitResult} uses on the submit path.
+   * The respondent waits one round trip before the screen appears, which is the correct trade:
+   * the alternative is telling them they are screened out while quietly recording nothing.
+   *
+   * Fail-soft like every autosave — `flushNow()` never throws — so a failed bank still shows
+   * the screen rather than stranding the respondent mid-form.
+   */
+  private async endAsDisqualified(screen: PublishedFormScreen): Promise<void> {
+    this.disqualifying = true;
+    await this.autosave?.flushNow();
     this.endingScreen.set(screen);
     this.phase.set('done');
     const redirectUrl = screen.redirectURL?.trim();
     if (redirectUrl) {
       this.redirect(redirectUrl);
     }
-    return true;
   }
 
   /**

@@ -10,6 +10,7 @@ import type {
 import { FORMS_UI_CSS } from '../shared';
 import {
   OPERATOR_CHOICES,
+  canAddCondition as groupHasRoom,
   SCORE_SOURCE_ID,
   coerceConditionValue,
   operatorNeedsValue as operatorTakesValue,
@@ -129,7 +130,15 @@ export class ConditionalRuleEditorComponent {
     this.emit();
   }
 
+  /** Whether the "Add condition" button is offered — see {@link groupHasRoom}. */
+  protected get canAddCondition(): boolean {
+    return groupHasRoom(this._conditions.length);
+  }
+
   protected addCondition(): void {
+    if (!this.canAddCondition) {
+      return; // the button is hidden at the cap; this is the guard for every other route in
+    }
     this._conditions = [
       ...this._conditions,
       conditionForSource(this.sources[0]?.id ?? '', 'equals', ''),

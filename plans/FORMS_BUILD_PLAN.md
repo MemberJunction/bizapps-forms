@@ -1341,3 +1341,62 @@ native entities. This is the reporting differentiator no incumbent has.
     passes. NOTE for the next session: the shared MJ workspace needed a manual
     `network-utils` symlink under `MJ/packages/AI/Providers/HeyGen/node_modules/@memberjunction`
     before CodeGen would boot — that is workspace drift in the sibling repo, not this branch.
+
+- **2026-08-25 (later) — adversarial review of PR #72, and the seven defects it cost.** An
+  independent multi-agent code review of the rules & branching branch, plus a second pass of my
+  own, found seven real defects in work that was already green on 1,742 tests. Worth recording
+  because five of the seven were invisible to the suite by construction, and one of them made the
+  headline feature of the branch inoperable:
+
+  1. **`serializeConditionalRule` discarded every rule that had no `show` group** (CRITICAL).
+     The guard was `!rule.show`, written when `show` was the only verb. A page whose author added
+     a jump and nothing else serialized to `null` — the jump never reached the database, so no
+     respondent ever skipped a page. Removing an unrelated "Show only if" card from an item that
+     also had a jump wiped the jump with it. Fixed by making the serializer verb-agnostic (it now
+     asks whether the object carries anything at all), which also means the next verb is covered
+     without anyone remembering to add it.
+  2. **The progress bar and the submit button disagreed.** The bar was still computed from the
+     static `isRequired` while validity had moved to `isRequiredNow`, so a `require` group that
+     fired showed 100% on a form whose submit button was disabled — in the one state where the bar
+     is the respondent's only clue.
+  3. **The knockout write could never leave the browser** (data loss, anonymous path). Two
+     mechanisms, either sufficient: `savePartial()` no-ops unless the phase is `ready`, and
+     `flushNow()` yields before issuing its write whenever a save is already in flight — so firing
+     it unawaited and setting the phase in the same tick dropped the save exactly when the
+     respondent had been typing. Plus `window.location.assign` aborting it outright when the
+     screen had a redirect. It worked whenever the autosave happened to be idle, which is why it
+     survived review. Split into a pure query + an awaited command, with a re-entrancy latch.
+  4. **The server scored questions it was about to discard as hidden.** `scoreFor` folded over
+     every question on a reachable page, question-level `show` rules ignored, while the widget
+     folded over the visible set — so a crafted submission could inflate its own total and reach an
+     ending screen (copy, redirect, score-gated automations) its answers did not earn. Both sides
+     now call one `resolveVisibleQuestions`.
+  5. **Score conditions were silently wrong in both directions.** The score is a number; the
+     editor's value box stores `"70"`; `70 === '70'` is false. "Total score equals 70" could never
+     fire and "does not equal 70" fired for everyone. Only `greaterThan`/`lessThan` worked, because
+     they already coerced numeric strings. Normalized in the evaluator, not the editor, because
+     rules also arrive from mj-sync and the AI builder.
+  6. **The caps' documentation claimed two enforcement points that did not exist**, and an
+     over-cap rule failed OPEN — the server's zod parse threw into a bare `catch {}`, the rule
+     became "no rule", and `evaluateConditionalRule(undefined)` means VISIBLE. The editor now
+     enforces the cap, the swallow logs with the item's identity, and the comment says what is
+     actually true (including the residual it cannot close).
+  7. **The two gates in front of persistence had not been told `Disqualified` exists.** Quota
+     counts completions, which a knockout never is — so a full form refused an ineligible
+     respondent outright and recorded nothing. Dedupe recognised only `Complete`, so a changed
+     retry ran the whole completion gauntlet and was rescued by a primary-key collision that
+     returned the form's "your response has been recorded" over a row saying the opposite.
+     Disqualification is now resolved FIRST (it is pure; nothing forced it to wait for the I/O).
+
+  **Also removed:** ten generated Angular form components carrying nothing but 6.x CodeGen drift
+  (`NewRecordValues/2`, `[ShowToolbar]="true"`) — shapes that do not exist in the pinned 5.51.0
+  and that `npm run lint:codegen-compat` rejects. The gate passed on `next` and failed on the
+  branch; the CodeGen run had used the 6.1.0-edge CLI. Only the two `FormScreen` files carry a
+  real change (the `IsDisqualification` field).
+
+  **Verification:** 1,778 unit tests green (+36, every fix specced happy/edge/worst and each one
+  demonstrated RED against the shipped code first), all five lint gates pass, full turbo build
+  clean, and all eight smoke paths pass against a live MJAPI. Two smoke scripts
+  (`binding-path`, `automation-semantics-path`) are order-sensitive around
+  `seed-binding-smoke` — they fail identically with the branch's changes stashed, so that is
+  pre-existing fixture behaviour, not a regression here.

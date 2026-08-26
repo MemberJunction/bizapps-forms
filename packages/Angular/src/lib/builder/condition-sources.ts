@@ -4,6 +4,7 @@
  * answers; it does not compute them. (RULES_AND_BRANCHING_PLAN Phase A1.)
  */
 import {
+  MAX_CONDITIONS_PER_GROUP,
   isFormQuestionType,
   questionTypeBehavior,
   type ConditionalOperator,
@@ -176,3 +177,18 @@ export const SCORE_SOURCE_ID = '__mjf-total-score__';
 
 /** The pseudo-source a host appends where rules may band on the running score (ending screens). */
 export const SCORE_SOURCE: ConditionalSourceQuestion = { id: SCORE_SOURCE_ID, prompt: 'Total score' };
+
+/**
+ * Whether a group may take another condition — the cap `MAX_CONDITIONS_PER_GROUP` declares.
+ *
+ * The contract documents this cap as enforced in the editor. It was not, anywhere, and the
+ * other stated enforcement did not cover the authoring path either: the builder publishes
+ * through the permissive JSON parser, not the zod schema, so an over-cap group published
+ * without complaint and only failed later — on the SERVER, on every public load, where the
+ * throw is caught and the rule becomes "no rule". A gate that cannot be read is a gate that is
+ * not applied, so the item it guarded rendered for everyone. Refusing the 21st condition here
+ * is what keeps that state unauthorable.
+ */
+export function canAddCondition(conditionCount: number): boolean {
+  return conditionCount < MAX_CONDITIONS_PER_GROUP;
+}

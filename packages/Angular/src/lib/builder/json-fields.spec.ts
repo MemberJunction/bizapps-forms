@@ -12,6 +12,7 @@ import {
   parseStyleTokens,
   buildStyleTokens,
 } from './json-fields';
+import { withVerbGroup } from './rules-panel-model';
 
 describe('conditional rule round-trip', () => {
   it('parses valid JSON', () => {
@@ -26,9 +27,35 @@ describe('conditional rule round-trip', () => {
     expect(parseConditionalRule('not json')).toBeUndefined();
   });
 
-  it('serializes to null when there is no show group', () => {
+  it('serializes to null only when the rule carries no verb at all', () => {
     expect(serializeConditionalRule(undefined)).toBeNull();
     expect(serializeConditionalRule({})).toBeNull();
+  });
+
+  it('keeps a rule whose only verb is jump', () => {
+    // The guard used to be `!rule.show`, written when `show` was the only verb. A page whose
+    // author added a jump and no show rule therefore serialized to `null`: the jump was
+    // discarded on save and no respondent ever skipped anything.
+    const rule: ConditionalRule = {
+      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, toPageId: 'p3' }],
+    };
+    expect(parseConditionalRule(serializeConditionalRule(rule))).toEqual(rule);
+  });
+
+  it('keeps a rule whose only verb is require', () => {
+    const rule: ConditionalRule = { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } };
+    expect(parseConditionalRule(serializeConditionalRule(rule))).toEqual(rule);
+  });
+
+  it('removing the show verb leaves the other verbs standing', () => {
+    // The destructive half of the same defect: `withVerbGroup` correctly returns the remaining
+    // verbs, and the serializer then threw them away because `show` was gone.
+    const rule: ConditionalRule = {
+      show: { all: [{ questionId: 'q1', op: 'isAnswered' }] },
+      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, toPageId: 'p3' }],
+    };
+    const withoutShow = withVerbGroup(rule, 'show', undefined);
+    expect(parseConditionalRule(serializeConditionalRule(withoutShow))).toEqual({ jump: rule.jump });
   });
 
   it('serializes a real rule', () => {

@@ -16,6 +16,7 @@ import { IsPlatformSQL } from '@memberjunction/core';
 import type {
   PublishedFormDefinition,
   mjBizAppsFormsFormDistributionEntityType,
+  mjBizAppsFormsFormResponseEntityType,
   mjBizAppsFormsFormVersionEntityType,
 } from '@mj-biz-apps/forms-entities';
 import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.service';
@@ -33,7 +34,8 @@ export type CreatePermissions = Record<string, boolean>;
 /** A stored FormResponse row the fake returns from session-response lookups. */
 export interface ExistingResponseRow {
   ID: string;
-  Status: 'Complete' | 'Partial';
+  /** Every status a real row can hold, `Disqualified` included — the gates must see it too. */
+  Status: mjBizAppsFormsFormResponseEntityType['Status'];
   FormVersionID: string;
   AnonymousSessionID: string;
   /** Optional stored SourceMetadata JSON, exercised by the client-id LIKE proof lookups. */

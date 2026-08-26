@@ -1,3 +1,4 @@
+import { MAX_CONDITIONS_PER_GROUP } from '@mj-biz-apps/forms-entities';
 import { describe, expect, it } from 'vitest';
 import {
   coerceConditionValue,
@@ -5,6 +6,7 @@ import {
   toConditionalSource,
   toggleMembership,
   valueEditorKind,
+  canAddCondition,
 } from './condition-sources';
 
 /** Structural fakes — the module deliberately reads plain fields, not BaseEntity. */
@@ -177,5 +179,22 @@ describe('toggleMembership', () => {
     it('numeric arrays are stringified, and re-checking never duplicates', () => {
       expect(toggleMembership([1, 2], '1', true)).toEqual(['2', '1']);
     });
+  });
+});
+
+describe('the condition cap the contract declares', () => {
+  it('lets a group grow up to the cap', () => {
+    expect(canAddCondition(0)).toBe(true);
+    expect(canAddCondition(MAX_CONDITIONS_PER_GROUP - 1)).toBe(true);
+  });
+
+  it('stops offering another condition at the cap', () => {
+    // The cap is documented as enforced "in the editor, which stops offering Add condition at
+    // the cap" — which was not true of any code. It mattered because the only other stated
+    // enforcement, the zod schema, does not run on the builder's publish path either: an
+    // over-cap group published cleanly and then failed to parse on every public form load,
+    // where a swallowed throw turned it into "no rule" and rendered the gated item to everyone.
+    expect(canAddCondition(MAX_CONDITIONS_PER_GROUP)).toBe(false);
+    expect(canAddCondition(MAX_CONDITIONS_PER_GROUP + 5)).toBe(false);
   });
 });

@@ -153,9 +153,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Response Answers','ResponseID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Response Answers','ResponseID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Response Answers')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormResponseAnswers')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormResponseAnswers', $event.totalRowCount)"
                 >
@@ -178,9 +178,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Entity Binding Records','FormResponseID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Binding Records','FormResponseID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Entity Binding Records')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormEntityBindingRecords')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormEntityBindingRecords', $event.totalRowCount)"
                 >
@@ -203,9 +203,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Automation Runs','FormResponseID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automation Runs','FormResponseID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Automation Runs')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormAutomationRuns')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormAutomationRuns', $event.totalRowCount)"
                 >

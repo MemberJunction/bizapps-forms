@@ -176,9 +176,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Question Options','QuestionID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Question Options','QuestionID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Question Options')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormQuestionOptions')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormQuestionOptions', $event.totalRowCount)"
                 >
@@ -201,9 +201,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Response Answers','QuestionID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Response Answers','QuestionID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Response Answers')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormResponseAnswers')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormResponseAnswers', $event.totalRowCount)"
                 >
@@ -226,9 +226,9 @@
         <div>
             <mj-explorer-entity-data-grid
                 [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Uploads','QuestionID')"
-                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Uploads','QuestionID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Uploads')"
                 [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormUploads')"
-                [ShowToolbar]="true"
+                [ShowToolbar]="false"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormUploads', $event.totalRowCount)"
                 >

@@ -12,7 +12,8 @@ import {
   type EvalExtras,
   type ConditionalRule,
 } from './conditional-rule';
-import type { PublishedFormPage, PublishedFormScreen } from './form-definition';
+import type { PublishedFormPage, PublishedFormQuestion, PublishedFormScreen } from './form-definition';
+import { isAnswerableQuestionType } from './question-types';
 
 /**
  * Whether a question is required RIGHT NOW, given the answers so far.
@@ -98,6 +99,35 @@ function firedJumpTarget(
     }
   }
   return null;
+}
+
+/**
+ * Every answer-collecting question the respondent can currently see, in document order:
+ * reachable pages (show rules + jumps) × the questions on them whose OWN show rule passes ×
+ * answerable types only.
+ *
+ * The one definition, because three things have to agree about this set and two of them are on
+ * opposite sides of the wire: the widget renders it, the widget submits exactly it, and the
+ * server scores over it. The server used to score over every question on a reachable page,
+ * question-level `show` rules ignored — so an answer to a hidden scored question (a stale one
+ * the respondent had since hidden, or simply one a crafted request added) counted toward a
+ * total the widget had computed without it. The two sides then picked different ending screens
+ * from the same submission, and the server's was the one an attacker could move.
+ */
+export function resolveVisibleQuestions(
+  pages: readonly PublishedFormPage[],
+  answers: ReadonlyMap<string, AnswerValue>,
+  extras?: EvalExtras,
+): PublishedFormQuestion[] {
+  const visible: PublishedFormQuestion[] = [];
+  for (const page of resolveVisiblePages(pages, answers, extras)) {
+    for (const question of [...page.questions].sort((a, b) => a.displayOrder - b.displayOrder)) {
+      if (isAnswerableQuestionType(question.type) && evaluateConditionalRule(question.conditionalRule, answers, extras)) {
+        visible.push(question);
+      }
+    }
+  }
+  return visible;
 }
 
 /**

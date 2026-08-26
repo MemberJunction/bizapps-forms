@@ -128,11 +128,24 @@ export interface ConditionalRule {
 /**
  * Caps on rule size (design principle: every unbounded shape gets an explicit limit).
  *
- * Enforced at the untrusted boundary — the zod schema REJECTS an over-cap rule (an explicit
- * publish-time failure, never a silent truncation that would weaken an `all` group) — and in
- * the editor, which stops offering "Add condition" at the cap. `resolveVisiblePages`
- * additionally ignores jump rules beyond the cap as a defense in depth for pre-validation
- * callers.
+ * Three enforcement points, and it is worth being precise about which one catches what,
+ * because an earlier version of this comment claimed two that did not exist:
+ *
+ *  - The EDITOR stops offering "Add condition" at `MAX_CONDITIONS_PER_GROUP` (`canAddCondition`
+ *    in the builder's condition-sources). This is the only one that acts before a rule is
+ *    stored, and it is what makes an over-cap group unauthorable through the UI. The rules
+ *    panel authors a single jump per page, so `MAX_JUMP_RULES` has no UI to enforce.
+ *  - The ZOD schema rejects an over-cap rule, but it runs on the SERVER's snapshot parse, not
+ *    on the builder's publish path (which uses the permissive JSON parser). So it is a boundary
+ *    check on untrusted input, NOT the publish-time failure an author would see.
+ *  - `resolveVisiblePages` ignores jump rules beyond the cap, defense in depth for callers that
+ *    never went through either.
+ *
+ * Known residual, out of this change's blast radius: a rule hand-authored or AI-authored over
+ * the cap still parses to `undefined` server-side (the snapshot parser logs and tolerates it),
+ * and an absent `show` group means VISIBLE — so such a rule fails open on the item it guards.
+ * Closing that means deciding what an unreadable rule should mean form-wide, which is a
+ * broader change than adding these caps was.
  */
 export const MAX_CONDITIONS_PER_GROUP = 20;
 export const MAX_JUMP_RULES = 10;
@@ -198,34 +211,86 @@ export function evaluateCondition(
   if (answer === NOT_EVALUABLE) {
     return false;
   }
+  const value = conditionComparand(condition);
   switch (condition.op) {
     case 'isAnswered':
       return isAnswerSupplied(answer);
     case 'isNotAnswered':
       return !isAnswerSupplied(answer);
     case 'equals':
-      return scalarsEqual(answer, condition.value);
+      return scalarsEqual(answer, value);
     case 'notEquals':
-      return !scalarsEqual(answer, condition.value);
+      return !scalarsEqual(answer, value);
     case 'equalsIgnoreCase':
-      return scalarsEqualIgnoreCase(answer, condition.value);
+      return scalarsEqualIgnoreCase(answer, value);
     case 'in':
-      return isMember(answer, condition.value);
+      return isMember(answer, value);
     case 'notIn':
-      return isAnswerSupplied(answer) && !isMember(answer, condition.value);
+      return isAnswerSupplied(answer) && !isMember(answer, value);
     case 'greaterThan':
-      return compareOrdered(answer, condition.value) === 'greater';
+      return compareOrdered(answer, value) === 'greater';
     case 'lessThan':
-      return compareOrdered(answer, condition.value) === 'less';
+      return compareOrdered(answer, value) === 'less';
     case 'contains':
-      return answerContains(answer, condition.value);
+      return answerContains(answer, value);
     case 'startsWith':
-      return stringAffixMatch(answer, condition.value, 'start');
+      return stringAffixMatch(answer, value, 'start');
     case 'endsWith':
-      return stringAffixMatch(answer, condition.value, 'end');
+      return stringAffixMatch(answer, value, 'end');
     default:
       return assertNever(condition.op);
   }
+}
+
+/**
+ * The value side of a condition, normalized for its source.
+ *
+ * A `source: 'score'` condition compares against a number — the running total always is one —
+ * but the editor's value input is a text box, so it stores `"70"`. `70 === '70'` is false, which
+ * made every equality-family operator on the score wrong in both directions: `equals` could
+ * never fire, and `notEquals` fired for everyone, with nothing anywhere to say so. Ordering
+ * escaped only because {@link compareOrdered} already coerced numeric strings.
+ *
+ * Normalized HERE, not in the editor, because rules also arrive from mj-sync metadata and the
+ * AI form builder — neither of which goes near the editor — and because one conversion at the
+ * single point of evaluation cannot drift from the several places that author rules. A value
+ * that is not a number stays exactly as written, so authorable nonsense ("score equals banana")
+ * remains inert rather than coercing to `NaN` and firing by accident.
+ *
+ * Question conditions are returned untouched: `'5'` and `5` are genuinely different answers to
+ * a question, and collapsing them would change the meaning of every rule already published.
+ */
+function conditionComparand(condition: ConditionalCondition): ConditionValue | undefined {
+  const value = condition.value;
+  if (condition.source !== 'score' || value === undefined) {
+    return value;
+  }
+  if (!Array.isArray(value)) {
+    return asScoreNumber(value) ?? value;
+  }
+  // All-or-nothing for a membership list: one unparseable entry means the author wrote something
+  // this rule cannot mean, and a half-converted list would quietly match on the half that parsed.
+  const numbers: number[] = [];
+  for (const entry of value) {
+    const parsed = asScoreNumber(entry);
+    if (parsed === undefined) {
+      return value;
+    }
+    numbers.push(parsed);
+  }
+  return numbers;
+}
+
+/** One score comparand as a number, or `undefined` when it has no finite numeric reading. */
+function asScoreNumber(value: string | number | boolean): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value !== 'string' || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value.trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /**

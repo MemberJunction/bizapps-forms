@@ -106,8 +106,10 @@
 
     }
 
-    <button type="button" class="cre-add" (click)="addCondition()">
-      <i class="fa-solid fa-plus" aria-hidden="true"></i> Add condition
-    </button>
+    @if (canAddCondition) {
+      <button type="button" class="cre-add" (click)="addCondition()">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add condition
+      </button>
+    }
   }
 </div>

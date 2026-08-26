@@ -7,8 +7,9 @@
 import { computed, signal } from '@angular/core';
 import {
   evaluateConditionalRule,
-  isAnswerableQuestionType,
+  isRequiredNow,
   resolveVisiblePages,
+  resolveVisibleQuestions,
   answerCompleteness,
   isAnswerSupplied,
   type AnswerValue,
@@ -105,18 +106,14 @@ export class FormRuntime {
       .filter((q) => evaluateConditionalRule(q.conditionalRule, map));
   }
 
-  /** Every visible, answer-collecting question across the form, in document order. */
-  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() => {
-    const out: PublishedFormQuestion[] = [];
-    for (const page of this.visiblePages()) {
-      for (const q of this.visibleQuestions(page)) {
-        if (isAnswerableQuestionType(q.type)) {
-          out.push(q);
-        }
-      }
-    }
-    return out;
-  });
+  /**
+   * Every visible, answer-collecting question across the form, in document order — from the
+   * shared resolver, so the set this widget renders, submits and scores over is the same set
+   * the server scores over.
+   */
+  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() =>
+    resolveVisibleQuestions(this.orderedPages(), this.answers()),
+  );
 
   // --- Validation ----------------------------------------------------------
 
@@ -167,12 +164,19 @@ export class FormRuntime {
 
   // --- Progress ------------------------------------------------------------
 
-  /** Fraction 0–1 of visible answerable questions that have a value. */
-  /** How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`. */
+  /**
+   * How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`.
+   *
+   * Requiredness comes from `isRequiredNow`, the same judge `errorFor`/`isFormValid` use, NOT
+   * from the static `isRequired` flag. `computeProgress` returns 1 as soon as every required
+   * question is satisfied, so reading the static flag showed a full bar on a form whose submit
+   * button was disabled by a `require` group that had just fired — the one state in which the
+   * bar is the respondent's only clue that something is still missing.
+   */
   public readonly progress = computed(() =>
     computeProgress(
       this.visibleAnswerableQuestions().map((q) => ({
-        required: q.isRequired,
+        required: isRequiredNow(q, this.answers()),
         completeness: answerCompleteness(q.type, this.valueFor(q.id)),
       })),
     ),

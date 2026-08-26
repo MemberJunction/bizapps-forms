@@ -257,6 +257,46 @@ describe('FormRuntime progress and conditional questions', () => {
   });
 });
 
+describe('FormRuntime progress and conditional requiredness', () => {
+  /**
+   * The bar must agree with the submit button (progress.ts states this invariant outright).
+   * `computeProgress` short-circuits to 1 once every REQUIRED question is satisfied, so feeding
+   * it the static `isRequired` while validity is judged by `isRequiredNow` reports a full bar on
+   * a form the respondent cannot submit — and gives them no clue which field is holding it.
+   */
+  it('counts a conditionally-required question as required', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q1', isRequired: true },
+        {
+          id: 'q2',
+          conditionalRule: { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
+        },
+      ]),
+    );
+    rt.setValue('q1', 'Other');
+
+    expect(rt.isFormValid()).toBe(false);
+    expect(rt.progress()).toBeLessThan(1);
+  });
+
+  it('stops counting it once the require group no longer fires', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q1', isRequired: true },
+        {
+          id: 'q2',
+          conditionalRule: { require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
+        },
+      ]),
+    );
+    rt.setValue('q1', 'Red');
+
+    expect(rt.isFormValid()).toBe(true);
+    expect(rt.progress()).toBe(1);
+  });
+});
+
 describe('FormRuntime progress edge cases', () => {
   it('reports complete for a form with nothing to answer', () => {
     expect(new FormRuntime(formOf([{ id: 's', type: 'Statement' }])).progress()).toBe(1);

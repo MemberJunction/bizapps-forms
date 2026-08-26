@@ -20,7 +20,7 @@ import {
   computeScore,
   resolveDisqualification,
   resolveEndingScreen,
-  resolveVisiblePages,
+  resolveVisibleQuestions,
   resolveOnSubmitDispatch,
   type AnswerValue,
   type FormAnswerInput,
@@ -205,16 +205,13 @@ function isNonEmptyString(value: unknown): value is string {
  * what did not happen.
  */
 /**
- * The running score for these answers (C4): computed over the pages the respondent could
- * actually reach, so a hidden or jumped-over page's stale answers score nothing — the same
- * basis the widget uses, via the same shared functions.
+ * The running score for these answers (C4): computed over exactly the questions the respondent
+ * could reach and see, so a hidden or jumped-over question's stale answer scores nothing. The
+ * widget folds over the same set from the same function, which is what makes "the same basis"
+ * a fact rather than a convention two files have to keep agreeing on.
  */
 function scoreFor(resolved: ResolvedDefinition, answers: ReadonlyMap<string, AnswerValue>): number {
-  const reachable = resolveVisiblePages(resolved.definition.pages, answers);
-  return computeScore(
-    reachable.flatMap((page) => page.questions),
-    answers,
-  );
+  return computeScore(resolveVisibleQuestions(resolved.definition.pages, answers), answers);
 }
 
 function confirmationFields(
@@ -359,11 +356,30 @@ async function runSubmitPipelineInner(
 
   timer.mark('captcha');
 
-  // 5. Dedupe (Task 1) — only on completion. If this session (or this client response id)
-  //    already Completed this form, short-circuit rather than writing a second row.
+  // 5. Disqualification (C3) — evaluated on EVERY save. The widget's own detection is advisory;
+  //    THIS is the enforcement (the mutation is reachable without the widget, and a client that
+  //    "forgets" it was disqualified must still be disqualified). Evaluated on the raw answer
+  //    map: a knockout answer disqualifies whether or not later visibility would have kept it.
+  //
+  //    FIRST among the gates, deliberately, because it is pure — no I/O — and because the two
+  //    gates below both exist to police COMPLETIONS, which a knockout is not. Running them first
+  //    meant a full form answered "no" by an ineligible respondent came back "no longer
+  //    accepting responses" and wrote nothing, so the one fact worth keeping about that person
+  //    — that they were screened out — was the fact we discarded.
+  const preliminaryMap = buildAnswerMap(submission.answers);
+  const disqualifiedBy = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
+    score: scoreFor(resolved, preliminaryMap),
+  });
+  const terminalCompletion = complete && disqualifiedBy === undefined;
+
+  // 6. Dedupe (Task 1) — only on a completion. If this session (or this client response id)
+  //    already reached a TERMINAL status for this form, short-circuit rather than writing a
+  //    second row. Terminal is `Complete` OR `Disqualified`: both mean nothing more is coming,
+  //    and treating only the first as terminal let a retried knockout fall through to the quota
+  //    gate below and be refused on an attempt that had already succeeded.
   //    FAIL-CLOSED: a lookup-query error rejects the resubmit (never silently duplicates).
   if (complete) {
-    const dedupe = await checkDuplicate(ctx, resolved, submission);
+    const dedupe = await checkDuplicate(ctx, resolved, submission, disqualifiedBy);
     if (dedupe) {
       return report(dedupe);
     }
@@ -371,8 +387,12 @@ async function runSubmitPipelineInner(
 
   timer.mark('dedupe');
 
-  // 6. Quota (distribution cap + optional form cap) — only enforced on completion.
-  if (complete) {
+  // 7. Quota (distribution cap + optional form cap) — enforced only on a submission that would
+  //    actually consume a slot. A disqualification never increments `ResponseCount`
+  //    (`countsCompletion` in persistence.service), so holding one to the cap refuses a response
+  //    that cannot fill it. A QUALIFYING respondent is still refused, which is the whole point
+  //    of the cap.
+  if (terminalCompletion) {
     const quotaResult = await checkQuotas(ctx, resolved);
     if (quotaResult) {
       return report(quotaResult);
@@ -381,17 +401,7 @@ async function runSubmitPipelineInner(
 
   timer.mark('quota');
 
-  // 6b. Disqualification (C3) — evaluated on EVERY save, before validation. The widget's own
-  //     detection is advisory; THIS is the enforcement (the mutation is reachable without the
-  //     widget, and a client that "forgets" it was disqualified must still be disqualified).
-  //     Evaluated on the raw answer map: a knockout answer disqualifies whether or not later
-  //     visibility would have kept it.
-  const preliminaryMap = buildAnswerMap(submission.answers);
-  const disqualifiedBy = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
-    score: scoreFor(resolved, preliminaryMap),
-  });
-
-  // 7. Server-side re-validation (conditional visibility + required + format). A disqualified
+  // 8. Server-side re-validation (conditional visibility + required + format). A disqualified
   //    respondent legitimately stopped mid-form, so required questions they never reached must
   //    not block the terminal write — validation runs in partial mode for them.
   const validation = validateSubmission(
@@ -403,7 +413,7 @@ async function runSubmitPipelineInner(
     return report({ success: false, errors: validation.errors });
   }
 
-  // 7b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
+  // 8b. Every file answer must be one this respondent actually uploaded. `__mj.File` has no owner
   //     column, so the foreign key proves only that the file exists — without this a submission
   //     can name any file in the instance and it becomes their answer. Checked before persistence,
   //     so a foreign id never reaches the database, and on partial saves too, so it is caught at
@@ -515,6 +525,29 @@ async function runSubmitPipelineInner(
       ? disqualificationFields(disqualifiedBy)
       : confirmationFields(resolved, validation.answerMap)),
   });
+}
+
+/**
+ * Statuses nothing further will come from. Mirrors `isTerminalStatus` in persistence.service —
+ * they answer the same question on either side of the write, and a status that is terminal for
+ * one and not the other is how a sealed response gets a second pipeline run.
+ */
+function isTerminalResponseStatus(status: string): status is 'Complete' | 'Disqualified' {
+  return status === 'Complete' || status === 'Disqualified';
+}
+
+/**
+ * What a repeat of an already-disqualified submission is shown.
+ *
+ * The knockout screen when this attempt still trips the same rule (the normal case — the same
+ * answers were re-sent), and the neutral fallback when it does not, because we cannot honestly
+ * name a screen these answers no longer match. Never the form's confirmation message: the row
+ * is `Disqualified`, and "thanks, your response has been recorded" is untrue of it.
+ */
+function terminalRepeatFields(
+  disqualifiedBy: PublishedFormScreen | undefined,
+): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
+  return disqualifiedBy ? disqualificationFields(disqualifiedBy) : { confirmationMessage: 'Thanks for your time.' };
 }
 
 /**
@@ -638,6 +671,7 @@ async function checkDuplicate(
   ctx: PipelineContext,
   resolved: ResolvedDefinition,
   submission: PipelineSubmission,
+  disqualifiedBy: PublishedFormScreen | undefined,
 ): Promise<FormSubmissionResult | undefined> {
   // First, an idempotent repeat of THIS client's final submit: the same client response id
   // already promoted to Complete. Keyed on the id (+ SourceMetadata proof), so it works even
@@ -651,12 +685,17 @@ async function checkDuplicate(
     if (!byId.ok) {
       return fail('Could not verify submission status; please retry shortly.');
     }
-    if (byId.response && byId.response.Status === 'Complete') {
+    if (byId.response && isTerminalResponseStatus(byId.response.Status)) {
       return {
         success: true,
         responseId: byId.response.ID,
-        status: 'Complete',
-        ...confirmationFields(resolved, buildAnswerMap(submission.answers)),
+        status: byId.response.Status,
+        // The repeat is shown what the original outcome was, not a generic thank-you: a
+        // respondent whose first attempt was screened out must not be told on their retry that
+        // their response has been recorded.
+        ...(byId.response.Status === 'Disqualified'
+          ? terminalRepeatFields(disqualifiedBy)
+          : confirmationFields(resolved, buildAnswerMap(submission.answers))),
       };
     }
   }
