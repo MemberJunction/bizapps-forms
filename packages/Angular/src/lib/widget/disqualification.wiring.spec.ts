@@ -216,3 +216,33 @@ describe('a server-side knockout is shown as one', () => {
     expect(body).toMatch(/Disqualified/);
   });
 });
+
+describe('a screened-out respondent is never told they succeeded', () => {
+  /**
+   * The server sends a redirect OR a message, never both — so for a knockout WITH a redirect,
+   * `confirmationMessage` is deliberately absent. Clearing `endingScreen` then drops the template
+   * into its `@else` arm: a success checkmark and the form-wide "Thanks — your response has been
+   * recorded." That sentence is exactly what `disqualificationFields` calls "a lie on both
+   * counts", shown to the one respondent it is most wrong for. The redirect makes it a flash
+   * rather than a resting state, which is not the same as making it acceptable — a blocked or
+   * slow navigation leaves it on screen.
+   */
+  it('the component knows the result was a screening', () => {
+    expect(source()).toMatch(/screenedOut/);
+  });
+
+  it('does not fall back to the form-wide confirmation for one', () => {
+    expect(methodIn(source(), 'protected confirmationMessage')).toMatch(/screenedOut|SCREENED_OUT/);
+  });
+
+  it('and the template does not show it a success tick', () => {
+    const template = stripped(join(__dirname, 'mj-form.component.html'));
+    const doneArm = template.slice(template.indexOf("@case ('done')"), template.indexOf('@default'));
+    expect(doneArm).toMatch(/screenedOut\(\)/);
+  });
+
+  it('uses the one shared wording, not a second copy of the server\'s', () => {
+    // The server has to have this string too (it answers the mutation). Two copies drift.
+    expect(source()).toMatch(/SCREENED_OUT_MESSAGE/);
+  });
+});

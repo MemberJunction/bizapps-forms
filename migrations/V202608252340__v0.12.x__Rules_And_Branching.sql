@@ -44,7 +44,7 @@ GO
 -- ------------------------------------------------------------------------------------------------
 
 /* SQL text to update existing entities from schema */
-EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys';
+EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
 /* SQL text to insert 1 new entity field(s) */
 
@@ -112,10 +112,10 @@ EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='${
       END;
 
 /* SQL text to update existing entity fields from schema */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys';
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
 /* SQL text to set default column width where needed */
-EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys';
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
 /* SQL text to insert entity field value with ID 772dbdf0-b7c7-43ac-bd26-659bd8b20e84 */
 INSERT INTO [${mjSchema}].[EntityFieldValue]
@@ -127,7 +127,7 @@ INSERT INTO [${mjSchema}].[EntityFieldValue]
 UPDATE [${mjSchema}].[EntityFieldValue] SET Sequence=3 WHERE ID='719712D6-558C-4087-8C3C-A1254801E211';
 
 /* SQL text to sync schema info from database schemas */
-EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys';
+EXEC [${mjSchema}].[spUpdateSchemaInfoFromDatabase] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
 /* Index for Foreign Keys for FormScreen */
 -----------------------------------------------------------------
@@ -465,13 +465,13 @@ GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormScreen] TO [cdp_Develope
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormScreen] TO [cdp_Developer], [cdp_Integration];
 
 /* SQL text to delete unneeded entity fields (1 scoped entities) */
-EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys', @EntityIDs='A1F8CC58-B040-429C-B695-70DB0E9E7327';
+EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @EntityIDs='A1F8CC58-B040-429C-B695-70DB0E9E7327';
 
 /* SQL text to update existing entity fields from schema (1 scoped entities) */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys', @EntityIDs='A1F8CC58-B040-429C-B695-70DB0E9E7327';
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @EntityIDs='A1F8CC58-B040-429C-B695-70DB0E9E7327';
 
 /* SQL text to set default column width where needed */
-EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber,${mjSchema}_BizAppsCommon,${mjSchema},sys';
+EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
 /* Set categories for 16 fields */
 

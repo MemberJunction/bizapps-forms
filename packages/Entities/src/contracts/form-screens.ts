@@ -51,6 +51,17 @@ export function resolveEndingScreen(
 }
 
 /**
+ * What a screened-out respondent is told when nothing more specific applies.
+ *
+ * Shared, because both ends need it and they must not drift: the server answers the mutation with
+ * it, and the widget needs it for the case where the server sent a REDIRECT instead of a message
+ * (it sends one or the other, never both) and the page is briefly on screen anyway. Deliberately
+ * not a thank-you for a completion — "your response has been recorded" is untrue of a knockout on
+ * both counts, and it is the sentence a respondent is most likely to quote back.
+ */
+export const SCREENED_OUT_MESSAGE = 'Thanks for your time.';
+
+/**
  * The message a respondent sees after submitting: the resolved ending's copy, else the
  * form-wide confirmation message, else a neutral default.
  *

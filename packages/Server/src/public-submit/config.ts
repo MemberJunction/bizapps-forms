@@ -28,6 +28,16 @@
  *                                     than rate, which no sliding window can do at any setting —
  *                                     a caller inside every limit can still open many requests at
  *                                     once. Orthogonal to the ceilings above, not a substitute.
+ *  - `FORMS_KNOCKOUT_MAX`             Per (caller, distribution) ceiling on DISQUALIFYING submits
+ *                                     per window. Defaults to `FORMS_COMPLETION_MAX`. A knockout
+ *                                     may not share the completion bucket — it fires none of the
+ *                                     work that bucket is tight for, and a burst of ineligible
+ *                                     respondents behind one NAT would lock real completions out
+ *                                     — but it must not be unthrottled either: each one leaves a
+ *                                     PERMANENT row, so with only the save ceiling above it the
+ *                                     durable row ceiling below falls an order of magnitude
+ *                                     faster. Its own bucket is the only answer that is not one
+ *                                     of those two mistakes.
  *  - `FORMS_MAX_PARTIALS_PER_VERSION` Hard ceiling on the rows a single published version may
  *                                     accumulate that NO QUOTA bounds — `Partial` autosaves and
  *                                     `Disqualified` knockouts alike, since the response quota
@@ -101,6 +111,8 @@ export interface PublicSubmitConfig {
    * fires while someone fills the form in). This is the tight one.
    */
   completionMax: number;
+  /** Per (caller, distribution) ceiling on disqualifying submits — see the env doc above. */
+  knockoutMax: number;
   /**
    * Hard cap on how many buckets the in-memory window store retains.
    *
@@ -141,6 +153,7 @@ export function getPublicSubmitConfig(): PublicSubmitConfig {
     rateLimitMaxKeys: numberFromEnv('FORMS_RATELIMIT_MAX_KEYS', 50_000),
     rateLimitWindowMs: numberFromEnv('FORMS_RATELIMIT_WINDOW_MS', 60_000),
     maxInFlight: numberFromEnv('FORMS_SUBMIT_MAX_IN_FLIGHT', 50),
+    knockoutMax: numberFromEnv('FORMS_KNOCKOUT_MAX', numberFromEnv('FORMS_COMPLETION_MAX', 20)),
     maxPartialsPerVersion: numberFromEnv('FORMS_MAX_PARTIALS_PER_VERSION', 10_000),
   });
   return cached;

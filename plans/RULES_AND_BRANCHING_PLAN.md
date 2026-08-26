@@ -200,9 +200,10 @@ Concretely, in the pane at `form-builder.component.html:473` (aside `fb-pane--ri
       page-visibility call sites; authoring UI offers only **later** pages; "Jump to page" card
       (page editor only).
 - [x] **C3. Disqualify**: `IsDisqualification` flag + "Disqualify if" card on ending screens;
-      widget evaluates `resolveDisqualification` on every answer change and, on first match,
-      submits what it has with a disqualified marker and shows that ending (its
-      `RedirectURL` honored); server re-evaluates on submit (client is never trusted — same
+      widget evaluates `resolveDisqualification` when the respondent FINISHES a question (leaves
+      it, or advances past it — never per keystroke, which disqualified someone typing `18` on the
+      `1`) and, on first match, submits what it has and shows that ending (its `RedirectURL`
+      honored); server re-evaluates on the FINAL submit (client is never trusted — same
       posture as required/validation), sets `Status='Disqualified'`, skips required-checks for
       everything after the disqualifying answer set, and returns the disqualify ending.
 - [x] **C4. Scoring**: read `FormQuestion.ScoringConfig` (`{points: Record<optionValue, number>}`);
@@ -293,11 +294,13 @@ absent show group means VISIBLE).
 2. **Disqualified responses consume NO quota**: `countsCompletion()` in
    `persistence.service.ts` excludes them from `ResponseCount`, and the form-wide quota check
    keeps counting `Complete` only. They also fire **no automations**.
-3. **No new mutation flag.** The widget banks the knockout through the existing autosave
-   (fail-soft) path and locks into the ending; the SERVER re-evaluates
-   `resolveDisqualification` on every save (partial or final) and writes
-   `Status='Disqualified'` — validation runs in partial mode for a disqualified save, so
-   never-reached required questions cannot block the terminal write. A client that "forgets"
+3. **No new mutation flag.** The widget sends the knockout as one FINISHED submission
+   (fail-soft) and locks into the ending; the SERVER re-evaluates `resolveDisqualification` on
+   every save but SEALS only a finished one, and writes `Status='Disqualified'` — validation runs
+   in partial mode for a disqualified save, so never-reached required questions cannot block the
+   terminal write. Sealing on a partial was the plan as first written and it was wrong: the
+   autosave debounce catches half-typed values, and a sealed row cannot be corrected. A client
+   that "forgets"
    it was disqualified still gets disqualified.
 
 ### Implementation notes (deltas from the plan as written)

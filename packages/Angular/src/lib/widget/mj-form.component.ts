@@ -25,6 +25,7 @@ import {
   endingRedirectUrl,
   resolveDisqualification,
   resolveEndingScreen,
+  SCREENED_OUT_MESSAGE,
   type FormSubmissionInput,
   type FormSubmissionResult,
   type FormStyleTokens,
@@ -766,6 +767,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Whether the server recorded this response as a screening rather than a completion.
+   *
+   * Read from the RESULT, not from the client's own verdict, because the server sees knockouts the
+   * client never evaluated — a rule on the last question before Submit, or a caller with no widget.
+   */
+  protected readonly screenedOut = computed(() => this.result()?.status === 'Disqualified');
+
+  /**
    * The confirmation message for a form with no ending screen.
    *
    * The server's echoed message wins over the form's own setting, because a server that
@@ -775,6 +784,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
     const echoed = this.result()?.confirmationMessage;
     if (echoed) {
       return echoed;
+    }
+    // A screening never falls back to the form's confirmation. The server sends a redirect OR a
+    // message, never both, so a knockout carrying a redirect arrives here with nothing echoed —
+    // and the form-wide default is "your response has been recorded", which is untrue of a
+    // knockout on both counts. A redirect usually makes this a flash; a blocked or slow
+    // navigation makes it the resting state, and it must not be a thank-you either way.
+    if (this.screenedOut()) {
+      return SCREENED_OUT_MESSAGE;
     }
     return endingMessage(undefined, this.definition()?.settings ?? {});
   }

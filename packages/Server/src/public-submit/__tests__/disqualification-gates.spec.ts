@@ -112,6 +112,7 @@ beforeEach(() => {
   FormsRateLimiter.Instance.resetForTests();
   delete process.env.FORMS_MAX_PARTIALS_PER_VERSION;
   delete process.env.FORMS_COMPLETION_MAX;
+  delete process.env.FORMS_KNOCKOUT_MAX;
   resetPublicSubmitConfigForTests();
 });
 
@@ -441,6 +442,7 @@ describe('a knockout does not spend the completion budget', () => {
   describe('worst', () => {
     it('knockouts past the completion ceiling are still recorded', async () => {
       process.env.FORMS_COMPLETION_MAX = '2';
+      process.env.FORMS_KNOCKOUT_MAX = '50';
       resetPublicSubmitConfigForTests();
       const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
 
@@ -453,6 +455,7 @@ describe('a knockout does not spend the completion budget', () => {
 
     it('and leave the ceiling intact for real completions', async () => {
       process.env.FORMS_COMPLETION_MAX = '2';
+      process.env.FORMS_KNOCKOUT_MAX = '50';
       resetPublicSubmitConfigForTests();
       const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
 
@@ -476,5 +479,52 @@ describe('a knockout does not spend the completion budget', () => {
       expect(second.success).toBe(false);
       expect(second.errors?.[0]?.message ?? '').toMatch(/too many|wait/i);
     });
+  });
+});
+
+describe('knockouts get their own throttle, not a free pass', () => {
+  /**
+   * Both neighbouring answers are wrong. Charging knockouts to the COMPLETION bucket let a burst
+   * of ineligible respondents behind one address lock real completions out of a form — that
+   * bucket is tight because a completion fires automations a knockout never fires. Exempting them
+   * entirely was the opposite mistake: each knockout writes a PERMANENT row, so with only the
+   * 120/min save ceiling above it, the durable row ceiling fell roughly an order of magnitude
+   * faster than it was sized for, and a saturated version stops recording anything at all.
+   */
+  it('a knockout burst is throttled by its own ceiling', async () => {
+    process.env.FORMS_KNOCKOUT_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+    expect((await submit(ctx, 'No')).success).toBe(true);
+    expect((await submit(ctx, 'No')).success).toBe(true);
+    const third = await submit(ctx, 'No');
+    expect(third.success).toBe(false);
+    expect(third.errors?.[0]?.message ?? '').toMatch(/too many|wait/i);
+  });
+
+  it('and spends none of the completion budget doing it', async () => {
+    process.env.FORMS_KNOCKOUT_MAX = '50';
+    process.env.FORMS_COMPLETION_MAX = '2';
+    // Gate (a) is 5 per (session, distribution) by default, and this sends six requests from one
+    // session — without raising it, the sixth is refused by THAT ceiling and the test would be
+    // reporting the wrong gate. Isolating one bucket means pinning the ones you are not testing.
+    process.env.FORMS_RATELIMIT_MAX = '50';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+    for (let i = 0; i < 5; i++) {
+      expect((await submit(ctx, 'No')).success, `knockout ${i + 1}`).toBe(true);
+    }
+    expect((await submit(ctx, 'Yes')).success).toBe(true);
+  });
+
+  it('defaults to the completion ceiling when unset', async () => {
+    process.env.FORMS_COMPLETION_MAX = '1';
+    resetPublicSubmitConfigForTests();
+    const { ctx } = contextFor(knockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+    expect((await submit(ctx, 'No')).success).toBe(true);
+    expect((await submit(ctx, 'No')).success).toBe(false);
   });
 });

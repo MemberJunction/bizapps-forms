@@ -24,6 +24,7 @@ import {
   computeScore,
   resolveDisqualification,
   resolveEndingScreen,
+  SCREENED_OUT_MESSAGE,
   resolveVisibleQuestions,
   resolveOnSubmitDispatch,
   type AnswerValue,
@@ -51,6 +52,7 @@ import {
   abuseIdentity,
   buildSourceMetadata,
   completionCeilingKey,
+  knockoutCeilingKey,
   rateLimitKey,
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
@@ -331,13 +333,18 @@ async function runSubmitPipelineInner(
   const knockout = resolveDisqualification(resolved.definition.endScreens ?? [], preliminaryMap, {
     score: scoreFor(resolved, preliminaryMap),
   });
+  // Computed ONCE, here, and read by every gate below that distinguishes the two. It was derived
+  // twice — the rate-limit gate said `complete && knockout === undefined` and the quota said
+  // `terminalCompletion` — which is the same decision written in two places, so a later change to
+  // one would have silently disagreed with the other.
+  const terminalCompletion = complete && knockout === undefined;
 
   timer.mark('resolve-form');
 
   // 3. Rate-limit. `charge` consults every bucket before spending any of them, so a request one
   //    gate refuses does not silently eat the respondent's budget in another.
   warnOnceIfAbuseKeyingDegraded(ctx.clientIpHash);
-  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, complete && knockout === undefined);
+  const gates = rateLimitGatesFor(ctx, resolved.distribution.ID, terminalCompletion, complete && knockout !== undefined);
   const limit = FormsRateLimiter.Instance.charge(gates);
   if (!limit.allowed) {
     return report(fail(rateLimitedMessage(limit.retryAfterMs)));
@@ -377,22 +384,10 @@ async function runSubmitPipelineInner(
   //    "forgets" it was disqualified must still be disqualified). Evaluated on the raw answer
   //    map: a knockout answer disqualifies whether or not later visibility would have kept it.
   //
-  //    FIRST among the gates, deliberately, because it is pure — no I/O — and because the two
-  //    gates below both exist to police COMPLETIONS, which a knockout is not. Running them first
-  //    meant a full form answered "no" by an ineligible respondent came back "no longer
-  //    accepting responses" and wrote nothing, so the one fact worth keeping about that person
-  //    — that they were screened out — was the fact we discarded.
-  //    A knockout SEALS the response only on a finished submission. The rule is evaluated on
-  //    whatever the request carries, and an autosave carries a value the respondent is still
-  //    typing: `1` on the way to `18`, under `age lessThan 18`, fired the rule and — because
-  //    sealed is sealed — left them unable to ever correct it, since dedupe hands the terminal
-  //    row straight back. A partial therefore records the answer and stays `Partial`.
-  //
-  //    This costs nothing in enforcement, which is the only reason the server evaluates this at
-  //    all: the FINAL submit is the pass a client cannot avoid, and it still seals. A caller that
-  //    "forgets" it was disqualified is disqualified the moment it tries to finish.
+  //    Resolved ABOVE, before any gate charges anything — see the block after the definition
+  //    loads. The order matters and the reason is not obvious: three of the gates (the completion
+  //    rate ceiling, dedupe and the quota) exist to police COMPLETIONS, which a knockout is not.
   const disqualifiedBy = complete ? knockout : undefined;
-  const terminalCompletion = complete && disqualifiedBy === undefined;
 
   // 6. Dedupe (Task 1) — only on a completion. If this session (or this client response id)
   //    already reached a TERMINAL status for this form, short-circuit rather than writing a
@@ -574,7 +569,7 @@ async function runSubmitPipelineInner(
 function terminalRepeatFields(
   disqualifiedBy: PublishedFormScreen | undefined,
 ): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
-  return disqualifiedBy ? disqualificationFields(disqualifiedBy) : { confirmationMessage: 'Thanks for your time.' };
+  return disqualifiedBy ? disqualificationFields(disqualifiedBy) : { confirmationMessage: SCREENED_OUT_MESSAGE };
 }
 
 /**
@@ -589,7 +584,7 @@ function disqualificationFields(
   const redirectUrl = screen.redirectURL?.trim() || undefined;
   const copy = [screen.title, screen.body].filter((t) => !!t?.trim()).join('\n\n');
   return {
-    confirmationMessage: redirectUrl ? undefined : copy || 'Thanks for your time.',
+    confirmationMessage: redirectUrl ? undefined : copy || SCREENED_OUT_MESSAGE,
     redirectUrl,
   };
 }
@@ -605,13 +600,20 @@ function disqualificationFields(
  *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
  *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
  *       ADDRESSES, which is the only currency a public endpoint can charge.
+ *   (d) per (caller, distribution), DISQUALIFYING submits only — its own counter, for the reason
+ *       spelled out at the push site below.
  *   (c) per (caller, distribution), completions only — the same identity against a much tighter
  *       cap, because a completion fires the on-submit automations (a confirmation email to an
  *       address the submission chose, an LLM run, entity upserts) and an autosave does not. One
  *       counter over both could only be tight enough to interrupt someone still typing, or loose
  *       enough to leave the expensive path effectively unlimited.
  */
-function rateLimitGatesFor(ctx: PipelineContext, distributionId: string, complete: boolean): RateLimitGate[] {
+function rateLimitGatesFor(
+  ctx: PipelineContext,
+  distributionId: string,
+  complete: boolean,
+  knockout: boolean,
+): RateLimitGate[] {
   const config = getPublicSubmitConfig();
   const gates: RateLimitGate[] = [
     { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
@@ -626,6 +628,13 @@ function rateLimitGatesFor(ctx: PipelineContext, distributionId: string, complet
   gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
   if (complete) {
     gates.push({ key: completionCeilingKey(distributionId, identity), max: config.completionMax });
+  }
+  // A knockout charges (d) and NOT (c): it fires none of the work (c) is tight for, so sharing
+  // that bucket let ineligible respondents crowd out real completions — but each knockout leaves
+  // a permanent row, so no bucket at all made the durable row ceiling fall far faster than it is
+  // sized for. Its own counter is the only reading that is neither of those.
+  if (knockout) {
+    gates.push({ key: knockoutCeilingKey(distributionId, identity), max: config.knockoutMax });
   }
   return gates;
 }

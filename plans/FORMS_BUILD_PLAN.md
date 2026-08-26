@@ -1575,3 +1575,49 @@ native entities. This is the reporting differentiator no incumbent has.
   **Verification:** 1,816 unit tests green, five lint gates, clean build, eight smoke paths. The
   magic-link provisioner 502s under BURST load specifically (five rapid requests fail, one
   succeeds) — unrelated to this work, and the reason a smoke path needs a retry.
+
+- **2026-08-26 — round five: the migration was rewriting another app's metadata, and I had checked
+  that file and cleared it.** Three findings. The first is the most instructive of the whole
+  exercise, because I had already looked straight at it.
+
+  1. **The migration's `@ExcludedSchemaNames` omitted `__mj_BizAppsTasks`, `dbo` and `staging`.**
+     All seven `spUpdateExistingEntitiesFromSchema` calls in the appended CodeGen output carried a
+     list built from whatever schemas MY database happened to hold. `bizapps-tasks` is a HARD
+     dependency that `mj app install` installs BEFORE forms, so on every consumer host this
+     migration would sync another Open App's entity metadata — and `dbo`/`staging` would register
+     the customer's own tables as MJ entities. The migration immediately before it on `next` names
+     all three. **I had inspected this exact area in round one and cleared it**, having asked
+     whether prior migrations made the same CALL — they do — without comparing the ARGUMENT. A
+     check that stops one level above where the defect lives reads exactly like a check that
+     passed.
+     Nothing gated it: `check-generated-schema-scope.mjs` reads `mj.config.cjs` and generated
+     TypeScript, not SQL. There is now a **CHECK 5** in the distribution gate that requires a
+     baseline exclusion set in every shipped `@ExcludedSchemaNames`, verified by reintroducing the
+     defect (7 violations) and removing it again. It is scoped to migrations at or after this one:
+     four older files carry the same gap and are already applied on hosts, where editing them would
+     change nothing while making the shipped history disagree with what ran. **Follow-up logged:
+     those four need a corrective migration, which is its own change with its own verification.**
+  2. **A server-detected knockout with a redirect showed the QUALIFIED confirmation.** My own
+     round-four fix cleared `endingScreen` for a disqualified result, and the server deliberately
+     sends `confirmationMessage: undefined` when it sends a redirect — so the template fell to its
+     `@else` arm: a green success tick over "Thanks — your response has been recorded." Verbatim
+     the sentence `disqualificationFields`' own comment calls "a lie on both counts". The redirect
+     usually makes it a flash, which is not the same as making it acceptable. There is now one
+     shared `SCREENED_OUT_MESSAGE` in the contract both ends import, a `screenedOut` computed read
+     from the RESULT, and no success tick for a screening.
+  3. **Knockouts had gone from over-throttled to unthrottled.** Round four stopped charging them
+     to the completion bucket — correct, since they fire none of the work that bucket is tight for
+     — but left them with only the 120/min save ceiling, and each knockout writes a PERMANENT row,
+     so the durable row ceiling fell roughly an order of magnitude faster than it is sized for.
+     Both neighbouring answers were wrong; knockouts now have **their own** bucket
+     (`FORMS_KNOCKOUT_MAX`, defaulting to `FORMS_COMPLETION_MAX`). Also folded in: the
+     rate-limit gate and the quota were deriving the same "is this a real completion" decision
+     twice, which is now computed once.
+
+  Two of my own tests were again wrong rather than the code: one sent six requests from a single
+  session against gate (a)'s default of five, so its refusal came from a ceiling it was not
+  testing. Isolating one bucket means pinning the ones you are not testing, and the fixture now
+  says so.
+
+  **Verification:** 1,824 unit tests green, five lint gates, clean build, eight smoke paths. The
+  magic-link 502 is now characterised: it is burst-triggered and clears after ~20s idle.

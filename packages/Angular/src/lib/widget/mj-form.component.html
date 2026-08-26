@@ -44,7 +44,12 @@
         <mjf-form-screen [screen]="es" />
       } @else {
         <div class="mjf-state mjf-state--done" role="status" aria-live="polite">
-          <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
+          <!-- No success tick for a screening: the server recorded it as Disqualified, and a
+               green check over "thanks for your time" tells the respondent the opposite of what
+               happened. -->
+          @if (!screenedOut()) {
+            <i class="fa-solid fa-circle-check mjf-done__icon" aria-hidden="true"></i>
+          }
           <p class="mjf-done__msg">{{ confirmationMessage() }}</p>
         </div>
       }
