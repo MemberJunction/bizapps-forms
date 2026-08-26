@@ -63,13 +63,6 @@ const SCREEN_EDITOR_CSS = /* css */ `
   color: var(--mj-text-secondary);
 }
 
-.se-rules-title {
-  margin: 0;
-  font-size: var(--mjf-meta);
-  font-weight: 600;
-  color: var(--mj-text-secondary);
-}
-
 `;
 
 @Component({
@@ -195,7 +188,6 @@ const SCREEN_EDITOR_CSS = /* css */ `
           </mjf-setting-row>
 
           <div class="se-section">
-            <p class="se-rules-title">Rules</p>
             <mjf-rules-panel
               [subjectId]="s.ID"
               [cards]="ruleCards"

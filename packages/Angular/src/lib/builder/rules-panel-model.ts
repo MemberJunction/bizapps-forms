@@ -8,7 +8,12 @@
  * rather than a JSON key (see {@link RuleVerb}). A future verb belongs here too, rather than in
  * a parallel scheme of its own.
  */
-import type { ConditionalGroup, ConditionalJumpRule, ConditionalRule } from '@mj-biz-apps/forms-entities';
+import type {
+  ConditionalCondition,
+  ConditionalGroup,
+  ConditionalJumpRule,
+  ConditionalRule,
+} from '@mj-biz-apps/forms-entities';
 import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } from './condition-sources';
 
 /**
@@ -106,6 +111,19 @@ export const ENDING_RULE_CARDS: ReadonlyArray<RuleCardSpec> = [
   },
 ];
 
+/**
+ * The spec for one verb among the ones THIS item offers, or undefined when it offers no such
+ * card. Undefined rather than a fallback: the dialog titles itself from this, and titling a
+ * require group "Show only if" because that happened to be first would mislabel the thing being
+ * edited.
+ */
+export function cardSpec(
+  verb: RuleVerb,
+  specs: ReadonlyArray<RuleCardSpec>,
+): RuleCardSpec | undefined {
+  return specs.find((spec) => spec.verb === verb);
+}
+
 /** The group a rule holds for one group verb, or undefined when the verb is not present. */
 export function verbGroup(rule: ConditionalRule | undefined, verb: GroupVerb): ConditionalGroup | undefined {
   return rule?.[verb];
@@ -166,6 +184,105 @@ export function withVerbGroup(
     next[verb] = group;
   }
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/* --------------------------------------------------------------- authoring a rule as a draft */
+
+/**
+ * The conditions a group carries, whichever combinator holds them.
+ *
+ * One reader for both keys, because `{ all: [] }`, `{ any: [] }`, `{}` and `undefined` all mean
+ * the same thing to an author — "nothing written yet" — and every caller that hand-rolled
+ * `group?.all ?? group?.any ?? []` had to remember that.
+ */
+export function groupConditions(group: ConditionalGroup | undefined): ReadonlyArray<ConditionalCondition> {
+  return group?.all ?? group?.any ?? [];
+}
+
+/** Whether the author has actually said something. The test for "is this rule worth keeping". */
+export function isAuthoredGroup(group: ConditionalGroup | undefined): boolean {
+  return groupConditions(group).length > 0;
+}
+
+/** Which combinator a group uses — the part `groupConditions` deliberately drops. */
+function combinatorOf(group: ConditionalGroup | undefined): 'all' | 'any' | 'none' {
+  if (group?.all !== undefined) {
+    return 'all';
+  }
+  return group?.any !== undefined ? 'any' : 'none';
+}
+
+/** Value equality for a comparand, which is a scalar or a list of them. */
+function sameValue(a: ConditionalCondition['value'], b: ConditionalCondition['value']): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((entry, i) => entry === b[i]);
+  }
+  return a === b;
+}
+
+function sameCondition(a: ConditionalCondition, b: ConditionalCondition): boolean {
+  return (
+    a.source === b.source &&
+    a.questionId === b.questionId &&
+    a.op === b.op &&
+    sameValue(a.value, b.value)
+  );
+}
+
+/**
+ * Value equality between two groups — what decides whether closing the dialog needs to ask.
+ *
+ * Field by field rather than `JSON.stringify`, because the two sides are built by different
+ * code: the baseline is parsed out of a stored JSON column, the draft is assembled by the
+ * condition editor, and neither promises the other's key order. Stringifying would report an
+ * edit the author never made, and a discard warning that fires on an untouched rule is the kind
+ * of dialog people learn to click through.
+ */
+export function sameGroup(a: ConditionalGroup | undefined, b: ConditionalGroup | undefined): boolean {
+  if (combinatorOf(a) !== combinatorOf(b)) {
+    return false;
+  }
+  const left = groupConditions(a);
+  const right = groupConditions(b);
+  return left.length === right.length && left.every((cond, i) => sameCondition(cond, right[i]));
+}
+
+/**
+ * A rule mid-authoring, before it is committed to the item.
+ *
+ * The dialog edits THIS and nothing else, so closing it can genuinely discard: the item's own
+ * rule is not touched until {@link isDraftCommittable} passes and the author presses Done. It
+ * replaces the `drafts: Set<RuleVerb>` marker the panel used to carry — that existed only
+ * because edits were persisted as they were typed, which is what let a card be added empty.
+ */
+export interface RuleDraft {
+  readonly verb: RuleVerb;
+  readonly group: ConditionalGroup | undefined;
+  /** A jump's target page; null for every other verb. */
+  readonly jumpTargetId: string | null;
+}
+
+/**
+ * Whether this draft would persist anything. A jump needs BOTH halves — a target with no
+ * conditions describes when to jump as "never", which `withJumpRule` correctly stores as
+ * nothing at all, so committing it would close the dialog over an empty result.
+ */
+export function isDraftCommittable(draft: RuleDraft): boolean {
+  if (!isAuthoredGroup(draft.group)) {
+    return false;
+  }
+  return draft.verb !== 'jump' || (draft.jumpTargetId ?? '').length > 0;
+}
+
+/** Whether this draft differs from what the item already had — the reason to warn on close. */
+export function isDraftDirty(draft: RuleDraft, baseline: RuleDraft): boolean {
+  return (
+    !sameGroup(draft.group, baseline.group) ||
+    (draft.jumpTargetId ?? '') !== (baseline.jumpTargetId ?? '')
+  );
 }
 
 /** The specs whose verb the rule actually carries, in spec order. */

@@ -22,22 +22,81 @@ import {
 } from './condition-sources';
 
 const CONDITIONAL_EDITOR_CSS = /* css */ `
-.cre { display: flex; flex-direction: column; gap: 10px; }
-.cre-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; font-weight: 600; color: var(--mj-text-secondary); cursor: pointer; }
-.cre-empty { font-size: 0.8125rem; color: var(--mj-text-muted); margin: 0; }
-.cre-combinator { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--mj-text-secondary); flex-wrap: wrap; }
-.cre-seg { font: inherit; font-size: 0.8125rem; padding: 3px 10px; cursor: pointer; border-radius: var(--mj-radius-full, 999px); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-secondary); }
+.cre { display: flex; flex-direction: column; gap: var(--mjf-gap); }
+.cre-empty { font-size: var(--mjf-meta); color: var(--mj-text-muted); margin: 0; }
+
+/* The conditions live in their own framed group, the way the reference designs box "If" apart
+   from "Then": it says where the rule starts and stops, which a bare stack of selects does not. */
+.cre-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mjf-gap);
+  padding: var(--mjf-card-pad);
+  background: var(--mj-bg-surface-sunken);
+  border: 1px solid var(--mj-border-subtle);
+  border-radius: var(--mjf-radius);
+}
+
+.cre-combinator { display: flex; align-items: center; gap: var(--mjf-gap-sm); font-size: var(--mjf-meta); color: var(--mj-text-secondary); flex-wrap: wrap; }
+.cre-seg { font: inherit; font-size: var(--mjf-meta); font-weight: 600; min-height: 30px; padding: 4px 14px; cursor: pointer; border-radius: var(--mjf-radius-pill); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-secondary); }
 .cre-seg.is-on { background: var(--mj-brand-primary); color: var(--mj-brand-on-primary, var(--mj-text-inverse)); border-color: var(--mj-brand-primary); }
-.cre-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.cre-input { flex: 1 1 120px; min-width: 0; }
-.cre-value { flex: 1 1 120px; }
-.cre-remove { flex: none; width: 32px; height: 32px; cursor: pointer; border-radius: var(--mj-radius-md, 8px); border: 1px solid var(--mj-border-default); background: var(--mj-bg-surface); color: var(--mj-text-muted); }
+.cre-seg:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+
+/* One condition per row on a wide dialog, stacked on a narrow one. The three controls are
+   given real widths rather than an equal split: the question prompt is the long one, and
+   truncating it to match the operator is what made the rail version unreadable. */
+.cre-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) minmax(0, 1.6fr) auto;
+  gap: var(--mjf-gap-sm);
+  align-items: center;
+}
+.cre-row + .cre-row { padding-top: var(--mjf-gap); border-top: 1px solid var(--mj-border-subtle); }
+.cre-input { min-width: 0; }
+.cre-value { min-width: 0; }
+.cre-remove {
+  flex: none;
+  width: var(--mjf-tap);
+  height: var(--mjf-tap);
+  cursor: pointer;
+  border-radius: var(--mjf-radius-sm);
+  border: 1px solid var(--mj-border-default);
+  background: var(--mj-bg-surface);
+  color: var(--mj-text-muted);
+}
 .cre-remove:hover { background: var(--mj-bg-surface-hover); color: var(--mj-status-error, var(--mj-color-error-600)); }
-.cre-add { align-self: flex-start; font: inherit; font-size: 0.8125rem; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; border-radius: var(--mj-radius-md, 8px); border: 1px dashed var(--mj-border-default); background: transparent; color: var(--mj-brand-primary); }
-.cre-add:hover { background: var(--mj-bg-surface-hover); }
-.cre-checklist { flex: 1 1 140px; display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
-.cre-check { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--mj-text-secondary); cursor: pointer; }
+.cre-remove:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
+
+.cre-add {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mjf-gap-sm);
+  min-height: var(--mjf-tap);
+  padding: 8px 14px;
+  cursor: pointer;
+  border-radius: var(--mjf-radius-sm);
+  border: 1px dashed var(--mj-border-default);
+  background: transparent;
+  color: var(--mj-brand-primary);
+}
+.cre-add:hover { background: var(--mj-bg-surface-hover); border-color: var(--mj-brand-primary); }
+.cre-add:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+
+.cre-checklist { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); min-width: 0; }
+.cre-check { display: inline-flex; align-items: center; gap: var(--mjf-gap-sm); font-size: var(--mjf-meta); color: var(--mj-text-secondary); cursor: pointer; }
 .cre-check input { accent-color: var(--mj-brand-primary); }
+
+/* Below the dialog's two-column comfort the row becomes a stack: three side-by-side selects at
+   phone width are the cramped layout this whole change exists to escape. */
+@media (max-width: 640px) {
+  .cre-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .cre-row > .cre-input:first-child { grid-column: 1 / -1; }
+  .cre-row + .cre-row { padding-top: var(--mjf-gap); }
+}
 `;
 
 /**

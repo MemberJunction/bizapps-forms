@@ -3,6 +3,7 @@
     <p class="cre-empty">Add an earlier question first to base a rule on its answer.</p>
   } @else {
     @if (_conditions.length > 0) {
+      <div class="cre-group">
       <div class="cre-combinator" role="group" aria-label="Match mode">
         <span>Match</span>
         <button
@@ -26,7 +27,7 @@
         <div class="cre-row">
           <select
             #questionSelect
-            class="cre-input"
+            class="mjf-select cre-input"
             [value]="questionSelectValue(cond)"
             (change)="setQuestion($index, questionSelect.value)"
             aria-label="Question"
@@ -38,7 +39,7 @@
 
           <select
             #operatorSelect
-            class="cre-input"
+            class="mjf-select cre-input"
             [value]="cond.op"
             (change)="setOperator($index, operatorSelect.value)"
             aria-label="Operator"
@@ -52,7 +53,7 @@
             @case ('select') {
               <select
                 #valueSelect
-                class="cre-input cre-value"
+                class="mjf-select cre-input cre-value"
                 [value]="valueAsString(cond)"
                 (change)="setValue($index, valueSelect.value)"
                 aria-label="Comparison value"
@@ -84,7 +85,7 @@
               <input
                 #valueInput
                 type="text"
-                class="cre-input cre-value"
+                class="mjf-input cre-input cre-value"
                 [value]="valueAsString(cond)"
                 (input)="setValue($index, valueInput.value)"
                 [attr.placeholder]="cond.op === 'in' || cond.op === 'notIn' ? 'a, b, c' : 'value'"
@@ -103,7 +104,7 @@
           </button>
         </div>
       }
-
+      </div>
     }
 
     @if (canAddCondition) {

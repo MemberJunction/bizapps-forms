@@ -48,6 +48,7 @@ export {
 } from './form-asset.service';
 export { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
+export { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 export { RulesPanelComponent } from './rules-panel.component';
 export { PageEditorComponent } from './page-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';

@@ -16,7 +16,6 @@ const PAGE_EDITOR_CSS = /* css */ `
 .pe-head-title { font-size: 0.8125rem; font-weight: 600; color: var(--mj-text-secondary); }
 .pe-name { font-size: 0.9375rem; font-weight: 600; color: var(--mj-text-primary); margin: 0; }
 .pe-hint { font-size: 0.75rem; color: var(--mj-text-muted); margin: 0; }
-.pe-rules-title { margin: 0 0 8px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mj-text-muted); }
 `;
 
 /**
@@ -40,7 +39,6 @@ const PAGE_EDITOR_CSS = /* css */ `
         </div>
         <p class="pe-name">{{ p.entity.Title || 'Page ' + pageNumber }}</p>
         <div>
-          <p class="pe-rules-title">Rules</p>
           @if (conditionalSources.length > 0 || jumpConditionSources.length > 0) {
             <mjf-rules-panel
               [subjectId]="p.entity.ID"

@@ -1,24 +1,29 @@
 <div class="rp">
+  <!-- The panel titles itself. Three hosts used to render their own "Rules" heading above it,
+       which put the label and the affordance that belongs beside it in different files. -->
+  <div class="rp-bar">
+    <p class="rp-bar-title">RULES</p>
+    @if (availableCards.length > 0) {
+      <button type="button" class="rp-add" aria-label="Add rule" (click)="openPicker()">
+        <i class="fa-solid fa-plus" aria-hidden="true"></i>
+      </button>
+    }
+  </div>
+
+  @if (shownCards.length === 0) {
+    <p class="rp-empty">No rules yet. This item always shows.</p>
+  }
+
   @for (card of shownCards; track card.verb) {
     <div class="rp-card">
       <div class="rp-head">
-        <button
-          type="button"
-          class="rp-head-main"
-          [attr.aria-expanded]="isExpanded(card.verb)"
-          (click)="toggleExpanded(card.verb)"
-        >
+        <button type="button" class="rp-head-main" (click)="editCard(card.verb)">
           <span class="rp-icon"><i [class]="card.icon" aria-hidden="true"></i></span>
           <span class="rp-titles">
             <span class="rp-title">{{ card.title }}</span>
             <span class="rp-summary">{{ summaryFor(card.verb) }}</span>
           </span>
-          <i
-            class="fa-solid rp-chevron"
-            [class.fa-chevron-down]="!isExpanded(card.verb)"
-            [class.fa-chevron-up]="isExpanded(card.verb)"
-            aria-hidden="true"
-          ></i>
+          <i class="fa-solid fa-pen rp-edit" aria-hidden="true"></i>
         </button>
         <button
           type="button"
@@ -29,46 +34,26 @@
           <i class="fa-solid fa-xmark" aria-hidden="true"></i>
         </button>
       </div>
-      @if (isExpanded(card.verb)) {
-        <div class="rp-body">
-          <p class="rp-hint">{{ card.description }}</p>
-          @if (card.verb === 'jump') {
-            <label class="rp-jump">
-              <span class="rp-jump-label">Go to</span>
-              <select
-                #jumpSelect
-                class="rp-jump-select"
-                [value]="jumpTargetId()"
-                (change)="setJumpTarget(jumpSelect.value)"
-                aria-label="Jump target page"
-              >
-                <option value="" disabled>Choose a later page&hellip;</option>
-                @for (target of jumpTargets; track target.id) {
-                  <option [value]="target.id">{{ target.label }}</option>
-                }
-              </select>
-              <span class="rp-jump-label">when&hellip;</span>
-            </label>
-          }
-          <mjf-conditional-rule-editor
-            [group]="groupFor(card.verb)"
-            [sources]="sourcesFor(card.verb)"
-            (groupChange)="onGroupChange(card.verb, $event)"
-          />
-        </div>
-      }
     </div>
   }
+</div>
 
-  @if (availableCards.length > 0) {
-    @if (!pickerOpen) {
-      <button type="button" class="rp-add" (click)="openPicker()">
-        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add rule
-      </button>
-    } @else {
-      <div class="rp-picker" role="menu" aria-label="Add a rule">
+@if (dialog; as open) {
+  <mjf-rule-editor-dialog
+    [title]="dialogTitle"
+    [subtitle]="dialogSubtitle"
+    [icon]="dialogIcon"
+    [canConfirm]="canCommit"
+    [confirming]="confirmingDiscard"
+    (closeRequested)="requestClose()"
+    (confirmed)="commit()"
+    (discarded)="discardDraft()"
+    (resumed)="resumeEditing()"
+  >
+    @if (open.mode === 'pick') {
+      <div class="rp-picks">
         @for (card of availableCards; track card.verb) {
-          <button type="button" class="rp-pick" role="menuitem" (click)="addCard(card.verb)">
+          <button type="button" class="rp-pick" (click)="addCard(card.verb)">
             <span class="rp-icon"><i [class]="card.icon" aria-hidden="true"></i></span>
             <span class="rp-titles">
               <span class="rp-title">{{ card.title }}</span>
@@ -76,8 +61,32 @@
             </span>
           </button>
         }
-        <button type="button" class="rp-cancel" (click)="closePicker()">Cancel</button>
       </div>
+    } @else {
+      @if (open.verb === 'jump') {
+        <label class="rp-jump">
+          <span class="rp-jump-label">Go to</span>
+          <select
+            #jumpSelect
+            class="mjf-select rp-jump-select"
+            [value]="draftJumpTarget ?? ''"
+            (change)="setJumpTarget(jumpSelect.value)"
+            aria-label="Jump target page"
+          >
+            <option value="" disabled>Choose a later page&hellip;</option>
+            @for (target of jumpTargets; track target.id) {
+              <option [value]="target.id">{{ target.label }}</option>
+            }
+          </select>
+          <span class="rp-jump-label">when&hellip;</span>
+        </label>
+      }
+      <!-- The draft, not the item: nothing here reaches the form until Done. -->
+      <mjf-conditional-rule-editor
+        [group]="draftGroup"
+        [sources]="sourcesFor(open.verb)"
+        (groupChange)="onGroupChange($event)"
+      />
     }
-  }
-</div>
+  </mjf-rule-editor-dialog>
+}
