@@ -7,7 +7,7 @@
  *
  *   - `FormPage.ConditionalRule`, `FormQuestion.ConditionalRule`, `FormScreen.ConditionalRule`
  *     and `FormAutomation.ConditionalRule` — `{ show: { all | any: [{ questionId, op, value }] },
- *     jump: [{ when, toPageId }] }` (question ids in the groups, page ids in jumps)
+ *     jump: [{ when, target }] }` (question ids in the groups, page/question ids in targets)
  *   - `FormEntityBinding.FieldMappings` — `{ version, fields: [{ source: { questionId } }] }`
  *
  * Copy those verbatim and the new form's branching points at the OLD form's questions. Nothing
@@ -29,6 +29,7 @@ import type {
   ConditionalRule,
   FieldMapping,
   FieldMappings,
+  JumpTarget,
 } from '@mj-biz-apps/forms-entities';
 
 export interface RemapResult {
@@ -47,7 +48,7 @@ function hasConditions(group: ConditionalGroup | undefined): boolean {
 export function remapConditionalRule(
   raw: string | null,
   idMap: ReadonlyMap<string, string>,
-  /** Page-id counterparts, for `jump.toPageId` — jumps are dropped (and counted) without it. */
+  /** Page-id counterparts, for page jump targets — those are dropped (and counted) without it. */
   pageIdMap?: ReadonlyMap<string, string>,
 ): RemapResult {
   if (raw === null || raw.trim() === '') {
@@ -125,7 +126,7 @@ export function remapConditionalRule(
   const show = remapGroup(parsed.show);
   const jump: ConditionalJumpRule[] = [];
   for (const rule of parsed.jump ?? []) {
-    const toPageId = pageIdMap?.get(rule.toPageId);
+    const target = remapTarget(rule.target, idMap, pageIdMap);
     // `remapGroup` returns `undefined` for two different things, and only one of them is a
     // failure: a group whose every condition failed to remap, and a group that had no conditions
     // to begin with. The second is an UNCONDITIONAL jump — `evaluateGroup({})` is vacuously true,
@@ -134,14 +135,14 @@ export function remapConditionalRule(
     // copy asked a page the original skipped and blamed "a reference to a question that was not
     // copied", which named nothing that had happened.
     const when = hasConditions(rule.when) ? remapGroup(rule.when) : rule.when;
-    // A jump missing either half in the copy would point at the OLD form's page — the exact
-    // hidden-forever failure this module exists to prevent. Dropped and counted, like a
-    // dangling question reference.
-    if (when === undefined || toPageId === undefined) {
+    // A jump missing either half in the copy would point at the OLD form's page or question —
+    // the exact hidden-forever failure this module exists to prevent. Dropped and counted, like
+    // a dangling question reference.
+    if (when === undefined || target === undefined) {
       dropped++;
       continue;
     }
-    jump.push({ when, toPageId });
+    jump.push({ when, target });
   }
 
   const result: ConditionalRule = {};
@@ -157,15 +158,45 @@ export function remapConditionalRule(
   return { json: JSON.stringify(result), dropped };
 }
 
+/**
+ * Rewrite a jump target for the copy, or `undefined` when it cannot be rewritten.
+ *
+ * `submit` references nothing, so it copies verbatim. Question and page targets go through the
+ * id maps the clone already builds. An ENDING target is dropped and counted: this module is not
+ * handed a screen-id map, and carrying the source form's screen id into the copy would point a
+ * live branch at another form's ending — the same class of silent breakage the header describes.
+ * Dropping is the loud, fixable direction, and the count reaches the author.
+ */
+function remapTarget(
+  target: JumpTarget,
+  idMap: ReadonlyMap<string, string>,
+  pageIdMap: ReadonlyMap<string, string> | undefined,
+): JumpTarget | undefined {
+  switch (target.kind) {
+    case 'submit':
+      return target;
+    case 'question': {
+      const id = idMap.get(target.id);
+      return id === undefined ? undefined : { kind: 'question', id };
+    }
+    case 'page': {
+      const id = pageIdMap?.get(target.id);
+      return id === undefined ? undefined : { kind: 'page', id };
+    }
+    case 'ending':
+      return undefined;
+  }
+}
+
 type GroupShape = { all?: ConditionalCondition[]; any?: ConditionalCondition[] };
 type RuleShape = {
   show?: GroupShape;
-  jump?: Array<{ when: GroupShape; toPageId: string }>;
+  jump?: Array<{ when: GroupShape; target: JumpTarget }>;
 };
 
 /**
  * A stored rule is usable only if it is a plain object whose group arms are arrays (and whose
- * jump list, if any, is an array of `{ when, toPageId }`). Anything else (an array, a string,
+ * jump list, if any, is an array of `{ when, target }`). Anything else (an array, a string,
  * a number, `{show: 5}`) is data we cannot rewrite, and copying it verbatim would carry the
  * source form's question ids into the copy.
  */
@@ -184,13 +215,26 @@ function isRuleShaped(value: unknown): value is RuleShape {
     return false;
   }
   return rule.jump.every(
-    (j) =>
-      typeof j === 'object' &&
-      j !== null &&
-      typeof j.toPageId === 'string' &&
-      isGroupShaped(j.when) &&
-      j.when !== undefined,
+    (j) => typeof j === 'object' && j !== null && isTargetShaped(j.target) && isGroupShaped(j.when) && j.when !== undefined,
   );
+}
+
+/**
+ * A jump target is usable only if it is tagged with a kind this build knows, and carries an id
+ * when its kind needs one. The clone reads STORED json, which may predate a kind or postdate it.
+ */
+function isTargetShaped(target: unknown): target is JumpTarget {
+  if (typeof target !== 'object' || target === null) {
+    return false;
+  }
+  const kind = (target as { kind?: unknown }).kind;
+  if (kind === 'submit') {
+    return true;
+  }
+  if (kind !== 'question' && kind !== 'page' && kind !== 'ending') {
+    return false;
+  }
+  return typeof (target as { id?: unknown }).id === 'string';
 }
 
 function isGroupShaped(group: GroupShape | undefined): boolean {

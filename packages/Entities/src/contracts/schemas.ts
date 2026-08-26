@@ -65,10 +65,52 @@ export const conditionalGroupSchema = z.object({
   any: z.array(conditionalConditionSchema).max(MAX_CONDITIONS_PER_GROUP).optional(),
 });
 
-const conditionalJumpRuleSchema = z.object({
-  when: conditionalGroupSchema,
-  toPageId: z.string(),
-});
+/**
+ * A tagged jump target. Discriminated on `kind` so a malformed one reports the arm it failed
+ * rather than "no union member matched", which for a four-arm union is not a usable message.
+ */
+const jumpTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('submit') }),
+  z.object({ kind: z.literal('question'), id: z.string().min(1) }),
+  z.object({ kind: z.literal('page'), id: z.string().min(1) }),
+  z.object({ kind: z.literal('ending'), id: z.string().min(1) }),
+]);
+
+/**
+ * A jump rule, accepting the legacy page-only shape and emitting only the tagged one.
+ *
+ * THIS IS THE ONLY PLACE the two shapes coexist. A published snapshot is a frozen blob that no
+ * migration rewrites, so rules authored before targets were tagged carry `{ when, toPageId }`
+ * forever; normalizing here means every resolver, every consumer and every test downstream sees
+ * exactly one shape. Tolerance at the boundary, one shape inside.
+ *
+ * A rule carrying BOTH is rejected rather than resolved. There is no reading of "go to page 3
+ * and also go to question 8" that is more likely to be what the author meant than the other, so
+ * picking one would be guessing about branching — and a wrong guess hides questions from
+ * respondents silently.
+ */
+const conditionalJumpRuleSchema = z
+  .object({
+    when: conditionalGroupSchema,
+    target: jumpTargetSchema.optional(),
+    /** Legacy only — normalized away by the transform below, never surfaced. */
+    toPageId: z.string().min(1).optional(),
+  })
+  .superRefine((rule, ctx) => {
+    if (rule.target !== undefined && rule.toPageId !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'a jump rule carries either `target` or the legacy `toPageId`, never both',
+      });
+    }
+    if (rule.target === undefined && rule.toPageId === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'a jump rule needs a target' });
+    }
+  })
+  .transform((rule) => ({
+    when: rule.when,
+    target: rule.target ?? { kind: 'page' as const, id: rule.toPageId as string },
+  }));
 
 export const conditionalRuleSchema = z.object({
   show: conditionalGroupSchema.optional(),

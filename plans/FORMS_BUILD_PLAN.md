@@ -2088,3 +2088,38 @@ native entities. This is the reporting differentiator no incumbent has.
   switch) were applied and each was caught before the file was kept. Build clean, widget
   1197.6 kB; `lint:ui`, `lint:distribution` + 72 mutants, `lint:generated` and `lint:migrations`
   all pass.
+
+- **2026-08-26 — question-level logic, Phase 1: one forward walk, and targets that say what they
+  are.** The user asked for question-to-question branching after seeing a competitor's editor,
+  then simplified further: *"disqualify and jump to end we can combine in jump to rule where user
+  simply points the end screen or submit."* Plan: `plans/QUESTION_LEVEL_LOGIC_PLAN.md`.
+
+  **The jump target is now tagged.** `{ when, toPageId }` became `{ when, target }` where target
+  is `{kind:'question'|'page'|'ending', id}` or `{kind:'submit'}`. Legacy rules normalize at the
+  parse boundary and nowhere else — tolerance at the edge, one shape inside — and a rule carrying
+  BOTH shapes is a parse error rather than a coin flip about branching. No migration: it is all
+  inside the `ConditionalRule` JSON column.
+
+  **Two folds became one.** `resolveVisiblePages` and `resolveVisibleQuestions` were independent
+  walks, which was safe only while a jump could target nothing but a page. Question-level jumps
+  make the two interdependent in both directions: jump past every question on a page and the page
+  is an empty header, and a jump landing INSIDE a page skips that page's own header stop. Two
+  folds computing halves of one answer is how the widget and the server come to disagree about
+  what is on screen — the failure the fixed-point loop exists to prevent — so there is now one
+  forward walk over a flat sequence of stops, and both functions are thin readers of it.
+
+  **What the walk preserves, deliberately.** A non-terminal target at or before the current
+  position stays inert — backward, self and unknown are skipped, never an error, which is what
+  makes cycles unrepresentable. A jumped-over stop's own rules are never consulted. A target
+  hidden by its own show rule stays hidden. A TERMINAL target is the one exception: it has no
+  ordering to violate, so it fires even when it names a screen that no longer exists, because
+  continuing would ask questions the author had decided this respondent should not see.
+
+  **What did NOT happen yet.** The plan had Phase 1 deleting `resolveDisqualification` and
+  `isArmedKnockout`; both have live callers in the widget and the server, so deleting them here
+  would leave the tree broken between commits. They move to Phase 2 with the swap, which keeps
+  this phase purely additive.
+
+  **Verification:** 1,970 unit tests (298 / 26 / 142 / 1003 / 501), +26 and all new — 10 for
+  target normalization, 16 for the walk. Build clean, widget 1199.1 kB (+1.5), `lint:ui` 0
+  violations, `lint:distribution` + 72 mutants pass.

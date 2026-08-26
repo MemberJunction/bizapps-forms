@@ -130,11 +130,11 @@ describe('remapConditionalRule — the jump verb (C2)', () => {
 
   it('happy: remaps a jump — both its when-group and its target page id', () => {
     const rule = JSON.stringify({
-      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'equals', value: 'skip' }] }, toPageId: 'p-old-3' }],
+      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p-old-3' } }],
     });
     const result = remapConditionalRule(rule, MAP, PAGE_MAP);
     expect(JSON.parse(result.json as string)).toEqual({
-      jump: [{ when: { all: [{ questionId: 'q-new-1', op: 'equals', value: 'skip' }] }, toPageId: 'p-new-3' }],
+      jump: [{ when: { all: [{ questionId: 'q-new-1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p-new-3' } }],
     });
   });
 
@@ -151,7 +151,7 @@ describe('remapConditionalRule — the jump verb (C2)', () => {
 
   it('worst: a jump with no page map (or an unmappable target) is dropped and counted, never dangling', () => {
     const rule = JSON.stringify({
-      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] }, toPageId: 'p-old-3' }],
+      jump: [{ when: { all: [{ questionId: 'q-old-1', op: 'isAnswered' }] }, target: { kind: 'page', id: 'p-old-3' } }],
     });
     expect(remapConditionalRule(rule, MAP)).toEqual({ json: null, dropped: 1 });
     expect(remapConditionalRule(rule, MAP, new Map())).toEqual({ json: null, dropped: 1 });
@@ -169,10 +169,10 @@ describe('remapConditionalRule — the jump verb (C2)', () => {
     // remap, and the jump loop read both as failure — so cloning silently dropped the rule and
     // the copy asked a page the original skipped, reported as "a reference to a question that was
     // not copied", which names nothing that happened here.
-    const rule = JSON.stringify({ jump: [{ when: {}, toPageId: 'p-old-3' }] });
+    const rule = JSON.stringify({ jump: [{ when: {}, target: { kind: 'page', id: 'p-old-3' } }] });
     const result = remapConditionalRule(rule, MAP, PAGE_MAP);
     expect(result.dropped).toBe(0);
-    expect(JSON.parse(result.json as string)).toEqual({ jump: [{ when: {}, toPageId: 'p-new-3' }] });
+    expect(JSON.parse(result.json as string)).toEqual({ jump: [{ when: {}, target: { kind: 'page', id: 'p-new-3' } }] });
   });
 
   it('worst: a jump whose conditions ALL fail to remap is still dropped', () => {
@@ -180,7 +180,7 @@ describe('remapConditionalRule — the jump verb (C2)', () => {
     // because two things were genuinely lost — the dead condition, and the rule that can no
     // longer be built from it.
     const rule = JSON.stringify({
-      jump: [{ when: { all: [{ questionId: 'q-not-copied', op: 'isAnswered' }] }, toPageId: 'p-old-3' }],
+      jump: [{ when: { all: [{ questionId: 'q-not-copied', op: 'isAnswered' }] }, target: { kind: 'page', id: 'p-old-3' } }],
     });
     expect(remapConditionalRule(rule, MAP, PAGE_MAP)).toEqual({ json: null, dropped: 2 });
   });

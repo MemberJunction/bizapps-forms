@@ -32,7 +32,7 @@ function whenQ1Equals(value: string): ConditionalRule {
 
 describe('resolveVisiblePages', () => {
   const jumpTo = (toPageId: string, value = 'skip'): ConditionalRule => ({
-    jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value }] }, toPageId }],
+    jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value }] }, target: { kind: 'page' as const, id: toPageId } }],
   });
 
   describe('happy', () => {
@@ -63,8 +63,8 @@ describe('resolveVisiblePages', () => {
     it('the first matching jump rule wins', () => {
       const both: ConditionalRule = {
         jump: [
-          { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, toPageId: 'p3' },
-          { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, toPageId: 'p4' },
+          { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'page' as const, id: 'p3' } },
+          { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'page' as const, id: 'p4' } },
         ],
       };
       const pages = [page('p1', 0, both), page('p2', 1), page('p3', 2), page('p4', 3)];
@@ -110,8 +110,8 @@ describe('resolveVisiblePages', () => {
     });
 
     it(`jump rules beyond the cap of ${MAX_JUMP_RULES} are ignored`, () => {
-      const inert = { when: { all: [{ questionId: 'q1', op: 'equals' as const, value: 'no' }] }, toPageId: 'p3' };
-      const firing = { when: { all: [{ questionId: 'q1', op: 'equals' as const, value: 'skip' }] }, toPageId: 'p3' };
+      const inert = { when: { all: [{ questionId: 'q1', op: 'equals' as const, value: 'no' }] }, target: { kind: 'page' as const, id: 'p3' } };
+      const firing = { when: { all: [{ questionId: 'q1', op: 'equals' as const, value: 'skip' }] }, target: { kind: 'page' as const, id: 'p3' } };
       const rule: ConditionalRule = { jump: [...Array.from({ length: MAX_JUMP_RULES }, () => inert), firing] };
       const pages = [page('p1', 0, rule), page('p2', 1), page('p3', 2)];
       // The firing rule is the 11th — over the cap, so it must NOT fire.
@@ -186,7 +186,7 @@ describe('an unarmed knockout screen never fires', () => {
       // A jump group is a real, populated group — and not this screen's. Arming a knockout off
       // it would disqualify on a condition the author wrote about page order.
       const jumpOnly: ConditionalRule = {
-        jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, toPageId: 'p2' }],
+        jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'page' as const, id: 'p2' } }],
       };
       expect(resolveDisqualification(flagged(jumpOnly), answers({ q1: 'x' }))).toBeUndefined();
     });

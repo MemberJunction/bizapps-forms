@@ -14,7 +14,12 @@
  *
  * Pure and Angular-free: the component renders these sentences, it does not compose them.
  */
-import type { ConditionalCondition, ConditionalGroup, ConditionalRule } from '@mj-biz-apps/forms-entities';
+import type {
+  ConditionalCondition,
+  ConditionalGroup,
+  ConditionalRule,
+  JumpTarget,
+} from '@mj-biz-apps/forms-entities';
 
 import { SCORE_SOURCE_ID, type ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition, groupConditions, jumpRule, type RuleVerb } from './rules-panel-model';
@@ -78,6 +83,7 @@ const VERB_ICONS: Record<'show' | 'jump' | 'disqualify', string> = {
 
 const MISSING_QUESTION = 'a question that no longer exists';
 const MISSING_PAGE = 'a page that no longer exists';
+const MISSING_ENDING = 'an ending screen that no longer exists';
 
 /**
  * Every rule on the form, in reading order: page by page, each page's own rules before its
@@ -88,10 +94,9 @@ const MISSING_PAGE = 'a page that no longer exists';
  */
 export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
   const entries: RuleEntry[] = [];
-  const pageIds = new Set(form.pages.map((page) => page.id));
 
   for (const page of form.pages) {
-    entries.push(...pageEntries(page, form, pageIds));
+    entries.push(...pageEntries(page, form));
     for (const question of page.questions) {
       const show = question.conditionalRule?.show;
       if (show) {
@@ -119,11 +124,7 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
 }
 
 /** A page's own rules: its show gate, then its forward jump. */
-function pageEntries(
-  page: RuleInventoryPage,
-  form: RuleInventoryForm,
-  pageIds: ReadonlySet<string>,
-): RuleEntry[] {
+function pageEntries(page: RuleInventoryPage, form: RuleInventoryForm): RuleEntry[] {
   const out: RuleEntry[] = [];
   const show = page.conditionalRule?.show;
   if (show) {
@@ -141,7 +142,7 @@ function pageEntries(
 
   const jump = jumpRule(page.conditionalRule);
   if (jump) {
-    const target = form.pages.find((p) => p.id === jump.toPageId);
+    const destination = describeTarget(jump.target, form);
     out.push({
       id: `page:${page.id}:jump`,
       itemKind: 'page',
@@ -150,12 +151,9 @@ function pageEntries(
       verb: 'jump',
       icon: VERB_ICONS.jump,
       sentence:
-        `After ${quoted(page.label)}, skip to ${quoted(target?.label ?? '(deleted page)')} ` +
+        `After ${quoted(page.label)}, ${destination.phrase} ` +
         `${whenClause(jump.when, form.sources)}`,
-      broken: [
-        ...brokenIn(jump.when, form.sources),
-        ...(pageIds.has(jump.toPageId) ? [] : [MISSING_PAGE]),
-      ],
+      broken: [...brokenIn(jump.when, form.sources), ...destination.broken],
     });
   }
   return out;
@@ -187,6 +185,46 @@ function endingEntry(ending: RuleInventoryItem, form: RuleInventoryForm): RuleEn
       : `Show ${quoted(ending.label)} ${clause}`,
     broken: brokenIn(show, form.sources),
   };
+}
+
+/**
+ * Where a jump sends the respondent, said in words, plus whatever about it is broken.
+ *
+ * Every kind is resolvable HERE and only here: the inventory is handed the whole form, where the
+ * per-item rail is handed only the pages a jump may target. That asymmetry is why the rail says
+ * "a later question" and this says the question's actual prompt — and it is the reason the hub
+ * is the screen worth opening when a rule stops making sense.
+ */
+function describeTarget(
+  target: JumpTarget,
+  form: RuleInventoryForm,
+): { phrase: string; broken: string[] } {
+  switch (target.kind) {
+    case 'submit':
+      // No id, nothing to break: `resolveEndingScreen` picks the screen at submit time.
+      return { phrase: 'submit the form', broken: [] };
+    case 'page': {
+      const page = form.pages.find((p) => p.id === target.id);
+      return {
+        phrase: `skip to ${quoted(page?.label ?? '(deleted page)')}`,
+        broken: page ? [] : [MISSING_PAGE],
+      };
+    }
+    case 'question': {
+      const question = form.sources.find((q) => q.id === target.id);
+      return {
+        phrase: `skip to ${quoted(question?.prompt ?? '(deleted question)')}`,
+        broken: question ? [] : [MISSING_QUESTION],
+      };
+    }
+    case 'ending': {
+      const ending = form.endings.find((e) => e.id === target.id);
+      return {
+        phrase: `finish on ${quoted(ending?.label ?? '(deleted ending screen)')}`,
+        broken: ending ? [] : [MISSING_ENDING],
+      };
+    }
+  }
 }
 
 /**

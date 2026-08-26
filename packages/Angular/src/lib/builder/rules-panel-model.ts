@@ -13,6 +13,7 @@ import type {
   ConditionalGroup,
   ConditionalJumpRule,
   ConditionalRule,
+  JumpTarget,
 } from '@mj-biz-apps/forms-entities';
 import { operatorLabel, operatorNeedsValue, type ConditionalSourceQuestion } from './condition-sources';
 
@@ -365,6 +366,30 @@ export function summarizeJump(
   if (!jump) {
     return 'No conditions yet';
   }
-  const label = targets.find((t) => t.id === jump.toPageId)?.label ?? '(deleted page)';
-  return `Go to ${label} · ${summarizeGroup(jump.when, sources)}`;
+  return `Go to ${jumpTargetLabel(jump.target, targets)} · ${summarizeGroup(jump.when, sources)}`;
+}
+
+/**
+ * A jump target in one phrase, for the rail's one-line summary.
+ *
+ * Only PAGE names can be resolved here: the panel is handed the pages a jump may target and
+ * nothing else. A question or ending target therefore reads by kind rather than by name — the
+ * Rules tab, which has the whole form, spells those out (`rules-inventory.ts`). Naming the kind
+ * is still better than naming nothing, and far better than resolving a question id against the
+ * page list and calling it "(deleted page)".
+ */
+export function jumpTargetLabel(
+  target: JumpTarget,
+  pages: ReadonlyArray<JumpTargetPage>,
+): string {
+  switch (target.kind) {
+    case 'page':
+      return pages.find((t) => t.id === target.id)?.label ?? '(deleted page)';
+    case 'question':
+      return 'a later question';
+    case 'ending':
+      return 'an ending screen';
+    case 'submit':
+      return 'Submit';
+  }
 }

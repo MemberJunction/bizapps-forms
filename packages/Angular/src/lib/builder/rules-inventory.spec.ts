@@ -97,7 +97,7 @@ describe('collectRuleEntries', () => {
               label: 'Intro',
               questions: [],
               conditionalRule: {
-                jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, toPageId: 'p2' }],
+                jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, target: { kind: 'page', id: 'p2' } }],
               },
             },
             { id: 'p2', label: 'VIP details', questions: [] },
@@ -170,7 +170,7 @@ describe('collectRuleEntries', () => {
               id: 'p1',
               label: 'Intro',
               questions: [],
-              conditionalRule: { jump: [{ when: {}, toPageId: 'p2' }] },
+              conditionalRule: { jump: [{ when: {}, target: { kind: 'page', id: 'p2' } }] },
             },
             { id: 'p2', label: 'Page 2', questions: [] },
           ],
@@ -213,7 +213,7 @@ describe('collectRuleEntries', () => {
               questions: [],
               conditionalRule: {
                 ...showVip,
-                jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, toPageId: 'p2' }],
+                jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'page', id: 'p2' } }],
               },
             },
             { id: 'p2', label: 'Page 2', questions: [] },
@@ -261,7 +261,7 @@ describe('collectRuleEntries', () => {
               label: 'Page 1',
               questions: [],
               conditionalRule: {
-                jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, toPageId: 'gone' }],
+                jump: [{ when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'page', id: 'gone' } }],
               },
             },
           ],
@@ -280,7 +280,7 @@ describe('collectRuleEntries', () => {
               label: 'Page 1',
               questions: [],
               conditionalRule: {
-                jump: [{ when: { all: [{ questionId: 'gone', op: 'isAnswered' }] }, toPageId: 'nowhere' }],
+                jump: [{ when: { all: [{ questionId: 'gone', op: 'isAnswered' }] }, target: { kind: 'page', id: 'nowhere' } }],
               },
             },
           ],
@@ -369,7 +369,7 @@ describe('groupEntriesByPage', () => {
               label: 'Page 1',
               questions: [],
               conditionalRule: {
-                jump: [{ when: { all: [{ questionId: 'gone', op: 'isAnswered' }] }, toPageId: 'nowhere' }],
+                jump: [{ when: { all: [{ questionId: 'gone', op: 'isAnswered' }] }, target: { kind: 'page', id: 'nowhere' } }],
               },
             },
           ],

@@ -167,7 +167,7 @@ describe('jump-to-page on the server (C2)', () => {
       id: 'p1',
       displayOrder: 0,
       conditionalRule: {
-        jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, toPageId: 'p3' }],
+        jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p3' } }],
       },
       questions: [question('q1')],
     },

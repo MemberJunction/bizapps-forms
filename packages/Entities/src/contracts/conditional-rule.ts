@@ -103,14 +103,59 @@ export interface ConditionalGroup {
   any?: ConditionalCondition[];
 }
 
+/** What a `Go to` rule can point at (QUESTION_LEVEL_LOGIC_PLAN §2). */
+export type JumpTargetKind = 'question' | 'page' | 'ending' | 'submit';
+
 /**
- * One forward jump: when `when` passes, skip ahead to the page `toPageId` (pages between are
- * hidden). Forward-only — a backward or unknown target is inert, never an error — which is
- * what makes jump cycles unrepresentable (RULES_AND_BRANCHING_PLAN §2.2).
+ * Where a fired jump sends the respondent — TAGGED, so no reader has to guess what an id
+ * refers to.
+ *
+ * `question` and `page` skip forward within the form; `ending` finishes it and shows that
+ * screen; `submit` finishes it and leaves the screen to `resolveEndingScreen`, which is what an
+ * author wants when several endings compete on score. `submit` names nothing, hence the arm
+ * without an `id`.
+ *
+ * What arriving at an ending MEANS is the screen's business, not the rule's: a screen flagged
+ * `isDisqualification` records the response as `Disqualified` (no quota, no automations), and
+ * every other screen records it as `Complete`. Keeping that on the screen is what let the
+ * separate disqualify verb — and its `isArmedKnockout` guard — be deleted.
+ */
+export type JumpTarget =
+  | { kind: 'question'; id: string }
+  | { kind: 'page'; id: string }
+  | { kind: 'ending'; id: string }
+  | { kind: 'submit' };
+
+/** A target that moves within the form — the ones a forward-order check applies to. */
+export type NavigationTarget = Extract<JumpTarget, { kind: 'question' | 'page' }>;
+
+/**
+ * One forward jump: when `when` passes, go to `target`.
+ *
+ * Forward-only for the non-terminal kinds — a backward, self or unknown target is inert, never
+ * an error — which is what makes jump cycles unrepresentable (RULES_AND_BRANCHING_PLAN §2.2).
+ * Terminal targets have no ordering to violate.
+ *
+ * Rules authored before targets were tagged carry `{ when, toPageId }` instead. That shape is
+ * normalized to `{ kind: 'page', id }` at the parse boundary and nowhere else: two shapes
+ * reaching a resolver is how a resolver comes to prefer one of them by accident.
  */
 export interface ConditionalJumpRule {
   when: ConditionalGroup;
-  toPageId: string;
+  target: JumpTarget;
+}
+
+/**
+ * Whether this target ENDS the form rather than moving within it.
+ *
+ * Named because three places need the distinction and each would otherwise spell it as its own
+ * two-arm comparison: the flow resolver (stop walking), the widget (submit and show a screen)
+ * and the server (seal the response).
+ */
+export function isTerminalTarget(
+  target: JumpTarget,
+): target is Extract<JumpTarget, { kind: 'ending' | 'submit' }> {
+  return target.kind === 'ending' || target.kind === 'submit';
 }
 
 /**

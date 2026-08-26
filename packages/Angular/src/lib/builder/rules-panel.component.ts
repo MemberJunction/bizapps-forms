@@ -246,7 +246,10 @@ export class RulesPanelComponent {
 
   private openDraft(verb: RuleVerb): void {
     const group = this.persistedGroup(verb);
-    const target = verb === 'jump' ? (jumpRule(this.rule)?.toPageId ?? null) : null;
+    // The panel authors PAGE jumps only for now, so a stored target of any other kind has no
+    // control to show and opens as empty rather than being silently rewritten.
+    const stored = verb === 'jump' ? jumpRule(this.rule)?.target : undefined;
+    const target = stored?.kind === 'page' ? stored.id : null;
     this.draftGroup = group;
     this.draftJumpTarget = target;
     this.baseline = { verb, group, jumpTargetId: target };
@@ -334,7 +337,7 @@ export class RulesPanelComponent {
     if (verb === 'jump') {
       const target = this.draftJumpTarget ?? '';
       return group !== undefined && target.length > 0
-        ? withJumpRule(this.rule, { when: group, toPageId: target })
+        ? withJumpRule(this.rule, { when: group, target: { kind: 'page', id: target } })
         : withJumpRule(this.rule, undefined);
     }
     if (verb === 'disqualify') {
