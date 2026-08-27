@@ -33,7 +33,12 @@
           <p class="mjf-page__desc">{{ page.description }}</p>
         }
         <div class="mjf-page__questions">
-          @for (entry of entriesFor(page); track $index) {
+          <!-- Tracked on the entry's own identity, never `$index`. With index tracking Angular
+               recycles a question component onto whatever question lands at the same position in
+               the next section, which is how one file question came to announce another's
+               upload. The store keyed by question id is what makes that harmless; this keeps it
+               from happening at all. -->
+          @for (entry of entriesFor(page); track entryKey(entry)) {
             @if (entry.kind === 'question') {
               <mjf-form-question
                 [question]="entry.question"

@@ -27,7 +27,7 @@ import {
 import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { FormRuntime } from '../core/form-runtime';
-import { sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
+import { entryKey, sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
 import { clampCursor } from '../core/stepper';
 import { FormProgressComponent } from './form-progress.component';
@@ -150,6 +150,11 @@ export class FormScrollComponent {
    */
   protected entriesFor(page: PublishedFormPage): SectionEntry[] {
     return sectionEntries(page, this.runtime().renderedQuestions(), this.runtime().answerMap());
+  }
+
+  /** Identity for `@for` tracking — see {@link entryKey} for why `$index` was wrong. */
+  protected entryKey(entry: SectionEntry): string {
+    return entryKey(entry);
   }
 
   /** The line shown where the questions were — one wording, defined once. */

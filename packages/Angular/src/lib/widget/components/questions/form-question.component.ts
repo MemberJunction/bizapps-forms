@@ -43,6 +43,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
+import { FormUploadStore } from '../../core/upload-store';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -113,15 +114,25 @@ export class FormQuestionComponent {
   public readonly valueChange = output<AnswerValue>();
 
   private readonly uploader = inject(FORMS_UPLOAD_SERVICE);
+  /**
+   * Upload state, keyed by question id rather than held here.
+   *
+   * These four used to be plain signals on this component, which quietly assumed one instance
+   * per question for the life of the form. Neither render mode works that way — see the note on
+   * {@link FormUploadStore} — so the state outlived the question it described and was announced
+   * against whichever question the framework reused this instance for.
+   */
+  private readonly uploads = inject(FormUploadStore);
 
-  /** FileUpload UI state (upload lifecycle for the current file). */
-  protected readonly uploadStatus = signal<UploadStatus>('idle');
+  /** This question's upload lifecycle, and nobody else's. */
+  private readonly upload = computed(() => this.uploads.viewFor(this.question().id));
+  protected readonly uploadStatus = computed<UploadStatus>(() => this.upload().status);
   /** Progress 0–1 while uploading, or `null` for an indeterminate phase. */
-  protected readonly uploadProgress = signal<number | null>(null);
+  protected readonly uploadProgress = computed(() => this.upload().progress);
   /** Display name of the selected/uploaded file (the stored answer is the fileId). */
-  protected readonly uploadFileName = signal<string>('');
+  protected readonly uploadFileName = computed(() => this.upload().fileName);
   /** Inline, respondent-facing upload error, or `null`. */
-  protected readonly uploadError = signal<string | null>(null);
+  protected readonly uploadError = computed(() => this.upload().error);
   /** Whole-number progress percent for the aria-valuenow / label. */
   protected readonly uploadPercent = computed(() => {
     const p = this.uploadProgress();
@@ -516,18 +527,15 @@ export class FormQuestionComponent {
 
   /** A drawn signature takes the ordinary file-answer path from here. */
   protected async onSignatureDrawn(file: File): Promise<void> {
-    this.lastFile = file;
     await this.uploadFile(file);
   }
 
   protected onSignatureCleared(): void {
-    // Retire the running upload before clearing. Without this, a respondent who draws, dislikes
-    // it and taps Clear gets the discarded signature back a moment later: the in-flight upload
+    // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it
+    // and taps Clear gets the discarded signature back a moment later: the in-flight upload
     // resolves and emits its fileId over the null, leaving a stored signature beside an empty pad
     // that reads "Draw your signature above."
-    this.uploadGeneration += 1;
-    this.lastFile = null;
-    this.resetUploadState();
+    this.uploads.clear(this.question().id);
     this.valueChange.emit(null);
   }
 
@@ -577,37 +585,22 @@ export class FormQuestionComponent {
     this.valueChange.emit(this.booleanValue() === value ? null : value);
   }
 
-  /** Last selected file, retained so the respondent can retry a failed upload. */
-  private lastFile: File | null = null;
-
-  /**
-   * Which upload is allowed to write the answer.
-   *
-   * Uploads are not serialized — the signature pad can start a second one while the first is
-   * still going, and a respondent can pick a different file mid-upload — so without a stamp the
-   * answer is whichever response ARRIVES last rather than whichever the respondent asked for
-   * last. On a lossy mobile link those differ routinely. Every upload captures this value at the
-   * start and refuses to touch component state if it has moved on since.
-   */
-  private uploadGeneration = 0;
-
   protected async onFile(input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0] ?? null;
     if (!file) {
       // Cleared the picker — drop the answer + any prior upload state.
-      this.lastFile = null;
-      this.resetUploadState();
+      this.uploads.clear(this.question().id);
       this.valueChange.emit(null);
       return;
     }
-    this.lastFile = file;
     await this.uploadFile(file);
   }
 
   /** Re-run the upload for the previously-selected file after a failure. */
   protected async retryUpload(): Promise<void> {
-    if (this.lastFile) {
-      await this.uploadFile(this.lastFile);
+    const last = this.uploads.lastFileFor(this.question().id);
+    if (last) {
+      await this.uploadFile(last);
     }
   }
 
@@ -617,52 +610,32 @@ export class FormQuestionComponent {
    * required FileUpload cannot be satisfied by a not-yet-stored file.
    */
   private async uploadFile(file: File): Promise<void> {
-    const generation = ++this.uploadGeneration;
-    this.uploadFileName.set(file.name);
-    this.uploadError.set(null);
-    this.uploadStatus.set('uploading');
-    this.uploadProgress.set(0);
+    const questionId = this.question().id;
+    const token = this.uploads.begin(questionId, file);
     // Clear any prior fileId until the new upload confirms.
     this.valueChange.emit(null);
     try {
       const result = await this.uploader.upload(
         file,
         this.distributionSlug(),
-        this.question().id,
-        (fraction) => {
-          if (generation !== this.uploadGeneration) {
-            return;
-          }
-          this.uploadProgress.set(fraction);
-        },
+        questionId,
+        (fraction) => this.uploads.setProgress(token, fraction),
         this.responseId() || undefined,
       );
       // A superseded upload must not write ANYTHING: not the answer, not the status. Its bytes
       // are stored and its MJ: Files row exists, but the respondent has since asked for a
-      // different file — or for none — and that is the answer that has to stand.
-      if (generation !== this.uploadGeneration) {
-        return;
+      // different file — or for none — and that is the answer that has to stand. The store owns
+      // that judgement now, and says so by refusing the write.
+      if (this.uploads.succeed(token)) {
+        this.valueChange.emit(result.fileId);
       }
-      this.uploadStatus.set('done');
-      this.uploadProgress.set(1);
-      this.valueChange.emit(result.fileId);
     } catch (err) {
-      // Guarded for the same reason, and it matters more here: an unguarded stale failure emits
+      // Refused for the same reason, and it matters more here: an unguarded stale failure emits
       // null and wipes the answer the NEWER upload had already stored successfully.
-      if (generation !== this.uploadGeneration) {
-        return;
+      const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
+      if (this.uploads.fail(token, message)) {
+        this.valueChange.emit(null);
       }
-      this.uploadStatus.set('error');
-      this.uploadProgress.set(null);
-      this.uploadError.set(err instanceof Error ? err.message : 'Upload failed. Please try again.');
-      this.valueChange.emit(null);
     }
-  }
-
-  private resetUploadState(): void {
-    this.uploadStatus.set('idle');
-    this.uploadProgress.set(null);
-    this.uploadFileName.set('');
-    this.uploadError.set(null);
   }
 }

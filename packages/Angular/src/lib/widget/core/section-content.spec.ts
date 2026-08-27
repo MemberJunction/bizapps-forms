@@ -17,7 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
-import { sectionEntries, skippedMessage } from './section-content';
+import { entryKey, sectionEntries, skippedMessage } from './section-content';
 
 function q(id: string, order: number, extra?: Partial<PublishedFormQuestion>): PublishedFormQuestion {
   return { id, type: 'ShortText', prompt: id, isRequired: false, displayOrder: order, options: [], ...extra };
@@ -144,5 +144,32 @@ describe('skippedMessage', () => {
         '1 question skipped based on your answers',
       );
     });
+  });
+});
+
+describe('entryKey — happy path', () => {
+  it('identifies a question entry by its question id, wherever it sits', () => {
+    const question = { id: 'q-resume', type: 'FileUpload', prompt: 'Resume', displayOrder: 1 } as PublishedFormQuestion;
+
+    expect(entryKey({ kind: 'question', question })).toBe('q-resume');
+  });
+
+  it('gives a skipped run a key that cannot collide with a question id', () => {
+    const key = entryKey({ kind: 'skipped', count: 2, afterPrompt: 'First name' });
+
+    expect(key).not.toBe('q-resume');
+    expect(key).toContain('skipped');
+  });
+});
+
+describe('entryKey — worst case', () => {
+  it('keeps two file questions at the same position in different sections apart', () => {
+    const transcript = { id: 'q-transcript', type: 'FileUpload', prompt: 'Transcript', displayOrder: 4 } as PublishedFormQuestion;
+    const resume = { id: 'q-resume', type: 'FileUpload', prompt: 'Resume', displayOrder: 4 } as PublishedFormQuestion;
+
+    // Both sit at index 3 of their own section. Tracking on `$index` made these the same row,
+    // so Angular reused one component for both and the resume announced the transcript's file.
+    expect(entryKey({ kind: 'question', question: transcript }))
+      .not.toBe(entryKey({ kind: 'question', question: resume }));
   });
 });

@@ -326,3 +326,31 @@ plan ships no migration, so the existing changeset's prose is what gets updated.
 **8.5 Done.** All phases pushed; gates green with numbers; `FORMS_BUILD_PLAN.md` §12 has one
 entry per phase; manual pass at `:4201` covering the §7 worst cases, plus a respondent run
 proving a question jump, a disqualifying ending jump and a `Complete` ending jump end-to-end.
+
+---
+
+## 9. Post-Phase-5 defect: upload state outlived its question
+
+**Found by testing, not by the plan.** Reported as "it doesn't upload two different files" on a
+form carrying a FileUpload at the same position in two sections. Diagnosed live at
+`http://localhost:4000/f/<slug>` — note that `/f/:slug` is served by the **API** origin, not
+Explorer, which `core/mj-api-origin.ts` already warns about.
+
+**Two wrong guesses recorded, because both are easy to make again.** First: that section stepping
+*unmounts* questions and therefore LOSES the upload confirmation. It does not — `@if (current();
+as page)` never goes falsy, so Angular re-binds the view instead of rebuilding it. Second, after
+seeing the confirmation survive: that this made the state harmless. The opposite. `@for` tracked
+on `$index`, so the component was recycled onto a different question and carried six private
+fields with it. Proven by stamping `data-stamp` on each `mjf-form-question` host, pressing Back,
+and finding the same node rendering another section's question.
+
+**Fix.** `core/upload-store.ts` — upload lifecycle keyed by question id, provided once per widget.
+Not a `BaseSingleton`: several forms can be embedded on one host page. `@for` tracks on
+`entryKey`. The supersede/clear rules moved out of the component and are unit-tested directly
+rather than by regex over component source.
+
+**What this cost the plan's own claims.** §7's manual pass never covered two file questions,
+which is why five phases of testing missed it. Any future render-mode change should re-run the
+upload case in BOTH modes — OneQuestion shares one component instance across the entire deck, so
+it is the more exposed of the two and remains unverified live (no published OneQuestion
+distribution carries a file question).

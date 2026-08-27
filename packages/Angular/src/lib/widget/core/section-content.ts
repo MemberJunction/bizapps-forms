@@ -102,6 +102,21 @@ export function sectionEntries(
  * cause wherever it honestly can, because the cause is also the fix — if the skip was not what
  * they meant, the answer above it is the thing to change.
  */
+/**
+ * Stable identity for a rendered entry, for `@for (... ; track ...)`.
+ *
+ * A question is its id. A skipped run has no identity of its own, so it takes one from the run
+ * it stands for — prefixed so it can never collide with a question id.
+ *
+ * This exists because tracking on `$index` let Angular recycle one question component across two
+ * different questions that happened to occupy the same position in different sections.
+ */
+export function entryKey(entry: SectionEntry): string {
+  return entry.kind === 'question'
+    ? entry.question.id
+    : `skipped:${entry.afterPrompt ?? ''}:${entry.count}`;
+}
+
 export function skippedMessage(entry: Extract<SectionEntry, { kind: 'skipped' }>): string {
   const questions = entry.count === 1 ? '1 question' : `${entry.count} questions`;
   const prompt = entry.afterPrompt?.trim();

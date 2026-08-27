@@ -41,6 +41,7 @@ import { applyStyleTokens } from './core/theming';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
+import { FormUploadStore } from './core/upload-store';
 import { passedSubmitPoints } from './core/partial-submit-point';
 import { initialPhaseFor, outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
 import { resolveShownScreen, shownScreenFor, type ShownScreen } from './core/shown-screen';
@@ -69,6 +70,9 @@ import type { WidgetPhase } from './core/submit-phase';
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
+  // One upload store per widget, NOT a singleton: several forms can be embedded on one host
+  // page and must not see each other's uploads. Question components inject it.
+  providers: [FormUploadStore],
 })
 export class MjFormComponent implements OnInit, OnDestroy {
   /** Distribution slug identifying which published form to load (element attribute). */
