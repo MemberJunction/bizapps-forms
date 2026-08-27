@@ -128,8 +128,8 @@ describe('the rule editor is a modal, not a rail expansion', () => {
 });
 
 describe('the panel header is the only add affordance', () => {
-  it('it is labelled RULES', () => {
-    expect(panelHtml()).toMatch(/RULES/);
+  it('it is labelled BRANCH', () => {
+    expect(panelHtml()).toMatch(/>BRANCH</);
   });
 
   it('the header button has an accessible name for whichever face it is showing', () => {

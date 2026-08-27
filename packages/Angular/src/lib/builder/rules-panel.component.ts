@@ -1,5 +1,5 @@
 /**
- * The RULES rail beside a question, section or ending screen: what this item's logic DOES, in
+ * The BRANCH rail beside a question, section or ending screen: what this item's logic DOES, in
  * one line per rule, with one way in to change it.
  *
  * It used to be a card picker — pick "Show only if", author it, close, pick "Jump to page",
@@ -36,7 +36,10 @@ const RULES_PANEL_CSS = /* css */ `
 .rp { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); }
 
 .rp-bar { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
-.rp-bar-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-label); font-weight: 700; letter-spacing: 0.06em; color: var(--mj-text-muted); }
+/* --mj-text-secondary, not --mj-text-muted: this heading sits in the same rail as the editors'
+   own "Page settings" / "Question settings" / "Ending" titles, all of which are secondary at 600,
+   and muted rendered it visibly lighter than every other line beside it. */
+.rp-bar-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-label); font-weight: 700; letter-spacing: 0.06em; color: var(--mj-text-secondary); }
 .rp-empty { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
 .rp-add {
