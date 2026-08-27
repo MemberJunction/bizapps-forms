@@ -1,8 +1,8 @@
 <div class="rp">
-  <!-- The panel titles itself. Three hosts used to render their own "Rules" heading above it,
-       which put the label and the affordance that belongs beside it in different files. -->
+  <!-- The panel titles itself. Its hosts used to render their own heading above it, which put
+       the label and the affordance that belongs beside it in different files. -->
   <div class="rp-bar">
-    <p class="rp-bar-title">RULES</p>
+    <p class="rp-bar-title">BRANCH</p>
     <!-- One button, two faces. A pencil on an item with no rules asks the author to open a
          dialog to discover it is empty; the message right below it has already said so. -->
     <button
@@ -47,6 +47,8 @@
       [draft]="draft"
       [sources]="sources"
       [jumpSources]="jumpSourceList"
+      [formSources]="formSources"
+      [formTargets]="formTargets"
       [targets]="targets"
       [reachNotes]="reachNotes"
       [allowJumps]="allowJumps"

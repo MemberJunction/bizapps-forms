@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { jumpReach, reachNote, type ReachPage } from './jump-reach';
+import { jumpReach, reachNote, readHorizon, type ReachPage } from './jump-reach';
 
 const q = (id: string, isRequired = false) => ({ id, label: id, isRequired });
 
@@ -137,6 +137,77 @@ describe('reachNote', () => {
       expect(reachNote({ skipped: 3, required: 1, inert: true })).toBe(
         'This destination is no longer ahead of the rule, so it never runs',
       );
+    });
+  });
+});
+
+/**
+ * `readHorizon` is the same walk as `jumpReach`, asked the other question: not "what does this
+ * rule skip" but "how far back can it see". Both are restatements of `flattenStops`, which is
+ * why they live together — two modules would be two answers that can disagree.
+ */
+describe('readHorizon', () => {
+  /** p1: q1 q2 · p2: (empty) · p3: q3 q4 — the empty section is load-bearing, see 'edge'. */
+  const GAPPED: ReachPage[] = [
+    { id: 'p1', questions: [q('q1'), q('q2')] },
+    { id: 'p2', questions: [] },
+    { id: 'p3', questions: [q('q3'), q('q4')] },
+  ];
+
+  describe('happy', () => {
+    it("a question's show rule may read everything strictly before it", () => {
+      expect(readHorizon(GAPPED, from('question', 'q3'), 'show')).toBe(1);
+    });
+
+    it("a question's jump may also read the question's own answer", () => {
+      // The whole point of a jump: "if THIS answer is X, go to Y".
+      expect(readHorizon(GAPPED, from('question', 'q3'), 'jump')).toBe(2);
+    });
+
+    it("a section's show rule may read everything before the section starts", () => {
+      // Reading its own questions would hide the section out from under a respondent mid-fill.
+      expect(readHorizon(GAPPED, from('page', 'p3'), 'show')).toBe(1);
+    });
+
+    it("a section's jump may read the section's own questions, because it fires on the way out", () => {
+      expect(readHorizon(GAPPED, from('page', 'p3'), 'jump')).toBe(3);
+    });
+  });
+
+  describe('edge', () => {
+    it('the first question can read nothing', () => {
+      expect(readHorizon(GAPPED, from('question', 'q1'), 'show')).toBe(-1);
+    });
+
+    it('the first section can read nothing', () => {
+      expect(readHorizon(GAPPED, from('page', 'p1'), 'show')).toBe(-1);
+    });
+
+    it("a section with no questions reads the same either way — there is nothing of its own to add", () => {
+      expect(readHorizon(GAPPED, from('page', 'p2'), 'show')).toBe(1);
+      expect(readHorizon(GAPPED, from('page', 'p2'), 'jump')).toBe(1);
+    });
+
+    it("a section's show horizon counts the questions before it, not the ones an empty section lacks", () => {
+      // The arm that is off by one if you write `fireIndex - questions.length`: p3 fires at 3,
+      // holds 2 questions, and the last question BEFORE it is index 1 — not index 0. Getting
+      // this wrong narrows the picker by one question and falsely badges a legal page rule.
+      expect(readHorizon(GAPPED, from('page', 'p3'), 'show')).toBe(
+        readHorizon(GAPPED, from('question', 'q3'), 'show'),
+      );
+    });
+  });
+
+  describe('worst', () => {
+    it('an unresolvable source may read EVERYTHING — the opposite of jumpReach, deliberately', () => {
+      // Both returns mean "claim nothing". There, the alarming claim would be "this jump skips
+      // the rest of the form"; here it would be "every condition on this rule is broken".
+      expect(readHorizon(GAPPED, from('question', 'gone'), 'show')).toBe(3);
+      expect(readHorizon(GAPPED, from('page', 'gone'), 'jump')).toBe(3);
+    });
+
+    it('a form with no questions at all leaves nothing readable', () => {
+      expect(readHorizon([{ id: 'p1', questions: [] }], from('page', 'p1'), 'jump')).toBe(-1);
     });
   });
 });

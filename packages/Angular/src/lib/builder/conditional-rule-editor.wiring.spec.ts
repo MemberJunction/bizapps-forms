@@ -217,3 +217,49 @@ describe('every select shows the value its condition actually holds', () => {
     expect(source).toMatch(/\[selected\]="true"[^>]*>\{\{ stale \}\}|\{\{ stale \}\}[^<]*<\/option>/);
   });
 });
+
+/**
+ * The stale-source option says WHICH kind of stale it is (issue #73).
+ *
+ * A reorder writes only `DisplayOrder`, so a rule whose source moved below it still names a
+ * question that exists — and the picker used to call it "(question no longer available)" while
+ * the author could see it two rows down. The decision itself is
+ * {@link import('./condition-sources').staleSourceLabel}, tested for real in
+ * `condition-sources.spec.ts`; what has to be true here is that the template ASKS it rather than
+ * hardcoding the old sentence.
+ */
+describe('the stale-source option distinguishes deleted from moved-below', () => {
+  it('the template renders the computed label, not a literal', () => {
+    const html = editorHtml();
+    expect(html).toMatch(/\{\{ staleQuestionLabel\(cond\) \}\}/);
+    expect(html).not.toMatch(/>\(question no longer available\)</);
+  });
+
+  it('the component asks the shared helper, with the form-wide list to difference against', () => {
+    // `this.sources` alone cannot tell the two apart — a source absent from it is absent for
+    // both reasons. The complement within `formSources` is what names the second.
+    expect(editor()).toMatch(/staleSourceLabel\(\s*this\.questionSelectValue\(condition\),\s*this\.sources,\s*this\.formSources,?\s*\)/);
+  });
+
+  it('defaults the form-wide list to empty, so an unwired host cannot make an ordering claim', () => {
+    expect(editor()).toMatch(/@Input\(\) formSources: ConditionalSourceQuestion\[\] = \[\];/);
+  });
+});
+
+describe('a rule the author can no longer add, but can still read and remove', () => {
+  it('keeps the empty state for an empty rule, not for a rule with conditions in it', () => {
+    // The empty state replaced the WHOLE editor whenever nothing was readable from here, and a
+    // reorder can put a question first — at which point a show rule it already carries is both
+    // broken and invisible: the dialog offered "Add an earlier question first" and no sign that
+    // there was a rule, let alone the row that explains and removes it. The badge on the canvas
+    // said the rule was broken and the one place to fix it showed nothing.
+    expect(editorHtml()).toMatch(/@if \(sources\.length === 0 && _conditions\.length === 0\)/);
+  });
+
+  it('stops offering to add a condition when there is nothing to read', () => {
+    // Rendering the rows in that state brings the Add button with them, and `addCondition`
+    // refuses without a source — a button that visibly does nothing. The refusal stays as the
+    // guard for every other route in; this is what keeps the control off the screen.
+    expect(editor()).toMatch(/canAddCondition\(\): boolean \{\s*return this\.sources\.length > 0 &&/);
+  });
+});

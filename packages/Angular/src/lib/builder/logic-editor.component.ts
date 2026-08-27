@@ -160,6 +160,11 @@ const LOGIC_EDITOR_CSS = /* css */ `
 
 @media (max-width: 640px) {
   .le-then { flex-direction: column; align-items: stretch; }
+  /* flex-basis follows the MAIN axis, so the 260px above stopped being a preferred width and
+     became a preferred HEIGHT the moment this stacked — a 260px-tall picker with its label
+     floating in the middle of it. Stretch already gives it the full width. The condition row
+     next to it is a grid with named areas, which is why only this one grew. */
+  .le-then-select { flex: none; }
 }
 `;
 
@@ -183,6 +188,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
           <mjf-conditional-rule-editor
             [group]="draft.show"
             [sources]="sources"
+            [formSources]="formSources"
             [subjectSourceId]="subjectSourceId"
             (groupChange)="onShowChange($event)"
           />
@@ -229,6 +235,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
               <mjf-conditional-rule-editor
                 [group]="rule.when"
                 [sources]="jumpSources"
+                [formSources]="formSources"
                 [subjectSourceId]="subjectSourceId"
                 (groupChange)="onWhenChange($index, $event)"
               />
@@ -255,9 +262,16 @@ const LOGIC_EDITOR_CSS = /* css */ `
                     </optgroup>
                   }
                   <!-- A stored target the picker no longer offers. Without this entry the select
-                       renders BLANK on a rule that reads perfectly well in the database. -->
+                       renders BLANK on a rule that reads perfectly well in the database.
+                       DISABLED, like the stale-source option in the condition editor and for the
+                       same reason: this list is forward-only precisely so an author cannot pick a
+                       destination the resolver will ignore, and rendering the inert one as a
+                       choice alongside the live ones undoes that. It is still the SELECTION, so
+                       the rule reads correctly; it is simply not offered again. The wording
+                       distinguishes a DELETED target from one a reorder put behind this rule —
+                       see storedTargetLabel in jump-target-options.ts. -->
                   @if (staleTarget(rule); as stale) {
-                    <option [value]="stale.value" [selected]="true">{{ stale.label }}</option>
+                    <option [value]="stale.value" disabled [selected]="true">{{ stale.label }}</option>
                   }
                 </select>
               </div>
@@ -315,6 +329,16 @@ export class LogicEditorComponent {
   @Input() sources: ConditionalSourceQuestion[] = [];
   /** Sources a jump's conditions may read — includes this item's own answers. */
   @Input() jumpSources: ConditionalSourceQuestion[] = [];
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
+  /**
+   * Every destination this form has, wherever it sits — what lets a stale `Go to` say WHY it is
+   * stale. See `storedTargetLabel`; `formSources` is the same idea for a rule's sources.
+   */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
   /**
@@ -435,7 +459,7 @@ export class LogicEditorComponent {
     if (this.targets.some((o) => o.value === value)) {
       return null;
     }
-    return { value, label: storedTargetLabel(rule.target, this.targets) };
+    return { value, label: storedTargetLabel(rule.target, this.targets, this.formTargets) };
   }
 
   private emit(next: LogicDraft): void {

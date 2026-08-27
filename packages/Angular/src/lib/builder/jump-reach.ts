@@ -124,6 +124,52 @@ function questionsBefore(pages: readonly ReachPage[], pageIndex: number): number
 }
 
 /**
+ * The highest index into the form's question list that a rule on `source` may READ.
+ *
+ * The other half of the same walk `jumpReach` makes: that one answers "what does this rule skip",
+ * this one answers "how far back can it see". Both restate `flattenStops` — a `show` rule runs
+ * before its item is on screen, a `jump` runs after its item has been answered, and a section's
+ * `jump` runs on the way OUT, so it may read the section's own questions while its `show` may not.
+ *
+ * `-1` means "nothing is readable" and is a real answer, not a failure: the first question of the
+ * form, or a rule on the first section.
+ *
+ * AN UNRESOLVABLE SOURCE REPORTS EVERYTHING READABLE — the OPPOSITE return from `jumpReach`, which
+ * reports `INERT` for the same input. Both mean "claim nothing". There, the alarming claim would
+ * be "this jump skips the rest of the form"; here, it would be "every condition on this rule reads
+ * a question it cannot see". Do not make these agree.
+ */
+export function readHorizon(
+  pages: readonly ReachPage[],
+  source: ReachSource,
+  verb: 'show' | 'jump',
+): number {
+  const stop = verb === 'jump' ? fireIndex(pages, source) : startIndex(pages, source);
+  if (stop === null) {
+    return pages.reduce((total, page) => total + page.questions.length, 0) - 1;
+  }
+  // A jump reads up to and INCLUDING its own stop — "if this answer is X, go to Y" is the whole
+  // point of it. A show rule decides before its item renders, so it stops one short.
+  return verb === 'jump' ? stop : stop - 1;
+}
+
+/**
+ * The index of the FIRST question the rule's own item covers, or `null` when it is unknown.
+ *
+ * For a question that is the question itself. For a page it is the count of questions before it —
+ * a page is ENTERED there, which is where its `show` rule runs. Equivalently
+ * `fireIndex - questions.length + 1`; written as the count directly because the identity is where
+ * an off-by-one hides, and an empty section makes both arms agree without proving anything.
+ */
+function startIndex(pages: readonly ReachPage[], source: ReachSource): number | null {
+  if (source.kind === 'question') {
+    return fireIndex(pages, source);
+  }
+  const pageIndex = pages.findIndex((page) => page.id === source.id);
+  return pageIndex < 0 ? null : questionsBefore(pages, pageIndex);
+}
+
+/**
  * The one-line note an author reads beside the destination, or `''` when there is nothing to say.
  *
  * An inert rule reports THAT and not the count: how many questions it would have skipped is

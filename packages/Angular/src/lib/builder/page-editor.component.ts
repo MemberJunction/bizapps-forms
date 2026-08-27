@@ -45,6 +45,8 @@ const PAGE_EDITOR_CSS = /* css */ `
               [rule]="conditionalRule"
               [sources]="conditionalSources"
               [jumpSources]="jumpConditionSources"
+              [formSources]="formSources"
+              [formTargets]="formTargets"
               [targets]="jumpTargets"
               [reachNotes]="reachNotes"
               [defaultEndingLabel]="defaultEndingLabel"
@@ -74,6 +76,14 @@ export class PageEditorComponent {
   @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
   /** Sources a jump's conditions may read: earlier pages AND this page's own questions. */
   @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
+
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
+  /** See `RulesPanelComponent.formTargets`. */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** The ending finishers land on, by name — stated in the logic dialog, never written there. */
   @Input() defaultEndingLabel: string | null = null;
   /** Emitted whenever the page entity changed (parent persists). */

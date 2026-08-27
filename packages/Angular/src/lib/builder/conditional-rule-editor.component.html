@@ -1,5 +1,10 @@
 <div class="cre">
-  @if (sources.length === 0) {
+  <!-- The empty state is for an EMPTY rule. A rule that already has conditions is shown even
+       when nothing here is readable any more, which is what a reorder that puts this question
+       first leaves behind: the rule is broken, the badge on the canvas says so, and this dialog
+       is where it gets read and removed. Replacing the rows with "add an earlier question
+       first" hid the only thing the author came here for. -->
+  @if (sources.length === 0 && _conditions.length === 0) {
     <p class="cre-empty">Add an earlier question first to base a rule on its answer.</p>
   } @else {
     @if (_conditions.length > 0) {
@@ -43,8 +48,9 @@
               <!-- Reached only when the stored id matches no source, so it IS the selection.
                    Disabled: re-choosing a question a rule can no longer read is never the move.
                    Without this the select falls back to its first option and the row reads as a
-                   rule about the top of the form. -->
-              <option [value]="gone" disabled [selected]="true">(question no longer available)</option>
+                   rule about the top of the form. The wording distinguishes a DELETED question
+                   from one that merely moved below this rule — see `staleSourceLabel`. -->
+              <option [value]="gone" disabled [selected]="true">{{ staleQuestionLabel(cond) }}</option>
             }
           </select>
 

@@ -223,6 +223,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
               [subjectId]="s.ID"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
+              [formSources]="formSources"
               [allowJumps]="false"
               itemNoun="screen"
               (ruleChange)="onConditionalChange($event)"
@@ -252,6 +253,12 @@ export class ScreenEditorComponent {
   private requested = { redirect: false, social: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
+
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
 
   /** Emitted whenever a field on the screen entity changed (parent persists). */
   @Output() screenChanged = new EventEmitter<mjBizAppsFormsFormScreenEntity>();

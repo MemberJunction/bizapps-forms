@@ -61,7 +61,8 @@ import {
 } from './question-type-catalog';
 import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
-import { jumpReach, reachNote, type ReachSource } from './jump-reach';
+import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
+import { RuleBadgeComponent } from './rule-badge.component';
 import {
   collectRuleEntries,
   endingReachFor,
@@ -79,7 +80,15 @@ import {
   publishControlState,
   type PublishControlState,
 } from './publish-fingerprint';
-import { isValidReorder } from './reorder';
+import {
+  damageKeys,
+  isValidReorder,
+  newlyBrokenRules,
+  noticeStillTrue,
+  reorderNoticeText,
+  undoReorderMove,
+  type ReorderNotice,
+} from './reorder';
 import { nextOptionLabel } from './option-labels';
 import {
   NOTHING_SELECTED,
@@ -154,6 +163,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     AutomationTabComponent,
     ResponsesTabComponent,
     SaveAsTemplateDialogComponent,
+    RuleBadgeComponent,
   ],
   providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
   templateUrl: './form-builder.component.html',
@@ -334,6 +344,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    * instead of latching it, so an edit that restores the published state reports clean.
    */
   private markDirty(): void {
+    this.retireStaleNotice();
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
           buildPublishedDefinition(
@@ -639,14 +650,6 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
-   * Conditional sources for a PAGE: questions on pages strictly BEFORE it.
-   *
-   * Not "questions before this one" (a question's rule) and not "everything" (an ending's):
-   * a page rule referencing its own questions would hide the page out from under a respondent
-   * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
-   * questions are never offered.
-   */
-  /**
    * The questions in this list that a rule may actually read.
    *
    * ONE definition, for all six source lists — a page's show gate and its jump, a question's
@@ -662,12 +665,33 @@ export class FormBuilderComponent extends BaseFormComponent {
     return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
   }
 
+  /**
+   * The sources a rule whose read horizon is `horizon` may reference.
+   *
+   * Slices the FULL question list and filters afterwards, never the other way round.
+   * `sourcesOf` drops a question that collects no answer, so slicing an already-filtered list
+   * would shift every horizon on any form carrying a `Statement` — silently, and in the
+   * direction that makes a legal rule look broken.
+   */
+  private sourcesUpTo(horizon: number): ConditionalSourceQuestion[] {
+    const questions = (this.tree?.pages ?? []).flatMap((page) => page.questions);
+    return this.sourcesOf(questions.slice(0, horizon + 1));
+  }
+
+  /**
+   * Conditional sources for a PAGE: questions on pages strictly BEFORE it.
+   *
+   * Not "questions before this one" (a question's rule) and not "everything" (an ending's):
+   * a page rule referencing its own questions would hide the page out from under a respondent
+   * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
+   * questions are never offered.
+   */
   protected get pageConditionalSources(): ConditionalSourceQuestion[] {
-    const index = this.selectedPageIndex;
-    if (!this.tree || index <= 0) {
+    const page = this.selectedPage;
+    if (!page) {
       return [];
     }
-    return this.tree.pages.slice(0, index).flatMap((page) => this.sourcesOf(page.questions));
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'page', id: page.entity.ID }, 'show'));
   }
 
   protected onPageChanged(page: PageNode): void {
@@ -682,11 +706,41 @@ export class FormBuilderComponent extends BaseFormComponent {
    * what the show rule must NOT read (see {@link pageConditionalSources}).
    */
   protected get pageJumpConditionSources(): ConditionalSourceQuestion[] {
-    const index = this.selectedPageIndex;
-    if (!this.tree || index < 0) {
+    const page = this.selectedPage;
+    if (!page) {
       return [];
     }
-    return this.tree.pages.slice(0, index + 1).flatMap((page) => this.sourcesOf(page.questions));
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'page', id: page.entity.ID }, 'jump'));
+  }
+
+  /**
+   * Every destination a jump could name, ANYWHERE on the form — not filtered by where the rule
+   * sits, which is what makes it useful.
+   *
+   * The pickers above are forward-only, mirroring the resolver. That is right for AUTHORING and
+   * wrong for NAMING: a reorder can put a target behind its rule, and it then drops out of the
+   * offered list while sitting one row up the canvas, so the rail read "(a question that no
+   * longer exists)" about something plainly there. The difference between this list and the
+   * offered one is exactly "exists, but not from here" — see `storedTargetLabel`.
+   *
+   * Same shape as {@link formSources}, which answers the identical question about a rule's
+   * SOURCES, and for the same reason.
+   */
+  protected get formTargets(): JumpTargetOption[] {
+    const tree = this.tree;
+    if (!tree) {
+      return [];
+    }
+    return jumpTargetOptions(
+      tree.pages.flatMap((page) =>
+        page.questions.map((q) => ({ id: q.entity.ID, label: q.entity.Prompt })),
+      ),
+      tree.pages.map((page, index) => ({
+        id: page.entity.ID,
+        label: page.entity.Title || `Page ${index + 1}`,
+      })),
+      this.endingDestinations,
+    );
   }
 
   /**
@@ -766,18 +820,42 @@ export class FormBuilderComponent extends BaseFormComponent {
     source: ReachSource,
     targets: readonly JumpTargetOption[],
   ): ReadonlyMap<string, string> {
-    const pages = (this.tree?.pages ?? []).map((page) => ({
-      id: page.entity.ID,
-      questions: page.questions.map((q) => ({ id: q.entity.ID, isRequired: q.entity.IsRequired === true })),
-    }));
     const notes = new Map<string, string>();
     for (const target of targets) {
-      const note = reachNote(jumpReach(pages, source, target.target));
+      const note = reachNote(jumpReach(this.reachPages, source, target.target));
       if (note.length > 0) {
         notes.set(targetValue(target.target), note);
       }
     }
     return notes;
+  }
+
+  /**
+   * The form as `jump-reach.ts` reads it: ids and required flags, in flow order.
+   *
+   * Both reach notes and every source list read it now, so the projection is written once. It is
+   * also the ONE place the ordering rule enters the builder — `readHorizon` and `jumpReach` are
+   * the only two things that interpret it, and they agree because they share this walk.
+   */
+  private get reachPages(): ReachPage[] {
+    return (this.tree?.pages ?? []).map((page) => ({
+      id: page.entity.ID,
+      questions: page.questions.map((q) => ({ id: q.entity.ID, isRequired: q.entity.IsRequired === true })),
+    }));
+  }
+
+  /**
+   * Every answerable question on the form, in flow order — the WHOLE list, not one rule's legal
+   * prefix.
+   *
+   * Two readers, and they need the same list for related reasons. The rule inventory resolves
+   * prompts against it, because a rule pointing at a question it should not have been able to
+   * reach is still a rule that reads. The condition editor differences it against the offered
+   * sources to tell "this question was deleted" from "this question is answered after your rule
+   * runs" — see `staleSourceLabel`.
+   */
+  protected get formSources(): ConditionalSourceQuestion[] {
+    return (this.tree?.pages ?? []).flatMap((page) => this.sourcesOf(page.questions));
   }
 
   /** Every ending screen, as a jump destination. */
@@ -793,19 +871,11 @@ export class FormBuilderComponent extends BaseFormComponent {
    * SHOW rule must not read, which is why {@link conditionalSources} stops one question earlier.
    */
   protected get questionJumpSources(): ConditionalSourceQuestion[] {
-    if (!this.tree || !this.selectedQuestionId) {
+    const id = this.selectedQuestionId;
+    if (!this.tree || !id) {
       return [];
     }
-    const sources: ConditionalSourceQuestion[] = [];
-    for (const page of this.tree.pages) {
-      for (const q of page.questions) {
-        sources.push(...this.sourcesOf([q]));
-        if (q.entity.ID === this.selectedQuestionId) {
-          return sources;
-        }
-      }
-    }
-    return sources;
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'question', id }, 'jump'));
   }
 
   protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {
@@ -908,7 +978,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return [];
     }
     return [
-      ...this.tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      ...this.formSources,
       // Endings may also band on the running score (C4) — "score > 70 → pass screen". Only
       // endings get this: mid-form rules reading a mid-form score would be circular.
       SCORE_SOURCE,
@@ -1019,19 +1089,11 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** Questions preceding the selected one (valid conditional-rule sources). */
   protected get conditionalSources(): ConditionalSourceQuestion[] {
-    if (!this.tree || !this.selectedQuestionId) {
+    const id = this.selectedQuestionId;
+    if (!this.tree || !id) {
       return [];
     }
-    const sources: ConditionalSourceQuestion[] = [];
-    for (const page of this.tree.pages) {
-      for (const q of page.questions) {
-        if (q.entity.ID === this.selectedQuestionId) {
-          return sources;
-        }
-        sources.push(...this.sourcesOf([q]));
-      }
-    }
-    return sources;
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'question', id }, 'show'));
   }
 
   // -- rule badges on the canvas (RULES_SIMPLIFICATION_PLAN Phase 3) ---------
@@ -1082,7 +1144,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return { sources: [], pages: [], endings: [] };
     }
     return {
-      sources: tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      sources: this.formSources,
       pages: tree.pages.map((page, index) => ({
         id: page.entity.ID,
         label: page.entity.Title || `Page ${index + 1}`,
@@ -1204,14 +1266,165 @@ export class FormBuilderComponent extends BaseFormComponent {
     await this.reorderQuestion(page, event.previousIndex, event.currentIndex);
   }
 
-  /** Shared reorder: move a question to a new index in its page, then persist. */
+  /**
+   * Shared reorder: move a question to a new index in its page, persist, and say what the move
+   * cost (issue #73).
+   *
+   * A drag writes `DisplayOrder` and nothing else — it never rewrites rule JSON, and it must not
+   * start: the tool cannot tell "everyone should answer this first" from "I was tidying", and a
+   * guessed repair to a jump silently drops an answer the respondent already typed. So the move
+   * stands and the CONSEQUENCE is reported.
+   *
+   * The consequence is a set difference over `collectRuleEntries`, not a rule check of its own.
+   * This path knows nothing about rules beyond "the broken set grew", which is why every
+   * breakage class the inventory learns later is warned about here without touching this method.
+   *
+   * The only write path that hooks this, because it is the only one that can INVERT a pair: every
+   * other path appends or removes (plan §1.5), and neither reverses the order of two surviving
+   * questions. If insert-at-index, duplicate-below or move-to-another-section ever ships, that
+   * proof lapses and the diff has to wrap the new write too.
+   */
   private async reorderQuestion(page: PageNode, from: number, to: number): Promise<void> {
     if (this.busy || !isValidReorder(from, to, page.questions.length)) {
       return;
     }
+    const moved = page.questions[from];
+    // Read BEFORE the array moves — it is the question this one used to sit in front of, which is
+    // what Undo puts it back before. `null` when it was last on the page.
+    const wasBefore = page.questions[from + 1]?.entity.ID ?? null;
+    const before = this.ruleEntries;
     moveItemInArray(page.questions, from, to);
-    await this.state.persistQuestionOrder(page);
+
+    const labels = this.itemLabels;
+    const broken = newlyBrokenRules(before, this.ruleEntries);
+    const text = reorderNoticeText(
+      { id: moved.entity.ID, label: moved.entity.Prompt },
+      broken,
+      (id) => labels.get(id) ?? 'another question',
+    );
+    // Keyed on IDS, never on `from`/`to`. A stored index pair is only correct while nothing else
+    // has shifted the page, and resolving by id when Undo is clicked makes moving the wrong
+    // question unrepresentable.
+    //
+    // A move that breaks nothing LEAVES A STANDING BAND ALONE. Overwriting with null here was
+    // how an unrelated nudge on another section silently took away the Undo for a breakage that
+    // was still on screen — reproduced. What retires a band is `retireStaleNotice`, which asks
+    // whether it is still TRUE rather than whether anything has happened since.
+    if (text.length > 0) {
+      this.reorderNotice = {
+        text,
+        pageId: page.entity.ID,
+        questionId: moved.entity.ID,
+        wasBefore,
+        damage: damageKeys(broken),
+      };
+    }
+
+    // `busy` for the write, like every other handler that awaits one. The guard at the top of
+    // this method was reading a flag nothing here ever set, so the Undo button's `[disabled]`
+    // was decorative and a second click could start a reorder while the first was still writing
+    // — two `Save()` sequences interleaving over the same `DisplayOrder` column, which is the
+    // lost update `builder-state.service.ts` warns about. try/finally because the state service
+    // can throw, and a stuck `busy` freezes every guarded handler on the screen at once.
+    this.busy = true;
+    try {
+      // Checked rather than discarded: this writes one question at a time and can fail halfway,
+      // leaving `DisplayOrder` matching neither the order before this move nor the one after.
+      // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
+      // refused write — and the notice below it stays true either way, because it is about what
+      // is on screen. Logged as well so a partial write is not invisible once that band is gone.
+      if (!(await this.state.persistQuestionOrder(page))) {
+        LogError(
+          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
+            'DisplayOrder may match neither the previous nor the new order.',
+        );
+      }
+    } finally {
+      this.busy = false;
+    }
     this.markDirty();
+  }
+
+  // -- the reorder notice (issue #73) ---------------------------------------
+
+  /**
+   * The last reorder that broke a rule, and enough to put it back. `null` when the last move
+   * cost nothing, which is the ordinary case.
+   *
+   * NO TIMER. It stands until it is undone, dismissed, or replaced by another costly move: an
+   * auto-hiding warning about something otherwise silent is the failure this issue is about.
+   */
+  protected reorderNotice: ReorderNotice | null = null;
+
+  /**
+   * Put the moved question back where it came from.
+   *
+   * `moveItemInArray(a, from, to)` is inverted exactly by moving the same element back, so this
+   * re-enters {@link reorderQuestion}, which re-runs the diff, finds nothing newly broken and
+   * clears its own notice. No command stack, and no second definition of what "undone" means.
+   */
+  protected async undoReorder(): Promise<void> {
+    const notice = this.reorderNotice;
+    if (!notice) {
+      return;
+    }
+    const page = this.tree?.pages.find((p) => p.entity.ID === notice.pageId);
+    const move = page
+      ? undoReorderMove(notice, page.questions.map((q) => q.entity.ID))
+      : null;
+    if (!page || !move) {
+      // The question or its section was deleted while the band stood. A band offering a move
+      // that cannot happen is worse than no band.
+      this.dismissReorderNotice();
+      return;
+    }
+    await this.reorderQuestion(page, move.from, move.to);
+  }
+
+  protected dismissReorderNotice(): void {
+    this.reorderNotice = null;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Drop the reorder band once the rules it named are no longer broken — HOWEVER they were fixed.
+   *
+   * Clicking Undo is only one of the ways. The author can drag the question back by hand, open
+   * the rule and repair it in the dialog, or delete it outright, and a band still announcing that
+   * breakage is a warning that outlived what it warned about.
+   *
+   * Called from {@link markDirty}, and that is not a contradiction of the comment in
+   * `reorderQuestion` that rejects it. `markDirty()` is the wrong clock for IDENTITY — which
+   * question Undo moves, and to where — because a keystroke in a prompt or a background
+   * automation event would answer that wrongly. It is the right clock for TRUTH, because a
+   * spurious call can only ever re-confirm a still-broken rule; it can never retire a real one.
+   */
+  private retireStaleNotice(): void {
+    const notice = this.reorderNotice;
+    if (notice && !noticeStillTrue(notice, this.ruleEntries)) {
+      this.reorderNotice = null;
+    }
+  }
+
+  /**
+   * Every item that can carry a rule, by id, named the way the canvas names it.
+   *
+   * Read from the same projection the badges are built from, so the band and the badge it points
+   * at cannot call one question two different things.
+   */
+  private get itemLabels(): ReadonlyMap<string, string> {
+    const labels = new Map<string, string>();
+    const form = this.ruleInventoryForm;
+    for (const page of form.pages) {
+      labels.set(page.id, page.label);
+      for (const question of page.questions) {
+        labels.set(question.id, question.label);
+      }
+    }
+    for (const ending of form.endings) {
+      labels.set(ending.id, ending.label);
+    }
+    return labels;
   }
 
   // -- form-level settings --------------------------------------------------

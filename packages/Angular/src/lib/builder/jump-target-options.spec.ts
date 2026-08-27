@@ -11,6 +11,9 @@ const QUESTIONS = [{ id: 'q8', label: 'Are you local?' }];
 const PAGES = [{ id: 'p3', label: 'VIP details' }];
 const ENDINGS = [{ id: 's1', label: 'Not eligible' }];
 
+/** Every destination the form has, wherever it sits — what the host wires as `formTargets`. */
+const ALL = jumpTargetOptions(QUESTIONS, PAGES, ENDINGS);
+
 describe('encoding a target for a <select>', () => {
   describe('happy', () => {
     it('round-trips every kind', () => {
@@ -75,10 +78,48 @@ describe('jumpTargetOptions', () => {
       // A <select> whose value is absent from its options renders EMPTY — an author would see a
       // blank destination on a rule that reads perfectly well in the database.
       const options = jumpTargetOptions(QUESTIONS, PAGES, ENDINGS);
-      expect(storedTargetLabel({ kind: 'question', id: 'gone' }, options)).toBe(
+      expect(storedTargetLabel({ kind: 'question', id: 'gone' }, options, ALL)).toBe(
         '(a question that no longer exists)',
       );
-      expect(storedTargetLabel({ kind: 'question', id: 'q8' }, options)).toBe('Are you local?');
+      expect(storedTargetLabel({ kind: 'question', id: 'q8' }, options, ALL)).toBe('Are you local?');
+    });
+
+    it('says a target is BEHIND the rule rather than calling it deleted', () => {
+      // The lie issue #73 fixed for sources, on destinations. A reorder can put a target behind
+      // its rule; the picker is forward-only, so it drops out of the offered list while sitting
+      // one row up the canvas, visibly present. Saying "no longer exists" about it is the badge
+      // caught lying — and this one is on the row an author opens to fix the rule.
+      const offered = jumpTargetOptions([], [], ENDINGS);
+      expect(storedTargetLabel({ kind: 'question', id: 'q8' }, offered, ALL)).toBe(
+        'Are you local? — no longer ahead, so this rule never runs',
+      );
+      expect(storedTargetLabel({ kind: 'page', id: 'p3' }, offered, ALL)).toBe(
+        'VIP details — no longer ahead, so this rule never runs',
+      );
+    });
+
+    it('never says that about Submit, which is always ahead of everything', () => {
+      expect(storedTargetLabel({ kind: 'submit' }, [], [])).toBe('Submit the form');
+    });
+
+    it('keeps the old wording for a host that has not wired the form-wide list', () => {
+      // Empty is the safe default: with no evidence about where the target sits, the honest
+      // answer is the one that makes no ordering claim.
+      expect(storedTargetLabel({ kind: 'question', id: 'q8' }, [], [])).toBe(
+        '(a question that no longer exists)',
+      );
+    });
+
+    it('tells an ending that was deleted from one that is simply not offered here', () => {
+      // An ending is reachable from anywhere, so a picker that omits one omits it deliberately.
+      expect(storedTargetLabel({ kind: 'ending', id: 's1' }, [], ALL)).toBe(
+        'Not eligible — no longer ahead, so this rule never runs',
+      );
+      // "an ending screen" is what the badge calls one (`MISSING_ENDING`); the rail and the
+      // badge are read together, and "a ending" was never right anyway.
+      expect(storedTargetLabel({ kind: 'ending', id: 'gone' }, [], ALL)).toBe(
+        '(an ending screen that no longer exists)',
+      );
     });
   });
 });

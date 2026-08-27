@@ -555,6 +555,35 @@ export function toggleMembership(
  * id. Selecting it authors a `source: 'score'` condition (C4); it exists only in the editor's
  * dropdown and is never stored.
  */
+/**
+ * What the picker calls a stored source id it is not offering, or `''` when it IS offering it.
+ *
+ * THREE causes reach this, and two of them must not read alike (issue #73):
+ *
+ *  - the question was DELETED — "(question no longer available)", which is true;
+ *  - the question EXISTS but sits after the rule in the walk, arrived at by reordering — the old
+ *    wording is a lie the author can disprove by looking at the canvas, so it is named instead;
+ *  - the question was converted to a type that collects no answer (a `Statement`), which
+ *    `toConditionalSource` drops. It is in neither list and keeps the "no longer available"
+ *    wording DELIBERATELY: telling it apart needs the raw question list threaded in to serve a
+ *    case no reorder can create, and a `Statement` genuinely is not available as a source.
+ *
+ * `formSources` empty means the caller has not wired the form-wide list; falling back to the old
+ * label is the only safe default, because the ordering claim would then have no evidence behind
+ * it.
+ */
+export function staleSourceLabel(
+  questionId: string,
+  offered: readonly ConditionalSourceQuestion[],
+  formSources: readonly ConditionalSourceQuestion[],
+): string {
+  if (offered.some((source) => source.id === questionId)) {
+    return '';
+  }
+  const later = formSources.find((source) => source.id === questionId);
+  return later ? `${later.prompt} — answered after this rule runs` : '(question no longer available)';
+}
+
 export const SCORE_SOURCE_ID = '__mjf-total-score__';
 
 /** The pseudo-source a host appends where rules may band on the running score (ending screens). */

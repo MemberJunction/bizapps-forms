@@ -127,9 +127,20 @@ describe('the rule editor is a modal, not a rail expansion', () => {
   });
 });
 
+describe('the dialog stacks on a phone without stretching a control', () => {
+  it('drops the destination picker\'s flex-basis when the row turns vertical', () => {
+    // `flex: 1 1 260px` is a preferred WIDTH in a row and a preferred HEIGHT in a column, so
+    // stacking the label above the picker turned it into a 260px-tall box with "Then go to"
+    // floating in the middle. Reported from a phone.
+    const css = readFileSync(join(__dirname, 'logic-editor.component.ts'), 'utf8');
+    const mobile = css.slice(css.indexOf('@media (max-width: 640px)'));
+    expect(mobile).toMatch(/\.le-then-select \{ flex: none; \}/);
+  });
+});
+
 describe('the panel header is the only add affordance', () => {
-  it('it is labelled RULES', () => {
-    expect(panelHtml()).toMatch(/RULES/);
+  it('it is labelled BRANCH', () => {
+    expect(panelHtml()).toMatch(/>BRANCH</);
   });
 
   it('the header button has an accessible name for whichever face it is showing', () => {
@@ -454,5 +465,74 @@ describe('the catch-all ending is STATED here, not edited here', () => {
     // It sits inside the same `@if (allowJumps)` guard as the jump rules.
     const guarded = /@if \(allowJumps\) \{([\s\S]*?)\n      \}/.exec(logicEditorSrc())?.[1] ?? '';
     expect(guarded).toMatch(/defaultEndingLabel/);
+  });
+});
+
+/**
+ * The rail names a rule's source from the WHOLE form, not from what that rule may legally read.
+ *
+ * Issue #73. Naming and legality are two questions and the rail was answering both with one
+ * list: after a reorder its summary read `Show only when (deleted question) is answered` about a
+ * question sitting one row above it on the canvas. The badge beside it had already been taught to
+ * say what really happened, so the rail was the last surface still telling the old lie.
+ *
+ * `rules-inventory.ts` reached this conclusion first and wrote it down — its `sources` is
+ * documented as "the WHOLE form's questions, not one item's legal sources", for this reason.
+ */
+describe('the rules rail names a source it is no longer allowed to read', () => {
+  it('resolves prompts against the form-wide list as well as the rule\'s own', () => {
+    expect(panel()).toMatch(/describeCondition\(c, \[\.\.\.sources, \.\.\.this\.formSources\]\)/);
+  });
+
+  it('takes that list as an input, defaulted to empty so an unwired host degrades to the old text', () => {
+    expect(panel()).toMatch(/@Input\(\) formSources: ConditionalSourceQuestion\[\] = \[\];/);
+  });
+
+  it('hands it on to the editor the dialog opens', () => {
+    expect(panelHtml()).toMatch(/\[formSources\]="formSources"/);
+  });
+});
+
+/**
+ * The same lie, about a rule's DESTINATION.
+ *
+ * Issue #73 fixed it for sources and logged this: the `Go to` picker is forward-only, mirroring
+ * the resolver, so a reorder that puts a target behind its rule drops it out of the offered list
+ * while the thing itself sits one row up the canvas. Both the rail line and the dialog's disabled
+ * option then read `(a question that no longer exists)` about something plainly present. The
+ * canvas badge has always said the true thing (`UNREACHED_DESTINATION`), so the two surfaces
+ * contradicted each other on the same rule.
+ */
+describe('the rules rail names a destination that is no longer ahead of the rule', () => {
+  it('gives the label function the form-wide list as well as the offered one', () => {
+    expect(panel()).toMatch(/storedTargetLabel\(jump\.target, this\.targets, this\.formTargets\)/);
+    expect(logicEditor()).toMatch(/storedTargetLabel\(rule\.target, this\.targets, this\.formTargets\)/);
+  });
+
+  it('takes that list as an input, defaulted to empty so an unwired host degrades to the old text', () => {
+    expect(panel()).toMatch(/@Input\(\) formTargets: JumpTargetOption\[\] = \[\];/);
+    expect(logicEditor()).toMatch(/@Input\(\) formTargets: JumpTargetOption\[\] = \[\];/);
+  });
+
+  it('hands it on to the editor the dialog opens', () => {
+    expect(panelHtml()).toMatch(/\[formTargets\]="formTargets"/);
+  });
+
+  it('makes the third argument REQUIRED, so a new caller has to decide rather than inherit the lie', () => {
+    const module = stripped('jump-target-options.ts');
+    expect(module).toMatch(/formTargets: ReadonlyArray<JumpTargetOption>,\s*\): string/);
+    expect(module).not.toMatch(/formTargets: ReadonlyArray<JumpTargetOption> = \[\]/);
+  });
+});
+
+describe('an unreachable destination is named, not offered', () => {
+  it('disables the stale option the way the condition editor disables a stale source', () => {
+    // The Go to list is forward-only precisely so an author cannot pick a destination the
+    // resolver ignores — a rule that reads correctly and silently never fires. Rendering the
+    // inert target as a selectable option beside the live ones gives that back. It stays the
+    // SELECTION, so the rule still reads right; it is just not on offer again.
+    expect(logicEditor()).toMatch(
+      /@if \(staleTarget\(rule\); as stale\) \{\s*<option \[value\]="stale\.value" disabled \[selected\]="true">/,
+    );
   });
 });

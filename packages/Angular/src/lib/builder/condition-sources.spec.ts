@@ -18,6 +18,7 @@ import {
   toggleMembership,
   valueEditorKind,
   canAddCondition,
+  staleSourceLabel,
   defaultConditionSource,
   newCondition,
   SCORE_SOURCE,
@@ -737,5 +738,53 @@ describe('a new condition on a fixed-answer source', () => {
   it('opens a presence-only source on an operator that needs no value', () => {
     const upload = toConditionalSource(question('FileUpload'), [])!;
     expect(operatorNeedsValue(newCondition(upload).op)).toBe(false);
+  });
+});
+
+/**
+ * What the picker calls a stored source it is not offering.
+ *
+ * Issue #73. The disabled option has always read "(question no longer available)", which after a
+ * REORDER is simply false — the question is two rows down the canvas, in plain sight. A picker
+ * that says a visible question does not exist is a picker nobody believes on the day it is right.
+ */
+describe('staleSourceLabel', () => {
+  const src = (id: string, prompt: string): ConditionalSourceQuestion => ({ id, prompt, kind: 'text' });
+  const q1 = src('q1', 'Ticket type');
+  const q2 = src('q2', 'Age');
+  const q3 = src('q3', 'Interests');
+  const FORM = [q1, q2, q3];
+
+  describe('happy', () => {
+    it('names a question that exists but is answered after the rule runs', () => {
+      expect(staleSourceLabel('q3', [q1, q2], FORM)).toBe('Interests — answered after this rule runs');
+    });
+
+    it('says a question is gone when it is gone from the whole form', () => {
+      expect(staleSourceLabel('deleted', [q1, q2], FORM)).toBe('(question no longer available)');
+    });
+  });
+
+  describe('edge', () => {
+    it('keeps the gone wording for a source that collects no answer', () => {
+      // A `Statement` is dropped by `toConditionalSource`, so it is in NEITHER list and lands
+      // here. Telling it apart would mean threading the raw question list in to serve a case no
+      // reorder can create — and "not available as a source" is true of a Statement.
+      expect(staleSourceLabel('statement-id', [q1], FORM)).toBe('(question no longer available)');
+    });
+
+    it('falls back to the gone wording when the form list is empty', () => {
+      // The safe default for any caller that has not wired the form-wide list: the old label,
+      // never a claim about ordering it has no evidence for.
+      expect(staleSourceLabel('q3', [q1], [])).toBe('(question no longer available)');
+    });
+  });
+
+  describe('worst', () => {
+    it('is never asked about a source that IS offered, and says nothing useful if it is', () => {
+      // The caller only reaches here when the select has no matching option. Guarding anyway,
+      // because a label that contradicts a visible, selectable option is the worst of the three.
+      expect(staleSourceLabel('q1', [q1, q2], FORM)).toBe('');
+    });
   });
 });

@@ -1,5 +1,5 @@
 /**
- * The RULES rail beside a question, section or ending screen: what this item's logic DOES, in
+ * The BRANCH rail beside a question, section or ending screen: what this item's logic DOES, in
  * one line per rule, with one way in to change it.
  *
  * It used to be a card picker — pick "Show only if", author it, close, pick "Jump to page",
@@ -36,7 +36,10 @@ const RULES_PANEL_CSS = /* css */ `
 .rp { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); }
 
 .rp-bar { display: flex; align-items: center; gap: var(--mjf-gap-sm); }
-.rp-bar-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-label); font-weight: 700; letter-spacing: 0.06em; color: var(--mj-text-muted); }
+/* --mj-text-secondary, not --mj-text-muted: this heading sits in the same rail as the editors'
+   own "Page settings" / "Question settings" / "Ending" titles, all of which are secondary at 600,
+   and muted rendered it visibly lighter than every other line beside it. */
+.rp-bar-title { flex: 1 1 auto; margin: 0; font-size: var(--mjf-label); font-weight: 700; letter-spacing: 0.06em; color: var(--mj-text-secondary); }
 .rp-empty { margin: 0; font-size: var(--mjf-label); color: var(--mj-text-muted); }
 
 .rp-add {
@@ -128,6 +131,21 @@ export class RulesPanelComponent {
    * Null means "same as sources".
    */
   @Input() jumpSources: ConditionalSourceQuestion[] | null = null;
+
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
+  /**
+   * Every destination the form has, for the same reason {@link formSources} exists: {@link
+   * targets} is forward-only, so a target a reorder put BEHIND this rule is absent from it while
+   * sitting one row up the canvas. See `storedTargetLabel`.
+   *
+   * Not wired by the ENDING editor, and that is not an oversight: an ending screen carries no
+   * jump — it IS the after — which is what `allowJumps` says.
+   */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
   /**
@@ -197,7 +215,7 @@ export class RulesPanelComponent {
         icon: 'fa-solid fa-arrow-turn-down',
         text:
           `If ${this.conditions(jump.when, this.jumpSourceList)}, go to ` +
-          storedTargetLabel(jump.target, this.targets),
+          storedTargetLabel(jump.target, this.targets, this.formTargets),
       });
     }
     return rows;
@@ -209,6 +227,14 @@ export class RulesPanelComponent {
    * Built on `describeCondition`, the same renderer the Rules tab uses, so the rail and the hub
    * cannot word the same rule differently. Truncated after two, because this is one line in a
    * ~300px column; the hub is where a rule is read in full.
+   *
+   * NAMING IS NOT LEGALITY, and resolving both from one list is how this rail came to read
+   * `Show only when (deleted question) is answered` about a question one row above it (issue
+   * #73). `sources` is what the rule may READ — a prefix that a reorder can shrink out from
+   * under an existing rule — while naming needs whatever the rule actually points at. The rule's
+   * own list goes first so it still wins for anything in both (an ending's running score is only
+   * ever in that one); the form-wide list supplies the rest. `rules-inventory.ts` reached the
+   * same conclusion first, and its `sources` field carries the same note.
    */
   private conditions(
     group: ConditionalRule['show'],
@@ -219,7 +245,7 @@ export class RulesPanelComponent {
       return 'always';
     }
     const joiner = group?.any ? ' or ' : ' and ';
-    const head = list.slice(0, 2).map((c) => describeCondition(c, sources)).join(joiner);
+    const head = list.slice(0, 2).map((c) => describeCondition(c, [...sources, ...this.formSources])).join(joiner);
     return list.length > 2 ? `${head} · +${list.length - 2} more` : head;
   }
 

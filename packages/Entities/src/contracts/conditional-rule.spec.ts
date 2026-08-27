@@ -513,3 +513,57 @@ describe('ordering a time-of-day answer', () => {
     });
   });
 });
+
+/**
+ * What a condition naming a question that is not in the answer map actually does.
+ *
+ * Four comments in the builder asserted this is `NOT_EVALUABLE`, which the evaluator reads as
+ * `false`, so the guarded item is "hidden from every respondent". Both halves are wrong, and the
+ * builder now says something else — these pin what it may say.
+ *
+ * The case arises two ways and they are indistinguishable here: the question was DELETED, or it
+ * is answered LATER than the rule runs, so nothing has been put in the map yet.
+ *
+ * These DOCUMENT behaviour that already shipped; they drove no change to the evaluator. They
+ * exist so the corrected prose cannot quietly drift back to what it said.
+ */
+describe('a condition whose question is absent from the answers', () => {
+  const missing = (op: ConditionalOperator, value?: ConditionValue): boolean =>
+    evaluateCondition({ questionId: 'gone', op, value }, answers({ q1: 'x' }));
+
+  describe('happy', () => {
+    it('is NOT the NOT_EVALUABLE sentinel — a deleted question still has an id', () => {
+      // `conditionOperand` returns that sentinel only for a MISSING or empty `questionId`, or a
+      // score condition with no score. A deleted question's id is a perfectly good string, so
+      // the operand is a plain `undefined` and every operator gets to run on it.
+      // Observable proof: the sentinel short-circuits to `false` before the operator is
+      // consulted, so an operator that answers `true` on `undefined` could not fire at all.
+      expect(missing('isNotAnswered')).toBe(true);
+    });
+
+    it('is false under the equality family, which is the case people expect', () => {
+      expect(missing('equals', 'x')).toBe(false);
+      expect(missing('in', ['x'])).toBe(false);
+      expect(missing('isAnswered')).toBe(false);
+    });
+  });
+
+  describe('worst', () => {
+    it('is TRUE under isNotAnswered and notEquals, so the item is shown to EVERYONE', () => {
+      // The half that makes "hidden from every respondent" a lie. A show rule reading a deleted
+      // or not-yet-answered question with either operator pins the item OPEN, not shut — and a
+      // badge caught lying once is a badge nobody reads on the day it is right.
+      expect(missing('isNotAnswered')).toBe(true);
+      expect(missing('notEquals', 'x')).toBe(true);
+    });
+
+    it('pins a whole show rule open, not shut', () => {
+      expect(
+        evaluateConditionalRule(
+          { show: { all: [{ questionId: 'gone', op: 'isNotAnswered' }] } },
+          answers({ q1: 'x' }),
+        ),
+      ).toBe(true);
+    });
+  });
+});

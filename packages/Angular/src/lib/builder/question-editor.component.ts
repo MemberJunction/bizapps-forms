@@ -214,6 +214,14 @@ export class QuestionEditorComponent {
    * to Y" is the whole point of a branching rule.
    */
   @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
+
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
+  /** See `RulesPanelComponent.formTargets`. */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** Forward destinations for this question's rules — later questions, later sections, endings. */
   @Input() jumpTargets: JumpTargetOption[] = [];
   /** What each destination skips, keyed by option value — see `jump-reach.ts`. */

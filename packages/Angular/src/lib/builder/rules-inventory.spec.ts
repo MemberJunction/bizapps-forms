@@ -19,14 +19,22 @@ const SOURCES: ConditionalSourceQuestion[] = [
 const showVip: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] } };
 
 /**
- * `sources` and `pages` must describe the SAME form.
+ * `sources` and `pages` must describe the SAME form, and this tops up BOTH directions so a
+ * fixture cannot say otherwise.
  *
  * They are two views of one thing — the whole form's questions, and those questions in document
  * order — and the builder derives both from one tree, so it cannot produce a form where they
- * disagree. A fixture that did was testing a state that does not exist, and it showed up the
- * moment rules started reporting what they skip: a target present in `sources` but absent from
- * `pages` reads as "resolves fine" to the sentence and "not ahead of the rule" to the reach.
- * Overridden pages therefore top up `sources` with anything they add.
+ * disagree. A fixture that did was testing a state that does not exist, and it has now shown up
+ * twice, each time as a plausible-looking failure somewhere else:
+ *
+ *  - a target present in `sources` but absent from `pages` reads as "resolves fine" to the
+ *    sentence and "not ahead of the rule" to the reach;
+ *  - the same gap reads as "answered later than this rule runs" to the read horizon, because a
+ *    question on no page is at no index, so no rule can reach it.
+ *
+ * Both are true statements about a form nobody can build. Overridden pages top up `sources` with
+ * anything they add; orphan sources are given a section AHEAD of everything, which is where a
+ * question a rule reads has to be for the rule to be legal.
  */
 function form(overrides?: Partial<RuleInventoryForm>): RuleInventoryForm {
   const base: RuleInventoryForm = {
@@ -39,11 +47,24 @@ function form(overrides?: Partial<RuleInventoryForm>): RuleInventoryForm {
     ...overrides,
   };
   const known = new Set(base.sources.map((source) => source.id));
-  const extra = base.pages
+  const extraSources = base.pages
     .flatMap((page) => page.questions)
     .filter((question) => !known.has(question.id))
     .map((question): ConditionalSourceQuestion => ({ id: question.id, prompt: question.label, kind: 'text' }));
-  return extra.length > 0 ? { ...base, sources: [...base.sources, ...extra] } : base;
+
+  const walked = new Set(base.pages.flatMap((page) => page.questions).map((question) => question.id));
+  const orphans = base.sources
+    .filter((source) => !walked.has(source.id))
+    .map((source) => ({ id: source.id, label: source.prompt }));
+
+  return {
+    ...base,
+    sources: extraSources.length > 0 ? [...base.sources, ...extraSources] : base.sources,
+    pages:
+      orphans.length > 0
+        ? [{ id: 'p0', label: 'Asked first', questions: orphans }, ...base.pages]
+        : base.pages,
+  };
 }
 
 describe('describeCondition', () => {
@@ -71,7 +92,8 @@ describe('describeCondition', () => {
   describe('worst', () => {
     it('says a deleted question is deleted instead of vanishing', () => {
       // A summary that hides the breakage is how a dead rule survives unnoticed — and a show
-      // rule on a deleted source evaluates false, hiding the item from EVERYONE, silently.
+      // rule on a deleted source reads `undefined`, which hides the item from everyone under
+      // `equals` and SHOWS it to everyone under `isNotAnswered`, silently either way.
       expect(describeCondition({ questionId: 'gone', op: 'equals', value: 'x' }, SOURCES)).toBe(
         '(deleted question) equals x',
       );
@@ -300,9 +322,10 @@ describe('collectRuleEntries', () => {
         }),
       );
 
-      // This is THE silent failure the hub exists for: the condition is NOT_EVALUABLE, so the
-      // show rule is false, so "Age" is hidden from every respondent with nothing anywhere
-      // saying why.
+      // This is THE silent failure the hub exists for: the condition reads `undefined`, so the
+      // show rule is false under `equals` and "Age" is hidden from every respondent, with
+      // nothing anywhere saying why. (Under `isNotAnswered` the same rule shows it to everyone —
+      // see `conditional-rule.spec.ts`. Both directions are silent.)
       expect(entries[0].broken).toEqual(['a question that no longer exists']);
     });
 
@@ -323,6 +346,43 @@ describe('collectRuleEntries', () => {
       );
 
       expect(entries[0].broken).toEqual(['a page that no longer exists']);
+    });
+
+    /**
+     * A `Statement` is on a page and is a legal jump DESTINATION — `jumpReach` walks every
+     * question — but it collects no answer, so it is never in `sources`. Resolving destinations
+     * through that list therefore called a paragraph the author is looking at "deleted".
+     *
+     * Built literally rather than through `form()`, because that helper tops `sources` up from
+     * the pages and so cannot express the one thing this is about: a question that exists and is
+     * not an answer source.
+     */
+    it('names a jump to a Statement, which is on the page but is no answer source', () => {
+      const entries = collectRuleEntries({
+        sources: SOURCES,
+        endings: [],
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              {
+                id: 'q1',
+                label: 'Ticket type',
+                conditionalRule: {
+                  jump: [
+                    { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'question', id: 'st1' } },
+                  ],
+                },
+              },
+              { id: 'st1', label: 'Please read the terms' },
+            ],
+          },
+        ],
+      });
+
+      expect(entries[0].sentence).toContain('skip to "Please read the terms"');
+      expect(entries[0].broken).toEqual([]);
     });
 
     it('reports both breakages when a rule has both', () => {
@@ -428,14 +488,23 @@ describe('ruleBadgesFor', () => {
 
   describe('happy', () => {
     it('says a question is conditional, and says what the condition is', () => {
+      // The rule hangs on q2 and reads q1, which is ahead of it. Hanging it on q1 would make it
+      // a rule reading its OWN answer — legitimately broken, and never offered by the picker.
       const map = badges(
         form({
           pages: [
-            { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: showVip }] },
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [
+                { id: 'q1', label: 'Ticket type' },
+                { id: 'q2', label: 'Age', conditionalRule: showVip },
+              ],
+            },
           ],
         }),
       );
-      const [badge] = map.get('q1') ?? [];
+      const [badge] = map.get('q2') ?? [];
       expect(badge.label).toBe('Conditional');
       expect(badge.detail).toContain('Ticket type equals VIP');
       expect(badge.broken).toBe(false);
@@ -448,13 +517,16 @@ describe('ruleBadgesFor', () => {
             {
               id: 'p1',
               label: 'Page 1',
-              questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: { ...showVip, ...jumpToP2 } }],
+              questions: [
+                { id: 'q1', label: 'Ticket type' },
+                { id: 'q2', label: 'Age', conditionalRule: { ...showVip, ...jumpToP2 } },
+              ],
             },
             { id: 'p2', label: 'Page 2', questions: [] },
           ],
         }),
       );
-      expect((map.get('q1') ?? []).map((b) => b.label)).toEqual(['Conditional', 'Branches']);
+      expect((map.get('q2') ?? []).map((b) => b.label)).toEqual(['Conditional', 'Branches']);
     });
 
     it('labels a page rule the same way it labels a question rule', () => {
@@ -496,9 +568,9 @@ describe('ruleBadgesFor', () => {
 
   describe('worst', () => {
     it('says a broken rule is broken, in place of saying what it does', () => {
-      // THE reason the Rules tab existed: a condition naming a deleted question evaluates
-      // false, so the item it guards is hidden from every respondent — permanently, silently,
-      // with the form still looking correct. The canvas now carries that warning.
+      // THE reason the Rules tab existed: a condition naming a deleted question reads
+      // `undefined`, so the item it guards is shown to everyone or to nobody depending on the
+      // operator — silently, with the form still looking correct. The canvas carries that now.
       const map = badges(
         form({
           pages: [
@@ -820,6 +892,228 @@ describe('a rule with no conditions', () => {
         }),
       );
       expect(entries[0].note).toBe('');
+    });
+  });
+});
+
+/**
+ * A rule that cannot READ its own source is broken, even though every id in it resolves.
+ *
+ * Issue #73. A reorder writes `DisplayOrder` and never touches rule JSON, so a rule whose source
+ * moved below it still names a question that exists — `resolves()` says fine — while the walk
+ * reaches the rule before that question has been answered. The rule then runs against a blank,
+ * decides the same way for every respondent, and CHANGES ITS MIND once the source is answered,
+ * in front of them.
+ *
+ * Same arithmetic as the source pickers (`readHorizon`), so the badge and the picker cannot
+ * disagree about what a rule may read. That was the whole point of consolidating it.
+ */
+describe('a rule reading a source answered later than it runs', () => {
+  const UNREADABLE = 'a question that is answered later than this rule runs, so the rule reads a blank';
+  const MISSING = 'a question that no longer exists';
+
+  /** p1: q1 q2 · p2: q3 — one section, then another, so both arms are reachable. */
+  const ordered = (overrides?: Partial<RuleInventoryForm>): RuleInventoryForm =>
+    form({
+      pages: [
+        { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type' }, { id: 'q2', label: 'Age' }] },
+        { id: 'p2', label: 'Page 2', questions: [{ id: 'q3', label: 'Interests' }] },
+      ],
+      ...overrides,
+    });
+
+  const brokenOf = (f: RuleInventoryForm, entryId: string): string[] =>
+    collectRuleEntries(f).find((entry) => entry.id === entryId)?.broken ?? ['(no such entry)'];
+
+  describe('happy', () => {
+    it("flags a question's show rule that reads a question below it", () => {
+      const f = ordered({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              { id: 'q1', label: 'Ticket type', conditionalRule: { show: { all: [{ questionId: 'q2', op: 'equals', value: 30 }] } } },
+              { id: 'q2', label: 'Age' },
+            ],
+          },
+          { id: 'p2', label: 'Page 2', questions: [{ id: 'q3', label: 'Interests' }] },
+        ],
+      });
+      expect(brokenOf(f, 'question:q1:show')).toEqual([UNREADABLE]);
+    });
+
+    it("flags a jump's `when` that reads a question below it", () => {
+      // Worse than the show case and absent from the issue: the jump fires RETROACTIVELY, and
+      // the questions it skips take the respondent's already-typed answers out of the submission.
+      const f = ordered({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              {
+                id: 'q1',
+                label: 'Ticket type',
+                conditionalRule: { jump: [{ when: { all: [{ questionId: 'q3', op: 'isAnswered' }] }, target: { kind: 'submit' } }] },
+              },
+              { id: 'q2', label: 'Age' },
+            ],
+          },
+          { id: 'p2', label: 'Page 2', questions: [{ id: 'q3', label: 'Interests' }] },
+        ],
+      });
+      expect(brokenOf(f, 'question:q1:jump:0')).toEqual([UNREADABLE]);
+    });
+
+    it('leaves an ordinary earlier-reading show rule alone', () => {
+      const f = ordered({
+        pages: [
+          { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type' }, { id: 'q2', label: 'Age' }] },
+          {
+            id: 'p2',
+            label: 'Page 2',
+            questions: [{ id: 'q3', label: 'Interests', conditionalRule: showVip }],
+          },
+        ],
+      });
+      expect(brokenOf(f, 'question:q3:show')).toEqual([]);
+    });
+  });
+
+  describe('edge', () => {
+    it("flags a section's show rule that reads one of the section's OWN questions", () => {
+      // A section is ENTERED before its first question, so its show gate runs before any of them
+      // is answered. The picker has always refused to offer them; now the badge agrees.
+      const f = ordered({
+        pages: [
+          { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type' }, { id: 'q2', label: 'Age' }] },
+          {
+            id: 'p2',
+            label: 'Page 2',
+            conditionalRule: { show: { all: [{ questionId: 'q3', op: 'isAnswered' }] } },
+            questions: [{ id: 'q3', label: 'Interests' }],
+          },
+        ],
+      });
+      expect(brokenOf(f, 'page:p2:show')).toEqual([UNREADABLE]);
+    });
+
+    it("leaves a section's JUMP reading its own questions alone — it fires on the way out", () => {
+      const f = ordered({
+        pages: [
+          { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type' }, { id: 'q2', label: 'Age' }] },
+          {
+            id: 'p2',
+            label: 'Page 2',
+            conditionalRule: {
+              jump: [{ when: { all: [{ questionId: 'q3', op: 'isAnswered' }] }, target: { kind: 'submit' } }],
+            },
+            questions: [{ id: 'q3', label: 'Interests' }],
+          },
+        ],
+      });
+      expect(brokenOf(f, 'page:p2:jump:0')).toEqual([]);
+    });
+
+    it('never asks the question of an ending, which is evaluated after the whole form', () => {
+      const f = ordered({
+        endings: [
+          {
+            id: 'e1',
+            label: 'Thanks',
+            conditionalRule: { show: { all: [{ questionId: 'q3', op: 'isAnswered' }] } },
+          },
+        ],
+      });
+      expect(brokenOf(f, 'ending:e1:show')).toEqual([]);
+    });
+
+    it('exempts a running-score condition, which names no question at all', () => {
+      const f = ordered({
+        endings: [
+          { id: 'e1', label: 'Pass', conditionalRule: { show: { all: [{ source: 'score', op: 'greaterThan', value: 70 }] } } },
+        ],
+      });
+      expect(brokenOf(f, 'ending:e1:show')).toEqual([]);
+    });
+  });
+
+  describe('worst', () => {
+    it('reports a deleted source AND a moved-below one, not just the first', () => {
+      // Keyed per condition and deduplicated. Reporting one reason per rule would hide half of
+      // what the author has to fix, on the rule where there is most of it.
+      const f = ordered({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              {
+                id: 'q1',
+                label: 'Ticket type',
+                conditionalRule: {
+                  show: {
+                    all: [
+                      { questionId: 'deleted', op: 'equals', value: 'x' },
+                      { questionId: 'q2', op: 'equals', value: 30 },
+                    ],
+                  },
+                },
+              },
+              { id: 'q2', label: 'Age' },
+            ],
+          },
+          { id: 'p2', label: 'Page 2', questions: [{ id: 'q3', label: 'Interests' }] },
+        ],
+      });
+      expect(brokenOf(f, 'question:q1:show').sort()).toEqual([MISSING, UNREADABLE].sort());
+    });
+
+    it('says a source is missing, not unreadable, when it is both', () => {
+      // A condition that does not resolve has no index to compare, so it is never also tested
+      // for readability. Two reasons about one condition would send the author looking twice.
+      const f = ordered({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              { id: 'q1', label: 'Ticket type', conditionalRule: { show: { all: [{ questionId: 'deleted', op: 'equals', value: 'x' }] } } },
+              { id: 'q2', label: 'Age' },
+            ],
+          },
+        ],
+      });
+      expect(brokenOf(f, 'question:q1:show')).toEqual([MISSING]);
+    });
+
+    it('reports the same reason once however many conditions earn it', () => {
+      const f = ordered({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              {
+                id: 'q1',
+                label: 'Ticket type',
+                conditionalRule: {
+                  show: {
+                    all: [
+                      { questionId: 'q2', op: 'isAnswered' },
+                      { questionId: 'q3', op: 'isAnswered' },
+                    ],
+                  },
+                },
+              },
+              { id: 'q2', label: 'Age' },
+            ],
+          },
+          { id: 'p2', label: 'Page 2', questions: [{ id: 'q3', label: 'Interests' }] },
+        ],
+      });
+      expect(brokenOf(f, 'question:q1:show')).toEqual([UNREADABLE]);
     });
   });
 });
