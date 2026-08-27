@@ -14,11 +14,22 @@
  * Structural, so specs need no `BaseEntity` — the generated screen entity satisfies
  * {@link DefaultEndingCandidate} by shape, and the caller keeps its real entities to save.
  */
+import type { mjBizAppsFormsFormScreenEntity } from '@mj-biz-apps/forms-entities';
 
-/** What this module needs to know about a screen. The generated entity satisfies it. */
+/**
+ * What this module needs to know about a screen. The generated entity satisfies it.
+ *
+ * `ScreenType` is INDEXED off the generated entity rather than written out as
+ * `'Ending' | 'Welcome'`. That union is CodeGen's projection of the column's CHECK constraint, so
+ * a copy of it is frozen at the moment it was typed: add a screen type in a migration, re-run
+ * CodeGen, and a hand-written union goes on compiling while silently describing the old schema —
+ * `orderedEndings` would keep filtering on a value list that no longer matches the database. The
+ * import is `import type`, erased at build time, so this stays structural and specs still pass
+ * plain object literals.
+ */
 export interface DefaultEndingCandidate {
   readonly ID: string;
-  readonly ScreenType: 'Ending' | 'Welcome';
+  readonly ScreenType: mjBizAppsFormsFormScreenEntity['ScreenType'];
   readonly DisplayOrder: number;
   readonly IsDefault: boolean;
   readonly IsDisqualification: boolean;
@@ -50,15 +61,7 @@ function orderedEndings<T extends DefaultEndingCandidate>(screens: readonly T[])
     .sort((a, b) => a.DisplayOrder - b.DisplayOrder);
 }
 
-/**
- * The two writes that move the default, in the order they must happen.
- *
- * `clear` is emptied first and `set` second, always. A filtered unique index permits one default
- * per form, so setting the new one before clearing the old leaves the form momentarily holding
- * two and the database refuses the write — which an author experiences as a switch that flipped
- * itself back. Returning the ORDER rather than performing the writes keeps that decision in a
- * module a test can reach; see `BuilderStateService.setDefaultEnding` for the awaiting.
- */
+/** The two writes that move the default, in the order they must happen. */
 export interface DefaultEndingChanges<T extends DefaultEndingCandidate> {
   /** Every screen that must stop being the default. Usually one, occasionally more. */
   readonly clear: readonly T[];
@@ -66,6 +69,22 @@ export interface DefaultEndingChanges<T extends DefaultEndingCandidate> {
   readonly set: T | null;
 }
 
+/**
+ * Work out the two writes that move a form's default ending to `nextId`.
+ *
+ * `clear` is emptied first and `set` second, always. A filtered unique index permits one default
+ * per form, so setting the new one before clearing the old leaves the form momentarily holding
+ * two and the database refuses the write — which an author experiences as a switch that flipped
+ * itself back. Returning the ORDER rather than performing the writes keeps that decision in a
+ * module a test can reach; see `BuilderStateService.setDefaultEnding` for the awaiting, and for
+ * what happens when the second write is refused.
+ *
+ * @param screens every screen on the form, in any order.
+ * @param nextId the ending that should become the catch-all.
+ * @returns the screens to clear, and the one to set — `set` is null when it already holds it.
+ * @throws if `nextId` names no eligible ending on this form. Guarded rather than tolerated:
+ *   falling through would clear the default the form HAS and set nothing in its place.
+ */
 export function defaultEndingChanges<T extends DefaultEndingCandidate>(
   screens: readonly T[],
   nextId: string,

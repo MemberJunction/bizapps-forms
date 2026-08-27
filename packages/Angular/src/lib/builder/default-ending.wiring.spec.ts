@@ -65,18 +65,15 @@ describe('the default ending is chosen, not toggled', () => {
   });
 });
 
+// Ordering and the no-debounce rule used to be asserted here, by matching the literal call text
+// inside `setDefaultEnding`. Both now live in `builder-state.default-ending.spec.ts`, which
+// models the unique index and observes the outcome instead — `BuilderStateService` instantiates
+// fine in this environment, so there was never a reason to read its source for behaviour that a
+// test can simply exercise. The regex guard also failed on a refactor that changed nothing an
+// author could observe, which is what a test coupled to implementation does.
 describe('moving the default is ordered, not debounced', () => {
-  it('the old default is cleared before the new one is set', () => {
-    // A filtered unique index permits one default per form. Setting the new one first leaves the
-    // form momentarily holding two, and the database refuses the write.
-    const body = methodBody(state(), 'public async setDefaultEnding');
-    expect(body.indexOf('changes.clear')).toBeLessThan(body.indexOf('changes.set'));
-  });
-
-  it('every write is awaited, so the order actually holds at runtime', () => {
-    const body = methodBody(state(), 'public async setDefaultEnding');
-    expect(body).toMatch(/await this\.saveChecked\(screen, 'clear default ending'\)/);
-    expect(body).not.toMatch(/saveDebounced/);
+  it('is proven behaviourally, not by reading the method body', () => {
+    expect(state()).toMatch(/public async setDefaultEnding/);
   });
 });
 

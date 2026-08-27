@@ -362,7 +362,13 @@ export class BuilderStateService {
     promote.IsDefault = true;
     // Reported but not fatal: the screen IS deleted, and saying otherwise would offer an undo
     // that cannot happen. `saveChecked` has already surfaced why the promotion did not stick.
-    await this.saveChecked(promote, 'promote default ending');
+    //
+    // The flag comes back off when it does not stick, though. Left on, the builder shows a
+    // catch-all the database never recorded — the form reads as repaired while every respondent
+    // who finishes still falls through to the confirmation message.
+    if (!(await this.chainSave(promote, 'promote default ending'))) {
+      promote.IsDefault = false;
+    }
     return true;
   }
 
@@ -376,22 +382,71 @@ export class BuilderStateService {
    * author sees a switch that flipped itself back, with the failure reported against the wrong
    * screen. Cleared first, awaited, then set.
    *
-   * Returns false and leaves the form as it was if any write fails; `saveChecked` has already
-   * surfaced why.
+   * Every write goes through {@link chainSave} rather than saving directly, for the reason the
+   * chain exists: `BaseEntity.Save()` re-reads the record from the row it gets back, so a save
+   * running concurrently with a pending autosave of the SAME screen overwrites whichever landed
+   * first. Making a screen the default while its title edit is still settling is an ordinary
+   * thing to do, and it used to be the one case that skipped the queue.
+   *
+   * Returns false if any write fails, and puts the form back the way it was — in the database via
+   * {@link restoreDefaultEnding}, and in memory, so the builder does not go on showing a move
+   * that did not happen. `saveChecked` has already surfaced why.
    */
   public async setDefaultEnding(tree: FormTree, screenId: string): Promise<boolean> {
     const changes = defaultEndingChanges(tree.screens, screenId);
+    const cleared: mjBizAppsFormsFormScreenEntity[] = [];
     for (const screen of changes.clear) {
       screen.IsDefault = false;
-      if (!(await this.saveChecked(screen, 'clear default ending'))) {
+      if (!(await this.chainSave(screen, 'clear default ending'))) {
+        // The row still holds the flag, so the builder must too. Dropped in memory BEFORE the
+        // save is attempted, a refused clear otherwise leaves the author looking at a form with
+        // no default while the database has one, and nothing later corrects it.
+        screen.IsDefault = true;
         return false;
       }
+      cleared.push(screen);
     }
     if (changes.set === null) {
       return true;
     }
     changes.set.IsDefault = true;
-    return this.saveChecked(changes.set, 'set default ending');
+    if (await this.chainSave(changes.set, 'set default ending')) {
+      return true;
+    }
+    await this.restoreDefaultEnding(changes.set, cleared);
+    return false;
+  }
+
+  /**
+   * Put the default back after a move that got halfway.
+   *
+   * The two halves of this invariant fail differently, and only one of them is noisy. The unique
+   * index refuses a SECOND default, so a bad `set` is reported; NOTHING refuses a form with none,
+   * which is exactly what a successful clear followed by a refused set leaves behind. Without
+   * this the method's own contract — "leaves the form as it was" — was false in the one case it
+   * was written for.
+   *
+   * ONE screen is restored, never all of them. `clear` holds more than one row only on a form
+   * that was already carrying several defaults, and re-setting those would ask the index to
+   * accept the very state it exists to refuse. The first is the lowest `DisplayOrder`, because
+   * `defaultEndingChanges` orders them the way `resolveEndingScreen` reads them — so the row that
+   * comes back is the one respondents were already landing on.
+   *
+   * Best effort, and deliberately not retried: if the restore is refused too, `saveChecked` has
+   * reported it and the author has to fix the form by hand. Looping here would spin on a database
+   * that is saying no.
+   */
+  private async restoreDefaultEnding(
+    failed: mjBizAppsFormsFormScreenEntity,
+    cleared: readonly mjBizAppsFormsFormScreenEntity[],
+  ): Promise<void> {
+    failed.IsDefault = false;
+    const restore = cleared[0];
+    if (restore === undefined) {
+      return;
+    }
+    restore.IsDefault = true;
+    await this.chainSave(restore, 'restore default ending');
   }
 
   // -------------------------------------------------------------------------
@@ -481,11 +536,17 @@ export class BuilderStateService {
     }
   }
 
-  /** Queue a save behind any save already running for the same entity. */
-  private chainSave(entity: SaveableEntity): Promise<void> {
+  /**
+   * Queue a save behind any save already running for the same entity, and report whether it stuck.
+   *
+   * The boolean is what lets the default-ending writes use this instead of calling `saveChecked`
+   * directly. They have to know: moving the default is two writes whose order the unique index
+   * enforces, so a caller that cannot tell the first one failed will go on to make the second.
+   */
+  private chainSave(entity: SaveableEntity, action = 'save'): Promise<boolean> {
     const previous = this.saveChains.get(entity) ?? Promise.resolve();
-    const next = previous
-      .then(() => this.saveChecked(entity, 'save'))
+    const result = previous.then(() => this.saveChecked(entity, action));
+    const next = result
       .then(() => undefined)
       .finally(() => {
         // Only clear the slot if no later edit has chained onto it meanwhile.
@@ -494,7 +555,7 @@ export class BuilderStateService {
         }
       });
     this.saveChains.set(entity, next);
-    return next;
+    return result;
   }
 
   /**
