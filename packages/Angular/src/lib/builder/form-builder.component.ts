@@ -61,7 +61,7 @@ import {
 } from './question-type-catalog';
 import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
-import { jumpReach, reachNote, type ReachSource } from './jump-reach';
+import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
 import {
   collectRuleEntries,
   endingReachFor,
@@ -639,14 +639,6 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
-   * Conditional sources for a PAGE: questions on pages strictly BEFORE it.
-   *
-   * Not "questions before this one" (a question's rule) and not "everything" (an ending's):
-   * a page rule referencing its own questions would hide the page out from under a respondent
-   * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
-   * questions are never offered.
-   */
-  /**
    * The questions in this list that a rule may actually read.
    *
    * ONE definition, for all six source lists — a page's show gate and its jump, a question's
@@ -662,12 +654,33 @@ export class FormBuilderComponent extends BaseFormComponent {
     return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
   }
 
+  /**
+   * The sources a rule whose read horizon is `horizon` may reference.
+   *
+   * Slices the FULL question list and filters afterwards, never the other way round.
+   * `sourcesOf` drops a question that collects no answer, so slicing an already-filtered list
+   * would shift every horizon on any form carrying a `Statement` — silently, and in the
+   * direction that makes a legal rule look broken.
+   */
+  private sourcesUpTo(horizon: number): ConditionalSourceQuestion[] {
+    const questions = (this.tree?.pages ?? []).flatMap((page) => page.questions);
+    return this.sourcesOf(questions.slice(0, horizon + 1));
+  }
+
+  /**
+   * Conditional sources for a PAGE: questions on pages strictly BEFORE it.
+   *
+   * Not "questions before this one" (a question's rule) and not "everything" (an ending's):
+   * a page rule referencing its own questions would hide the page out from under a respondent
+   * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
+   * questions are never offered.
+   */
   protected get pageConditionalSources(): ConditionalSourceQuestion[] {
-    const index = this.selectedPageIndex;
-    if (!this.tree || index <= 0) {
+    const page = this.selectedPage;
+    if (!page) {
       return [];
     }
-    return this.tree.pages.slice(0, index).flatMap((page) => this.sourcesOf(page.questions));
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'page', id: page.entity.ID }, 'show'));
   }
 
   protected onPageChanged(page: PageNode): void {
@@ -682,11 +695,11 @@ export class FormBuilderComponent extends BaseFormComponent {
    * what the show rule must NOT read (see {@link pageConditionalSources}).
    */
   protected get pageJumpConditionSources(): ConditionalSourceQuestion[] {
-    const index = this.selectedPageIndex;
-    if (!this.tree || index < 0) {
+    const page = this.selectedPage;
+    if (!page) {
       return [];
     }
-    return this.tree.pages.slice(0, index + 1).flatMap((page) => this.sourcesOf(page.questions));
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'page', id: page.entity.ID }, 'jump'));
   }
 
   /**
@@ -766,18 +779,28 @@ export class FormBuilderComponent extends BaseFormComponent {
     source: ReachSource,
     targets: readonly JumpTargetOption[],
   ): ReadonlyMap<string, string> {
-    const pages = (this.tree?.pages ?? []).map((page) => ({
-      id: page.entity.ID,
-      questions: page.questions.map((q) => ({ id: q.entity.ID, isRequired: q.entity.IsRequired === true })),
-    }));
     const notes = new Map<string, string>();
     for (const target of targets) {
-      const note = reachNote(jumpReach(pages, source, target.target));
+      const note = reachNote(jumpReach(this.reachPages, source, target.target));
       if (note.length > 0) {
         notes.set(targetValue(target.target), note);
       }
     }
     return notes;
+  }
+
+  /**
+   * The form as `jump-reach.ts` reads it: ids and required flags, in flow order.
+   *
+   * Both reach notes and every source list read it now, so the projection is written once. It is
+   * also the ONE place the ordering rule enters the builder — `readHorizon` and `jumpReach` are
+   * the only two things that interpret it, and they agree because they share this walk.
+   */
+  private get reachPages(): ReachPage[] {
+    return (this.tree?.pages ?? []).map((page) => ({
+      id: page.entity.ID,
+      questions: page.questions.map((q) => ({ id: q.entity.ID, isRequired: q.entity.IsRequired === true })),
+    }));
   }
 
   /** Every ending screen, as a jump destination. */
@@ -793,19 +816,11 @@ export class FormBuilderComponent extends BaseFormComponent {
    * SHOW rule must not read, which is why {@link conditionalSources} stops one question earlier.
    */
   protected get questionJumpSources(): ConditionalSourceQuestion[] {
-    if (!this.tree || !this.selectedQuestionId) {
+    const id = this.selectedQuestionId;
+    if (!this.tree || !id) {
       return [];
     }
-    const sources: ConditionalSourceQuestion[] = [];
-    for (const page of this.tree.pages) {
-      for (const q of page.questions) {
-        sources.push(...this.sourcesOf([q]));
-        if (q.entity.ID === this.selectedQuestionId) {
-          return sources;
-        }
-      }
-    }
-    return sources;
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'question', id }, 'jump'));
   }
 
   protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {
@@ -1019,19 +1034,11 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** Questions preceding the selected one (valid conditional-rule sources). */
   protected get conditionalSources(): ConditionalSourceQuestion[] {
-    if (!this.tree || !this.selectedQuestionId) {
+    const id = this.selectedQuestionId;
+    if (!this.tree || !id) {
       return [];
     }
-    const sources: ConditionalSourceQuestion[] = [];
-    for (const page of this.tree.pages) {
-      for (const q of page.questions) {
-        if (q.entity.ID === this.selectedQuestionId) {
-          return sources;
-        }
-        sources.push(...this.sourcesOf([q]));
-      }
-    }
-    return sources;
+    return this.sourcesUpTo(readHorizon(this.reachPages, { kind: 'question', id }, 'show'));
   }
 
   // -- rule badges on the canvas (RULES_SIMPLIFICATION_PLAN Phase 3) ---------
