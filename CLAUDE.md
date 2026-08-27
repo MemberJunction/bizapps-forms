@@ -113,7 +113,7 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 ### Running it — **[docs/local-host.md](docs/local-host.md)**
 ⚠️ **`start:api` / `start:explorer` / `build:api` / `build:explorer` do not exist** (they did not survive the pnpm migration; `4121`/`4321` describe a host convention, not something this repo serves). Two different answers depending on what you are working on:
 - **Server side** (submit endpoint, actions, resolvers, smoke tests) → this repo's own API harness: `cd apps/MJAPI && node server.mjs`. It is API-only, `private: true`, and a deliberate workspace member — see the comment in `pnpm-workspace.yaml` for why that membership is load-bearing.
-- **Builder / admin UI in Explorer, or `forms-ng` components** → **MJ's host**: `cd ~/Projects/MJ && pnpm start` (Explorer `:4201`, API `:4000`), with this repo linked in via `mj dev workspace`. There is no Explorer in this repo. Caliber and ATS use the same host; one serves all three.
+- **Builder / admin UI in Explorer, or `forms-ng` components** → **MJ's host**: `cd ../MJ && pnpm start` (Explorer `:4201`, API `:4000`) — MJ is checked out beside this repo under a shared workspace parent, with this repo linked in via `mj dev workspace`. There is no Explorer in this repo. Caliber and ATS use the same host; one serves all three.
 
 ## CodeGen
 - Generated code lives in `packages/*/src/generated/` (entities, actions, resolvers, Angular forms). **Never hand-edit generated files.** Run `npm run mj:codegen` after any schema change. Write TypeScript against generated types **only after** CodeGen runs.

@@ -11,7 +11,7 @@ release-time model is *documented by its own practitioners as unverified*. The g
 fix under either cadence. Adopting the release-time model is also a larger change for Forms than
 it looks: our own distribution gate currently *forces* the per-feature loop.**
 
-Sources: read directly from the repos under `/Users/sohamdesai/Projects/` on 2026-08-13 by three
+Sources: read directly from the sibling repos in the workspace parent (`..`) on 2026-08-13 by three
 parallel research agents (MJ, bizapps-common, bizapps-caliber) plus direct inspection of this
 repo. Citations are file paths and commit hashes in those repos.
 
