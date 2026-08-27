@@ -34,7 +34,7 @@
 @if (dialogOpen) {
   <mjf-rule-editor-dialog
     [title]="'Edit logic'"
-    [subtitle]="'Decide when this ' + itemNoun + ' appears, and where the respondent goes next.'"
+    [subtitle]="dialogSubtitle"
     icon="fa-solid fa-code-branch"
     [confirming]="confirmingDiscard"
     (closeRequested)="requestClose()"
@@ -51,6 +51,7 @@
       [reachNotes]="reachNotes"
       [allowJumps]="allowJumps"
       [itemNoun]="itemNoun"
+      [defaultEndingLabel]="defaultEndingLabel"
       [subjectSourceId]="subjectSourceId"
       (draftChange)="onDraftChange($event)"
     />

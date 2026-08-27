@@ -118,21 +118,31 @@ const SCREEN_EDITOR_CSS = /* css */ `
         />
 
         @if (s.ScreenType === 'Ending') {
-          <mjf-setting-row
-            label="Default ending"
-            hint="Shown when no other ending's condition matches. Every form needs exactly one."
-          >
-            <button
-              slot="control"
-              type="button"
-              class="mjf-switch"
-              role="switch"
-              [attr.aria-checked]="s.IsDefault"
-              [class.is-on]="s.IsDefault"
-              aria-label="Default ending"
-              (click)="toggleDefault()"
-            ></button>
-          </mjf-setting-row>
+          <!-- A switch that only turns ON, and only for a screen that could actually win.
+               Turning it off would leave the form with no catch-all, which the old free toggle
+               allowed and nothing reported; and a screened-out ending takes no part in ending
+               resolution at all, so making one the default would be a setting that does nothing.
+               The form-wide half of the write — clearing whichever ending holds it today — is
+               the host's, because this editor only ever has ONE screen. -->
+          @if (!s.IsDisqualification) {
+            <mjf-setting-row
+              label="Default ending"
+              hint="Shown when no other ending's condition matches. Every form has exactly one — turning this on moves it here."
+            >
+              <button
+                slot="control"
+                type="button"
+                class="mjf-switch"
+                role="switch"
+                [attr.aria-checked]="s.IsDefault"
+                [class.is-on]="s.IsDefault"
+                [disabled]="s.IsDefault"
+                [attr.title]="s.IsDefault ? 'This is the default ending. Make another ending the default to move it.' : null"
+                aria-label="Default ending"
+                (click)="makeDefault()"
+              ></button>
+            </mjf-setting-row>
+          }
 
           <!-- What arriving here MEANS, which is the screen's business rather than any rule's.
                A Go-to rule names this screen; this toggle decides how the response is recorded.
@@ -141,7 +151,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
                one panel away. -->
           <mjf-setting-row
             label="Screened out"
-            hint="Responses that reach this screen are recorded as disqualified — they do not count toward your response limit, and no automations run. Send people here with a Go to rule."
+            [hint]="s.IsDefault ? 'The default ending cannot be screened out — everyone who finishes normally lands here. Make another ending the default first.' : 'Responses that reach this screen are recorded as disqualified — they do not count toward your response limit, and no automations run. Send people here with a Go to rule.'"
           >
             <button
               slot="control"
@@ -150,6 +160,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
               role="switch"
               [attr.aria-checked]="s.IsDisqualification"
               [class.is-on]="s.IsDisqualification"
+              [disabled]="s.IsDefault"
               aria-label="Screened out"
               (click)="toggleDisqualification()"
             ></button>
@@ -244,6 +255,13 @@ export class ScreenEditorComponent {
 
   /** Emitted whenever a field on the screen entity changed (parent persists). */
   @Output() screenChanged = new EventEmitter<mjBizAppsFormsFormScreenEntity>();
+  /**
+   * This screen should become the form's default ending.
+   *
+   * A REQUEST rather than a change, because it is not one: the host must also clear the ending
+   * that holds it today, and only the host has that screen. See {@link makeDefault}.
+   */
+  @Output() makeDefaultRequested = new EventEmitter<mjBizAppsFormsFormScreenEntity>();
 
   protected get redirectOpen(): boolean {
     return isOptionalOpen(!!this.screen?.RedirectURL, this.requested.redirect);
@@ -345,10 +363,20 @@ export class ScreenEditorComponent {
     });
   }
 
-  protected toggleDefault(): void {
-    this.apply((s) => {
-      s.IsDefault = !s.IsDefault;
-    });
+  /**
+   * Ask the host to move the form's default ending here.
+   *
+   * Deliberately NOT `apply()`. Every other control on this panel writes one field on the one
+   * screen it was handed, and `apply` exists for exactly that. This one also has to clear
+   * whichever OTHER ending currently holds the default — a screen this editor has never seen —
+   * so it reports the intent and lets the host, which holds the whole tree, perform both writes
+   * in the order the unique index requires.
+   */
+  protected makeDefault(): void {
+    if (!this.screen || this.screen.IsDefault) {
+      return;
+    }
+    this.makeDefaultRequested.emit(this.screen);
   }
 
   protected toggleDisqualification(): void {

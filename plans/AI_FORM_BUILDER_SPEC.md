@@ -3,7 +3,7 @@
 **Status:** Draft for implementation · **Date:** 2026-08-19 · **Author:** Soham Desai (research + verification via Claude)
 **Audience:** the build agent implementing this feature. Every file/class/line reference in this document was
 verified against the working tree (branch `feat/forms-ui-redesign`) and against the MemberJunction source
-checkout at `~/Projects/MJ` on 2026-08-19 — including at the **`v5.51.0` git tag**, so nothing here depends on
+checkout beside this repo (`../MJ`) on 2026-08-19 — including at the **`v5.51.0` git tag**, so nothing here depends on
 6.x-only APIs. Where behavior differs between 5.51.0 and the current 6.1.0-edge workspace, it is called out.
 
 ---
@@ -416,7 +416,7 @@ contract becomes "the current definition", which is what its name already claims
 
 **Acceptance (D):** spec tests for the service's event parsing/filtering/terminal reconcile with a mocked
 observable; component test that an `applyPageDetail` patch changes `designPreviewDefinition` output;
-manual smoke via the MJ host (`~/Projects/MJ && pnpm start`, Explorer :4201) — watch a real brief build
+manual smoke via the MJ host (`cd ../MJ && pnpm start`, Explorer :4201) — watch a real brief build
 live; kill the websocket mid-run and confirm the identical final form.
 
 ---
@@ -462,7 +462,7 @@ stage fails soft). Say so in the PR body rather than implying test coverage prov
 
 ## 11. MJ 6.x capabilities assessed — and why this spec doesn't build on them yet
 
-Full survey of the MJ repo (`~/Projects/MJ`, 6.1.0-edge.2) performed 2026-08-19, diffed against the
+Full survey of the MJ repo (`../MJ`, 6.1.0-edge.2) performed 2026-08-19, diffed against the
 `v5.51.0` tag. Governing fact for everything below: **MJ 6.x is relicensed to BUSL-1.1** (commit
 `19937deb8b`; 5.51.0 is ISC) and there is no 6.0 stable — the 6.x line is `6.1.0-edge.*` and requires 6.1
 core `__mj` migrations on the host. Adopting any 6.x-only capability is therefore a *repo-level* platform

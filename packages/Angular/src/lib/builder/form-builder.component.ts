@@ -49,6 +49,7 @@ import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { endScreensOf, welcomeScreenOf } from './builder-models';
+import { defaultEndingId } from './default-ending';
 import {
   QUESTION_PALETTE_GROUPS,
   questionTypeMeta,
@@ -832,13 +833,58 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     this.busy = true;
-    if (await this.state.deleteScreen(screen)) {
-      this.tree.screens = this.tree.screens.filter((s) => s.ID !== screen.ID);
+    // The service removes it from the tree, because deleting the default ending also has to
+    // promote a survivor — an invariant no caller should be able to forget.
+    if (await this.state.deleteScreen(this.tree, screen)) {
       this.selection = clearIfScreen(this.selection, screen.ID);
       this.markDirty();
     }
     this.busy = false;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Move the form's default ending to the screen the editor named.
+   *
+   * Awaited and NOT debounced, unlike every other screen edit here: this is two writes to two
+   * records whose order the database enforces, so `setDefaultEnding` owns the sequencing. See
+   * its own header for what goes wrong when the two land the other way round.
+   */
+  protected async onMakeDefaultEnding(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    // try/finally, unlike its neighbours: `setDefaultEnding` is the one call here that can
+    // THROW rather than return false — it refuses an id naming no eligible ending. Without
+    // this, that refusal would leave `busy` true forever and every guarded handler in the
+    // builder would stop responding, with nothing on screen to connect it to this.
+    try {
+      if (await this.state.setDefaultEnding(this.tree, screen.ID)) {
+        this.markDirty();
+      }
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /**
+   * The ending everyone who finishes lands on, by name — what the logic dialog states.
+   *
+   * Resolved through `defaultEndingId`, which excludes screened-out endings for the same reason
+   * `resolveEndingScreen` does: nobody reaches a disqualification screen by finishing. So null
+   * here means "nothing catches finishers", whether that is because the form has no endings or
+   * because every ending is screened out — one answer for two states the dialog must not
+   * describe differently.
+   */
+  protected get defaultEndingLabel(): string | null {
+    const id = this.tree ? defaultEndingId(this.tree.screens) : null;
+    if (id === null) {
+      return null;
+    }
+    const screen = this.endScreens.find((s) => s.ID === id);
+    return screen ? screen.Title || 'Ending screen' : null;
   }
 
   protected onScreenChanged(screen: mjBizAppsFormsFormScreenEntity): void {

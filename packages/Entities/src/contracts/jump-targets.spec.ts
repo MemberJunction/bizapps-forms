@@ -1,6 +1,6 @@
 /**
  * Where a `Go to` rule can point, and how a rule authored before it could point anywhere but a
- * page still parses (plans/QUESTION_LEVEL_LOGIC_PLAN.md Phase 1).
+ * page still parses (plans/done/QUESTION_LEVEL_LOGIC_PLAN.md Phase 1).
  *
  * The stored shape is a TAGGED target — `{ kind, id }` — so the resolver never has to guess what
  * an id refers to. Legacy rules carry `{ when, toPageId }` instead, and a published snapshot is

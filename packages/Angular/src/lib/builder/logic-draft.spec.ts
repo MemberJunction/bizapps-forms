@@ -1,6 +1,6 @@
 /**
  * The working copy behind the "Edit logic" dialog
- * (plans/QUESTION_LEVEL_LOGIC_PLAN.md Phases 3–4).
+ * (plans/done/QUESTION_LEVEL_LOGIC_PLAN.md Phases 3–4).
  *
  * An item's logic is now two things at once — an optional "show this when…" gate and an ordered
  * list of "if … then go to …" rules — and they are edited together in one dialog. That makes the
@@ -247,8 +247,8 @@ describe('an unfinished condition is dropped on save', () => {
     it('choosing a question and leaving the value blank is not a change worth warning about', () => {
       // Dirtiness asks "would saving change anything?". Now that saving would not, the dialog
       // must not claim there is unsaved work — the two answers come from the same function.
-      const baseline = { show: undefined, jumps: [] };
-      expect(isLogicDraftDirty({ show: { all: [blank] }, jumps: [] }, baseline)).toBe(false);
+      const baseline = emptyLogicDraft();
+      expect(isLogicDraftDirty({ ...baseline, show: { all: [blank] } }, baseline)).toBe(false);
     });
   });
 });

@@ -311,7 +311,7 @@ do not delete it.
 
 **8.5 Definition of done.** All four phases committed and pushed; zero-check greps clean; gate
 battery green with numbers recorded; `FORMS_BUILD_PLAN.md` §12 has one entry per phase;
-manual pass in Explorer (`~/Projects/mj-dev && pnpm turbo start --filter=mj_api
+manual pass in Explorer (`cd .. && pnpm turbo start --filter=mj_api
 --filter=mj_explorer`, :4201 — registration lives in the gitignored `MJ/mj.config.js`; verify via
 startup log, never the tracked config): author each of the three outcomes, close a dialog dirty
 and clean, view the hub, and confirm a respondent run at the widget honors a show rule and a

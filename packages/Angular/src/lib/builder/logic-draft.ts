@@ -34,7 +34,14 @@ export interface JumpDraft {
   target?: JumpTarget;
 }
 
-/** Everything the dialog edits, for one item. */
+/**
+ * Everything the dialog edits, for one item.
+ *
+ * ONE ITEM, deliberately. The dialog also SHOWS the form's catch-all ending, but only as a
+ * sentence — it is authored on the Endings strip, which is the single place that writes it. A
+ * form-level value carried in here would need seeding, comparing and clearing alongside the
+ * item's own rule, and would make `ruleFromLogicDraft` able to reach something it must not.
+ */
 export interface LogicDraft {
   /** The show gate; absent means the item always shows. */
   show: ConditionalGroup | undefined;

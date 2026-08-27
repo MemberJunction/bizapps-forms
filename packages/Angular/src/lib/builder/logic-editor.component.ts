@@ -28,6 +28,7 @@ import {
 import {
   addJumpRule,
   canAddJumpRule,
+  emptyLogicDraft,
   moveJumpRule,
   removeJumpRule,
   updateJumpRule,
@@ -67,6 +68,13 @@ const LOGIC_EDITOR_CSS = /* css */ `
 }
 .le-reach.is-warning { color: var(--mj-warning, var(--mj-text-secondary)); }
 .le-reach i { opacity: 0.8; }
+
+/* The form's catch-all, stated. A plain paragraph rather than the .le-reach flex row: that one
+   holds an icon and ONE text node, and a sentence with a <strong> in it would become three flex
+   items — a stray gap before the comma, and nowrap, so the line could not break on a phone. */
+.le-finish { margin: 0; font-size: var(--mjf-meta); line-height: 1.45; color: var(--mj-text-muted); }
+.le-finish i { margin-right: 6px; opacity: 0.8; }
+.le-finish strong { color: var(--mj-text-secondary); font-weight: 600; }
 
 /* One rule, framed, because "where does rule 1 end" is the question a flat stack cannot answer. */
 .le-rule {
@@ -274,13 +282,35 @@ const LOGIC_EDITOR_CSS = /* css */ `
           } @else {
             <p class="le-hint">That is the most rules one {{ itemNoun }} can carry.</p>
           }
+
+          <!-- Where finishers land is STATED, not edited. The catch-all is authored on the Endings
+               strip, which is the one place that writes it; a second control here would be a
+               form-wide setting wearing a per-question dialog, and would need a caption saying so.
+               The hint at the top of this block ends with "carries on to the next question", and
+               this is the answer to the "and then what?" that invites. -->
+          @if (defaultEndingLabel) {
+            <p class="le-finish">
+              <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+              Everyone who finishes lands on <strong>{{ defaultEndingLabel }}</strong>, unless a
+              rule sends them elsewhere.
+            </p>
+          } @else {
+            <!-- True of BOTH states that get here: a form with no ending screens, and a form whose
+                 every ending is screened out. Naming only the first contradicted the destination
+                 list two lines above, which was offering an ending at the time. -->
+            <p class="le-finish">
+              <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+              No ending screen is set as the catch-all, so everyone who finishes sees the
+              form&rsquo;s confirmation message.
+            </p>
+          }
         </section>
       }
     </div>
   `,
 })
 export class LogicEditorComponent {
-  @Input() draft: LogicDraft = { show: undefined, jumps: [] };
+  @Input() draft: LogicDraft = emptyLogicDraft();
   /** Sources the SHOW gate may read — earlier questions only. */
   @Input() sources: ConditionalSourceQuestion[] = [];
   /** Sources a jump's conditions may read — includes this item's own answers. */
@@ -301,6 +331,14 @@ export class LogicEditorComponent {
   @Input() itemNoun = 'question';
   /** The item being edited — what a new condition opens on. See {@link seedGroup}. */
   @Input() subjectSourceId: string | null = null;
+  /**
+   * The ending everyone who finishes lands on, by name — or null when the form has none that
+   * anyone can reach that way (no endings at all, or every ending screened out).
+   *
+   * A label rather than an id: this is read out, never written back, so the component has no use
+   * for anything it could look something up with.
+   */
+  @Input() defaultEndingLabel: string | null = null;
 
   @Output() readonly draftChange = new EventEmitter<LogicDraft>();
 

@@ -1,5 +1,5 @@
 /**
- * Question-level branching (plans/QUESTION_LEVEL_LOGIC_PLAN.md Phase 1).
+ * Question-level branching (plans/done/QUESTION_LEVEL_LOGIC_PLAN.md Phase 1).
  *
  * A `Go to` rule can now sit on a QUESTION and point at a later question, a later page, an
  * ending screen or Submit. Page visibility, question visibility and termination all fall out of

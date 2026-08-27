@@ -220,7 +220,7 @@ cd apps/MJAPI && node server.mjs   # the API harness → http://localhost:4121
 > There is **no `start:api` / `start:explorer` script** — they did not survive the pnpm migration,
 > and this repo has no Explorer at all. `apps/MJAPI` is an API-only harness, which is enough for the
 > respondent path, the submit endpoint and the smoke scripts. For the **builder / admin UI**, run
-> MJ's own host with this repo linked in: `cd ~/Projects/MJ && pnpm start` (Explorer `:4201`).
+> MJ's own host with this repo linked in: `cd ../MJ && pnpm start` (Explorer `:4201`).
 > **[docs/local-host.md](docs/local-host.md)** is the full procedure.
 
 > `npm run build` now also emits `dist/widget/mj-form.js`, the `<mj-form>` custom-element bundle

@@ -218,6 +218,8 @@ export class QuestionEditorComponent {
   @Input() jumpTargets: JumpTargetOption[] = [];
   /** What each destination skips, keyed by option value — see `jump-reach.ts`. */
   @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
+  /** The ending finishers land on, by name — stated in the logic dialog, never written there. */
+  @Input() defaultEndingLabel: string | null = null;
 
   private requested = { validation: false, placeholder: false, scoring: false };
 

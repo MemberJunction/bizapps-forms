@@ -6,7 +6,7 @@ Explorer**. Which one you need depends on what you are working on.
 | Working on | Run |
 |---|---|
 | Respondent path, submit endpoint, actions, resolvers — anything server-side or smoke-tested | This repo's own API harness: `cd apps/MJAPI && node server.mjs` |
-| The builder / admin UI in Explorer, or `forms-ng` components | **MJ's host**: `cd ~/Projects/MJ && pnpm start` (Explorer `:4201`, API `:4000`) |
+| The builder / admin UI in Explorer, or `forms-ng` components | **MJ's host**: `cd ../MJ && pnpm start` (Explorer `:4201`, API `:4000`) |
 
 `apps/MJAPI` is `mj-forms-api-harness` — API only, `private: true`, and a deliberate workspace member
 so its `@memberjunction/*` deps dedupe against `packages/*` through one lockfile. See the comment in
@@ -24,8 +24,19 @@ describe the slot a *host* should use in the sibling convention; nothing here se
 `mj dev workspace` joins sibling checkouts under a common parent so an edit here is live in the
 running host in about a second. The parent must not itself be a git repo.
 
+**Every path below is relative to this repo**, so `..` is that parent and `../MJ` is the MJ
+checkout. Where it lives on your disk is yours to choose; only the shape matters:
+
+```
+<workspace parent>/          # a plain folder, NOT a git repo
+  MJ/
+  bizapps-forms/             # you are here
+  bizapps-common/
+  ...
+```
+
 ```bash
-cd ~/Projects   # a plain folder holding MJ/, bizapps-forms/, bizapps-common/, ...
+cd ..
 node MJ/packages/MJCLI/bin/run.js dev workspace --force --clean-members \
   --exclude SaaS --exclude bizapps-tasks
 ```
@@ -92,11 +103,11 @@ so `@mj-biz-apps/forms-ng` is `UNRESOLVED` from the Explorer until you link it. 
 tracked files clean (`workspace:*` dependencies would break MJ's standalone install later):
 
 ```bash
-ln -s ../../../../../bizapps-forms/packages/Angular  ~/Projects/MJ/packages/MJExplorer/node_modules/@mj-biz-apps/forms-ng
-ln -s ../../../../../bizapps-forms/packages/Entities ~/Projects/MJ/packages/MJExplorer/node_modules/@mj-biz-apps/forms-entities
-ln -s ../../../../../bizapps-forms/packages/Server   ~/Projects/MJ/packages/MJAPI/node_modules/@mj-biz-apps/forms-server
-ln -s ../../../../../bizapps-forms/packages/Entities ~/Projects/MJ/packages/MJAPI/node_modules/@mj-biz-apps/forms-entities
-ln -s ../../../../../bizapps-forms/packages/Actions  ~/Projects/MJ/packages/MJAPI/node_modules/@mj-biz-apps/forms-actions
+ln -s ../../../../../bizapps-forms/packages/Angular  ../MJ/packages/MJExplorer/node_modules/@mj-biz-apps/forms-ng
+ln -s ../../../../../bizapps-forms/packages/Entities ../MJ/packages/MJExplorer/node_modules/@mj-biz-apps/forms-entities
+ln -s ../../../../../bizapps-forms/packages/Server   ../MJ/packages/MJAPI/node_modules/@mj-biz-apps/forms-server
+ln -s ../../../../../bizapps-forms/packages/Entities ../MJ/packages/MJAPI/node_modules/@mj-biz-apps/forms-entities
+ln -s ../../../../../bizapps-forms/packages/Actions  ../MJ/packages/MJAPI/node_modules/@mj-biz-apps/forms-actions
 ```
 
 ### 4. Point the host at your Forms database
@@ -109,8 +120,8 @@ the `ln -sf ../../.env apps/MJAPI/.env` step in the Quick start.
 ## Daily loop
 
 ```bash
-cd ~/Projects/MJ && pnpm start                                   # host up
-cd ~/Projects && pnpm --filter @mj-biz-apps/forms-ng run build   # after editing Forms
+cd ../MJ && pnpm start                                # host up
+cd .. && pnpm --filter @mj-biz-apps/forms-ng run build  # after editing Forms
 ```
 
 Build from the **parent**, not from this repo. Consumers see the change immediately through the
@@ -140,7 +151,7 @@ Find it:
 
 ```bash
 for r in MJ bizapps-ats bizapps-caliber bizapps-forms bizapps-common; do
-  printf "%-16s " "$r"; [ -d ~/Projects/$r/node_modules/.pnpm ] && echo STANDALONE || echo clean
+  printf "%-16s " "$r"; [ -d ../$r/node_modules/.pnpm ] && echo STANDALONE || echo clean
 done
 ```
 
@@ -155,9 +166,9 @@ node -e "console.log(require.resolve('@memberjunction/core/package.json',{paths:
 Fix — remove that repo's trees and reinstall from the parent:
 
 ```bash
-cd ~/Projects/<offending-repo>
+cd ../<offending-repo>
 find . -name node_modules -type d -prune -not -path "*/node_modules/*" -not -path "./.claude/*" -exec rm -rf {} +
-cd ~/Projects && CI=true pnpm install
+cd .. && CI=true pnpm install
 ```
 
 ⚠️ **Do not reach for the documented `dev workspace --force --clean-members` here.** `--force`

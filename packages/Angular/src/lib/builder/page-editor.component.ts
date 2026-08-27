@@ -47,6 +47,7 @@ const PAGE_EDITOR_CSS = /* css */ `
               [jumpSources]="jumpConditionSources"
               [targets]="jumpTargets"
               [reachNotes]="reachNotes"
+              [defaultEndingLabel]="defaultEndingLabel"
               itemNoun="section"
               (ruleChange)="onConditionalChange($event)"
             />
@@ -73,6 +74,8 @@ export class PageEditorComponent {
   @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
   /** Sources a jump's conditions may read: earlier pages AND this page's own questions. */
   @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
+  /** The ending finishers land on, by name — stated in the logic dialog, never written there. */
+  @Input() defaultEndingLabel: string | null = null;
   /** Emitted whenever the page entity changed (parent persists). */
   @Output() pageChanged = new EventEmitter<PageNode>();
 
