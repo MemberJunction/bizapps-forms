@@ -711,6 +711,36 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
+   * Every destination a jump could name, ANYWHERE on the form — not filtered by where the rule
+   * sits, which is what makes it useful.
+   *
+   * The pickers above are forward-only, mirroring the resolver. That is right for AUTHORING and
+   * wrong for NAMING: a reorder can put a target behind its rule, and it then drops out of the
+   * offered list while sitting one row up the canvas, so the rail read "(a question that no
+   * longer exists)" about something plainly there. The difference between this list and the
+   * offered one is exactly "exists, but not from here" — see `storedTargetLabel`.
+   *
+   * Same shape as {@link formSources}, which answers the identical question about a rule's
+   * SOURCES, and for the same reason.
+   */
+  protected get formTargets(): JumpTargetOption[] {
+    const tree = this.tree;
+    if (!tree) {
+      return [];
+    }
+    return jumpTargetOptions(
+      tree.pages.flatMap((page) =>
+        page.questions.map((q) => ({ id: q.entity.ID, label: q.entity.Prompt })),
+      ),
+      tree.pages.map((page, index) => ({
+        id: page.entity.ID,
+        label: page.entity.Title || `Page ${index + 1}`,
+      })),
+      this.endingDestinations,
+    );
+  }
+
+  /**
    * Where the SELECTED PAGE's rules may send a respondent — forward only.
    *
    * Forward-only mirrors the resolver, which treats a backward or self target as inert. Offering

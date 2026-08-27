@@ -46,6 +46,7 @@ const PAGE_EDITOR_CSS = /* css */ `
               [sources]="conditionalSources"
               [jumpSources]="jumpConditionSources"
               [formSources]="formSources"
+              [formTargets]="formTargets"
               [targets]="jumpTargets"
               [reachNotes]="reachNotes"
               [defaultEndingLabel]="defaultEndingLabel"
@@ -81,6 +82,8 @@ export class PageEditorComponent {
    * See `ConditionalRuleEditorComponent.formSources`.
    */
   @Input() formSources: ConditionalSourceQuestion[] = [];
+  /** See `RulesPanelComponent.formTargets`. */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** The ending finishers land on, by name — stated in the logic dialog, never written there. */
   @Input() defaultEndingLabel: string | null = null;
   /** Emitted whenever the page entity changed (parent persists). */

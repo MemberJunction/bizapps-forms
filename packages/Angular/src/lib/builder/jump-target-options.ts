@@ -110,19 +110,57 @@ export function groupedJumpTargets(
 }
 
 /**
+ * How a destination is NAMED when it is missing from the picker — worded to match the badge on
+ * the item, which says the same thing about the same rule.
+ *
+ * "an ending screen" rather than "an ending" because that is what `rules-inventory.ts` calls one
+ * in `MISSING_ENDING`, and the rail and the badge are read together.
+ */
+const MISSING_KIND: Record<Exclude<JumpTarget['kind'], 'submit'>, string> = {
+  question: 'a question',
+  page: 'a page',
+  ending: 'an ending screen',
+};
+
+/**
  * The label for a STORED target, including one the picker no longer offers.
  *
  * A `<select>` whose value is absent from its options renders BLANK, so a rule pointing at a
  * deleted question would show an empty box on a row that reads perfectly well in the database.
- * Returning a "(no longer exists)" label lets the caller render the entry instead.
+ * Returning a label lets the caller render the entry instead.
+ *
+ * TWO REASONS A TARGET IS UNOFFERED, and they need different sentences — the destination half of
+ * issue #73. `options` is FORWARD-ONLY, so a reorder that puts a target behind its rule drops it
+ * out of that list while the thing itself sits one row up the canvas, visibly present. Calling
+ * that "no longer exists" is a rail caught lying, on the very row an author opens to fix the
+ * rule; `collectRuleEntries` has always said the true thing about it (`UNREACHED_DESTINATION`),
+ * so the two surfaces disagreed. `formTargets` is every destination the form has, wherever it
+ * sits, and the difference between the two lists is exactly "exists, but not from here".
+ *
+ * An EMPTY `formTargets` is the safe default: with no evidence about where the target sits, the
+ * honest answer is the one that makes no ordering claim, which is the old wording. Required
+ * rather than defaulted, so a new caller has to decide rather than inherit the lie.
+ *
+ * `condition-sources.ts`'s `staleSourceLabel` is the same decision about a rule's SOURCES, and
+ * the two read alike on purpose.
  */
 export function storedTargetLabel(
   target: JumpTarget,
   options: ReadonlyArray<JumpTargetOption>,
+  formTargets: ReadonlyArray<JumpTargetOption>,
 ): string {
-  const known = options.find((o) => o.value === targetValue(target));
+  const value = targetValue(target);
+  const known = options.find((o) => o.value === value);
   if (known) {
     return known.label;
   }
-  return target.kind === 'submit' ? 'Submit the form' : `(a ${target.kind} that no longer exists)`;
+  if (target.kind === 'submit') {
+    // Submit is ahead of everything and is offered everywhere; it can only be missing from a
+    // list the caller never filled in.
+    return 'Submit the form';
+  }
+  const elsewhere = formTargets.find((o) => o.value === value);
+  return elsewhere
+    ? `${elsewhere.label} — no longer ahead, so this rule never runs`
+    : `(${MISSING_KIND[target.kind]} that no longer exists)`;
 }

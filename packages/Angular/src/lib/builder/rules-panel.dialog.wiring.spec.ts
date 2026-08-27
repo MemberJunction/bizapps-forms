@@ -481,3 +481,47 @@ describe('the rules rail names a source it is no longer allowed to read', () => 
     expect(panelHtml()).toMatch(/\[formSources\]="formSources"/);
   });
 });
+
+/**
+ * The same lie, about a rule's DESTINATION.
+ *
+ * Issue #73 fixed it for sources and logged this: the `Go to` picker is forward-only, mirroring
+ * the resolver, so a reorder that puts a target behind its rule drops it out of the offered list
+ * while the thing itself sits one row up the canvas. Both the rail line and the dialog's disabled
+ * option then read `(a question that no longer exists)` about something plainly present. The
+ * canvas badge has always said the true thing (`UNREACHED_DESTINATION`), so the two surfaces
+ * contradicted each other on the same rule.
+ */
+describe('the rules rail names a destination that is no longer ahead of the rule', () => {
+  it('gives the label function the form-wide list as well as the offered one', () => {
+    expect(panel()).toMatch(/storedTargetLabel\(jump\.target, this\.targets, this\.formTargets\)/);
+    expect(logicEditor()).toMatch(/storedTargetLabel\(rule\.target, this\.targets, this\.formTargets\)/);
+  });
+
+  it('takes that list as an input, defaulted to empty so an unwired host degrades to the old text', () => {
+    expect(panel()).toMatch(/@Input\(\) formTargets: JumpTargetOption\[\] = \[\];/);
+    expect(logicEditor()).toMatch(/@Input\(\) formTargets: JumpTargetOption\[\] = \[\];/);
+  });
+
+  it('hands it on to the editor the dialog opens', () => {
+    expect(panelHtml()).toMatch(/\[formTargets\]="formTargets"/);
+  });
+
+  it('makes the third argument REQUIRED, so a new caller has to decide rather than inherit the lie', () => {
+    const module = stripped('jump-target-options.ts');
+    expect(module).toMatch(/formTargets: ReadonlyArray<JumpTargetOption>,\s*\): string/);
+    expect(module).not.toMatch(/formTargets: ReadonlyArray<JumpTargetOption> = \[\]/);
+  });
+});
+
+describe('an unreachable destination is named, not offered', () => {
+  it('disables the stale option the way the condition editor disables a stale source', () => {
+    // The Go to list is forward-only precisely so an author cannot pick a destination the
+    // resolver ignores — a rule that reads correctly and silently never fires. Rendering the
+    // inert target as a selectable option beside the live ones gives that back. It stays the
+    // SELECTION, so the rule still reads right; it is just not on offer again.
+    expect(logicEditor()).toMatch(
+      /@if \(staleTarget\(rule\); as stale\) \{\s*<option \[value\]="stale\.value" disabled \[selected\]="true">/,
+    );
+  });
+});

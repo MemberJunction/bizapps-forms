@@ -11,9 +11,13 @@
  *   - `FormEntityBinding.FieldMappings` — `{ version, fields: [{ source: { questionId } }] }`
  *
  * Copy those verbatim and the new form's branching points at the OLD form's questions. Nothing
- * errors. The evaluator simply never finds an answer for the id it was given, every condition
- * comes back false, and the questions behind them are hidden from every respondent forever —
- * which the author discovers, if ever, as missing answers weeks later.
+ * errors. The evaluator simply never finds an answer for the id it was given, so the operand is
+ * `undefined` — `false` for the equality family and TRUE for `isNotAnswered` / `notEquals`. The
+ * questions behind those conditions are therefore pinned SHUT for every respondent, or pinned
+ * OPEN for every respondent, depending on the operator: silently either way, with the copy still
+ * looking correct in the builder, and discovered — if ever — as missing answers weeks later.
+ * (Not the `NOT_EVALUABLE` sentinel, which is reserved for a condition naming nothing at all; a
+ * copied id is still a perfectly good string. `rules-inventory.ts` carries the same correction.)
  *
  * WHAT AN UNMAPPABLE REFERENCE DOES. It is dropped, and counted. Keeping it would reproduce
  * exactly the hidden-forever failure above; dropping it leaves the question always visible,

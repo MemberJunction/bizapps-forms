@@ -220,6 +220,8 @@ export class QuestionEditorComponent {
    * See `ConditionalRuleEditorComponent.formSources`.
    */
   @Input() formSources: ConditionalSourceQuestion[] = [];
+  /** See `RulesPanelComponent.formTargets`. */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** Forward destinations for this question's rules — later questions, later sections, endings. */
   @Input() jumpTargets: JumpTargetOption[] = [];
   /** What each destination skips, keyed by option value — see `jump-reach.ts`. */

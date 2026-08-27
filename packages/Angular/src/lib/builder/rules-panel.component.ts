@@ -134,6 +134,15 @@ export class RulesPanelComponent {
    * See `ConditionalRuleEditorComponent.formSources`.
    */
   @Input() formSources: ConditionalSourceQuestion[] = [];
+  /**
+   * Every destination the form has, for the same reason {@link formSources} exists: {@link
+   * targets} is forward-only, so a target a reorder put BEHIND this rule is absent from it while
+   * sitting one row up the canvas. See `storedTargetLabel`.
+   *
+   * Not wired by the ENDING editor, and that is not an oversight: an ending screen carries no
+   * jump — it IS the after — which is what `allowJumps` says.
+   */
+  @Input() formTargets: JumpTargetOption[] = [];
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
   /**
@@ -203,7 +212,7 @@ export class RulesPanelComponent {
         icon: 'fa-solid fa-arrow-turn-down',
         text:
           `If ${this.conditions(jump.when, this.jumpSourceList)}, go to ` +
-          storedTargetLabel(jump.target, this.targets),
+          storedTargetLabel(jump.target, this.targets, this.formTargets),
       });
     }
     return rows;

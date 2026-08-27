@@ -7,7 +7,7 @@ Branch to cut **from `next`** (currently `98abfc0`), tracking `origin/<branch>` 
 Revision 2, after a design review; §1.4, §1.6, §2, and the three amendments in §4 come from it,
 and §3.2 corrects it. Revision 3 records what landed.
 
-## Status — Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ — #73 closed
+## Status — Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · follow-up ✅ — #73 closed
 
 Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<same-name>`.
 
@@ -16,8 +16,7 @@ Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<
 | 0 — one statement of the ordering rule | **landed** | `refactor(builder): state the rule read horizon once` |
 | 1 — a rule that cannot read its own source is broken | **landed** | see §4 |
 | 2 — say it at the drag, and offer the one move that undoes it | **landed** | `feat(#73): say what a reorder broke, and offer the move that undoes it` |
-
-What remains is the follow-up logged below, not part of #73.
+| follow-up — the same lie about a jump's DESTINATION | **landed** | see below |
 
 **What the build changed about this plan, and why.** Five things, all found by building or by driving
 the real UI:
@@ -59,15 +58,28 @@ page — the state that helper's own comment warns about, now impossible because
 *both* directions. Two more hung `showVip` (which reads `q1`) on `q1` itself: a rule reading its own
 answer, which the picker has never offered and which Phase 1 correctly calls broken.
 
-**Logged, not fixed** — `storedTargetLabel` (`jump-target-options.ts:119`) has the identical defect
-for jump DESTINATIONS: a target that still exists but is no longer ahead of its rule renders
-`(a question that no longer exists)` in the rail. The canvas badge already says the truth
-(`UNREACHED_DESTINATION`), so only the rail line lies. Fixing it means threading a form-wide
-*target* list (questions + pages + endings) the way `formSources` was threaded. Deliberately left
-out of Phase 2 as well: Phase 2 is about the moment of a change and this is a thing said at rest,
-and folding an unrelated surface into the commit that ships the band would have made both harder to
-review or revert. Take it as the follow-up — with `templates/clone-remap.ts:15`, the ninth copy of
-the corrected `NOT_EVALUABLE` prose, which is the same kind of debt on the same subject.
+**The follow-up, landed after Phase 2 as its own commit.** `storedTargetLabel`
+(`jump-target-options.ts`) had the identical defect for jump DESTINATIONS: a target that still
+exists but is no longer ahead of its rule rendered `(a question that no longer exists)` — in the
+rail line *and* in the Edit-logic dialog's `<select>`, the two surfaces Phase 1 fixed for sources.
+The canvas badge had always said the true thing (`UNREACHED_DESTINATION`), so the builder
+contradicted itself about one rule. Fixed by threading a form-wide `formTargets` list (every
+question, page and ending) exactly the way `formSources` was threaded, and giving the function a
+third, REQUIRED argument so a new caller has to decide rather than inherit the lie. It reads
+`"{label} — no longer ahead, so this rule never runs"`. Two things found by driving it, neither in
+the plan:
+
+* **The stale target option was SELECTABLE**, where the stale *source* option has always been
+  disabled. The `Go to` list is forward-only precisely so an author cannot pick a destination the
+  resolver ignores; rendering the inert one as a choice beside the live ones gave that back. Now
+  disabled, still the selection.
+* **"a ending"** — the missing-target label built its article by concatenation. Now
+  `an ending screen`, which is what `MISSING_ENDING` calls one, so the rail and the badge match.
+
+Also corrected here: `templates/clone-remap.ts`, the ninth and last copy of the `NOT_EVALUABLE`
+prose §1.4 refutes. A copied-but-unmapped question id makes the operand `undefined` — `false` for
+the equality family and **true** for `isNotAnswered`/`notEquals` — so the guarded question is
+pinned shut for everyone or pinned open for everyone, not "hidden from every respondent".
 
 ---
 
@@ -599,12 +611,21 @@ survived typing in another question's prompt, which is the case a stored index p
 to `markDirty()`; and dismissing with ✕ removed the band without reverting the order, because
 dismiss is not undo. Console clean, zero `not found in metadata` on the restart.
 
-**Still owed, and no unit test can stand in for either** — both are about the RESPONDENT, so they
-belong with the next preview session rather than with this change:
+**The DELETED-source arm was then confirmed in Preview** (2026-08-27, by the developer, during the
+follow-up smoke pass). The fixture previews as page 1 only — `Q1 name`, the Statement, Submit — and
+the chain is exactly what the badges claim: `Q4`'s show rule reads the deleted `Q3` with `equals`,
+so the operand is `undefined`, which the equality family reads as **false**, and Q4 is pinned shut
+for every respondent; `Q5`'s rule is HEALTHY and dies anyway, because the question it legally reads
+is never rendered and so never answered. A legal rule, dead because of a broken one upstream — and
+with `isNotAnswered` or `notEquals` the identical breakage would have shown Q4 to *everyone*
+instead. That asymmetry is why §1.4 was worth correcting in nine places.
 
-1. Preview the broken form and judge whether the badge's wording describes what the widget actually
-   does (§1.1). A spec can prove the question reappears; only a human can say whether the sentence
-   is a fair description of it.
+**Still owed, and no unit test can stand in for either** — both are about the RESPONDENT:
+
+1. Preview a form broken by a REORDER (not by a deletion) and judge whether the badge's wording
+   describes what the widget does (§1.1): the item reappears mid-fill once the later source is
+   answered. The deletion arm above is confirmed; this is the arm where the rule changes its mind
+   in front of the respondent, and only a human can say whether the sentence is fair to it.
 2. Preview the two mutually-referencing `isNotAnswered` rules of constraint 2.3 and read the console
    warning. This is where the builder's badge and the respondent's experience diverge most, and a
    reviewer will not believe it without seeing it.
