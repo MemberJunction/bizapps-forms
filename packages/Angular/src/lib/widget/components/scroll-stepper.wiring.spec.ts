@@ -163,3 +163,40 @@ describe('the inner form is this component\'s business alone', () => {
     expect(template()).toMatch(/\(submit\)="onSubmit\(\$event\)"/);
   });
 });
+
+/**
+ * Questions that vanish say why.
+ *
+ * A `Go to` pointing inside the section on screen removes the questions between it and its
+ * target while the respondent is looking at them. Section stepping fixed the cross-section case;
+ * this is the one that is left, and with nothing said it reads as a glitch rather than as logic.
+ *
+ * The decisions — which absences are worth mentioning, and what the line says — are tested for
+ * real in `section-content.spec.ts`. What is left to prove here is that the renderer asks, and
+ * renders the answer where the questions were.
+ */
+describe('a section says what it stopped asking', () => {
+  it('renders entries, not a bare question list', () => {
+    const html = template();
+    expect(html).toMatch(/@for \(entry of entriesFor\(page\); track/);
+    expect(html).not.toMatch(/@for \(q of questionsFor\(page\); track q\.id\)/);
+  });
+
+  it('asks the shared reader which absences are worth a word', () => {
+    // Not "every question missing from the page": one hidden by its own show rule was never on
+    // screen, and announcing it would narrate the form's structure on every unused follow-up.
+    expect(source()).toMatch(/sectionEntries\(/);
+  });
+
+  it('uses the one wording, rather than composing a second copy in the template', () => {
+    expect(source()).toMatch(/skippedMessage\(/);
+  });
+
+  it('the marker is not announced as an alert', () => {
+    // It is context, not an error. `role="alert"` would interrupt a screen reader mid-question
+    // and re-announce on every keystroke that changes the run.
+    const html = template();
+    const marker = html.slice(html.indexOf('mjf-skipped'));
+    expect(marker).not.toMatch(/role="alert"/);
+  });
+});

@@ -80,6 +80,47 @@
   box-shadow: var(--mjf-card-shadow), var(--mjf-focus-ring);
 }
 
+/*
+ * The note left where a jump passed some questions over.
+ *
+ * Quiet by design: it explains an absence, it is not a thing to act on, and it sits in the flow
+ * of questions the respondent IS answering. It fades in rather than appearing, because the
+ * questions it replaces vanish the instant an answer changes and a hard swap is what reads as a
+ * glitch. Only the arrival is animated — Angular removes the questions from the DOM outright, so
+ * there is no exit to soften without an animation package this widget does not carry.
+ */
+.mjf-skipped {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  color: var(--mjf-page-ink-muted);
+  background: var(--mjf-page-bg);
+  border: 1px dashed var(--mjf-card-border);
+  border-radius: var(--mjf-card-radius);
+  animation: mjf-skipped-in 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.mjf-skipped i {
+  flex: none;
+  opacity: 0.7;
+}
+
+@keyframes mjf-skipped-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mjf-skipped {
+    animation: none;
+  }
+}
+
 .mjf-scroll__empty {
   margin: 0;
   color: var(--mjf-page-ink-muted);

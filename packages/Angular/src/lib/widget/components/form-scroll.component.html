@@ -33,17 +33,26 @@
           <p class="mjf-page__desc">{{ page.description }}</p>
         }
         <div class="mjf-page__questions">
-          @for (q of questionsFor(page); track q.id) {
-            <mjf-form-question
-              [question]="q"
-              [value]="runtime().valueFor(q.id)"
-              [errorMessage]="runtime().visibleErrorFor(q)"
-              [partErrors]="runtime().visiblePartErrorsFor(q)"
-              [distributionSlug]="distributionSlug()"
-              [responseId]="responseId()"
-              (valueChange)="onValueChange(q, $event)"
-              (focusout)="onBlur(q, $event)"
-            />
+          @for (entry of entriesFor(page); track $index) {
+            @if (entry.kind === 'question') {
+              <mjf-form-question
+                [question]="entry.question"
+                [value]="runtime().valueFor(entry.question.id)"
+                [errorMessage]="runtime().visibleErrorFor(entry.question)"
+                [partErrors]="runtime().visiblePartErrorsFor(entry.question)"
+                [distributionSlug]="distributionSlug()"
+                [responseId]="responseId()"
+                (valueChange)="onValueChange(entry.question, $event)"
+                (focusout)="onBlur(entry.question, $event)"
+              />
+            } @else {
+              <!-- Context, not an error, so no role="alert": that would interrupt a screen
+                   reader mid-question and re-announce on every keystroke that changes the run. -->
+              <p class="mjf-skipped">
+                <i class="fa-solid fa-arrow-turn-down" aria-hidden="true"></i>
+                {{ skippedText(entry) }}
+              </p>
+            }
           }
         </div>
       </section>

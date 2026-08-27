@@ -27,6 +27,7 @@ import {
 import type { AnswerValue, PublishedFormPage, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { FormRuntime } from '../core/form-runtime';
+import { sectionEntries, skippedMessage, type SectionEntry } from '../core/section-content';
 import { steppableSections } from '../core/section-stepper';
 import { clampCursor } from '../core/stepper';
 import { FormProgressComponent } from './form-progress.component';
@@ -137,6 +138,23 @@ export class FormScrollComponent {
 
   protected questionsFor(page: PublishedFormPage): PublishedFormQuestion[] {
     return this.runtime().visibleQuestions(page);
+  }
+
+  /**
+   * What this section renders: its questions, and a note where a jump passed some over.
+   *
+   * A `Go to` pointing INSIDE the section on screen removes questions the respondent is looking
+   * at. Section stepping fixed the cross-section case; this is what is left of it, and unspoken
+   * it reads as a glitch. Which absences are worth mentioning is `section-content.ts`'s call —
+   * notably not the ones a question's own `show` rule hid, which were never on screen.
+   */
+  protected entriesFor(page: PublishedFormPage): SectionEntry[] {
+    return sectionEntries(page, this.runtime().renderedQuestions(), this.runtime().answerMap());
+  }
+
+  /** The line shown where the questions were — one wording, defined once. */
+  protected skippedText(entry: Extract<SectionEntry, { kind: 'skipped' }>): string {
+    return skippedMessage(entry);
   }
 
   protected onValueChange(question: PublishedFormQuestion, value: AnswerValue): void {
