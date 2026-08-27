@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { collectRuleEntries, type RuleEntry, type RuleInventoryForm } from './rules-inventory';
-import { isValidReorder, newlyBrokenRules, reorderNoticeText, undoReorderMove } from './reorder';
+import {
+  isValidReorder,
+  newlyBrokenRules,
+  noticeStillTrue,
+  reorderNoticeText,
+  undoReorderMove,
+} from './reorder';
 
 describe('isValidReorder', () => {
   it('accepts an in-bounds move to a different index', () => {
@@ -274,5 +280,46 @@ describe('an appended question cannot break a rule', () => {
     const before = collectRuleEntries(propertyForm(PAGE_A, PAGE_B));
     const after = collectRuleEntries(propertyForm([...PAGE_A, 'qa4'], PAGE_B));
     expect(newlyBrokenRules(before, after)).toEqual([]);
+  });
+});
+
+describe('noticeStillTrue', () => {
+  const notice = (ruleIds: string[]) => ({
+    text: 'Moved "Email". This broke 1 rule on it.',
+    pageId: 'pA',
+    questionId: 'qa3',
+    originalIndex: 0,
+    ruleIds,
+  });
+
+  it('holds while a rule the band named is still broken', () => {
+    expect(noticeStillTrue(notice(['r1']), [entry('r1', [UNREADABLE])])).toBe(true);
+  });
+
+  it('lapses once every rule it named is healthy again', () => {
+    // The author dragged the question back BY HAND rather than clicking Undo. Same recovery,
+    // and the band must not go on describing a breakage that is no longer there.
+    expect(noticeStillTrue(notice(['r1']), [entry('r1', [])])).toBe(false);
+  });
+
+  it('lapses when the rule it named no longer exists at all', () => {
+    // Deleted with its question. Gone is not broken.
+    expect(noticeStillTrue(notice(['r1']), [])).toBe(false);
+  });
+
+  it('holds while ANY of several named rules is still broken', () => {
+    const entries = [entry('r1', []), entry('r2', [UNREADABLE])];
+    expect(noticeStillTrue(notice(['r1', 'r2']), entries)).toBe(true);
+  });
+
+  it('is false for a notice that named nothing, which is not a state the builder can reach', () => {
+    // `reorderNoticeText` returns '' for an empty diff, so no notice is raised without rules.
+    // Pinned anyway: "no rules named" must read as nothing to say, never as always-true.
+    expect(noticeStillTrue(notice([]), [entry('r1', [UNREADABLE])])).toBe(false);
+  });
+
+  it('reads breakage from the entry, not from whether the id is present', () => {
+    // A healthy rule with the same id must not keep the band alive.
+    expect(noticeStillTrue(notice(['r1']), [entry('r1', []), entry('r2', [MISSING])])).toBe(false);
   });
 });

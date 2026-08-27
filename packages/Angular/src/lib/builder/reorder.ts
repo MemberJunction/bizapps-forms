@@ -89,6 +89,37 @@ export interface ReorderNotice {
   readonly questionId: string;
   /** Where the question came FROM. That is where Undo returns it. */
   readonly originalIndex: number;
+  /**
+   * The rules this band announced, by {@link RuleEntry.id} — what decides when it has outlived
+   * its truth. See {@link noticeStillTrue}.
+   *
+   * Rule ids, not question ids: one question can carry a show rule and several jumps, and the
+   * band is about which RULES broke.
+   */
+  readonly ruleIds: readonly string[];
+}
+
+/**
+ * Whether a standing notice still describes something that is true.
+ *
+ * The band announces a consequence, and a consequence can be undone by something other than its
+ * Undo button — the author drags the question back by hand, or opens the rule and fixes it in the
+ * dialog. Either way the band must stop saying a rule is broken, because a warning that outlives
+ * what it warned about is the same class of untrustworthy as one that lies about a deleted
+ * question.
+ *
+ * A rule that has VANISHED — deleted along with its question — is not in the broken set, so the
+ * notice lapses. Gone is not broken.
+ *
+ * The counterpart to `undoReorderMove`: that one answers "what would putting this back mean", and
+ * this one answers "is there still anything to put back for".
+ */
+export function noticeStillTrue(
+  notice: Pick<ReorderNotice, 'ruleIds'>,
+  entries: readonly RuleEntry[],
+): boolean {
+  const broken = new Set(entries.filter((entry) => entry.broken.length > 0).map((entry) => entry.id));
+  return notice.ruleIds.some((id) => broken.has(id));
 }
 
 /**

@@ -526,6 +526,25 @@ and can fail halfway, leaving the database in a third state matching neither bef
 existing failure band already owns saying so, and this keeps the two bands about two different
 things.
 
+**A BAND RETIRES WHEN IT STOPS BEING TRUE, not when something happens** — the amendment that came
+out of verifying Phase 2 rather than out of the design. Revision 3 ended `reorderQuestion` with
+`this.reorderNotice = text.length > 0 ? {…} : null`, so any later move that broke nothing cleared a
+standing band. Reproduced in the builder: break a rule on section 3, nudge a question on section 1,
+and the band vanishes — the breakage still on screen, the Undo gone, nothing dismissed.
+
+Keeping it unconditionally is the opposite error: the author can drag the question back BY HAND, or
+repair the rule in the Edit-logic dialog, and a band still announcing that breakage is a warning
+that outlived what it warned about — the same untrustworthiness as a badge that lies. So the notice
+carries `ruleIds` (the `RuleEntry.id`s it announced) and `noticeStillTrue` asks whether any of them
+is still broken. A rule that has VANISHED with its question is not broken, so the band lapses.
+
+`retireStaleNotice()` runs from `markDirty()`, and that does NOT contradict the paragraph above
+rejecting it. `markDirty()` is the wrong clock for **identity** — which question Undo moves, and to
+where — because a keystroke or a background automation event answers that wrongly. It is the right
+clock for **truth**, because a spurious call can only ever re-confirm a still-broken rule; it can
+never retire a real band. Both statements are in the code, next to each other, for the reader who
+would otherwise "fix" one of them.
+
 **`form-builder.component.html` / `form-builder.styles.ts`** — a second band beside the existing
 `.fb-failure` one, warning-toned (`--mj-status-warning-*`), `role="alert"`, carrying **Undo** and a
 dismiss. Same markup shape and token discipline as the band above it; confirm left, cancel right.

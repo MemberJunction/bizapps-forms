@@ -83,6 +83,7 @@ import {
 import {
   isValidReorder,
   newlyBrokenRules,
+  noticeStillTrue,
   reorderNoticeText,
   undoReorderMove,
   type ReorderNotice,
@@ -342,6 +343,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    * instead of latching it, so an edit that restores the published state reports clean.
    */
   private markDirty(): void {
+    this.retireStaleNotice();
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
           buildPublishedDefinition(
@@ -1290,19 +1292,29 @@ export class FormBuilderComponent extends BaseFormComponent {
     moveItemInArray(page.questions, from, to);
 
     const labels = this.itemLabels;
+    const broken = newlyBrokenRules(before, this.ruleEntries);
     const text = reorderNoticeText(
       { id: moved.entity.ID, label: moved.entity.Prompt },
-      newlyBrokenRules(before, this.ruleEntries),
+      broken,
       (id) => labels.get(id) ?? 'another question',
     );
     // Keyed on IDS, never on `from`/`to`. A stored index pair is only correct while nothing else
-    // has shifted the page, and the obvious clock for retiring a stale one — `markDirty()` —
-    // fires on every keystroke in a prompt and once from a background automation event, so it
-    // would clear a standing Undo for reasons that have nothing to do with the author. Resolving
-    // by id when Undo is clicked makes moving the wrong question unrepresentable.
-    this.reorderNotice = text.length > 0
-      ? { text, pageId: page.entity.ID, questionId: moved.entity.ID, originalIndex: from }
-      : null;
+    // has shifted the page, and resolving by id when Undo is clicked makes moving the wrong
+    // question unrepresentable.
+    //
+    // A move that breaks nothing LEAVES A STANDING BAND ALONE. Overwriting with null here was
+    // how an unrelated nudge on another section silently took away the Undo for a breakage that
+    // was still on screen — reproduced. What retires a band is `retireStaleNotice`, which asks
+    // whether it is still TRUE rather than whether anything has happened since.
+    if (text.length > 0) {
+      this.reorderNotice = {
+        text,
+        pageId: page.entity.ID,
+        questionId: moved.entity.ID,
+        originalIndex: from,
+        ruleIds: broken.map((entry) => entry.id),
+      };
+    }
 
     // Checked rather than discarded: this writes one question at a time and can fail halfway,
     // leaving `DisplayOrder` matching neither the order before this move nor the one after.
@@ -1357,6 +1369,26 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected dismissReorderNotice(): void {
     this.reorderNotice = null;
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Drop the reorder band once the rules it named are no longer broken — HOWEVER they were fixed.
+   *
+   * Clicking Undo is only one of the ways. The author can drag the question back by hand, open
+   * the rule and repair it in the dialog, or delete it outright, and a band still announcing that
+   * breakage is a warning that outlived what it warned about.
+   *
+   * Called from {@link markDirty}, and that is not a contradiction of the comment in
+   * `reorderQuestion` that rejects it. `markDirty()` is the wrong clock for IDENTITY — which
+   * question Undo moves, and to where — because a keystroke in a prompt or a background
+   * automation event would answer that wrongly. It is the right clock for TRUTH, because a
+   * spurious call can only ever re-confirm a still-broken rule; it can never retire a real one.
+   */
+  private retireStaleNotice(): void {
+    const notice = this.reorderNotice;
+    if (notice && !noticeStillTrue(notice, this.ruleEntries)) {
+      this.reorderNotice = null;
+    }
   }
 
   /**
