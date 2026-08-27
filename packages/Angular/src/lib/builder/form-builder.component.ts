@@ -80,7 +80,13 @@ import {
   publishControlState,
   type PublishControlState,
 } from './publish-fingerprint';
-import { isValidReorder } from './reorder';
+import {
+  isValidReorder,
+  newlyBrokenRules,
+  reorderNoticeText,
+  undoReorderMove,
+  type ReorderNotice,
+} from './reorder';
 import { nextOptionLabel } from './option-labels';
 import {
   NOTHING_SELECTED,
@@ -1227,14 +1233,121 @@ export class FormBuilderComponent extends BaseFormComponent {
     await this.reorderQuestion(page, event.previousIndex, event.currentIndex);
   }
 
-  /** Shared reorder: move a question to a new index in its page, then persist. */
+  /**
+   * Shared reorder: move a question to a new index in its page, persist, and say what the move
+   * cost (issue #73).
+   *
+   * A drag writes `DisplayOrder` and nothing else — it never rewrites rule JSON, and it must not
+   * start: the tool cannot tell "everyone should answer this first" from "I was tidying", and a
+   * guessed repair to a jump silently drops an answer the respondent already typed. So the move
+   * stands and the CONSEQUENCE is reported.
+   *
+   * The consequence is a set difference over `collectRuleEntries`, not a rule check of its own.
+   * This path knows nothing about rules beyond "the broken set grew", which is why every
+   * breakage class the inventory learns later is warned about here without touching this method.
+   *
+   * The only write path that hooks this, because it is the only one that can INVERT a pair: every
+   * other path appends or removes (plan §1.5), and neither reverses the order of two surviving
+   * questions. If insert-at-index, duplicate-below or move-to-another-section ever ships, that
+   * proof lapses and the diff has to wrap the new write too.
+   */
   private async reorderQuestion(page: PageNode, from: number, to: number): Promise<void> {
     if (this.busy || !isValidReorder(from, to, page.questions.length)) {
       return;
     }
+    const moved = page.questions[from];
+    const before = this.ruleEntries;
     moveItemInArray(page.questions, from, to);
-    await this.state.persistQuestionOrder(page);
+
+    const labels = this.itemLabels;
+    const text = reorderNoticeText(
+      { id: moved.entity.ID, label: moved.entity.Prompt },
+      newlyBrokenRules(before, this.ruleEntries),
+      (id) => labels.get(id) ?? 'another question',
+    );
+    // Keyed on IDS, never on `from`/`to`. A stored index pair is only correct while nothing else
+    // has shifted the page, and the obvious clock for retiring a stale one — `markDirty()` —
+    // fires on every keystroke in a prompt and once from a background automation event, so it
+    // would clear a standing Undo for reasons that have nothing to do with the author. Resolving
+    // by id when Undo is clicked makes moving the wrong question unrepresentable.
+    this.reorderNotice = text.length > 0
+      ? { text, pageId: page.entity.ID, questionId: moved.entity.ID, originalIndex: from }
+      : null;
+
+    // Checked rather than discarded: this writes one question at a time and can fail halfway,
+    // leaving `DisplayOrder` matching neither the order before this move nor the one after.
+    // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
+    // refused write — and the notice below it stays true either way, because it is about what is
+    // on screen. Logged as well so a partial write is not invisible once that band is dismissed.
+    if (!(await this.state.persistQuestionOrder(page))) {
+      LogError(
+        `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
+          'DisplayOrder may match neither the previous nor the new order.',
+      );
+    }
     this.markDirty();
+  }
+
+  // -- the reorder notice (issue #73) ---------------------------------------
+
+  /**
+   * The last reorder that broke a rule, and enough to put it back. `null` when the last move
+   * cost nothing, which is the ordinary case.
+   *
+   * NO TIMER. It stands until it is undone, dismissed, or replaced by another costly move: an
+   * auto-hiding warning about something otherwise silent is the failure this issue is about.
+   */
+  protected reorderNotice: ReorderNotice | null = null;
+
+  /**
+   * Put the moved question back where it came from.
+   *
+   * `moveItemInArray(a, from, to)` is inverted exactly by moving the same element back, so this
+   * re-enters {@link reorderQuestion}, which re-runs the diff, finds nothing newly broken and
+   * clears its own notice. No command stack, and no second definition of what "undone" means.
+   */
+  protected async undoReorder(): Promise<void> {
+    const notice = this.reorderNotice;
+    if (!notice) {
+      return;
+    }
+    const page = this.tree?.pages.find((p) => p.entity.ID === notice.pageId);
+    const move = page
+      ? undoReorderMove(notice, page.questions.map((q) => q.entity.ID))
+      : null;
+    if (!page || !move) {
+      // The question or its section was deleted while the band stood. A band offering a move
+      // that cannot happen is worse than no band.
+      this.dismissReorderNotice();
+      return;
+    }
+    await this.reorderQuestion(page, move.from, move.to);
+  }
+
+  protected dismissReorderNotice(): void {
+    this.reorderNotice = null;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Every item that can carry a rule, by id, named the way the canvas names it.
+   *
+   * Read from the same projection the badges are built from, so the band and the badge it points
+   * at cannot call one question two different things.
+   */
+  private get itemLabels(): ReadonlyMap<string, string> {
+    const labels = new Map<string, string>();
+    const form = this.ruleInventoryForm;
+    for (const page of form.pages) {
+      labels.set(page.id, page.label);
+      for (const question of page.questions) {
+        labels.set(question.id, question.label);
+      }
+    }
+    for (const ending of form.endings) {
+      labels.set(ending.id, ending.label);
+    }
+    return labels;
   }
 
   // -- form-level settings --------------------------------------------------

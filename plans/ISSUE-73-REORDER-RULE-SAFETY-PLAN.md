@@ -7,7 +7,7 @@ Branch to cut **from `next`** (currently `98abfc0`), tracking `origin/<branch>` 
 Revision 2, after a design review; §1.4, §1.6, §2, and the three amendments in §4 come from it,
 and §3.2 corrects it. Revision 3 records what landed.
 
-## Status — Phase 0 ✅ · Phase 1 ✅ · Phase 2 ⏳
+## Status — Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ — #73 closed
 
 Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<same-name>`.
 
@@ -15,9 +15,11 @@ Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<
 |---|---|---|
 | 0 — one statement of the ordering rule | **landed** | `refactor(builder): state the rule read horizon once` |
 | 1 — a rule that cannot read its own source is broken | **landed** | see §4 |
-| 2 — say it at the drag, and offer the one move that undoes it | **not started** | — |
+| 2 — say it at the drag, and offer the one move that undoes it | **landed** | `feat(#73): say what a reorder broke, and offer the move that undoes it` |
 
-**What the build changed about this plan, and why.** Four things, all found by building or by driving
+What remains is the follow-up logged below, not part of #73.
+
+**What the build changed about this plan, and why.** Five things, all found by building or by driving
 the real UI:
 
 1. **`formSources`, not `laterSources`** (§4 Phase 1). The plan had the host compute the complement
@@ -36,7 +38,14 @@ the real UI:
    `describeCondition` was resolving prompts against the rule's *legal prefix*. Naming and legality
    are two questions; `rules-inventory.ts` had already worked that out and documented it, and the
    rail simply had not been given the same list. Fixed in `rules-panel.component.ts`.
-4. **The badge's message was unreadable, so Phase 1 was not actually delivered.** It was a native
+4. **A third sentence form, because the plan's two were awkward in the commonest case** (§4 Phase 2).
+   The plan's single-item form produced `Moved "Q5 last". This broke 1 rule on "Q5 last".` in the
+   real UI — a single-question drag usually breaks that question's OWN rule, so the sentence named
+   it twice and read as a mistake. The distinction is information rather than grammar: *on it* sends
+   the author to the card they just dropped, *on "First name"* sends them somewhere else, and those
+   are different next actions. Found in the browser, not in a spec; the spec that pins it was
+   written afterwards.
+5. **The badge's message was unreadable, so Phase 1 was not actually delivered.** It was a native
    `[title]`, which `setting-row.component.ts:46` had already rejected in this repo for the exact
    reason that bit here: the browser waits about a second, so a hover that does nothing reads as a
    broken control — on the badge whose whole job is to report a broken rule. Reported by the
@@ -54,8 +63,11 @@ answer, which the picker has never offered and which Phase 1 correctly calls bro
 for jump DESTINATIONS: a target that still exists but is no longer ahead of its rule renders
 `(a question that no longer exists)` in the rail. The canvas badge already says the truth
 (`UNREACHED_DESTINATION`), so only the rail line lies. Fixing it means threading a form-wide
-*target* list (questions + pages + endings) the way `formSources` was threaded. Outside Phase 1;
-fold into Phase 2 or take as a follow-up issue.
+*target* list (questions + pages + endings) the way `formSources` was threaded. Deliberately left
+out of Phase 2 as well: Phase 2 is about the moment of a change and this is a thing said at rest,
+and folding an unrelated surface into the commit that ships the band would have made both harder to
+review or revert. Take it as the follow-up — with `templates/clone-remap.ts:15`, the ninth copy of
+the corrected `NOT_EVALUABLE` prose, which is the same kind of debt on the same subject.
 
 ---
 
@@ -404,7 +416,7 @@ const UNREADABLE_SOURCE =
 Nothing else changes: `ruleBadgesFor` already turns any non-empty `broken[]` into the warning badge
 and its tooltip line.
 
-### Phase 2 — say it at the drag, and offer the one move that undoes it ⏳ *(next)*
+### Phase 2 — say it at the drag, and offer the one move that undoes it ✅
 
 **`reorder.ts`** grows from "is this move legal" to "what does this move cost" — the same subject,
 and pure, which is the only way any of it can be unit-tested (component classes are not instantiated
@@ -577,17 +589,23 @@ hovering the badge showed a help cursor and no message (native `title`, ~1s dela
 bubble that does not swallow clicks on the card beneath it. Console clean, zero
 `not found in metadata` on every restart.
 
-**Manual pass still owed for Phase 2** (same host):
+**Smoke pass actually run, phase 2** (2026-08-27, by the developer, same host and fixture). Dragging
+`Q5 last` above `Q4 on page 3` raised the amber band under the header — *Moved "Q5 last". This broke
+1 rule on it.* — with Undo and a dismiss, and flipped Q5's badge to **Rule is broken**; **Undo**
+restored the order, cleared the band AND cleared the badge; a harmless drag on section 1 raised
+nothing, and so did dragging `Q5` back down, which REPAIRS a rule (§7: the diff is one-directional
+by design); the arrow buttons produced an identical band, which is the keyboard path; the band
+survived typing in another question's prompt, which is the case a stored index pair would have lost
+to `markDirty()`; and dismissing with ✕ removed the band without reverting the order, because
+dismiss is not undo. Console clean, zero `not found in metadata` on the restart.
 
-1. Two questions in one section, `show` on the first reading the second → warning badge on the
-   first, `— answered after this rule runs` in its Edit logic picker.
-2. Drag the source below → band naming the moved question; **Undo** → band clears, badge clears,
-   order restored.
-3. Drag a question with no rules → no band.
-4. Preview the broken form and confirm the badge's wording matches what the widget does (§1.1).
-   **This is the one claim no unit test can check** — a spec can prove the widget reappears the
-   question, only a human can judge whether the sentence describes it.
-5. Preview the two mutually-referencing `isNotAnswered` rules of constraint 2.3 and read the console
+**Still owed, and no unit test can stand in for either** — both are about the RESPONDENT, so they
+belong with the next preview session rather than with this change:
+
+1. Preview the broken form and judge whether the badge's wording describes what the widget actually
+   does (§1.1). A spec can prove the question reappears; only a human can say whether the sentence
+   is a fair description of it.
+2. Preview the two mutually-referencing `isNotAnswered` rules of constraint 2.3 and read the console
    warning. This is where the builder's badge and the respondent's experience diverge most, and a
    reviewer will not believe it without seeing it.
 

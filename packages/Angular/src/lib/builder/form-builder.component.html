@@ -131,6 +131,29 @@
     </div>
   }
 
+  <!-- A reorder that broke a rule (issue #73). Deliberately NOT the band above: that one means
+       one thing, "the database refused a write", and widening it to "and also, consequences of
+       things that succeeded" makes a clear signal vague — the two genuinely co-occur. No timer;
+       an auto-hiding warning about something otherwise silent is how this got missed. -->
+  @if (reorderNotice; as notice) {
+    <div class="fb-reorder-notice" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span class="fb-reorder-text">{{ notice.text }}</span>
+      <button
+        type="button"
+        class="fb-reorder-undo"
+        [disabled]="busy"
+        title="Put the question back where it was."
+        (click)="undoReorder()"
+      >
+        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Undo
+      </button>
+      <button type="button" class="fb-reorder-close" (click)="dismissReorderNotice()" aria-label="Dismiss">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+      </button>
+    </div>
+  }
+
   <!-- Tabs -->
   <nav class="fb-tabs" role="tablist" aria-label="Builder workspace">
     <button

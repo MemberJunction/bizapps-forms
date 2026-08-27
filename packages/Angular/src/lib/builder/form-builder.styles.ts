@@ -37,6 +37,53 @@ const LAYOUT_CSS = /* css */ `
 .fb-failure-close:hover { background: var(--mj-bg-surface-hover); }
 .fb-failure-close:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 
+/* The reorder notice: a write that SUCCEEDED and cost something. Warning-toned, one step down
+   from the error band it sits under, because nothing is broken about the form's data — a rule
+   on it stopped being readable. Undo LEFT, dismiss right: the confirm-left convention, and the
+   one action here that is not "make this go away". */
+.fb-reorder-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--mjf-gap-sm);
+  padding: 10px var(--mjf-gutter);
+  font-size: var(--mjf-meta);
+  color: var(--mj-status-warning-text);
+  background: var(--mj-status-warning-bg);
+  border-bottom: 1px solid var(--mj-status-warning-border);
+}
+.fb-reorder-text { flex: 1 1 auto; min-width: 0; }
+.fb-reorder-undo {
+  flex: none;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  cursor: pointer;
+  color: inherit;
+  background: var(--mj-bg-surface);
+  border: 1px solid var(--mj-status-warning-border);
+  border-radius: var(--mjf-radius-sm);
+}
+.fb-reorder-undo:hover:not(:disabled) { background: var(--mj-bg-surface-hover); }
+.fb-reorder-undo:disabled { opacity: 0.6; cursor: default; }
+.fb-reorder-close {
+  flex: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: var(--mjf-radius-sm);
+}
+.fb-reorder-close:hover { background: var(--mj-bg-surface-hover); }
+.fb-reorder-undo:focus-visible,
+.fb-reorder-close:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
+
 /* "Saved as template" — the resting state of a control that has already been used. Success-toned
    rather than muted: it reports an accomplished fact, and it uses the same token as the
    neighbouring "Published" state so the two read as the same kind of statement.

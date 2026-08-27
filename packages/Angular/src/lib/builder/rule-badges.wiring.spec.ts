@@ -120,3 +120,76 @@ describe('what the builder offers a rule to read', () => {
     expect(builder()).toMatch(/sourcesOf\([\s\S]{0,220}?toConditionalSource\([\s\S]{0,80}?\?\?\s*\[\]/);
   });
 });
+
+describe('a reorder that breaks a rule says so at the drag', () => {
+  it('diffs the rules around the move rather than checking them itself', () => {
+    // A drag-time rule checker is a second implementation of "is this rule broken", free to
+    // disagree with the badge — and then the author is told two things about one rule. The
+    // difference over `collectRuleEntries` cannot disagree with the badge because it IS the
+    // badge, and every breakage class added there later is warned about here for free.
+    const source = builder();
+    expect(source).toMatch(/const before = this\.ruleEntries;[\s\S]{0,120}moveItemInArray\(/);
+    expect(source).toMatch(/newlyBrokenRules\(before, this\.ruleEntries\)/);
+  });
+
+  it('remembers WHICH question moved, not which index it left', () => {
+    // An index pair is only correct while nothing else has shifted the page. Resolving by id at
+    // click time makes moving the wrong question unrepresentable rather than merely unlikely.
+    const source = builder();
+    expect(source).toMatch(/questionId: moved\.entity\.ID/);
+    expect(source).toMatch(/undoReorderMove\(notice, page\.questions\.map\(/);
+  });
+
+  it('checks that the new order was actually written', () => {
+    // `persistQuestionOrder` writes one question at a time and returns false when a write is
+    // refused halfway — a third state matching neither the order before the move nor after it.
+    expect(builder()).toMatch(/if \(!\(await this\.state\.persistQuestionOrder\(page\)\)\)/);
+  });
+
+  it('is its own band, not the failure band, and carries an Undo that outlives the tick', () => {
+    // `lastFailure` means one thing: the database refused a write. Widening it to "and also,
+    // consequences of things that succeeded" makes a clear signal vague, and the two co-occur.
+    const html = builderHtml();
+    expect(html).toMatch(/class="fb-reorder-notice" role="alert"/);
+    expect(html).toMatch(/\(click\)="undoReorder\(\)"/);
+    expect(html).toMatch(/\(click\)="dismissReorderNotice\(\)"/);
+    // Undo LEFT of dismiss — the repo's confirm-left convention, and the one action here that is
+    // not "make this go away".
+    expect(html.indexOf('undoReorder()')).toBeLessThan(html.indexOf('dismissReorderNotice()'));
+    // Warning-toned, a step down from the error band above it: nothing is broken about the
+    // form's data, a rule on it stopped being readable.
+    expect(stripped('form-builder.styles.ts')).toMatch(
+      /\.fb-reorder-notice \{[\s\S]{0,400}?--mj-status-warning-bg/,
+    );
+  });
+
+  it('does not hide itself on a timer', () => {
+    // An auto-hiding warning about something otherwise silent is the failure this issue is
+    // about. The notice stands until it is undone, dismissed, or superseded by another move.
+    expect(builder()).not.toMatch(/setTimeout[\s\S]{0,120}reorderNotice/);
+    expect(builder()).not.toMatch(/reorderNotice[\s\S]{0,120}setTimeout/);
+  });
+
+  it('is not a toast, because the toast cannot carry the Undo', () => {
+    // `MJNotificationService.CreateSimpleNotification` takes (message, style, hideAfter) and
+    // renders a close button and nothing else — no action slot — and would add a peer this
+    // package does not carry. Adopting an MJ package to get a control that cannot do the job is
+    // the wrong reading of "use the built-in where one exists".
+    expect(builder()).not.toMatch(/MJNotificationService/);
+  });
+});
+
+describe('only a reorder can invert a pair, so only a reorder is watched', () => {
+  it('keeps every other write path append-only', () => {
+    // Plan §1.5 is the proof that the drag diff needs to hook exactly one method. If a
+    // duplicate-below, an insert-at-index or a move-to-another-section ever ships, that proof
+    // lapses — and this is where it says so, rather than the notice quietly under-reporting.
+    const source = builder();
+    const html = builderHtml();
+    expect(source).not.toMatch(/transferArrayItem/);
+    expect(html).not.toMatch(/cdkDropListConnectedTo/);
+    // No page-order write: sections cannot be reordered, so no page's questions can change
+    // their position relative to another page's.
+    expect(source).not.toMatch(/persistPageOrder/);
+  });
+});
