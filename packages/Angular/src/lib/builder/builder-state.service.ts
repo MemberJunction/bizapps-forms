@@ -42,6 +42,7 @@ type SaveableEntity =
   | mjBizAppsFormsFormScreenEntity;
 
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
+import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
 
 /**
  * Loads and persists the editable form tree (Form + Pages + Questions + Options).
@@ -321,18 +322,76 @@ export class BuilderStateService {
     screen.ScreenType = screenType;
     screen.Title = title;
     screen.DisplayOrder = tree.screens.filter((s) => s.ScreenType === screenType).length;
-    // The first ending an author creates is the catch-all. Without this a form whose only ending
-    // carries a condition silently shows nothing when the condition misses.
-    screen.IsDefault = screenType === 'Ending' && !tree.screens.some((s) => s.ScreenType === 'Ending');
+    // A new ending becomes the catch-all when the form does not already have one. Without this a
+    // form whose only ending carries a condition silently shows nothing when the condition misses.
+    //
+    // The question is "does this form HAVE a default", not "does it have any endings" — which is
+    // what it used to ask, and the two differ exactly where it matters: a form whose only ending
+    // is screened out has an ending and no default, so the next one added was left un-flagged and
+    // the form kept no catch-all at all.
+    screen.IsDefault = screenType === 'Ending' && defaultEndingId(tree.screens) === null;
     if (!(await this.saveChecked(screen, 'create screen'))) {
       return undefined;
     }
     return screen;
   }
 
-  /** Delete a screen. Screens own nothing, so there is no cascade. */
-  public async deleteScreen(screen: mjBizAppsFormsFormScreenEntity): Promise<boolean> {
-    return this.deleteChecked(screen, 'delete screen');
+  /**
+   * Delete a screen and leave the form's ending invariant intact.
+   *
+   * Takes the tree, and removes the screen from it, because the two cannot be separated: deleting
+   * the DEFAULT ending leaves the form with none, and the survivor then reads "Never shown — add
+   * a condition" on a form where it is the only place a respondent can land. Handing the caller a
+   * boolean and letting it splice the tree itself is what made that possible — the repair had no
+   * obvious owner, so nobody did it.
+   *
+   * Screens own nothing, so there is still no cascade; the only follow-on is the promotion.
+   */
+  public async deleteScreen(
+    tree: FormTree,
+    screen: mjBizAppsFormsFormScreenEntity,
+  ): Promise<boolean> {
+    if (!(await this.deleteChecked(screen, 'delete screen'))) {
+      return false;
+    }
+    tree.screens = tree.screens.filter((s) => s.ID !== screen.ID);
+    const promote = vacantDefaultEnding(tree.screens);
+    if (promote === null) {
+      return true;
+    }
+    promote.IsDefault = true;
+    // Reported but not fatal: the screen IS deleted, and saying otherwise would offer an undo
+    // that cannot happen. `saveChecked` has already surfaced why the promotion did not stick.
+    await this.saveChecked(promote, 'promote default ending');
+    return true;
+  }
+
+  /**
+   * Move the form's default ending to one screen, clearing whichever screens held it.
+   *
+   * NOT `saveDebounced`, and that is the whole reason this method exists rather than the caller
+   * flipping two flags. The debounce keys a timer per entity OBJECT with no ordering between
+   * them, so the two writes could land in either order — and a filtered unique index permits one
+   * default per form, so "set the new one" landing first is a save the database REFUSES. The
+   * author sees a switch that flipped itself back, with the failure reported against the wrong
+   * screen. Cleared first, awaited, then set.
+   *
+   * Returns false and leaves the form as it was if any write fails; `saveChecked` has already
+   * surfaced why.
+   */
+  public async setDefaultEnding(tree: FormTree, screenId: string): Promise<boolean> {
+    const changes = defaultEndingChanges(tree.screens, screenId);
+    for (const screen of changes.clear) {
+      screen.IsDefault = false;
+      if (!(await this.saveChecked(screen, 'clear default ending'))) {
+        return false;
+      }
+    }
+    if (changes.set === null) {
+      return true;
+    }
+    changes.set.IsDefault = true;
+    return this.saveChecked(changes.set, 'set default ending');
   }
 
   // -------------------------------------------------------------------------

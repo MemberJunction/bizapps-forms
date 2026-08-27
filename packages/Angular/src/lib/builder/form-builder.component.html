@@ -526,6 +526,7 @@
             [screen]="screen"
             [conditionalSources]="endingConditionalSources"
             (screenChanged)="onScreenChanged($event)"
+            (makeDefaultRequested)="onMakeDefaultEnding($event)"
           />
         } @else if (selectedPage; as page) {
           <mjf-page-editor

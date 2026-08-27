@@ -832,9 +832,29 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     this.busy = true;
-    if (await this.state.deleteScreen(screen)) {
-      this.tree.screens = this.tree.screens.filter((s) => s.ID !== screen.ID);
+    // The service removes it from the tree, because deleting the default ending also has to
+    // promote a survivor — an invariant no caller should be able to forget.
+    if (await this.state.deleteScreen(this.tree, screen)) {
       this.selection = clearIfScreen(this.selection, screen.ID);
+      this.markDirty();
+    }
+    this.busy = false;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Move the form's default ending to the screen the editor named.
+   *
+   * Awaited and NOT debounced, unlike every other screen edit here: this is two writes to two
+   * records whose order the database enforces, so `setDefaultEnding` owns the sequencing. See
+   * its own header for what goes wrong when the two land the other way round.
+   */
+  protected async onMakeDefaultEnding(screen: mjBizAppsFormsFormScreenEntity): Promise<void> {
+    if (!this.tree || this.busy) {
+      return;
+    }
+    this.busy = true;
+    if (await this.state.setDefaultEnding(this.tree, screen.ID)) {
       this.markDirty();
     }
     this.busy = false;
