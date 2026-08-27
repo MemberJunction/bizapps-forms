@@ -74,6 +74,16 @@ export interface FakeProviderConfig {
   fileLinks?: { ID: string; FileID: string }[];
   /** `FormUpload` rows for the response under test — what Forms is allowed to unlink. */
   responseUploads?: { FileID: string }[];
+  /**
+   * `FormResponseAnswer` rows already stored against the response — what a re-save has to clear
+   * before it re-inserts. Returned unfiltered; the tests that use these assert on what was
+   * DELETED, which is where getting it wrong matters.
+   *
+   * The fake returned an empty list for this entity until answer durability was under test, so
+   * "the prior answers were cleared" and "there were none" were indistinguishable — and the
+   * window in which a response holds neither its old answers nor its new ones was untestable.
+   */
+  existingAnswers?: { ID: string; QuestionID?: string }[];
 }
 
 /** The fake provider plus inspection handles for tests. */
@@ -150,6 +160,11 @@ function makeFakeEntity(
           return false;
         }
         saved.push({ entityName, values: { ...values } });
+        // A real BaseEntity stops being new the moment it is inserted — the next Save is an
+        // UPDATE. Without this the fake treated a second save of the same row as a fresh insert
+        // and returned the PK-collision failure, which only mattered once anything saved a row
+        // twice (sealing a response after its answers are stored).
+        isNew = false;
         if (isResponse) {
           responseStore.set(record.ID, {
             ID: record.ID,
@@ -251,6 +266,20 @@ export function makeFakeProvider(config: FakeProviderConfig): FakeProvider {
     }
     if (name === FORM_UPLOAD_ENTITY) {
       return runViewResult<T>(true, (config.responseUploads ?? []) as unknown as T[]);
+    }
+    if (name === FORM_RESPONSE_ANSWER_ENTITY) {
+      // `replaceAnswersClear` asks for `entity_object` and calls `.Delete()` on each row, so
+      // these have to be entity-LIKE, not plain data — a bare `{ ID }` throws inside the code
+      // under test rather than exercising it.
+      const rows = (config.existingAnswers ?? []).map((row) => {
+        const entity = makeFakeEntity(FORM_RESPONSE_ANSWER_ENTITY, saved, deleted, config.failSaveFor === name, responseStore);
+        entity.ID = row.ID;
+        if (row.QuestionID !== undefined) {
+          entity.QuestionID = row.QuestionID;
+        }
+        return entity;
+      });
+      return runViewResult<T>(true, rows as unknown as T[]);
     }
     return runViewResult<T>(true, []);
   };
