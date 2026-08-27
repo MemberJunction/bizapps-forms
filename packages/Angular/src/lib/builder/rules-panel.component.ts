@@ -22,6 +22,7 @@ import { RuleEditorDialogComponent } from './rule-editor-dialog.component';
 import { LogicEditorComponent } from './logic-editor.component';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import {
+  emptyLogicDraft,
   isLogicDraftDirty,
   logicDraftOf,
   ruleFromLogicDraft,
@@ -138,6 +139,11 @@ export class RulesPanelComponent {
   /** Ending screens have no "after this" — they ARE the after. */
   @Input() allowJumps = true;
   @Input() itemNoun = 'question';
+  /**
+   * The ending everyone who finishes lands on, by name — passed straight to the dialog, which
+   * states it and never writes it. Null when the form has none anyone can reach that way.
+   */
+  @Input() defaultEndingLabel: string | null = null;
 
   @Output() ruleChange = new EventEmitter<ConditionalRule | undefined>();
 
@@ -146,12 +152,26 @@ export class RulesPanelComponent {
   protected confirmingDiscard = false;
 
   /** The working copy the dialog edits. Written to the item on Save, dropped on anything else. */
-  protected draft: LogicDraft = { show: undefined, jumps: [] };
+  protected draft: LogicDraft = emptyLogicDraft();
   /** What the item held when the dialog opened — what `isLogicDraftDirty` compares against. */
-  private baseline: LogicDraft = { show: undefined, jumps: [] };
+  private baseline: LogicDraft = emptyLogicDraft();
 
   protected get jumpSourceList(): ConditionalSourceQuestion[] {
     return this.jumpSources ?? this.sources;
+  }
+
+  /**
+   * What this dialog is for, in the words of the dialog you actually get.
+   *
+   * Branched rather than concatenated: an ending screen has no "after this" — it IS the after,
+   * which is why {@link allowJumps} hides the whole jump block for one. The unconditional
+   * version promised an ending's author that they could decide "where the respondent goes
+   * next", directly above a dialog with nowhere to decide it.
+   */
+  protected get dialogSubtitle(): string {
+    return this.allowJumps
+      ? `Decide when this ${this.itemNoun} appears, and where the respondent goes next.`
+      : `Decide when this ${this.itemNoun} appears.`;
   }
 
   /**
@@ -248,7 +268,7 @@ export class RulesPanelComponent {
   private closeDialog(): void {
     this.dialogOpen = false;
     this.confirmingDiscard = false;
-    this.draft = { show: undefined, jumps: [] };
-    this.baseline = { show: undefined, jumps: [] };
+    this.draft = emptyLogicDraft();
+    this.baseline = emptyLogicDraft();
   }
 }

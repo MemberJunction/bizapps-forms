@@ -40,7 +40,8 @@ After testing the simplified rules and seeing a competitor's logic editor, the u
 3. **Rebuild the rule dialog as If/Then**, matching the reference screenshot: a titled
    "Edit logic for ⟨item⟩", an If block with the and/or connector BETWEEN condition rows, a Then
    row, "All other cases go to", Delete rule / + Add rule, "See all rules" linking to the Rules
-   tab, and Delete all rules.
+   tab, and Delete all rules. *(As built: "See all rules" is obsolete and "All other cases go to"
+   shipped as a read-only line rather than a control — §6 has the status of each.)*
 4. **Disqualify and "jump to an ending" are the same thing — combine them.** *"we can combine in
    jump to rule where user simplify points the end screen or submit. So identify those things
    and combine them and make it easy as possible."* Disqualification stops being a RULE and
@@ -103,6 +104,12 @@ error** — which is what makes jump cycles unrepresentable. **Preserve that pro
 first non-disqualification ending whose `conditionalRule` MATCHES wins; otherwise the one marked
 `isDefault`, else the first with no rule. **The reference screenshot's "All other cases go to" IS
 this default ending.** Phase 4 surfaces it in the dialog; it does not invent it.
+
+**Outcome 2026-08-27:** surfaced as a SENTENCE, not a picker — see the "All other cases go to"
+bullet in §6 for why the control was built and then removed. Note also what this paragraph
+already implies and §6 spells out: a *conditional* ending beats the default, so copy that says
+"lands here unless a rule sends them elsewhere" must also allow for an ending's own condition
+claiming them first.
 
 ### Builder surfaces
 - Card sets: `QUESTION_RULE_CARDS` = [show]; `PAGE_RULE_CARDS` = [show, jump];
@@ -276,10 +283,23 @@ draft/commit and discard-warning behaviour — that work is done and must not re
 - **All other cases go to**: reads and writes the default ending screen's `isDefault`. A
   form-level fact edited from an item-level dialog, so it needs an explicit note in the UI; it is
   the one write here that touches something other than the item.
-  **STATUS 2026-08-27: not built.** `logic-editor.component.ts` ships the show gate, the numbered
-  rule rows with move/remove, and **+ Add rule** — and nothing else from this bullet. The default
-  ending itself exists and works (`resolveEndingScreen`); what is missing is the control that
-  surfaces it here. Still wanted, and still unscheduled.
+  **STATUS 2026-08-27 — SUPERSEDED. Shipped as a read-only line, deliberately NOT a picker.**
+  Do not "finish" this bullet by building the control; it was built, reviewed and removed.
+
+  The dialog now states the catch-all — *"Everyone who finishes lands on **X**, unless a rule
+  sends them elsewhere"* — and offers no way to change it. What this bullet asked for was built
+  first (a `<select>` writing `IsDefault` through the draft) and rejected in review for the
+  reason the bullet itself names: it is form-level state on an item-level dialog. Every
+  question's dialog carried it, so it needed a caption reading *"this is a form-wide setting —
+  changing it here changes it for every question."* A control that needs that caption has
+  already failed. The catch-all is authored in exactly one place, the Default toggle on the
+  Endings strip, made genuinely exclusive in v0.12 (`UQ_FormScreen_OneDefaultEndingPerForm`).
+
+  Note for anyone tempted to route this through the Then row instead: **a jump rule cannot
+  express the catch-all.** A jump needs a condition, and `ruleFromLogicDraft` drops a
+  conditionless row on purpose, because `evaluateGroup({})` is vacuously true — such a row would
+  fire for everyone and swallow every rule after it. "Then go to → an ending" and "the default
+  ending" are different things and neither substitutes for the other.
 - **See all rules** → the Rules tab. **Delete rule** / **+ Add rule** / **Delete all rules**,
   the last behind a confirm.
   **STATUS 2026-08-27.** **See all rules is OBSOLETE** — the Rules tab was deleted in `d4b31c0`

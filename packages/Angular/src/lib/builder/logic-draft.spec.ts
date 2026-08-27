@@ -247,8 +247,8 @@ describe('an unfinished condition is dropped on save', () => {
     it('choosing a question and leaving the value blank is not a change worth warning about', () => {
       // Dirtiness asks "would saving change anything?". Now that saving would not, the dialog
       // must not claim there is unsaved work — the two answers come from the same function.
-      const baseline = { show: undefined, jumps: [] };
-      expect(isLogicDraftDirty({ show: { all: [blank] }, jumps: [] }, baseline)).toBe(false);
+      const baseline = emptyLogicDraft();
+      expect(isLogicDraftDirty({ ...baseline, show: { all: [blank] } }, baseline)).toBe(false);
     });
   });
 });

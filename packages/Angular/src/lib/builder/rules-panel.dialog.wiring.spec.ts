@@ -25,6 +25,7 @@ const stripped = (file: string): string =>
 const panel = (): string => stripped('rules-panel.component.ts');
 const panelHtml = (): string => stripped('rules-panel.component.html');
 const dialog = (): string => stripped('rule-editor-dialog.component.ts');
+const logicEditor = (): string => stripped('logic-editor.component.ts');
 
 describe('the rule editor is a modal, not a rail expansion', () => {
   it('the dialog covers the viewport and centers its card, like the image picker', () => {
@@ -248,8 +249,16 @@ describe('closing asks only when there is something to lose', () => {
   });
 
   it('the draft is cleared on the way out, not left for the next item', () => {
-    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.draft = \{ show: undefined, jumps: \[\] \}/);
-    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.baseline = \{ show: undefined, jumps: \[\] \}/);
+    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.draft = emptyLogicDraft\(\)/);
+    expect(panel()).toMatch(/closeDialog\(\): void \{[\s\S]{0,400}this\.baseline = emptyLogicDraft\(\)/);
+  });
+
+  it('an empty draft has ONE spelling, so a field added to it cannot be missed', () => {
+    // Four hand-written copies of `{ show: undefined, jumps: [] }` used to live here while
+    // `emptyLogicDraft()` sat unused. That is fine until the draft grows a field: the compiler
+    // catches the copies, but only after they have all been written wrong once. The constructor
+    // is the single place that decides what "nothing authored yet" means.
+    expect(panel()).not.toMatch(/show: undefined, jumps: \[\]/);
   });
 
   it('the warning names the consequence rather than asking "are you sure"', () => {
@@ -275,7 +284,6 @@ describe('closing asks only when there is something to lose', () => {
 });
 
 describe('a new rule starts where the author is already standing', () => {
-  const logicEditor = (): string => stripped('logic-editor.component.ts');
 
   it('the panel hands the dialog the item being edited', () => {
     // The panel already knows it — `subjectId` is what closes the dialog when the selection
@@ -309,7 +317,6 @@ describe('the destination select shows the destination the rule holds', () => {
   // conditional-rule-editor.wiring.spec.ts): the select's `value` is written before its
   // optgroups exist, so a saved rule rendered pointing at the first destination on the list.
   // Here that is worse than cosmetic — the author reads it as where the respondent goes.
-  const logicEditor = (): string => stripped('logic-editor.component.ts');
 
   it('each offered destination says whether it is the selected one', () => {
     expect(logicEditor()).toMatch(/\[selected\]="option\.value === valueFor\(rule\)"/);
@@ -364,7 +371,6 @@ describe('the header button offers the move the item actually needs', () => {
  * that the dialog is given it and renders it against the rule being edited.
  */
 describe('a destination says what it skips, while the author is picking it', () => {
-  const logicEditor = (): string => stripped('logic-editor.component.ts');
 
   it('the dialog takes a note per destination rather than working it out itself', () => {
     // Which questions lie between two items is a fact about the FORM, and this component is
@@ -384,5 +390,69 @@ describe('a destination says what it skips, while the author is picking it', () 
     // A jump to the very next question skips nothing, and a line saying "skips 0 questions"
     // beneath every destination is noise that teaches authors to stop reading it.
     expect(logicEditor()).toMatch(/@if \(reachNoteFor\(rule\); as note\)/);
+  });
+});
+
+describe('the dialog subtitle describes the dialog you actually got', () => {
+  it('an item with no "after this" is not promised one', () => {
+    // The subtitle was concatenated unconditionally: an ending screen was told the dialog would
+    // decide "where the respondent goes next", while the dialog correctly showed no jump block
+    // at all, because an ending IS where they went. Same class of bug as the picker copy — the
+    // words claiming something the surface right below them contradicts.
+    expect(panelHtml()).not.toMatch(/'Decide when this ' \+ itemNoun/);
+    expect(panelHtml()).toMatch(/\[subtitle\]="dialogSubtitle"/);
+    const body = /get dialogSubtitle\(\): string \{([\s\S]*?)\n  \}/.exec(panel())?.[1] ?? '';
+    expect(body).toMatch(/this\.allowJumps/);
+    expect(body).toMatch(/goes next/);
+  });
+});
+
+describe('the catch-all ending is STATED here, not edited here', () => {
+  const logicEditorSrc = (): string => stripped('logic-editor.component.ts');
+
+  it('the dialog reports where finishers land, and offers no way to change it', () => {
+    // It IS the question an author asks while writing branching rules — the hint above says
+    // "if none match, the respondent carries on", which invites "and then what?". But the
+    // default ending already has one home, the Default toggle on the Endings strip, and a
+    // second writer inside a per-QUESTION dialog needs a caption admitting it is form-wide.
+    // A control that needs that caption has already failed; a sentence needs no caption.
+    const source = logicEditorSrc();
+    expect(source).toMatch(/@Input\(\) defaultEndingLabel/);
+    expect(source).toMatch(/lands on/);
+    expect(source).not.toMatch(/<select[^>]*defaultEnding/);
+    expect(source).not.toMatch(/form-wide setting/);
+  });
+
+  it('nothing about it reaches the draft, so there is nothing to save or undo', () => {
+    // The read-only line writes nothing, which is the whole point: no output, no commit
+    // branch, no dirty term, and no way for a dismissed dialog to leave a change behind.
+    expect(panel()).not.toMatch(/defaultEndingChange/);
+    expect(stripped('logic-draft.ts')).not.toMatch(/defaultEndingId/);
+  });
+
+  it('a form with no catch-all says so, instead of claiming it has no endings', () => {
+    // Two different states reach this branch — a form with no ending screens at all, and a
+    // form whose every ending is screened out — and only one sentence is true of both. The
+    // picker version said "this form has no ending screen to land on" while the destination
+    // list two lines above was offering one.
+    expect(logicEditorSrc()).toMatch(/@if \(defaultEndingLabel\)[\s\S]{0,600}\} @else \{/);
+    expect(logicEditorSrc()).toMatch(/confirmation message/);
+    expect(logicEditorSrc()).not.toMatch(/no ending screen to land on/);
+  });
+
+  it('the sentence flows as prose, so it wraps on a phone', () => {
+    // NOT `.le-reach`, which is a flex row: it lays each child out as a flex item, so a sentence
+    // with a <strong> in the middle becomes three of them — a stray 6px gap before the comma,
+    // and `nowrap` means the line cannot break at all on a narrow screen.
+    const source = logicEditorSrc();
+    expect(source).toMatch(/class="le-finish"/);
+    const rule = /\.le-finish \{([^}]*)\}/.exec(source)?.[1] ?? '';
+    expect(rule).not.toMatch(/display:\s*flex/);
+  });
+
+  it('an ending screen is not told about it either', () => {
+    // It sits inside the same `@if (allowJumps)` guard as the jump rules.
+    const guarded = /@if \(allowJumps\) \{([\s\S]*?)\n      \}/.exec(logicEditorSrc())?.[1] ?? '';
+    expect(guarded).toMatch(/defaultEndingLabel/);
   });
 });

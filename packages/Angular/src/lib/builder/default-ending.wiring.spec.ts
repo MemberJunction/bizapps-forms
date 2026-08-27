@@ -110,3 +110,17 @@ describe('deleting the default leaves a default behind', () => {
   });
 });
 
+
+describe('a refused move releases the builder instead of freezing it', () => {
+  const builder = (): string => stripped('form-builder.component.ts');
+
+  it('the busy flag is cleared in a finally, not on the happy path', () => {
+    // `setDefaultEnding` THROWS on an id naming no eligible ending, rather than returning false
+    // like every other write here. Without try/finally the flag stays true forever and every
+    // guarded handler in the builder goes inert — a dead builder, reported as "it just stopped
+    // responding", with nothing on screen to connect it to this line.
+    const body = methodBody(builder(), 'protected async onMakeDefaultEnding');
+    expect(body).toMatch(/try \{/);
+    expect(body).toMatch(/\} finally \{[\s\S]{0,120}this\.busy = false/);
+  });
+});
