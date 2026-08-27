@@ -534,6 +534,7 @@
             [conditionalSources]="pageConditionalSources"
             [jumpConditionSources]="pageJumpConditionSources"
             [jumpTargets]="pageJumpTargets"
+            [reachNotes]="pageReachNotes"
             (pageChanged)="onPageChanged($event)"
           />
         } @else {
@@ -544,6 +545,7 @@
             [conditionalSources]="conditionalSources"
             [jumpConditionSources]="questionJumpSources"
             [jumpTargets]="questionJumpTargets"
+            [reachNotes]="questionReachNotes"
             (questionChanged)="onQuestionChanged($event)"
             (optionChanged)="onOptionChanged($event)"
             (addOptionRequested)="onAddOption($event)"

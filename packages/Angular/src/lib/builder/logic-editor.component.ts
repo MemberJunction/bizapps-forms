@@ -57,6 +57,16 @@ const LOGIC_EDITOR_CSS = /* css */ `
   color: var(--mj-text-muted);
 }
 .le-hint { margin: 0; font-size: var(--mjf-meta); color: var(--mj-text-muted); }
+.le-reach {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--mjf-meta);
+  color: var(--mj-text-muted);
+}
+.le-reach.is-warning { color: var(--mj-warning, var(--mj-text-secondary)); }
+.le-reach i { opacity: 0.8; }
 
 /* One rule, framed, because "where does rule 1 end" is the question a flat stack cannot answer. */
 .le-rule {
@@ -243,6 +253,17 @@ const LOGIC_EDITOR_CSS = /* css */ `
                   }
                 </select>
               </div>
+
+              <!-- What this destination costs, said where the author is choosing it. A rule that
+                   skips four questions reads as a shortcut and behaves as a deletion, and until
+                   this line existed the first party to find out was the respondent. Absent when
+                   there is nothing to say — a note under every destination saying "skips 0
+                   questions" is noise that teaches people to stop reading it. -->
+              @if (reachNoteFor(rule); as note) {
+                <p class="le-reach" [class.is-warning]="note.startsWith('This destination')">
+                  <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ note }}
+                </p>
+              }
             </div>
           }
 
@@ -266,6 +287,14 @@ export class LogicEditorComponent {
   @Input() jumpSources: ConditionalSourceQuestion[] = [];
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
+  /**
+   * What each destination costs, keyed by its option value — see `jump-reach.ts`.
+   *
+   * Handed in rather than derived: which questions lie between two items is a fact about the
+   * whole FORM, and this component is given one item's rules. Working it out here would mean
+   * passing the tree into a dialog that has no other use for it.
+   */
+  @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
   /** Ending screens have no "after this" — they ARE the after. */
   @Input() allowJumps = true;
   /** "question" or "section", for copy that reads naturally either way. */
@@ -352,6 +381,11 @@ export class LogicEditorComponent {
 
   protected valueFor(rule: JumpDraft): string {
     return rule.target ? targetValue(rule.target) : '';
+  }
+
+  /** The note for the destination this rule currently holds, or `''` when there is none. */
+  protected reachNoteFor(rule: JumpDraft): string {
+    return this.reachNotes.get(this.valueFor(rule)) ?? '';
   }
 
   /** The stored-but-unoffered target entry, or null — see the template comment. */

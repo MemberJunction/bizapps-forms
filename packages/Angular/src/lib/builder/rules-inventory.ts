@@ -33,6 +33,7 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 
 import { SCORE_SOURCE_ID, type ConditionalSourceQuestion } from './condition-sources';
+import { jumpReach, reachNote } from './jump-reach';
 import { describeCondition, groupConditions, type RuleVerb } from './rules-panel-model';
 
 /** Which kind of item a rule hangs off — what the hub needs to route a click back to. */
@@ -48,6 +49,8 @@ export interface RuleInventoryItem {
   isDisqualification?: boolean;
   /** Ending screens only — the one a respondent lands on when no condition picks another. */
   isDefault?: boolean;
+  /** Questions only — counted when a `Go to` reports what it passes over. */
+  isRequired?: boolean;
 }
 
 export interface RuleInventoryPage extends RuleInventoryItem {
@@ -86,6 +89,15 @@ export interface RuleEntry {
    * the rule, and one row saying "this rule is broken" is what gets them there.
    */
   readonly broken: string[];
+  /**
+   * What a `Go to` costs, in one line — "Skips 3 questions, 1 of them required" — or `''` when
+   * there is nothing to say. Empty on a `show` rule, which goes nowhere.
+   *
+   * Separate from {@link sentence} because they answer different questions: the sentence says
+   * what the rule DOES, and this says what it takes away. Folding it in would also have churned
+   * every existing sentence for a reason unrelated to any of them.
+   */
+  readonly note: string;
 }
 
 /**
@@ -102,6 +114,16 @@ const ROW_ICONS = {
 const MISSING_QUESTION = 'a question that no longer exists';
 const MISSING_PAGE = 'a page that no longer exists';
 const MISSING_ENDING = 'an ending screen that no longer exists';
+/**
+ * A destination the picker would never have offered, arrived at by REORDERING.
+ *
+ * The resolver treats a backward, self or unknown target as inert by design — that is what makes
+ * jump cycles unrepresentable — so nothing fails, nothing logs, and the rule reads correctly in
+ * the dialog while never running.
+ */
+const UNREACHED_DESTINATION = 'a destination that is no longer ahead of it, so the rule never runs';
+/** Refused by the resolver — see `hasCondition` in rule-verbs.ts for why ignoring is the safe way. */
+const NO_CONDITIONS = 'no conditions, so it never runs';
 
 /**
  * Every rule on the form, in reading order: page by page, each page's own rules before its
@@ -160,12 +182,21 @@ function itemEntries(
       icon: ROW_ICONS.show,
       sentence: `Show ${quoted(item.label)} ${whenClause(show, form.sources)}`,
       broken: brokenIn(show, form.sources),
+      note: '',
     });
   }
 
   const jumps = item.conditionalRule?.jump ?? [];
   jumps.forEach((jump, index) => {
     const destination = describeTarget(jump.target, form);
+    // What the jump passes over, and whether it can fire at all — see `jump-reach.ts`. An
+    // ENDING screen is not a stop in the walk, so reach is asked only of an item that is: a
+    // question or a section.
+    const reach =
+      kind === 'ending' ? undefined : jumpReach(form.pages, { kind, id: item.id }, jump.target);
+    // The resolver refuses a conditionless jump outright, so everything else this row would say
+    // about it — where it goes, what it skips — is about a rule that never runs.
+    const fires = groupConditions(jump.when).length > 0;
     // Numbered only when there is more than one, so the common case reads as a sentence rather
     // than as an entry in a list.
     const ordinal = jumps.length > 1 ? `Rule ${index + 1}: ` : '';
@@ -178,8 +209,22 @@ function itemEntries(
       icon: ROW_ICONS.jump,
       sentence:
         `${ordinal}After ${quoted(item.label)}, ${destination.phrase} ` +
-        `${whenClause(jump.when, form.sources)}`,
-      broken: [...brokenIn(jump.when, form.sources), ...destination.broken],
+        `${whenClause(jump.when, form.sources, 'jump')}`,
+      broken: [
+        ...brokenIn(jump.when, form.sources),
+        ...destination.broken,
+        ...(fires ? [] : [NO_CONDITIONS]),
+        // Only when the destination RESOLVES and the rule can run at all: a deleted target is
+        // already reported above, and saying "it is not ahead of the rule" about a question that
+        // no longer exists — or about a rule that never runs anyway — sends the author looking
+        // for an ordering problem they do not have.
+        ...(fires && reach?.inert && destination.broken.length === 0
+          ? [UNREACHED_DESTINATION]
+          : []),
+      ],
+      // A count of what a dead rule "would skip" describes behaviour no respondent meets, and
+      // reads as though the rule is working.
+      note: fires && reach ? reachNote(reach) : '',
     });
   });
   return out;
@@ -237,6 +282,7 @@ function endingEntry(
     icon: knockout ? ROW_ICONS.screenedOut : ROW_ICONS.show,
     sentence,
     broken,
+    note: '',
   };
 }
 
@@ -368,10 +414,17 @@ function describeTarget(
 function whenClause(
   group: ConditionalGroup | undefined,
   sources: ReadonlyArray<ConditionalSourceQuestion>,
+  verb: RuleVerb = 'show',
 ): string {
   const conditions = groupConditions(group);
   if (conditions.length === 0) {
-    return 'always — this rule has no conditions, so it applies to everyone';
+    // The same empty group means opposite things to the two verbs. An item with no show
+    // condition is always visible; a `Go to` with none is REFUSED by the resolver rather than
+    // fired for everyone (`hasCondition` in rule-verbs.ts), because "send everybody past this,
+    // always" is never what anyone meant to write.
+    return verb === 'jump'
+      ? 'never — this rule has no conditions, so it never runs'
+      : 'always — this rule has no conditions, so it applies to everyone';
   }
   const joiner = group?.any ? ' or ' : ' and ';
   return `when ${conditions.map((condition) => describeCondition(condition, sources)).join(joiner)}`;
@@ -494,8 +547,14 @@ function merged(badges: RuleBadge[], existing: RuleBadge, entry: RuleEntry): Rul
 
 /** One rule as a line of the tooltip: what it says, and what it can no longer reach. */
 function detailFor(entry: RuleEntry): string {
-  if (entry.broken.length === 0) {
-    return entry.sentence;
+  if (entry.broken.length > 0) {
+    // What it costs is beside the point on a rule that is not working; lead with the breakage.
+    return `${entry.sentence} — references ${entry.broken.join(', ')}`;
   }
-  return `${entry.sentence} — references ${entry.broken.join(', ')}`;
+  return entry.note.length > 0 ? `${entry.sentence} — ${lowerFirst(entry.note)}` : entry.sentence;
+}
+
+/** "Skips 3 questions" reads as a sentence on its own and as a clause after an em dash. */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }

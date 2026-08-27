@@ -18,8 +18,18 @@ const SOURCES: ConditionalSourceQuestion[] = [
 
 const showVip: ConditionalRule = { show: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] } };
 
+/**
+ * `sources` and `pages` must describe the SAME form.
+ *
+ * They are two views of one thing — the whole form's questions, and those questions in document
+ * order — and the builder derives both from one tree, so it cannot produce a form where they
+ * disagree. A fixture that did was testing a state that does not exist, and it showed up the
+ * moment rules started reporting what they skip: a target present in `sources` but absent from
+ * `pages` reads as "resolves fine" to the sentence and "not ahead of the rule" to the reach.
+ * Overridden pages therefore top up `sources` with anything they add.
+ */
 function form(overrides?: Partial<RuleInventoryForm>): RuleInventoryForm {
-  return {
+  const base: RuleInventoryForm = {
     sources: SOURCES,
     pages: [
       { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type' }] },
@@ -28,6 +38,12 @@ function form(overrides?: Partial<RuleInventoryForm>): RuleInventoryForm {
     endings: [],
     ...overrides,
   };
+  const known = new Set(base.sources.map((source) => source.id));
+  const extra = base.pages
+    .flatMap((page) => page.questions)
+    .filter((question) => !known.has(question.id))
+    .map((question): ConditionalSourceQuestion => ({ id: question.id, prompt: question.label, kind: 'text' }));
+  return extra.length > 0 ? { ...base, sources: [...base.sources, ...extra] } : base;
 }
 
 describe('describeCondition', () => {
@@ -192,11 +208,14 @@ describe('collectRuleEntries', () => {
   });
 
   describe('edge', () => {
-    it('says an unconditional rule applies to everyone, in plain English', () => {
-      // `evaluateGroup({})` is vacuously TRUE, so a rule with no conditions fires for every
-      // respondent. The builder's Done button refuses to author one, but mj-sync metadata and
-      // the AI builder both can, and a jump that always fires silently skips pages for
-      // everyone — which is precisely the kind of rule this tab exists to surface.
+    it('says an unconditional Go to never runs, in plain English', () => {
+      // REVERSED, deliberately. This used to read "always — applies to everyone", because
+      // `evaluateGroup({})` is vacuously TRUE and the resolver obeyed it: a conditionless jump
+      // skipped pages for every respondent. It is now REFUSED at the resolver (`hasCondition`
+      // in rule-verbs.ts), on the grounds that nobody means "send everybody past this, always"
+      // and ignoring is the recoverable direction. The reason for surfacing it is unchanged —
+      // the builder cannot author one, but mj-sync metadata and the AI builder both can — and
+      // what is surfaced is now the truth about what the respondent will experience.
       const entries = collectRuleEntries(
         form({
           pages: [
@@ -212,8 +231,9 @@ describe('collectRuleEntries', () => {
       );
 
       expect(entries[0].sentence).toBe(
-        'After "Intro", skip to "Page 2" always — this rule has no conditions, so it applies to everyone',
+        'After "Intro", skip to "Page 2" never — this rule has no conditions, so it never runs',
       );
+      expect(entries[0].broken).toEqual(['no conditions, so it never runs']);
     });
 
     it('is empty for a form with no rules at all', () => {
@@ -387,6 +407,9 @@ describe('an item carrying several Go to rules', () => {
                 },
               ],
             },
+            // Rule 1 points at "Age", so the form has to actually contain it — otherwise the
+            // healthy rule is only healthy because nothing checked where it lands.
+            { id: 'p2', label: 'Page 2', questions: [{ id: 'q2', label: 'Age' }] },
           ],
         }),
       );
@@ -639,6 +662,164 @@ describe('endingReachFor', () => {
     it('a rule naming a screen that no longer exists reaches nothing', () => {
       const reach = withEndings([{ id: 'e1', label: 'Thanks' }], goToEnding('deleted'));
       expect(reach.get('e1')?.unreachable).toBe(true);
+    });
+  });
+});
+
+/**
+ * What a `Go to` rule costs, and whether it can fire — see `jump-reach.ts` for the reasoning.
+ *
+ * Both facts were unsayable in the builder, and both are silent. A rule that skips four
+ * questions reads as a shortcut and behaves as a deletion; a rule whose destination stopped
+ * being ahead of it after a drag reads perfectly and does nothing at all.
+ */
+describe('a Go to rule reports what it passes over', () => {
+  const goTo = (target: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['target'] : never): ConditionalRule => ({
+    jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, target }],
+  });
+
+  /** p1: q1 (the rule) q2* q3 · p2: q4 */
+  function longForm(rule: ConditionalRule): RuleInventoryForm {
+    return form({
+      pages: [
+        {
+          id: 'p1',
+          label: 'Page 1',
+          questions: [
+            { id: 'q1', label: 'Ticket type', conditionalRule: rule },
+            { id: 'q2', label: 'Age', isRequired: true },
+            { id: 'q3', label: 'Interests' },
+          ],
+        },
+        { id: 'p2', label: 'Page 2', questions: [{ id: 'q4', label: 'Notes' }] },
+      ],
+    });
+  }
+
+  describe('happy', () => {
+    it('says how many questions go unasked, and how many were required', () => {
+      const entry = collectRuleEntries(longForm(goTo({ kind: 'question', id: 'q4' })))[0];
+      expect(entry.note).toBe('Skips 2 questions, 1 of them required');
+      expect(entry.broken).toEqual([]);
+    });
+
+    it('a jump to Submit passes over the whole rest of the form', () => {
+      expect(collectRuleEntries(longForm(goTo({ kind: 'submit' })))[0].note).toBe(
+        'Skips 3 questions, 1 of them required',
+      );
+    });
+  });
+
+  describe('edge', () => {
+    it('says nothing when the destination is the very next question', () => {
+      expect(collectRuleEntries(longForm(goTo({ kind: 'question', id: 'q2' })))[0].note).toBe('');
+    });
+
+    it('a show rule has nothing to report — it goes nowhere', () => {
+      const entry = collectRuleEntries(
+        form({ pages: [{ id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: showVip }] }] }),
+      )[0];
+      expect(entry.note).toBe('');
+    });
+  });
+
+  describe('worst', () => {
+    it('a destination that is no longer ahead of the rule is broken, not merely quiet', () => {
+      // Unauthorable through the picker, which offers forward targets only — this is what a
+      // REORDER leaves behind, and the rule still reads perfectly while doing nothing.
+      const backward = form({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              { id: 'q0', label: 'Name' },
+              { id: 'q1', label: 'Ticket type', conditionalRule: goTo({ kind: 'question', id: 'q0' }) },
+            ],
+          },
+        ],
+      });
+      expect(collectRuleEntries(backward)[0].broken).toEqual([
+        'a destination that is no longer ahead of it, so the rule never runs',
+      ]);
+    });
+
+    it('the badge on the item says the rule is broken', () => {
+      const backward = form({
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              { id: 'q0', label: 'Name' },
+              { id: 'q1', label: 'Ticket type', conditionalRule: goTo({ kind: 'question', id: 'q0' }) },
+            ],
+          },
+        ],
+      });
+      const badge = ruleBadgesFor(collectRuleEntries(backward)).get('q1')?.[0];
+      expect(badge?.broken).toBe(true);
+    });
+  });
+});
+
+/**
+ * A conditionless rule means opposite things to the two verbs, and the hub has to say so.
+ *
+ * `evaluateGroup({})` is vacuously true, which is right for a `show` gate — no condition, always
+ * visible — and refused for a jump, which now needs at least one condition to run at all (see
+ * `hasCondition` in rule-verbs.ts). One sentence for both would be wrong about one of them, and
+ * the old one — "always, this rule applies to everyone" — was wrong about the dangerous one.
+ */
+describe('a rule with no conditions', () => {
+  const noConditions = (target: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['target'] : never): ConditionalRule => ({
+    jump: [{ when: { all: [] }, target }],
+  });
+
+  describe('happy', () => {
+    it('a Go to with none says it never runs, and is broken', () => {
+      const entries = collectRuleEntries(
+        form({
+          pages: [
+            { id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: noConditions({ kind: 'question', id: 'q2' }) }] },
+            { id: 'p2', label: 'Page 2', questions: [{ id: 'q2', label: 'Age' }] },
+          ],
+        }),
+      );
+      expect(entries[0].sentence).toContain('never — this rule has no conditions, so it never runs');
+      expect(entries[0].broken).toEqual(['no conditions, so it never runs']);
+    });
+  });
+
+  describe('edge', () => {
+    it('a show gate with none still reads as always, and is not broken', () => {
+      const entries = collectRuleEntries(
+        form({ pages: [{ id: 'p1', label: 'Page 1', questions: [{ id: 'q1', label: 'Ticket type', conditionalRule: { show: { all: [] } } }] }] }),
+      );
+      expect(entries[0].sentence).toContain('always — this rule has no conditions, so it applies to everyone');
+      expect(entries[0].broken).toEqual([]);
+    });
+  });
+
+  describe('worst', () => {
+    it('says the rule never runs rather than what it would have skipped', () => {
+      // A count of what a dead rule "skips" describes behaviour no respondent will ever meet,
+      // and reads as though the rule is working.
+      const entries = collectRuleEntries(
+        form({
+          pages: [
+            {
+              id: 'p1',
+              label: 'Page 1',
+              questions: [
+                { id: 'q1', label: 'Ticket type', conditionalRule: noConditions({ kind: 'submit' }) },
+                { id: 'q2', label: 'Age', isRequired: true },
+              ],
+            },
+          ],
+        }),
+      );
+      expect(entries[0].note).toBe('');
     });
   });
 });

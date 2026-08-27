@@ -401,3 +401,63 @@ describe('endsWithoutSubmit', () => {
     });
   });
 });
+
+/**
+ * A `Go to` with no conditions is refused, not obeyed.
+ *
+ * `evaluateGroup({})` is vacuously TRUE, which is exactly right for a `show` gate — an item with
+ * no condition is visible — and catastrophic for a jump, where it means "send everybody past
+ * this, always". Nobody authors that on purpose: the builder already drops a conditionless row
+ * rather than storing it (`committedJump` in logic-draft.ts), so a stored one has arrived from
+ * mj-sync metadata, an AI-authored rule, or hand-written JSON — none of which pass through that
+ * check.
+ *
+ * This is the same hazard the deleted `isArmedKnockout` guard existed for. That guard went when
+ * disqualification stopped being a rule verb; the underlying vacuous-truth problem did not go
+ * with it, it just moved to the only verb that still reads a group as a trigger.
+ *
+ * Refusing is the recoverable direction. An unconditional jump that fires skips questions for
+ * every respondent, silently and permanently; one that is ignored leaves the form asking
+ * everything, which is visible, complainable, and loses nobody's data.
+ */
+describe('a Go to rule with no conditions', () => {
+  const pages = (when: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['when'] : never) => [
+    page('p1', 0, [q('q1', 0, { conditionalRule: { jump: [{ when, target: { kind: 'question', id: 'q3' } }] } }), q('q2', 1), q('q3', 2)]),
+  ];
+
+  describe('happy', () => {
+    it('does not fire, so nothing is skipped', () => {
+      expect(ids(resolveVisibleQuestions(pages({ all: [] }), answers({})))).toEqual(['q1', 'q2', 'q3']);
+    });
+
+    it('an empty group in either arm is refused the same way', () => {
+      expect(ids(resolveVisibleQuestions(pages({}), answers({})))).toEqual(['q1', 'q2', 'q3']);
+      expect(ids(resolveVisibleQuestions(pages({ any: [] }), answers({})))).toEqual(['q1', 'q2', 'q3']);
+    });
+  });
+
+  describe('edge', () => {
+    it('one real condition is enough — this is not a rule against short rules', () => {
+      const real = pages({ all: [{ questionId: 'q1', op: 'isAnswered' }] });
+      expect(ids(resolveVisibleQuestions(real, answers({ q1: 'yes' })))).toEqual(['q1', 'q3']);
+    });
+  });
+
+  describe('worst', () => {
+    it('a conditionless TERMINAL jump does not end the form on arrival', () => {
+      // The worst reading of the old behaviour: a half-authored "go to Submit" ended the form
+      // before the first question was answered, for everyone, and the response recorded was
+      // whatever the respondent had not yet typed.
+      const terminal = [page('p1', 0, [q('q1', 0, { conditionalRule: { jump: [{ when: { all: [] }, target: { kind: 'submit' } }] } }), q('q2', 1)])];
+      expect(resolveTermination(terminal, answers({}))).toBeUndefined();
+      expect(ids(resolveVisibleQuestions(terminal, answers({})))).toEqual(['q1', 'q2']);
+    });
+
+    it('an item with no condition is still SHOWN — the show gate keeps its meaning', () => {
+      // The two verbs read the same group type and must not be given the same answer: absent
+      // conditions mean "always visible" and "never jump".
+      const shown = [page('p1', 0, [q('q1', 0, { conditionalRule: { show: { all: [] } } })])];
+      expect(ids(resolveVisibleQuestions(shown, answers({})))).toEqual(['q1']);
+    });
+  });
+});

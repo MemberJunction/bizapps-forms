@@ -59,7 +59,8 @@ import {
   type QuestionTypeMeta,
 } from './question-type-catalog';
 import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
-import { jumpTargetOptions, type JumpTargetOption } from './jump-target-options';
+import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
+import { jumpReach, reachNote, type ReachSource } from './jump-reach';
 import {
   collectRuleEntries,
   endingReachFor,
@@ -740,6 +741,44 @@ export class FormBuilderComponent extends BaseFormComponent {
     return jumpTargetOptions(laterQuestions, laterPages, this.endingDestinations);
   }
 
+  /** What each destination the SELECTED PAGE may jump to would skip. */
+  protected get pageReachNotes(): ReadonlyMap<string, string> {
+    const page = this.selectedPage;
+    return page ? this.reachNotesFor({ kind: 'page', id: page.entity.ID }, this.pageJumpTargets) : new Map();
+  }
+
+  /** What each destination the SELECTED QUESTION may jump to would skip. */
+  protected get questionReachNotes(): ReadonlyMap<string, string> {
+    const id = this.selectedQuestionId;
+    return id ? this.reachNotesFor({ kind: 'question', id }, this.questionJumpTargets) : new Map();
+  }
+
+  /**
+   * One note per offered destination, keyed by its `<option>` value.
+   *
+   * Computed here because reach is a fact about the whole FORM — which questions lie between two
+   * items — and the dialog is handed one item's rules. Keyed by option value rather than by
+   * target object so the dialog can look one up from the select it already renders, with no
+   * second opinion about how a target is encoded.
+   */
+  private reachNotesFor(
+    source: ReachSource,
+    targets: readonly JumpTargetOption[],
+  ): ReadonlyMap<string, string> {
+    const pages = (this.tree?.pages ?? []).map((page) => ({
+      id: page.entity.ID,
+      questions: page.questions.map((q) => ({ id: q.entity.ID, isRequired: q.entity.IsRequired === true })),
+    }));
+    const notes = new Map<string, string>();
+    for (const target of targets) {
+      const note = reachNote(jumpReach(pages, source, target.target));
+      if (note.length > 0) {
+        notes.set(targetValue(target.target), note);
+      }
+    }
+    return notes;
+  }
+
   /** Every ending screen, as a jump destination. */
   private get endingDestinations(): Array<{ id: string; label: string }> {
     return this.endScreens.map((screen) => ({ id: screen.ID, label: screen.Title || 'Ending screen' }));
@@ -1006,6 +1045,9 @@ export class FormBuilderComponent extends BaseFormComponent {
           id: q.entity.ID,
           label: q.entity.Prompt,
           conditionalRule: parseConditionalRule(q.entity.ConditionalRule),
+          // Carried so a `Go to` can say how many REQUIRED questions it passes over, which is
+          // the half of "this rule skips things" an author actually needs to weigh.
+          isRequired: q.entity.IsRequired === true,
         })),
       })),
       endings: this.endScreens.map((screen) => ({

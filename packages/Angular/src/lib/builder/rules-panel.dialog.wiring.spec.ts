@@ -350,3 +350,39 @@ describe('the header button offers the move the item actually needs', () => {
     expect(panel()).toMatch(/get hasRules\(\): boolean \{[\s\S]{0,140}this\.summaryRows\.length > 0/);
   });
 });
+
+/**
+ * The dialog says what a destination COSTS, where the author is choosing it.
+ *
+ * "If First name is Soham, go to Submit" reads as a shortcut and behaves as a deletion: four
+ * questions are never asked, and two of them the author marked required. Nothing said so. The
+ * first party to find out was the respondent, and the second was the author, one round of
+ * testing later, reading it as a bug in requiredness rather than as the rule doing exactly what
+ * they wrote.
+ *
+ * The count itself is computed and tested in `jump-reach.spec.ts`. What has to be true HERE is
+ * that the dialog is given it and renders it against the rule being edited.
+ */
+describe('a destination says what it skips, while the author is picking it', () => {
+  const logicEditor = (): string => stripped('logic-editor.component.ts');
+
+  it('the dialog takes a note per destination rather than working it out itself', () => {
+    // Which questions lie between two items is a fact about the FORM, and this component is
+    // handed one item's rules. Deriving it here would need the whole tree passed in.
+    expect(logicEditor()).toMatch(/@Input\(\) reachNotes/);
+  });
+
+  it('renders the note for the destination the rule actually holds', () => {
+    expect(logicEditor()).toMatch(/reachNoteFor\(rule\)/);
+  });
+
+  it('the panel supplies them for the item being edited', () => {
+    expect(panelHtml()).toMatch(/\[reachNotes\]="reachNotes"/);
+  });
+
+  it('says nothing when there is nothing to say', () => {
+    // A jump to the very next question skips nothing, and a line saying "skips 0 questions"
+    // beneath every destination is noise that teaches authors to stop reading it.
+    expect(logicEditor()).toMatch(/@if \(reachNoteFor\(rule\); as note\)/);
+  });
+});

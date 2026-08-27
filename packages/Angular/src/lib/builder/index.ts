@@ -77,6 +77,14 @@ export {
   type JumpTargetOption,
 } from './jump-target-options';
 export {
+  jumpReach,
+  reachNote,
+  type JumpReach,
+  type ReachItem,
+  type ReachPage,
+  type ReachSource,
+} from './jump-reach';
+export {
   collectRuleEntries,
   endingReachFor,
   ruleBadgesFor,

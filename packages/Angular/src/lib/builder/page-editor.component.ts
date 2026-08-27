@@ -46,6 +46,7 @@ const PAGE_EDITOR_CSS = /* css */ `
               [sources]="conditionalSources"
               [jumpSources]="jumpConditionSources"
               [targets]="jumpTargets"
+              [reachNotes]="reachNotes"
               itemNoun="section"
               (ruleChange)="onConditionalChange($event)"
             />
@@ -68,6 +69,8 @@ export class PageEditorComponent {
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
   /** Pages AFTER this one — the only places a jump may land (forward-only by contract). */
   @Input() jumpTargets: JumpTargetOption[] = [];
+  /** What each destination skips, keyed by option value — see `jump-reach.ts`. */
+  @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
   /** Sources a jump's conditions may read: earlier pages AND this page's own questions. */
   @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
   /** Emitted whenever the page entity changed (parent persists). */

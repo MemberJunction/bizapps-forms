@@ -216,6 +216,8 @@ export class QuestionEditorComponent {
   @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
   /** Forward destinations for this question's rules — later questions, later sections, endings. */
   @Input() jumpTargets: JumpTargetOption[] = [];
+  /** What each destination skips, keyed by option value — see `jump-reach.ts`. */
+  @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
 
   private requested = { validation: false, placeholder: false, scoring: false };
 

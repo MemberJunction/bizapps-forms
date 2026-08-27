@@ -129,6 +129,12 @@ export class RulesPanelComponent {
   @Input() jumpSources: ConditionalSourceQuestion[] | null = null;
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
+  /**
+   * What each destination costs, keyed by its option value — passed straight through to the
+   * dialog. The host computes it because it is the only party that knows the whole form; see
+   * `jump-reach.ts`.
+   */
+  @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
   /** Ending screens have no "after this" — they ARE the after. */
   @Input() allowJumps = true;
   @Input() itemNoun = 'question';

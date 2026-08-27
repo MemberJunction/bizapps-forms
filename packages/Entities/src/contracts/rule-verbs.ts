@@ -17,6 +17,7 @@ import {
   isTerminalTarget,
   type AnswerValue,
   type EvalExtras,
+  type ConditionalGroup,
   type ConditionalRule,
   type JumpTarget,
 } from './conditional-rule';
@@ -195,7 +196,8 @@ function flattenStops(pages: readonly PublishedFormPage[]): FlowStop[] {
  * The first jump rule on `rule` that fires and is allowed to, or null.
  *
  * Non-terminal targets must point strictly forward; a terminal target is accepted wherever it
- * is found. Rules past {@link MAX_JUMP_RULES} are not consulted at all.
+ * is found. Rules past {@link MAX_JUMP_RULES} are not consulted at all, and a rule with no
+ * conditions is not consulted either — see {@link hasCondition}.
  */
 function firedJump(
   rule: ConditionalRule | undefined,
@@ -205,6 +207,9 @@ function firedJump(
   extras: EvalExtras | undefined,
 ): JumpTarget | null {
   for (const jump of (rule?.jump ?? []).slice(0, MAX_JUMP_RULES)) {
+    if (!hasCondition(jump.when)) {
+      continue; // see hasCondition
+    }
     const target = jump.target;
     if (!isTerminalTarget(target)) {
       const targetPosition = positionOf.get(target.id);
@@ -217,6 +222,29 @@ function firedJump(
     }
   }
   return null;
+}
+
+/**
+ * Whether a jump's trigger says anything at all.
+ *
+ * `evaluateGroup({})` is vacuously TRUE. That is right for a `show` gate — an item with no
+ * condition is visible — and catastrophic for a jump, where it reads as "send everybody past
+ * this, always". The two verbs share a group type and must not share that answer.
+ *
+ * Nobody authors one on purpose: the builder drops a conditionless row rather than storing it
+ * (`committedJump` in `logic-draft.ts`). A stored one has arrived from mj-sync metadata, an
+ * AI-authored rule or hand-written JSON, none of which pass through that check — and the damage
+ * is silent and total, since an unconditional jump skips its questions for every respondent
+ * while the form still reads correctly in the builder.
+ *
+ * This is the hazard the deleted `isArmedKnockout` guard existed for. That guard went when
+ * disqualification stopped being a rule verb; the vacuous-truth problem did not go with it, it
+ * moved to the only verb still reading a group as a trigger. Ignoring is the recoverable
+ * direction: the form asks everything, which someone will notice, rather than silently asking
+ * less.
+ */
+function hasCondition(when: ConditionalGroup | undefined): boolean {
+  return (when?.all?.length ?? 0) > 0 || (when?.any?.length ?? 0) > 0;
 }
 
 /**
