@@ -128,6 +128,12 @@ export class RulesPanelComponent {
    * Null means "same as sources".
    */
   @Input() jumpSources: ConditionalSourceQuestion[] | null = null;
+
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
   /**
@@ -209,6 +215,14 @@ export class RulesPanelComponent {
    * Built on `describeCondition`, the same renderer the Rules tab uses, so the rail and the hub
    * cannot word the same rule differently. Truncated after two, because this is one line in a
    * ~300px column; the hub is where a rule is read in full.
+   *
+   * NAMING IS NOT LEGALITY, and resolving both from one list is how this rail came to read
+   * `Show only when (deleted question) is answered` about a question one row above it (issue
+   * #73). `sources` is what the rule may READ — a prefix that a reorder can shrink out from
+   * under an existing rule — while naming needs whatever the rule actually points at. The rule's
+   * own list goes first so it still wins for anything in both (an ending's running score is only
+   * ever in that one); the form-wide list supplies the rest. `rules-inventory.ts` reached the
+   * same conclusion first, and its `sources` field carries the same note.
    */
   private conditions(
     group: ConditionalRule['show'],
@@ -219,7 +233,7 @@ export class RulesPanelComponent {
       return 'always';
     }
     const joiner = group?.any ? ' or ' : ' and ';
-    const head = list.slice(0, 2).map((c) => describeCondition(c, sources)).join(joiner);
+    const head = list.slice(0, 2).map((c) => describeCondition(c, [...sources, ...this.formSources])).join(joiner);
     return list.length > 2 ? `${head} · +${list.length - 2} more` : head;
   }
 

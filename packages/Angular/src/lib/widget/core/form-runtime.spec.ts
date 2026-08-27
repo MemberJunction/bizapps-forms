@@ -562,3 +562,81 @@ describe('FormRuntime — the scroll renderer follows the flow, not just show ru
     });
   });
 });
+
+/**
+ * What a rule reading a question answered LATER than it runs actually does to a respondent.
+ *
+ * Issue #73's badge says such a rule "reads a blank". These are what makes that sentence
+ * checkable rather than plausible — the builder can only report the hazard honestly if the
+ * hazard is what is written here.
+ *
+ * The issue itself claims the guarded item is "hidden from every respondent, permanently, and
+ * never recovers". It is not: visibility is a fixed point re-derived on every keystroke, so the
+ * item comes back — in front of the respondent, mid-fill.
+ */
+describe('a rule whose source is answered after it runs', () => {
+  it('shows the gated question the moment the later source is answered', () => {
+    // "Permanently hidden" is disprovable in Preview in ten seconds, which is why the badge does
+    // not say it. What the respondent gets is a question APPEARING above the one they are on.
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gated', conditionalRule: { show: { all: [{ questionId: 'source', op: 'equals', value: 'yes' }] } } },
+        { id: 'source' },
+        { id: 'tail' },
+      ]),
+    );
+    expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['source', 'tail']);
+
+    rt.setValue('source', 'yes');
+    expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['gated', 'source', 'tail']);
+  });
+
+  it("takes an already-typed answer out of the submission when a jump's `when` reads later", () => {
+    // The variant the issue does not mention, and the one that costs data rather than nerves.
+    // `q1` jumps to `q3` on `q3`'s own answer — legal-looking, unauthorable, arrived at by
+    // reordering. The respondent fills `q2`, answers `q3`, and `q2` leaves the payload.
+    const rt = new FormRuntime(
+      formOf([
+        {
+          id: 'q1',
+          conditionalRule: {
+            jump: [{ when: { all: [{ questionId: 'q3', op: 'equals', value: 'yes' }] }, target: { kind: 'question', id: 'q3' } }],
+          },
+        },
+        { id: 'q2' },
+        { id: 'q3' },
+        { id: 'tail' },
+      ]),
+    );
+    rt.setValue('q1', 'a');
+    rt.setValue('q2', 'typed by the respondent');
+    expect([...rt.transmittedView().answers.keys()]).toContain('q2');
+
+    rt.setValue('q3', 'yes');
+    expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['q1', 'q3', 'tail']);
+    expect([...rt.transmittedView().answers.keys()]).not.toContain('q2');
+  });
+
+  it('warns rather than looping when two rules can never agree', () => {
+    // Visibility is NOT monotone: `isNotAnswered` means removing an answer can REVEAL a
+    // question, so the iteration has no guaranteed fixed point. This is where the builder's
+    // badge and the respondent's screen diverge most, and it is capped, not solved.
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (message: string) => void warnings.push(message);
+    try {
+      const rt = new FormRuntime(
+        formOf([
+          { id: 'a', conditionalRule: { show: { all: [{ questionId: 'b', op: 'isNotAnswered' }] } } },
+          { id: 'b', conditionalRule: { show: { all: [{ questionId: 'a', op: 'isAnswered' }] } } },
+        ]),
+      );
+      rt.setValue('a', '1');
+      rt.setValue('b', '2');
+      rt.renderedQuestions();
+    } finally {
+      console.warn = original;
+    }
+    expect(warnings.join('\n')).toContain('visibility did not settle');
+  });
+});

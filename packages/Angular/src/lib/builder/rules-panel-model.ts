@@ -79,7 +79,8 @@ export function groupConditions(group: ConditionalGroup | undefined): ReadonlyAr
  *
  * A reference to a question that no longer exists says so rather than vanishing. A summary that
  * hides the breakage is how a dead rule survives unnoticed — and a show rule on a deleted source
- * evaluates false, hiding the item from everyone.
+ * reads `undefined`, which pins the item shut for everyone under `equals` and OPEN for everyone
+ * under `isNotAnswered` / `notEquals`.
  */
 export function describeCondition(
   condition: ConditionalCondition,

@@ -183,6 +183,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
           <mjf-conditional-rule-editor
             [group]="draft.show"
             [sources]="sources"
+            [formSources]="formSources"
             [subjectSourceId]="subjectSourceId"
             (groupChange)="onShowChange($event)"
           />
@@ -229,6 +230,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
               <mjf-conditional-rule-editor
                 [group]="rule.when"
                 [sources]="jumpSources"
+                [formSources]="formSources"
                 [subjectSourceId]="subjectSourceId"
                 (groupChange)="onWhenChange($index, $event)"
               />
@@ -315,6 +317,11 @@ export class LogicEditorComponent {
   @Input() sources: ConditionalSourceQuestion[] = [];
   /** Sources a jump's conditions may read — includes this item's own answers. */
   @Input() jumpSources: ConditionalSourceQuestion[] = [];
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
   /** Forward destinations, already filtered by the host. */
   @Input() targets: JumpTargetOption[] = [];
   /**

@@ -217,3 +217,31 @@ describe('every select shows the value its condition actually holds', () => {
     expect(source).toMatch(/\[selected\]="true"[^>]*>\{\{ stale \}\}|\{\{ stale \}\}[^<]*<\/option>/);
   });
 });
+
+/**
+ * The stale-source option says WHICH kind of stale it is (issue #73).
+ *
+ * A reorder writes only `DisplayOrder`, so a rule whose source moved below it still names a
+ * question that exists — and the picker used to call it "(question no longer available)" while
+ * the author could see it two rows down. The decision itself is
+ * {@link import('./condition-sources').staleSourceLabel}, tested for real in
+ * `condition-sources.spec.ts`; what has to be true here is that the template ASKS it rather than
+ * hardcoding the old sentence.
+ */
+describe('the stale-source option distinguishes deleted from moved-below', () => {
+  it('the template renders the computed label, not a literal', () => {
+    const html = editorHtml();
+    expect(html).toMatch(/\{\{ staleQuestionLabel\(cond\) \}\}/);
+    expect(html).not.toMatch(/>\(question no longer available\)</);
+  });
+
+  it('the component asks the shared helper, with the form-wide list to difference against', () => {
+    // `this.sources` alone cannot tell the two apart — a source absent from it is absent for
+    // both reasons. The complement within `formSources` is what names the second.
+    expect(editor()).toMatch(/staleSourceLabel\(\s*this\.questionSelectValue\(condition\),\s*this\.sources,\s*this\.formSources,?\s*\)/);
+  });
+
+  it('defaults the form-wide list to empty, so an unwired host cannot make an ordering claim', () => {
+    expect(editor()).toMatch(/@Input\(\) formSources: ConditionalSourceQuestion\[\] = \[\];/);
+  });
+});

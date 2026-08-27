@@ -532,12 +532,15 @@ const LAYOUT_CSS = /* css */ `
 .fb-q-help { font-size: var(--mjf-meta); color: var(--mj-text-muted); word-break: break-word; }
 .fb-q-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .fb-q-tags .mjf-badge { padding: 1px 8px; font-size: 0.6875rem; }
+.fb-q-tags mjf-rule-badge, .fb-page-head mjf-rule-badge { display: inline-flex; }
 
 /* What a rule looks like on the canvas. A help cursor rather than the default one, because the
    badge is two words and the sentences it stands for are in its tooltip — the cursor is the only
    thing that says there is more to read. */
-.fb-rule-badge { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
-.fb-rule-badge i { font-size: 0.625rem; opacity: 0.8; }
+/* The rule badge and its tooltip live in rule-badge.component.ts now. A native title showed
+   nothing for about a second, which reads as a broken control on the badge whose whole job is to
+   report a broken rule — and the compact sizing went with it, because a parent's scoped CSS does
+   not reach inside a child component. */
 
 /* Actions live in the card's top-right corner and appear on hover. They stay visible
    whenever focus is inside the card, so the keyboard path never depends on hover. */

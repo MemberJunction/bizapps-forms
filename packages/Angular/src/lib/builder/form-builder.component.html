@@ -318,11 +318,7 @@
                 <!-- A page rule hides every question on the page. Nothing on the canvas said
                      so, and the tab that did is gone. -->
                 @for (badge of badges.get(page.entity.ID) ?? []; track badge.icon) {
-                  <span
-                    class="mjf-badge fb-rule-badge"
-                    [class.mjf-badge--warning]="badge.broken"
-                    [title]="badge.detail"
-                  ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                  <mjf-rule-badge [badge]="badge" />
                 }
                 <button
                   type="button"
@@ -404,11 +400,7 @@
                          because a rule whose source was deleted hides this question from every
                          respondent, silently, with the form still looking correct. -->
                     @for (badge of badges.get(node.entity.ID) ?? []; track badge.icon) {
-                      <span
-                        class="mjf-badge fb-rule-badge"
-                        [class.mjf-badge--warning]="badge.broken"
-                        [title]="badge.detail"
-                      ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                      <mjf-rule-badge [badge]="badge" />
                     }
                   </div>
                 </div>
@@ -481,10 +473,7 @@
                          supposed to LAND. -->
                     @for (badge of badges.get(es.ID) ?? []; track badge.icon) {
                       @if (badge.broken) {
-                        <span
-                          class="mjf-badge mjf-badge--warning fb-rule-badge"
-                          [title]="badge.detail"
-                        ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                        <mjf-rule-badge [badge]="badge" />
                       }
                     }
                   </div>
@@ -525,6 +514,7 @@
           <mjf-screen-editor
             [screen]="screen"
             [conditionalSources]="endingConditionalSources"
+            [formSources]="formSources"
             (screenChanged)="onScreenChanged($event)"
             (makeDefaultRequested)="onMakeDefaultEnding($event)"
           />
@@ -534,6 +524,7 @@
             [pageNumber]="selectedPageIndex + 1"
             [conditionalSources]="pageConditionalSources"
             [jumpConditionSources]="pageJumpConditionSources"
+            [formSources]="formSources"
             [jumpTargets]="pageJumpTargets"
             [reachNotes]="pageReachNotes"
             [defaultEndingLabel]="defaultEndingLabel"
@@ -546,6 +537,7 @@
             [formId]="record.ID"
             [conditionalSources]="conditionalSources"
             [jumpConditionSources]="questionJumpSources"
+            [formSources]="formSources"
             [jumpTargets]="questionJumpTargets"
             [reachNotes]="questionReachNotes"
             [defaultEndingLabel]="defaultEndingLabel"

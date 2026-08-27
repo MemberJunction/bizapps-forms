@@ -4,8 +4,58 @@ Closes [#73](https://github.com/MemberJunction/bizapps-forms/issues/73). Follow-
 Branch to cut **from `next`** (currently `98abfc0`), tracking `origin/<branch>` — not
 `origin/next`, per the repo's branching rule.
 
-Nothing is built yet. This is the verification record and the design. Revision 2, after a design
-review; §1.4, §1.6, §2, and the three amendments in §4 come from it, and §3.2 corrects it.
+Revision 2, after a design review; §1.4, §1.6, §2, and the three amendments in §4 come from it,
+and §3.2 corrects it. Revision 3 records what landed.
+
+## Status — Phase 0 ✅ · Phase 1 ✅ · Phase 2 ⏳
+
+Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<same-name>`.
+
+| Phase | State | Commit |
+|---|---|---|
+| 0 — one statement of the ordering rule | **landed** | `refactor(builder): state the rule read horizon once` |
+| 1 — a rule that cannot read its own source is broken | **landed** | see §4 |
+| 2 — say it at the drag, and offer the one move that undoes it | **not started** | — |
+
+**What the build changed about this plan, and why.** Four things, all found by building or by driving
+the real UI:
+
+1. **`formSources`, not `laterSources`** (§4 Phase 1). The plan had the host compute the complement
+   per verb. A `show` gate and a `jump` on the same item have different `sources`, so that needs
+   *two* new inputs at every level of the chain (~10 in all). One form-wide list serves both, and
+   the "later" set is differenced against the very array the `<select>` is rendering, so the two
+   cannot drift. Empty is the safe default — an unwired host keeps the old wording rather than
+   making an ordering claim it has no evidence for. The decision itself is `staleSourceLabel` in
+   `condition-sources.ts`, pure and unit-tested, rather than a template literal.
+2. **The stale prose was in EIGHT places, not four** (§1.4). Also wrong:
+   `rules-panel-model.spec.ts:165` and `rules-inventory.spec.ts` ×3. All corrected. A ninth,
+   `templates/clone-remap.ts:15`, makes the same claim about an unmapped clone reference — left
+   alone as outside this change's blast radius, and logged below.
+3. **A surface the plan missed: the properties rail.** After a reorder its summary read
+   `Show only when (deleted question) is answered` about a question one row above it, because
+   `describeCondition` was resolving prompts against the rule's *legal prefix*. Naming and legality
+   are two questions; `rules-inventory.ts` had already worked that out and documented it, and the
+   rail simply had not been given the same list. Fixed in `rules-panel.component.ts`.
+4. **The badge's message was unreadable, so Phase 1 was not actually delivered.** It was a native
+   `[title]`, which `setting-row.component.ts:46` had already rejected in this repo for the exact
+   reason that bit here: the browser waits about a second, so a hover that does nothing reads as a
+   broken control — on the badge whose whole job is to report a broken rule. Reported by the
+   developer during the Phase 1 smoke pass. Now one standalone `mjf-rule-badge` component (three
+   call sites carried the identical span) with an immediate CSS bubble, `pointer-events: none`,
+   `white-space: pre-line` for multi-rule details, and an `aria-label` the badge never had.
+
+**Two fixture-honesty problems surfaced by Phase 1**, both in `rules-inventory.spec.ts` and both
+describing forms nobody can build. Six fixtures gave a rule a source present in `sources` but on no
+page — the state that helper's own comment warns about, now impossible because `form()` tops up
+*both* directions. Two more hung `showVip` (which reads `q1`) on `q1` itself: a rule reading its own
+answer, which the picker has never offered and which Phase 1 correctly calls broken.
+
+**Logged, not fixed** — `storedTargetLabel` (`jump-target-options.ts:119`) has the identical defect
+for jump DESTINATIONS: a target that still exists but is no longer ahead of its rule renders
+`(a question that no longer exists)` in the rail. The canvas badge already says the truth
+(`UNREACHED_DESTINATION`), so only the rail line lies. Fixing it means threading a form-wide
+*target* list (questions + pages + endings) the way `formSources` was threaded. Outside Phase 1;
+fold into Phase 2 or take as a follow-up issue.
 
 ---
 
@@ -300,7 +350,7 @@ already says so and keeps saying it.
 
 ## 4. Phases
 
-### Phase 0 — one statement of the ordering rule *(refactor, no behaviour change, own commit)*
+### Phase 0 — one statement of the ordering rule ✅ *(refactor, no behaviour change, own commit)*
 
 Make the change easy, then make the change.
 
@@ -315,7 +365,7 @@ arithmetic on the full list, filtering after). `endingConditionalSources` is unt
 plus `SCORE_SOURCE`. Factor the `{ id, questions: [{ id, isRequired }] }` projection currently
 inlined in `reachNotesFor` into one private `reachPages` getter; three call sites now need it.
 
-### Phase 1 — a rule that cannot read its own source is broken
+### Phase 1 — a rule that cannot read its own source is broken ✅
 
 **`rules-inventory.ts`**
 
@@ -354,7 +404,7 @@ const UNREADABLE_SOURCE =
 Nothing else changes: `ruleBadgesFor` already turns any non-empty `broken[]` into the warning badge
 and its tooltip line.
 
-### Phase 2 — say it at the drag, and offer the one move that undoes it
+### Phase 2 — say it at the drag, and offer the one move that undoes it ⏳ *(next)*
 
 **`reorder.ts`** grows from "is this move legal" to "what does this move cost" — the same subject,
 and pure, which is the only way any of it can be unit-tested (component classes are not instantiated
@@ -509,8 +559,25 @@ All `.spec.ts`, colocated, the convention in `packages/Angular/src/lib/builder/`
 for anything the respondent meets. Nothing here changes the public path — no migration, no server
 change, no snapshot-shape change — so the smoke suite is unaffected.
 
-**Manual pass before the PR** (the builder runs in MJ's host: `cd ../MJ && pnpm start`, Explorer
-`:4201`; there is no Explorer in this repo):
+**Smoke pass actually run, phases 0 and 1** (2026-08-27, by the developer, in MJ's host —
+`cd ../MJ && pnpm start`, Explorer `:4201`; there is no Explorer in this repo). A fixture form
+*"Issue 73 fixture"* was built to the shape the arithmetic is falsifiable on — `p1: Q1 · Statement ·
+Q3` / `p2: (empty)` / `p3: Q4 · Q5` — and every picker read directly off the DOM. Phase 0: all four
+source lists offered exactly what they offered before the refactor, including the case that catches
+the page-arm off-by-one (section 3's show gate offers `Q3`, which `fireIndex − questions.length`
+would have dropped) and the case that catches index arithmetic run on the filtered list (the
+`Statement` is never offered and never shifts the questions around it). Phase 1: authoring `Q5 show
+when Q4 is answered` badged healthy; moving `Q5` above `Q4` flipped it to **Rule is broken** reading
+*"…answered later than this rule runs, so the rule reads a blank"*, the rail summary named `Q4 on
+page 3` instead of "(deleted question)", and the Edit-logic picker showed a disabled `Q4 on page 3 —
+answered after this rule runs`; `Q4`'s own earlier-reading rule stayed `Conditional` throughout;
+moving `Q5` back cleared the badge; and deleting `Q3` produced the OTHER message — *"a question that
+no longer exists"* — proving the two causes still read differently. One failure was found and fixed:
+hovering the badge showed a help cursor and no message (native `title`, ~1s delay), now an immediate
+bubble that does not swallow clicks on the card beneath it. Console clean, zero
+`not found in metadata` on every restart.
+
+**Manual pass still owed for Phase 2** (same host):
 
 1. Two questions in one section, `show` on the first reading the second → warning badge on the
    first, `— answered after this rule runs` in its Edit logic picker.

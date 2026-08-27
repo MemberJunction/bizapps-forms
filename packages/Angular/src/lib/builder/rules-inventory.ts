@@ -13,9 +13,12 @@
  * produced is now read by {@link ruleBadgesFor}, so the same sentences appear on the canvas
  * against the item they are about.
  *
- * The failure that makes this more than a convenience: a condition naming a question that was
- * since deleted is NOT_EVALUABLE, which the evaluator reads as `false`, so the item it guarded
- * is hidden from every respondent — permanently, silently, and with the form still looking
+ * The failure that makes this more than a convenience: a condition whose question is not in the
+ * answer map — DELETED, or answered LATER than the rule runs — reads a plain `undefined`. Not the
+ * `NOT_EVALUABLE` sentinel, which is reserved for a condition naming nothing at all; a deleted
+ * question's id is still a perfectly good string. `undefined` is `false` for the equality family
+ * and TRUE for `isNotAnswered` / `notEquals`, so the guarded item is pinned shut for everyone or
+ * pinned OPEN for everyone, depending on the operator — silently, with the form still looking
  * correct in the builder. {@link collectRuleEntries} surfaces exactly that as `broken`.
  *
  * It also answers the one question next to those sentences that is not itself a rule: how a
@@ -33,7 +36,7 @@ import type {
 } from '@mj-biz-apps/forms-entities';
 
 import { SCORE_SOURCE_ID, type ConditionalSourceQuestion } from './condition-sources';
-import { jumpReach, reachNote } from './jump-reach';
+import { jumpReach, reachNote, readHorizon, type ReachSource } from './jump-reach';
 import { describeCondition, groupConditions, type RuleVerb } from './rules-panel-model';
 
 /** Which kind of item a rule hangs off — what the hub needs to route a click back to. */
@@ -124,6 +127,17 @@ const MISSING_ENDING = 'an ending screen that no longer exists';
 const UNREACHED_DESTINATION = 'a destination that is no longer ahead of it, so the rule never runs';
 /** Refused by the resolver — see `hasCondition` in rule-verbs.ts for why ignoring is the safe way. */
 const NO_CONDITIONS = 'no conditions, so it never runs';
+/**
+ * A source that EXISTS but sits after the rule in the walk — arrived at by REORDERING (issue #73).
+ *
+ * Not a deleted question, and saying so would be worse than saying nothing: the question is two
+ * rows down the canvas, visibly present, and a badge caught lying once is a badge nobody reads on
+ * the day it is right. What actually happens is that the rule runs before anything has been put in
+ * the answer map under that id, decides the same way for every respondent, and then CHANGES ITS
+ * MIND once the source is answered — the widget re-derives visibility on every keystroke.
+ */
+const UNREADABLE_SOURCE =
+  'a question that is answered later than this rule runs, so the rule reads a blank';
 
 /**
  * Every rule on the form, in reading order: page by page, each page's own rules before its
@@ -171,6 +185,9 @@ function itemEntries(
   form: RuleInventoryForm,
 ): RuleEntry[] {
   const out: RuleEntry[] = [];
+  // An ENDING is not a stop in the walk — it is evaluated after the whole form — so neither what
+  // a jump passes over nor what a rule may read is asked of one.
+  const reachSource: ReachSource | undefined = kind === 'ending' ? undefined : { kind, id: item.id };
   const show = item.conditionalRule?.show;
   if (show) {
     out.push({
@@ -181,7 +198,7 @@ function itemEntries(
       verb: 'show',
       icon: ROW_ICONS.show,
       sentence: `Show ${quoted(item.label)} ${whenClause(show, form.sources)}`,
-      broken: brokenIn(show, form.sources),
+      broken: brokenIn(show, form, reachSource, 'show'),
       note: '',
     });
   }
@@ -192,8 +209,7 @@ function itemEntries(
     // What the jump passes over, and whether it can fire at all — see `jump-reach.ts`. An
     // ENDING screen is not a stop in the walk, so reach is asked only of an item that is: a
     // question or a section.
-    const reach =
-      kind === 'ending' ? undefined : jumpReach(form.pages, { kind, id: item.id }, jump.target);
+    const reach = reachSource ? jumpReach(form.pages, reachSource, jump.target) : undefined;
     // The resolver refuses a conditionless jump outright, so everything else this row would say
     // about it — where it goes, what it skips — is about a rule that never runs.
     const fires = groupConditions(jump.when).length > 0;
@@ -211,7 +227,7 @@ function itemEntries(
         `${ordinal}After ${quoted(item.label)}, ${destination.phrase} ` +
         `${whenClause(jump.when, form.sources, 'jump')}`,
       broken: [
-        ...brokenIn(jump.when, form.sources),
+        ...brokenIn(jump.when, form, reachSource, 'jump'),
         ...destination.broken,
         ...(fires ? [] : [NO_CONDITIONS]),
         // Only when the destination RESOLVES and the rule can run at all: a deleted target is
@@ -265,7 +281,7 @@ function endingEntry(
     broken.push('a condition that is never read, because screened-out screens are not chosen by finishing');
   }
   if (show) {
-    broken.push(...brokenIn(show, form.sources));
+    broken.push(...brokenIn(show, form, undefined, 'show'));
   }
 
   const sentence = knockout
@@ -430,13 +446,58 @@ function whenClause(
   return `when ${conditions.map((condition) => describeCondition(condition, sources)).join(joiner)}`;
 }
 
-/** The references in a group that no longer resolve, deduplicated. */
+/**
+ * What a group references that the author needs told about, deduplicated.
+ *
+ * TWO failures, and they are not the same failure. A source that no longer EXISTS is a rule about
+ * a question that is gone. A source that exists but is answered LATER than this rule runs is a
+ * rule about a question that is right there — see {@link UNREADABLE_SOURCE}.
+ *
+ * Collected PER CONDITION, so a rule naming one deleted question and one moved-below question
+ * reports both: that is the rule with the most to fix, and one reason per rule would hide half of
+ * it. A condition that does not resolve is not then also tested for readability — there is no
+ * index to compare, and two reasons about one condition sends the author looking twice.
+ *
+ * `source` is `undefined` for an ENDING screen, which is evaluated after the whole form is
+ * answered and may legally read anything. That is the same answer `endingConditionalSources`
+ * gives the picker, from the same fact.
+ */
 function brokenIn(
   group: ConditionalGroup | undefined,
-  sources: ReadonlyArray<ConditionalSourceQuestion>,
+  form: RuleInventoryForm,
+  source: ReachSource | undefined,
+  verb: RuleVerb,
 ): string[] {
-  const missing = groupConditions(group).some((condition) => !resolves(condition, sources));
-  return missing ? [MISSING_QUESTION] : [];
+  const readable = source ? readableSources(form, source, verb) : undefined;
+  const reasons = new Set<string>();
+  for (const condition of groupConditions(group)) {
+    if (!resolves(condition, form.sources)) {
+      reasons.add(MISSING_QUESTION);
+      continue;
+    }
+    if (readable && condition.source !== 'score' && !readable.has(condition.questionId ?? '')) {
+      reasons.add(UNREADABLE_SOURCE);
+    }
+  }
+  return [...reasons];
+}
+
+/**
+ * The question ids a rule on `source` may read, per `readHorizon`.
+ *
+ * The SAME arithmetic the source pickers slice with, which is the point: the picker and the badge
+ * answer "can this rule read that question?" from one function, so they cannot disagree. Sliced
+ * from the full ordered list — `form.sources` is the filtered one, and mixing them shifts every
+ * horizon on a form containing a `Statement`.
+ */
+function readableSources(
+  form: RuleInventoryForm,
+  source: ReachSource,
+  verb: RuleVerb,
+): ReadonlySet<string> {
+  const horizon = readHorizon(form.pages, source, verb);
+  const questions = form.pages.flatMap((page) => page.questions);
+  return new Set(questions.slice(0, horizon + 1).map((question) => question.id));
 }
 
 /**
@@ -471,12 +532,12 @@ function quoted(label: string): string {
  * belongs beside the thing it is about, and it was a second place to look that an author had to
  * remember existed. The badges say it where the rules live.
  *
- * What must NOT be lost with the tab is the warning: a condition naming a question that was
- * since deleted is NOT_EVALUABLE, which the evaluator reads as `false`, so the item it guards is
- * hidden from every respondent — permanently, silently, with the form still looking correct.
- * That is what {@link RuleBadge.broken} carries, and it is why a broken badge says so INSTEAD of
- * saying what the rule does: what the rule was meant to do stopped being the useful fact about
- * it.
+ * What must NOT be lost with the tab is the warning: a condition whose question is not in the
+ * answer map reads `undefined`, which is `false` for the equality family and TRUE for
+ * `isNotAnswered` / `notEquals` — so the guarded item is pinned shut for everyone, or pinned
+ * open for everyone, with the form still looking correct in the builder. That is what
+ * {@link RuleBadge.broken} carries, and it is why a broken badge says so INSTEAD of saying what
+ * the rule does: what the rule was meant to do stopped being the useful fact about it.
  */
 export interface RuleBadge {
   /** Font Awesome classes — the same icon the rule carries everywhere else. */

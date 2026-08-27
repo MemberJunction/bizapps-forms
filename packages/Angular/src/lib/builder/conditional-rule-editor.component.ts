@@ -26,6 +26,7 @@ import {
   type ConditionalSourceQuestion,
   type OperatorChoice,
   type ValueEditorKind,
+  staleSourceLabel,
 } from './condition-sources';
 
 const CONDITIONAL_EDITOR_CSS = /* css */ `
@@ -160,6 +161,21 @@ export class ConditionalRuleEditorComponent {
   @Input() sources: ConditionalSourceQuestion[] = [];
 
   /**
+   * EVERY answerable question on the form, in order — not a second opinion about what this rule
+   * may read, but the list that lets a stale row say WHY it is stale.
+   *
+   * The complement of {@link sources} within this is exactly "exists, but answered after this
+   * rule runs" (issue #73). Derived here rather than handed down as a ready-made "later" list
+   * because a `show` gate and a `jump` on the same item have different {@link sources} and would
+   * need two such lists — while this one value serves both, and cannot drift from the array the
+   * `<select>` is rendering because it is differenced against exactly that array.
+   *
+   * Empty is the safe default: {@link staleSourceLabel} then keeps the old wording rather than
+   * making an ordering claim it has no evidence for.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
+
+  /**
    * The item this rule belongs to — the question or page whose logic is being edited.
    *
    * It decides where a NEW row opens. The list alone cannot: a question's jump reads its own
@@ -263,6 +279,14 @@ export class ConditionalRuleEditorComponent {
       return null;
     }
     return named;
+  }
+
+  /**
+   * What that extra entry READS — see {@link staleSourceLabel} for the three causes it tells
+   * apart, and why one of them deliberately keeps the old wording.
+   */
+  protected staleQuestionLabel(condition: ConditionalCondition): string {
+    return staleSourceLabel(this.questionSelectValue(condition), this.sources, this.formSources);
   }
 
   /**

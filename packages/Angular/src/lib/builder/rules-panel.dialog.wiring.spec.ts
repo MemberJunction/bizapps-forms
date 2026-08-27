@@ -456,3 +456,28 @@ describe('the catch-all ending is STATED here, not edited here', () => {
     expect(guarded).toMatch(/defaultEndingLabel/);
   });
 });
+
+/**
+ * The rail names a rule's source from the WHOLE form, not from what that rule may legally read.
+ *
+ * Issue #73. Naming and legality are two questions and the rail was answering both with one
+ * list: after a reorder its summary read `Show only when (deleted question) is answered` about a
+ * question sitting one row above it on the canvas. The badge beside it had already been taught to
+ * say what really happened, so the rail was the last surface still telling the old lie.
+ *
+ * `rules-inventory.ts` reached this conclusion first and wrote it down — its `sources` is
+ * documented as "the WHOLE form's questions, not one item's legal sources", for this reason.
+ */
+describe('the rules rail names a source it is no longer allowed to read', () => {
+  it('resolves prompts against the form-wide list as well as the rule\'s own', () => {
+    expect(panel()).toMatch(/describeCondition\(c, \[\.\.\.sources, \.\.\.this\.formSources\]\)/);
+  });
+
+  it('takes that list as an input, defaulted to empty so an unwired host degrades to the old text', () => {
+    expect(panel()).toMatch(/@Input\(\) formSources: ConditionalSourceQuestion\[\] = \[\];/);
+  });
+
+  it('hands it on to the editor the dialog opens', () => {
+    expect(panelHtml()).toMatch(/\[formSources\]="formSources"/);
+  });
+});

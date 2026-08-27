@@ -7,10 +7,11 @@
  * was conditional at all. The sentences it composed are still composed (`rules-inventory.ts`);
  * what changed is where they are shown.
  *
- * The one thing that MUST survive the tab is its warning. A condition naming a question that was
- * since deleted evaluates false, so the item it guards is hidden from every respondent —
- * permanently, silently, with the form still looking correct in the builder. Nothing else in the
- * builder says so, which is why the tab was worth opening and why the badge is worth rendering.
+ * The one thing that MUST survive the tab is its warning. A condition whose question is not in
+ * the answer map reads `undefined` — `false` under the equality family, TRUE under
+ * `isNotAnswered` / `notEquals` — so the item it guards is shown to everyone or to nobody,
+ * silently, with the form still looking correct in the builder. Nothing else in the builder says
+ * so, which is why the tab was worth opening and why the badge is worth rendering.
  *
  * The component uses decorated inputs and cannot be instantiated in this suite's node
  * environment, so what is checkable is the source. Comments are stripped before every assertion:
@@ -65,21 +66,39 @@ describe('a rule is visible on the item it is about', () => {
   it('says what is wrong in words, never in colour alone', () => {
     // The warning token turns a badge amber. Amber is not a message, and it is not one at all to
     // a colourblind author or a screen reader.
+    const badge = stripped('rule-badge.component.ts');
+    expect(badge).toMatch(/\[class\.mjf-badge--warning\]="badge\.broken"/);
+    expect(badge).toMatch(/\{\{ badge\.label \}\}/);
+  });
+
+  it('shows that message on hover, rather than promising one a native tooltip withholds', () => {
+    // `[title]` is technically a tooltip and practically a dead icon: the browser waits about a
+    // second, so the honest reading of a hover that does nothing is that the badge is broken —
+    // which is exactly the wrong impression for the badge that reports a broken rule.
+    // `setting-row.component.ts` reached this conclusion first and its CSS says so; this is the
+    // one place that kept the mechanism that was rejected there.
+    const badge = stripped('rule-badge.component.ts');
+    expect(badge).toMatch(/role="tooltip"/);
+    expect(badge).toMatch(/\{\{ badge\.detail \}\}/);
+    expect(badge).not.toMatch(/\[title\]="badge\.detail"/);
+    // The bubble overlaps whatever sits below it. Without this it swallows that row's clicks.
+    expect(badge).toMatch(/pointer-events:\s*none/);
+    // Amber plus a hover bubble is still nothing to a screen reader.
+    expect(badge).toMatch(/\[attr\.aria-label\]="badge\.label \+ ': ' \+ badge\.detail"/);
+  });
+
+  it('is rendered from ONE component, not copied to each place a badge appears', () => {
+    // Three sites carried the same span — a question, a section header and an ending screen — so
+    // the tooltip would have been written three times and drifted twice.
     const html = builderHtml();
-    expect(html).toMatch(/\[class\.mjf-badge--warning\]="badge\.broken"/);
-    expect(html).toMatch(/\[title\]="badge\.detail"/);
-    expect(html).toMatch(/\{\{ badge\.label \}\}/);
+    expect(html.match(/<mjf-rule-badge/g) ?? []).toHaveLength(3);
+    expect(html).not.toMatch(/<span[^>]*fb-rule-badge/);
   });
 
   it('is a label, not a second way to write a rule', () => {
     // Two write paths for one thing is how a summary and a panel come to disagree about what a
     // rule says. The badge has no click handler; selecting the row opens the panel that owns it.
-    const html = builderHtml();
-    const badgeSpans = html.match(/<span[^>]*fb-rule-badge[\s\S]{0,200}?>/g) ?? [];
-    expect(badgeSpans.length).toBeGreaterThan(0);
-    for (const span of badgeSpans) {
-      expect(span).not.toMatch(/\(click\)/);
-    }
+    expect(stripped('rule-badge.component.ts')).not.toMatch(/\(click\)/);
   });
 });
 

@@ -62,6 +62,7 @@ import {
 import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
 import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
+import { RuleBadgeComponent } from './rule-badge.component';
 import {
   collectRuleEntries,
   endingReachFor,
@@ -154,6 +155,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     AutomationTabComponent,
     ResponsesTabComponent,
     SaveAsTemplateDialogComponent,
+    RuleBadgeComponent,
   ],
   providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
   templateUrl: './form-builder.component.html',
@@ -803,6 +805,20 @@ export class FormBuilderComponent extends BaseFormComponent {
     }));
   }
 
+  /**
+   * Every answerable question on the form, in flow order — the WHOLE list, not one rule's legal
+   * prefix.
+   *
+   * Two readers, and they need the same list for related reasons. The rule inventory resolves
+   * prompts against it, because a rule pointing at a question it should not have been able to
+   * reach is still a rule that reads. The condition editor differences it against the offered
+   * sources to tell "this question was deleted" from "this question is answered after your rule
+   * runs" — see `staleSourceLabel`.
+   */
+  protected get formSources(): ConditionalSourceQuestion[] {
+    return (this.tree?.pages ?? []).flatMap((page) => this.sourcesOf(page.questions));
+  }
+
   /** Every ending screen, as a jump destination. */
   private get endingDestinations(): Array<{ id: string; label: string }> {
     return this.endScreens.map((screen) => ({ id: screen.ID, label: screen.Title || 'Ending screen' }));
@@ -923,7 +939,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return [];
     }
     return [
-      ...this.tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      ...this.formSources,
       // Endings may also band on the running score (C4) — "score > 70 → pass screen". Only
       // endings get this: mid-form rules reading a mid-form score would be circular.
       SCORE_SOURCE,
@@ -1089,7 +1105,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return { sources: [], pages: [], endings: [] };
     }
     return {
-      sources: tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      sources: this.formSources,
       pages: tree.pages.map((page, index) => ({
         id: page.entity.ID,
         label: page.entity.Title || `Page ${index + 1}`,

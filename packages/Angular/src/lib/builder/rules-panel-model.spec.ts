@@ -162,7 +162,8 @@ describe('describeCondition speaks in the voice of the source it read', () => {
   describe('worst', () => {
     it('says a deleted question is deleted instead of vanishing', () => {
       // A summary that hides the breakage is how a dead rule survives unnoticed — and a show
-      // rule on a deleted source evaluates false, hiding the item from EVERYONE.
+      // rule on a deleted source reads `undefined`, which hides the item from everyone under
+      // `equals` and SHOWS it to everyone under `isNotAnswered`.
       expect(describeCondition({ questionId: 'gone', op: 'equals', value: 'x' }, SOURCES)).toBe(
         '(deleted question) equals x',
       );
