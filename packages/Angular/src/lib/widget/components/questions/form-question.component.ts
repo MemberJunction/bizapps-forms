@@ -588,9 +588,8 @@ export class FormQuestionComponent {
   protected async onFile(input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0] ?? null;
     if (!file) {
-      // Cleared the picker — drop the answer + any prior upload state.
+      // Cleared the picker — the store drops the upload state AND the answer together.
       this.uploads.clear(this.question().id);
-      this.valueChange.emit(null);
       return;
     }
     await this.uploadFile(file);
@@ -605,15 +604,17 @@ export class FormQuestionComponent {
   }
 
   /**
-   * Upload one file to the anonymous `/forms/upload` endpoint and store the returned
-   * `fileId` as the answer. The answer is cleared while the upload is in flight so a
-   * required FileUpload cannot be satisfied by a not-yet-stored file.
+   * Upload one file to the anonymous `/forms/upload` endpoint.
+   *
+   * The result does NOT travel back through `valueChange`, and that is the whole point. An output
+   * is routed by the view: `(valueChange)="onValueChange(q, $event)"` writes to whichever question
+   * the template is bound to at the moment it fires, which after an `await` is no longer reliably
+   * the question the upload was for. The store commits the answer under the token's own question
+   * id instead — see `succeed` for the two ways that went wrong.
    */
   private async uploadFile(file: File): Promise<void> {
     const questionId = this.question().id;
     const token = this.uploads.begin(questionId, file);
-    // Clear any prior fileId until the new upload confirms.
-    this.valueChange.emit(null);
     try {
       const result = await this.uploader.upload(
         file,
@@ -622,20 +623,10 @@ export class FormQuestionComponent {
         (fraction) => this.uploads.setProgress(token, fraction),
         this.responseId() || undefined,
       );
-      // A superseded upload must not write ANYTHING: not the answer, not the status. Its bytes
-      // are stored and its MJ: Files row exists, but the respondent has since asked for a
-      // different file — or for none — and that is the answer that has to stand. The store owns
-      // that judgement now, and says so by refusing the write.
-      if (this.uploads.succeed(token)) {
-        this.valueChange.emit(result.fileId);
-      }
+      this.uploads.succeed(token, result.fileId);
     } catch (err) {
-      // Refused for the same reason, and it matters more here: an unguarded stale failure emits
-      // null and wipes the answer the NEWER upload had already stored successfully.
       const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
-      if (this.uploads.fail(token, message)) {
-        this.valueChange.emit(null);
-      }
+      this.uploads.fail(token, message);
     }
   }
 }

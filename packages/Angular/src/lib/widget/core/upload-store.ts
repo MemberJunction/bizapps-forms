@@ -16,7 +16,9 @@
  * One store per widget instance — NOT a `BaseSingleton`. Several forms can be embedded on one
  * host page, and they must not see each other's uploads.
  */
-import { computed, signal } from '@angular/core';
+import { signal } from '@angular/core';
+
+import { type AnswerValue } from '@mj-biz-apps/forms-entities';
 
 export type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
 
@@ -56,11 +58,35 @@ interface UploadRecord extends UploadView {
 
 const idleRecord = (seq: number, file: File | null): UploadRecord => ({ ...IDLE_UPLOAD, seq, file });
 
+/**
+ * Where a file question's answer is written.
+ *
+ * `FormRuntime` satisfies this structurally; the store asks for the narrowest thing it needs so
+ * it cannot reach into the rest of the runtime.
+ */
+export interface UploadAnswerSink {
+  setValue(questionId: string, value: AnswerValue): void;
+}
+
 export class FormUploadStore {
   private readonly records = signal<ReadonlyMap<string, UploadRecord>>(new Map());
 
+  private sink: UploadAnswerSink | null = null;
+
   /** Bumped per upload so a superseded one can be recognised even across questions. */
   private nextSeq = 0;
+
+  /**
+   * Bind this store to the runtime whose answers its uploads become.
+   *
+   * Called when the form definition loads, because the runtime does not exist before then. Any
+   * records held now describe the PREVIOUS runtime's form, so they go with it — a reload mints a
+   * new response id, and a confirmation carried across would name a file that response never had.
+   */
+  public connect(sink: UploadAnswerSink): void {
+    this.sink = sink;
+    this.records.set(new Map());
+  }
 
   /** Begin uploading `file` for `questionId`; the returned token is what may write the result. */
   public begin(questionId: string, file: File): UploadToken {
@@ -73,33 +99,51 @@ export class FormUploadStore {
       seq,
       file,
     });
+    // No answer while an upload is in flight: a required FileUpload must not be satisfied by a
+    // file that is not stored yet, and a replacement must not leave the old id standing.
+    this.commit(questionId, null);
     return { questionId, seq };
   }
 
   /**
-   * Record a successful upload. Returns false when the token has been superseded, which is the
-   * caller's signal that it must not write the answer either.
+   * Record a successful upload AND store its file as the question's answer.
+   *
+   * The two are one act, which is the point. They used to be two: the store recorded the
+   * confirmation against the question id, and the component emitted the file id through its
+   * `valueChange` output. An output is routed by the VIEW — `(valueChange)="onValueChange(q, ...)"`
+   * reads whichever question the template is bound to when the event fires — and by the time a
+   * slow upload resolved that was a different question in OneQuestion mode (one component
+   * instance serves the whole deck, so the resume's file id was written as the next question's
+   * answer) or no question at all in Scroll (leaving the page destroys the component, and an
+   * emit from a destroyed `output()` is dropped, so the answer was silently lost while this
+   * store still showed "done"). Committing here removes the view from the path entirely.
+   *
+   * A superseded token writes NOTHING: its bytes are stored and its `MJ: Files` row exists, but
+   * the respondent has since asked for a different file — or for none — and that is the answer
+   * that has to stand.
    */
-  public succeed(token: UploadToken): boolean {
+  public succeed(token: UploadToken, fileId: string): void {
     const current = this.records().get(token.questionId);
     if (!current || current.seq !== token.seq) {
-      return false;
+      return;
     }
     this.write(token.questionId, { ...current, status: 'done', progress: 1, error: null });
-    return true;
+    this.commit(token.questionId, fileId);
   }
 
   /**
-   * Record a failed upload. Returns false when the token has been superseded — the caller must
-   * then leave the answer alone, because a newer upload may already have stored one.
+   * Record a failed upload and leave the question unanswered.
+   *
+   * A superseded token is ignored, and it matters more here than on the success path: clearing
+   * the answer on a stale failure wipes the one a NEWER upload had already stored successfully.
    */
-  public fail(token: UploadToken, message: string): boolean {
+  public fail(token: UploadToken, message: string): void {
     const current = this.records().get(token.questionId);
     if (!current || current.seq !== token.seq) {
-      return false;
+      return;
     }
     this.write(token.questionId, { ...current, status: 'error', progress: null, error: message });
-    return true;
+    this.commit(token.questionId, null);
   }
 
   /** The file last chosen for `questionId`, so a failed upload can be retried. */
@@ -129,6 +173,7 @@ export class FormUploadStore {
    */
   public clear(questionId: string): void {
     this.write(questionId, idleRecord(++this.nextSeq, null));
+    this.commit(questionId, null);
   }
 
   /**
@@ -144,6 +189,23 @@ export class FormUploadStore {
     }
     const { status, fileName, progress, error } = record;
     return { status, fileName, progress, error };
+  }
+
+  /**
+   * Write a file question's answer.
+   *
+   * Throws rather than dropping the answer: an unconnected store means the widget wired itself
+   * wrong, and a respondent silently submitting a form without the file they attached is the
+   * worse of the two outcomes by a distance.
+   */
+  private commit(questionId: string, value: AnswerValue): void {
+    if (!this.sink) {
+      throw new Error(
+        `FormUploadStore has no answer sink, so the upload for question ${questionId} cannot be stored. ` +
+          'Call connect(runtime) when the form definition loads.',
+      );
+    }
+    this.sink.setValue(questionId, value);
   }
 
   private write(questionId: string, record: UploadRecord): void {

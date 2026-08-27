@@ -276,8 +276,17 @@ draft/commit and discard-warning behaviour — that work is done and must not re
 - **All other cases go to**: reads and writes the default ending screen's `isDefault`. A
   form-level fact edited from an item-level dialog, so it needs an explicit note in the UI; it is
   the one write here that touches something other than the item.
+  **STATUS 2026-08-27: not built.** `logic-editor.component.ts` ships the show gate, the numbered
+  rule rows with move/remove, and **+ Add rule** — and nothing else from this bullet. The default
+  ending itself exists and works (`resolveEndingScreen`); what is missing is the control that
+  surfaces it here. Still wanted, and still unscheduled.
 - **See all rules** → the Rules tab. **Delete rule** / **+ Add rule** / **Delete all rules**,
   the last behind a confirm.
+  **STATUS 2026-08-27.** **See all rules is OBSOLETE** — the Rules tab was deleted in `d4b31c0`
+  and every rule an item carries is now a badge on that item, with the hub's own sentences as its
+  tooltip, so there is no longer a destination for the link and nothing for it to say. **Delete
+  rule** and **+ Add rule** shipped in `f1f03df`. **Delete all rules, behind a confirm, is NOT
+  built** — removing several rules means removing them one at a time. Minor, and unscheduled.
 - **The ending screen's settings** gain the disqualified toggle with copy that says what it
   means: *"Responses that reach this screen are recorded as disqualified — they don't count
   toward your response limit and no automations run."*
@@ -354,3 +363,43 @@ which is why five phases of testing missed it. Any future render-mode change sho
 upload case in BOTH modes — OneQuestion shares one component instance across the entire deck, so
 it is the more exposed of the two and remains unverified live (no published OneQuestion
 distribution carries a file question).
+
+
+---
+
+## 10. The other half of §9: an upload's ANSWER was routed by the view
+
+**Found by code review, in the exact place §9 said to look.** §9 closed with "OneQuestion shares
+one component instance across the entire deck, so it is the more exposed of the two and remains
+unverified live". It was right, and the store fixed only half of what was wrong there.
+
+**What §9's fix did and did not cover.** `FormUploadStore` keyed the upload *confirmation* by
+question id, so the display could no longer bleed. The *answer* still travelled a different road:
+`FormQuestionComponent.uploadFile` awaited the upload and then called `this.valueChange.emit(fileId)`.
+An `output()` is routed by the VIEW — `(valueChange)="onValueChange(q, $event)"` writes to whichever
+question the template is bound to at the moment it fires — and after an `await` that is not reliably
+the question the upload was for:
+
+- **OneQuestion — silent corruption.** `@if (current(); as q)` re-binds rather than rebuilds, so one
+  `mjf-form-question` serves the whole deck. A respondent who picks a file for an optional question
+  and presses Next before the upload lands has the resume's file id written as the NEXT question's
+  answer, overwriting whatever they had put there. Nothing reports it; both questions read plausibly.
+- **Scroll — silent loss.** Leaving a section destroys the component (the `entryKey` fix means the
+  views really are rebuilt), and an emit from a destroyed `output()` is dropped. The store still
+  shows "resume.pdf uploaded" while the answer was never stored — the display/answer divergence the
+  store was built to end, arriving through the other door.
+
+**Fix.** The store commits the answer itself, under the token's own question id, so the view is not
+on the path at all: `succeed(token, fileId)` / `fail(token, message)` / `clear(questionId)` write
+through an `UploadAnswerSink` (`FormRuntime` satisfies it structurally), and `begin` clears the
+question while its upload is in flight. The component no longer emits from the upload path. The
+supersede guard and the answer write became ONE decision instead of two that had to agree — the
+booleans `succeed`/`fail` used to return, which the caller had to remember to check, are gone.
+
+**Why this was invisible.** Both halves are Angular view semantics, and this suite is node-only —
+no TestBed, no DOM. §9's fix was verified live in Scroll mode, where the corruption does not occur.
+Committing through a plain class is what made it testable at all: `upload-store.spec.ts` now drives
+a real `FormRuntime` and asserts the answer lands on the right question.
+
+**Still unverified live:** OneQuestion mode with a file question, in either direction. No published
+OneQuestion distribution carries one. That has now been the outstanding item twice.

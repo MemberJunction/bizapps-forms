@@ -249,6 +249,15 @@ integration*, not on out-feature-ing the long tail.
    progress signal, instant load, resilience on flaky networks.
 2. **Two render modes:** classic scroll form **and** Typeform-style one-question-at-a-time
    (a per-form setting). Both from the same definition.
+   *Amended 2026-08-25 (`a338ae0`).* "Classic scroll" now means **one SECTION per screen**, not
+   every visible section stacked under a single Submit. A single-section form — the common case —
+   is still one screen and looks exactly as it always did; a multi-section form gains Back / Next
+   and "Section 2 of 4". The change was forced by branching: with everything on one surface a
+   `Go to` could only make questions VANISH from a page the respondent was already reading, above
+   the cursor as often as below it, taking whatever they had typed with them. A section is a step,
+   so a jump has a real destination and the questions it skips are never reached rather than
+   removed. Scroll still scrolls *within* a section, which is what distinguishes it from
+   OneQuestion.
 3. **Anonymous by default for public links;** identified when the respondent is known
    (prefill via signed token, or authenticated Explorer user).
 4. **Setup in under 2 minutes** for the 80% case — template or AI-generated, then tweak.

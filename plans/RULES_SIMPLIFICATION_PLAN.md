@@ -150,10 +150,20 @@ disqualify."** The Required toggle stays untouched. Scoring stays and feeds cond
 | Multi-select (options, `multiValued: true`) | includes any of (`in`) · includes none of (`notIn`) · is answered · is not answered | checklist only |
 | Free text (no options, text column) | is · is not · is answered · is not answered | text (trimmed) |
 | Numeric (no options, numeric column) | is · is not · greater than · less than · is answered · is not answered | text, `inputmode="numeric"` |
-| Total score | greater than · less than · is | numeric text |
+| Total score **(ending rules only)** | greater than · less than · is | numeric text |
 
 `equals`/`notEquals` are **not offered** for multi-select (never-match / always-match traps, §1).
 One canonical label map; per-kind lists reference it — never a second label for the same op.
+
+**`Total score` is offered on ENDING rules only** — `form-builder.component.ts` adds `SCORE_SOURCE`
+to the ending source list and to no other. A mid-form `show` or `Go to` rule reading the running
+score would be circular: the score is the sum of what has been answered so far, and a rule that
+changes which questions are asked changes the very total it is testing. The widget matches the
+builder — `FormRuntime.visiblePages` calls `resolveVisiblePages(pages, answers)` with no
+`EvalExtras`, so a score condition reaching a page or question rule through mj-sync, an AI-authored
+rule or hand-written JSON is **inert**, not merely unauthorable. Inert is the safe direction (a
+`show` gate stays open, a `Go to` never fires), but it is silent; if score-banding mid-form is ever
+genuinely wanted, it needs a real answer to the circularity, not a wider source list.
 
 ---
 

@@ -88,6 +88,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly api = inject(FORMS_API_SERVICE);
   private readonly config = inject(FORMS_API_CONFIG);
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+  /** Provided above, so this is the store every question component in THIS widget injects. */
+  private readonly uploads = inject(FormUploadStore);
   private readonly startedAt = new Date().toISOString();
 
   /** The mounted Turnstile challenge (present only when captcha is required + rendered). */
@@ -275,7 +277,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
       this.definition.set(def);
-      this.runtime.set(new FormRuntime(def));
+      const runtime = new FormRuntime(def);
+      this.runtime.set(runtime);
+      // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed`.
+      this.uploads.connect(runtime);
       this.autosave?.dispose();
       this.autosave = new AutosaveController(
         () => this.savePartial(),
