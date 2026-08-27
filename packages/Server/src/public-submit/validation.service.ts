@@ -13,7 +13,7 @@
  *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
  *     `ValidationRule` (length / numeric bounds / regex pattern).
  *
- * A `partial` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`).
+ * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`).
  * It is a draft, and the widget autosaves on a debounce with no validity gate, so a half-typed
  * value is the normal case rather than an error — but "not finished" and "already too big" are
  * different claims. A value under `minLength`, an incomplete email or a value that does not yet
@@ -35,10 +35,10 @@
  * Returns the set of visible answers to persist plus any field errors. Pure — no I/O.
  */
 import {
-  evaluateConditionalRule,
   isAnswerableQuestionType,
   isAnswerSupplied,
   isRequiredSatisfied,
+  resolveRenderedQuestions,
   coerceAnswerToNumber,
   matchesValidationPattern,
   validateAnswerFormat,
@@ -135,44 +135,69 @@ export function buildAnswerMap(answers: FormAnswerInput[]): Map<string, AnswerVa
 }
 
 /**
- * Run full server-side validation. `partial` submissions skip the `isRequired`
- * check (the respondent has not finished) but still validate any supplied answers.
+ * How much of the rulebook a submission is held to.
+ *
+ * This was a boolean called `partial`, and the pipeline passed `true` for two unrelated
+ * situations: an autosaved draft, and a COMPLETED submission from a respondent a knockout rule
+ * screened out. They make different claims. A draft is unfinished, so judging a half-typed
+ * value would be unfair. A screened-out submission is finished — it seals the response row —
+ * and the only thing it needs waived is `isRequired` on questions the flow never reached.
+ * Waiving format along with it left the one path that writes a permanent row as the one path
+ * where the author's validation was off.
+ */
+export type ValidationMode = 'complete' | 'draft' | 'screened-out';
+
+/** Whether this mode enforces `isRequired`. Only a finished, qualifying submission does. */
+function asksForEverything(mode: ValidationMode): boolean {
+  return mode === 'complete';
+}
+
+/**
+ * Run full server-side validation. See {@link ValidationMode} for what each mode waives.
  */
 export function validateSubmission(
   definition: PublishedFormDefinition,
   answers: FormAnswerInput[],
-  partial: boolean,
+  mode: ValidationMode,
 ): ValidationOutcome {
   const answerMap = buildAnswerMap(answers);
   const inputByQuestion = new Map(answers.map((a) => [a.questionId, a] as const));
   const errors: FieldError[] = [];
   const visible: ValidatedAnswer[] = [];
 
-  for (const page of definition.pages) {
-    if (!evaluateConditionalRule(page.conditionalRule, answerMap)) {
-      continue;
-    }
-    for (const question of page.questions) {
-      collectVisibleQuestion(question, answerMap, inputByQuestion, partial, errors, visible);
-    }
+  // ONE forward walk decides what the respondent saw — page show rules, question show rules,
+  // forward jumps and the terminal jump that ends the form, all folded together. Iterating
+  // `resolveVisiblePages` and re-filtering each page's own list was the same answer only for
+  // PAGE-level jumps: those remove a whole page, so the page resolver happens to drop them. A
+  // question jump hides questions WITHIN a page the walk already entered, and a terminal jump
+  // ends the form mid-page — a second pass over that page's list puts every one of them back.
+  // The widget renders this same walk, so a question it never showed can no longer be required
+  // here (plan invariant 2, which held for pages and silently did not hold for questions).
+  for (const question of resolveRenderedQuestions(definition.pages, answerMap)) {
+    collectVisibleQuestion(question, answerMap, inputByQuestion, mode, errors, visible);
   }
   return { errors, answers: visible, answerMap };
 }
 
-/** Evaluate one question's visibility, requiredness, and format; append findings. */
+/**
+ * Enforce requiredness and format on one question the walk decided the respondent reached;
+ * append findings.
+ *
+ * Visibility is NOT re-decided here — `resolveRenderedQuestions` already did it, jumps
+ * included. This used to re-run the question's own `show` rule, which read as belt and braces
+ * and was in fact the whole belt: it was the only visibility this function applied, so
+ * everything the walk knew about jumps was discarded on the way in.
+ */
 function collectVisibleQuestion(
   question: PublishedFormQuestion,
   answerMap: Map<string, AnswerValue>,
   inputByQuestion: Map<string, FormAnswerInput>,
-  partial: boolean,
+  mode: ValidationMode,
   errors: FieldError[],
   visible: ValidatedAnswer[],
 ): void {
   if (!isAnswerableQuestionType(question.type)) {
     return; // display-only, never an answer
-  }
-  if (!evaluateConditionalRule(question.conditionalRule, answerMap)) {
-    return; // hidden => its answer is dropped and required does not apply
   }
 
   const input = inputByQuestion.get(question.id);
@@ -182,8 +207,9 @@ function collectVisibleQuestion(
   // Required is asked SEPARATELY from answered, because the two disagree on consent: an
   // unticked box is `false`, which is a supplied answer, so a required "I agree to the terms"
   // used to pass here as well as in the widget. A rule enforced only in the browser is not
-  // enforced at all — this mutation is reachable without it.
-  if (question.isRequired && !partial && !isRequiredSatisfied(question.type, value)) {
+  // enforced at all — this mutation is reachable without it. The visibility return above is
+  // what keeps hidden ⇒ never required true (plan invariant 2).
+  if (asksForEverything(mode) && question.isRequired && !isRequiredSatisfied(question.type, value)) {
     errors.push({ questionId: question.id, message: `"${question.prompt}" is required.` });
     return;
   }
@@ -192,7 +218,7 @@ function collectVisibleQuestion(
     return; // nothing to persist / validate for an unanswered, optional question
   }
 
-  const invalid = validateValue(question, value, partial);
+  const invalid = validateValue(question, value, mode);
   if (invalid) {
     errors.push({ questionId: question.id, message: invalid });
     return;
@@ -212,7 +238,7 @@ function collectVisibleQuestion(
  * {@link validateAnswerFormat} is the same check the widget runs, imported rather than
  * reimplemented so the two cannot drift again.
  *
- * A `partial` (autosave) save is held ONLY to the upper bounds. Everything else — the type
+ * A `draft` (autosave) save is held ONLY to the upper bounds. Everything else — the type
  * format, `minLength`, `min`, `pattern` — describes a finished value, and a respondent passes
  * through all of those states on the way to a good answer: the widget autosaves on a 1500ms
  * debounce with no validity gate, so "someone@examp" is what typing an address looks like.
@@ -223,10 +249,10 @@ function collectVisibleQuestion(
 function validateValue(
   question: PublishedFormQuestion,
   value: AnswerValue,
-  partial: boolean,
+  mode: ValidationMode,
 ): string | undefined {
   const rule = question.validationRule;
-  if (partial) {
+  if (mode === 'draft') {
     return rule ? validateUpperBounds(value, rule) : undefined;
   }
   // The whole question, not just its type: an option-based answer cannot be checked against

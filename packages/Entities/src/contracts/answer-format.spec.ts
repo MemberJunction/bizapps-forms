@@ -5,7 +5,12 @@ import {
   validateCompositeParts,
   isRequiredSatisfied,
   answerCompleteness,
+  ratingScaleMax,
+  numericScalePoints,
+  impliedAnswerValues,
+  MAX_IMPLIED_SCALE_POINTS,
 } from './answer-format';
+import { FORM_QUESTION_TYPES } from './question-types';
 
 describe('matchesValidationPattern', () => {
   it('anchors the author pattern to the whole value', () => {
@@ -350,5 +355,119 @@ describe('validateAnswerFormat — answers checked against the authored options'
     // to check membership against, so the shape check is all that is left.
     expect(validateAnswerFormat({ type: 'SingleChoice', options: [] }, 'anything')).toBeUndefined();
     expect(validateAnswerFormat({ type: 'Ranking', options: [] }, ['a', 'b'])).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The answer set a type IMPLIES — see `impliedAnswerValues`.
+// ---------------------------------------------------------------------------
+
+describe('ratingScaleMax', () => {
+  describe('happy', () => {
+    it('reads the authored star count', () => {
+      expect(ratingScaleMax({ max: 7 })).toBe(7);
+    });
+  });
+
+  describe('edge', () => {
+    it('falls back to five when the author set none — what the widget has always rendered', () => {
+      expect(ratingScaleMax(undefined)).toBe(5);
+      expect(ratingScaleMax({})).toBe(5);
+      expect(ratingScaleMax({ max: 'seven' })).toBe(5);
+    });
+
+    it('refuses a scale with nothing to click', () => {
+      expect(ratingScaleMax({ max: 0 })).toBe(5);
+      expect(ratingScaleMax({ max: -3 })).toBe(5);
+    });
+  });
+
+  describe('worst', () => {
+    // A rating is rendered as one clickable star per point, and a condition editor as one
+    // <option> per point. Neither has any business building a million of them from a number
+    // that reached Settings through an API, a paste, or a typo.
+    it('clamps an absurd scale rather than rendering it', () => {
+      expect(ratingScaleMax({ max: 1_000_000 })).toBe(MAX_IMPLIED_SCALE_POINTS);
+    });
+  });
+});
+
+describe('numericScalePoints', () => {
+  describe('happy', () => {
+    it('gives a rating its stars, one per point', () => {
+      expect(numericScalePoints('Rating', { max: 5 })).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    it('gives NPS its fixed 0-10, which is not a setting', () => {
+      expect(numericScalePoints('NPS')).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(numericScalePoints('NPS', { min: 3, max: 4 })).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    });
+
+    it('gives an opinion scale exactly the points the widget renders', () => {
+      expect(numericScalePoints('OpinionScale', { min: 0, max: 4 })).toEqual([0, 1, 2, 3, 4]);
+    });
+  });
+
+  describe('edge', () => {
+    it('a plain Number question has no implied set — any number is an answer', () => {
+      expect(numericScalePoints('Number')).toBeUndefined();
+    });
+
+    it('is undefined for every type that does not answer on a scale', () => {
+      expect(numericScalePoints('ShortText')).toBeUndefined();
+      expect(numericScalePoints('YesNo')).toBeUndefined();
+      expect(numericScalePoints('SingleChoice')).toBeUndefined();
+    });
+  });
+
+  describe('worst', () => {
+    it('never builds more points than the widget would render', () => {
+      const points = numericScalePoints('OpinionScale', { min: 1, max: 5_000_000 });
+      expect(points?.length).toBeLessThanOrEqual(MAX_IMPLIED_SCALE_POINTS);
+    });
+  });
+});
+
+describe('impliedAnswerValues', () => {
+  describe('happy', () => {
+    it('a boolean question answers true or false, and nothing else', () => {
+      expect(impliedAnswerValues('YesNo')).toEqual([true, false]);
+      expect(impliedAnswerValues('Checkbox')).toEqual([true, false]);
+      expect(impliedAnswerValues('Legal')).toEqual([true, false]);
+    });
+
+    it('a scale question answers with one of its points', () => {
+      expect(impliedAnswerValues('Rating', { max: 3 })).toEqual([1, 2, 3]);
+    });
+  });
+
+  describe('edge', () => {
+    // The distinction the condition editor turns on: an implied set means the value is PICKED.
+    it('is undefined for free-input and option-driven types alike', () => {
+      expect(impliedAnswerValues('ShortText')).toBeUndefined();
+      expect(impliedAnswerValues('Number')).toBeUndefined();
+      expect(impliedAnswerValues('Date')).toBeUndefined();
+      expect(impliedAnswerValues('SingleChoice')).toBeUndefined();
+      expect(impliedAnswerValues('FileUpload')).toBeUndefined();
+    });
+  });
+
+  describe('worst', () => {
+    // The set is what a condition may compare against, so a value outside it can never match.
+    // Typed values, not their spellings: `5`, not `'5'`; `true`, not `'true'`.
+    it('carries the values in the type the answer is stored as', () => {
+      for (const value of impliedAnswerValues('Rating') ?? []) {
+        expect(typeof value).toBe('number');
+      }
+      for (const value of impliedAnswerValues('YesNo') ?? []) {
+        expect(typeof value).toBe('boolean');
+      }
+    });
+
+    it('every type either implies a set or does not — none throws', () => {
+      for (const type of FORM_QUESTION_TYPES) {
+        expect(() => impliedAnswerValues(type, { max: 4 })).not.toThrow();
+      }
+    });
   });
 });

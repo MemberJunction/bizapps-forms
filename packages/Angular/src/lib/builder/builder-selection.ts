@@ -17,6 +17,7 @@
 export type BuilderSelection =
   | { readonly kind: 'question'; readonly id: string }
   | { readonly kind: 'screen'; readonly id: string }
+  | { readonly kind: 'page'; readonly id: string }
   | { readonly kind: 'none' };
 
 /** The empty selection. A shared constant: it carries no identity worth allocating twice. */
@@ -32,6 +33,11 @@ export function selectScreen(id: string): BuilderSelection {
   return { kind: 'screen', id };
 }
 
+/** Show this page's settings, whatever was showing before (RULES_AND_BRANCHING_PLAN B2). */
+export function selectPage(id: string): BuilderSelection {
+  return { kind: 'page', id };
+}
+
 /** The selected question's id, or null when a screen (or nothing) is selected. */
 export function questionId(selection: BuilderSelection): string | null {
   return selection.kind === 'question' ? selection.id : null;
@@ -40,6 +46,11 @@ export function questionId(selection: BuilderSelection): string | null {
 /** The selected screen's id, or null when a question (or nothing) is selected. */
 export function screenId(selection: BuilderSelection): string | null {
   return selection.kind === 'screen' ? selection.id : null;
+}
+
+/** The selected page's id, or null when anything else (or nothing) is selected. */
+export function pageId(selection: BuilderSelection): string | null {
+  return selection.kind === 'page' ? selection.id : null;
 }
 
 /**
@@ -55,4 +66,9 @@ export function clearIfQuestion(selection: BuilderSelection, deletedId: string):
 /** Drop the selection if it is this screen — for when the screen is deleted. */
 export function clearIfScreen(selection: BuilderSelection, deletedId: string): BuilderSelection {
   return screenId(selection) === deletedId ? NOTHING_SELECTED : selection;
+}
+
+/** Drop the selection if it is this page — for when the page is deleted. */
+export function clearIfPage(selection: BuilderSelection, deletedId: string): BuilderSelection {
+  return pageId(selection) === deletedId ? NOTHING_SELECTED : selection;
 }

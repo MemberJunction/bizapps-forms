@@ -1,0 +1,58 @@
+<div class="rp">
+  <!-- The panel titles itself. Three hosts used to render their own "Rules" heading above it,
+       which put the label and the affordance that belongs beside it in different files. -->
+  <div class="rp-bar">
+    <p class="rp-bar-title">RULES</p>
+    <!-- One button, two faces. A pencil on an item with no rules asks the author to open a
+         dialog to discover it is empty; the message right below it has already said so. -->
+    <button
+      type="button"
+      class="rp-add"
+      [attr.aria-label]="hasRules ? 'Edit logic' : 'Add a rule'"
+      (click)="openDialog()"
+    >
+      @if (hasRules) {
+        <i class="fa-solid fa-pen" aria-hidden="true"></i> Edit
+      } @else {
+        <i class="fa-solid fa-plus" aria-hidden="true"></i> Add
+      }
+    </button>
+  </div>
+
+  @if (!hasRules) {
+    <p class="rp-empty">No rules yet. This item always shows.</p>
+  }
+
+  @for (row of summaryRows; track $index) {
+    <button type="button" class="rp-row" (click)="openDialog()">
+      <span class="rp-icon"><i [class]="row.icon" aria-hidden="true"></i></span>
+      <span class="rp-text">{{ row.text }}</span>
+    </button>
+  }
+</div>
+
+@if (dialogOpen) {
+  <mjf-rule-editor-dialog
+    [title]="'Edit logic'"
+    [subtitle]="'Decide when this ' + itemNoun + ' appears, and where the respondent goes next.'"
+    icon="fa-solid fa-code-branch"
+    [confirming]="confirmingDiscard"
+    (closeRequested)="requestClose()"
+    (confirmed)="commit()"
+    (discarded)="discardDraft()"
+    (resumed)="resumeEditing()"
+  >
+    <!-- The draft, not the item: nothing here reaches the form until Save. -->
+    <mjf-logic-editor
+      [draft]="draft"
+      [sources]="sources"
+      [jumpSources]="jumpSourceList"
+      [targets]="targets"
+      [reachNotes]="reachNotes"
+      [allowJumps]="allowJumps"
+      [itemNoun]="itemNoun"
+      [subjectSourceId]="subjectSourceId"
+      (draftChange)="onDraftChange($event)"
+    />
+  </mjf-rule-editor-dialog>
+}

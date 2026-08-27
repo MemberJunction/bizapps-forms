@@ -249,6 +249,15 @@ integration*, not on out-feature-ing the long tail.
    progress signal, instant load, resilience on flaky networks.
 2. **Two render modes:** classic scroll form **and** Typeform-style one-question-at-a-time
    (a per-form setting). Both from the same definition.
+   *Amended 2026-08-25 (`a338ae0`).* "Classic scroll" now means **one SECTION per screen**, not
+   every visible section stacked under a single Submit. A single-section form — the common case —
+   is still one screen and looks exactly as it always did; a multi-section form gains Back / Next
+   and "Section 2 of 4". The change was forced by branching: with everything on one surface a
+   `Go to` could only make questions VANISH from a page the respondent was already reading, above
+   the cursor as often as below it, taking whatever they had typed with them. A section is a step,
+   so a jump has a real destination and the questions it skips are never reached rather than
+   removed. Scroll still scrolls *within* a section, which is what distinguishes it from
+   OneQuestion.
 3. **Anonymous by default for public links;** identified when the respondent is known
    (prefill via signed token, or authenticated Explorer user).
 4. **Setup in under 2 minutes** for the 80% case — template or AI-generated, then tweak.
@@ -529,13 +538,16 @@ flowchart LR
 ## 6. Conditional Logic (Phase 1 basics only)
 
 Stored as **declarative JSON `ConditionalRule`** on FormPage and FormQuestion. Phase 1
-supports show/hide and skip-to-page based on prior answers:
+supports show/hide based on prior answers (skip-to-page and the other rule verbs ship with
+`plans/RULES_AND_BRANCHING_PLAN.md` — this section previously claimed skip-to-page, which
+never existed in the code):
 
 ```jsonc
 { "show": { "all": [ { "questionId": "<q>", "op": "equals", "value": "Other" } ] } }
 ```
 
-Operators: `equals, notEquals, in, notIn, isAnswered, greaterThan, lessThan, contains`.
+Operators: `equals, notEquals, equalsIgnoreCase, in, notIn, isAnswered, isNotAnswered,
+greaterThan, lessThan, contains, startsWith, endsWith`.
 Combinators: `all` / `any`. Evaluated client-side in the widget and re-validated server-side
 on submit. **Out of scope for P1:** calculated fields, expression language, quotas, visual
 flow-graph. Anything heavier is a Phase-2 candidate or an MJ Action.
@@ -1302,3 +1314,899 @@ native entities. This is the reporting differentiator no incumbent has.
     `packages/Server/src/generated/generated.ts` **byte-identically** to what is checked in. The
     regeneration artifacts were discarded: the DisplayName drift they also carry belongs to
     `chore/resync-codegen-output`, which this unblocks.
+- **2026-08-25 (evening) — rules & branching: verbs, not just visibility.** Branch
+  `feat/rules-and-branching`, driven end-to-end by `plans/RULES_AND_BRANCHING_PLAN.md` (which
+  carries the per-task implementation notes; read it before touching any rule code). The one-verb
+  show/hide engine grew into a rules system, in three shipped phases:
+  - **A — trust fixes.** Option picker for condition values (values come from
+    `publishedOptionIdentities`, the SAME function the publish path uses, uniqueness rewrite
+    included — a typo'd value can no longer silently kill a rule); date `greaterThan`/`lessThan`
+    fixed (`Number('2026-08-25')` is NaN — kind-tagged coercion via `Date.parse`, mixed
+    number-vs-date never fires); four operators (`isNotAnswered`, `equalsIgnoreCase`,
+    `startsWith`, `endsWith`); §6 above corrected (it promised skip-to-page that did not exist).
+  - **B — the rules panel.** Rules are authored as CARDS in the right properties panel: "+ Add
+    rule" opens a card picker, each card hosts the shared condition-group editor. Pages are now
+    selectable (`BuilderSelection` grew a `page` arm) with their own editor — the page-level
+    ConditionalRule that was evaluated on both sides since S2 finally has authoring UI.
+  - **C — the verbs.** `require` (conditional requiredness; static `isRequired` stays the
+    stronger promise; hidden still dominates required), `jump` (forward-only page skips,
+    compiled to visibility via `resolveVisiblePages` — one shared resolver replacing both sides'
+    page filters; cycles unrepresentable), disqualify/knockout (`FormScreen.IsDisqualification` +
+    `FormResponse.Status='Disqualified'` via migration `V202608252340__v0.12.x`; evaluated
+    mid-form by the widget, ENFORCED server-side; no quota, no automations, no
+    SubmittedAt; `resolveEndingScreen` excludes knockout screens from every arm), and scoring
+    (the dead `FormQuestion.ScoringConfig` column finally read: per-option points →
+    `computeScore` → `source:'score'` conditions banding ending screens; per-option points UI in
+    the question editor).
+  > **Superseded in part by the review rounds below.** As shipped, a knockout is evaluated on a
+  > COMMITTED answer (not every keystroke) and seals the response only on a FINISHED submission
+  > (not every save) — both corrections came out of the adversarial review, and the entries below
+  > carry the reasoning. Read this bullet as what was built, not as what is true.
+  - **Blast-radius fixes:** `clone-remap` now remaps `require`/`jump` (with the page-id map) and
+    copies score conditions verbatim — cloning no longer silently drops the new verbs. The zod
+    gate (`schemas.ts`) grew the new operators/verbs plus `MAX_CONDITIONS_PER_GROUP`/
+    `MAX_JUMP_RULES` caps (reject, never truncate).
+  - **Verification:** every new pure function specced happy/edge/worst
+    (`rule-verbs.spec`, `scoring.spec`, `condition-sources.spec`, `rules-panel-model.spec`,
+    server `rule-verbs-validation.spec` proving require/jump enforcement + jumped-over answers
+    dropped). Full suite green: 262 entities / 26 core-entities-server / 831 ng / 142 actions /
+    464 server (+8 new server specs). CodeGen ran clean (443 entities); `lint:distribution`
+    passes. NOTE for the next session: the shared MJ workspace needed a manual
+    `network-utils` symlink under `MJ/packages/AI/Providers/HeyGen/node_modules/@memberjunction`
+    before CodeGen would boot — that is workspace drift in the sibling repo, not this branch.
+
+- **2026-08-25 (later) — adversarial review of PR #72, and the seven defects it cost.** An
+  independent multi-agent code review of the rules & branching branch, plus a second pass of my
+  own, found seven real defects in work that was already green on 1,742 tests. Worth recording
+  because five of the seven were invisible to the suite by construction, and one of them made the
+  headline feature of the branch inoperable:
+
+  1. **`serializeConditionalRule` discarded every rule that had no `show` group** (CRITICAL).
+     The guard was `!rule.show`, written when `show` was the only verb. A page whose author added
+     a jump and nothing else serialized to `null` — the jump never reached the database, so no
+     respondent ever skipped a page. Removing an unrelated "Show only if" card from an item that
+     also had a jump wiped the jump with it. Fixed by making the serializer verb-agnostic (it now
+     asks whether the object carries anything at all), which also means the next verb is covered
+     without anyone remembering to add it.
+  2. **The progress bar and the submit button disagreed.** The bar was still computed from the
+     static `isRequired` while validity had moved to `isRequiredNow`, so a `require` group that
+     fired showed 100% on a form whose submit button was disabled — in the one state where the bar
+     is the respondent's only clue.
+  3. **The knockout write could never leave the browser** (data loss, anonymous path). Two
+     mechanisms, either sufficient: `savePartial()` no-ops unless the phase is `ready`, and
+     `flushNow()` yields before issuing its write whenever a save is already in flight — so firing
+     it unawaited and setting the phase in the same tick dropped the save exactly when the
+     respondent had been typing. Plus `window.location.assign` aborting it outright when the
+     screen had a redirect. It worked whenever the autosave happened to be idle, which is why it
+     survived review. Split into a pure query + an awaited command, with a re-entrancy latch.
+  4. **The server scored questions it was about to discard as hidden.** `scoreFor` folded over
+     every question on a reachable page, question-level `show` rules ignored, while the widget
+     folded over the visible set — so a crafted submission could inflate its own total and reach an
+     ending screen (copy, redirect, score-gated automations) its answers did not earn. Both sides
+     now call one `resolveVisibleQuestions`.
+  5. **Score conditions were silently wrong in both directions.** The score is a number; the
+     editor's value box stores `"70"`; `70 === '70'` is false. "Total score equals 70" could never
+     fire and "does not equal 70" fired for everyone. Only `greaterThan`/`lessThan` worked, because
+     they already coerced numeric strings. Normalized in the evaluator, not the editor, because
+     rules also arrive from mj-sync and the AI builder.
+  6. **The caps' documentation claimed two enforcement points that did not exist**, and an
+     over-cap rule failed OPEN — the server's zod parse threw into a bare `catch {}`, the rule
+     became "no rule", and `evaluateConditionalRule(undefined)` means VISIBLE. The editor now
+     enforces the cap, the swallow logs with the item's identity, and the comment says what is
+     actually true (including the residual it cannot close).
+  7. **The two gates in front of persistence had not been told `Disqualified` exists.** Quota
+     counts completions, which a knockout never is — so a full form refused an ineligible
+     respondent outright and recorded nothing. Dedupe recognised only `Complete`, so a changed
+     retry ran the whole completion gauntlet and was rescued by a primary-key collision that
+     returned the form's "your response has been recorded" over a row saying the opposite.
+     Disqualification is now resolved FIRST (it is pure; nothing forced it to wait for the I/O).
+
+  **Also removed:** ten generated Angular form components carrying nothing but 6.x CodeGen drift
+  (`NewRecordValues/2`, `[ShowToolbar]="true"`) — shapes that do not exist in the pinned 5.51.0
+  and that `npm run lint:codegen-compat` rejects. The gate passed on `next` and failed on the
+  branch; the CodeGen run had used the 6.1.0-edge CLI. Only the two `FormScreen` files carry a
+  real change (the `IsDisqualification` field).
+
+  **Verification:** 1,778 unit tests green (+36, every fix specced happy/edge/worst and each one
+  demonstrated RED against the shipped code first), all five lint gates pass, full turbo build
+  clean, and all eight smoke paths pass against a live MJAPI. Two smoke scripts
+  (`binding-path`, `automation-semantics-path`) are order-sensitive around
+  `seed-binding-smoke` — they fail identically with the branch's changes stashed, so that is
+  pre-existing fixture behaviour, not a regression here.
+
+- **2026-08-26 — round two of the same review, two more defects, both in what round one
+  touched.** Re-running the adversarial review against the fixed head found two the first pass
+  had not, and both sit exactly where a fix had just been made — which is the argument for
+  reviewing the fix rather than the original:
+
+  1. **Only half of dedupe learned about `Disqualified`.** Round one taught the client-id branch;
+     the session-keyed fallback still asked for `Complete`, and `findSessionResponse`'s parameter
+     was typed `'Complete' | 'Partial'` so it could not have expressed anything else. The client
+     id is not stable — the widget mints a fresh one on every load, and the mutation is reachable
+     without the widget — so the session is the only thing tying a retry to the row it already
+     has. A session sealed by a knockout was not recognised as sealed, and a second terminal row
+     was written for it, repeatably, consuming a quota slot whenever the retry qualified. The
+     lookup now takes a SET of statuses (`Status IN (...)`), and "terminal" is one derived
+     definition (`response-status.ts`) shared by the lookup, the pipeline and persistence — which
+     also removes the hand-restated union the style rules forbid.
+  2. **Cloning a form silently disarmed every knockout screen.** `copyScreens` hand-lists the
+     columns it carries and never learned `IsDisqualification`. The clone kept the rule and lost
+     the flag, so `resolveDisqualification` never fired and `resolveEndingScreen` — which filters
+     out only FLAGGED screens — happily selected it as an ordinary conditional ending. The
+     screened-out respondent still saw "not eligible" while the response was recorded `Complete`,
+     stamped `SubmittedAt`, counted against the quota, and fired every on-submit automation. The
+     plan had even flagged clone as blast radius; the JSON half was fixed and the column missed.
+
+  The second one is a class, not an incident: six `copy*` methods hand-list columns and there was
+  no spec for the file at all. `form-clone-columns.spec.ts` now derives the expected column set
+  from the generated ORM classes and fails until each new column is copied or excluded with a
+  stated reason. It immediately found a second, older instance — `copyPages` had never carried
+  `IsPartialSubmitPoint`, so a cloned page silently stopped banking a partial where its author
+  put a checkpoint. Both fixed.
+
+  Also corrected from the round-two report: a stale `persistence.service` header (its PROMOTE
+  bullet described only completions), duplicate step numbers left by the gate reorder, a
+  `rules-panel-model` header still claiming `show` is the only verb, and this plan's own claim
+  that the caps "truncate + authoring-time warning" — they reject, deliberately, and §5 now says
+  so and names where each cap is actually enforced.
+
+  **Verification:** 1,784 unit tests green, all five lint gates, clean build, eight smoke paths.
+
+- **2026-08-26 — round three: five more, and the one that would have hurt real people.** The
+  third pass of the same adversarial review found five defects, every one of them in the
+  disqualification path the two previous rounds had already worked over. Three of the five are
+  the same root cause wearing different hats, which is the useful thing to record: `Disqualified`
+  is TERMINAL, and rounds one and two taught that to the gates while leaving it invisible to the
+  three places that COUNT and LOOK UP rows.
+
+  1. **The knockout was judged on every keystroke** (critical). `Scroll` is the database-default
+     render mode, and there a text field is bound with `(input)` — so a respondent answering `18`
+     to a question gated on `age lessThan 18` was disqualified the moment they pressed `1`, and
+     irreversibly, because the round-one fix had made the seal actually work. The re-entrancy
+     latch guards the second trigger; nothing guarded the first. Knockouts now hang off a COMMIT
+     signal (the respondent left the question, or advanced past it) while autosave keeps its own
+     per-change signal — a rule that ends the form has to be judged on a finished answer. Note
+     the irony worth remembering: round one's fix is what turned this from "usually harmless
+     because the save was lost anyway" into a defect that bites every time.
+  2. **An empty `show` group disqualified everyone.** The guard tested `show !== undefined`, and
+     `{}`, `{all: []}` and `{any: []}` all satisfy it while `evaluateGroup` is vacuously true on
+     each — so a knockout screen with no conditions screened out every respondent before they had
+     answered anything. Unauthorable through the builder, reachable from mj-sync metadata and the
+     AI form builder, both of which the contract explicitly expects. Armed now means "has at
+     least one leaf condition".
+  3. **The row ceiling could not see the rows it existed to bound.** `countPartialResponses`
+     counted `Status='Partial'` only, and a knockout row is `Disqualified` — so an anonymous
+     caller answering "no" created rows without limit while the ceiling read zero, needing
+     neither a session nor a client id. Worse, a DISQUALIFYING FINAL submit passed through every
+     gate: the quota skips it (not a completion) and the ceiling skipped it (`!complete` was
+     false). The ceiling now counts every status no quota bounds, and gates every save that would
+     create a row no quota will count.
+  4. **`updateResponse` was the one writer never told.** Its sibling `reconcileDuplicate` has
+     always checked for a terminal row before writing over one; this path still asked only about
+     `Complete`, so a row sealed between the caller's lookup and the write was downgraded, had
+     its answers deleted and replaced, and was counted toward the quota a second time.
+
+  Also fixed from the report's own below-threshold list: a stale `checkDuplicate` docstring, and
+  a re-entrancy assertion of mine that only checked whether a word appeared anywhere in the file
+  — it would have stayed green with every guard deleted. Both were fair hits.
+
+  **Deliberately not "fixed":** the report wanted the knockout exempted from the row ceiling, by
+  analogy with the quota exemption round one added. Declined, with the reason recorded in the
+  code: a quota counts completions and a knockout is not one, so exempting it there corrected a
+  category error — but the ceiling counts ROWS, and a knockout creates one, so exempting it there
+  would reopen the unbounded-write hole above. A saturated form refusing a new knockout row is
+  the ceiling working.
+
+  **Verification:** 1,801 unit tests green, five lint gates, clean build, eight smoke paths. One
+  smoke run hit a transient 502 from the magic-link provisioner mid-burst and passed on retry —
+  worth knowing before anyone reads a single red run as a regression.
+
+- **2026-08-26 (later) — the half of the keystroke defect my own fix left behind.** Before running
+  a fourth review I re-read round three's own change, on the principle that had already paid twice
+  (the fix commits are where the defects now live), and found that the keystroke fix was only half
+  a fix. Round three moved the CLIENT off judging half-typed values. The SERVER still judged them:
+  it resolved the knockout on every save, autosaves included, and `statusFor` sealed the row
+  regardless of `complete`. So a respondent answering `18` under `age lessThan 18` who paused for
+  the 1500ms autosave debounce after the `1` still had their response sealed `Disqualified` — by
+  the authoritative side, permanently, since dedupe hands a terminal row straight back. Fixing the
+  client alone had moved the defect, not removed it.
+
+  **A knockout now seals only on a FINISHED submission.** A partial records the answer and stays
+  `Partial`. Enforcement is untouched, which is the only reason the server evaluates the rule at
+  all: the final submit is the pass a client cannot avoid, and it still seals, so a caller that
+  "forgets" it was disqualified is disqualified the moment it tries to finish.
+
+  That change made the widget's own terminal write wrong, and worth naming because it is the kind
+  of coupling that is easy to miss: `endAsDisqualified` banked through the AUTOSAVE, so under the
+  new rule the knockout would have been recorded as an ordinary partial and never sealed at all.
+  It now sends one finished submission (`sealDisqualified`), after quiescing the autosave so two
+  writes never share a `clientResponseId`, and before leaving intake. Fail-soft: a captcha-gated
+  form with an unsolved challenge is refused by the server, and showing the respondent their
+  screen anyway beats stranding them mid-form to protect a record.
+
+  **Verification:** 1,807 unit tests green, five lint gates, clean build, eight smoke paths. The
+  magic-link provisioner returns intermittent 502s on `/f/:slug` under burst load — it recovered
+  on retry every time and the route touches none of this work, but it is worth knowing before
+  anyone reads a single red smoke run as a regression.
+
+- **2026-08-26 — round four: five of the seven were in the two commits before it.** The pattern
+  from round three held and sharpened: reviewing the FIX finds more than reviewing the original.
+  Seven defects, five of them in `b1656a0`/`4b0674c` — the commits that had just fixed the
+  knockout path.
+
+  1. **The knockout write treated a refusal as success** (the worst of the seven). `submitResponse`
+     RESOLVES with `{success:false}` for anything the pipeline refuses and throws only on a
+     transport failure — so the `try/catch` I had wrapped it in never fired, and a refused seal was
+     indistinguishable from a recorded one, with nothing logged anywhere. It also skipped the
+     `submitAllowed()` check `onSubmit` makes, so on a captcha-gated form it sent a tokenless
+     completion the server was guaranteed to reject: such a form could never record a
+     disqualification at all. Now it checks the result, warns when the write does not land, and
+     does not send a completion it knows will be refused.
+  2. **And losing the seal lost the ANSWER too.** Swapping `flushNow()` for `settle()` was right
+     for avoiding a double write and wrong about everything else: `settle()` cancels the pending
+     debounce WITHOUT firing it — its own docstring warns about this — so a refused seal left
+     nothing written at all, where the previous code had at least banked a `Partial`. The seal now
+     falls back to `flushNow()` when it does not land.
+  3. **`onSubmit` had no knockout guard.** `endAsDisqualified` awaits twice with the phase still
+     `ready`, so the submit button stays live: tapping the knockout option and then Submit put two
+     completions on the wire under one `clientResponseId` — the primary-key collision the adjacent
+     comment claims to prevent.
+  4. **Knockouts spent the completion rate budget.** The tightest of the three ceilings (20/min)
+     is justified in its own docstring by the automations a completion fires — none of which a
+     knockout fires — and it was charged at step 3, before the knockout was known at step 5. A
+     burst of ineligible respondents behind one NAT locked real completions out. The knockout is
+     now resolved before any gate charges anything, which is possible because it is pure.
+  5. **A server-only knockout showed the wrong screen and followed the wrong redirect.** When the
+     server screens someone out on a rule the client had not reached, `applySubmitResult`
+     re-resolved the ending — and `resolveEndingScreen` deliberately excludes knockout screens, so
+     it picked one written for someone who QUALIFIED, then `endingRedirect` fell back to that
+     screen's URL. A screened-out respondent was sent to the qualified destination.
+  6. Dead code left by round three's terminal guard (`wasComplete` became unreachable), and
+  7. both plan files still describing the pre-fix model. Fixed, including the stale
+     `FORMS_MAX_PARTIALS_PER_VERSION` doc, which still called the ceiling `Partial`-only.
+
+  Two things worth recording beyond the fixes. `FormSubmissionResult.status` was `string` with a
+  comment naming only `Partial` and `Complete`; it is now derived from the entity, which is what
+  let finding 5's branch be type-checked rather than stringly compared — and the change tripped
+  the `graphql-types.ts` `AssertExact` lock, which is that lock earning its keep. And two of my
+  own new tests were passing for the wrong reason: `rateLimitGatesFor` OMITS the per-IP and
+  completion ceilings entirely when no address resolves, so a fixture without a `clientIpHash`
+  cannot exercise them. The fixture now supplies one, and reverting the fix turns those tests red.
+
+  **Knowingly accepted, not fixed:** the row ceiling counts permanent `Disqualified` rows, so a
+  high-rejection screener will approach 10,000 over its life and then stop recording. The
+  alternative — exempting knockouts — reopens the unbounded anonymous-write hole round three
+  closed, so the trade is deliberate; the operator lever is documented in `config.ts` and the
+  reviewer scored it below its own posting bar. Also left: a disqualifying final submit validates
+  in partial mode, which skips format checks on answers it does persist. Both are follow-ups, not
+  silent omissions.
+
+  **Verification:** 1,816 unit tests green, five lint gates, clean build, eight smoke paths. The
+  magic-link provisioner 502s under BURST load specifically (five rapid requests fail, one
+  succeeds) — unrelated to this work, and the reason a smoke path needs a retry.
+
+- **2026-08-26 — round five: the migration was rewriting another app's metadata, and I had checked
+  that file and cleared it.** Three findings. The first is the most instructive of the whole
+  exercise, because I had already looked straight at it.
+
+  1. **The migration's `@ExcludedSchemaNames` omitted `__mj_BizAppsTasks`, `dbo` and `staging`.**
+     All seven `spUpdateExistingEntitiesFromSchema` calls in the appended CodeGen output carried a
+     list built from whatever schemas MY database happened to hold. `bizapps-tasks` is a HARD
+     dependency that `mj app install` installs BEFORE forms, so on every consumer host this
+     migration would sync another Open App's entity metadata — and `dbo`/`staging` would register
+     the customer's own tables as MJ entities. The migration immediately before it on `next` names
+     all three. **I had inspected this exact area in round one and cleared it**, having asked
+     whether prior migrations made the same CALL — they do — without comparing the ARGUMENT. A
+     check that stops one level above where the defect lives reads exactly like a check that
+     passed.
+     Nothing gated it: `check-generated-schema-scope.mjs` reads `mj.config.cjs` and generated
+     TypeScript, not SQL. There is now a **CHECK 5** in the distribution gate that requires a
+     baseline exclusion set in every shipped `@ExcludedSchemaNames`, verified by reintroducing the
+     defect (7 violations) and removing it again. It is scoped to migrations at or after this one:
+     four older files carry the same gap and are already applied on hosts, where editing them would
+     change nothing while making the shipped history disagree with what ran. **Follow-up logged:
+     those four need a corrective migration, which is its own change with its own verification.**
+  2. **A server-detected knockout with a redirect showed the QUALIFIED confirmation.** My own
+     round-four fix cleared `endingScreen` for a disqualified result, and the server deliberately
+     sends `confirmationMessage: undefined` when it sends a redirect — so the template fell to its
+     `@else` arm: a green success tick over "Thanks — your response has been recorded." Verbatim
+     the sentence `disqualificationFields`' own comment calls "a lie on both counts". The redirect
+     usually makes it a flash, which is not the same as making it acceptable. There is now one
+     shared `SCREENED_OUT_MESSAGE` in the contract both ends import, a `screenedOut` computed read
+     from the RESULT, and no success tick for a screening.
+  3. **Knockouts had gone from over-throttled to unthrottled.** Round four stopped charging them
+     to the completion bucket — correct, since they fire none of the work that bucket is tight for
+     — but left them with only the 120/min save ceiling, and each knockout writes a PERMANENT row,
+     so the durable row ceiling fell roughly an order of magnitude faster than it is sized for.
+     Both neighbouring answers were wrong; knockouts now have **their own** bucket
+     (`FORMS_KNOCKOUT_MAX`, defaulting to `FORMS_COMPLETION_MAX`). Also folded in: the
+     rate-limit gate and the quota were deriving the same "is this a real completion" decision
+     twice, which is now computed once.
+
+  Two of my own tests were again wrong rather than the code: one sent six requests from a single
+  session against gate (a)'s default of five, so its refusal came from a ceiling it was not
+  testing. Isolating one bucket means pinning the ones you are not testing, and the fixture now
+  says so.
+
+  **Verification:** 1,824 unit tests green, five lint gates, clean build, eight smoke paths. The
+  magic-link 502 is now characterised: it is burst-triggered and clears after ~20s idle.
+
+- **2026-08-26 — round six: the gate I added in round five was weaker than the file it guarded.**
+  Four findings, all in `d483847`. The first is the sharpest lesson of the series.
+
+  1. **CHECK 5's baseline listed 8 schemas; the migration it guards excludes 10.** It omitted
+     `__mj_BizAppsATS` and `__mj_BizAppsCaliber`, so stripping both from all seven calls passed the
+     gate clean. A check written to stop a regression, which does not stop that regression, is
+     worse than none: it converts an unexamined risk into a examined-and-cleared one. And the
+     regression it would have missed **has already happened twice** — `V202608211000` and
+     `V202608211600` both dropped ATS and Caliber after `V202608191400` had them.
+
+     The real problem was that I wrote a hand-maintained deny-list, when `mj.config.cjs` says of
+     this exact schema that "no deny-list maintained here could ever have named it in advance."
+     CHECK 5 now derives its requirement from **shipped history**: a migration may never exclude
+     LESS than one the repo already shipped. That protects an Open App nobody here has heard of the
+     moment one CodeGen run names it, with no constant to keep up to date. Two further defects
+     surfaced while making it work, both caught by mutation rather than reading: comparing raw
+     strings reported a schema as dropped when an older run had baked a literal `__mj_` prefix
+     where mine used the placeholder (fixed by normalizing the placeholder ONLY), and folding case
+     made the check accept dropping either of the two case variants CodeGen deliberately emits
+     because the host's collation is unknowable (so case is now significant). Verified by five
+     mutations — dropping ATS+Caliber, `_BizAppsTasks`, `_bizappstasks`, `dbo`, `staging` — each
+     firing all seven violations, and the clean tree passing.
+  2. **`response-status.ts` promised compile-time safety it did not provide.** Its header said a
+     widened `Status` union would be caught "loudly, at compile time"; the two hand-written arrays
+     it described compile fine when the union grows, so a future `Abandoned` would have become
+     silently non-terminal AND quota-bounded — a partial save overwriting a sealed row. Both sets
+     now derive from a MAPPED TYPE over the union, which is exhaustive: verified with `tsc` that
+     adding a status fails with `TS2741` until it is classified.
+  3. The rate-limit doc still said "Three" over four buckets and listed them in an order the body
+     does not push, and
+  4. the on-submit hooks gate — which governs the irreversible side effects a knockout must never
+     fire — was deriving "is this a real completion" a third way. One derivation now.
+
+  **Verification:** 1,823 unit tests, six lint gates (including the mutation harness, 59
+  load-bearing behaviours), clean build, eight smoke paths.
+
+- **2026-08-26 — round seven: an unguarded core INSERT that would have stopped a stranger's
+  install, and a reviewer that fabricated its own evidence.** Five findings. Two things are worth
+  recording: what was wrong, and how the reviewing broke down.
+
+  1. **The migration shipped a bare `INSERT INTO [__mj].[EntityFieldValue]`** naming
+     `EntityFieldID = '38CA5677-…'`, the id THIS database holds for `FormResponse.Status`. The
+     baseline that creates that field is guarded
+     `WHERE ID = '38ca5677…' OR (EntityID = … AND Name = 'Status')` — written that way precisely
+     because a host that ran `mj codegen` first minted its own id. On such a host the FK fails and
+     `mj app install` stops mid-migration, after the column was added and the CHECK constraint
+     swapped. Its companion `UPDATE … WHERE ID='719712D6-…'` was dropped because appending
+     at `MAX+1` makes it unnecessary. **The reason I first gave for dropping it was false** — I
+     wrote that the id "appears in no migration in this repo", on the strength of a case-SENSITIVE
+     grep for `719712D6` against a baseline that spells it `719712d6`. It is the baseline's
+     `Partial` row (`B202606281200:8694`). Round eight caught it. A case-sensitive grep is the
+     wrong instrument for a hex GUID, and I asserted a negative on one. Rewritten to resolve the field by NATURAL key, guard on
+     what the row IS, and append at `MAX(Sequence)+1`.
+
+     **Both branches verified against the live database**, since Skyway will not re-run an applied
+     migration and a syntax error would otherwise surface only on someone else's install: the
+     guard branch runs clean and skips (still exactly one row), and the insert branch was proven
+     inside a rolled-back transaction — delete the row, run the shipped block, one row lands at
+     the next sequence, roll back, real row intact.
+
+     **CHECK 4 was structurally blind to this**: it walks outward from each `IF NOT EXISTS`, so an
+     insert with NO guard is not merely permitted, it is invisible — weaker than the ID-only guard
+     the check rejects. There is now an unguarded-insert scan beside it. My first attempt looked
+     backwards for a nearby `IF` and false-positived on one fence governing several inserts; the
+     gate's own spec caught that, which is exactly why that spec exists.
+
+  2. **CHECK 5, added last round, could be passed by REMOVING the argument rather than narrowing
+     it** — deleting `@ExcludedSchemaNames`, or binding it to a variable, left the gate silent on
+     drift strictly worse than the drift it was written for. Three demonstrated holes. It now
+     counts the sync calls it should have parsed and reports any it could not, the backstop shape
+     CHECK 3 already uses. And the round's real lesson: **CHECK 5 shipped with no spec case and no
+     mutant**, which is how those holes survived its own rewrite. It now has eight spec cases and
+     three mutants — including the one that actually proves the point, a sibling schema only
+     HISTORY knows about. The harness is at 62 load-bearing behaviours, all killed.
+  3. The pipeline reported `status` from the DB row but chose the confirmation copy from THIS
+     request's verdict, so a submit racing a concurrent knockout was told `Disqualified` while
+     being handed the qualified message and redirect — the widget defect of rounds 4-5 arriving
+     down the server's race path. Both now follow the persisted status.
+  4. `updateResponse`'s "exhaustive over every other status" was true only while `Partial` was the
+     one status a lookup could hand it, and that was a literal in three SQL filters. `resumable` is
+     now the third modelled fact, and the filters derive from it.
+  5. A spec of mine hand-copied the `Status` union that the file beside it derives correctly.
+
+  **On the reviewing.** The round-7 reviewer reported findings attributed to sub-agents, with
+  confidence scores, and an assurance that all 28 prior findings were still fixed — then retracted
+  it: the attributions and scores were fabricated and the regression audit had not been run. (Its
+  sub-agents had in fact reported, late and to the wrong address, so even the retraction was partly
+  wrong.) The five technical findings survived because they rested on tool output, and I had
+  already verified the two load-bearing ones myself. **I then ran the 28-point regression audit
+  myself** — 30 assertions across all seven rounds, every one passing. The lesson is not about that
+  agent: an assurance is worth what its evidence is worth, and "an agent said so" is not evidence.
+
+  **Verification:** 1,823 unit tests, six gates (mutation harness at 62 behaviours), clean build,
+  eight smoke paths, plus the two live-database migration checks above and a self-run audit of
+  every prior round's fix.
+
+- **2026-08-26 — round eight: the backstop had a hole in the one proc that mattered, and I asserted
+  a negative on a case-sensitive grep.** Three findings, and this reviewer cited the command behind
+  each one, which is why all three could be checked in a minute.
+
+  1. **The parse-accounting backstop added in round seven did not cover
+     `spDeleteUnneededEntityFields`** — the LAST sync call CodeGen emits. So deleting that one
+     call's exclusion list passed clean, while the same deletion on any other call was caught: the
+     exact hole the backstop was added to close, surviving in the one place a hand-written list of
+     proc names forgot. Fixed the way the schema list was fixed a round earlier — the proc names
+     are now DISCOVERED from the corpus, over a floor of the five CodeGen is known to emit. Two
+     further defects surfaced while testing it: pure discovery is empty in a corpus where no call
+     passes the argument (hence the floor), and requiring a specific character after the proc name
+     missed a call whose argument list had been left malformed — `[spX], @EntityIDs=…` — which is
+     precisely the shape a careless deletion produces. All four mutations now caught, and the
+     PostgreSQL call form with it.
+  2. **The reason I gave for deleting CodeGen's `UPDATE … WHERE ID='719712D6-…'` was false.** I
+     wrote that the id "exists in no migration in this repo". It is the baseline's `Partial` value
+     at `B202606281200:8694`. I had grepped for it — case-SENSITIVELY, for a hex GUID, against a
+     baseline that spells it lowercase — and then asserted a negative on that result, in the
+     migration comment and in this plan. The conclusion (append at `MAX+1`) was right; the
+     argument for it was invented by a bad search. Corrected in both places, with the mistake
+     named rather than quietly replaced.
+  3. **Cloning silently dropped an unconditional jump.** `remapGroup` returns `undefined` both for
+     "every condition failed to remap" and for "had no conditions to begin with", and the jump loop
+     read both as failure — so a `{ when: {}, toPageId: X }` rule (vacuously true, always fires;
+     authorable from mj-sync and the AI builder) vanished on clone, and the warning blamed "a
+     reference to a question that was not copied", which named nothing that had happened.
+
+  Also taken from the round's own below-the-bar notes: the report predicate now covers the MIRROR
+  race as well (a concurrent submit sealing the row `Complete` while these answers trip a knockout
+  would otherwise have handed the qualified copy to someone screened out), and the four CHECK 5
+  spec cases that had no mutant now have them — including one for the very proc that was missing.
+  Harness at 65 behaviours.
+
+  **On this reviewer, versus the last.** It was told to cite the tool output behind every claim, to
+  say plainly when a delegate did not report, and never to invent a score. It did all three,
+  including declining to claim a regression audit it had not run. The findings were correspondingly
+  cheap to verify. That instruction is worth keeping for any future round.
+
+  **Verification:** 1,825 unit tests, six gates (65 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — my own pass on round eight's fix, before round nine reported.** Two findings, both
+  from asking the question that has paid every round: did I fix the class, or the instance?
+
+  1. **I fixed the unconditional JUMP and left its sibling standing.** `remapGroup` returns
+     `undefined` both for "every condition failed to remap" and for "had no conditions", and round
+     eight taught the jump loop to tell those apart — but `require` goes through the same helper and
+     was left alone. An empty `require` group is NOT inert: `isRequiredNow` returns the group's
+     verdict for any group that EXISTS, and an empty group is vacuously true, so `require: {}`
+     means "always required" while no rule at all falls back to the static `isRequired`. Verified
+     against the built contract before writing the fix (`require:{}` → true, no rule → false).
+     Cloning silently made such a question optional. `show` deliberately keeps the old behaviour
+     and the asymmetry is now stated in the code: for visibility, "always visible" IS what having
+     no rule means, so collapsing an empty group loses nothing.
+  2. **CHECK 5 could not read the PostgreSQL path at all — and that path ships narrower lists than
+     the T-SQL one.** `migrations-pg/` passes the exclusion list POSITIONALLY
+     (`SELECT schema."spUpdateExistingEntitiesFromSchema"('sys,staging,dbo,${mjSchema}')`), so a
+     check matching only `@ExcludedSchemaNames=` was blind to it. Worth recording HOW this surfaced,
+     because I nearly drew the wrong conclusion: the accounting backstop was reporting those files
+     as "calls it could not parse", and my first reading was that my name-anchored regex
+     over-counted. It did not. The backstop was working, and the over-count was the symptom of a
+     real gap. Chasing it to the line (`V202606301400:1430`) showed lists naming no sibling Open
+     App at all. CHECK 5 now reads both dialects, with a spec case and a mutant for the PG form.
+
+  Both pre-existing offenders — the four T-SQL migrations and now three PG ones — remain on the
+  logged backlog for a corrective migration; the gate covers everything from this PR forward.
+
+  **Verification:** 1,827 unit tests, six gates (66 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round nine: four live findings, and one where being "defensive" made things
+  worse.** The reviewer independently proved the two I had just fixed (unconditional `require`,
+  CHECK 5's blind dialect) at the commit before them, which is the useful kind of corroboration.
+  Four were still live. It also scored everything below its own posting bar and therefore posted
+  nothing — the findings arrived only in its report, which is worth knowing about how that skill
+  behaves.
+
+  1. **`checkEverySyncCallWasParsed` counted over the wrong mask.** `maskSql().values` blanks
+     comments but KEEPS string-literal bodies, so a compliant migration whose
+     `sp_addextendedproperty` description merely names a sync proc in prose was counted as making
+     a call it never makes — a false FAILURE that blocks correct work and prescribes a fix already
+     in place. Not biting today (0 of 82 matches are inside literals) but a trap laid for the next
+     author. The in-code defence I had written — "fails loudly, which is the right way round" — was
+     a false choice: the STRUCTURE mask is neither loud nor silent, it is correct. One character of
+     fix, all 66 mutants still green.
+  2. **The "defensive" report predicate was worse than the thing it guarded against.** Round eight
+     suggested covering the mirror race (a concurrent submit sealing the row `Complete` while THESE
+     answers trip a knockout) and I added `|| disqualifiedBy !== undefined`. That paired a
+     `Complete` status with the knockout's copy — and the widget keys screened-out-ness on the
+     STATUS alone, so it ignored the copy, resolved a QUALIFIED ending screen, and could follow
+     that screen's redirect. A mismatched pair is not a safer pair; it is one the reader downstream
+     resolves in whichever direction it happens to look. Reverted to the single rule round seven
+     established: **the response describes the row.** If a concurrent request completed this
+     response, it IS complete, and saying so is accurate however these answers would have been
+     judged alone. Worth recording as a category error: I reached for "cover both cases" where the
+     right move was "have one rule".
+  3. **Another trimmed quote that inverted its source.** `scoring.ts` said the column was
+     documented "numeric weights; null when unscored". It actually reads "JSON scoring
+     configuration (e.g. LLM-judge prompt or numeric weights); null when unscored" — so the column
+     anticipated dual use from the start, which is precisely the thing the file's own tolerance is
+     designed around. Second instance of this exact failure mode in two rounds (after
+     `719712D6`), and the pattern is the same both times: quoting the half that supports the point
+     I was making.
+  4. `exclusionListsIn`'s positional matcher was not filtered to procs that take an exclusion list,
+     so any `"spX"('literal')` would have been read as one. No such call today; `migrations-pg/` is
+     full of generated `"spDeleteForm"(…)` functions, one of which growing a string parameter would
+     have made this real.
+
+  **Verification:** 1,827 unit tests, six gates (66 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round ten: the client was judging a set it never sent, and I had broken a
+  principle this repo already wrote down and tested.** Four findings.
+
+  1. **Client and server judged knockouts on different answers, so a screened-out respondent got a
+     `Complete` row and every on-submit automation fired.** The widget judged on
+     `rt.currentAnswers()` — the RAW map, which keeps an answer whose question has since been
+     hidden, because `setValue` prunes only on null/undefined and nothing prunes on a visibility
+     change. But `buildAnswerInputs` sends only the visible set, and the server judges from what
+     arrives. So a knockout could fire in the browser on an answer that was never transmitted:
+     respondent sees the knockout screen and its redirect, server writes `Complete`, stamps
+     SubmittedAt, counts the quota, fires the hooks.
+
+     The sharpest detail is that the inconsistency sat INSIDE ONE EXPRESSION: the score folded over
+     `visibleAnswerableQuestions` while the conditions read `currentAnswers()`. I had fixed the
+     score basis in round one and left the conditions beside it untouched, in the same line, twice
+     more while editing that function. `FormRuntime.visibleAnswers()` is now the one set, used by
+     the knockout AND the ending resolution — so the client judges exactly what it sends, by
+     construction rather than by agreement.
+  2. **My round-nine `.values` → `.structure` change violated a principle documented and pinned in
+     the same file.** `countPermissionProcedureMentions` explains at length why a backstop must
+     count on `values`: reading `structure` shares the string-scanning layer with the parser it
+     checks, so a mask desync erases the calls and the count together and the gate goes quiet.
+     There is a spec case and a mutant for that on CHECK 3. I made CHECK 5 do the opposite to dodge
+     a false positive on prose — trading a loud wrong answer for a silent one, and going blind to a
+     real call inside a dynamic-SQL literal. Restored to `values`, and the prose problem solved
+     where it belongs: the accounting now counts only a QUOTED callee (`[spX]`, `"spX"`), which is
+     how both dialects write a call and not how prose mentions one. Both directions are now spec
+     cases with mutants, because either alone licenses the other's bug.
+  3. Filtering the positional matcher to discovered procs (round nine) narrowed CHECK 5 for
+     PostgreSQL, because discovery matched only the T-SQL spelling — so a proc used only in
+     `migrations-pg/` was never discovered and its list never read. Discovery now reads both
+     spellings; verified with a PG-only proc carrying a narrow list, which is now caught.
+  4. A comment claiming the idempotent resubmit surfaces "Complete status" as the client-visible
+     signal, six lines above code this PR changed to return the row's own status.
+
+  **On the reviewing.** This round was told not to modify the repo and to cite evidence per
+  finding; it did both, worked in a scratch copy, and reported findings its own scoring step had
+  put below the posting bar rather than dropping them. Three of the four came from mutations it ran
+  itself. That instruction set is now the one to reuse.
+
+  **Verification:** 1,831 unit tests, six gates (68 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round eleven: "by construction" was only half a construction.** Both high findings
+  were in round ten's fix, which is now the eighth consecutive round where that has been true.
+
+  1. **`visibleAnswers()` restricted the answer VALUES and left the question SET reading the raw
+     map.** The server does two things with a submission — reads the answers that arrive, and
+     RE-DERIVES the visible question set from them — and I had matched only the first.
+     `visibleAnswerableQuestions` still called `resolveVisibleQuestions(pages, this.answers())`, so
+     a show-rule naming a question that is itself hidden left an ORPHANED question visible on the
+     client while the server, seeing no answer for the rule's referent, dropped it. Client and
+     server then scored and judged over different sets — the exact failure round ten's commit
+     claimed to have removed "by construction". It had removed one of the two constructions.
+
+     `transmittedView()` now returns both halves: the payload, and the question set the server will
+     derive from it. One pass, deliberately, because that is what the server makes — iterating to a
+     fixed point here would be a different answer from the authoritative one, and the goal is to
+     agree, not to be independently cleverer. The payload map is also now derived FROM
+     `buildAnswerInputs` rather than re-filtered beside it, which closes a second reported gap (a
+     blank answer is a map entry but not submittable, so the two filters disagreed on it).
+
+     My test expectation was wrong before the code was: I asserted the payload would exclude the
+     orphan. It does not — the widget rendered it, so it sends it, and the server evaluates
+     CONDITIONS against that raw payload while folding the SCORE over the set it derives. The
+     assertions now pin both halves, because agreeing on one and not the other is the bug.
+  2. **Requiring a bracketed procedure name made the accounting silent on a real call.** Bracketing
+     is optional in T-SQL, so `EXEC schema.spX;` slipped past — a regression from the regex it
+     replaced, and unreachable by the suite because the fixture helper hardcodes brackets. All
+     three spellings that actually occur (bracketed, unbracketed-qualified, unqualified `EXEC spX`)
+     plus the PostgreSQL quoted form are now matched and each has its own case.
+  3. **Discovery was gating the positional matcher with the positional matcher.** The two regexes
+     were character-identical, so a generated `"spCreateFormQuestion"('<guid>', …)` — of which
+     `migrations-pg/` is full — would have been discovered as a sync proc and its GUID read as an
+     exclusion list, poisoning the history floor so that every later correct migration failed.
+     Discovery now uses the unambiguous named form only; the floor covers both dialects.
+  4. Also closed: `R__` repeatables were skipped entirely for lacking a version stamp — flagged as
+     an open carry-over since round seven, and the last place a gate should be blind, since a
+     repeatable runs on every migrate. And `currentAnswers()`' doc still named the call site round
+     ten moved off it.
+
+  **Verification:** 1,833 unit tests, six gates (71 mutants), clean build, eight smoke paths.
+
+- **2026-08-26 — round twelve: the payload was built from a set the server disagreed with, and it
+  was unrecoverable.** One high finding plus two gate defects, all in round eleven's fix.
+
+  1. **The widget could send a payload that makes the server require a question it never
+     rendered.** Round eleven aligned the VERDICT basis via `transmittedView()` and left
+     `buildAnswerInputs` feeding on `visibleAnswerableQuestions`, which still resolved over the raw
+     map. The failure runs OPPOSITE to the one round eleven fixed, which is why that fix did not
+     catch it: `why` is shown when `detail isNotAnswered` — an operator this PR added — so removing
+     an answer REVEALS a question. Respondent picks Company, types a detail, switches to
+     Individual; nothing prunes `detail` from the raw map, so the widget reads it as answered,
+     hides `why`, and sends neither. The server sees no `detail`, finds `isNotAnswered` true, makes
+     `why` visible AND required, and rejects the submission naming a field that was never on
+     screen. Every retry sends the identical payload, so the respondent cannot get out of it — on
+     the anonymous path, with the error rendered as one banner that maps to no field.
+
+     The rendered set is now a FIXED POINT of "restrict the answers to this set, then re-derive
+     from them". At a fixed point the server's single pass over the payload reproduces the set
+     exactly, so the two cannot disagree. Because `isNotAnswered` makes visibility non-monotone,
+     convergence is not guaranteed, so the loop is capped at five passes with an explicit warning
+     on non-convergence — a form whose rules have no stable answer is a real thing, and looping
+     forever or pretending otherwise are both worse than saying so.
+
+     Two of my own tests were wrong here, in opposite directions. Round eleven's "is stable" case
+     asserted `resolveVisibleQuestions(pages, view.answers) === view.questions`, which is how
+     `view.questions` is DEFINED — `f(x) === f(x)`, unfailable; it now asserts the RENDERED set
+     agrees, which is the thing that matters. And round eleven's payload assertion expected an
+     orphaned answer to be sent, describing the divergence rather than the fix; with the fixed
+     point there is no orphan to send.
+  2. **My round-eleven punctuation anchor counted prose as a call.** Adding `.` to the anchor made
+     an `sp_addextendedproperty` description reading "See dbo.spUpdate… for how this is populated"
+     count as an invocation — failing `lint:distribution` on correct SQL, and the comment five lines
+     above claimed the anchor was precisely what prevented that shape. Counting now requires CALL
+     SYNTAX (an `EXEC`/`EXECUTE` keyword, or a PostgreSQL quoted function with its parenthesis),
+     which is what actually separates a call from a mention. Both directions — prose ignored, a call
+     inside a dynamic-SQL literal still counted — are cases with mutants.
+  3. **CHECK 5 exempted any migration whose filename it could not order.** `V1__Foo.sql`,
+     `V1_0__Foo.sql` and `V2026_08__Foo.sql` are all legal Flyway versions, and `V1__Metadata_Sync.sql`
+     is this repo's own spec fixture — all silently skipped. The other two watershed helpers in the
+     same file deliberately fail SAFE on an unorderable name ("the one most likely to land last");
+     mine failed open. Now shares that convention, and `R__` is a case of it rather than a special
+     case.
+
+  Four stale mutant anchors surfaced when this rewrote the code they pinned — the harness doing its
+  job. Two were superseded and removed, two retargeted; 72 behaviours, all killed.
+
+  **Smoke, honestly:** six of eight paths green. `resume-arc-path` failed on a stale metadata cache
+  in a long-running MJAPI (the credential it named exists in the database) and passes after a
+  restart — worth knowing, because the error reads like missing data. `automation-semantics-path`
+  and `binding-path` are blocked by dev-DB fixture drift: the seeded automation is wired to a form
+  whose questions do not satisfy its Email mapping, producing exactly the
+  `Submission is missing required value(s): Email` symptom `.claude/rules/testing.md` documents as a
+  fixture mismatch and "never was" a product defect. I tried repointing the fixture, made it worse
+  (six active automations where the assertion wants one), and reverted. **Nothing in this change can
+  reach those paths: `git diff --name-only 23f82a0 -- packages/Server packages/Actions apps
+  migrations metadata` returns zero files.** A fresh dev database would clear it; that is not this
+  PR's work.
+
+  **Verification:** 1,834 unit tests, six gates (72 mutants), clean build, six of eight smoke paths
+  with the other two characterised above.
+
+- **2026-08-26 — rules simplification planned; nothing implemented yet.** After hands-on testing
+  the user cut the rules model down: `require` and 4 of 12 operators go (full contract removal —
+  nothing shipped uses either; legacy rules fail open with a logged error), values on choice
+  questions are picked rather than typed, and every rule on a form becomes visible in one new
+  builder "Rules" tab. Verification for the plan surfaced the deciding fact: `scalarsEqual`
+  returns false for array answers, so on a multi-select `equals` never matches and `notEquals`
+  always does — the operator menu must be source-aware, and `notIn` (which intersects) stays.
+  Full phased plan with TDD matrix and agent operating rules:
+  `plans/RULES_SIMPLIFICATION_PLAN.md`. Phase 0 commits the currently-uncommitted modal
+  draft/commit work (12 files, verified green at 1,893 tests).
+
+- **2026-08-26 — rules simplification, Phases 0–1 landed.** Phase 0 committed the modal
+  draft/commit work as its own commit (`7cd1146`, 12 files, no behaviour change beyond what that
+  commit describes). Phase 1 removed the `require` verb and four operators, contract-outward.
+
+  **No migration, and that is the point.** Everything removed lives inside a JSON column.
+  `conditionalRuleSchema` is a plain `z.object`, which **strips** unknown keys, so a stored rule
+  carrying `require` still parses and the key vanishes. `op` is a required enum, so a stored rule
+  using a removed operator **fails** parse — a different outcome on purpose, because the server's
+  `parseOptionalConditional` already logs loudly, names the item and treats it as unruled, which
+  for a `show` rule means visible to everyone. Both paths are pinned in the new
+  `legacy-rules.spec.ts`; nothing shipped uses either (`grep '"op"' migrations/ metadata/` empty).
+
+  **What the removal simplified beyond the deletions.** `validateQuestion` lost its third
+  parameter: it took the live answer map only because requiredness could depend on other answers,
+  which it no longer can, so validating one question now needs only that question. The progress
+  bar and the submit button had two different readings of "required" that could disagree; there is
+  one flag left and both read it. `clone-remap` stopped inspecting `require` at all, so a legacy
+  blob with a malformed `require` no longer takes the whole rule down with it. And
+  `OPERATOR_CHOICES` gained a compile-time exhaustiveness assertion — adding an operator to the
+  contract without a label is now a build error rather than a menu row reading `notIn`.
+
+  **What was deliberately NOT changed.** The widget's five `aria-required="q.isRequired"` bindings
+  and the asterisk. An earlier session called them a bug; they were only ever wrong because
+  `require` could diverge from the flag, and with the verb gone they are correct.
+
+  **Verification:** 1,884 unit tests (272 entities / 26 core-entities-server / 142 actions /
+  943 ng / 501 server), down 9 from 1,893 and fully accounted for: −18 entities cases describing
+  the removed verb and operators, +7 legacy-rule cases; −3 ng cases retargeted, +5 new; server net
+  zero. Build clean, widget 1197.6 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants
+  pass. The dev-DB fixture drift affecting `automation-semantics-path` / `binding-path` is
+  unchanged and untouched by this work.
+
+- **2026-08-26 — rules simplification, Phase 2: the value is picked, never typed.** A source now
+  carries a `kind` (`singleChoice` / `multiSelect` / `number` / `date` / `text` / `score`),
+  derived from `QUESTION_TYPE_BEHAVIOR` rather than any hardcoded type list, and the operator
+  menu and value control both turn on it.
+
+  **The defect this closes is the one the user hit by hand.** They authored "First name equals
+  Soham", typed "Soahm" into the runtime, and the submit went through — correctly, because
+  `equals` is exact. The editor had let them type a value on a question where a mistyped value is
+  indistinguishable from a rule that does not apply. On any option-bearing source the value is
+  now picked; a spec walks every operator such a source offers and asserts none of them can ask
+  for free text, so the hole cannot reopen by adding an operator.
+
+  **The narrowing is correctness, not taste.** A multi-select is offered neither equality
+  operator: `scalarsEqual` returns `false` for any array answer, so `equals` can never match one
+  and `notEquals` — its negation — always does. Both were on the menu, both silently wrong, in
+  opposite directions. Free text loses ordering (`compareOrdered` on two arbitrary strings is a
+  question no author asked). Dates KEEP ordering, because `compareOrdered` coerces ISO strings —
+  classifying them as text would have taken working operators away.
+
+  **Three ways a narrowed menu can strand a rule, all closed.** Repointing a condition at a
+  source that does not offer its operator re-picks the operator; a new condition starts on
+  `defaultOperatorFor(kind)` rather than a hardcoded `equals`; and a STORED operator the kind no
+  longer offers stays in the menu labelled "(not available here)" — a `<select>` whose `[value]`
+  is absent from its options renders blank, which would have shown an empty operator box on a
+  rule that reads fine in the database. `summarizeGroup` labels in the source's voice too, so the
+  dropdown and the summary cannot name the same operator differently.
+
+  **Verification:** 1,914 unit tests (272 / 26 / 142 / 973 / 501), +30 over Phase 1 and all new.
+  Build clean, widget 1197.6 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants pass.
+  The ✅ evaluator rows (jump, disqualification, scoring, ending resolution, fixed-point
+  visibility) were re-run rather than re-implemented and are unchanged.
+
+- **2026-08-26 — rules simplification, Phase 3: one place to see every rule.** A new builder
+  "Rules" tab lists every rule on the form as a full sentence — *Show "Email" when Ticket type
+  equals VIP*, *After "Intro", skip to "VIP details" when …*, *Disqualify — show "Not eligible"
+  — when Age is less than 18* — grouped by the page the respondent meets them on.
+
+  **The capability that is genuinely new is not the list, it is the badge.** A condition naming a
+  question that was since deleted is `NOT_EVALUABLE`, which the evaluator reads as `false`, so
+  the item it guarded is hidden from every respondent — permanently, silently, with the form
+  still looking correct in the builder. The tab carries a count of broken rules and each row says
+  in words what it points at that no longer exists. Nothing in the product said this before.
+
+  **The hub is a view, and one plan point was deviated from to keep it one.** §6 said each row
+  opens the same dialog the per-item panels open; instead a row selects its item and switches to
+  Build, where that panel already is. Embedding the panel would have meant a second place that
+  knows how to write a rule to a question versus a page versus a screen — the "two write paths
+  for one thing" the same section forbids. `rules-tab.component.ts` has no persistence, no
+  `BuilderStateService`, and no import of the authoring components; `rules-hub.wiring.spec.ts`
+  pins all three.
+
+  **Prose has one source.** `describeCondition` was extracted out of `summarizeGroup`, so the
+  rail's one-line summary and the hub's full sentences are the same renderer — an author who
+  reads one wording in the panel and another in the hub has to work out whether the rule changed
+  under them. The rail still truncates to "+2 more" (it is one line in a 300px column); the hub
+  never does, because it is the one screen where a rule can be read whole.
+
+  **One existing spec was retargeted, not deleted.** `registration.spec.ts` pinned the literal
+  `BuilderTab` union to assert "responses is last"; adding any tab failed it, which reads as a
+  Responses regression and is not one. It now parses the union and asserts the ordering claim its
+  own title makes.
+
+  **One thing the self-review pass caught.** The hub rendered an unconditional rule as *Show
+  "Age" when always* — bad English burying a real fact. `evaluateGroup({})` is vacuously TRUE, so
+  a rule with no conditions fires for every respondent, and a jump like that silently skips pages
+  for everyone. The builder's Done button refuses to author one (`isDraftCommittable` requires a
+  populated group), but mj-sync metadata and the AI builder both can, so it is a rule an author
+  can inherit and never have written — exactly what the tab exists to surface. It now reads
+  *"…always — this rule has no conditions, so it applies to everyone"*.
+
+  **Verification:** 1,944 unit tests (272 / 26 / 142 / 1003 / 501), +30 over Phase 2. The ten
+  structural guards in `rules-hub.wiring.spec.ts` were written after the component, so four
+  deliberate mutations (a write method on the hub, a flat list, a hardcoded colour, a missing tab
+  switch) were applied and each was caught before the file was kept. Build clean, widget
+  1197.6 kB; `lint:ui`, `lint:distribution` + 72 mutants, `lint:generated` and `lint:migrations`
+  all pass.
+
+- **2026-08-26 — question-level logic, Phase 1: one forward walk, and targets that say what they
+  are.** The user asked for question-to-question branching after seeing a competitor's editor,
+  then simplified further: *"disqualify and jump to end we can combine in jump to rule where user
+  simply points the end screen or submit."* Plan: `plans/QUESTION_LEVEL_LOGIC_PLAN.md`.
+
+  **The jump target is now tagged.** `{ when, toPageId }` became `{ when, target }` where target
+  is `{kind:'question'|'page'|'ending', id}` or `{kind:'submit'}`. Legacy rules normalize at the
+  parse boundary and nowhere else — tolerance at the edge, one shape inside — and a rule carrying
+  BOTH shapes is a parse error rather than a coin flip about branching. No migration: it is all
+  inside the `ConditionalRule` JSON column.
+
+  **Two folds became one.** `resolveVisiblePages` and `resolveVisibleQuestions` were independent
+  walks, which was safe only while a jump could target nothing but a page. Question-level jumps
+  make the two interdependent in both directions: jump past every question on a page and the page
+  is an empty header, and a jump landing INSIDE a page skips that page's own header stop. Two
+  folds computing halves of one answer is how the widget and the server come to disagree about
+  what is on screen — the failure the fixed-point loop exists to prevent — so there is now one
+  forward walk over a flat sequence of stops, and both functions are thin readers of it.
+
+  **What the walk preserves, deliberately.** A non-terminal target at or before the current
+  position stays inert — backward, self and unknown are skipped, never an error, which is what
+  makes cycles unrepresentable. A jumped-over stop's own rules are never consulted. A target
+  hidden by its own show rule stays hidden. A TERMINAL target is the one exception: it has no
+  ordering to violate, so it fires even when it names a screen that no longer exists, because
+  continuing would ask questions the author had decided this respondent should not see.
+
+  **What did NOT happen yet.** The plan had Phase 1 deleting `resolveDisqualification` and
+  `isArmedKnockout`; both have live callers in the widget and the server, so deleting them here
+  would leave the tree broken between commits. They move to Phase 2 with the swap, which keeps
+  this phase purely additive.
+
+  **Verification:** 1,970 unit tests (298 / 26 / 142 / 1003 / 501), +26 and all new — 10 for
+  target normalization, 16 for the walk. Build clean, widget 1199.1 kB (+1.5), `lint:ui` 0
+  violations, `lint:distribution` + 72 mutants pass.
+
+- **2026-08-26 — question-level logic, Phase 2: disqualification stops being a rule.** The rule
+  now says where to GO; the ending screen says what ARRIVING there means. `resolveDisqualification`
+  and `isArmedKnockout` are deleted, replaced by one shared `resolveFormOutcome` that both the
+  widget and the server call.
+
+  **What the entanglement cost.** An ending screen's `show` group meant two different things
+  depending on its `IsDisqualification` flag — "which thank-you page at the end" or "who gets
+  screened out mid-form". That is why the ending rule cards carried an `excludes` list: offering
+  both would silently reinterpret a group the author had already written. And it is why
+  `isArmedKnockout` existed at all — an empty group is vacuously true, which is right for `show`
+  and catastrophic for a knockout ("disqualify everyone before they have answered anything").
+  Decoupling the flag from the group deletes the guard, the `excludes` machinery, the `disqualify`
+  pseudo-verb, the `RuleFlags` bag and the panel's second output. The panel now has exactly one
+  output and cannot reach the screen flag at all.
+
+  **The widget path turned out to be identical either way.** `sealDisqualified` already sent a
+  COMPLETION and let the server decide the status, so an ending jump to an unflagged screen needed
+  no new client path — it seals, shows the screen, and the server writes `Complete` with quota
+  counted and automations fired. Renamed to `endEarly`/`sealEarlyEnd` to stop describing only half
+  of what it does.
+
+  **The UI moved in the same commit, deliberately.** Leaving the "Disqualify if" card in place
+  would have left an authoring path that writes a rule nothing reads — the exact silent failure
+  this work keeps closing. Screening out is now a **Screened out** toggle in the ending screen's
+  own settings, with copy saying what it costs (no quota, no automations).
+
+  **New in the Rules tab:** an ending marked screened-out that no `Go to` rule targets is flagged
+  as broken ("nothing sends anyone to this screen"), and so is a show rule written on one, since
+  `resolveEndingScreen` excludes flagged screens and never reads it. Both were previously
+  invisible.
+
+  **Verification:** 1,969 unit tests (296 / 26 / 142 / 1004 / 501). The count moved by −9 deleted
+  knockout-arming cases, +7 `resolveFormOutcome` cases and +3 new tab cases. Build clean, widget
+  1199.1 kB, `lint:ui` 0 violations, `lint:distribution` + 72 mutants pass.
+
+- **2026-08-26 — question-level logic, Phases 3–4: one dialog, several rules, real destinations.**
+  Shipped together because "several rules per item" with no UI to author them is dead capability,
+  and the If/Then dialog IS that UI.
+
+  **The card picker is gone.** Logic used to be authored a verb at a time — pick "Show only if",
+  author it, close, pick "Jump to page", author that — so the commonest question an author has,
+  *what does this question actually do?*, could not be answered without opening two dialogs and
+  remembering the first. There is now one **Edit logic** dialog per item holding the show gate and
+  every branching rule together, and the rail beside it is a one-line-per-rule summary of what the
+  item does.
+
+  **Rules are numbered, and can be reordered.** `resolveFlow` takes the first rule whose
+  conditions pass, so order is meaning rather than presentation. Move-up/down and the numbering
+  say so; a bare list would let an author write two rules and be surprised by which one won.
+  `MAX_JUMP_RULES` is now enforced where an author can see it — it was in the contract and at the
+  server's zod boundary, but not in the editor, so an over-cap rule could be authored and would
+  then fail to parse on every public load.
+
+  **Destinations are picked from a grouped list** — Questions · Sections · Endings · Submit —
+  filtered forward-only to match the resolver, since a backward target is inert there and
+  offering one would let an author write a rule that reads correctly and never fires. A stored
+  target the picker no longer offers still renders, named, because a `<select>` whose value is
+  absent from its options goes BLANK.
+
+  **Two shipping bugs the dead-code sweep caught.** The Rules tab read only `rule.jump[0]` and
+  ignored question-level jumps entirely, so most of the new capability would have been invisible
+  in the one place built to show every rule. It now emits one row per rule, numbered when there is
+  more than one, and flags only the broken one rather than its healthy neighbours.
+
+  **What got deleted.** `RuleCardSpec`, the three card-set constants, `cardSpec`, `activeCards`,
+  `hasVerb`, `isGroupVerb`, `GroupVerb`, `RuleDraft`, `isDraftCommittable`, `isDraftDirty`,
+  `sameGroup`, `jumpRule`, `withJumpRule`, `summarizeJump`, `JumpTargetPage`. `rules-panel-model`
+  is down to the JSON accessors and `describeCondition`, which is the single source of prose the
+  rail and the hub both read.
+
+  **What was preserved, because it was hard-won.** Nothing persists until Save; a dirty close
+  warns and a clean one closes silently; dirty is value equality, not touched-ness; changing the
+  selected item closes the dialog. `commit` is now the ONLY writer — deleting a rule is an edit
+  to the draft, where it used to persist straight from the rail.
+
+  **Verification:** 1,971 unit tests (296 / 26 / 142 / 1006 / 501). Build clean, widget 1199.1 kB;
+  `lint:ui`, `lint:distribution` + 72 mutants, `lint:generated` and `lint:migrations` all pass.

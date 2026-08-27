@@ -8,11 +8,14 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
+  parseQuestionScoring,
   questionTypeBehavior,
+  serializeQuestionScoring,
   type ConditionalRule,
   type JSONValue,
   type mjBizAppsFormsFormQuestionOptionEntity,
   type QuestionOptionMode,
+  type QuestionScoring,
   type ValidationRule,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
@@ -24,10 +27,13 @@ import {
   withSetting,
   type QuestionSettingField,
 } from './question-settings';
+import { RulesPanelComponent } from './rules-panel.component';
 import {
-  ConditionalRuleEditorComponent,
+  authoredAnswerOptions,
+  type AuthoredAnswerOption,
   type ConditionalSourceQuestion,
-} from './conditional-rule-editor.component';
+} from './condition-sources';
+import type { JumpTargetOption } from './jump-target-options';
 import { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
@@ -60,6 +66,11 @@ const QUESTION_EDITOR_CSS = /* css */ `
    panel title is enough structure; four more make a 340px column look like a form
    made of forms. */
 .qe-section { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); padding-top: var(--mjf-gap-sm); }
+.qe-points { display: flex; flex-direction: column; gap: 8px; }
+.qe-points-row { display: flex; align-items: center; gap: 10px; }
+.qe-points-label { flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--mj-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qe-points-input { flex: none; width: 84px; text-align: right; }
+
 .qe-section-title {
   margin: 0;
   font-size: var(--mjf-label);
@@ -143,7 +154,7 @@ const QUESTION_EDITOR_CSS = /* css */ `
   imports: [
     CommonModule,
     FormsModule,
-    ConditionalRuleEditorComponent,
+    RulesPanelComponent,
     ValidationRuleEditorComponent,
     ImageFieldComponent,
     SettingRowComponent,
@@ -195,13 +206,26 @@ export class QuestionEditorComponent {
    * switching a row on and typing into it. Reset when the selected question changes, since the
    * next question's emptiness is not this question's.
    */
-  private requested = { validation: false, placeholder: false, conditional: false };
+  /**
+   * Sources a jump's conditions may read — this question's OWN answer included.
+   *
+   * Not the same set as {@link conditionalSources}: a question's SHOW rule must not read its own
+   * answer (it would hide the field the respondent is typing into), but "if THIS answer is X, go
+   * to Y" is the whole point of a branching rule.
+   */
+  @Input() jumpConditionSources: ConditionalSourceQuestion[] = [];
+  /** Forward destinations for this question's rules — later questions, later sections, endings. */
+  @Input() jumpTargets: JumpTargetOption[] = [];
+  /** What each destination skips, keyed by option value — see `jump-reach.ts`. */
+  @Input() reachNotes: ReadonlyMap<string, string> = new Map<string, string>();
+
+  private requested = { validation: false, placeholder: false, scoring: false };
 
   @Input()
   public set selectedId(id: string) {
     if (id !== this.lastSelectedId) {
       this.lastSelectedId = id;
-      this.requested = { validation: false, placeholder: false, conditional: false };
+      this.requested = { validation: false, placeholder: false, scoring: false };
     }
   }
   private lastSelectedId = '';
@@ -212,10 +236,6 @@ export class QuestionEditorComponent {
 
   protected get placeholderOpen(): boolean {
     return isOptionalOpen(this.settingValue(this.placeholderField).trim() !== '', this.requested.placeholder);
-  }
-
-  protected get conditionalOpen(): boolean {
-    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
   }
 
   protected toggleValidation(): void {
@@ -232,14 +252,6 @@ export class QuestionEditorComponent {
     this.requested.placeholder = next.requested;
     if (next.clear) {
       this.setSetting(field, '');
-    }
-  }
-
-  protected toggleConditional(): void {
-    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
-    this.requested.conditional = next.requested;
-    if (next.clear) {
-      this.onConditionalChange(undefined);
     }
   }
 
@@ -413,6 +425,66 @@ export class QuestionEditorComponent {
   protected onValidationChange(rule: ValidationRule | undefined): void {
     if (!this.node) return;
     this.node.entity.ValidationRule = serializeValidationRule(rule);
+    this.questionChanged.emit(this.node);
+  }
+
+  // -- scoring (C4) -----------------------------------------------------------
+
+  /**
+   * The choices points can be assigned to — the PUBLISHED option identities, because points are
+   * keyed by the value a published form actually stores as the answer (`Value ?? Label`,
+   * uniquified).
+   *
+   * Reads {@link authoredAnswerOptions} rather than the condition source's option list, which
+   * it used to share. They have since parted company: a condition source also carries the
+   * options a TYPE implies — a rating's stars, a yes/no's two answers — so that a comparison
+   * value is picked rather than typed. Scoring wants none of those. Sharing the list would
+   * have put a points box against every star on every rating on every form, unasked.
+   */
+  protected get scoringChoices(): AuthoredAnswerOption[] {
+    if (!this.node) return [];
+    return authoredAnswerOptions(this.node.entity, this.node.options);
+  }
+
+  protected get scoring(): QuestionScoring | undefined {
+    return this.node ? parseQuestionScoring(this.node.entity.ScoringConfig) : undefined;
+  }
+
+  protected get scoringOpen(): boolean {
+    return isOptionalOpen(!!this.scoring, this.requested.scoring);
+  }
+
+  protected toggleScoring(): void {
+    const next = toggleOptional(!!this.scoring, this.requested.scoring);
+    this.requested.scoring = next.requested;
+    if (next.clear) {
+      this.writeScoring(undefined);
+    }
+  }
+
+  protected pointsFor(optionValue: string): string {
+    const points = this.scoring?.points;
+    if (!points || !Object.prototype.hasOwnProperty.call(points, optionValue)) {
+      return '';
+    }
+    return String(points[optionValue]);
+  }
+
+  protected setPoints(optionValue: string, raw: string): void {
+    const parsed = raw.trim() === '' ? undefined : Number(raw);
+    const points: Record<string, number> = { ...(this.scoring?.points ?? {}) };
+    if (parsed === undefined || !Number.isFinite(parsed)) {
+      delete points[optionValue];
+    } else {
+      points[optionValue] = parsed;
+    }
+    this.writeScoring(Object.keys(points).length > 0 ? { points } : undefined);
+  }
+
+  /** Merge-preserving write: sibling ScoringConfig content (an LLM-judge prompt) survives. */
+  private writeScoring(scoring: QuestionScoring | undefined): void {
+    if (!this.node) return;
+    this.node.entity.ScoringConfig = serializeQuestionScoring(this.node.entity.ScoringConfig, scoring);
     this.questionChanged.emit(this.node);
   }
 }

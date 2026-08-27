@@ -29,6 +29,7 @@ import { DesignStateService } from './design-state.service';
 import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
+import { PageEditorComponent } from './page-editor.component';
 import { ImportQuestionsComponent } from './import-questions.component';
 import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
@@ -57,7 +58,19 @@ import {
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
-import type { ConditionalSourceQuestion } from './conditional-rule-editor.component';
+import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
+import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
+import { jumpReach, reachNote, type ReachSource } from './jump-reach';
+import {
+  collectRuleEntries,
+  endingReachFor,
+  ruleBadgesFor,
+  type EndingReach,
+  type RuleBadge,
+  type RuleEntry,
+  type RuleInventoryForm,
+} from './rules-inventory';
+import { parseConditionalRule } from './json-fields';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
   definitionFingerprint,
@@ -69,10 +82,13 @@ import { isValidReorder } from './reorder';
 import { nextOptionLabel } from './option-labels';
 import {
   NOTHING_SELECTED,
+  clearIfPage,
   clearIfQuestion,
   clearIfScreen,
+  pageId,
   questionId,
   screenId,
+  selectPage as pageSelection,
   selectQuestion as questionSelection,
   selectScreen as screenSelection,
   type BuilderSelection,
@@ -129,6 +145,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     CdkDragPreview,
     QuestionEditorComponent,
     ScreenEditorComponent,
+    PageEditorComponent,
     ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
@@ -164,6 +181,10 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected get selectedScreenId(): string | null {
     return screenId(this.selection);
+  }
+
+  protected get selectedPageId(): string | null {
+    return pageId(this.selection);
   }
 
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
@@ -544,6 +565,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.busy = true;
     if (await this.state.deletePage(page)) {
       this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
+      this.selection = clearIfPage(this.selection, page.entity.ID);
       for (const q of page.questions) {
         this.selection = clearIfQuestion(this.selection, q.entity.ID);
       }
@@ -591,6 +613,198 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected selectScreen(screen: mjBizAppsFormsFormScreenEntity): void {
     this.selection = screenSelection(screen.ID);
     this.cdr.markForCheck();
+  }
+
+  // -- page selection (RULES_AND_BRANCHING_PLAN B2) ---------------------------
+
+  protected get selectedPage(): PageNode | null {
+    if (!this.tree || !this.selectedPageId) {
+      return null;
+    }
+    return this.tree.pages.find((p) => p.entity.ID === this.selectedPageId) ?? null;
+  }
+
+  /** 0-based position of the selected page, or -1. */
+  protected get selectedPageIndex(): number {
+    if (!this.tree || !this.selectedPageId) {
+      return -1;
+    }
+    return this.tree.pages.findIndex((p) => p.entity.ID === this.selectedPageId);
+  }
+
+  protected selectPage(page: PageNode): void {
+    this.selection = pageSelection(page.entity.ID);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Conditional sources for a PAGE: questions on pages strictly BEFORE it.
+   *
+   * Not "questions before this one" (a question's rule) and not "everything" (an ending's):
+   * a page rule referencing its own questions would hide the page out from under a respondent
+   * mid-fill — the widget re-evaluates visibility on every answer — so the page's own
+   * questions are never offered.
+   */
+  /**
+   * The questions in this list that a rule may actually read.
+   *
+   * ONE definition, for all six source lists — a page's show gate and its jump, a question's
+   * show gate and its jump, an ending's, and the Rules tab's inventory. Each of those used to
+   * map the tree itself, so "which questions can a rule read" was answered six times, and the
+   * first exclusion to arrive would have had to be remembered in all six.
+   *
+   * `toConditionalSource` returns `undefined` for a question that collects no answer — a
+   * `Statement` renders prose and never reaches the answer map, so every operator on it is a
+   * constant, and it was offered in the question dropdown all the same.
+   */
+  private sourcesOf(questions: readonly QuestionNode[]): ConditionalSourceQuestion[] {
+    return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
+  }
+
+  protected get pageConditionalSources(): ConditionalSourceQuestion[] {
+    const index = this.selectedPageIndex;
+    if (!this.tree || index <= 0) {
+      return [];
+    }
+    return this.tree.pages.slice(0, index).flatMap((page) => this.sourcesOf(page.questions));
+  }
+
+  protected onPageChanged(page: PageNode): void {
+    this.state.saveDebounced(page.entity);
+    this.markDirty();
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Sources for the selected page's JUMP conditions: earlier pages AND the page's own
+   * questions — leaving a page is decided by what was just answered on it, which is exactly
+   * what the show rule must NOT read (see {@link pageConditionalSources}).
+   */
+  protected get pageJumpConditionSources(): ConditionalSourceQuestion[] {
+    const index = this.selectedPageIndex;
+    if (!this.tree || index < 0) {
+      return [];
+    }
+    return this.tree.pages.slice(0, index + 1).flatMap((page) => this.sourcesOf(page.questions));
+  }
+
+  /**
+   * Where the SELECTED PAGE's rules may send a respondent — forward only.
+   *
+   * Forward-only mirrors the resolver, which treats a backward or self target as inert. Offering
+   * one would let an author write a rule that silently never fires, which is worse than not
+   * offering it: the rule reads correctly and does nothing.
+   */
+  protected get pageJumpTargets(): JumpTargetOption[] {
+    const index = this.selectedPageIndex;
+    if (!this.tree || index < 0) {
+      return [];
+    }
+    const later = this.tree.pages.slice(index + 1);
+    return jumpTargetOptions(
+      // Questions on later pages. A page's own questions are NOT offered: "after this page, go
+      // to a question on this page" is backward or sideways, and the resolver ignores it.
+      later.flatMap((page) => page.questions.map((q) => ({ id: q.entity.ID, label: q.entity.Prompt }))),
+      later.map((page, offset) => ({
+        id: page.entity.ID,
+        label: page.entity.Title || `Page ${index + 2 + offset}`,
+      })),
+      this.endingDestinations,
+    );
+  }
+
+  /**
+   * Where the SELECTED QUESTION's rules may send a respondent — everything after it, in flow
+   * order, plus every ending screen and Submit.
+   */
+  protected get questionJumpTargets(): JumpTargetOption[] {
+    if (!this.tree || !this.selectedQuestionId) {
+      return [];
+    }
+    const laterQuestions: Array<{ id: string; label: string }> = [];
+    const laterPages: Array<{ id: string; label: string }> = [];
+    let seen = false;
+    this.tree.pages.forEach((page, index) => {
+      if (seen) {
+        laterPages.push({ id: page.entity.ID, label: page.entity.Title || `Page ${index + 1}` });
+      }
+      for (const q of page.questions) {
+        if (q.entity.ID === this.selectedQuestionId) {
+          seen = true;
+          continue;
+        }
+        if (seen) {
+          laterQuestions.push({ id: q.entity.ID, label: q.entity.Prompt });
+        }
+      }
+    });
+    return jumpTargetOptions(laterQuestions, laterPages, this.endingDestinations);
+  }
+
+  /** What each destination the SELECTED PAGE may jump to would skip. */
+  protected get pageReachNotes(): ReadonlyMap<string, string> {
+    const page = this.selectedPage;
+    return page ? this.reachNotesFor({ kind: 'page', id: page.entity.ID }, this.pageJumpTargets) : new Map();
+  }
+
+  /** What each destination the SELECTED QUESTION may jump to would skip. */
+  protected get questionReachNotes(): ReadonlyMap<string, string> {
+    const id = this.selectedQuestionId;
+    return id ? this.reachNotesFor({ kind: 'question', id }, this.questionJumpTargets) : new Map();
+  }
+
+  /**
+   * One note per offered destination, keyed by its `<option>` value.
+   *
+   * Computed here because reach is a fact about the whole FORM — which questions lie between two
+   * items — and the dialog is handed one item's rules. Keyed by option value rather than by
+   * target object so the dialog can look one up from the select it already renders, with no
+   * second opinion about how a target is encoded.
+   */
+  private reachNotesFor(
+    source: ReachSource,
+    targets: readonly JumpTargetOption[],
+  ): ReadonlyMap<string, string> {
+    const pages = (this.tree?.pages ?? []).map((page) => ({
+      id: page.entity.ID,
+      questions: page.questions.map((q) => ({ id: q.entity.ID, isRequired: q.entity.IsRequired === true })),
+    }));
+    const notes = new Map<string, string>();
+    for (const target of targets) {
+      const note = reachNote(jumpReach(pages, source, target.target));
+      if (note.length > 0) {
+        notes.set(targetValue(target.target), note);
+      }
+    }
+    return notes;
+  }
+
+  /** Every ending screen, as a jump destination. */
+  private get endingDestinations(): Array<{ id: string; label: string }> {
+    return this.endScreens.map((screen) => ({ id: screen.ID, label: screen.Title || 'Ending screen' }));
+  }
+
+  /**
+   * Sources the SELECTED QUESTION's jump conditions may read — every question up to and
+   * INCLUDING itself.
+   *
+   * Its own answer is the whole point: "if this answer is X, go to Y". That is exactly what its
+   * SHOW rule must not read, which is why {@link conditionalSources} stops one question earlier.
+   */
+  protected get questionJumpSources(): ConditionalSourceQuestion[] {
+    if (!this.tree || !this.selectedQuestionId) {
+      return [];
+    }
+    const sources: ConditionalSourceQuestion[] = [];
+    for (const page of this.tree.pages) {
+      for (const q of page.questions) {
+        sources.push(...this.sourcesOf([q]));
+        if (q.entity.ID === this.selectedQuestionId) {
+          return sources;
+        }
+      }
+    }
+    return sources;
   }
 
   protected async addScreen(screenType: 'Welcome' | 'Ending'): Promise<void> {
@@ -647,9 +861,12 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree) {
       return [];
     }
-    return this.tree.pages.flatMap((page) =>
-      page.questions.map((q) => ({ id: q.entity.ID, prompt: q.entity.Prompt })),
-    );
+    return [
+      ...this.tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      // Endings may also band on the running score (C4) — "score > 70 → pass screen". Only
+      // endings get this: mid-form rules reading a mid-form score would be circular.
+      SCORE_SOURCE,
+    ];
   }
 
   // -- import ---------------------------------------------------------------
@@ -765,10 +982,82 @@ export class FormBuilderComponent extends BaseFormComponent {
         if (q.entity.ID === this.selectedQuestionId) {
           return sources;
         }
-        sources.push({ id: q.entity.ID, prompt: q.entity.Prompt });
+        sources.push(...this.sourcesOf([q]));
       }
     }
     return sources;
+  }
+
+  // -- rule badges on the canvas (RULES_SIMPLIFICATION_PLAN Phase 3) ---------
+
+  /**
+   * The badges each item on the canvas wears, keyed by item id — see `rules-inventory.ts`.
+   *
+   * Read ONCE per render, through `@let` at the top of the canvas, and indexed per item from
+   * there. A getter called per question would walk the whole form once per question, which on a
+   * form long enough to need a rule hub is exactly the form that can least afford it.
+   *
+   * Recomputed per read rather than cached: rules change from the panel beside the canvas, from
+   * the item's own delete, and from a question being dragged to another page, so a cache would
+   * need invalidating from every one of those write paths. The form's rules number in the tens.
+   */
+  protected get ruleBadges(): Map<string, RuleBadge[]> {
+    return ruleBadgesFor(this.ruleEntries);
+  }
+
+  /**
+   * How each ending screen is reached, keyed by id — see `endingReachFor`.
+   *
+   * Read once per render through `@let`, for the same reason {@link ruleBadges} is: it walks
+   * every rule on the form to find out which endings they point at.
+   */
+  protected get endingReach(): Map<string, EndingReach> {
+    return this.tree ? endingReachFor(this.ruleInventoryForm) : new Map<string, EndingReach>();
+  }
+
+  /** Every rule on the form as a sentence — see `rules-inventory.ts` for why this exists. */
+  private get ruleEntries(): RuleEntry[] {
+    return this.tree ? collectRuleEntries(this.ruleInventoryForm) : [];
+  }
+
+  /**
+   * The whole form as the inventory reads it.
+   *
+   * One shape, two readers — the sentences on the canvas and the reach line on each ending. They
+   * have to be built from the same walk: the badges say a rule is broken and the reach line says
+   * whether anyone arrives, and a row showing two answers assembled from two different views of
+   * the form is a row that can contradict itself.
+   *
+   * Only called with a tree present; the getters above guard for it.
+   */
+  private get ruleInventoryForm(): RuleInventoryForm {
+    const tree = this.tree;
+    if (!tree) {
+      return { sources: [], pages: [], endings: [] };
+    }
+    return {
+      sources: tree.pages.flatMap((page) => this.sourcesOf(page.questions)),
+      pages: tree.pages.map((page, index) => ({
+        id: page.entity.ID,
+        label: page.entity.Title || `Page ${index + 1}`,
+        conditionalRule: parseConditionalRule(page.entity.ConditionalRule),
+        questions: page.questions.map((q) => ({
+          id: q.entity.ID,
+          label: q.entity.Prompt,
+          conditionalRule: parseConditionalRule(q.entity.ConditionalRule),
+          // Carried so a `Go to` can say how many REQUIRED questions it passes over, which is
+          // the half of "this rule skips things" an author actually needs to weigh.
+          isRequired: q.entity.IsRequired === true,
+        })),
+      })),
+      endings: this.endScreens.map((screen) => ({
+        id: screen.ID,
+        label: screen.Title || 'Ending screen',
+        conditionalRule: parseConditionalRule(screen.ConditionalRule),
+        isDisqualification: screen.IsDisqualification === true,
+        isDefault: screen.IsDefault === true,
+      })),
+    };
   }
 
   /** Every question on the form, in page/display order — what the Automate tab maps from. */

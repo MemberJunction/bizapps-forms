@@ -67,10 +67,17 @@ describe('builder Responses tab wiring', () => {
   const component = () => readFileSync(join(BUILDER, 'form-builder.component.ts'), 'utf8');
   const template = () => readFileSync(join(BUILDER, 'form-builder.component.html'), 'utf8');
 
-  it("adds 'responses' to BuilderTab, last, after 'automate'", () => {
-    expect(component()).toMatch(
-      /type BuilderTab = 'build' \| 'design' \| 'distribute' \| 'automate' \| 'responses';/,
-    );
+  it("adds 'responses' to BuilderTab, and keeps it last", () => {
+    // Ordering is the claim, not the exact roster — the builder's own header states it:
+    // "build it, style it, distribute it, decide what happens on submit, then read what came
+    // back. Collection follows configuration." Pinning the whole union made adding any tab
+    // fail here, which reads as a Responses regression and is not one.
+    const union = /type BuilderTab = ([^;]+);/.exec(component());
+    expect(union).not.toBeNull();
+    const members = union![1].split('|').map((m) => m.trim());
+    expect(members).toContain("'responses'");
+    expect(members[members.length - 1]).toBe("'responses'");
+    expect(members.indexOf("'automate'")).toBe(members.length - 2);
   });
 
   it('offers a tab button that activates it', () => {

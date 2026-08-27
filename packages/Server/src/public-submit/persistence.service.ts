@@ -8,9 +8,14 @@
  *   - CREATE   — first save for a session (Partial autosave or one-shot Complete).
  *   - UPDATE   — a Partial autosave re-hits the SAME session row: update it in place and
  *                REPLACE its answers (idempotent — no duplicate Partial rows). (Task 4)
- *   - PROMOTE  — a final submit finds the session's existing Partial row: flip it to
- *                Complete + set SubmittedAt, replace answers, and increment the count.
- *                No second row is created. (Task 4)
+ *   - PROMOTE  — a final submit finds the session's existing Partial row: flip it to its
+ *                terminal status, replace answers, and — for a COMPLETION — set SubmittedAt and
+ *                increment the count. No second row is created. (Task 4)
+ *
+ * "Terminal status" is two things now, and the difference is the whole point of the second one:
+ * a `Disqualified` promotion is still terminal and still replaces answers, but it never stamps
+ * `SubmittedAt` and never counts toward a quota — the respondent was screened out, not finished.
+ * See {@link statusFor} / {@link countsCompletion}.
  *
  * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)`
  * (never `new`), passing the anonymous `contextUser`. Every `Save()`/`Delete()` boolean is
@@ -34,6 +39,7 @@ import {
   FORM_RESPONSE_ANSWER_ENTITY,
   FORM_RESPONSE_ENTITY,
 } from './entity-names';
+import { isTerminalResponseStatus } from './response-status';
 import type { ValidatedAnswer } from './validation.service';
 
 /** Everything the persistence step needs from the resolved/validated submission. */
@@ -42,6 +48,12 @@ export interface PersistenceInputs {
   formVersionId: string;
   distributionId: string;
   complete: boolean;
+  /**
+   * C3: this save is a DISQUALIFICATION — a knockout rule matched. Terminal like Complete,
+   * but never quota-counted, never SubmittedAt-stamped, and it wins over `complete`: a final
+   * submit whose answers disqualify persists as `Disqualified`, whatever the client claimed.
+   */
+  disqualified?: boolean;
   startedAt?: string;
   sessionId: string;
   sourceMetadata: JSONValue;
@@ -70,7 +82,7 @@ export interface PersistenceInputs {
 export interface PersistenceResult {
   ok: boolean;
   responseId?: string;
-  status?: 'Complete' | 'Partial';
+  status?: mjBizAppsFormsFormResponseEntity['Status'];
   message?: string;
   /**
    * True when this submission was an idempotent no-op against a row a CONCURRENT request had
@@ -86,11 +98,14 @@ interface SaveResponseResult {
   entity?: mjBizAppsFormsFormResponseEntity;
   message?: string;
   /**
-   * True when this write targeted a PRE-EXISTING row (a normal upsert, or a duplicate-key
-   * recovery) — its answers must be cleared before re-inserting so the persisted set mirrors
-   * the latest submission. A fresh CREATE leaves this false (nothing to clear).
+   * True when this row still has to be given its real status — every path except the idempotent
+   * no-op against a row a concurrent request already sealed.
+   *
+   * This was `replacedExisting`, meaning "clear its answers before re-inserting". Both the flag
+   * and the wholesale clear are gone: answers are reconciled in place (see `reconcileAnswers`),
+   * and what is deferred now is the SEAL rather than the delete.
    */
-  replacedExisting?: boolean;
+  pendingSeal?: boolean;
   /**
    * True when this write TRANSITIONED the row to Complete for the first time (fresh Complete
    * create, or Partial→Complete promotion) and the distribution ResponseCount should be
@@ -137,20 +152,55 @@ export function isValidUuid(value: string | undefined | null): boolean {
   return typeof value === 'string' && UUID_RE.test(value);
 }
 
-/** Apply the (non-answer) column values common to create + update onto the response row. */
-function applyResponseFields(response: mjBizAppsFormsFormResponseEntity, inputs: PersistenceInputs): void {
+/** The status this save writes. Disqualification wins over everything else. */
+function statusFor(inputs: PersistenceInputs): mjBizAppsFormsFormResponseEntity['Status'] {
+  if (inputs.disqualified) {
+    return 'Disqualified';
+  }
+  return inputs.complete ? 'Complete' : 'Partial';
+}
+
+/** Terminal statuses: rows nothing may downgrade or rewrite. One definition, three callers. */
+const isTerminalStatus = isTerminalResponseStatus;
+
+/** Whether this save counts toward completion quotas — a disqualification never does. */
+function countsCompletion(inputs: PersistenceInputs): boolean {
+  return inputs.complete && !inputs.disqualified;
+}
+
+/**
+ * The columns that describe the response whether or not it is finished.
+ *
+ * Split from {@link applyResponseOutcome} so the row can exist, and hold everything true about
+ * it, before anything claims it was submitted.
+ */
+function applyResponseIdentity(response: mjBizAppsFormsFormResponseEntity, inputs: PersistenceInputs): void {
   response.FormID = inputs.formId;
   response.FormVersionID = inputs.formVersionId;
-  response.Status = inputs.complete ? 'Complete' : 'Partial';
   response.AnonymousSessionID = inputs.sessionId;
   if (inputs.startedAt) {
     response.StartedAt = new Date(inputs.startedAt);
   }
-  // Set SubmittedAt only on completion; a re-saved Partial must never claim it was submitted.
-  if (inputs.complete) {
+  response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
+}
+
+/**
+ * The columns that CLAIM a finished submission — written only once the answers are stored.
+ *
+ * These two used to be set in the same pass as the identity columns, before the answers were
+ * touched at all, so a response was sealed and then had its answers rewritten underneath it. A
+ * failure in between left a row saying `Complete`, carrying a `SubmittedAt` and counted against
+ * the quota, whose answers had been deleted and not replaced — and the dedupe gate then refused
+ * the retry, because the row it was retrying against was already terminal.
+ *
+ * `SubmittedAt` is stamped only on a completion: a re-saved Partial must never claim it was
+ * submitted, and a disqualified respondent never submitted at all.
+ */
+function applyResponseOutcome(response: mjBizAppsFormsFormResponseEntity, inputs: PersistenceInputs): void {
+  response.Status = statusFor(inputs);
+  if (inputs.complete && !inputs.disqualified) {
     response.SubmittedAt = new Date();
   }
-  response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
 }
 
 /** CREATE a new parent FormResponse row; returns it or a failure. */
@@ -170,9 +220,12 @@ async function createResponse(
   if (adoptedId) {
     response.ID = adoptedId;
   }
-  applyResponseFields(response, inputs);
+  applyResponseIdentity(response, inputs);
+  // Deliberately NOT the submission's real status: a row must exist before its answers can name
+  // it, so it starts as a draft and is sealed once they are stored. See `applyResponseOutcome`.
+  response.Status = 'Partial';
   if (await response.Save()) {
-    return { ok: true, entity: response, replacedExisting: false, countable: inputs.complete };
+    return { ok: true, entity: response, pendingSeal: true, countable: countsCompletion(inputs) };
   }
   // Save failed. If a CONCURRENT request already created the row at our adopted client id, the
   // dedupe/adopt SELECTs missed it (they ran before that insert committed) and we collided on
@@ -206,17 +259,16 @@ async function reconcileDuplicate(
     // The colliding row could not be loaded (vanished again) — surface the original failure.
     return { ok: false, message: 'Failed to save form response (duplicate id could not be reconciled).' };
   }
-  if (response.Status === 'Complete') {
-    // Terminal: a concurrent final submit already recorded this response. Return it as-is.
-    return { ok: true, entity: response, replacedExisting: false, countable: false, skipAnswers: true };
+  if (isTerminalStatus(response.Status)) {
+    // Terminal (Complete or Disqualified): a concurrent request already sealed this response —
+    // never downgrade it, never rewrite its answers. Return it as-is.
+    return { ok: true, entity: response, pendingSeal: false, countable: false, skipAnswers: true };
   }
   // The existing row is Partial: update it in place, or promote it to Complete. It was never
-  // counted as a Partial, so a promotion counts once here.
-  applyResponseFields(response, inputs);
-  if (!(await response.Save())) {
-    return { ok: false, message: saveError(response, 'Failed to reconcile form response.') };
-  }
-  return { ok: true, entity: response, replacedExisting: true, countable: inputs.complete };
+  // counted as a Partial, so a promotion counts once here. The identity columns are applied now
+  // and the row is SEALED later, once its answers are stored.
+  applyResponseIdentity(response, inputs);
+  return { ok: true, entity: response, pendingSeal: true, countable: countsCompletion(inputs) };
 }
 
 /** UPDATE/PROMOTE an existing parent FormResponse row in place; returns it or a failure. */
@@ -234,13 +286,21 @@ async function updateResponse(
     // The row vanished between lookup and save — fall back to creating a fresh one.
     return createResponse(provider, inputs, contextUser);
   }
-  // Count a promotion once: only when this write flips a not-yet-Complete row to Complete.
-  const wasComplete = response.Status === 'Complete';
-  applyResponseFields(response, inputs);
-  if (!(await response.Save())) {
-    return { ok: false, message: saveError(response, 'Failed to update form response.') };
+  // Sealed since the caller looked it up: leave it exactly as it is. The lookups that produce
+  // `existingResponseId` all filter on `RESUMABLE_RESPONSE_STATUSES`, so arriving here means the row WAS a
+  // partial a moment ago — a knockout flush, a second tab or a retry landing in between is the
+  // whole window. Without this the row was downgraded, its answers deleted and rewritten, and
+  // the quota counted it again, because the promotion check below asks only about `Complete`.
+  // `reconcileDuplicate` has always made this check; this is the path that never learned it.
+  if (isTerminalStatus(response.Status)) {
+    return { ok: true, entity: response, pendingSeal: false, countable: false, skipAnswers: true };
   }
-  return { ok: true, entity: response, replacedExisting: true, countable: inputs.complete && !wasComplete };
+  // The row is `Partial` — the guard above is exhaustive over every other status — so this write
+  // can only ever be an update in place or a promotion, and a promotion counts once. The old
+  // `!wasComplete` term was unreachable the moment that guard landed; leaving it would have read
+  // like a live safeguard.
+  applyResponseIdentity(response, inputs);
+  return { ok: true, entity: response, pendingSeal: true, countable: countsCompletion(inputs) };
 }
 
 /** Map one validated answer onto the FormResponseAnswer typed columns and Save it. */
@@ -288,13 +348,31 @@ function applyAnswerValue(answer: mjBizAppsFormsFormResponseAnswerEntity, input:
 }
 
 /**
- * Delete every existing answer for a response (used before re-inserting on an UPDATE/PROMOTE
- * so the row's answers exactly mirror the latest submission — idempotent). Loads the answers
- * as entity objects so each `.Delete()` return is checked. On any failure returns a message.
+ * Bring a response's stored answers in line with the submission — WRITE FIRST, DELETE LAST.
+ *
+ * This used to delete every stored answer and re-insert the whole set. Two things were wrong
+ * with that, and the second is the serious one.
+ *
+ * It rewrote everything on every save. An autosave carrying one changed answer performed N
+ * deletes and N inserts against a form of N questions, on a debounce, per respondent.
+ *
+ * And it opened a window in which the response held NEITHER its old answers nor its new ones.
+ * There is no transaction here: the deletes commit, then the inserts run one at a time and abort
+ * on the first failure. A failure anywhere in between left a response — already sealed by the
+ * caller, `SubmittedAt` stamped and quota counted — with the answers it had destroyed and
+ * nothing to replace them. Nothing retried, because the submit returned an error and the dedupe
+ * gate refuses a resubmit against a row that is already terminal.
+ *
+ * The order here is the fix. Every incoming answer is written first, reusing the row that
+ * already holds that question, so a failure leaves the previous value in place rather than a
+ * hole. Only once every one of them is safely stored are the rows the submission no longer
+ * carries removed — and those are the only rows that are ever deleted, which is also what makes
+ * an unchanged autosave cost nothing.
  */
-async function replaceAnswersClear(
+async function reconcileAnswers(
   provider: DatabaseProviderBase,
   responseId: string,
+  answers: ValidatedAnswer[],
   contextUser: UserInfo,
 ): Promise<SaveAnswerResult> {
   const existing = await provider.RunView<mjBizAppsFormsFormResponseAnswerEntityType>(
@@ -308,27 +386,58 @@ async function replaceAnswersClear(
   if (!existing.Success) {
     return { ok: false, message: 'Failed to load existing answers for replacement.' };
   }
+
+  const stale = new Map<string, mjBizAppsFormsFormResponseAnswerEntity>();
   for (const row of existing.Results) {
     const answer = row as unknown as mjBizAppsFormsFormResponseAnswerEntity;
-    if (!(await answer.Delete())) {
-      return { ok: false, message: saveError(answer, 'Failed to clear a prior answer.') };
+    // Last one wins on a duplicate: the row store should hold at most one answer per question,
+    // and if it somehow holds two, keeping one and deleting the other is the repair.
+    stale.set(answer.QuestionID, answer);
+  }
+
+  for (const validated of answers) {
+    const held = stale.get(validated.question.id);
+    stale.delete(validated.question.id);
+    const result = held
+      ? await rewriteAnswer(held, validated)
+      : await saveAnswer(provider, responseId, validated, contextUser);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
+  // LAST, and only what the submission no longer carries — a question hidden by a rule, or an
+  // answer cleared. Everything the respondent still has an answer for is already stored.
+  for (const orphan of stale.values()) {
+    if (!(await orphan.Delete())) {
+      return { ok: false, message: saveError(orphan, 'Failed to clear a prior answer.') };
     }
   }
   return { ok: true };
 }
 
-/** Insert all validated answers for a response; aborts with a message on first failure. */
-async function insertAnswers(
-  provider: DatabaseProviderBase,
-  responseId: string,
-  answers: ValidatedAnswer[],
-  contextUser: UserInfo,
+/**
+ * Overwrite the answer already stored for this question.
+ *
+ * Every typed column is cleared first. `applyAnswerValue` only writes the columns the input
+ * populates, which is correct on a fresh row where the rest are null — on a REUSED row it would
+ * leave the previous answer's column behind, so a question whose answer changed from text to a
+ * number would end up holding both, and `answerValueOf`'s precedence would read back the stale
+ * one.
+ */
+async function rewriteAnswer(
+  answer: mjBizAppsFormsFormResponseAnswerEntity,
+  validated: ValidatedAnswer,
 ): Promise<SaveAnswerResult> {
-  for (const validated of answers) {
-    const result = await saveAnswer(provider, responseId, validated, contextUser);
-    if (!result.ok) {
-      return result;
-    }
+  answer.TextValue = null;
+  answer.NumericValue = null;
+  answer.DateValue = null;
+  answer.BooleanValue = null;
+  answer.JSONValue = null;
+  answer.FileID = null;
+  applyAnswerValue(answer, validated.input);
+  if (!(await answer.Save())) {
+    return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
   }
   return { ok: true };
 }
@@ -426,22 +535,26 @@ export async function persistSubmission(
   // A concurrent request already Completed this row (duplicate-key recovery): it is terminal, so
   // its answers and count are already recorded — return the existing id/status untouched.
   if (saved.skipAnswers) {
-    return { ok: true, responseId, status: saved.entity.Status as 'Complete' | 'Partial', deduped: true };
+    return { ok: true, responseId, status: saved.entity.Status, deduped: true };
   }
 
-  // When this write targeted a pre-existing row (upsert or duplicate-key recovery), clear its
-  // prior answers first so the persisted set mirrors the latest submission (no stale/duplicate
-  // answers across autosaves or promotion).
-  if (saved.replacedExisting) {
-    const cleared = await replaceAnswersClear(provider, responseId, contextUser);
-    if (!cleared.ok) {
-      return { ok: false, message: cleared.message };
+  // One pass for both paths. A fresh CREATE has nothing stored, so this inserts; an upsert or a
+  // duplicate-key recovery reuses the rows already there. The `replacedExisting` branch that used
+  // to gate a wholesale clear is gone with it — see `reconcileAnswers` for why nothing is deleted
+  // until every incoming answer is safely written.
+  const written = await reconcileAnswers(provider, responseId, inputs.answers, contextUser);
+  if (!written.ok) {
+    return { ok: false, message: written.message };
+  }
+
+  // SEALED LAST. Until this line the row is a draft: whatever went wrong above, it never claimed
+  // to be a submission it does not have the answers for, and it stays resumable so the retry the
+  // respondent makes lands on it instead of being turned away by the dedupe gate.
+  if (saved.pendingSeal) {
+    applyResponseOutcome(saved.entity, inputs);
+    if (!(await saved.entity.Save())) {
+      return { ok: false, message: saveError(saved.entity, 'Failed to save form response.') };
     }
-  }
-
-  const inserted = await insertAnswers(provider, responseId, inputs.answers, contextUser);
-  if (!inserted.ok) {
-    return { ok: false, message: inserted.message };
   }
 
   // Runs on partial saves too: a respondent who uploaded on page one should see the file on the
@@ -455,5 +568,5 @@ export async function persistSubmission(
   if (saved.countable) {
     await incrementResponseCount(provider, inputs.distributionId, contextUser);
   }
-  return { ok: true, responseId, status: inputs.complete ? 'Complete' : 'Partial' };
+  return { ok: true, responseId, status: statusFor(inputs) };
 }

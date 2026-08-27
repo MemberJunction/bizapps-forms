@@ -50,6 +50,11 @@ export function hasValue(value: AnswerValue): boolean {
 /**
  * Validate one question's current value. Only call for VISIBLE questions — hidden
  * questions (failed conditional rule) are never required and never validated.
+ *
+ * This took the live answer map as a third argument for as long as the conditional `require`
+ * verb existed, since requiredness could then depend on other answers. It cannot any more:
+ * requiredness is the question's own static flag, so validating one question needs only that
+ * question.
  */
 export function validateQuestion(
   question: PublishedFormQuestion,

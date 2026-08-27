@@ -1,6 +1,9 @@
 <div class="mjf-scroll">
   <div class="mjf-scroll__progress">
     <mjf-form-progress [value]="progress()" />
+    @if (stepLabel(); as label) {
+      <span class="mjf-scroll__step" aria-live="polite">{{ label }}</span>
+    }
   </div>
 
   <!--
@@ -11,10 +14,18 @@
     down the component and aborting the in-flight submit mutation — every respondent lost
     their answers. The <form> element itself is kept for semantics (screen readers, and
     the mobile keyboard's "Go" affordance); `preventDefault` is now explicit.
+
+    The primary button is type="submit" on every section, not only the last, so that pressing
+    Enter in a field does the same thing the button does. `onSubmit` routes a mid-form submit
+    to `onNext`, which is what makes the two agree.
   -->
   <form class="mjf-scroll__body" (submit)="onSubmit($event)" novalidate>
-    @for (page of pages(); track page.id) {
-      <section class="mjf-page" [attr.aria-label]="page.title || 'Section'">
+    @if (current(); as page) {
+      <section
+        class="mjf-page"
+        tabindex="-1"
+        [attr.aria-label]="page.title || 'Section'"
+      >
         @if (page.title) {
           <h2 class="mjf-page__title">{{ page.title }}</h2>
         }
@@ -22,28 +33,53 @@
           <p class="mjf-page__desc">{{ page.description }}</p>
         }
         <div class="mjf-page__questions">
-          @for (q of questionsFor(page); track q.id) {
-            <mjf-form-question
-              [question]="q"
-              [value]="runtime().valueFor(q.id)"
-              [errorMessage]="runtime().visibleErrorFor(q)"
-              [partErrors]="runtime().visiblePartErrorsFor(q)"
-              [distributionSlug]="distributionSlug()"
-              [responseId]="responseId()"
-              (valueChange)="onValueChange(q, $event)"
-              (focusout)="onBlur(q, $event)"
-            />
+          <!-- Tracked on the entry's own identity, never `$index`. With index tracking Angular
+               recycles a question component onto whatever question lands at the same position in
+               the next section, which is how one file question came to announce another's
+               upload. The store keyed by question id is what makes that harmless; this keeps it
+               from happening at all. -->
+          @for (entry of entriesFor(page); track entryKey(entry)) {
+            @if (entry.kind === 'question') {
+              <mjf-form-question
+                [question]="entry.question"
+                [value]="runtime().valueFor(entry.question.id)"
+                [errorMessage]="runtime().visibleErrorFor(entry.question)"
+                [partErrors]="runtime().visiblePartErrorsFor(entry.question)"
+                [distributionSlug]="distributionSlug()"
+                [responseId]="responseId()"
+                (valueChange)="onValueChange(entry.question, $event)"
+                (focusout)="onBlur(entry.question, $event)"
+              />
+            } @else {
+              <!-- Context, not an error, so no role="alert": that would interrupt a screen
+                   reader mid-question and re-announce on every keystroke that changes the run. -->
+              <p class="mjf-skipped">
+                <i class="fa-solid fa-arrow-turn-down" aria-hidden="true"></i>
+                {{ skippedText(entry) }}
+              </p>
+            }
           }
         </div>
       </section>
+    } @else {
+      <p class="mjf-scroll__empty">This form has no questions to display.</p>
     }
 
-    <div class="mjf-scroll__actions">
-      <button type="submit" class="mjf-submit" [disabled]="submitting() || submitDisabled()">
-        @if (submitting()) {
-          <span>Submitting…</span>
+    <div class="mjf-scroll__actions" [class.mjf-scroll__actions--stepped]="!isFirst()">
+      @if (!isFirst()) {
+        <button type="button" class="mjf-back" [disabled]="submitting()" (click)="onBack()">
+          Back
+        </button>
+      }
+      <button type="submit" class="mjf-submit" [disabled]="primaryDisabled()">
+        @if (isLast()) {
+          @if (submitting()) {
+            <span>Submitting&hellip;</span>
+          } @else {
+            <span>Submit</span>
+          }
         } @else {
-          <span>Submit</span>
+          <span>Next</span>
         }
       </button>
     </div>

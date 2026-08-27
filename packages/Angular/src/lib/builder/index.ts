@@ -48,6 +48,55 @@ export {
 } from './form-asset.service';
 export { resolveApiOrigin, resolveApiToken } from '../shared/mj-api-origin';
 export { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
+export { RuleEditorDialogComponent } from './rule-editor-dialog.component';
+export { RulesPanelComponent } from './rules-panel.component';
+export { LogicEditorComponent } from './logic-editor.component';
+export {
+  addJumpRule,
+  canAddJumpRule,
+  emptyLogicDraft,
+  isCommittableJump,
+  isLogicDraftDirty,
+  jumpRules,
+  logicDraftOf,
+  moveJumpRule,
+  removeJumpRule,
+  ruleFromLogicDraft,
+  updateJumpRule,
+  type JumpDraft,
+  type LogicDraft,
+} from './logic-draft';
+export {
+  groupedJumpTargets,
+  jumpTargetOptions,
+  storedTargetLabel,
+  targetFromValue,
+  targetValue,
+  type JumpDestination,
+  type JumpTargetGroup,
+  type JumpTargetOption,
+} from './jump-target-options';
+export {
+  jumpReach,
+  reachNote,
+  type JumpReach,
+  type ReachItem,
+  type ReachPage,
+  type ReachSource,
+} from './jump-reach';
+export {
+  collectRuleEntries,
+  endingReachFor,
+  ruleBadgesFor,
+  type EndingReach,
+  type RuleBadge,
+  type RuleEntry,
+  type RuleInventoryForm,
+  type RuleInventoryItem,
+  type RuleInventoryPage,
+  type RuleItemKind,
+} from './rules-inventory';
+export { PageEditorComponent } from './page-editor.component';
 export { ValidationRuleEditorComponent } from './validation-rule-editor.component';
 export { BuilderStateService } from './builder-state.service';
 export {

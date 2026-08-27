@@ -26,10 +26,8 @@ import {
   type mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
-import {
-  ConditionalRuleEditorComponent,
-  type ConditionalSourceQuestion,
-} from './conditional-rule-editor.component';
+import { RulesPanelComponent } from './rules-panel.component';
+import type { ConditionalSourceQuestion } from './condition-sources';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
@@ -73,7 +71,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
   imports: [
     CommonModule,
     FormsModule,
-    ConditionalRuleEditorComponent,
+    RulesPanelComponent,
     ImageFieldComponent,
     SettingRowComponent,
   ],
@@ -136,6 +134,27 @@ const SCREEN_EDITOR_CSS = /* css */ `
             ></button>
           </mjf-setting-row>
 
+          <!-- What arriving here MEANS, which is the screen's business rather than any rule's.
+               A Go-to rule names this screen; this toggle decides how the response is recorded.
+               Keeping the two apart is what removed the old disqualify rule card, whose group
+               had to mean "which thank-you page" or "who is screened out" depending on a flag
+               one panel away. -->
+          <mjf-setting-row
+            label="Screened out"
+            hint="Responses that reach this screen are recorded as disqualified — they do not count toward your response limit, and no automations run. Send people here with a Go to rule."
+          >
+            <button
+              slot="control"
+              type="button"
+              class="mjf-switch"
+              role="switch"
+              [attr.aria-checked]="s.IsDisqualification"
+              [class.is-on]="s.IsDisqualification"
+              aria-label="Screened out"
+              (click)="toggleDisqualification()"
+            ></button>
+          </mjf-setting-row>
+
           <mjf-setting-row
             label="Redirect after submit"
             hint="Send the respondent to another page instead of showing this screen."
@@ -188,27 +207,16 @@ const SCREEN_EDITOR_CSS = /* css */ `
             </div>
           </mjf-setting-row>
 
-          <mjf-setting-row
-            label="Show only if"
-            hint="Endings are checked in order and the first match wins. One with no condition is only reachable as the default."
-            [open]="conditionalOpen"
-          >
-            <button
-              slot="control"
-              type="button"
-              class="mjf-switch"
-              [class.is-on]="conditionalOpen"
-              role="switch"
-              [attr.aria-checked]="conditionalOpen"
-              aria-label="Show only if"
-              (click)="toggleConditional()"
-            ></button>
-            <mjf-conditional-rule-editor
+          <div class="se-section">
+            <mjf-rules-panel
+              [subjectId]="s.ID"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
+              [allowJumps]="false"
+              itemNoun="screen"
               (ruleChange)="onConditionalChange($event)"
             />
-          </mjf-setting-row>
+          </div>
         }
       </div>
     }
@@ -219,7 +227,7 @@ export class ScreenEditorComponent {
   public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
     if (value?.ID !== this.current?.ID) {
       // A new screen's emptiness is not the previous screen's — start its rows closed.
-      this.requested = { redirect: false, conditional: false, social: false };
+      this.requested = { redirect: false, social: false };
     }
     this.current = value;
   }
@@ -229,7 +237,8 @@ export class ScreenEditorComponent {
   private current: mjBizAppsFormsFormScreenEntity | null = null;
 
   /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
-  private requested = { redirect: false, conditional: false, social: false };
+
+  private requested = { redirect: false, social: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 
@@ -240,9 +249,6 @@ export class ScreenEditorComponent {
     return isOptionalOpen(!!this.screen?.RedirectURL, this.requested.redirect);
   }
 
-  protected get conditionalOpen(): boolean {
-    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
-  }
 
   protected toggleRedirect(): void {
     const next = toggleOptional(!!this.screen?.RedirectURL, this.requested.redirect);
@@ -252,13 +258,6 @@ export class ScreenEditorComponent {
     }
   }
 
-  protected toggleConditional(): void {
-    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
-    this.requested.conditional = next.requested;
-    if (next.clear) {
-      this.onConditionalChange(undefined);
-    }
-  }
 
   // --- Social links ---------------------------------------------------------
 
@@ -349,6 +348,12 @@ export class ScreenEditorComponent {
   protected toggleDefault(): void {
     this.apply((s) => {
       s.IsDefault = !s.IsDefault;
+    });
+  }
+
+  protected toggleDisqualification(): void {
+    this.apply((s) => {
+      s.IsDisqualification = !s.IsDisqualification;
     });
   }
 

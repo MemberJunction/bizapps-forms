@@ -24,6 +24,8 @@ import { escapeSqlString, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import type { DefinitionRunViewProvider } from './definition-loader.service';
 import { FORM_RESPONSE_ENTITY } from './entity-names';
+import { RESUMABLE_RESPONSE_STATUSES, UNCOUNTED_BY_QUOTA } from './response-status';
+import type { FormResponseStatus } from './response-status';
 
 /** The identity of the session+form whose response we are looking up. */
 export interface ResponseLookupKey {
@@ -45,18 +47,22 @@ export interface ResponseLookupResult {
 }
 
 /**
- * Load the most-recent response for `(session, version)` in the given status, or none.
- * `status` narrows to 'Complete' (dedupe) or 'Partial' (upsert/promote).
+ * Load the most-recent response for `(session, version)` in any of `statuses`, or none.
+ *
+ * A SET rather than one status because the two callers ask different questions: the partial
+ * upsert wants exactly `Partial`, while dedupe wants "already sealed" — which is every terminal
+ * status, not just `Complete`. Passing one status meant dedupe could only ever name one of them,
+ * and the one it named was the one that predated `Disqualified`.
  */
 export async function findSessionResponse(
   provider: DefinitionRunViewProvider,
   key: ResponseLookupKey,
-  status: 'Complete' | 'Partial',
+  statuses: ReadonlyArray<FormResponseStatus>,
   contextUser: UserInfo,
 ): Promise<ResponseLookupResult> {
   // A blank session id cannot be correlated to a prior row — treat as "no match" (never
   // collapse distinct un-sessioned submissions into one).
-  if (!key.sessionId) {
+  if (!key.sessionId || statuses.length === 0) {
     return { ok: true, response: undefined };
   }
   const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
@@ -65,7 +71,7 @@ export async function findSessionResponse(
       ExtraFilter:
         `FormVersionID=${quoteSqlString(key.formVersionId)} ` +
         `AND AnonymousSessionID=${quoteSqlString(key.sessionId)} ` +
-        `AND Status=${quoteSqlString(status)}`,
+        `AND Status IN (${statuses.map(quoteSqlString).join(', ')})`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',
       MaxRows: 1,
@@ -129,7 +135,8 @@ export async function findResponseById(
 }
 
 /**
- * Count the `Partial` (in-flight autosave) rows for a published version.
+ * Count the rows for a published version that NO QUOTA bounds — the in-flight autosaves, and
+ * the knockouts.
  *
  * The durable, request-context-independent bound on partial-write abuse. The per-caller ceilings
  * are sliding windows held in one process's memory, so they bound a RATE and nothing else: a
@@ -137,6 +144,12 @@ export async function findResponseById(
  * rows for as long as they care to. Partial writes are otherwise ungated entirely — Turnstile and
  * both quotas apply only to COMPLETE submissions — so this count is what actually stops the table
  * growing without limit.
+ *
+ * `Disqualified` belongs in the count for the same reason `Partial` does, and it is easy to miss
+ * because the status is TERMINAL: terminal only means nothing more is coming for that respondent,
+ * not that anything bounded how many were created. A knockout is never a completion, so no quota
+ * ever counts it — leaving this ceiling reading zero while a caller answering "no" created rows
+ * without limit, needing neither a session nor a client id.
  *
  * Keyed on `FormVersionID`, not a distribution id, because `FormResponse` carries no distribution
  * FK — the same key dedupe and same-session upsert already use. Runs under the elevated principal
@@ -153,7 +166,9 @@ export async function countPartialResponses(
   const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
     {
       EntityName: FORM_RESPONSE_ENTITY,
-      ExtraFilter: `FormVersionID=${quoteSqlString(key.formVersionId)} AND Status='Partial'`,
+      ExtraFilter:
+        `FormVersionID=${quoteSqlString(key.formVersionId)} ` +
+        `AND Status IN (${UNCOUNTED_BY_QUOTA.map(quoteSqlString).join(', ')})`,
       ResultType: 'count_only',
     },
     contextUser,
@@ -198,7 +213,7 @@ export async function findAdoptableResponseById(
       ExtraFilter:
         `ID=${quoteSqlString(key.responseId)} ` +
         `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
-        `AND Status='Partial' ` +
+        `AND Status IN (${RESUMABLE_RESPONSE_STATUSES.map(quoteSqlString).join(', ')}) ` +
         // Require the row to carry this exact client id in its SourceMetadata JSON — proves the
         // PK was minted by the widget (not a guessed/foreign id), the ownership capability when
         // there is no session to key on.
@@ -242,7 +257,7 @@ export async function findOwnedResponseById(
         `ID=${quoteSqlString(key.responseId)} ` +
         `AND AnonymousSessionID=${quoteSqlString(key.sessionId)} ` +
         `AND FormVersionID=${quoteSqlString(key.formVersionId)} ` +
-        `AND Status='Partial'`,
+        `AND Status IN (${RESUMABLE_RESPONSE_STATUSES.map(quoteSqlString).join(', ')})`,
       OrderBy: '__mj_CreatedAt DESC',
       ResultType: 'entity_object',
       MaxRows: 1,

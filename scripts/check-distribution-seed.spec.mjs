@@ -1206,6 +1206,241 @@ IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityRelationship] WHERE ID = '855
     );
 }
 
+// ------------------------------------------------------------------------------------------------
+// CHECK 5 and the unguarded-insert scan. Both shipped without a case here, and that gap is exactly
+// how CHECK 5's three silent passes survived its own rewrite: narrowing a list was covered by hand,
+// REMOVING one was not, and "not seen" reads identically to "correct".
+// ------------------------------------------------------------------------------------------------
+
+const FULL_EXCLUSIONS =
+    "'sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks," +
+    "${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber'";
+
+/** A gated migration whose only content is one schema-sync call with the given argument text. */
+function syncMigration(argument) {
+    return `EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema]${argument};\n`;
+}
+
+withMigration(POST_GUARD, syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS}`), (violations) =>
+    check('CHECK 5 passes a sync that excludes the full baseline', violations.length === 0, JSON.stringify(violations)),
+);
+
+withMigration(POST_GUARD, syncMigration(" @ExcludedSchemaNames='sys,staging,dbo,${mjSchema}'"), (violations) =>
+    check('CHECK 5 catches a NARROWED exclusion list', violations.some((v) => v.includes('drops')), JSON.stringify(violations)),
+);
+
+withMigration(POST_GUARD, syncMigration(''), (violations) =>
+    check(
+        'CHECK 5 catches a sync call with NO exclusion argument at all',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(POST_GUARD, syncMigration(' @ExcludedSchemaNames=@Excl'), (violations) =>
+    check(
+        'CHECK 5 catches an exclusion list bound to a variable',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(
+    PRE_GUARD,
+    syncMigration(" @ExcludedSchemaNames='sys'"),
+    (violations) => check('CHECK 5 leaves pre-watershed migrations alone', violations.length === 0, JSON.stringify(violations)),
+);
+
+withMigration(
+    POST_GUARD,
+    `INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [Value]) VALUES ('1', 'x');\n`,
+    (violations) =>
+        check(
+            'an unguarded core insert is caught',
+            violations.some((v) => v.includes('no `IF NOT EXISTS` guard at all')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    POST_GUARD,
+    `
+IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[EntityFieldValue] WHERE [EntityFieldID] = '1' AND [Value] = 'x')
+BEGIN
+   INSERT INTO [\${mjSchema}].[EntityFieldValue] ([ID], [Value]) VALUES ('1', 'x');
+   INSERT INTO [\${mjSchema}].[EntityPermission] ([ID]) VALUES ('2');
+END;
+`,
+    (violations) =>
+        check(
+            'one fence over a BEGIN…END covers every insert inside it',
+            !violations.some((v) => v.includes('no `IF NOT EXISTS` guard at all')),
+            JSON.stringify(violations),
+        ),
+);
+
+// The case that proves the point of reading history at all: a schema NO constant here names.
+// `bizapps-somethingelse` stands for the Open App this repo has not heard of — `mj.config.cjs`
+// says of `__mj_BizAppsCaliber` that no hand-written deny-list "could ever have named it in
+// advance", which is why the requirement is derived from what the repo has already shipped. An
+// earlier migration excludes it; a later one must not quietly stop.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        writeFileSync(
+            join(root, 'migrations', PRE_GUARD),
+            syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS.slice(0, -1)},\${mjSchema}_BizAppsSomethingElse'`),
+        );
+        writeFileSync(join(root, 'migrations', POST_GUARD), syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS}`));
+    },
+    (violations) =>
+        check(
+            'CHECK 5 catches dropping a sibling schema only HISTORY knows about',
+            violations.some((v) => v.includes(POST_GUARD) && v.includes('BizAppsSomethingElse')),
+            JSON.stringify(violations.filter((v) => v.includes(POST_GUARD))),
+        ),
+);
+
+// The proc round eight found missing. `spDeleteUnneededEntityFields` is the LAST sync call CodeGen
+// emits, and the first version of the accounting regex did not name it — so deleting that one
+// call's exclusion list passed clean while the same deletion on any other call was caught. A case
+// per proc would be noise; a case for the one that was actually missed is the case that matters.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        writeFileSync(
+            join(root, 'migrations', POST_GUARD),
+            'EXEC [\${mjSchema}].[spDeleteUnneededEntityFields];\n',
+        );
+    },
+    (violations) =>
+        check(
+            'CHECK 5 accounts for spDeleteUnneededEntityFields, not only the procs it happens to see used',
+            violations.some((v) => v.includes(POST_GUARD) && v.includes('this gate can read')),
+            JSON.stringify(violations.filter((v) => v.includes(POST_GUARD))),
+        ),
+);
+
+// The PostgreSQL call form. `migrations-pg/` passes the exclusion list POSITIONALLY, so a check
+// that only reads `@ExcludedSchemaNames=` cannot see that path at all — and the lists there name
+// no sibling Open App, which is exactly the drift CHECK 5 exists to catch. Both dialects now.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202609010000__v0.12.x__Probe.pg.sql'),
+            `SELECT \${mjSchema}."spUpdateExistingEntitiesFromSchema"('sys,staging,dbo,\${mjSchema}');\n`,
+        );
+    },
+    (violations) =>
+        check(
+            'CHECK 5 reads the PostgreSQL positional exclusion list, not only the named T-SQL form',
+            violations.some((v) => v.includes('Probe.pg.sql') && v.includes('drops')),
+            JSON.stringify(violations.filter((v) => v.includes('Probe.pg.sql'))),
+        ),
+);
+
+// The two directions CHECK 5's accounting has to get right at once, and they pull apart. Round
+// nine reported a false failure on prose; round ten reported that the fix for it went blind to a
+// real call inside a dynamic-SQL literal. Both are cases now, because either alone licenses the
+// other's bug.
+withMigration(
+    POST_GUARD,
+    "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'Rebuilt by spUpdateExistingEntitiesFromSchema during install';\n",
+    (violations) =>
+        check(
+            'a procedure named in PROSE is not counted as a call',
+            !violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    POST_GUARD,
+    "DECLARE @cmd NVARCHAR(MAX) = N'EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames = @p';\n",
+    (violations) =>
+        check(
+            'a real call hidden inside a dynamic-SQL literal IS counted',
+            violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+// `syncMigration()` hardcodes brackets, so every case above reached only ONE of the three spellings
+// a real call takes. That is how requiring a bracket went silent on `EXEC schema.spX` — the suite
+// could not see the difference. One case per spelling now, plus the repeatable.
+withMigration(POST_GUARD, 'EXEC ${mjSchema}.spUpdateExistingEntitiesFromSchema;\n', (violations) =>
+    check(
+        'an UNBRACKETED T-SQL call is counted',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration(POST_GUARD, 'EXEC spUpdateExistingEntitiesFromSchema;\n', (violations) =>
+    check(
+        'an UNQUALIFIED `EXEC spX` call is counted',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+withMigration('R__Repeatable_Sync.sql', 'EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema];\n', (violations) =>
+    check(
+        'a repeatable migration is gated too — it runs on every migrate',
+        violations.some((v) => v.includes('this gate can read')),
+        JSON.stringify(violations),
+    ),
+);
+
+// The poison the positional matcher must not swallow: a generated CRUD function whose first
+// argument is a GUID, not a schema list. Discovering through the positional form would read that
+// GUID as an exclusion list and corrupt the history floor for every later migration.
+withFixture(
+    (root) => {
+        quietRepo(root);
+        mkdirSync(join(root, 'migrations-pg'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-pg', 'V202609030000__v0.12.x__Probe.pg.sql'),
+            `SELECT \${mjSchema}."spCreateFormQuestion"('11111111-2222-3333-4444-555555555555');\n`,
+        );
+    },
+    (violations) =>
+        check(
+            'a generated CRUD function is not mistaken for a schema sync',
+            !violations.some((v) => v.includes('Probe.pg.sql')),
+            JSON.stringify(violations.filter((v) => v.includes('Probe.pg.sql'))),
+        ),
+);
+
+// The prose shape that a punctuation anchor could not distinguish from a call. Kept as a case
+// because the fix for it has now been got wrong twice in opposite directions: once by counting
+// prose as a call, once by going blind to a call inside a literal.
+withMigration(
+    POST_GUARD,
+    `EXEC [\${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames=${FULL_EXCLUSIONS};\n` +
+        "EXEC sp_addextendedproperty @value = N'See dbo.spUpdateExistingEntitiesFromSchema for how this is populated.';\n",
+    (violations) =>
+        check(
+            'a DOT-qualified procedure name in prose is not counted as a call',
+            !violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+);
+
+// Flyway accepts versions this gate cannot order. It used to skip them, which exempted them; the
+// other watershed helpers in this file fail safe instead, and now so does this one.
+for (const name of ['V1__Unstamped.sql', 'V2026_08__Unstamped.sql']) {
+    withMigration(name, 'EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema];\n', (violations) =>
+        check(
+            `an unstamped but Flyway-legal name (${name}) is GATED, not exempt`,
+            violations.some((v) => v.includes('this gate can read')),
+            JSON.stringify(violations),
+        ),
+    );
+}
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

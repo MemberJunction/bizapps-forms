@@ -15,6 +15,13 @@
  * fileId over the top, leaving a stored signature beside an empty pad reading "Draw your
  * signature above."
  *
+ * The race rules themselves now live in `core/upload-store.ts` and are unit-tested directly in
+ * `upload-store.spec.ts`, which is a stronger check than any regex over this file. What is left
+ * for these guards is the WIRING: that this component hands every upload outcome to the store —
+ * which commits the answer itself, so a result that resolves late cannot be routed by the view to
+ * the wrong question — and that it keeps no upload state of its own, the state that used to bleed
+ * between questions when Angular reused an instance.
+ *
  * Comments are stripped before every assertion — the source explains these same decisions, and a
  * guard that matches its own documentation proves nothing.
  */
@@ -32,28 +39,54 @@ const question = (): string => stripped('form-question.component.ts');
 const pad = (): string => stripped('signature-pad.component.ts');
 
 describe('only the newest upload may write the answer', () => {
-  it('stamps each upload with a generation', () => {
-    expect(question()).toMatch(/uploadGeneration/);
-    expect(question()).toMatch(/const generation = \+\+this\.uploadGeneration;/);
+  it('takes a token from the store for every upload', () => {
+    expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
   });
 
-  it('drops a result that a newer upload has superseded', () => {
+  it('hands both outcomes to the store, which owns the supersede decision', () => {
     // Both paths matter: a stale SUCCESS overwrites the good answer, and a stale FAILURE clears
     // an answer the newer upload just stored correctly.
-    const matches = question().match(/generation !== this\.uploadGeneration/g) ?? [];
-    expect(matches.length).toBeGreaterThanOrEqual(2);
+    expect(question()).toMatch(/this\.uploads\.succeed\(token, result\.fileId\)/);
+    expect(question()).toMatch(/this\.uploads\.fail\(token, message\)/);
   });
 
-  it('drops a stale progress tick too, so the bar cannot run backwards', () => {
-    expect(question()).toMatch(
-      /\(fraction\) => \{[\s\S]{0,200}generation !== this\.uploadGeneration[\s\S]{0,120}uploadProgress\.set\(fraction\)/,
-    );
+  it('never routes an upload result back through the view', () => {
+    // `valueChange` is routed by whichever question the TEMPLATE is bound to when it fires, which
+    // after an await is not reliably the question the upload was for. In OneQuestion mode one
+    // component serves the whole deck, so the answer landed on the next question; in Scroll the
+    // component is destroyed on leaving the page, so the answer was dropped while the store still
+    // showed "done". The upload path must not emit at all.
+    const uploadPath = question().slice(question().indexOf('private async uploadFile'));
+    expect(uploadPath).not.toMatch(/valueChange\.emit/);
+  });
+
+  it('routes progress through the token too, so the bar cannot run backwards', () => {
+    expect(question()).toMatch(/\(fraction\) => this\.uploads\.setProgress\(token, fraction\)/);
+  });
+});
+
+describe('upload state belongs to a question, not to this component', () => {
+  it('keeps no upload state of its own', () => {
+    // The defect these replaced: six private fields outlived the question they described, so a
+    // recycled instance announced one file question's upload against another's.
+    expect(question()).not.toMatch(/private uploadGeneration/);
+    expect(question()).not.toMatch(/private lastFile/);
+    expect(question()).not.toMatch(/uploadStatus = signal/);
+    expect(question()).not.toMatch(/uploadFileName = signal/);
+  });
+
+  it('reads what it displays from the store, keyed by the question it is rendering', () => {
+    expect(question()).toMatch(/this\.uploads\.viewFor\(this\.question\(\)\.id\)/);
+  });
+
+  it('retrieves the retry file by question rather than remembering it', () => {
+    expect(question()).toMatch(/this\.uploads\.lastFileFor\(this\.question\(\)\.id\)/);
   });
 });
 
 describe('clearing a signature cannot be undone by an upload already in flight', () => {
-  it('invalidates the running upload when the answer is cleared', () => {
-    expect(question()).toMatch(/onSignatureCleared\(\)[\s\S]{0,300}this\.uploadGeneration \+= 1;/);
+  it('clears through the store, which retires the running upload', () => {
+    expect(question()).toMatch(/onSignatureCleared\(\)[\s\S]{0,300}this\.uploads\.clear\(this\.question\(\)\.id\);/);
   });
 });
 
@@ -70,9 +103,9 @@ describe('a multi-stroke signature stays correct without deferring the export', 
     expect(pad()).toMatch(/onPointerUp\([\s\S]{0,1400}void this\.emitPng\(\);/);
   });
 
-  it('relies on the generation stamp, not on ordering, for which image wins', () => {
+  it('relies on the store\'s token, not on ordering, for which image wins', () => {
     // This is what makes exporting per stroke safe: the last upload STARTED wins regardless of
     // which arrives first, and that is the most complete drawing.
-    expect(question()).toMatch(/const generation = \+\+this\.uploadGeneration;/);
+    expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
   });
 });

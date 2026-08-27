@@ -35,25 +35,35 @@ function parseObject<T>(raw: string | null | undefined): T | undefined {
   }
 }
 
-/** Serialize an object for storage, or `null` when the object is empty/absent. */
+/**
+ * Serialize an object for storage, or `null` when it carries nothing.
+ *
+ * "Carries nothing" counts DEFINED values only. `JSON.stringify({ show: undefined })` is
+ * `'{}'`, so counting raw keys would store a phantom "this item has a rule" marker that every
+ * reader then has to see through — the exact shape `withVerbGroup` deletes keys to avoid.
+ */
 function serializeObject(value: object | undefined): string | null {
   if (value === undefined) {
     return null;
   }
-  if (Object.keys(value).length === 0) {
-    return null;
-  }
-  return JSON.stringify(value);
+  const populated = Object.values(value).some((v) => v !== undefined);
+  return populated ? JSON.stringify(value) : null;
 }
 
 export function parseConditionalRule(raw: string | null | undefined): ConditionalRule | undefined {
   return parseObject<ConditionalRule>(raw);
 }
 
+/**
+ * Serialize a {@link ConditionalRule}, or `null` when it carries no verb.
+ *
+ * Deliberately verb-agnostic. This used to short-circuit on `!rule.show`, written when `show`
+ * was the only verb there was — so once `require` and `jump` arrived, a rule carrying only one
+ * of them serialized to `null` and was discarded on save: a page's jump never persisted, and
+ * deleting an unrelated "Show only if" card from an item that also had a jump wiped the jump
+ * with it. Any new verb is covered here by construction rather than by remembering to add it.
+ */
 export function serializeConditionalRule(rule: ConditionalRule | undefined): string | null {
-  if (!rule || !rule.show) {
-    return null;
-  }
   return serializeObject(rule);
 }
 

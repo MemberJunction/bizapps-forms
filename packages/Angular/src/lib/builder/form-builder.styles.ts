@@ -171,6 +171,8 @@ const LAYOUT_CSS = /* css */ `
    own sizing below; these two are whole components, so they get it from the host. */
 .fb-pane-host { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
+/* The count of broken rules, carried on the tab so the problem is visible without opening it. */
+
 /* ----------------------------------------------------------------- build body */
 
 .fb-body { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 340px; min-height: 0; overflow: hidden; }
@@ -319,6 +321,14 @@ const LAYOUT_CSS = /* css */ `
   margin: var(--mjf-stack) 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--mjf-rule);
+  cursor: pointer;
+}
+.fb-page-head.is-selected {
+  border-bottom-color: var(--mj-brand-primary);
+}
+.fb-page-head.is-selected .fb-page-num {
+  background: var(--mj-brand-primary);
+  color: var(--mj-brand-on-primary, var(--mj-text-inverse));
 }
 .fb-page-num {
   flex: none;
@@ -522,6 +532,12 @@ const LAYOUT_CSS = /* css */ `
 .fb-q-help { font-size: var(--mjf-meta); color: var(--mj-text-muted); word-break: break-word; }
 .fb-q-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .fb-q-tags .mjf-badge { padding: 1px 8px; font-size: 0.6875rem; }
+
+/* What a rule looks like on the canvas. A help cursor rather than the default one, because the
+   badge is two words and the sentences it stands for are in its tooltip — the cursor is the only
+   thing that says there is more to read. */
+.fb-rule-badge { display: inline-flex; align-items: center; gap: 5px; cursor: help; }
+.fb-rule-badge i { font-size: 0.625rem; opacity: 0.8; }
 
 /* Actions live in the card's top-right corner and appear on hover. They stay visible
    whenever focus is inside the card, so the keyboard path never depends on hover. */

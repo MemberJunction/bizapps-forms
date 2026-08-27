@@ -9,9 +9,11 @@
  * through bad data). The nested `ConditionalRule`/`ValidationRule`/`FormSettings`
  * blobs are validated with the shared contract parsers.
  */
+import { LogError } from '@memberjunction/core';
 import {
   parseConditionalRule,
   parseFormSettings,
+  parseQuestionScoring,
   parseValidationRule,
   isFormQuestionType,
   type ConditionalRule,
@@ -160,8 +162,9 @@ function parseScreen(
     mediaURL: asString(obj.mediaURL),
     redirectURL: asString(obj.redirectURL),
     displayOrder: asNumber(obj.displayOrder) ?? 0,
-    conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    conditionalRule: parseOptionalConditional(obj.conditionalRule, 'screen', obj.id),
     isDefault: asBoolean(obj.isDefault),
+    isDisqualification: asBoolean(obj.isDisqualification),
     socialLinks: parseScreenSocialLinks(obj.socialLinks),
   };
 }
@@ -235,7 +238,7 @@ function parseAutomation(obj: JSONObject | undefined): PublishedFormAutomation |
     trigger,
     executionMode,
     displayOrder,
-    conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    conditionalRule: parseOptionalConditional(obj.conditionalRule, 'automation', obj.id),
     continueOnError: asBoolean(obj.continueOnError) ?? true,
     isActive: asBoolean(obj.isActive) ?? true,
   };
@@ -308,7 +311,7 @@ function parsePage(obj: JSONObject | undefined): PublishedFormPage | undefined {
     title: asString(obj.title),
     description: asString(obj.description),
     displayOrder,
-    conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    conditionalRule: parseOptionalConditional(obj.conditionalRule, 'page', obj.id),
     isPartialSubmitPoint: asBoolean(obj.isPartialSubmitPoint),
     questions,
   };
@@ -336,8 +339,11 @@ function parseQuestion(obj: JSONObject | undefined): PublishedFormQuestion | und
     helpText: asString(obj.helpText),
     isRequired: asBoolean(obj.isRequired) ?? false,
     displayOrder,
-    conditionalRule: parseOptionalConditional(obj.conditionalRule),
+    conditionalRule: parseOptionalConditional(obj.conditionalRule, 'question', obj.id),
     validationRule: parseOptionalValidation(obj.validationRule),
+    // Tolerant by contract: an unusable scoring blob means "does not score", never a failed
+    // snapshot — same posture as automations (side-effect config must not take the form down).
+    scoring: parseQuestionScoring(obj.scoring),
     settings: asObject(obj.settings),
     options: parseOptions(obj.options),
   };
@@ -370,15 +376,37 @@ function parseOptions(value: JSONValue | undefined): PublishedFormQuestionOption
   return options;
 }
 
-/** Conditional rule is optional; a malformed one is treated as "no rule". */
-function parseOptionalConditional(value: JSONValue | undefined): ConditionalRule | undefined {
+/**
+ * Conditional rule is optional; one this parser cannot validate is treated as "no rule" — but
+ * never SILENTLY, which is what this used to do.
+ *
+ * Be clear about what "no rule" means downstream: `evaluateConditionalRule(undefined, ...)`
+ * returns `true`, so dropping an unreadable rule renders the item it guarded to EVERYONE. That
+ * is a fail-open on an eligibility gate, and with a bare `catch {}` it happened on every public
+ * load of the form with nothing anywhere to say so — no error, no warning, no difference an
+ * author could see between "this rule is off" and "this rule could not be read".
+ *
+ * Tolerating it is still the right call (a bad blob must not take a live form down, the same
+ * posture the automation and scoring parsers take one field over), so what changes here is only
+ * that it is now audible, and says which item it happened to.
+ */
+function parseOptionalConditional(
+  value: JSONValue | undefined,
+  itemKind: string,
+  itemId: JSONValue | undefined,
+): ConditionalRule | undefined {
   const obj = asObject(value);
   if (!obj) {
     return undefined;
   }
   try {
     return parseConditionalRule(obj);
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    LogError(
+      `[Forms] ${itemKind} ${asString(itemId) ?? '(no id)'} has a ConditionalRule this server cannot ` +
+        `read; it will behave as if it had no rule, which for a show rule means ALWAYS VISIBLE. ${reason}`,
+    );
     return undefined;
   }
 }

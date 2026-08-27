@@ -47,7 +47,9 @@ export {
   type AutosaveStatus,
   type TimerApi,
 } from './core/autosave-controller';
-export { clampCursor } from './core/one-question-stepper';
+export { clampCursor } from './core/stepper';
+export { steppableSections } from './core/section-stepper';
+export { sectionEntries, skippedMessage, type SectionEntry } from './core/section-content';
 export { applyStyleTokens } from './core/theming';
 export {
   availableScreens,

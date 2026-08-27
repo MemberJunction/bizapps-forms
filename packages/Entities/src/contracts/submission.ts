@@ -8,6 +8,7 @@
  * types.
  */
 import type { JSONValue } from './json-value';
+import type { mjBizAppsFormsFormResponseEntity } from '../generated/entity_subclasses';
 
 /** Lightweight client telemetry; IP-hash is derived server-side, not sent here. */
 export interface ClientMeta {
@@ -58,8 +59,13 @@ export interface FieldError {
 export interface FormSubmissionResult {
   success: boolean;
   responseId?: string;
-  /** Persisted FormResponse status, e.g. `Partial` | `Complete`. */
-  status?: string;
+  /**
+   * Persisted `FormResponse` status. DERIVED from the entity rather than restated: the value list
+   * comes from a CHECK constraint, so the next migration that widens it widens this too. It was
+   * `string` with a comment naming only `Partial` and `Complete`, which stopped being true the
+   * moment `Disqualified` shipped — and a caller branching on it had no compile-time help.
+   */
+  status?: mjBizAppsFormsFormResponseEntity['Status'];
   confirmationMessage?: string;
   redirectUrl?: string;
   errors?: FieldError[];

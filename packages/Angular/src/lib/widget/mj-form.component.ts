@@ -20,9 +20,13 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  computeScore,
   endingMessage,
   endingRedirectUrl,
-  resolveEndingScreen,
+  endsWithoutSubmit,
+  resolveFormOutcome,
+  SCREENED_OUT_MESSAGE,
+  type FormOutcome,
   type FormSubmissionInput,
   type FormSubmissionResult,
   type FormStyleTokens,
@@ -37,6 +41,7 @@ import { applyStyleTokens } from './core/theming';
 import { FormRuntime } from './core/form-runtime';
 import { AutosaveController, type AutosaveStatus } from './core/autosave-controller';
 import { generateClientResponseId } from './core/client-id';
+import { FormUploadStore } from './core/upload-store';
 import { passedSubmitPoints } from './core/partial-submit-point';
 import { initialPhaseFor, outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
 import { resolveShownScreen, shownScreenFor, type ShownScreen } from './core/shown-screen';
@@ -65,6 +70,9 @@ import type { WidgetPhase } from './core/submit-phase';
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
+  // One upload store per widget, NOT a singleton: several forms can be embedded on one host
+  // page and must not see each other's uploads. Question components inject it.
+  providers: [FormUploadStore],
 })
 export class MjFormComponent implements OnInit, OnDestroy {
   /** Distribution slug identifying which published form to load (element attribute). */
@@ -80,6 +88,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly api = inject(FORMS_API_SERVICE);
   private readonly config = inject(FORMS_API_CONFIG);
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+  /** Provided above, so this is the store every question component in THIS widget injects. */
+  private readonly uploads = inject(FormUploadStore);
   private readonly startedAt = new Date().toISOString();
 
   /** The mounted Turnstile challenge (present only when captcha is required + rendered). */
@@ -236,6 +246,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private autosave: AutosaveController | null = null;
   /** Submit-point pages already banked this fill, so each fires once. Reset on {@link load}. */
   private bankedSubmitPoints = new Set<string>();
+  /**
+   * Latched the moment a knockout starts ending the form, and never cleared: awaiting the bank
+   * hands control back to a template that keeps firing progress events at a respondent who is
+   * still typing, and each one would otherwise start another knockout. Reset on {@link load},
+   * with the rest of the per-fill state.
+   */
+  private endingEarly = false;
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -260,7 +277,10 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
       this.definition.set(def);
-      this.runtime.set(new FormRuntime(def));
+      const runtime = new FormRuntime(def);
+      this.runtime.set(runtime);
+      // File answers are committed by the store, not by a view event — see `FormUploadStore.succeed`.
+      this.uploads.connect(runtime);
       this.autosave?.dispose();
       this.autosave = new AutosaveController(
         () => this.savePartial(),
@@ -269,6 +289,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingScreen.set(undefined);
       this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
+      this.endingEarly = false;
       this.phase.set(initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
@@ -326,8 +347,180 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /** Progress checkpoint from a child render mode → schedule a debounced partial save. */
   protected onProgress(): void {
+    // A knockout already under way owns the rest of this response: its bank is on the wire and
+    // another ping would re-arm the debounce behind it.
+    if (this.endingEarly) {
+      return;
+    }
     this.autosave?.ping();
     void this.bankPassedSubmitPoints();
+  }
+
+  /**
+   * The respondent has FINISHED with a question — they left it, or advanced past it.
+   *
+   * Knockout rules are judged here and nowhere else. They used to ride `onProgress`, which in
+   * scroll mode arrives on every keystroke, so a rule like `age lessThan 18` disqualified an
+   * eligible respondent the instant they typed the `1` of `18` — and irreversibly, because
+   * {@link endEarly} latches, seals the row and leaves intake. A rule that ends the
+   * form has to be judged on a finished answer; autosave keeps riding every change, because
+   * saving a half-typed value costs nothing and is undone by the next save.
+   *
+   * This is only about when the client NOTICES. The server re-evaluates the same shared rule on
+   * the save regardless, so a client that never fired this is still disqualified.
+   */
+  protected onCommit(): void {
+    if (this.endingEarly || this.phase() !== 'ready') {
+      return;
+    }
+    const outcome = this.outcomeForAnswers();
+    // Not every finished flow is the widget's to send. `endsWithoutSubmit` is where that line is
+    // drawn and why: a screening is done TO the respondent, so it seals itself, and everything
+    // else waits for them to press Submit. Reading `endedEarly` here instead made a
+    // `Go to -> Submit` fire on a BLUR — click out of a text box and the response was gone.
+    if (outcome && endsWithoutSubmit(outcome)) {
+      void this.endEarly(outcome);
+    }
+  }
+
+  /**
+   * The verdict these answers have already reached.
+   *
+   * A pure query — it decides, it does not act. {@link endEarly} is the command half, and keeping
+   * them apart is what lets the command be awaited without the decision being re-made every time
+   * control comes back.
+   *
+   * The ONE place this component resolves an outcome, read by both paths a finished form can
+   * take: sealed by a screening, or submitted by the respondent. They used to be two calls to two
+   * different resolvers — this one, and `resolveEndingScreen` on the submit path, which resolves
+   * by CONDITION and knows nothing about a jump's named target. So a rule saying "Go to -> Thanks
+   * for applying" showed that screen when it sealed itself and a different one when the
+   * respondent pressed Submit.
+   *
+   * No phase guard: WHEN it is fair to ask is the caller's business, and the submit path asks
+   * after the phase has already left `ready`.
+   */
+  private outcomeForAnswers(): FormOutcome | undefined {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt) {
+      return undefined;
+    }
+    // `visibleAnswers()`, not the raw map — the set this widget will SEND, which is the set the
+    // server judges. The score already folded over the visible questions while the conditions were
+    // read from the raw map, so the two halves of this one expression disagreed: a knockout could
+    // fire here on an answer to a question the respondent had since hidden, be omitted from the
+    // payload, and leave the server writing `Complete` — SubmittedAt stamped, quota counted, every
+    // on-submit automation fired — while the respondent was shown the knockout screen.
+    // The server's view — the answers it will receive AND the question set it will derive from
+    // them. Using the rendered question list here instead was the divergence: an orphaned question
+    // stays "visible" on the client when the rule that reveals it reads an answer that is no
+    // longer being sent.
+    const sent = rt.transmittedView();
+    return resolveFormOutcome(def.pages, def.endScreens ?? [], sent.answers, {
+      score: computeScore(sent.questions, sent.answers),
+    });
+  }
+
+  /**
+   * End the form on a knockout (C3) — the whole point of a disqualification is that an
+   * ineligible respondent does not fill the rest in first.
+   *
+   * THE ORDER HERE IS THE FEATURE. This client-side verdict is a courtesy; the enforcement is
+   * the server re-evaluating the same shared rule on the save below and writing
+   * `Status = 'Disqualified'`. That makes this one save the only thing standing between a
+   * knockout and a response row that still claims to be an abandoned `Partial` — and it can be
+   * lost two ways that both pass a hand test:
+   *
+   *   - `savePartial()` no-ops unless the phase is still 'ready', and `flushNow()` yields
+   *     before issuing its write whenever a save is already in flight. Firing it unawaited and
+   *     setting the phase in the same tick therefore dropped the write exactly when the
+   *     respondent had been typing, and worked whenever the autosave happened to be idle.
+   *   - `window.location.assign` aborts requests still on the wire, so navigating first
+   *     cancels it.
+   *
+   * So: bank while intake still permits it, await that, and only then show the screen and
+   * follow the redirect — the same order {@link applySubmitResult} uses on the submit path.
+   * The respondent waits one round trip before the screen appears, which is the correct trade:
+   * the alternative is telling them they are screened out while quietly recording nothing.
+   *
+   * Fail-soft like every autosave — `flushNow()` never throws — so a failed bank still shows
+   * the screen rather than stranding the respondent mid-form.
+   */
+  private async endEarly(outcome: FormOutcome): Promise<void> {
+    this.endingEarly = true;
+    // Quiesce the autosave before writing, so two requests never carry the same
+    // `clientResponseId` — the primary-key collision the submit path guards the same way.
+    await this.autosave?.settle();
+    await this.sealEarlyEnd();
+    // Disqualifying or not, the client does the SAME thing here: seal a completion and show the
+    // screen. Which status gets written is the server's call, from the same shared outcome — an
+    // ending jump to an unflagged screen is an ordinary completion (quota counts it, automations
+    // fire) and only the screen differs. Deciding that twice, once per side, is how a respondent
+    // ends up looking at a knockout screen while the row says `Complete`.
+    this.endingScreen.set(outcome.screen);
+    this.phase.set('done');
+    const redirectUrl = outcome.screen?.redirectURL?.trim();
+    if (redirectUrl) {
+      this.redirect(redirectUrl);
+    }
+  }
+
+  /**
+   * Record the knockout: ONE finished submission, sent before the form leaves intake.
+   *
+   * A finished submission, not an autosave, because only a completion seals a knockout
+   * server-side — a partial deliberately does not, since the rule would otherwise be judged on
+   * whatever half-typed value the debounce happened to catch. For this respondent the form IS
+   * over, so a completion is also the honest description of it.
+   *
+   * Fail-soft, like every other background write here. A captcha-gated form whose challenge is
+   * unsolved lands in the catch — the server refuses a completion without a token — and the row
+   * keeps whatever its last autosave left. Showing the respondent their screen anyway is the
+   * better half of that trade; stranding them mid-form to protect a record is not.
+   */
+  private async sealEarlyEnd(): Promise<void> {
+    const def = this.definition();
+    const rt = this.runtime();
+    if (!def || !rt) {
+      return;
+    }
+    // Don't send a completion the server is certain to refuse. The captcha gate applies to every
+    // completion, and a knockout can fire long before the challenge is solved — `onSubmit` makes
+    // this same check, and skipping it here meant a captcha-gated form could never record one.
+    if (this.submitAllowed() && (await this.trySeal(def, rt))) {
+      return;
+    }
+    // The seal did not land. Bank what exists as a draft so the knockout ANSWER survives even
+    // though its status did not — `settle()` above cancelled the pending debounce without firing
+    // it, and nothing else will write: the latch is set and every other entry point returns early.
+    await this.autosave?.flushNow();
+  }
+
+  /**
+   * One attempt at the terminal write. True when the server accepted it.
+   *
+   * `submitResponse` RESOLVES with `success: false` for anything the pipeline refuses — a
+   * captcha, the row ceiling, a rate limit — and throws only on a transport failure. A bare
+   * `try/catch` therefore treated every refusal as a successful seal, silently, which is the
+   * worst of the three possible outcomes: no record, and nothing anywhere saying so.
+   */
+  private async trySeal(def: PublishedFormDefinition, rt: FormRuntime): Promise<boolean> {
+    try {
+      const res = await this.api.submitResponse(this.buildSubmission(def, rt, false), this.responseTarget());
+      if (res.success) {
+        if (res.responseId) {
+          this.responseId = res.responseId;
+        }
+        return true;
+      }
+      const why = (res.errors ?? []).map((e) => e.message).join(' ').trim();
+      console.warn(`[mj-form] the disqualification could not be recorded: ${why || 'refused'}`);
+      return false;
+    } catch (err) {
+      console.warn(`[mj-form] the disqualification could not be recorded: ${String(err)}`);
+      return false;
+    }
   }
 
   /**
@@ -369,6 +562,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // done. Without this, a double-tap (or an Enter + click) fires two mutations and can
     // leave the UI stuck between phases.
     if (shouldIgnoreSubmit(this.phase())) {
+      return;
+    }
+    // A knockout mid-seal is not visible to the phase guard above: `endEarly` awaits
+    // twice while the phase is still 'ready', so the submit button stays live the whole time.
+    // Without this, tapping the knockout option and then Submit puts two completions on the wire
+    // carrying the same `clientResponseId` — exactly the primary-key collision the settle() below
+    // exists to prevent.
+    if (this.endingEarly) {
       return;
     }
     // Captcha gate: when required, block final submit until the challenge is solved.
@@ -461,6 +662,20 @@ export class MjFormComponent implements OnInit, OnDestroy {
       }
       return;
     }
+    if (res.status === 'Disqualified') {
+      // The SERVER screened this respondent out on a rule the client had not reached: the last
+      // question before Submit, a client that never fired a commit, or a caller with no widget at
+      // all. Do not re-resolve the ending — `resolveEndingScreen` deliberately excludes knockout
+      // screens, so it would pick one written for someone who QUALIFIED, and `endingRedirect`
+      // would then fall back to that screen's URL and send a screened-out respondent to the
+      // qualified destination. The server sent the knockout's own copy and redirect; they are the
+      // only correct answer here, and `confirmationMessage()` already prefers the echoed one.
+      this.endingScreen.set(undefined);
+      if (res.redirectUrl) {
+        this.redirect(res.redirectUrl);
+      }
+      return;
+    }
     this.resolveEnding();
     // Success always reaches 'done' (both render modes). Redirect ONLY when a URL is set, and
     // only after 'done' — so a blocked/slow navigation still shows the confirmation.
@@ -470,14 +685,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Pick the ending screen for the answers as submitted. */
+  /**
+   * Pick the ending screen for the answers as submitted.
+   *
+   * Through {@link outcomeForAnswers}, which reads the payload the server will judge AND honours
+   * a `Go to` that named a screen. It used to call `resolveEndingScreen` directly — condition
+   * banding only — so a terminal jump's destination was simply lost on the manual-submit path:
+   * the same rule showed one screen when it sealed itself and another when the respondent
+   * pressed Submit.
+   */
   private resolveEnding(): void {
-    const def = this.definition();
-    const rt = this.runtime();
-    if (!def || !rt) {
-      return;
-    }
-    this.endingScreen.set(resolveEndingScreen(def.endScreens ?? [], rt.currentAnswers()));
+    this.endingScreen.set(this.outcomeForAnswers()?.screen);
   }
 
   /**
@@ -590,6 +808,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Whether the server recorded this response as a screening rather than a completion.
+   *
+   * Read from the RESULT, not from the client's own verdict, because the server sees knockouts the
+   * client never evaluated — a rule on the last question before Submit, or a caller with no widget.
+   */
+  protected readonly screenedOut = computed(() => this.result()?.status === 'Disqualified');
+
+  /**
    * The confirmation message for a form with no ending screen.
    *
    * The server's echoed message wins over the form's own setting, because a server that
@@ -599,6 +825,14 @@ export class MjFormComponent implements OnInit, OnDestroy {
     const echoed = this.result()?.confirmationMessage;
     if (echoed) {
       return echoed;
+    }
+    // A screening never falls back to the form's confirmation. The server sends a redirect OR a
+    // message, never both, so a knockout carrying a redirect arrives here with nothing echoed —
+    // and the form-wide default is "your response has been recorded", which is untrue of a
+    // knockout on both counts. A redirect usually makes this a flash; a blocked or slow
+    // navigation makes it the resting state, and it must not be a thank-you either way.
+    if (this.screenedOut()) {
+      return SCREENED_OUT_MESSAGE;
     }
     return endingMessage(undefined, this.definition()?.settings ?? {});
   }

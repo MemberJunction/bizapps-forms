@@ -116,10 +116,10 @@ export class FormCloneService {
     const automations = await this.copyAutomations(sourceFormId, copy.ID, bindings.idMap);
 
     // Pass two — every id-bearing payload, now that the map is complete.
-    await this.rewriteConditionalRules(pages.copies, questions.idMap, warnings, 'page');
-    await this.rewriteConditionalRules(questions.copies, questions.idMap, warnings, 'question');
-    await this.rewriteConditionalRules(screens.copies, questions.idMap, warnings, 'screen');
-    await this.rewriteConditionalRules(automations.copies, questions.idMap, warnings, 'automation');
+    await this.rewriteConditionalRules(pages.copies, questions.idMap, warnings, 'page', pages.idMap);
+    await this.rewriteConditionalRules(questions.copies, questions.idMap, warnings, 'question', pages.idMap);
+    await this.rewriteConditionalRules(screens.copies, questions.idMap, warnings, 'screen', pages.idMap);
+    await this.rewriteConditionalRules(automations.copies, questions.idMap, warnings, 'automation', pages.idMap);
     await this.rewriteFieldMappings(bindings.copies, questions.idMap, warnings);
 
     return {
@@ -193,6 +193,9 @@ export class FormCloneService {
       copy.Description = source.Description;
       copy.DisplayOrder = source.DisplayOrder;
       copy.ConditionalRule = source.ConditionalRule;
+      // Pre-dates the rule verbs and was missed the same way `IsDisqualification` was: a cloned
+      // page that loses this silently stops banking a partial where its author put a checkpoint.
+      copy.IsPartialSubmitPoint = source.IsPartialSubmitPoint;
       await this.save(copy, `page "${source.Title ?? source.ID}"`);
       idMap.set(source.ID, copy.ID);
       copies.push(copy);
@@ -309,6 +312,13 @@ export class FormCloneService {
       copy.IsDefault = source.IsDefault;
       copy.SocialLinks = source.SocialLinks;
       copy.ConditionalRule = source.ConditionalRule;
+      // The screened-out flag lives on the COLUMN, not in the ConditionalRule JSON that
+      // `rewriteConditionalRules` handles below. Copying the rule alone left the copy with a
+      // knockout's wiring and none of its meaning: `resolveEndingScreen` excludes only flagged
+      // screens, so the cloned screen became a NORMAL ending. The respondent still saw "not
+      // eligible", while the response was recorded Complete, stamped SubmittedAt, counted
+      // against the quota and fired every on-submit automation.
+      copy.IsDisqualification = source.IsDisqualification;
       await this.save(copy, `${source.ScreenType.toLowerCase()} screen "${source.Title}"`);
       copies.push(copy);
     }
@@ -396,13 +406,14 @@ export class FormCloneService {
     questionIdMap: ReadonlyMap<string, string>,
     warnings: string[],
     label: string,
+    pageIdMap?: ReadonlyMap<string, string>,
   ): Promise<void> {
     for (const copy of copies) {
       const original = copy.ConditionalRule;
       if (original === null || original.trim() === '') {
         continue;
       }
-      const result = remapConditionalRule(original, questionIdMap);
+      const result = remapConditionalRule(original, questionIdMap, pageIdMap);
       this.collect(result, warnings, `${label} visibility rule`);
       if (result.json === original) {
         continue;

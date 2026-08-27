@@ -96,6 +96,25 @@ describe('QUESTION_TYPE_BEHAVIOR', () => {
     }
   });
 
+  // Ranking and MultiChoice were byte-identical rows — values/json/choice/multiValued — and they
+  // are not the same thing at all. A MultiChoice answer is a SELECTION among the options; a
+  // Ranking answer is an ORDERING of every one of them, so membership against a Ranking is true
+  // for anyone who answered at all. Nothing could tell them apart until `ordered` existed.
+  it('marks Ranking, and only Ranking, as an ordering of every option', () => {
+    const ordered = FORM_QUESTION_TYPES.filter((t) => QUESTION_TYPE_BEHAVIOR[t].ordered);
+    expect(ordered).toEqual(['Ranking']);
+  });
+
+  it('cannot order what it cannot hold several of', () => {
+    for (const type of FORM_QUESTION_TYPES) {
+      const behavior = QUESTION_TYPE_BEHAVIOR[type];
+      if (behavior.ordered) {
+        expect(behavior.multiValued).toBe(true);
+        expect(behavior.optionMode).not.toBe('none');
+      }
+    }
+  });
+
   it('never analyses an unanswerable type', () => {
     for (const type of FORM_QUESTION_TYPES) {
       if (!isAnswerableQuestionType(type)) {

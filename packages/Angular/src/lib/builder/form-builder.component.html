@@ -275,13 +275,22 @@
             </button>
           }
 
+          <!-- Read once, indexed per item. A getter called per question would walk every rule
+               on the form once per question, and the form long enough to need this is the one
+               that can least afford it. -->
+          @let badges = ruleBadges;
+
           @for (page of pages; track page.entity.ID) {
             <!-- Pages were invisible on the canvas: a multi-page form rendered as one
                  undifferentiated question list, and there was nowhere to put a page-level
                  setting. Shown only when there IS more than one page, so a simple one-page form
                  gains no chrome it has no use for. -->
             @if (pages.length > 1) {
-              <div class="fb-page-head">
+              <div
+                class="fb-page-head"
+                [class.is-selected]="selectedPageId === page.entity.ID"
+                (click)="selectPage(page)"
+              >
                 <span class="fb-page-num">{{ $index + 1 }}</span>
                 <input
                   #pageTitle
@@ -306,12 +315,28 @@
                     Save progress here
                   </span>
                 </label>
+                <!-- A page rule hides every question on the page. Nothing on the canvas said
+                     so, and the tab that did is gone. -->
+                @for (badge of badges.get(page.entity.ID) ?? []; track badge.icon) {
+                  <span
+                    class="mjf-badge fb-rule-badge"
+                    [class.mjf-badge--warning]="badge.broken"
+                    [title]="badge.detail"
+                  ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                }
+                <button
+                  type="button"
+                  class="fb-q-btn fb-reveal"
+                  [disabled]="busy"
+                  [attr.aria-label]="'Rules for section ' + ($index + 1)"
+                  (click)="selectPage(page)"
+                ><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
                 <button
                   type="button"
                   class="fb-q-btn fb-q-btn--danger fb-reveal"
                   [disabled]="busy"
                   [attr.aria-label]="'Delete section ' + ($index + 1)"
-                  (click)="deletePage(page)"
+                  (click)="$event.stopPropagation(); deletePage(page)"
                 ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </div>
               <!-- The widget has always rendered this under the section heading; nothing in the
@@ -372,6 +397,19 @@
                     @if (node.entity.IsRequired) {
                       <span class="mjf-badge">Required</span>
                     }
+                    <!-- Where the Rules tab used to be. It said things about a question that
+                         belonged beside that question, and an author had to know it existed to
+                         find out a question was conditional at all. The tooltip carries the
+                         rules in full; a broken one says so instead of saying what it does,
+                         because a rule whose source was deleted hides this question from every
+                         respondent, silently, with the form still looking correct. -->
+                    @for (badge of badges.get(node.entity.ID) ?? []; track badge.icon) {
+                      <span
+                        class="mjf-badge fb-rule-badge"
+                        [class.mjf-badge--warning]="badge.broken"
+                        [title]="badge.detail"
+                      ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                    }
                   </div>
                 </div>
                 <div class="fb-q-side fb-reveal">
@@ -424,18 +462,30 @@
                 <span class="fb-screen-icon mjf-viz-2"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
                 <div class="fb-screen-main">
                   <div class="fb-screen-kind">
-                    @if (es.IsDefault) {
-                      Default ending
-                    } @else if (es.ConditionalRule) {
-                      Conditional ending
-                    } @else {
-                      <!-- Endings are checked in order and the first match wins, so one with no
-                           condition is only ever reachable as the default — and there already is
-                           one. Saying "Ending" here made a dead screen look like a normal screen. -->
+                    <!-- Three routes reach an ending — the default, a condition on the screen, or
+                         a `Go to` rule naming it — and `endingReachFor` is what knows which apply.
+                         This used to read the screen alone, so a screen deliberately wired up as a
+                         rule's destination was labelled unreachable and told to add a condition. -->
+                    @let reach = endingReach.get(es.ID);
+                    @if (reach?.unreachable) {
                       <span class="fb-screen-warn">
                         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                        Never shown — add a condition
+                        {{ reach?.label }}
                       </span>
+                    } @else {
+                      {{ reach?.label }}
+                    }
+                    <!-- An ending already says it is conditional; what it could not say is
+                         that its condition stopped working. A broken ending rule is the worst
+                         of the three, because the screen it guards is where a respondent was
+                         supposed to LAND. -->
+                    @for (badge of badges.get(es.ID) ?? []; track badge.icon) {
+                      @if (badge.broken) {
+                        <span
+                          class="mjf-badge mjf-badge--warning fb-rule-badge"
+                          [title]="badge.detail"
+                        ><i [class]="badge.icon" aria-hidden="true"></i> {{ badge.label }}</span>
+                      }
                     }
                   </div>
                   <div class="fb-screen-title">{{ es.Title }}</div>
@@ -477,12 +527,25 @@
             [conditionalSources]="endingConditionalSources"
             (screenChanged)="onScreenChanged($event)"
           />
+        } @else if (selectedPage; as page) {
+          <mjf-page-editor
+            [page]="page"
+            [pageNumber]="selectedPageIndex + 1"
+            [conditionalSources]="pageConditionalSources"
+            [jumpConditionSources]="pageJumpConditionSources"
+            [jumpTargets]="pageJumpTargets"
+            [reachNotes]="pageReachNotes"
+            (pageChanged)="onPageChanged($event)"
+          />
         } @else {
           <mjf-question-editor
             [node]="selectedNode"
             [selectedId]="selectedNode?.entity?.ID ?? ''"
             [formId]="record.ID"
             [conditionalSources]="conditionalSources"
+            [jumpConditionSources]="questionJumpSources"
+            [jumpTargets]="questionJumpTargets"
+            [reachNotes]="questionReachNotes"
             (questionChanged)="onQuestionChanged($event)"
             (optionChanged)="onOptionChanged($event)"
             (addOptionRequested)="onAddOption($event)"

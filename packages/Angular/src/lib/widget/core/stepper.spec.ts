@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampCursor } from './one-question-stepper';
+import { clampCursor } from './stepper';
 
 describe('clampCursor', () => {
   it('clamps into [0, total-1]', () => {

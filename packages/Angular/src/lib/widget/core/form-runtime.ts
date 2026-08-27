@@ -6,8 +6,10 @@
  */
 import { computed, signal } from '@angular/core';
 import {
-  evaluateConditionalRule,
   isAnswerableQuestionType,
+  resolveRenderedQuestions,
+  resolveVisiblePages,
+  resolveVisibleQuestions,
   answerCompleteness,
   isAnswerSupplied,
   type AnswerValue,
@@ -21,6 +23,36 @@ import { toAnswerInputs } from './answer-value';
 import { computeProgress } from './progress';
 import { validateQuestion } from './validation';
 
+/**
+ * How many times visibility is re-derived before giving up.
+ *
+ * Visibility is NOT monotone: `isNotAnswered` means removing an answer can REVEAL a question, so
+ * "restrict, then re-derive" is not guaranteed to converge — a pair of rules can oscillate. A cap
+ * with an explicit outcome is the honest shape for that, per this repo's design principles: every
+ * loop bounded, and the limit case handled rather than assumed unreachable. Five is far above any
+ * real form (the scenario that motivated this settles in two) and small enough to stay cheap.
+ */
+const MAX_VISIBILITY_PASSES = 5;
+
+/** The answers belonging to `questions`, dropping every other entry. */
+function restrictAnswers(
+  answers: ReadonlyMap<string, AnswerValue>,
+  questions: readonly PublishedFormQuestion[],
+): ReadonlyMap<string, AnswerValue> {
+  const restricted = new Map<string, AnswerValue>();
+  for (const question of questions) {
+    if (answers.has(question.id)) {
+      restricted.set(question.id, answers.get(question.id));
+    }
+  }
+  return restricted;
+}
+
+/** Whether two derivations picked the same questions, in the same order. */
+function sameQuestions(a: readonly PublishedFormQuestion[], b: readonly PublishedFormQuestion[]): boolean {
+  return a.length === b.length && a.every((question, index) => question.id === b[index].id);
+}
+
 export class FormRuntime {
   private readonly answers = signal<Map<string, AnswerValue>>(new Map());
   private readonly touched = signal<Set<string>>(new Set());
@@ -32,8 +64,15 @@ export class FormRuntime {
   public readonly answerMap = this.answers.asReadonly();
 
   /**
-   * The live answer map, for consumers that evaluate a rule over the WHOLE response rather
-   * than one question — ending-screen resolution is the only one today.
+   * The RAW answer map — everything the respondent has entered, including answers to questions
+   * that are currently hidden.
+   *
+   * Deliberately not the basis for any verdict, and it used to name ending-screen resolution as
+   * its example consumer, which is exactly the call site that had to move off it: a verdict
+   * reached here is reached on answers the widget will not transmit. {@link transmittedView} is
+   * what every rule now evaluates against. What remains true of this map is that it must keep the
+   * hidden answers — re-showing a question should bring its answer back — which is precisely why
+   * it cannot also be the thing rules read.
    *
    * Read-only by type so a caller cannot mutate the runtime's state behind its back: every
    * write goes through `setValue`, which is what keeps the derived signals correct.
@@ -88,34 +127,130 @@ export class FormRuntime {
 
   // --- Visibility (conditional rules, S2) ---------------------------------
 
-  /** Pages whose page-level rule passes given current answers. */
+  /**
+   * Pages the respondent can currently reach — page show rules AND forward jumps (C2), via
+   * the shared resolver the server also uses.
+   */
   public readonly visiblePages = computed<PublishedFormPage[]>(() => {
-    const map = this.answers();
-    return this.orderedPages().filter((p) =>
-      evaluateConditionalRule(p.conditionalRule, map),
-    );
+    return resolveVisiblePages(this.orderedPages(), this.settledAnswers());
   });
 
-  /** Visible questions on a given page (page must itself be visible to matter). */
+  /**
+   * The questions the scroll renderer puts on THIS page, display-only types included.
+   *
+   * A slice of {@link renderedQuestions}, not its own derivation. It used to filter the page's
+   * own list on the question's `show` rule alone, which meant a `Go to` rule changed what the
+   * form submitted without changing what it displayed: the skipped question stayed on screen
+   * with its required asterisk, was never validated (submit judges the flow's set), and
+   * whatever was typed into it was dropped from the payload. Reading the walk is what keeps
+   * "on screen" and "in the payload" the same sentence.
+   */
   public visibleQuestions(page: PublishedFormPage): PublishedFormQuestion[] {
-    const map = this.answers();
-    return [...page.questions]
-      .sort((a, b) => a.displayOrder - b.displayOrder)
-      .filter((q) => evaluateConditionalRule(q.conditionalRule, map));
+    const onThisPage = new Set(page.questions.map((q) => q.id));
+    return this.renderedQuestions().filter((q) => onThisPage.has(q.id));
   }
 
-  /** Every visible, answer-collecting question across the form, in document order. */
-  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() => {
-    const out: PublishedFormQuestion[] = [];
-    for (const page of this.visiblePages()) {
-      for (const q of this.visibleQuestions(page)) {
-        if (isAnswerableQuestionType(q.type)) {
-          out.push(q);
-        }
+  /**
+   * The answers the whole widget derives from: a FIXED POINT of the server's own derivation,
+   * which is the property that makes the two sides agree.
+   *
+   * Resolving once over the raw map is not enough, and the failure is worse than a wrong number.
+   * The raw map keeps an answer whose question is hidden (nothing prunes on a visibility change),
+   * the payload carries only the visible set, and the server re-derives visibility FROM that
+   * payload. A rule reading an answer that is not being sent therefore reaches a different verdict
+   * on each side — and with `isNotAnswered`, removing an answer can REVEAL a question, so the
+   * server could make a question visible and REQUIRED that the widget never rendered. The
+   * respondent then gets "«prompt» is required" for a field that is not on screen, and every retry
+   * sends the identical payload: unrecoverable, on the anonymous path.
+   *
+   * So this iterates until the set is stable under "restrict the answers to this set, then re-derive
+   * from them", and returns THE RESTRICTED MAP — the answers whose single-pass derivation is that
+   * set, which is exactly the pass the server makes over the payload. Everything else here is a
+   * reading of this map. See {@link MAX_VISIBILITY_PASSES} for why it is capped rather than
+   * looped until stable.
+   */
+  private readonly settledAnswers = computed<ReadonlyMap<string, AnswerValue>>(() => {
+    const pages = this.orderedPages();
+    const raw = this.answers();
+    let set = resolveVisibleQuestions(pages, raw);
+    for (let pass = 0; pass < MAX_VISIBILITY_PASSES; pass++) {
+      const restricted = restrictAnswers(raw, set);
+      const next = resolveVisibleQuestions(pages, restricted);
+      if (sameQuestions(next, set)) {
+        return restricted;
       }
+      set = next;
     }
-    return out;
+    // Cap reached: the rules do not settle, so no client set can match the server's single pass.
+    // Say so once and use the last derivation — the alternative is looping forever on a form whose
+    // own rules contradict each other.
+    console.warn(
+      '[mj-form] visibility did not settle after ' +
+        `${MAX_VISIBILITY_PASSES} passes; this form's show rules depend on each other in a way ` +
+        'that has no stable answer (an `is not answered` rule revealing a question whose own answer ' +
+        'then hides it). The server may disagree with what is on screen.',
+    );
+    return restrictAnswers(raw, set);
   });
+
+  /**
+   * Every question that RENDERS, in document order — display-only types included.
+   *
+   * The one walk both renderers read. Derived from {@link settledAnswers} rather than the raw
+   * map so that what renders, what submits and what the server re-derives are three readings of
+   * one answer set instead of three derivations that agree most of the time.
+   */
+  public readonly renderedQuestions = computed<PublishedFormQuestion[]>(() =>
+    resolveRenderedQuestions(this.orderedPages(), this.settledAnswers()),
+  );
+
+  public readonly visibleAnswerableQuestions = computed<PublishedFormQuestion[]>(() =>
+    this.renderedQuestions().filter((question) => isAnswerableQuestionType(question.type)),
+  );
+
+  /**
+   * Exactly the answers this widget will transmit — derived FROM the payload builder, not
+   * alongside it.
+   *
+   * Built by asking {@link buildAnswerInputs} what it will send and keying those ids, rather than
+   * re-deriving the filter here. A previous version restricted the raw map with its own
+   * `answers.has(id)` test, which agreed with the payload for every ordinary answer and disagreed
+   * for a blank one — `buildAnswerInputs` drops what is not submittable, and a blank value is
+   * still a map entry. One definition of "what gets sent" removes that class outright.
+   */
+  public transmittedAnswers(): ReadonlyMap<string, AnswerValue> {
+    const raw = this.answers();
+    const map = new Map<string, AnswerValue>();
+    for (const input of this.buildAnswerInputs()) {
+      map.set(input.questionId, raw.get(input.questionId));
+    }
+    return map;
+  }
+
+  /**
+   * What the server will see, AND what it will make of it — the basis for every client-side
+   * verdict.
+   *
+   * The server does two things with a submission: it reads the answers that arrive, and it
+   * RE-DERIVES the visible question set from them (`resolveVisibleQuestions` over the payload).
+   * Matching only the first is not matching. An earlier fix restricted the answer values and left
+   * `visibleAnswerableQuestions` resolving over the raw map, so a show-rule naming a question that
+   * is itself hidden kept an orphaned question "visible" on the client while the server — seeing no
+   * answer for the question that rule reads — dropped it. Client and server then scored, banded and
+   * judged knockouts over different sets, which is the failure that fix claimed to have removed
+   * "by construction".
+   *
+   * One pass, deliberately, because that is what the server makes. Iterating to a fixed point here
+   * would be a different answer from the authoritative one, which is worse than an imperfect
+   * agreement — the point is to agree, not to be independently cleverer.
+   */
+  public transmittedView(): {
+    readonly answers: ReadonlyMap<string, AnswerValue>;
+    readonly questions: PublishedFormQuestion[];
+  } {
+    const answers = this.transmittedAnswers();
+    return { answers, questions: resolveVisibleQuestions(this.orderedPages(), answers) };
+  }
 
   // --- Validation ----------------------------------------------------------
 
@@ -166,8 +301,20 @@ export class FormRuntime {
 
   // --- Progress ------------------------------------------------------------
 
-  /** Fraction 0–1 of visible answerable questions that have a value. */
-  /** How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`. */
+  /**
+   * How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`.
+   *
+   * Requiredness is `isRequired` — the same judge `errorFor`/`isFormValid` use, which is the
+   * property that matters. `computeProgress` returns 1 as soon as every required question is
+   * satisfied, so a bar reading a different notion of "required" than the submit button reads
+   * can show full on a form that will not submit, which is the one state where the bar is the
+   * respondent's only clue that something is missing. The two used to be able to disagree
+   * (the bar read the static flag, validity read the `require` verb); with the verb gone there
+   * is only one flag left to read, and both read it.
+   *
+   * Visibility still gates it: the map runs over `visibleAnswerableQuestions`, so a required
+   * question hidden by its show rule is not counted against the bar.
+   */
   public readonly progress = computed(() =>
     computeProgress(
       this.visibleAnswerableQuestions().map((q) => ({

@@ -117,27 +117,54 @@
       ></mjf-validation-rule-editor>
     </mjf-setting-row>
 
-    <mjf-setting-row
-      label="Show only if"
-      hint="Hide this question unless an earlier answer matches."
-      [open]="conditionalOpen"
-    >
-      <button
-        slot="control"
-        type="button"
-        class="mjf-switch"
-        [class.is-on]="conditionalOpen"
-        role="switch"
-        [attr.aria-checked]="conditionalOpen"
-        aria-label="Show only if"
-        (click)="toggleConditional()"
-      ></button>
-      <mjf-conditional-rule-editor
-        [sources]="conditionalSources"
+    @if (scoringChoices.length > 0) {
+      <mjf-setting-row
+        label="Scoring"
+        hint="Points per answer. The running total can route ending screens (score bands) and automations."
+        [open]="scoringOpen"
+      >
+        <button
+          slot="control"
+          type="button"
+          class="mjf-switch"
+          [class.is-on]="scoringOpen"
+          role="switch"
+          [attr.aria-checked]="scoringOpen"
+          aria-label="Scoring"
+          (click)="toggleScoring()"
+        ></button>
+        <div class="qe-points">
+          @for (choice of scoringChoices; track choice.value) {
+            <label class="qe-points-row">
+              <span class="qe-points-label">{{ choice.label }}</span>
+              <input
+                #pointsInput
+                class="mjf-input qe-points-input"
+                type="number"
+                step="any"
+                placeholder="0"
+                [value]="pointsFor(choice.value)"
+                (change)="setPoints(choice.value, pointsInput.value)"
+                [attr.aria-label]="'Points for ' + choice.label"
+              />
+            </label>
+          }
+        </div>
+      </mjf-setting-row>
+    }
+
+    <div class="qe-section">
+      <mjf-rules-panel
+        [subjectId]="node.entity.ID"
         [rule]="conditionalRule"
+        [sources]="conditionalSources"
+        [jumpSources]="jumpConditionSources"
+        [targets]="jumpTargets"
+        [reachNotes]="reachNotes"
+        itemNoun="question"
         (ruleChange)="onConditionalChange($event)"
-      ></mjf-conditional-rule-editor>
-    </mjf-setting-row>
+      />
+    </div>
 
     @if (otherSettingFields.length > 0) {
       <div class="qe-section">

@@ -155,6 +155,19 @@ export function completionCeilingKey(distributionId: string, identity: string): 
 }
 
 /**
+ * Bucket for DISQUALIFYING submits, per (caller, distribution).
+ *
+ * Its own bucket, deliberately. Sharing the completion one let a burst of ineligible respondents
+ * behind a single address lock real completions out of a form — that bucket is tight because a
+ * completion fires automations a knockout never fires. But leaving knockouts unthrottled was the
+ * opposite mistake: each one writes a PERMANENT row, so the durable row ceiling fell an order of
+ * magnitude faster than it was sized for. Its own bucket is the only answer that is neither.
+ */
+export function knockoutCeilingKey(distributionId: string, identity: string): string {
+  return `knockout:${distributionId}:${identity}`;
+}
+
+/**
  * Assemble the structured `SourceMetadata` payload persisted on the FormResponse.
  * Only non-empty fields are included so the stored JSON stays compact.
  */
