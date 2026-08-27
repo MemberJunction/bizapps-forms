@@ -3,6 +3,7 @@ import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { collectRuleEntries, type RuleEntry, type RuleInventoryForm } from './rules-inventory';
 import {
+  damageKeys,
   isValidReorder,
   newlyBrokenRules,
   noticeStillTrue,
@@ -147,15 +148,39 @@ describe('reorderNoticeText', () => {
 });
 
 describe('undoReorderMove', () => {
-  const notice = { pageId: 'pA', questionId: 'qa3', originalIndex: 0 };
+  /** "qa3" used to sit immediately before "qa1" — see {@link ReorderNotice.wasBefore}. */
+  const notice = { pageId: 'pA', questionId: 'qa3', wasBefore: 'qa1' };
 
-  it('moves the question back to where it came from', () => {
+  const undone = (
+    n: { questionId: string; wasBefore: string | null },
+    ids: readonly string[],
+  ): readonly string[] => {
+    const move = undoReorderMove(n, ids);
+    return move ? moved(ids, move.from, move.to) : ids;
+  };
+
+  it('moves the question back in front of the one it used to precede', () => {
     expect(undoReorderMove(notice, ['qa1', 'qa2', 'qa3'])).toEqual({ from: 2, to: 0 });
   });
 
-  it('finds the question by id, not by the index it was dropped at', () => {
-    // Something above it was deleted while the band stood. Indices shifted; the id did not.
-    expect(undoReorderMove(notice, ['qa2', 'qa3'])).toEqual({ from: 1, to: 0 });
+  it('survives an unrelated move made while the band stood', () => {
+    // The case a stored index gets wrong, and gets wrong SILENTLY. [X,A,C,D] with C reading A:
+    // A is dragged below C, then X is dragged to the end for reasons of its own. "Put A back at
+    // index 1" is where A already sits, so Undo did nothing at all and C still could not read A.
+    const c = { pageId: 'pA', questionId: 'A', wasBefore: 'C' };
+    expect(undone(c, ['C', 'A', 'D', 'X'])).toEqual(['A', 'C', 'D', 'X']);
+  });
+
+  it('finds both the question and its anchor by id, not by index', () => {
+    // Something above them was deleted while the band stood. Indices shifted; the ids did not.
+    expect(undoReorderMove(notice, ['qa2', 'qa1', 'qa3'])).toEqual({ from: 2, to: 1 });
+  });
+
+  it('puts a question that was LAST back at the end', () => {
+    // Nothing followed it, so there is no anchor to name — and the end of the page is still the
+    // end of the page however many questions have come and gone since.
+    const last = { pageId: 'pA', questionId: 'qa3', wasBefore: null };
+    expect(undone(last, ['qa3', 'qa1', 'qa2'])).toEqual(['qa1', 'qa2', 'qa3']);
   });
 
   it('refuses a question that is no longer there', () => {
@@ -166,16 +191,24 @@ describe('undoReorderMove', () => {
     expect(undoReorderMove(notice, [])).toBeNull();
   });
 
-  it('clamps the original index to the list that is there now', () => {
-    // The question came from index 4 of a page that has since lost questions. Undo puts it as
-    // far back as the page now goes rather than refusing, or splicing past the end.
-    const late = { pageId: 'pA', questionId: 'qa1', originalIndex: 4 };
-    expect(undoReorderMove(late, ['qa1', 'qa2'])).toEqual({ from: 0, to: 1 });
-    expect(undoReorderMove(late, ['qa2', 'qa1'])).toBeNull();
+  it('refuses when the anchor was deleted, rather than guessing a position', () => {
+    // Where "before qa1" is on a page with no qa1 is a question with no answer. A band offering
+    // a move whose destination has to be invented is worse than a band that has lapsed.
+    expect(undoReorderMove(notice, ['qa2', 'qa3'])).toBeNull();
   });
 
   it('refuses when the question is already back where it started', () => {
     expect(undoReorderMove(notice, ['qa3', 'qa1', 'qa2'])).toBeNull();
+  });
+
+  it('resolves against where the anchor is NOW, which is the limit of what one anchor can do', () => {
+    // Pinned as a known edge, not as a claim to have solved it. No single neighbour survives
+    // being moved itself: undoing one move while a second has reordered the same pair has no
+    // unique right answer, and inventing one would move the author's question somewhere neither
+    // of them asked for. Refusing is the honest end of it — the BADGE still says the rule is
+    // broken, which is the half that must never be wrong.
+    const n = { pageId: 'pA', questionId: 'qa1', wasBefore: 'qa2' };
+    expect(undoReorderMove(n, ['qa1', 'qa2', 'qa3'])).toBeNull();
   });
 });
 
@@ -283,43 +316,89 @@ describe('an appended question cannot break a rule', () => {
   });
 });
 
+/**
+ * A `Statement` is a legal jump destination and never an answer source, so it is the one item
+ * whose presence on the page and absence from `sources` differ — the case that made the whole
+ * class of "jump to a question" reorder invisible to the band.
+ */
+describe('a jump to a Statement', () => {
+  const statementForm = (order: readonly string[]): RuleInventoryForm => ({
+    sources: [{ id: 'qa1', prompt: 'Ticket type', kind: 'text' }],
+    endings: [],
+    pages: [
+      {
+        id: 'pA',
+        label: 'Page A',
+        questions: order.map((id) => ({
+          id,
+          label: id === 'st1' ? 'Please read the terms' : id,
+          conditionalRule:
+            id === 'qa1'
+              ? { jump: [{ when: { all: [{ questionId: 'qa1', op: 'isAnswered' }] }, target: { kind: 'question', id: 'st1' } }] }
+              : undefined,
+        })),
+      },
+    ],
+  });
+
+  it('is healthy while the Statement is ahead of the rule', () => {
+    expect(collectRuleEntries(statementForm(['qa1', 'st1']))[0].broken).toEqual([]);
+  });
+
+  it('breaks — and is REPORTED — when the reorder puts the Statement behind it', () => {
+    const before = collectRuleEntries(statementForm(['qa1', 'st1']));
+    const after = collectRuleEntries(statementForm(['st1', 'qa1']));
+    expect(newlyBrokenRules(before, after).map((e) => e.broken)).toEqual([
+      ['a destination that is no longer ahead of it, so the rule never runs'],
+    ]);
+  });
+});
+
 describe('noticeStillTrue', () => {
-  const notice = (ruleIds: string[]) => ({
-    text: 'Moved "Email". This broke 1 rule on it.',
-    pageId: 'pA',
-    questionId: 'qa3',
-    originalIndex: 0,
-    ruleIds,
+  const notice = (broken: RuleEntry[]) => ({ damage: damageKeys(broken) });
+
+  it('holds while a rule the band named is still broken for the reason it named', () => {
+    expect(noticeStillTrue(notice([entry('r1', [UNREADABLE])]), [entry('r1', [UNREADABLE])])).toBe(true);
   });
 
-  it('holds while a rule the band named is still broken', () => {
-    expect(noticeStillTrue(notice(['r1']), [entry('r1', [UNREADABLE])])).toBe(true);
-  });
-
-  it('lapses once every rule it named is healthy again', () => {
+  it('lapses once every reason it named is repaired', () => {
     // The author dragged the question back BY HAND rather than clicking Undo. Same recovery,
     // and the band must not go on describing a breakage that is no longer there.
-    expect(noticeStillTrue(notice(['r1']), [entry('r1', [])])).toBe(false);
+    expect(noticeStillTrue(notice([entry('r1', [UNREADABLE])]), [entry('r1', [])])).toBe(false);
+  });
+
+  it('lapses when the reason the MOVE added is repaired, though older breakage remains', () => {
+    // The band is about what THIS move cost. A rule that was already pointing at a deleted
+    // question, and which the move also made unreadable, has had the move's damage undone the
+    // moment it is readable again — the badge goes on saying the rest, which is its job. Keyed
+    // on rule ids alone the band stood there offering to Undo a move that had already been
+    // undone, and named a consequence that was no longer one.
+    expect(noticeStillTrue(notice([entry('r1', [UNREADABLE])]), [entry('r1', [MISSING])])).toBe(false);
+  });
+
+  it('holds while the exact reason it named survives alongside another', () => {
+    const live = [entry('r1', [MISSING, UNREADABLE])];
+    expect(noticeStillTrue(notice([entry('r1', [UNREADABLE])]), live)).toBe(true);
   });
 
   it('lapses when the rule it named no longer exists at all', () => {
     // Deleted with its question. Gone is not broken.
-    expect(noticeStillTrue(notice(['r1']), [])).toBe(false);
+    expect(noticeStillTrue(notice([entry('r1', [UNREADABLE])]), [])).toBe(false);
   });
 
-  it('holds while ANY of several named rules is still broken', () => {
-    const entries = [entry('r1', []), entry('r2', [UNREADABLE])];
-    expect(noticeStillTrue(notice(['r1', 'r2']), entries)).toBe(true);
+  it('holds while ANY of several named reasons is still live', () => {
+    const named = [entry('r1', [UNREADABLE]), entry('r2', [UNREADABLE], 'qa2')];
+    expect(noticeStillTrue(notice(named), [entry('r1', []), entry('r2', [UNREADABLE], 'qa2')])).toBe(true);
   });
 
   it('is false for a notice that named nothing, which is not a state the builder can reach', () => {
     // `reorderNoticeText` returns '' for an empty diff, so no notice is raised without rules.
-    // Pinned anyway: "no rules named" must read as nothing to say, never as always-true.
-    expect(noticeStillTrue(notice([]), [entry('r1', [UNREADABLE])])).toBe(false);
+    // Pinned anyway: "no damage named" must read as nothing to say, never as always-true.
+    expect(noticeStillTrue({ damage: [] }, [entry('r1', [UNREADABLE])])).toBe(false);
   });
 
-  it('reads breakage from the entry, not from whether the id is present', () => {
-    // A healthy rule with the same id must not keep the band alive.
-    expect(noticeStillTrue(notice(['r1']), [entry('r1', []), entry('r2', [MISSING])])).toBe(false);
+  it('does not confuse one rule\'s reason for another rule\'s', () => {
+    // The keys are pairs, so the same reason on a DIFFERENT rule is a different fact.
+    expect(noticeStillTrue(notice([entry('r1', [UNREADABLE])]), [entry('r2', [UNREADABLE], 'qa2')])).toBe(false);
   });
 });

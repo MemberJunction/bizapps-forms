@@ -348,6 +348,43 @@ describe('collectRuleEntries', () => {
       expect(entries[0].broken).toEqual(['a page that no longer exists']);
     });
 
+    /**
+     * A `Statement` is on a page and is a legal jump DESTINATION — `jumpReach` walks every
+     * question — but it collects no answer, so it is never in `sources`. Resolving destinations
+     * through that list therefore called a paragraph the author is looking at "deleted".
+     *
+     * Built literally rather than through `form()`, because that helper tops `sources` up from
+     * the pages and so cannot express the one thing this is about: a question that exists and is
+     * not an answer source.
+     */
+    it('names a jump to a Statement, which is on the page but is no answer source', () => {
+      const entries = collectRuleEntries({
+        sources: SOURCES,
+        endings: [],
+        pages: [
+          {
+            id: 'p1',
+            label: 'Page 1',
+            questions: [
+              {
+                id: 'q1',
+                label: 'Ticket type',
+                conditionalRule: {
+                  jump: [
+                    { when: { all: [{ questionId: 'q1', op: 'isAnswered' }] }, target: { kind: 'question', id: 'st1' } },
+                  ],
+                },
+              },
+              { id: 'st1', label: 'Please read the terms' },
+            ],
+          },
+        ],
+      });
+
+      expect(entries[0].sentence).toContain('skip to "Please read the terms"');
+      expect(entries[0].broken).toEqual([]);
+    });
+
     it('reports both breakages when a rule has both', () => {
       const entries = collectRuleEntries(
         form({

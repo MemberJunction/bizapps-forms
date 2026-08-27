@@ -8,6 +8,11 @@
  * does nothing is that the control is broken. On the badge that REPORTS a broken rule, that is
  * precisely the wrong impression — and it is the one an author actually reported.
  *
+ * Reachable by KEYBOARD and by TOUCH, not by pointer alone. `:hover` is the one input a phone
+ * does not have, and a badge is not a control a tab order would otherwise stop at, so the detail
+ * was mouse-only: the `aria-label` carried it to a screen reader and nothing carried it to a
+ * sighted author who does not use a mouse.
+ *
  * One component rather than a span repeated three times (a question, a section header, an ending
  * screen). The bubble is fiddly enough — overlap, pointer events, multi-line detail — that three
  * copies would have drifted, and the tooltip is the whole reason this exists.
@@ -66,7 +71,22 @@ const RULE_BADGE_CSS = `
   pointer-events: none;
 }
 
-:host(:hover) .rb-tip { opacity: 1; visibility: visible; }
+:host(:hover) .rb-tip,
+/* :hover is the one input a phone does not have, and every respondent-facing surface here is
+   held to mobile first — the builder should not be the exception that hides its only explanation
+   behind a pointer. focus-within rather than focus so the rule survives the badge growing an
+   interactive child. */
+:host(:focus-within) .rb-tip { opacity: 1; visibility: visible; }
+
+/* The badge takes a tab stop because the detail is the whole reason it exists, and a tab stop
+   with no visible focus is a place a keyboard user gets lost. Painted on the badge, not the
+   bubble: the bubble is what focus REVEALS. */
+:host(:focus-visible) { outline: none; }
+:host(:focus-visible) .rb {
+  outline: 2px solid var(--mjf-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--mjf-radius-sm);
+}
 `;
 
 @Component({
@@ -79,6 +99,7 @@ const RULE_BADGE_CSS = `
     @if (badge; as badge) {
       <span
         class="mjf-badge rb"
+        tabindex="0"
         [class.mjf-badge--warning]="badge.broken"
         [attr.aria-label]="badge.label + ': ' + badge.detail"
       >

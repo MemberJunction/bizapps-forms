@@ -326,7 +326,11 @@ export class ConditionalRuleEditorComponent {
 
   /** Whether the "Add condition" button is offered — see {@link groupHasRoom}. */
   protected get canAddCondition(): boolean {
-    return groupHasRoom(this._conditions.length);
+    // Room in the group AND something to read. The rows now render with no sources — a rule
+    // stranded by a reorder has to be readable somewhere — and this button came with them,
+    // offering an action `addCondition` then refuses. A control that visibly does nothing is
+    // worse than an absent one.
+    return this.sources.length > 0 && groupHasRoom(this._conditions.length);
   }
 
   protected addCondition(): void {

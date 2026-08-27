@@ -81,6 +81,7 @@ import {
   type PublishControlState,
 } from './publish-fingerprint';
 import {
+  damageKeys,
   isValidReorder,
   newlyBrokenRules,
   noticeStillTrue,
@@ -1288,6 +1289,9 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     const moved = page.questions[from];
+    // Read BEFORE the array moves — it is the question this one used to sit in front of, which is
+    // what Undo puts it back before. `null` when it was last on the page.
+    const wasBefore = page.questions[from + 1]?.entity.ID ?? null;
     const before = this.ruleEntries;
     moveItemInArray(page.questions, from, to);
 
@@ -1311,21 +1315,32 @@ export class FormBuilderComponent extends BaseFormComponent {
         text,
         pageId: page.entity.ID,
         questionId: moved.entity.ID,
-        originalIndex: from,
-        ruleIds: broken.map((entry) => entry.id),
+        wasBefore,
+        damage: damageKeys(broken),
       };
     }
 
-    // Checked rather than discarded: this writes one question at a time and can fail halfway,
-    // leaving `DisplayOrder` matching neither the order before this move nor the one after.
-    // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
-    // refused write — and the notice below it stays true either way, because it is about what is
-    // on screen. Logged as well so a partial write is not invisible once that band is dismissed.
-    if (!(await this.state.persistQuestionOrder(page))) {
-      LogError(
-        `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
-          'DisplayOrder may match neither the previous nor the new order.',
-      );
+    // `busy` for the write, like every other handler that awaits one. The guard at the top of
+    // this method was reading a flag nothing here ever set, so the Undo button's `[disabled]`
+    // was decorative and a second click could start a reorder while the first was still writing
+    // — two `Save()` sequences interleaving over the same `DisplayOrder` column, which is the
+    // lost update `builder-state.service.ts` warns about. try/finally because the state service
+    // can throw, and a stuck `busy` freezes every guarded handler on the screen at once.
+    this.busy = true;
+    try {
+      // Checked rather than discarded: this writes one question at a time and can fail halfway,
+      // leaving `DisplayOrder` matching neither the order before this move nor the one after.
+      // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
+      // refused write — and the notice below it stays true either way, because it is about what
+      // is on screen. Logged as well so a partial write is not invisible once that band is gone.
+      if (!(await this.state.persistQuestionOrder(page))) {
+        LogError(
+          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
+            'DisplayOrder may match neither the previous nor the new order.',
+        );
+      }
+    } finally {
+      this.busy = false;
     }
     this.markDirty();
   }

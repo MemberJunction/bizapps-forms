@@ -31,6 +31,16 @@ const stripped = (file: string): string =>
 const builder = (): string => stripped('form-builder.component.ts');
 const builderHtml = (): string => stripped('form-builder.component.html');
 
+/** Just the shared reorder path, so a guard about it cannot be satisfied by another method. */
+const reorderMethod = (): string => {
+  const source = builder();
+  const start = source.indexOf('private async reorderQuestion(');
+  const end = source.indexOf('protected reorderNotice', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+};
+
 describe('the Rules tab is gone, not hidden', () => {
   it('leaves no tab to open', () => {
     // A tab left in the union but unreachable in the template is a state the component can still
@@ -87,6 +97,17 @@ describe('a rule is visible on the item it is about', () => {
     expect(badge).toMatch(/\[attr\.aria-label\]="badge\.label \+ ': ' \+ badge\.detail"/);
   });
 
+  it('shows it to a keyboard and a touch screen too, not to a mouse alone', () => {
+    // `:hover` is the one input a phone does not have, and this app is mobile-first. Without a
+    // tab stop the detail was unreachable by keyboard as well: the aria-label carries it to a
+    // screen reader, and a sighted author who does not use a mouse had nowhere to read it.
+    const badge = stripped('rule-badge.component.ts');
+    expect(badge).toMatch(/tabindex="0"/);
+    expect(badge).toMatch(/:host\(:focus-within\) \.rb-tip/);
+    // A focusable thing that shows nothing on focus is worse than one that cannot be focused.
+    expect(badge).toMatch(/:host\(:focus-visible\)/);
+  });
+
   it('is rendered from ONE component, not copied to each place a badge appears', () => {
     // Three sites carried the same span — a question, a section header and an ending screen — so
     // the tooltip would have been written three times and drifted twice.
@@ -138,6 +159,18 @@ describe('a reorder that breaks a rule says so at the drag', () => {
     const source = builder();
     expect(source).toMatch(/questionId: moved\.entity\.ID/);
     expect(source).toMatch(/undoReorderMove\(notice, page\.questions\.map\(/);
+  });
+
+  it('holds the busy flag across the write it awaits', () => {
+    // The method GUARDS on `busy` and nothing here ever set it, so the guard read a flag that
+    // was false for the whole write and the Undo button's `[disabled]="busy"` was decoration.
+    // Two reorders could then interleave over one `DisplayOrder` column — the lost update
+    // `builder-state.service.ts` documents. try/finally because a stuck flag freezes every
+    // guarded handler on the screen with nothing on screen to explain it.
+    const method = reorderMethod();
+    expect(method).toMatch(/this\.busy = true;/);
+    expect(method).toMatch(/finally \{\s*this\.busy = false;/);
+    expect(method.indexOf('this.busy = true')).toBeLessThan(method.indexOf('persistQuestionOrder'));
   });
 
   it('checks that the new order was actually written', () => {

@@ -65,10 +65,17 @@ export interface RuleInventoryForm {
   pages: RuleInventoryPage[];
   endings: RuleInventoryItem[];
   /**
-   * Every question a rule may reference, for resolving prompts in sentences AND for deciding
-   * whether a reference is broken. Must be the WHOLE form's questions, not one item's legal
-   * sources: a rule pointing at a question it should not have been able to reach is still a
-   * rule that reads, and calling it broken would be a lie.
+   * Every question a CONDITION may reference — the whole form's answerable questions, not one
+   * item's legal sources: a rule reading a question it should not have been able to reach is
+   * still a rule that reads, and calling it broken would be a lie.
+   *
+   * ANSWERABLE, which is narrower than "every question", and the difference is a `Statement`.
+   * One collects no answer, so it never reaches the answer map and every operator on it is a
+   * constant — `toConditionalSource` drops it, and a condition naming one is genuinely broken.
+   * That makes this the wrong list for a jump DESTINATION, which may legally be any question on
+   * the form; those resolve through {@link RuleInventoryForm.pages}, where a Statement is
+   * present. Reading destinations from here had the badge calling a paragraph on the canvas
+   * "deleted", and reporting a healthy rule broken for it.
    */
   sources: ReadonlyArray<ConditionalSourceQuestion>;
 }
@@ -397,9 +404,16 @@ function describeTarget(
       };
     }
     case 'question': {
-      const question = form.sources.find((q) => q.id === target.id);
+      // Resolved from the PAGES, not from `form.sources`. Those two lists answer different
+      // questions and only one of them is about destinations: `sources` is what a CONDITION may
+      // read, so it holds the answerable questions only, and a `Statement` — which collects no
+      // answer — is absent from it while sitting on the canvas as a perfectly good place to jump
+      // to. `jumpReach` walks every question, so the runtime lands there quite happily; resolving
+      // the name through `sources` was the badge calling a paragraph the author is looking at
+      // "deleted", and then reporting a healthy rule broken for it.
+      const question = form.pages.flatMap((p) => p.questions).find((q) => q.id === target.id);
       return {
-        phrase: `skip to ${quoted(question?.prompt ?? '(deleted question)')}`,
+        phrase: `skip to ${quoted(question?.label ?? '(deleted question)')}`,
         broken: question ? [] : [MISSING_QUESTION],
       };
     }

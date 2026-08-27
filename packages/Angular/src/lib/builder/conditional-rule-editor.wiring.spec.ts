@@ -245,3 +245,21 @@ describe('the stale-source option distinguishes deleted from moved-below', () =>
     expect(editor()).toMatch(/@Input\(\) formSources: ConditionalSourceQuestion\[\] = \[\];/);
   });
 });
+
+describe('a rule the author can no longer add, but can still read and remove', () => {
+  it('keeps the empty state for an empty rule, not for a rule with conditions in it', () => {
+    // The empty state replaced the WHOLE editor whenever nothing was readable from here, and a
+    // reorder can put a question first — at which point a show rule it already carries is both
+    // broken and invisible: the dialog offered "Add an earlier question first" and no sign that
+    // there was a rule, let alone the row that explains and removes it. The badge on the canvas
+    // said the rule was broken and the one place to fix it showed nothing.
+    expect(editorHtml()).toMatch(/@if \(sources\.length === 0 && _conditions\.length === 0\)/);
+  });
+
+  it('stops offering to add a condition when there is nothing to read', () => {
+    // Rendering the rows in that state brings the Add button with them, and `addCondition`
+    // refuses without a source — a button that visibly does nothing. The refusal stays as the
+    // guard for every other route in; this is what keeps the control off the screen.
+    expect(editor()).toMatch(/canAddCondition\(\): boolean \{\s*return this\.sources\.length > 0 &&/);
+  });
+});
