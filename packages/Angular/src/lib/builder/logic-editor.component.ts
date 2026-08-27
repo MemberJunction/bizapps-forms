@@ -160,6 +160,11 @@ const LOGIC_EDITOR_CSS = /* css */ `
 
 @media (max-width: 640px) {
   .le-then { flex-direction: column; align-items: stretch; }
+  /* flex-basis follows the MAIN axis, so the 260px above stopped being a preferred width and
+     became a preferred HEIGHT the moment this stacked — a 260px-tall picker with its label
+     floating in the middle of it. Stretch already gives it the full width. The condition row
+     next to it is a grid with named areas, which is why only this one grew. */
+  .le-then-select { flex: none; }
 }
 `;
 

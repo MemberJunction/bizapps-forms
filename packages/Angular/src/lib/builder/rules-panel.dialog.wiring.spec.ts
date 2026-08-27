@@ -127,6 +127,17 @@ describe('the rule editor is a modal, not a rail expansion', () => {
   });
 });
 
+describe('the dialog stacks on a phone without stretching a control', () => {
+  it('drops the destination picker\'s flex-basis when the row turns vertical', () => {
+    // `flex: 1 1 260px` is a preferred WIDTH in a row and a preferred HEIGHT in a column, so
+    // stacking the label above the picker turned it into a 260px-tall box with "Then go to"
+    // floating in the middle. Reported from a phone.
+    const css = readFileSync(join(__dirname, 'logic-editor.component.ts'), 'utf8');
+    const mobile = css.slice(css.indexOf('@media (max-width: 640px)'));
+    expect(mobile).toMatch(/\.le-then-select \{ flex: none; \}/);
+  });
+});
+
 describe('the panel header is the only add affordance', () => {
   it('it is labelled BRANCH', () => {
     expect(panelHtml()).toMatch(/>BRANCH</);
