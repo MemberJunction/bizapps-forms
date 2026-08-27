@@ -7,7 +7,7 @@ Branch to cut **from `next`** (currently `98abfc0`), tracking `origin/<branch>` 
 Revision 2, after a design review; §1.4, §1.6, §2, and the three amendments in §4 come from it,
 and §3.2 corrects it. Revision 3 records what landed.
 
-## Status — Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · follow-up ✅ — #73 closed
+## Status — DONE. Phase 0 ✅ · Phase 1 ✅ · Phase 2 ✅ · follow-up ✅ · band lifetime ✅
 
 Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<same-name>`.
 
@@ -16,7 +16,12 @@ Branch `fix/73-reorder-rule-safety`, from `next` @ `98abfc0`, tracking `origin/<
 | 0 — one statement of the ordering rule | **landed** | `refactor(builder): state the rule read horizon once` |
 | 1 — a rule that cannot read its own source is broken | **landed** | see §4 |
 | 2 — say it at the drag, and offer the one move that undoes it | **landed** | `feat(#73): say what a reorder broke, and offer the move that undoes it` |
-| follow-up — the same lie about a jump's DESTINATION | **landed** | see below |
+| follow-up — the same lie about a jump's DESTINATION | **landed** | `fix(#73): say a jump's destination is behind it, not that it is gone` |
+| amendment — a band retires when it stops being TRUE | **landed** | `fix(#73): retire the reorder band when it stops being true` |
+
+Six commits on `fix/73-reorder-rule-safety`. Every phase was smoke-tested by the developer in MJ's
+host against a purpose-built fixture; what each pass covered is recorded in §6, and so is what it
+did **not**.
 
 **What the build changed about this plan, and why.** Five things, all found by building or by driving
 the real UI:
@@ -638,6 +643,35 @@ for every respondent; `Q5`'s rule is HEALTHY and dies anyway, because the questi
 is never rendered and so never answered. A legal rule, dead because of a broken one upstream — and
 with `isNotAnswered` or `notEquals` the identical breakage would have shown Q4 to *everyone*
 instead. That asymmetry is why §1.4 was worth correcting in nine places.
+
+**Verified in the browser after the band-lifetime amendment**: a band survives a harmless move on
+another section and an unrelated keystroke; it retires ITSELF when the author repairs the order by
+hand instead of clicking Undo; Undo and dismiss still behave as before. Reproduced by the author of
+the change and handed to the developer as a smoke list.
+
+**Known unverified, recorded so nobody reads silence as coverage.** None blocks the merge; all are
+narrow, and two are unreachable from the UI:
+
+* `persistQuestionOrder` returning **false** — no way to make the database refuse a `DisplayOrder`
+  write from the browser, so the `LogError` branch has never executed. Reasoned, not observed.
+* The `busy` guard on **Undo** — the write completes faster than the band paints; sampling every
+  60ms across a reorder never caught the button disabled. Not evidence it is broken, evidence the
+  window is not reachable by hand.
+* The `!page` arm of `undoReorder` (the whole SECTION deleted, not just the question). The
+  question-deleted arm was driven and refuses correctly; this is the adjacent two lines through the
+  same dismiss.
+* **Retiring the band from a repair made in the Edit-logic dialog.** The mechanism is `markDirty()`,
+  which that dialog's save goes through, and the pure decision is unit-tested — but the path was not
+  driven end to end.
+* **Light theme.** Everything was driven in dark. `lint:ui` gates hardcoded colours, but this repo
+  already has one recorded case of a status token measuring 2.28:1 against the light topbar (the
+  comment is in `form-builder.styles.ts`), so amber-on-light is a precedented risk.
+* **Assistive technology.** `role="alert"` and the badge's `aria-label` are wired and guarded in
+  source; no screen reader was run.
+
+Band layout WAS checked: forced to 560/420/320px the text wraps, the band grows in height, and Undo
+and dismiss stay inside at full size with the label intact. It only degrades at 240px, which the
+builder shell never reaches.
 
 **Still owed, and no unit test can stand in for either** — both are about the RESPONDENT:
 
