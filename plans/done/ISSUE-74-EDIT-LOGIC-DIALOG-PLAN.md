@@ -9,9 +9,9 @@ Closes [#74](https://github.com/MemberJunction/bizapps-forms/issues/74). Branch:
 | Phase | State | Commit |
 |---|---|---|
 | **1. One default ending, enforced** | **DONE** | `45d586d` |
-| **2. The catch-all, stated in the dialog** | **DONE** (uncommitted) | working tree |
-| 3. Delete all rules | not started | — |
-| 4. Close out | not started | — |
+| **2. The catch-all, stated in the dialog** | **DONE** | `5b48fe0` |
+| ~~3. Delete all rules~~ | **WON'T BUILD** — decided 2026-08-27 | — |
+| 4. Close out | the only work left | — |
 
 Also on this branch, unrelated to #74 and safe to ignore while working on it: `51965de`
 (developer-local paths out of tracked files) and `4bdf894` (CLAUDE.md's MJ pin was two majors
@@ -23,7 +23,7 @@ Nothing is merged. No PR is open.
 
 ## What #74 actually asks for
 
-`plans/QUESTION_LEVEL_LOGIC_PLAN.md` §6 (Phase 4) specified two controls for the **Edit logic**
+`QUESTION_LEVEL_LOGIC_PLAN.md` §6 (Phase 4) specified two controls for the **Edit logic**
 dialog that were never reached. A third — "See all rules" → the Rules tab — is obsolete: that tab
 was deleted in `d4b31c0` and every rule is now a badge on its own item.
 
@@ -32,8 +32,8 @@ was deleted in `d4b31c0` and every rule is now a badge on its own item.
    The plan is explicit that Phase 4 *surfaces* it, it does not invent it.
    **→ Shipped as a read-only line, not a picker.** See Phase 2 and *Phase 2's design history*
    below before touching this. The control was built and removed on purpose.
-2. **"Delete all rules"**, behind a confirm. Minor. Today, clearing an item means clicking the
-   per-rule bin once per rule.
+2. **"Delete all rules"**, behind a confirm. Minor.
+   **→ Not shipping.** Every rule already has a bin on its own row. See *Phase 3* below.
 
 ### The finding that reordered the work
 
@@ -127,7 +127,7 @@ correctly follows whichever ending is unreachable as the default moves.
 
 ---
 
-## Phase 2 — the catch-all, stated in the dialog ✅ (uncommitted)
+## Phase 2 — the catch-all, stated in the dialog ✅ `5b48fe0`
 
 **Shipped as a read-only line. The picker this section used to specify was built, reviewed and
 removed — do not rebuild it.** The reasoning is in the changeset and in
@@ -194,45 +194,44 @@ to → an ending" and "the default ending" are different things.
   eligible ending.
 - **Still open, not fixed:** nothing from Phase 2.
 
-## Phase 3 — Delete all rules
+## Phase 3 — Delete all rules — **WON'T BUILD** (decided 2026-08-27)
 
-**`logic-draft.ts`** — `clearJumpRules(draft)`. One line, but named so the intent is testable.
+**Do not build this. It was designed in full and declined; the design is not the missing part.**
 
-**`logic-editor.component.ts`** — a control to the right of `+ Add rule`, rendered only at
-`jumps.length >= 2` (with one rule its own bin already does the job). Click swaps the row for an
-inline confirm:
+Every rule already carries a bin on its own row (`logic-editor.component.ts`, the
+`'Delete rule ' + ($index + 1)` button). "Delete all" is a second way to do what that button
+already does, and it is not free: it needs a confirm, and the confirm needs state, and that state
+has to live in `LogicEditorComponent` — whose whole contract today is that *it holds no state of
+its own*. One boolean is not expensive; giving up that invariant to save an author two clicks on
+a control capped at ten rules is.
 
-```
-[ + Add rule ]        Delete all 5 rules?  [Delete all] [Keep]
-```
+The scope question that blocked this ("does it clear the show gate too?") is moot, but worth
+recording because it is what made the control awkward in the first place: the rail counts the show
+gate as a rule and the dialog numbers only the jumps, so no honest label existed at dialog level.
+The show gate's delete, meanwhile, is already the **Always** segment — `setAlwaysShown(true)`
+drops the group outright.
 
-**Scoped to the numbered jump rules, not the show gate** — the button lives in the "Then, after
-this question" block, and the show gate has its own Always / Only-when toggle two inches above.
-*(Open decision, see below.)*
-
-**Do not touch `RuleEditorDialogComponent`'s `confirming` footer.** Its copy is hardcoded to
-discard and is pinned by `rules-panel.dialog.wiring.spec.ts:234,256`. The confirm here is a local
-boolean in the logic editor — which makes that component's header comment *"it holds no state of
-its own"* inaccurate, so update it in the same commit.
-
-Nothing persists until Done, so Cancel is already an undo; the confirm is cheap insurance, not
-data protection.
+Same shape of decision as Phase 2's picker: the plan asked for a control, the control turned out
+to need an apology, and the existing affordance was already sufficient.
 
 ---
 
-## Phase 4 — close out
+## Phase 4 — close out — **all that remains**
 
-- ~~Update the `STATUS 2026-08-27` notes in `plans/QUESTION_LEVEL_LOGIC_PLAN.md` §6.~~ **Done for
-  the "All other cases go to" bullet** (marked SUPERSEDED, with the reasoning and the
-  jump-rule-can't-express-a-catch-all warning). The **Delete all rules** note is still accurate
-  as "not built" and should be updated when Phase 3 lands.
-- Changeset: `.changeset/when-they-finish.md` exists for Phase 2 (`patch` — no migration, and
-  `logic-draft.ts`'s exported signatures ended up unchanged). Phase 3 needs its own.
-- **Say the deviation on #74 itself**, not only in the changeset: the issue asks for a picker and
-  a sentence shipped instead.
-- Gates: `pnpm run build:packages` · `pnpm run test:packages` · `lint:ui` · `lint:migrations` ·
-  `lint:distribution` · `lint:generated`.
-- PR → `next`, closing #74.
+- [x] `QUESTION_LEVEL_LOGIC_PLAN.md` §6 `STATUS 2026-08-27` notes — **both bullets now
+      current**: "All other cases go to" marked SUPERSEDED (shipped as a sentence), "Delete all
+      rules" marked WON'T BUILD.
+- [ ] **Changeset** — `.changeset/when-they-finish.md` covers Phase 2 (`patch`). Phase 1's
+      `.changeset/one-default-ending.md` is `minor`, which is what
+      `.github/workflows/changes.yml` requires of a PR to `next` that adds a migration. **No new
+      changeset is needed** — Phase 3 is not shipping.
+- [ ] **Gates** — `pnpm run build:packages` · `pnpm run test:packages` · `lint:ui` ·
+      `lint:migrations` · `lint:distribution` · `lint:generated`.
+- [ ] **PR → `next`**, closing #74.
+- [ ] **Say both deviations on #74 itself**, not only in the changeset. The issue asks for two
+      controls; one shipped as a read-only sentence and the other is not shipping at all. Said
+      nowhere but here, the next person reads the issue and "finishes" it.
+
 
 ---
 
@@ -252,13 +251,10 @@ data protection.
   `${flyway:defaultSchema}` and `${mjSchema}` may appear in shipped SQL.
 - **Smoke testing is the user's.** Hand over a check list; do not claim browser verification.
 
-## Open decision
+## Open decisions
 
-**Does "Delete all rules" also clear the show gate?** Planned as *no* — scoped to the numbered
-jump rules, matching the block the button sits in. If it should wipe everything, the control moves
-to the top of the dialog and is renamed **"Clear all logic"**. The vocabulary is genuinely
-ambiguous: the rail's `hasRules`/`summaryRows` counts the show gate as a rule, the dialog numbers
-only the Then rows.
+None. The one that stood here — *does "Delete all rules" also clear the show gate?* — closed with
+the control (see Phase 3).
 
 ## Phase 2's design history, so it is not relitigated
 
@@ -283,4 +279,4 @@ considered deviation, and if it is not said out loud the next person will read t
   differently: preview hosts the widget against a deliberately inert connection, and the widget
   only resolves an ending in its *submit-result* handler, so no submit means no resolution. The
   live link goes through the server. Argues for one resolver with three consumers.
-- `plans/QUESTION_LEVEL_LOGIC_PLAN.md` §6 — the original spec for both controls.
+- `QUESTION_LEVEL_LOGIC_PLAN.md` §6 — the original spec for both controls.

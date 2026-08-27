@@ -1,6 +1,6 @@
 /**
  * The working copy behind the "Edit logic" dialog
- * (plans/QUESTION_LEVEL_LOGIC_PLAN.md Phases 3–4).
+ * (plans/done/QUESTION_LEVEL_LOGIC_PLAN.md Phases 3–4).
  *
  * An item's logic is now two things at once — an optional "show this when…" gate and an ordered
  * list of "if … then go to …" rules — and they are edited together in one dialog. That makes the

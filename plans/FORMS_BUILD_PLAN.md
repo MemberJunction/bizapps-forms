@@ -2101,7 +2101,7 @@ native entities. This is the reporting differentiator no incumbent has.
 - **2026-08-26 — question-level logic, Phase 1: one forward walk, and targets that say what they
   are.** The user asked for question-to-question branching after seeing a competitor's editor,
   then simplified further: *"disqualify and jump to end we can combine in jump to rule where user
-  simply points the end screen or submit."* Plan: `plans/QUESTION_LEVEL_LOGIC_PLAN.md`.
+  simply points the end screen or submit."* Plan: `plans/done/QUESTION_LEVEL_LOGIC_PLAN.md`.
 
   **The jump target is now tagged.** `{ when, toPageId }` became `{ when, target }` where target
   is `{kind:'question'|'page'|'ending', id}` or `{kind:'submit'}`. Legacy rules normalize at the

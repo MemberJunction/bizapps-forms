@@ -22,7 +22,7 @@ them here would leave the tree broken between two commits. They go in **Phase 2*
 commit that swaps those callers onto `resolveTermination` — which also keeps Phase 1 purely
 additive and independently revertible.
 
-Follows `RULES_SIMPLIFICATION_PLAN.md` (complete, `dda2677`). Branch:
+Follows `../RULES_SIMPLIFICATION_PLAN.md` (complete, `dda2677`). Branch:
 `feat/rules-and-branching` → PR #72, or a fresh branch off `next` if #72 has merged by then.
 
 Baseline to beat: **1,944** tests (272 entities / 26 core-entities-server / 142 actions /
@@ -184,7 +184,7 @@ change, keep its flag and have a group nothing reads (`resolveEndingScreen` alre
 disqualification screens). It stops screening anyone, silently. Nothing is shipped, so this is
 dev data only — but **the Rules tab must flag it**: an ending marked disqualified that no `Go to`
 rule targets gets a broken-rule row saying nothing sends anyone there. That reuses the badge
-built in `RULES_SIMPLIFICATION_PLAN` Phase 3 and turns a silent regression into a visible one.
+built in `../RULES_SIMPLIFICATION_PLAN.md` Phase 3 and turns a silent regression into a visible one.
 
 ---
 
@@ -305,8 +305,12 @@ draft/commit and discard-warning behaviour — that work is done and must not re
   **STATUS 2026-08-27.** **See all rules is OBSOLETE** — the Rules tab was deleted in `d4b31c0`
   and every rule an item carries is now a badge on that item, with the hub's own sentences as its
   tooltip, so there is no longer a destination for the link and nothing for it to say. **Delete
-  rule** and **+ Add rule** shipped in `f1f03df`. **Delete all rules, behind a confirm, is NOT
-  built** — removing several rules means removing them one at a time. Minor, and unscheduled.
+  rule** and **+ Add rule** shipped in `f1f03df`. **Delete all rules is SUPERSEDED — decided
+  2026-08-27, will not be built.** Every rule already carries a bin on its own row, so this is a
+  second route to a deletion that is already one click away; it would need a confirm, the confirm
+  needs state, and that state would have to live in `LogicEditorComponent`, whose contract is that
+  it holds none. Removing several rules means removing them one at a time, and that is the
+  intended answer. Do not "finish" this bullet.
 - **The ending screen's settings** gain the disqualified toggle with copy that says what it
   means: *"Responses that reach this screen are recorded as disqualified — they don't count
   toward your response limit and no automations run."*
@@ -352,7 +356,7 @@ npm run lint:distribution && npm run lint:distribution:mutants
 starvation, not the code — rerun it. `changes_and_migrations` needs the changeset to exist; this
 plan ships no migration, so the existing changeset's prose is what gets updated.
 
-**8.5 Done.** All phases pushed; gates green with numbers; `FORMS_BUILD_PLAN.md` §12 has one
+**8.5 Done.** All phases pushed; gates green with numbers; `../FORMS_BUILD_PLAN.md` §12 has one
 entry per phase; manual pass at `:4201` covering the §7 worst cases, plus a respondent run
 proving a question jump, a disqualifying ending jump and a `Complete` ending jump end-to-end.
 
