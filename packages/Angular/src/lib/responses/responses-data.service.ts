@@ -97,6 +97,24 @@ export function uploadsForFileIdsFilter(fileIds: readonly string[]): string | nu
  * WHICH entities are read and WHICH columns are asked for — a silently-missing column is a
  * class of bug nothing else here would catch. Exported for unit testing.
  */
+/**
+ * The read that turns a response's pinned `FormVersionID` into the definition its answers are
+ * labelled from — BY ID, never by status.
+ *
+ * That distinction became load-bearing with #82: publishing now retires the version it replaces,
+ * so most versions carrying responses are `Retired`, and a `Status='Published'` predicate added
+ * here would blank the labels on every response older than the current version. Exported so a test
+ * can hold the predicate to exactly the id.
+ */
+export function definitionForVersionQuery(formVersionId: string): RunViewParams {
+  return {
+    EntityName: FORMS_ENTITY.FormVersion,
+    ExtraFilter: `ID='${formVersionId}'`,
+    ResultType: 'simple',
+    Fields: ['ID', 'DefinitionSnapshot'],
+  };
+}
+
 export function responseDetailQueries(responseId: string): RunViewParams[] {
   return [
     {
@@ -344,12 +362,9 @@ export class ResponsesDataService {
 
   /** Loads + parses the published `DefinitionSnapshot` for a version. */
   public async loadDefinition(formVersionId: string): Promise<PublishedFormDefinition> {
-    const res = (await this.rv.RunView({
-      EntityName: FORMS_ENTITY.FormVersion,
-      ExtraFilter: `ID='${formVersionId}'`,
-      ResultType: 'simple',
-      Fields: ['ID', 'DefinitionSnapshot'],
-    })) as RunViewResult<mjBizAppsFormsFormVersionEntityType>;
+    const res = (await this.rv.RunView(
+      definitionForVersionQuery(formVersionId),
+    )) as RunViewResult<mjBizAppsFormsFormVersionEntityType>;
 
     if (!res.Success || res.Results.length === 0) {
       throw new Error(res.ErrorMessage || 'Form version not found.');
