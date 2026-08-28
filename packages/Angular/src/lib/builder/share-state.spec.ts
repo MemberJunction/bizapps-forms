@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { autoShareName, shareState, type ShareLinkFacts } from './share-state';
+import { autoShareName, formReach, shareState, type ShareLinkFacts } from './share-state';
 
 const NOW = new Date('2026-08-19T12:00:00Z');
 const PAST = new Date('2026-08-01T12:00:00Z');
@@ -121,6 +121,76 @@ describe('shareState', () => {
 
   it('is full once the count passes the cap, not only when it lands on it', () => {
     expect(shareState(link({ MaxResponses: 5, ResponseCount: 9 }), NOW).kind).toBe('full');
+  });
+});
+
+describe('formReach', () => {
+  it('does not call a form with no share links reachable', () => {
+    // Issue #83: the builder header announced "Everything in this form is live on its public
+    // link" the instant a form was published, with FormDistribution holding zero rows for it.
+    expect(formReach([], NOW).kind).toBe('unshared');
+  });
+
+  it('is reachable as soon as one link would accept a response', () => {
+    expect(formReach([link()], NOW).kind).toBe('live');
+  });
+
+  it('is closed when no link would accept a response, for any of the reasons', () => {
+    // Not just "Open to responses: off". Every gate that makes `shareState` refuse counts,
+    // because every one of them turns a respondent away — a form whose only link sits at
+    // its cap, or past its closing date, is exactly as unreachable as one switched off.
+    const dead: Partial<ShareLinkFacts>[] = [
+      { Status: 'Closed' },
+      { IsActive: false },
+      { CloseAt: PAST },
+      { OpenAt: FUTURE },
+      { MaxResponses: 1, ResponseCount: 1 },
+      { PublicLinkToken: null },
+    ];
+    for (const override of dead) {
+      expect(formReach([link(override)], NOW).kind, JSON.stringify(override)).toBe('closed');
+    }
+    expect(formReach(dead.map(link), NOW).kind).toBe('closed');
+  });
+
+  it('needs only one survivor among many dead links', () => {
+    expect(formReach([link({ Status: 'Closed' }), link(), link({ CloseAt: PAST })], NOW).kind).toBe(
+      'live',
+    );
+  });
+
+  it('does not mistake links it could not read for links that do not exist', () => {
+    // A failed RunView is not an empty list — the same distinction `DistributionService.list`
+    // already makes. Sending an author to create a second link because we could not see the
+    // first is a worse answer than admitting we do not know.
+    expect(formReach(null, NOW).kind).toBe('unknown');
+  });
+
+  it('claims a public link in words only when there is a live one', () => {
+    // THE INVARIANT. Everything else here is machinery in service of this line: the wording
+    // that reaches the author may promise a reachable URL only in the `live` kind.
+    expect(formReach([link()], NOW).detail).toMatch(/live on its public link/i);
+    for (const unreachable of [formReach([], NOW), formReach([link({ Status: 'Closed' })], NOW), formReach(null, NOW)]) {
+      expect(unreachable.detail, unreachable.kind).not.toMatch(/live on its public link/i);
+    }
+  });
+
+  it('names the next step whenever there is one to name', () => {
+    // "Not shared" without "so go and share it" is half a message — the same reasoning
+    // `shareState.fix` is built on.
+    expect(formReach([], NOW).detail).toMatch(/Distribute/);
+    expect(formReach([link({ Status: 'Closed' })], NOW).detail).toMatch(/Distribute/);
+    // Nothing to send them to fix when we could not see the links in the first place.
+    expect(formReach(null, NOW).needsAttention).toBe(false);
+    expect(formReach([link()], NOW).needsAttention).toBe(false);
+    expect(formReach([], NOW).needsAttention).toBe(true);
+    expect(formReach([link({ Status: 'Closed' })], NOW).needsAttention).toBe(true);
+  });
+
+  it('says on the chip itself what the tooltip says, because a phone has no hover', () => {
+    expect(formReach([link()], NOW).label).toBe('Published');
+    expect(formReach([], NOW).label).not.toBe('Published');
+    expect(formReach([link({ Status: 'Closed' })], NOW).label).not.toBe('Published');
   });
 });
 

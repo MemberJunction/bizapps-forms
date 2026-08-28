@@ -166,6 +166,30 @@ const LAYOUT_CSS = /* css */ `
 }
 .fb-published i { font-size: 0.875rem; }
 
+/* Published, but no respondent can reach it: no share link exists, or every one of them has
+   been switched off, expired or filled up. Warning tone rather than success, because the
+   author's mental model after pressing Publish is "it is out there" and it is not.
+
+   This one IS a button — the remedy lives on another tab — so it needs the affordances a
+   span got for free: a pointer, a hover, and a visible focus ring for anyone arriving by
+   keyboard. It keeps the .fb-published box, so the chip does not move or resize when the
+   author creates a link and it flips back to the reassuring version. */
+.fb-published--unshared {
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--mj-status-warning-text);
+  background: var(--mj-status-warning-bg);
+  border-color: var(--mj-status-warning-border);
+  transition: filter var(--mjf-ease);
+}
+.fb-published--unshared:hover { filter: brightness(0.97); }
+.fb-published--unshared:focus-visible {
+  outline: 2px solid var(--mj-brand-primary);
+  outline-offset: 2px;
+}
+
 /* The publish action itself carries no extra ring: it only appears when there is
    genuinely something to publish, so its presence is the signal. */
 .fb-publish { min-width: 140px; }

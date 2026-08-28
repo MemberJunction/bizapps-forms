@@ -161,6 +161,90 @@ function stateKind(facts: ShareLinkFacts, now: Date): ShareStateKind {
 }
 
 /**
+ * Whether a FORM — not one of its links — can be reached by a respondent right now.
+ *
+ * `live` is the only kind that entitles a surface to say the form is on a public link.
+ */
+export type FormReachKind = 'live' | 'unshared' | 'closed' | 'unknown';
+
+export interface FormReach {
+  kind: FormReachKind;
+  /**
+   * The chip's own words, and the only half of this an author on a phone ever sees — a
+   * `title` is a hover affordance and there is no hover on a touch screen. So the label,
+   * alone and out of context, has to be true.
+   */
+  label: string;
+  /** The sentence behind the chip. Promises a reachable URL in the `live` kind and nowhere else. */
+  detail: string;
+  /**
+   * Whether there is something on the Distribute tab for the author to go and do.
+   *
+   * False for `unknown` as well as for `live`: an unreadable link list is not a defect to
+   * send someone to fix, and dressing it as one manufactures an alarm out of a failed read.
+   */
+  needsAttention: boolean;
+}
+
+const REACH: Record<FormReachKind, Omit<FormReach, 'kind'>> = {
+  live: {
+    label: 'Published',
+    detail: 'Everything in this form is live on its public link.',
+    needsAttention: false,
+  },
+  unshared: {
+    label: 'Published, not shared',
+    detail:
+      'This form is published, but it has no share link yet, so nobody can open it. Create one on the Distribute tab to start collecting responses.',
+    needsAttention: true,
+  },
+  closed: {
+    label: 'Published, not shared',
+    detail:
+      'This form is published, but none of its share links are taking responses. Reopen one on the Distribute tab to start collecting again.',
+    needsAttention: true,
+  },
+  unknown: {
+    label: 'Published',
+    detail:
+      'This form is published. Its share links could not be read just now, so whether anyone can reach it is unknown.',
+    needsAttention: false,
+  },
+};
+
+/**
+ * What the form's share links, taken together, mean for a respondent.
+ *
+ * WHY THIS EXISTS. The builder header announced "Everything in this form is live on its
+ * public link" from `Form.Status` alone, so a form published thirty seconds ago — with no
+ * `FormDistribution` row anywhere and the Distribute tab still showing its empty state —
+ * told its author it was reachable. Publishing makes a *version*; only a share link makes
+ * a *URL*, and the two are separate acts.
+ *
+ * Reachability is `shareState().accepting`, not `Status`, for the reason that module was
+ * written: a link at its response cap, past its closing date, or never issued a token is
+ * refused by the server while its column still reads Active. One predicate, so the header
+ * and the Distribute tab can never disagree about whether the form is collecting.
+ *
+ * `now` is passed in rather than read, so a link that expires while the builder is open
+ * stops being counted on the next render instead of at the next reload.
+ */
+export function formReach(links: readonly ShareLinkFacts[] | null, now: Date): FormReach {
+  const kind = reachKind(links, now);
+  return { kind, ...REACH[kind] };
+}
+
+function reachKind(links: readonly ShareLinkFacts[] | null, now: Date): FormReachKind {
+  if (links === null) {
+    return 'unknown';
+  }
+  if (links.length === 0) {
+    return 'unshared';
+  }
+  return links.some((l) => shareState(l, now).accepting) ? 'live' : 'closed';
+}
+
+/**
  * A name for a newly created share link.
  *
  * Creating a link asks for NOTHING — no name, no channel, no confirmation — because the

@@ -88,16 +88,43 @@
     } @else {
     @switch (publishState) {
       @case ('current') {
-        <span class="fb-published" role="status" title="Everything in this form is live on its public link.">
-          <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Published
-        </span>
+        <!-- WHAT PUBLISHING ACTUALLY DID, which is less than this chip used to claim. Publishing
+             writes a FormVersion; a share link is a separate act on the Distribute tab, so the
+             fixed "live on its public link" here was addressed to a form that, more often than
+             not, no respondent could open (issue #83). The sentence now comes from `publishReach`,
+             which asks the same question of a FormDistribution that the server asks before it
+             accepts a submission.
+
+             The label carries the answer, not just the tooltip: `title` needs a hover and a phone
+             has none, and this is the surface the mobile-first bar applies to as much as any. -->
+        <!-- One evaluation per render, and one snapshot for all three reads: the getter walks the
+             links against a fresh `now`, so reading it three times could in principle disagree
+             with itself across midnight on a link's closing date. -->
+        @let reach = publishReach;
+        @if (reach.needsAttention) {
+          <!-- A button, not a badge, in exactly the states with something to do: the remedy is on
+               another tab, and a status that reports a problem and leaves you to find the tab is
+               half a message. Live and unknown stay text — there is nothing to press. -->
+          <button
+            type="button"
+            class="fb-published fb-published--unshared"
+            [title]="reach.detail"
+            (click)="setTab('distribute')"
+          >
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ reach.label }}
+          </button>
+        } @else {
+          <span class="fb-published" role="status" [title]="reach.detail">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i> {{ reach.label }}
+          </span>
+        }
       }
       @case ('update') {
         <button
           type="button"
           class="mjf-btn mjf-btn--primary fb-publish"
           [disabled]="busy"
-          title="Your edits are not on the public link yet. Publishing pushes them live."
+          title="Your edits are not published yet. Publishing pushes them live."
           (click)="publish()"
         >
           <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish changes
@@ -108,7 +135,7 @@
           type="button"
           class="mjf-btn mjf-btn--primary fb-publish"
           [disabled]="busy"
-          title="Publish this form to make its public link live."
+          title="Publish this form so it can be shared and answered."
           (click)="publish()"
         >
           <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish

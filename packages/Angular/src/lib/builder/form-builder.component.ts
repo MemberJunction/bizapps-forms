@@ -33,6 +33,8 @@ import { PageEditorComponent } from './page-editor.component';
 import { ImportQuestionsComponent } from './import-questions.component';
 import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
+import { DistributionService } from './distribution.service';
+import { formReach, type FormReach, type ShareLinkFacts } from './share-state';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
 import { FormCloneService } from '../templates/form-clone.service';
@@ -165,7 +167,14 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     SaveAsTemplateDialogComponent,
     RuleBadgeComponent,
   ],
-  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
+  providers: [
+    BuilderStateService,
+    DesignStateService,
+    PublishService,
+    DistributionService,
+    FormCloneService,
+    FormTemplatesService,
+  ],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
@@ -175,6 +184,7 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected readonly state = inject(BuilderStateService);
   private readonly design = inject(DesignStateService);
   private readonly publisher = inject(PublishService);
+  private readonly distributions = inject(DistributionService);
   private readonly clone = inject(FormCloneService);
   private readonly templates = inject(FormTemplatesService);
 
@@ -274,6 +284,9 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** MJGlobal subscription behind {@link watchForAutomationChanges}; released on destroy. */
   private automationChanges?: EventSubscription;
 
+  /** MJGlobal subscription behind {@link watchForDistributionChanges}; released on destroy. */
+  private distributionChanges?: EventSubscription;
+
   /**
    * The style the draft currently resolves to, cached so the fingerprint stays synchronous.
    * A style change is publishable, so this is refreshed whenever one is applied.
@@ -326,6 +339,28 @@ export class FormBuilderComponent extends BaseFormComponent {
    * saves would make the builder flicker on every keystroke.
    */
   protected builderReady = false;
+
+  /**
+   * This form's share links, or `null` while unread or unreadable.
+   *
+   * Null is the honest starting value AND the honest failure value, and it has to be both:
+   * seeding `[]` would have the header announce "not shared" for the moment before the read
+   * lands, and go on announcing it forever if the read failed.
+   */
+  private shareLinks: ShareLinkFacts[] | null = null;
+
+  /**
+   * What the Published chip is entitled to say about this form being reachable.
+   *
+   * Publishing writes a `FormVersion`. It does not write a `FormDistribution`, and without
+   * one of those there is no URL — so the chip used to congratulate an author on a public
+   * link that did not exist, with the Distribute tab one click away still offering to create
+   * the first one (issue #83). Derived on read, from `now`, so a link that reaches its
+   * closing date or its response cap while the builder sits open stops counting.
+   */
+  protected get publishReach(): FormReach {
+    return formReach(this.shareLinks, new Date());
+  }
 
   protected get publishState(): PublishControlState {
     return publishControlState({
@@ -406,9 +441,11 @@ export class FormBuilderComponent extends BaseFormComponent {
       }
     }
     await this.refreshPublishState();
+    await this.refreshShareLinks();
     await this.refreshSavedTemplate(this.record.ID);
     this.watchForTemplateChanges();
     this.watchForAutomationChanges();
+    this.watchForDistributionChanges();
     this.busy = false;
     this.announceReady();
   }
@@ -1466,6 +1503,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.templateChanges = undefined;
     this.automationChanges?.unsubscribe();
     this.automationChanges = undefined;
+    this.distributionChanges?.unsubscribe();
+    this.distributionChanges = undefined;
     super.ngOnDestroy();
   }
 
@@ -1505,6 +1544,46 @@ export class FormBuilderComponent extends BaseFormComponent {
         return;
       }
       void this.refreshDraftAutomations().then(() => this.markDirty());
+    });
+  }
+
+  /**
+   * Re-read the share links this form is reachable through.
+   *
+   * A failed read leaves {@link shareLinks} null, which the header renders as "we could not
+   * check" — never as "there are none", which would send the author off to create a second
+   * link beside one they already have.
+   */
+  private async refreshShareLinks(): Promise<void> {
+    this.shareLinks = await this.distributions.shareLinkFacts(this.record.ID);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Keep the header honest about links created, paused, scheduled or deleted elsewhere.
+   *
+   * The builder stays mounted while its tabs change, so without this the Distribute tab
+   * minting the very first share link would leave the header still insisting the form is not
+   * shared — the inverse of #83 and no more true. Both save AND delete, and unfiltered by
+   * form: this component never writes `FormDistribution` rows itself, so any event for that
+   * entity came from somewhere else and is worth one cheap seven-column read.
+   */
+  private watchForDistributionChanges(): void {
+    if (this.distributionChanges) {
+      return;
+    }
+    this.distributionChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
+        return;
+      }
+      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
+      if (args?.type !== 'save' && args?.type !== 'delete') {
+        return;
+      }
+      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.FormDistribution) {
+        return;
+      }
+      void this.refreshShareLinks();
     });
   }
 

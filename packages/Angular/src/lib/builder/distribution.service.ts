@@ -12,6 +12,7 @@ import {
   slugify as buildSlug,
   randomSuffix,
 } from './distribution-links';
+import type { ShareLinkFacts } from './share-state';
 
 /** The channel kinds the builder can mint (Phase 1: PublicLink / Embed / QR). */
 export type DistributionChannel = mjBizAppsFormsFormDistributionEntityType['ChannelType'];
@@ -104,6 +105,53 @@ export class DistributionService {
       return { ok: false, error };
     }
     return { ok: true, items: result.Results ?? [] };
+  }
+
+  /**
+   * Just enough of a form's share links to say whether a respondent could reach it.
+   *
+   * Deliberately NOT {@link list}. That one hands back `entity_object` rows because the
+   * Distribute tab edits them; a caller that only wants to KNOW something has no business
+   * holding five savable records, and this read runs on every builder load rather than only
+   * when someone opens the tab. Seven named columns, `ResultType: 'simple'`.
+   *
+   * `null` — never `[]` — when the read cannot be performed, for the reason
+   * {@link DistributionListResult} exists: "this form has no share links" is a real state
+   * with its own message, and a failed read is not it. Collapsing the two would send an
+   * author off to create a link that already exists.
+   */
+  public async shareLinkFacts(formId: string): Promise<ShareLinkFacts[] | null> {
+    if (!formId) {
+      // Not a data state — a caller asking about a form that has never been saved. Answering
+      // "no share links" would be a confident lie about a form that does not exist yet.
+      LogError('Refusing to read share links: no form id was supplied.');
+      return null;
+    }
+    const rv = new RunView();
+    const result = await rv.RunView<ShareLinkFacts>(
+      {
+        EntityName: FORMS_ENTITY.FormDistribution,
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
+        Fields: [
+          'Status',
+          'IsActive',
+          'OpenAt',
+          'CloseAt',
+          'MaxResponses',
+          'ResponseCount',
+          'PublicLinkToken',
+        ],
+        ResultType: 'simple',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(
+        `Failed to read share links for form ${formId}: ${result.ErrorMessage ?? 'unknown error'}`,
+      );
+      return null;
+    }
+    return result.Results ?? [];
   }
 
   /**
