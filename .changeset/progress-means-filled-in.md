@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/forms-ng": minor
+"@mj-biz-apps/forms-ng": patch
 ---
 
 **The progress bar reads 100% only when the form is actually filled in.** `computeProgress` short-circuited to full the moment every *required* question was satisfied, so on a nine-question form with one required email, answering that email alone painted a solid, completely full bar above eight visibly blank questions — `aria-valuenow="100"` with one of six fields filled. Respondents act on a full bar; the goal-gradient reasoning the file was written around is exactly why they stop at one, so optional questions the author deliberately asked got skipped because the UI had already signalled completion. The weighted proportion now runs all the way to the end: required questions still count for three optional ones, so the bar leans toward the path that gates the submit and every single answer still moves it, but neither half can finish it alone.
