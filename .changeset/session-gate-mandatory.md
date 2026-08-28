@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/forms-server": minor
+"@mj-biz-apps/forms-server": patch
 ---
 
 **A response that has an owner keeps it.** `SubmitFormResponse` accepts a client-minted `responseId`, and which lookup resolved it was up to the caller. Sending `x-session-id` went through `findOwnedResponseById`, which filters on `AnonymousSessionID` and correctly refuses another session's row. Omitting the header went through `findAdoptableResponseById`, which had no session predicate at all — its docstring said so plainly ("ownership is proven by the id itself"). So the session gate was not a gate: it was opt-in, and a caller opted out by dropping a header. A `Partial` row belonging to someone else could be adopted, sealed `Complete`, have its `AnonymousSessionID` blanked, and have its answers replaced with the caller's.
