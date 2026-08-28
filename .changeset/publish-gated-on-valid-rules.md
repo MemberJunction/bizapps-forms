@@ -1,0 +1,9 @@
+---
+"@mj-biz-apps/forms-ng": patch
+---
+
+**Publish refuses a form whose rules the builder is already calling broken.** The canvas has badged a dangling rule for a while, and says exactly what is wrong with it — *references a question that no longer exists*, or *references a question that is answered later than this rule runs, so the rule reads a blank*. Publish read none of that. Clicking it with the badge on screen returned "Published version 1", baked the dangling `questionId` into `FormVersion.DefinitionSnapshot`, and the public link then rendered one question fewer than the author believes the form has: the guarded item's condition can never be satisfied, so nobody is ever shown it, and the dashboard reports it as *0 answers · 100% skipped* — indistinguishable from respondents choosing not to answer.
+
+**One decision, in one place.** The badge and the gate are now the same read. `ruleInventoryFormOf` is the single adapter from the builder's loaded tree into the shape the rule inventory walks — it used to be a getter on the builder component, which is precisely how publish came to have its own opinion of the form — and `brokenRuleLines` is what both the refusal and (via `collectRuleEntries`) the badges consume. A breakage class the inventory learns later blocks a publish without either being touched, and neither can start disagreeing with the other.
+
+**The gate is on the service, not the button.** `PublishService.publish` is the only code in the app that writes a Published `FormVersion`, so refusing there covers every caller rather than only the one click — and the refusal names the rules, so an author is told what to fix rather than that something is wrong.

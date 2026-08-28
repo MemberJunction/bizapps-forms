@@ -48,7 +48,7 @@ import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { endScreensOf, welcomeScreenOf } from './builder-models';
+import { allQuestions, endScreensOf, welcomeScreenOf } from './builder-models';
 import { defaultEndingId } from './default-ending';
 import {
   QUESTION_PALETTE_GROUPS,
@@ -59,20 +59,21 @@ import {
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
-import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
+import { SCORE_SOURCE, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
 import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
 import { RuleBadgeComponent } from './rule-badge.component';
 import {
   collectRuleEntries,
+  conditionSourcesOf,
   endingReachFor,
   ruleBadgesFor,
+  ruleInventoryFormOf,
   type EndingReach,
   type RuleBadge,
   type RuleEntry,
   type RuleInventoryForm,
 } from './rules-inventory';
-import { parseConditionalRule } from './json-fields';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
   definitionFingerprint,
@@ -650,32 +651,20 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
-   * The questions in this list that a rule may actually read.
-   *
-   * ONE definition, for all six source lists — a page's show gate and its jump, a question's
-   * show gate and its jump, an ending's, and the Rules tab's inventory. Each of those used to
-   * map the tree itself, so "which questions can a rule read" was answered six times, and the
-   * first exclusion to arrive would have had to be remembered in all six.
-   *
-   * `toConditionalSource` returns `undefined` for a question that collects no answer — a
-   * `Statement` renders prose and never reaches the answer map, so every operator on it is a
-   * constant, and it was offered in the question dropdown all the same.
-   */
-  private sourcesOf(questions: readonly QuestionNode[]): ConditionalSourceQuestion[] {
-    return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
-  }
-
-  /**
    * The sources a rule whose read horizon is `horizon` may reference.
    *
    * Slices the FULL question list and filters afterwards, never the other way round.
-   * `sourcesOf` drops a question that collects no answer, so slicing an already-filtered list
-   * would shift every horizon on any form carrying a `Statement` — silently, and in the
+   * `conditionSourcesOf` drops a question that collects no answer, so slicing an already-filtered
+   * list would shift every horizon on any form carrying a `Statement` — silently, and in the
    * direction that makes a legal rule look broken.
    */
   private sourcesUpTo(horizon: number): ConditionalSourceQuestion[] {
-    const questions = (this.tree?.pages ?? []).flatMap((page) => page.questions);
-    return this.sourcesOf(questions.slice(0, horizon + 1));
+    return conditionSourcesOf(this.questionsInFlowOrder.slice(0, horizon + 1));
+  }
+
+  /** Every question on the form, in page-then-display order — what both source lists read. */
+  private get questionsInFlowOrder(): QuestionNode[] {
+    return this.tree ? allQuestions(this.tree) : [];
   }
 
   /**
@@ -853,9 +842,13 @@ export class FormBuilderComponent extends BaseFormComponent {
    * reach is still a rule that reads. The condition editor differences it against the offered
    * sources to tell "this question was deleted" from "this question is answered after your rule
    * runs" — see `staleSourceLabel`.
+   *
+   * Literally the list `ruleInventoryFormOf` puts in `sources`, from the same function. Two
+   * walks would be two answers to "which questions can a rule read", and the editor differences
+   * one against a list the badges resolve through the other.
    */
   protected get formSources(): ConditionalSourceQuestion[] {
-    return (this.tree?.pages ?? []).flatMap((page) => this.sourcesOf(page.questions));
+    return conditionSourcesOf(this.questionsInFlowOrder);
   }
 
   /** Every ending screen, as a jump destination. */
@@ -1131,41 +1124,17 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * The whole form as the inventory reads it.
    *
-   * One shape, two readers — the sentences on the canvas and the reach line on each ending. They
-   * have to be built from the same walk: the badges say a rule is broken and the reach line says
-   * whether anyone arrives, and a row showing two answers assembled from two different views of
-   * the form is a row that can contradict itself.
+   * One shape, several readers — the sentences on the canvas, the reach line on each ending, the
+   * reorder notice, and the publish gate. They have to be built from the same walk: the badges
+   * say a rule is broken and the reach line says whether anyone arrives, and a row showing two
+   * answers assembled from two different views of the form is a row that can contradict itself.
    *
-   * Only called with a tree present; the getters above guard for it.
+   * The projection itself is `ruleInventoryFormOf` in `rules-inventory.ts` rather than code here,
+   * because publish reads it too and it must be the same one — see issue #79. This getter is only
+   * the component's null-tree guard.
    */
   private get ruleInventoryForm(): RuleInventoryForm {
-    const tree = this.tree;
-    if (!tree) {
-      return { sources: [], pages: [], endings: [] };
-    }
-    return {
-      sources: this.formSources,
-      pages: tree.pages.map((page, index) => ({
-        id: page.entity.ID,
-        label: page.entity.Title || `Page ${index + 1}`,
-        conditionalRule: parseConditionalRule(page.entity.ConditionalRule),
-        questions: page.questions.map((q) => ({
-          id: q.entity.ID,
-          label: q.entity.Prompt,
-          conditionalRule: parseConditionalRule(q.entity.ConditionalRule),
-          // Carried so a `Go to` can say how many REQUIRED questions it passes over, which is
-          // the half of "this rule skips things" an author actually needs to weigh.
-          isRequired: q.entity.IsRequired === true,
-        })),
-      })),
-      endings: this.endScreens.map((screen) => ({
-        id: screen.ID,
-        label: screen.Title || 'Ending screen',
-        conditionalRule: parseConditionalRule(screen.ConditionalRule),
-        isDisqualification: screen.IsDisqualification === true,
-        isDefault: screen.IsDefault === true,
-      })),
-    };
+    return this.tree ? ruleInventoryFormOf(this.tree) : { sources: [], pages: [], endings: [] };
   }
 
   /** Every question on the form, in page/display order — what the Automate tab maps from. */

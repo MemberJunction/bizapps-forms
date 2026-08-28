@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Metadata, RunView, LogError, type UserInfo } from '@memberjunction/core';
+import { Metadata, RunView, LogError, LogStatus, type UserInfo } from '@memberjunction/core';
 import {
   AUTHORED_AUTOMATION_FIELDS,
   buildPublishedAutomations,
@@ -13,6 +13,7 @@ import {
 import { FORMS_ENTITY } from '../shared/entity-names';
 import { parseFormSettings } from './json-fields';
 import type { FormTree } from './builder-models';
+import { brokenRuleLines } from './rules-inventory';
 import { buildPublishedDefinition } from './snapshot-builder';
 
 /** Outcome of a publish attempt. */
@@ -21,6 +22,30 @@ export interface PublishResult {
   version?: mjBizAppsFormsFormVersionEntity;
   versionNumber?: number;
   error?: string;
+}
+
+/**
+ * How many broken rules a refusal names before it stops listing them.
+ *
+ * The message lands in one line of the toolbar's status text, so an uncapped list on a form with
+ * thirty broken rules is a paragraph nobody reads — and the count, which is the part that says
+ * how much work is waiting, would be buried in it. Three is enough to recognise the problem; the
+ * canvas badges carry every one of them against the item it is about, which is where an author
+ * goes to fix them anyway.
+ */
+const MAX_NAMED_BROKEN_RULES = 3;
+
+/** Why the publish was refused, and which rules to go and fix. */
+function brokenRuleRefusal(broken: readonly string[]): string {
+  const named = broken.slice(0, MAX_NAMED_BROKEN_RULES);
+  const unnamed = broken.length - named.length;
+  const one = broken.length === 1;
+  const count = one ? '1 broken rule' : `${broken.length} broken rules`;
+  const rest = unnamed > 0 ? ` (and ${unnamed} more)` : '';
+  return (
+    `Publish refused — ${count} would ship with this form. ` +
+    `${one ? 'Fix it' : 'Fix them'} and publish again: ${named.join('; ')}${rest}.`
+  );
 }
 
 /**
@@ -45,6 +70,26 @@ export class PublishService {
 
   /** Publish the tree as a new immutable version. */
   public async publish(tree: FormTree): Promise<PublishResult> {
+    // Before anything is read or written: a form whose rules the builder is already flagging as
+    // broken does not go live (issue #79). A dangling condition reads `undefined` at runtime, so
+    // the item it guards is pinned shut — or pinned open — for every respondent, and the form
+    // silently collects one fewer answer than its author believes it does.
+    //
+    // EVERY breakage `collectRuleEntries` reports, deliberately — not just the two shapes the
+    // issue named. The badge on the canvas and this refusal have to be one decision or they will
+    // drift, and an author looking at "Rule is broken" while Publish says the form is fine has
+    // been told two things, one of which is a lie. The cost is real and accepted: a form that
+    // published yesterday carrying, say, a screened-out ending nothing routes to is refused
+    // today, and there is no publish-anyway. That is the point — a confirmation an author clicks
+    // through ships exactly the snapshot this issue is about.
+    const broken = brokenRuleLines(tree);
+    if (broken.length > 0) {
+      const error = brokenRuleRefusal(broken);
+      // A status, not an error: nothing failed. The author's form is not ready, they are being
+      // told which rules and why, and the failure result carries the same words back to them.
+      LogStatus(`Forms publish: refused form ${tree.form.ID} — ${error}`);
+      return { success: false, error };
+    }
     const style = await this.loadStyle(tree.form.StyleID);
     const automations = await this.loadAutomations(tree.form.ID);
     const settings = await this.loadStoredSettings(tree.form.ID);

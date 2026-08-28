@@ -30,6 +30,8 @@ const stripped = (file: string): string =>
 
 const builder = (): string => stripped('form-builder.component.ts');
 const builderHtml = (): string => stripped('form-builder.component.html');
+/** Where the rule sentences — and the one source-list definition — actually live. */
+const inventory = (): string => stripped('rules-inventory.ts');
 
 /** Just the shared reorder path, so a guard about it cannot be satisfied by another method. */
 const reorderMethod = (): string => {
@@ -130,15 +132,23 @@ describe('what the builder offers a rule to read', () => {
     // itself. Six copies of "which questions can a rule read" is six places for the answer to
     // drift, and the first thing that had to be excluded (a Statement, which collects no
     // answer) would have needed adding to all six.
-    const source = builder();
-    expect(source).toMatch(/private sourcesOf\(/);
-    expect(source.match(/toConditionalSource\(/g) ?? []).toHaveLength(1);
+    //
+    // The helper moved OUT of the component with issue #79: publish has to read the same list
+    // the badges resolve against, and a private method on a component is not somewhere a service
+    // can reach. The invariant did not move — it got wider — so it is now asserted where the one
+    // definition lives, plus the fact that the component no longer keeps a copy.
+    expect(inventory()).toMatch(/export function conditionSourcesOf\(/);
+    expect(inventory().match(/toConditionalSource\(/g) ?? []).toHaveLength(1);
+    expect(builder()).not.toMatch(/toConditionalSource\(/);
+    expect(builder()).toMatch(/conditionSourcesOf\(/);
   });
 
   it('drops a question that cannot be a source rather than rendering a ghost', () => {
     // `toConditionalSource` returns undefined for a question that collects no answer. Mapping
     // it straight into the array would put `undefined` in a list every consumer then indexes.
-    expect(builder()).toMatch(/sourcesOf\([\s\S]{0,220}?toConditionalSource\([\s\S]{0,80}?\?\?\s*\[\]/);
+    expect(inventory()).toMatch(
+      /conditionSourcesOf\([\s\S]{0,220}?toConditionalSource\([\s\S]{0,80}?\?\?\s*\[\]/,
+    );
   });
 });
 
