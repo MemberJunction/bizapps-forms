@@ -22,6 +22,7 @@
  * checked; on failure we read `LatestResult.CompleteMessage` (per CLAUDE.md). The answer
  * typed columns mirror the `FormAnswerInput` transport exactly.
  */
+import { LogError } from '@memberjunction/core';
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
@@ -169,19 +170,145 @@ function countsCompletion(inputs: PersistenceInputs): boolean {
 }
 
 /**
- * The columns that describe the response whether or not it is finished.
+ * Normalize a session id for comparison: absent, blank and whitespace-only all mean "no owner".
+ *
+ * Case-folded because the SQL predicate this has to agree with — `AnonymousSessionID='…'` in
+ * `findOwnedResponseById` — runs under SQL Server's case-insensitive default collation. A
+ * case-sensitive comparison here would refuse writes that the lookup had just approved.
+ *
+ * `upload/upload-provenance.service.ts` folds identifiers the same way, and the duplication is
+ * deliberate rather than an extraction waiting to happen: that one answers "do these two values
+ * denote the same thing", this one also answers "is there a value at all", and the ANSWER TO THE
+ * SECOND QUESTION IS A SECURITY DECISION here — folding to `''` is what makes a row unowned and
+ * therefore adoptable. A shared helper would offer both call sites a normalization whose blank
+ * case means something different on each side.
+ */
+function foldSessionId(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+/**
+ * May a caller identified by `callerSessionId` write to a row whose stored owner is
+ * `storedSessionId`?
+ *
+ * Yes when the row has no owner (the genuinely headerless flow, where the 122-bit client id in
+ * `SourceMetadata` is the only capability there is), or when the caller IS the owner. No
+ * otherwise — and "no" covers the absent header exactly as it covers a forged one, which is the
+ * whole point: an absent credential must never be more permissive than a wrong one.
+ *
+ * Kept as its own named predicate so the policy reads as one sentence rather than as a condition
+ * inlined into {@link applyResponseIdentity}. Not exported: the behaviour it decides is observable
+ * through the submit pipeline, which is where `session-ownership.spec.ts` tests it.
+ */
+function sessionMayAdopt(storedSessionId: string | null | undefined, callerSessionId: string): boolean {
+  const owner = foldSessionId(storedSessionId);
+  return owner === '' || owner === foldSessionId(callerSessionId);
+}
+
+/**
+ * What a refused write tells the caller. ONE sentence for every ownership failure — missing
+ * header, blank header, a different session, a session belonging to some other response — so the
+ * refusal cannot be used to tell those cases apart. It also says nothing about the row: naming
+ * the owner, or admitting one exists, would hand back more than the caller arrived with.
+ */
+const FOREIGN_RESPONSE_MESSAGE = 'This response could not be saved. Please reload the form and try again.';
+
+/**
+ * The outcome of applying the identity columns: applied, or refused with a caller-safe message.
+ *
+ * Flat and non-discriminated for the same reason {@link PersistenceResult} is, and stated here
+ * because the next reader will otherwise "tidy" it into a union: this package compiles without
+ * `strictNullChecks`, where narrowing via `!result.ok` does not work.
+ */
+interface IdentityResult {
+  ok: boolean;
+  message?: string;
+}
+
+/**
+ * Refuse this caller if `response` — a row that already existed before this request — is not
+ * theirs to touch. Returns `undefined` when they may proceed.
+ *
+ * ONE decision function with two call sites, and the pairing is deliberate rather than a guard
+ * that got copied:
+ *
+ *   - {@link applyResponseIdentity} calls it because that is the narrow waist EVERY write passes
+ *     through, which is what makes the gate closed by default — a path added later cannot write a
+ *     response without meeting it.
+ *   - the two functions that LOAD a pre-existing row call it immediately after the load, because
+ *     they can return before any write happens: a row that is already terminal short-circuits to
+ *     an idempotent no-op, and answering that for somebody else's response tells a caller its
+ *     status. Waiting for the write seam would be too late for a decision about a read.
+ */
+function refuseIfNotOurs(
+  response: mjBizAppsFormsFormResponseEntity,
+  inputs: PersistenceInputs,
+): IdentityResult | undefined {
+  if (sessionMayAdopt(response.AnonymousSessionID, inputs.sessionId)) {
+    return undefined;
+  }
+  // Logged with the row and version, never with either session id: the operator needs to know
+  // WHICH response someone tried to take over, and the victim's correlator is not theirs to
+  // spread through the log to get it.
+  LogError(
+    `[Forms] refused a write to response ${response.ID} on form version ${inputs.formVersionId}: ` +
+      `the row belongs to a different anonymous session.`,
+  );
+  return { ok: false, message: FOREIGN_RESPONSE_MESSAGE };
+}
+
+/**
+ * The columns that describe the response whether or not it is finished — AND the one gate that
+ * decides whether this caller may describe it at all.
  *
  * Split from {@link applyResponseOutcome} so the row can exist, and hold everything true about
  * it, before anything claims it was submitted.
+ *
+ * The ownership check lives HERE, and deliberately not in the lookups that resolve which row to
+ * write (issue #78). Those lookups were where it used to live, and being there made it opt-in:
+ * the caller chose which lookup ran by deciding whether to send `x-session-id`, and one of the
+ * two asked nothing about ownership. Worse, a caller who missed EVERY lookup still reached a
+ * foreign row — persistence adopts the client id as the primary key, so the CREATE collided and
+ * `reconcileDuplicate` picked the victim's row up with no check of its own. A gate in front of
+ * one lookup could never have covered that path, because that path performs no lookup.
+ *
+ * This function is the narrow waist all three writes pass through — CREATE, UPDATE/PROMOTE, and
+ * duplicate-key recovery — and it is the only place `AnonymousSessionID` is written. So a lookup
+ * added later inherits the check by construction rather than by remembering to repeat it.
  */
-function applyResponseIdentity(response: mjBizAppsFormsFormResponseEntity, inputs: PersistenceInputs): void {
+function applyResponseIdentity(
+  response: mjBizAppsFormsFormResponseEntity,
+  inputs: PersistenceInputs,
+): IdentityResult {
+  const refusal = refuseIfNotOurs(response, inputs);
+  if (refusal) {
+    return refusal;
+  }
   response.FormID = inputs.formId;
   response.FormVersionID = inputs.formVersionId;
-  response.AnonymousSessionID = inputs.sessionId;
+  // WRITE-ONCE, and stored in the SAME normalized form the ownership check compares. Two rules,
+  // and the second is what keeps the first honest.
+  //
+  // Write-once: a row's owner is stamped when it is created and never rewritten. The guard above
+  // has already established the row is unowned or ours, and overwriting it in the "ours" case
+  // would only churn the stored casing. The case that made this matter is the one it now
+  // forecloses — an adopting write used to assign the CALLER's session unconditionally, so a
+  // takeover by a caller with no header blanked the ownership record on its way past, turning a
+  // takeover into a permanent one the real respondent could never resume.
+  //
+  // Normalized: storing the RAW header let the column hold a value that does not mean what it
+  // looks like. `x-session-id: '   '` stored three spaces, which `foldSessionId` reads back as
+  // "no owner" — a row that appears owned, is not, and is adoptable by anyone holding its id.
+  // Storing what we compare removes the gap rather than adding a second place that has to
+  // remember to trim.
+  if (foldSessionId(response.AnonymousSessionID) === '') {
+    response.AnonymousSessionID = foldSessionId(inputs.sessionId);
+  }
   if (inputs.startedAt) {
     response.StartedAt = new Date(inputs.startedAt);
   }
   response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
+  return { ok: true };
 }
 
 /**
@@ -220,7 +347,13 @@ async function createResponse(
   if (adoptedId) {
     response.ID = adoptedId;
   }
-  applyResponseIdentity(response, inputs);
+  // A brand-new record has no stored owner, so this can only refuse once the row already exists —
+  // which on this path means the duplicate-key recovery below. Checked anyway rather than assumed:
+  // the assumption is exactly what a future change to `NewRecord()`/defaults would quietly break.
+  const identity = applyResponseIdentity(response, inputs);
+  if (!identity.ok) {
+    return { ok: false, message: identity.message };
+  }
   // Deliberately NOT the submission's real status: a row must exist before its answers can name
   // it, so it starts as a draft and is sealed once they are stored. See `applyResponseOutcome`.
   response.Status = 'Partial';
@@ -259,6 +392,13 @@ async function reconcileDuplicate(
     // The colliding row could not be loaded (vanished again) — surface the original failure.
     return { ok: false, message: 'Failed to save form response (duplicate id could not be reconciled).' };
   }
+  // BEFORE the terminal branch, not after it. That branch answers `success: true` with the row's
+  // id and status without writing anything, so reaching it with somebody else's response reports
+  // their submission's status back to a caller who only had its id.
+  const foreign = refuseIfNotOurs(response, inputs);
+  if (foreign) {
+    return foreign;
+  }
   if (isTerminalStatus(response.Status)) {
     // Terminal (Complete or Disqualified): a concurrent request already sealed this response —
     // never downgrade it, never rewrite its answers. Return it as-is.
@@ -267,7 +407,14 @@ async function reconcileDuplicate(
   // The existing row is Partial: update it in place, or promote it to Complete. It was never
   // counted as a Partial, so a promotion counts once here. The identity columns are applied now
   // and the row is SEALED later, once its answers are stored.
-  applyResponseIdentity(response, inputs);
+  //
+  // This is the collision route into a FOREIGN row, and the reason the ownership gate cannot live
+  // in the lookups: a caller presenting someone else's response id under a different session id
+  // matches no lookup at all, falls through to CREATE, and arrives here holding the victim's row.
+  const identity = applyResponseIdentity(response, inputs);
+  if (!identity.ok) {
+    return { ok: false, message: identity.message };
+  }
   return { ok: true, entity: response, pendingSeal: true, countable: countsCompletion(inputs) };
 }
 
@@ -286,6 +433,12 @@ async function updateResponse(
     // The row vanished between lookup and save — fall back to creating a fresh one.
     return createResponse(provider, inputs, contextUser);
   }
+  // Same reason as in `reconcileDuplicate`: the terminal branch below returns a status without
+  // writing, so ownership has to be settled before it, not at the write seam.
+  const foreign = refuseIfNotOurs(response, inputs);
+  if (foreign) {
+    return foreign;
+  }
   // Sealed since the caller looked it up: leave it exactly as it is. The lookups that produce
   // `existingResponseId` all filter on `RESUMABLE_RESPONSE_STATUSES`, so arriving here means the row WAS a
   // partial a moment ago — a knockout flush, a second tab or a retry landing in between is the
@@ -299,7 +452,14 @@ async function updateResponse(
   // can only ever be an update in place or a promotion, and a promotion counts once. The old
   // `!wasComplete` term was unreachable the moment that guard landed; leaving it would have read
   // like a live safeguard.
-  applyResponseIdentity(response, inputs);
+  //
+  // `existingResponseId` arrives from whichever lookup resolved it, and the ownership gate below
+  // is what makes that safe for all of them — including the client-id lookup, which asks only
+  // that the row carry the id and not who it belongs to.
+  const identity = applyResponseIdentity(response, inputs);
+  if (!identity.ok) {
+    return { ok: false, message: identity.message };
+  }
   return { ok: true, entity: response, pendingSeal: true, countable: countsCompletion(inputs) };
 }
 

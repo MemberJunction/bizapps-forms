@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import {
   countPartialResponses,
-  findAdoptableResponseById,
+  findResumableResponseById,
   findResponseById,
   findSessionResponse,
 } from '../response-lookup.service';
@@ -85,12 +85,12 @@ describe('findSessionResponse', () => {
   });
 });
 
-describe('findAdoptableResponseById', () => {
+describe('findResumableResponseById', () => {
   it('filters by id + version + Partial + the SourceMetadata client-id proof', async () => {
     let captured: RunViewParams | undefined;
     const provider = makeProvider({ rows: [{ ID: 'resp-1' }], capture: (p) => (captured = p) });
 
-    const result = await findAdoptableResponseById(
+    const result = await findResumableResponseById(
       provider,
       { responseId: 'resp-1', formVersionId: 'ver-1' },
       USER,
@@ -111,14 +111,14 @@ describe('findAdoptableResponseById', () => {
 
   it('returns no match (without querying) for a blank response id', async () => {
     const provider = makeProvider({ rows: [{ ID: 'x' }] });
-    const result = await findAdoptableResponseById(provider, { responseId: '', formVersionId: 'v' }, USER);
+    const result = await findResumableResponseById(provider, { responseId: '', formVersionId: 'v' }, USER);
     expect(result.ok).toBe(true);
     expect(result.response).toBeUndefined();
   });
 
   it('reports NOT ok on a query failure (caller falls back, never adopts unverified)', async () => {
     const provider = makeProvider({ success: false });
-    const result = await findAdoptableResponseById(provider, { responseId: 'r', formVersionId: 'v' }, USER);
+    const result = await findResumableResponseById(provider, { responseId: 'r', formVersionId: 'v' }, USER);
     expect(result.ok).toBe(false);
   });
 });
