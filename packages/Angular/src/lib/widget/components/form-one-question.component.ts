@@ -84,6 +84,17 @@ export class FormOneQuestionComponent {
     () => this.submitting() || (this.isLast() && this.submitDisabled()),
   );
 
+  /**
+   * Whether "you can submit now" is true HERE — the last question, the control live, the whole
+   * visible form valid. Same three conditions as the scroll renderer, resolved against this
+   * renderer's own cursor, because "the last step" is the one thing the two do not share.
+   *
+   * This is the signal the progress bar used to carry by reading 100% early (#88).
+   */
+  protected readonly readyToSubmit = computed(
+    () => this.isLast() && !this.primaryDisabled() && this.runtime().isFormValid(),
+  );
+
   constructor() {
     // When conditional logic resizes the path, re-clamp the stored cursor so it never
     // drifts above the new last index. Without this, hiding questions below the cursor
