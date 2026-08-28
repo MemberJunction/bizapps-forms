@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import type { FormQuestionType, ValidationRule } from '@mj-biz-apps/forms-entities';
+import { questionTypeBehavior, type FormQuestionType, type ValidationRule } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { rangeConflict } from './validation-bounds';
 
@@ -44,8 +44,30 @@ export class ValidationRuleEditorComponent {
 
   protected _rule: ValidationRule = {};
 
+  /**
+   * Whether to show — and therefore to check — the `minLength`/`maxLength` pair.
+   *
+   * Derived from `QUESTION_TYPE_BEHAVIOR`, never from a hardcoded list, because the boxes have
+   * to line up with the types the bounds are actually ENFORCED on. Both validators apply the
+   * length checks to any answer that is a string, and the behaviour table is what says which
+   * types those are: every `answerColumn: 'text'` type, which is `Email`, `Phone` and `Website`
+   * as much as `ShortText` and `LongText`. Listing only the latter two is how an Email question
+   * came to carry a 10..5 pair that rejected every address a respondent could type while the
+   * editor showed no boxes and {@link conflict} never looked (issue #80 follow-up).
+   *
+   * Two exclusions, both deliberate:
+   *
+   *  - `optionMode !== 'none'` drops `SingleChoice`, `Dropdown` and `PictureChoice`. They store
+   *    text too, but the answer is an option the AUTHOR wrote, so a length bound on it is not a
+   *    rule anybody authors — and offering one would invite a constraint on their own labels.
+   *  - `answerable` drops `Statement`, which collects nothing to constrain.
+   *
+   * A numeric type keeps no length boxes: its answer is not a string, so the pair genuinely
+   * does nothing there and showing it would offer a constraint that never fires.
+   */
   protected get showLength(): boolean {
-    return this.questionType === 'ShortText' || this.questionType === 'LongText';
+    const behavior = questionTypeBehavior(this.questionType);
+    return behavior.answerable && behavior.answerColumn === 'text' && behavior.optionMode === 'none';
   }
 
   protected get showRange(): boolean {

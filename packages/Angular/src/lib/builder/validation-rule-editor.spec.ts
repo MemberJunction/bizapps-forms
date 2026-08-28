@@ -164,6 +164,61 @@ describe('the same invariant on a text answer, which fails the same way', () => 
   });
 });
 
+/**
+ * The length pair is enforced on EVERY text answer, not only on the two types whose editor
+ * happened to show the boxes.
+ *
+ * `validateRule` applies `minLength`/`maxLength` to any value that is a string, and
+ * `QUESTION_TYPE_BEHAVIOR` says `Email`, `Phone` and `Website` all answer in the text column.
+ * So an Email question carrying 10..5 rejects every address a respondent can type — "a@b.co"
+ * is told to use at least 10 characters, "long@example.com" to use at most 5 — while the
+ * editor showed no length boxes and said nothing.
+ */
+describe('a free-text type whose length bounds are enforced but were never shown', () => {
+  it.each(['Email', 'Phone', 'Website'] as const)(
+    'reports the impossible length pair on a %s question',
+    (questionType) => {
+      const { editor } = editorFor(questionType, { minLength: 10, maxLength: 5 });
+
+      expect(conflictOf(editor)).toBe(
+        'Minimum (10) is above maximum (5), so no answer can satisfy this range.',
+      );
+    },
+  );
+
+  it('does not carry the pair out on an unrelated pattern edit', () => {
+    // The silent half of the defect: the author edits the pattern on an Email question and the
+    // impossible pair they cannot see is re-emitted and re-persisted alongside it.
+    const { editor, emitted } = editorFor('Email', { minLength: 10, maxLength: 5 });
+
+    editor['setPattern']('.+@example\\.com$');
+
+    expect(emitted).toEqual([]);
+  });
+
+  it('gives the author the two boxes the refusal asks them to reconcile', () => {
+    // Reporting a conflict in a pair with no controls would be a lockout: the only escape left
+    // would be deleting the whole rule.
+    const { editor } = editorFor('Email', { minLength: 10, maxLength: 5 });
+
+    expect(editor['showLength']).toBe(true);
+  });
+
+  it('still shows no length boxes where the pair is genuinely inert', () => {
+    // A Number answer is not a string, so the length checks never run on it. Showing the boxes
+    // would offer a constraint that does nothing.
+    expect(editorFor('Number', {}).editor['showLength']).toBe(false);
+    expect(editorFor('Rating', {}).editor['showLength']).toBe(false);
+  });
+
+  it('offers no length boxes on a type whose answer is chosen rather than typed', () => {
+    // SingleChoice/Dropdown also store text, but the answer is an option the author wrote —
+    // constraining its length is not a rule anybody authors.
+    expect(editorFor('SingleChoice', {}).editor['showLength']).toBe(false);
+    expect(editorFor('Dropdown', {}).editor['showLength']).toBe(false);
+  });
+});
+
 describe('a contradiction the author inherited rather than typed', () => {
   it('states itself the moment the question is opened', () => {
     // Forms authored before this check existed, or written by mj-sync metadata or the AI builder,
