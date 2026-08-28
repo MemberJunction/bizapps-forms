@@ -51,12 +51,17 @@ A UI claim is not evidence on its own. Check each behaviour in as many of these 
 
 **UI** — Playwright, as above.
 
-**DB** — `mssql` is not installed in this repo, but it is in the shared workspace. Drop this in a
-scratch dir:
+**DB** — `mssql` is not a dependency of this repo; it lives in the shared pnpm store alongside it.
+Resolve it first, then drop the helper below in a scratch dir:
+
+```bash
+node -e "console.log(require.resolve('mssql', { paths: ['../MJ', '..'] }))"
+# or: find ../node_modules/.pnpm -maxdepth 4 -type d -name mssql -path '*node_modules*' | head -1
+```
 
 ```js
-// q.mjs — node q.mjs "SELECT ..."
-import sql from '/Users/sohamdesai/Projects/mj-dev/node_modules/.pnpm/mssql@12.7.0/node_modules/mssql/index.js';
+// q.mjs — node q.mjs "SELECT ..."   (run from the repo root)
+import sql from '<the path printed above>';
 import { readFileSync } from 'fs';
 const env = Object.fromEntries(readFileSync('.env','utf8')
   .split('\n').filter(l => l.includes('=') && !l.trim().startsWith('#'))
