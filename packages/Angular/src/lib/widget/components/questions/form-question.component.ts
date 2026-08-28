@@ -52,7 +52,7 @@ import {
   inputModeFor,
   inputTypeFor,
 } from './input-mode';
-import { SignaturePadComponent } from './signature-pad.component';
+import { SignaturePadComponent, type SignatureCapture } from './signature-pad.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
 /** How long a reordered row takes to travel to its new place. */
@@ -134,15 +134,17 @@ export class FormQuestionComponent {
   /** Inline, respondent-facing upload error, or `null`. */
   protected readonly uploadError = computed(() => this.upload().error);
   /**
-   * The file this question's answer is made of, or `null`.
+   * The file held locally for this question, whatever its upload has done — or `null`.
    *
-   * What the signature pad repaints itself from after Angular destroys it — leaving a section and
-   * coming back, or stepping past a question of another type — and what a failed upload is
-   * retried with. Read from the store, keyed by question id, for the same reason every other
-   * upload fact is: this component instance is recycled across questions and cannot be trusted to
-   * still be the one the file belongs to.
+   * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
+   * file is here from the moment it is chosen or drawn, while it is uploading, and after an
+   * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
+   * rendering — the signature pad repaints itself from it after Angular destroys the control —
+   * and retrying. Read from the store, keyed by question id, for the same reason every other
+   * upload fact is: this component instance is recycled across questions and cannot be trusted
+   * to still be the one the file belongs to.
    */
-  protected readonly uploadedFile = computed(() => this.upload().file);
+  protected readonly localFile = computed(() => this.upload().file);
   /**
    * Whether a file answer is on record for this question — the answer id, not the artifact.
    *
@@ -175,6 +177,22 @@ export class FormQuestionComponent {
     return optionLetter(index);
   }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
+  protected readonly statusId = computed(() => `${this.inputId()}-status`);
+
+  /**
+   * Whether the file control's status line currently says anything.
+   *
+   * Read by the input's `aria-describedby`, because that line is the ONLY place the attached
+   * file is named: a re-created file input reports "No file chosen" no matter what is stored, so
+   * a screen-reader user who is not pointed at the status is never told their answer exists.
+   * `aria-live` does not cover it — the text is already on the page when the control is
+   * rendered, and a live region announces changes, not what was there on arrival.
+   */
+  protected readonly hasFileStatus = computed(
+    () =>
+      this.question().type === 'FileUpload' &&
+      (this.uploadStatus() === 'uploading' || this.uploadStatus() === 'done' || this.answerRecorded()),
+  );
 
   /** True when the failure is field-level, which is what decides where messages are rendered. */
   protected readonly hasPartErrors = computed(() => Object.keys(this.partErrors()).length > 0);
@@ -207,6 +225,9 @@ export class FormQuestionComponent {
     }
     if (this.errorMessage()) {
       ids.push(this.errorId());
+    }
+    if (this.hasFileStatus()) {
+      ids.push(this.statusId());
     }
     return ids.length ? ids.join(' ') : null;
   });
@@ -548,9 +569,16 @@ export class FormQuestionComponent {
 
   // --- Signature -----------------------------------------------------------
 
-  /** A drawn signature takes the ordinary file-answer path from here. */
-  protected async onSignatureDrawn(file: File): Promise<void> {
-    await this.uploadFile(file);
+  /**
+   * A drawn signature takes the ordinary file-answer path from here.
+   *
+   * Stored against the question the capture NAMES, not against `this.question()`. The export
+   * finishes after the gesture, and this handler is routed by the view — in OneQuestion mode one
+   * pad serves consecutive Signature questions, so reading the current question here filed the
+   * first one's drawing as the second one's answer.
+   */
+  protected async onSignatureDrawn(capture: SignatureCapture): Promise<void> {
+    await this.uploadFile(capture.file, capture.subject);
   }
 
   protected onSignatureCleared(): void {
@@ -615,14 +643,16 @@ export class FormQuestionComponent {
       this.uploads.clear(this.question().id);
       return;
     }
-    await this.uploadFile(file);
+    // A picker's `change` fires with the view as rendered, so the current question IS the one
+    // the respondent chose the file for. Only the pad's export outlives its gesture.
+    await this.uploadFile(file, this.question().id);
   }
 
   /** Re-run the upload for the previously-selected file after a failure. */
   protected async retryUpload(): Promise<void> {
-    const last = this.uploadedFile();
+    const last = this.localFile();
     if (last) {
-      await this.uploadFile(last);
+      await this.uploadFile(last, this.question().id);
     }
   }
 
@@ -635,8 +665,7 @@ export class FormQuestionComponent {
    * the question the upload was for. The store commits the answer under the token's own question
    * id instead — see `succeed` for the two ways that went wrong.
    */
-  private async uploadFile(file: File): Promise<void> {
-    const questionId = this.question().id;
+  private async uploadFile(file: File, questionId: string): Promise<void> {
     const token = this.uploads.begin(questionId, file);
     try {
       const result = await this.uploader.upload(

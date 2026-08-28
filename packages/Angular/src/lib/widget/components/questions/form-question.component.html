@@ -143,21 +143,25 @@
           </div>
         }
         @case ('FileUpload') {
-          <!-- The input is visually hidden and a label stands in for it, which is not styling.
-               A file input DRAWS ITS OWN STATUS — "No file chosen" — from its `files` list, and
-               that list is empty on a control Angular has just re-created. So after leaving the
-               section and coming back it sat beside our own line reading "licence.pdf uploaded",
-               contradicting it, and nothing can be written to it to make the two agree. Deleting
-               the second status display is the fix; the line below is the only one.
+          <!-- The input is TRANSPARENT AND FULL-SIZE, laid over a label that draws the control.
+               Not styling, and not the same as hiding it.
 
-               The input keeps the id, the validation attributes and the focus — it is still the
-               control — so a screen reader and the mobile camera-capture affordance are unchanged.
-               The label is `aria-hidden` because the question's own <label> already names the
-               input, and the ring is drawn with :focus-within since the input itself is off
-               screen. -->
+               A file input draws its own status — "No file chosen" — from its `files` list, and
+               that list is empty on a control Angular has just re-created. So after leaving the
+               section and coming back it sat beside our own line reading "licence.pdf uploaded"
+               and contradicted it, with no API able to make the two agree. `opacity: 0` retires
+               that second status display without retiring the ELEMENT, which matters: a file
+               input is a native drop target, and clipping it to 1×1 (the first attempt here)
+               silently took drag-and-drop away from every desktop respondent.
+
+               So the input keeps its id, its size, its validation attributes, its focus and its
+               drop behaviour — it is still the control, and still the thing a pointer hits. The
+               label under it is `aria-hidden` and inert to the pointer, because the question's
+               own <label> already names the input; the focus ring is drawn with :focus-within,
+               since the ring belongs on the shape the respondent can see. -->
           <div class="mjf-file" [class.mjf-file--busy]="uploadStatus() === 'uploading'">
             <input
-              class="mjf-visually-hidden"
+              class="mjf-file__input"
               [id]="inputId()"
               type="file"
               #fileInput
@@ -191,7 +195,7 @@
             </div>
           }
 
-          <p class="mjf-file__status" aria-live="polite">
+          <p class="mjf-file__status" [id]="statusId()" aria-live="polite">
             @switch (uploadStatus()) {
               @case ('uploading') {
                 <span>
@@ -405,7 +409,7 @@
           <mjf-signature-pad
             [label]="q.prompt"
             [subject]="q.id"
-            [image]="uploadedFile()"
+            [signature]="localFile()"
             [recorded]="answerRecorded()"
             (drawn)="onSignatureDrawn($event)"
             (cleared)="onSignatureCleared()"
