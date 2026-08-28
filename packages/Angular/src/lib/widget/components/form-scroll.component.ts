@@ -109,6 +109,18 @@ export class FormScrollComponent {
     () => this.submitting() || (this.isLast() && this.submitDisabled()),
   );
 
+  /**
+   * Whether "you can submit now" is true HERE — the last section, the control live, the whole
+   * visible form valid. All three, because each one alone is a different claim: valid on section
+   * one still needs three Nexts, and a captcha-blocked last section has a Submit that does nothing.
+   *
+   * This is the signal the progress bar used to carry by reading 100% early (#88). Split out, the
+   * bar can report fill honestly and this can say the thing the respondent actually needed to hear.
+   */
+  protected readonly readyToSubmit = computed(
+    () => this.isLast() && !this.primaryDisabled() && this.runtime().isFormValid(),
+  );
+
   constructor() {
     // A jump firing on the last section shortens the list under the cursor, so re-clamp whenever
     // the path resizes. Tracked on `total()` with the cursor read and written untracked, so the

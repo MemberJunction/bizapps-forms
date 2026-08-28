@@ -209,6 +209,17 @@ export class FormRuntime {
   );
 
   /**
+   * Whether the respondent has anything to fill in at all.
+   *
+   * Lives here rather than in each renderer so both spell the same predicate. A form of pure
+   * Statement copy — or one whose every question is currently hidden by a show rule — has no
+   * progress to report, and both render modes suppress the bar on exactly this fact.
+   */
+  public readonly hasAnswerableQuestions = computed(
+    () => this.visibleAnswerableQuestions().length > 0,
+  );
+
+  /**
    * Exactly the answers this widget will transmit — derived FROM the payload builder, not
    * alongside it.
    *
@@ -302,18 +313,25 @@ export class FormRuntime {
   // --- Progress ------------------------------------------------------------
 
   /**
-   * How full the bar is. The weighting — and why it is weighted — lives in `progress.ts`.
+   * How full the bar is: the fraction of the visible form that is filled in, reaching 1 only when
+   * every visible answerable question is answered. The weighting — and why it is weighted — lives
+   * in `progress.ts`.
    *
-   * Requiredness is `isRequired` — the same judge `errorFor`/`isFormValid` use, which is the
-   * property that matters. `computeProgress` returns 1 as soon as every required question is
-   * satisfied, so a bar reading a different notion of "required" than the submit button reads
-   * can show full on a form that will not submit, which is the one state where the bar is the
-   * respondent's only clue that something is missing. The two used to be able to disagree
-   * (the bar read the static flag, validity read the `require` verb); with the verb gone there
-   * is only one flag left to read, and both read it.
+   * Requiredness is `isRequired`, the same judge `errorFor`/`isFormValid` use. It is a WEIGHT here,
+   * not a finish line: this used to short-circuit to full the moment every required question was
+   * satisfied, and a bar that reads 100% over eight blank questions tells the respondent they are
+   * done when they are not (#88).
    *
-   * Visibility still gates it: the map runs over `visibleAnswerableQuestions`, so a required
-   * question hidden by its show rule is not counted against the bar.
+   * "The respondent can submit" is {@link isFormValid}'s answer, not this one, and the renderers
+   * show it as its own line beside the bar. Two facts, two signals — which is also why they may
+   * legitimately disagree: an answered-but-malformed email holds the button while the bar counts
+   * the answer, so the bar does not flicker under someone still typing.
+   *
+   * Visibility gates it: the map runs over `visibleAnswerableQuestions`, so a required question
+   * hidden by its show rule is not counted against the bar. That makes the denominator a property
+   * of the CURRENT path, so switching branches can move the bar down as well as up — deliberately.
+   * The alternative, a high-water clamp, would hold 100% over a revealed required question, which
+   * is the lie this is written to avoid.
    */
   public readonly progress = computed(() =>
     computeProgress(
