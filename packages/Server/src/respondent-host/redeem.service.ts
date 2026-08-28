@@ -19,6 +19,8 @@ import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/cor
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
+import { distributionQuotaExceeded } from '../public-submit/quota.service.js';
+
 const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 
 /**
@@ -46,6 +48,7 @@ export interface RedeemMagicLinkJsonResult {
 export type RedeemFailureReason =
   | 'distribution-not-found'
   | 'distribution-closed'
+  | 'distribution-full'
   | 'no-token'
   | 'redeem-failed';
 
@@ -71,18 +74,40 @@ export interface RedeemDeps {
   fetchImpl: typeof fetch;
 }
 
-/** Distribution is open for redemption if active, not Closed, and within its open/close window. */
-function distributionIsOpen(dist: mjBizAppsFormsFormDistributionEntityType, now: Date): boolean {
+/**
+ * Why this link refuses to open right now, or `undefined` when it is taking responses.
+ *
+ * One decision, not a boolean plus a special case beside it: every reason a respondent must be
+ * turned away BEFORE they type anything is settled here, and each carries its own message. That
+ * matters because "closed" and "full" are different facts about the link and imply different
+ * things to the person holding it — one may reopen, the other has already had its fill.
+ *
+ * The cap is judged by {@link distributionQuotaExceeded}, the SAME predicate the submit pipeline's
+ * quota gate uses, rather than a second `ResponseCount >= MaxResponses` written here. A link that
+ * opens but cannot accept a submission is precisely the defect this closes (bizapps-forms#81), so
+ * the two gates must not be able to drift apart — sharing the predicate is what guarantees it.
+ *
+ * The submit-time gate REMAINS the authority: this read is a snapshot, and two respondents can be
+ * holding the last slot at once. This only stops the form inviting work it already knows it cannot
+ * accept; it does not decide the race.
+ */
+function distributionRefusal(
+  dist: mjBizAppsFormsFormDistributionEntityType,
+  now: Date,
+): RedeemFailureReason | undefined {
   if (!dist.IsActive || dist.Status === 'Closed') {
-    return false;
+    return 'distribution-closed';
   }
   if (dist.OpenAt && new Date(dist.OpenAt) > now) {
-    return false;
+    return 'distribution-closed';
   }
   if (dist.CloseAt && new Date(dist.CloseAt) < now) {
-    return false;
+    return 'distribution-closed';
   }
-  return true;
+  if (distributionQuotaExceeded(dist)) {
+    return 'distribution-full';
+  }
+  return undefined;
 }
 
 /** Load the distribution row for a slug, or `undefined` if the read fails / no row matches. */
@@ -157,8 +182,9 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!dist) {
     return { ok: false, reason: 'distribution-not-found' };
   }
-  if (!distributionIsOpen(dist, new Date())) {
-    return { ok: false, reason: 'distribution-closed' };
+  const refusal = distributionRefusal(dist, new Date());
+  if (refusal) {
+    return { ok: false, reason: refusal };
   }
   const rawToken = dist.PublicLinkToken;
   if (!rawToken) {

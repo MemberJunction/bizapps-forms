@@ -130,6 +130,30 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-closed');
   });
 
+  it('returns distribution-full when the response limit has been reached, minting no token', async () => {
+    const provider = fakeProvider({
+      rows: [fakeDistribution({ MaxResponses: 6, ResponseCount: 6 })],
+    }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-full');
+    // The whole point of refusing at the door: no anonymous session is minted for a link
+    // that cannot accept what it would invite the respondent to write.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // Documents the boundary rather than having driven it: paired with the test above, an
+  // off-by-one in the cap breaks exactly one of the two, so the last slot stays claimable.
+  it('still opens the form on the last remaining slot', async () => {
+    const provider = fakeProvider({
+      rows: [fakeDistribution({ MaxResponses: 6, ResponseCount: 5 })],
+    }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(out.ok).toBe(true);
+    expect(out.token).toBe('redeemed-jwt');
+  });
+
   it('returns no-token when the distribution has no PublicLinkToken', async () => {
     const provider = fakeProvider({ rows: [fakeDistribution({ PublicLinkToken: null })] }).provider;
     const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');

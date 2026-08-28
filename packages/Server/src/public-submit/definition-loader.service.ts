@@ -97,7 +97,18 @@ async function loadPublishedVersion(
   return result.Results[0];
 }
 
-/** Distribution is open if Active, not Closed, and within its open/close window. */
+/**
+ * Distribution is open if Active, not Closed, and within its open/close window.
+ *
+ * Deliberately does NOT consider the response cap, unlike the otherwise-identical guard at the
+ * respondent-host door (`respondent-host/redeem.service.ts`, which refuses a full link outright —
+ * bizapps-forms#81). The asymmetry is the point: this gate runs for EVERY submit, including a
+ * partial save and a disqualifying knockout, neither of which consumes a slot. Folding the cap in
+ * here would block a respondent already mid-form from saving their progress, and would replace the
+ * quota gate's specific "(quota reached)" message with a generic closure. The cap belongs where
+ * `checkQuotas` applies it: on a terminal completion only, and as the authority for the last-slot
+ * race between two respondents.
+ */
 function distributionIsOpen(
   dist: mjBizAppsFormsFormDistributionEntityType,
   now: Date,

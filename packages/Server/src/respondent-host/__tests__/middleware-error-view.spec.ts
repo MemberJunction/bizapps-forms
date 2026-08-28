@@ -10,6 +10,13 @@ describe('redeemFailureToView', () => {
     expect(redeemFailureToView('distribution-closed').status).toBe(410);
   });
 
+  it('maps distribution-full to 410 with wording that names the limit, not just closure', () => {
+    const full = redeemFailureToView('distribution-full');
+    expect(full.status).toBe(410);
+    expect(full.message).not.toBe(redeemFailureToView('distribution-closed').message);
+    expect(full.message.toLowerCase()).toContain('limit');
+  });
+
   it('maps no-token to 409', () => {
     expect(redeemFailureToView('no-token').status).toBe(409);
   });
@@ -19,7 +26,13 @@ describe('redeemFailureToView', () => {
   });
 
   it('returns a non-empty respondent-facing message for every reason', () => {
-    for (const reason of ['distribution-not-found', 'distribution-closed', 'no-token', 'redeem-failed'] as const) {
+    for (const reason of [
+      'distribution-not-found',
+      'distribution-closed',
+      'distribution-full',
+      'no-token',
+      'redeem-failed',
+    ] as const) {
       const view = redeemFailureToView(reason);
       expect(view.message.length).toBeGreaterThan(0);
     }
