@@ -387,8 +387,34 @@ export class QuestionEditorComponent {
     return this.node ? parseConditionalRule(this.node.entity.ConditionalRule) : undefined;
   }
 
+  /**
+   * The validation rule stored on the selected question — the SAME object for as long as that
+   * question and its stored rule are unchanged.
+   *
+   * Stability is load-bearing, not an optimisation. `[rule]` is re-evaluated on every
+   * change-detection pass and an `@Input` setter fires whenever the bound expression is a new
+   * object, so parsing on every read reset the validation editor constantly. That was invisible
+   * while the editor emitted everything it was handed; it stops being invisible now that it
+   * withholds a pair of bounds no answer could satisfy and holds them on screen for the author to
+   * fix (issue #80) — an echo of the stored rule would erase the number mid-correction.
+   *
+   * Keyed on the NODE as well as the stored text: two questions can store the same rule, and
+   * without that the second would inherit the first's unresolved edit.
+   *
+   * A getter that writes is a deliberate exception to command–query separation here, and the
+   * alternative is worse: maintaining the parsed rule as a field means every writer of
+   * `entity.ValidationRule` has to remember to refresh it, where deriving it on read is correct
+   * for writers this component has never heard of.
+   */
+  private ruleCache: { node: QuestionNode | null; raw: string | null; rule: ValidationRule | undefined } | null =
+    null;
+
   protected get validationRule(): ValidationRule | undefined {
-    return this.node ? parseValidationRule(this.node.entity.ValidationRule) : undefined;
+    const raw = this.node?.entity.ValidationRule ?? null;
+    if (!this.ruleCache || this.ruleCache.node !== this.node || this.ruleCache.raw !== raw) {
+      this.ruleCache = { node: this.node, raw, rule: parseValidationRule(raw) };
+    }
+    return this.ruleCache.rule;
   }
 
   protected setPrompt(value: string): void {
