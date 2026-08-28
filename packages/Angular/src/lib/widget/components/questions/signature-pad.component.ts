@@ -1,24 +1,40 @@
 /**
- * A draw-your-signature pad that hands back a PNG `File`.
+ * A draw-your-signature pad that hands back a PNG `File` — and shows the one it was given.
  *
  * Its own component rather than another arm of `form-question`'s `@switch`, because it is the
  * one control here with real internal machinery — a bitmap, a pointer-drag state machine and a
  * canvas-to-blob export — none of which the surrounding component has any reason to see. What
- * it exposes is one line wide: "the respondent drew something, here is the file".
+ * it exposes is two lines wide: "here is the signature for this question" in, "the respondent
+ * drew something, here is the file" out.
  *
  * The question component then uploads that file through the SAME path a `FileUpload` answer
  * takes, which is why `Signature` needs no server work at all: it is a file answer whose file
  * happens to be produced by a canvas instead of a file picker.
+ *
+ * IT IS CONTROLLED, like every other control in this widget, and that is not decoration. The
+ * pad used to be write-only: ink lived in the canvas bitmap and in a private `hasInk` flag, both
+ * of which die with the component. Angular destroys it whenever the respondent leaves the
+ * section (Scroll) or steps to a question of another type (OneQuestion), so coming back built a
+ * blank pad reading "Draw your signature above." over an answer that was, in fact, safely
+ * stored — the respondent's signature "disappearing". The mirror-image failure was worse: in
+ * OneQuestion mode two consecutive Signature questions share ONE pad instance, so the first
+ * question's ink stayed on screen for the second, which then read "Signed." while unanswered.
+ * Painting from {@link signature} on every (re)binding is one mechanism that closes both.
  */
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   ElementRef,
+  effect,
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
+
+import { PadCaptures, type CaptureClaim } from './pad-captures';
 
 /**
  * Bitmap resolution of the exported signature, independent of the CSS size the pad is drawn at.
@@ -107,8 +123,8 @@ const SIGNATURE_PAD_CSS = /* css */ `
         (pointercancel)="onPointerUp($event)"
       ></canvas>
       <div class="mjf-sig__bar">
-        <p class="mjf-sig__hint">{{ hasInk() ? 'Signed.' : 'Draw your signature above.' }}</p>
-        <button type="button" class="mjf-sig__clear" [disabled]="!hasInk()" (click)="clear()">
+        <p class="mjf-sig__hint">{{ hint() }}</p>
+        <button type="button" class="mjf-sig__clear" [disabled]="!hasInk() && !recorded()" (click)="clear()">
           <i class="fa-solid fa-eraser" aria-hidden="true"></i> Clear
         </button>
       </div>
@@ -118,8 +134,42 @@ const SIGNATURE_PAD_CSS = /* css */ `
 export class SignaturePadComponent {
   /** Accessible name for the canvas. */
   public readonly label = input<string>('Signature');
-  /** Emitted once a stroke settles, carrying the signature as a PNG file. */
-  public readonly drawn = output<File>();
+  /**
+   * The signature already held for {@link subject}, or `null` for an unsigned question.
+   *
+   * The same `File` this pad last emitted for it, handed back by whoever is holding the answer.
+   * Painted onto the canvas whenever the pad is bound to a subject — see the constructor.
+   */
+  public readonly signature = input<File | null>(null);
+  /**
+   * WHAT this pad is currently signing — the question id, in the widget.
+   *
+   * The repaint key, and the reason it is an input rather than something the pad infers: the pad
+   * cannot tell a new instance apart from an old one re-pointed at the next question, and those
+   * need the same response. A value it has never seen means the canvas belongs to something else
+   * now and must be redrawn from {@link image}.
+   */
+  public readonly subject = input<string>('');
+  /**
+   * Whether an answer is on record for {@link subject}, whether or not it can be shown.
+   *
+   * A separate fact from {@link image}, and it earns its place on exactly the occasions the pad
+   * would otherwise lie: a signature captured in an earlier session (the widget holds the answer
+   * id, not the artifact) and one whose repaint failed to decode. Both leave a pad with no ink
+   * over an answer that stands, and "Draw your signature above." invites the respondent to redo
+   * work that is already done — or worse, reads as the signature having been lost again.
+   */
+  public readonly recorded = input<boolean>(false);
+  /**
+   * Emitted once a stroke settles, carrying the signature AND the subject it was drawn on.
+   *
+   * The subject travels with the file because the export finishes later than the gesture that
+   * started it, and an `output()` is routed by whatever the view is bound to when it fires. In
+   * OneQuestion mode one pad instance serves consecutive Signature questions, so a respondent
+   * who advances while `toBlob` is still encoding had the first question's drawing stored as the
+   * SECOND question's answer. Naming the subject here is what makes that impossible to express.
+   */
+  public readonly drawn = output<SignatureCapture>();
   /** Emitted when the respondent clears the pad. */
   public readonly cleared = output<void>();
 
@@ -127,8 +177,44 @@ export class SignaturePadComponent {
   protected readonly padHeight = PAD_HEIGHT;
   protected readonly hasInk = signal(false);
 
+  /**
+   * What the pad says about itself — three states, because there are three.
+   *
+   * The middle one is the honest answer to "there is an answer here but no picture of it": the
+   * respondent is told their signature stands, and Clear stays available so they can withdraw a
+   * signature they cannot see. Saying nothing, or saying "Draw your signature above.", would
+   * both be the control claiming an empty answer that is not empty.
+   */
+  protected readonly hint = computed(() => {
+    if (this.hasInk()) {
+      return 'Signed.';
+    }
+    return this.recorded() ? 'Signed — your saved signature is not shown here.' : 'Draw your signature above.';
+  });
+
   private readonly pad = viewChild<ElementRef<HTMLCanvasElement>>('pad');
   private drawing = false;
+  /** Which outstanding exports and repaints still speak for this pad. See {@link PadCaptures}. */
+  private readonly captures = new PadCaptures();
+
+  constructor() {
+    // Put the stored signature back whenever this pad starts standing for a subject — a fresh
+    // instance after the section was left and re-entered, or the same instance re-pointed at the
+    // next question without being destroyed.
+    //
+    // `subject()` and the canvas are the only things tracked, deliberately. The canvas is tracked
+    // because a view query resolves after construction and the repaint has to wait for it.
+    // `signature()` is NOT: every stroke starts an upload that rewrites the held file, so
+    // repainting on it would wipe the drawing out from under the respondent mid-signature.
+    // Reading it untracked means this fires exactly when the pad changes what it stands for.
+    effect(() => {
+      const canvas = this.pad()?.nativeElement;
+      const subject = this.subject();
+      if (canvas) {
+        void untracked(() => this.repaint(canvas, subject, this.signature()));
+      }
+    });
+  }
 
   protected onPointerDown(event: PointerEvent): void {
     const ctx = this.beginStroke(event);
@@ -138,6 +224,10 @@ export class SignaturePadComponent {
     // Without preventDefault a touch drag scrolls the page instead of drawing, and the stroke
     // arrives as a handful of disconnected points.
     event.preventDefault();
+    // The respondent is drawing, so anything still in flight describes a pad that no longer
+    // exists: a repaint would bury this stroke under the stored image, and the previous stroke's
+    // export is about to be superseded by this one's anyway.
+    this.captures.supersede();
     this.drawing = true;
   }
 
@@ -186,8 +276,64 @@ export class SignaturePadComponent {
     }
   }
 
-  /** Wipe the pad and tell the parent the answer is gone. */
+  /**
+   * Draw `signature` onto the pad, or empty it when there is none.
+   *
+   * `createImageBitmap` rather than an `Image` + object URL: it decodes the same PNG with no URL
+   * whose lifetime someone then has to own. A decode that fails clears {@link hasInk} and stops
+   * there, which lands the pad on the {@link recorded} wording — "signed, just not shown" — and
+   * never on "Draw your signature above.", because the answer is still there and inviting the
+   * respondent to redo it would be the original bug wearing a different face.
+   */
+  private async repaint(canvas: HTMLCanvasElement, subject: string, signature: File | null): Promise<void> {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    // Synchronously, before the decode: on a re-point the previous question's ink has to leave
+    // the screen NOW, not whenever the next image finishes decoding.
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!signature) {
+      this.hasInk.set(false);
+      return;
+    }
+    const claim = this.captures.claim(subject);
+    try {
+      const bitmap = await createImageBitmap(signature);
+      // The pad may have been cleared, drawn on, or re-pointed while that decoded.
+      if (!this.captures.mayPaint(claim, this.subject())) {
+        bitmap.close();
+        return;
+      }
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      this.hasInk.set(true);
+    } catch (err) {
+      if (!this.captures.mayPaint(claim, this.subject())) {
+        // A rejection for a pad that has moved on says nothing about the pad now on screen —
+        // reporting it would mark a visible signature as missing, or stop a stroke in progress
+        // from being emitted.
+        return;
+      }
+      this.hasInk.set(false);
+      console.warn(
+        `[mj-form] could not redraw the stored signature for "${subject}", so the pad shows it as ` +
+          'recorded but not displayed. The answer itself is unaffected.',
+        err,
+      );
+    }
+  }
+
+  /**
+   * Wipe the pad and tell the parent the answer is gone.
+   *
+   * Superseding is half the work. The parent retires the running UPLOAD, which is not the same
+   * thing: an export still encoding has not started its upload yet, so there is nothing there to
+   * retire — it would begin a fresh one afterwards and commit the drawing the respondent has
+   * just withdrawn, leaving a stored signature under an empty pad.
+   */
   public clear(): void {
+    this.captures.supersede();
     const canvas = this.pad()?.nativeElement;
     const ctx = canvas?.getContext('2d');
     if (canvas && ctx) {
@@ -233,6 +379,7 @@ export class SignaturePadComponent {
    * onto the paper colour first makes the artifact self-contained.
    */
   private async emitPng(): Promise<void> {
+    const claim = this.captures.claim(this.subject());
     const canvas = this.pad()?.nativeElement;
     if (!canvas) {
       return;
@@ -249,8 +396,25 @@ export class SignaturePadComponent {
     ctx.drawImage(canvas, 0, 0);
 
     const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
-    if (blob) {
-      this.drawn.emit(new File([blob], 'signature.png', { type: 'image/png' }));
+    if (!blob) {
+      console.warn(
+        `[mj-form] the browser could not encode the signature drawn for "${claim.subject}", so ` +
+          'this stroke was not stored. The respondent can draw again.',
+      );
+      return;
     }
+    if (!this.captures.mayEmit(claim)) {
+      return;
+    }
+    this.drawn.emit({
+      subject: claim.subject,
+      file: new File([blob], 'signature.png', { type: 'image/png' }),
+    });
   }
+}
+
+/** One finished capture: the signature, and the subject it was drawn for. */
+export interface SignatureCapture {
+  readonly subject: string;
+  readonly file: File;
 }

@@ -143,18 +143,40 @@
           </div>
         }
         @case ('FileUpload') {
-          <input
-            class="mjf-input mjf-file"
-            [id]="inputId()"
-            type="file"
-            #fileInput
-            [accept]="fileAccept()"
-            [disabled]="uploadStatus() === 'uploading'"
-            [attr.aria-required]="q.isRequired"
-            [attr.aria-invalid]="!!errorMessage() || uploadStatus() === 'error'"
-            [attr.aria-describedby]="describedBy()"
-            (change)="onFile(fileInput)"
-          />
+          <!-- The input is TRANSPARENT AND FULL-SIZE, laid over a label that draws the control.
+               Not styling, and not the same as hiding it.
+
+               A file input draws its own status — "No file chosen" — from its `files` list, and
+               that list is empty on a control Angular has just re-created. So after leaving the
+               section and coming back it sat beside our own line reading "licence.pdf uploaded"
+               and contradicted it, with no API able to make the two agree. `opacity: 0` retires
+               that second status display without retiring the ELEMENT, which matters: a file
+               input is a native drop target, and clipping it to 1×1 (the first attempt here)
+               silently took drag-and-drop away from every desktop respondent.
+
+               So the input keeps its id, its size, its validation attributes, its focus and its
+               drop behaviour — it is still the control, and still the thing a pointer hits. The
+               label under it is `aria-hidden` and inert to the pointer, because the question's
+               own <label> already names the input; the focus ring is drawn with :focus-within,
+               since the ring belongs on the shape the respondent can see. -->
+          <div class="mjf-file" [class.mjf-file--busy]="uploadStatus() === 'uploading'">
+            <input
+              class="mjf-file__input"
+              [id]="inputId()"
+              type="file"
+              #fileInput
+              [accept]="fileAccept()"
+              [disabled]="uploadStatus() === 'uploading'"
+              [attr.aria-required]="q.isRequired"
+              [attr.aria-invalid]="!!errorMessage() || uploadStatus() === 'error'"
+              [attr.aria-describedby]="describedBy()"
+              (change)="onFile(fileInput)"
+            />
+            <label class="mjf-file__pick" [attr.for]="inputId()" aria-hidden="true">
+              <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+              {{ uploadFileName() || answerRecorded() ? 'Choose a different file' : 'Choose a file' }}
+            </label>
+          </div>
 
           @if (uploadStatus() === 'uploading') {
             <div
@@ -173,7 +195,7 @@
             </div>
           }
 
-          <p class="mjf-file__status" aria-live="polite">
+          <p class="mjf-file__status" [id]="statusId()" aria-live="polite">
             @switch (uploadStatus()) {
               @case ('uploading') {
                 <span>
@@ -186,6 +208,17 @@
                   <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
                   {{ uploadFileName() }} uploaded
                 </span>
+              }
+              @case ('idle') {
+                <!-- An answer with nothing local to show for it: the file was attached in an
+                     earlier session, so this widget holds its id and not its name. Saying nothing
+                     here renders an empty-looking control over a stored answer. -->
+                @if (answerRecorded()) {
+                  <span class="mjf-file__ok">
+                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+                    A file is attached to this answer.
+                  </span>
+                }
               }
             }
           </p>
@@ -369,8 +402,15 @@
           <ng-container *ngTemplateOutlet="compositeControl" />
         }
         @case ('Signature') {
+          <!-- Controlled, like every other control in this switch. `subject` is the repaint key:
+               Scroll destroys this pad on leaving the section, and OneQuestion re-points ONE pad
+               at the next question without destroying it, and both must put the right drawing
+               back. See the component for what each binding closes. -->
           <mjf-signature-pad
             [label]="q.prompt"
+            [subject]="q.id"
+            [signature]="localFile()"
+            [recorded]="answerRecorded()"
             (drawn)="onSignatureDrawn($event)"
             (cleared)="onSignatureCleared()"
           />

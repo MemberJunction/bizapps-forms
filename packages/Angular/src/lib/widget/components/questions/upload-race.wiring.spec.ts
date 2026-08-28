@@ -79,8 +79,11 @@ describe('upload state belongs to a question, not to this component', () => {
     expect(question()).toMatch(/this\.uploads\.viewFor\(this\.question\(\)\.id\)/);
   });
 
-  it('retrieves the retry file by question rather than remembering it', () => {
-    expect(question()).toMatch(/this\.uploads\.lastFileFor\(this\.question\(\)\.id\)/);
+  it('retrieves the file it retries — and the one it repaints — by question, not by remembering it', () => {
+    // One projection, from the store's record for THIS question: `viewFor(...).file`. A field on
+    // the component would be the recycled-instance defect again, one indirection further out.
+    expect(question()).toMatch(/localFile = computed\(\(\) => this\.upload\(\)\.file\)/);
+    expect(question()).toMatch(/const last = this\.localFile\(\);/);
   });
 });
 
@@ -107,5 +110,130 @@ describe('a multi-stroke signature stays correct without deferring the export', 
     // This is what makes exporting per stroke safe: the last upload STARTED wins regardless of
     // which arrives first, and that is the most complete drawing.
     expect(question()).toMatch(/const token = this\.uploads\.begin\(questionId, file\);/);
+  });
+});
+
+describe('the pad shows the signature already held for the question it is bound to', () => {
+  it('takes the drawing and the subject as inputs, rather than trusting its own canvas', () => {
+    // The canvas and `hasInk` die with the component, and Angular destroys this one on every
+    // section change. A pad that can only render what it was drawn on shows an empty box over a
+    // stored answer — the "my signature disappeared" report. Controlled, like every other control
+    // in `form-question.component.html`.
+    expect(pad()).toMatch(/signature = input<File \| null>\(null\)/);
+    expect(pad()).toMatch(/subject = input<string>\(''\)/);
+  });
+
+  it('repaints on the subject, never on the image', () => {
+    // Every stroke starts an upload that rewrites the held file. Repainting on `image()` would
+    // therefore wipe the drawing out from under the respondent mid-signature; repainting on the
+    // subject fires exactly when the pad changes what it stands for.
+    const repaintEffect = /effect\(\(\) => \{[\s\S]{0,400}this\.subject\(\)[\s\S]{0,400}untracked\([\s\S]{0,200}this\.repaint\(/;
+    expect(pad()).toMatch(repaintEffect);
+  });
+
+  it('never claims "Signed." over paper it failed to draw on', () => {
+    // `hasInk` drives both the hint and the Clear button, so a decode that fails has to leave it
+    // false — and say why, since the respondent's only remaining move is to sign again. It must
+    // do neither for a pad that has moved on: a rejection from the PREVIOUS question would
+    // otherwise mark a visible signature as missing.
+    expect(pad()).toMatch(
+      /catch \(err\) \{[\s\S]{0,400}mayPaint\(claim, this\.subject\(\)\)[\s\S]{0,400}this\.hasInk\.set\(false\);\s*console\.warn\(/,
+    );
+  });
+
+  it('is handed the file and the id by the question component', () => {
+    const template = stripped('form-question.component.html');
+    expect(template).toMatch(/<mjf-signature-pad[\s\S]{0,200}\[subject\]="q\.id"/);
+    expect(template).toMatch(/<mjf-signature-pad[\s\S]{0,200}\[signature\]="localFile\(\)"/);
+  });
+});
+
+describe('a control never renders empty over an answer that stands', () => {
+  it('asks the ANSWER whether one is on record, not the upload store', () => {
+    // The store is per-widget memory; the answer outlives it. A control reading only the store
+    // shows nothing for a file attached in an earlier session — the signature-pad bug one level
+    // up, and the reason this reads `value()`.
+    expect(question()).toMatch(/answerRecorded = computed\(\(\) => \{[\s\S]{0,200}const value = this\.value\(\);/);
+  });
+
+  it('gives the pad the fact, and the pad a third thing to say', () => {
+    expect(stripped('form-question.component.html')).toMatch(/\[recorded\]="answerRecorded\(\)"/);
+    expect(pad()).toMatch(/recorded = input<boolean>\(false\)/);
+    // Three states, because there are three: signed and shown, signed and not shown, unsigned.
+    expect(pad()).toMatch(/return this\.recorded\(\) \? 'Signed[^']*' : 'Draw your signature above\.'/);
+  });
+
+  it('lets a respondent withdraw a signature they cannot see', () => {
+    expect(pad()).toMatch(/\[disabled\]="!hasInk\(\) && !recorded\(\)"/);
+  });
+
+  it('says so on a file question too', () => {
+    expect(stripped('form-question.component.html')).toMatch(
+      /@case \('idle'\) \{[\s\S]{0,300}answerRecorded\(\)[\s\S]{0,200}A file is attached to this answer\./,
+    );
+  });
+});
+
+describe('the file control has ONE status display', () => {
+  it('makes the native input transparent rather than hiding it', () => {
+    // The input keeps the id, the aria, the focus AND ITS SIZE — it is still the control, and a
+    // file input is a native drop target. Clipping it to 1×1 removed drag-and-drop from every
+    // desktop respondent while looking like a pure styling change; only its browser-drawn status
+    // text should go, because that text contradicted ours after every remount.
+    const template = stripped('form-question.component.html');
+    const css = stripped('form-question.component.css');
+    expect(template).toMatch(/<input\s+class="mjf-file__input"[\s\S]{0,200}type="file"/);
+    expect(template).not.toMatch(/<input\s+class="mjf-visually-hidden"[\s\S]{0,200}type="file"/);
+    expect(css).toMatch(/\.mjf-file__input \{[\s\S]{0,220}opacity: 0;/);
+    expect(css).toMatch(/\.mjf-file__input \{[\s\S]{0,220}inset: 0;/);
+    expect(template).toMatch(/<label class="mjf-file__pick" \[attr\.for\]="inputId\(\)" aria-hidden="true">/);
+  });
+
+  it('draws the focus ring on the stand-in, since the input is off screen', () => {
+    const css = stripped('form-question.component.css');
+    expect(css).toMatch(/\.mjf-file:focus-within \.mjf-file__pick \{[\s\S]{0,160}--mjf-focus-ring/);
+    // And positions the clipped input where the control is, so focusing it scrolls to the right
+    // place on a failed submit.
+    expect(css).toMatch(/\.mjf-file \{[\s\S]{0,300}position: relative;/);
+  });
+});
+
+describe('nothing that finishes late may speak for a pad that has moved on', () => {
+  it('claims the pad before every export and repaint', () => {
+    expect(pad()).toMatch(/const claim = this\.captures\.claim\(this\.subject\(\)\);/);
+    expect(pad()).toMatch(/const claim = this\.captures\.claim\(subject\);/);
+  });
+
+  it('retires them when the respondent clears the pad', () => {
+    // The parent retires the running UPLOAD, which is a different thing: an export still
+    // encoding has not started one yet, so it begins a fresh upload afterwards and commits the
+    // drawing that was just withdrawn.
+    expect(pad()).toMatch(/public clear\(\): void \{\s*this\.captures\.supersede\(\);/);
+  });
+
+  it('retires them when a new stroke begins', () => {
+    expect(pad()).toMatch(/this\.captures\.supersede\(\);\s*this\.drawing = true;/);
+  });
+
+  it('checks the claim before emitting an export', () => {
+    expect(pad()).toMatch(/if \(!this\.captures\.mayEmit\(claim\)\) \{\s*return;\s*\}/);
+  });
+
+  it('sends the subject with the file rather than letting the view choose one', () => {
+    // `output()` is routed by whatever the template is bound to when it fires, which after an
+    // await is not reliably the question the signature was drawn on.
+    expect(pad()).toMatch(/this\.drawn\.emit\(\{\s*subject: claim\.subject,/);
+    expect(question()).toMatch(/await this\.uploadFile\(capture\.file, capture\.subject\);/);
+  });
+});
+
+describe('the file status is part of what the input announces', () => {
+  it('gives the status line an id and describes the input with it', () => {
+    // A re-created file input reports "No file chosen" whatever is stored, and `aria-live` only
+    // covers changes — not text already on the page when the control is rendered.
+    expect(stripped('form-question.component.html')).toMatch(
+      /<p class="mjf-file__status" \[id\]="statusId\(\)"/,
+    );
+    expect(question()).toMatch(/if \(this\.hasFileStatus\(\)\) \{\s*ids\.push\(this\.statusId\(\)\);/);
   });
 });

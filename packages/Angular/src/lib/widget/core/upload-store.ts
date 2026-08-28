@@ -31,10 +31,29 @@ export interface UploadView {
   readonly progress: number | null;
   /** Respondent-facing failure text, or null. */
   readonly error: string | null;
+  /**
+   * The file itself, for a control that has to RENDER it rather than name it.
+   *
+   * The signature pad is that control, and this field is what puts the drawing back after the
+   * respondent leaves the section and returns. Its canvas dies with the component, so a pad
+   * with nothing to repaint from shows an empty box over an answer that is stored — which is
+   * exactly what the respondent reads as "my signature is gone". Every other control in the
+   * widget renders from the answer it is given; this is what lets the pad do the same.
+   *
+   * It doubles as the file a failed upload is retried with. One field, because it is one fact:
+   * the artifact this question's answer is made of, for as long as the answer stands.
+   */
+  readonly file: File | null;
 }
 
 /** What every question shows before anything has been uploaded for it. */
-export const IDLE_UPLOAD: UploadView = { status: 'idle', fileName: '', progress: null, error: null };
+export const IDLE_UPLOAD: UploadView = {
+  status: 'idle',
+  fileName: '',
+  progress: null,
+  error: null,
+  file: null,
+};
 
 /**
  * Permission to write the result of one upload.
@@ -52,8 +71,6 @@ export interface UploadToken {
 interface UploadRecord extends UploadView {
   /** The newest upload started for this question; only it may write. */
   readonly seq: number;
-  /** Retained so the respondent can retry a failed upload. */
-  readonly file: File | null;
 }
 
 const idleRecord = (seq: number, file: File | null): UploadRecord => ({ ...IDLE_UPLOAD, seq, file });
@@ -146,11 +163,6 @@ export class FormUploadStore {
     this.commit(token.questionId, null);
   }
 
-  /** The file last chosen for `questionId`, so a failed upload can be retried. */
-  public lastFileFor(questionId: string): File | null {
-    return this.records().get(questionId)?.file ?? null;
-  }
-
   /**
    * Report progress for a running upload; a superseded token is ignored.
    *
@@ -179,16 +191,17 @@ export class FormUploadStore {
   /**
    * What `questionId` should render right now.
    *
-   * Projected rather than returned whole: the record also carries the supersede stamp and the
-   * retained File, which are this store's business and not the template's.
+   * Projected rather than returned whole: the record also carries the supersede stamp, which is
+   * this store's business and not the template's. The file is NOT stripped — see
+   * {@link UploadView.file}; a control that draws its answer needs the answer.
    */
   public viewFor(questionId: string): UploadView {
     const record = this.records().get(questionId);
     if (!record) {
       return IDLE_UPLOAD;
     }
-    const { status, fileName, progress, error } = record;
-    return { status, fileName, progress, error };
+    const { status, fileName, progress, error, file } = record;
+    return { status, fileName, progress, error, file };
   }
 
   /**
