@@ -43,6 +43,30 @@ export interface ShareLinkFacts
   CloseAt: Date | string | null;
 }
 
+/**
+ * Every key of {@link ShareLinkFacts}, present exactly once.
+ *
+ * `Record<keyof ShareLinkFacts, true>` is the whole point: TypeScript refuses a missing key
+ * and refuses an unknown one, so this cannot drift from the interface in either direction.
+ * A hand-written list could, and the drift would be silent — a `RunView` that stops asking
+ * for a column hands the gate `undefined` and goes on rendering a confident answer, which is
+ * the failure class this whole module exists to remove.
+ */
+const SHARE_LINK_FIELD_SET: Record<keyof ShareLinkFacts, true> = {
+  Status: true,
+  IsActive: true,
+  OpenAt: true,
+  CloseAt: true,
+  MaxResponses: true,
+  ResponseCount: true,
+  PublicLinkToken: true,
+};
+
+/** The columns a read must request to be able to answer {@link shareState} or {@link formReach}. */
+export const SHARE_LINK_FIELDS: readonly (keyof ShareLinkFacts)[] = Object.keys(
+  SHARE_LINK_FIELD_SET,
+) as (keyof ShareLinkFacts)[];
+
 /** Why a link is or is not taking responses. One kind per reason the server can refuse. */
 export type ShareStateKind = 'pending' | 'paused' | 'ended' | 'scheduled' | 'full' | 'live';
 
@@ -178,37 +202,49 @@ export interface FormReach {
   /** The sentence behind the chip. Promises a reachable URL in the `live` kind and nowhere else. */
   detail: string;
   /**
-   * Whether there is something on the Distribute tab for the author to go and do.
+   * Whether a respondent could open this form right now — the one thing that earns the
+   * reassuring rendering.
    *
-   * False for `unknown` as well as for `live`: an unreadable link list is not a defect to
-   * send someone to fix, and dressing it as one manufactures an alarm out of a failed read.
+   * Redundant with `kind === 'live'` on purpose, the same way {@link ShareState.accepting}
+   * is: the question a surface is asking is "may I reassure them", and it should not have to
+   * spell that as a string comparison it could get subtly wrong.
+   *
+   * NOT true for `unknown`. A failed read dressed as a green check is the exact defect this
+   * module exists to prevent, one level up — an unverified claim rendered as a verified one.
    */
-  needsAttention: boolean;
+  reachable: boolean;
 }
 
 const REACH: Record<FormReachKind, Omit<FormReach, 'kind'>> = {
   live: {
     label: 'Published',
     detail: 'Everything in this form is live on its public link.',
-    needsAttention: false,
+    reachable: true,
   },
   unshared: {
     label: 'Published, not shared',
     detail:
       'This form is published, but it has no share link yet, so nobody can open it. Create one on the Distribute tab to start collecting responses.',
-    needsAttention: true,
+    reachable: false,
   },
   closed: {
-    label: 'Published, not shared',
+    // Not "not shared" — the links exist and may well be in the wild. What stopped is the
+    // collecting, and that is the distinction between the two remedies: create one, or
+    // reopen one.
+    label: 'Published, not collecting',
     detail:
       'This form is published, but none of its share links are taking responses. Reopen one on the Distribute tab to start collecting again.',
-    needsAttention: true,
+    reachable: false,
   },
   unknown: {
-    label: 'Published',
+    // Deliberately NOT the reassuring wording. "Published" over a green check is what a
+    // genuinely live form looks like, so rendering a failed read that way would make the UI
+    // confidently wrong in the one situation where it knows least. The Distribute tab is
+    // where the real load error is shown, which is also why this state points there.
+    label: 'Published, link unchecked',
     detail:
-      'This form is published. Its share links could not be read just now, so whether anyone can reach it is unknown.',
-    needsAttention: false,
+      'This form is published. Its share links could not be read just now, so whether anyone can reach it is unknown. Open the Distribute tab to see why.',
+    reachable: false,
   },
 };
 

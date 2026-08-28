@@ -1532,19 +1532,11 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (this.automationChanges) {
       return;
     }
-    this.automationChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
-        return;
-      }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (args?.type !== 'save' && args?.type !== 'delete') {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.FormAutomation) {
-        return;
-      }
-      void this.refreshDraftAutomations().then(() => this.markDirty());
-    });
+    this.automationChanges = this.onEntityWrite(
+      FORMS_ENTITY.FormAutomation,
+      ['save', 'delete'],
+      () => void this.refreshDraftAutomations().then(() => this.markDirty()),
+    );
   }
 
   /**
@@ -1572,39 +1564,57 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (this.distributionChanges) {
       return;
     }
-    this.distributionChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
-        return;
-      }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (args?.type !== 'save' && args?.type !== 'delete') {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.FormDistribution) {
-        return;
-      }
-      void this.refreshShareLinks();
-    });
+    this.distributionChanges = this.onEntityWrite(
+      FORMS_ENTITY.FormDistribution,
+      ['save', 'delete'],
+      () => void this.refreshShareLinks(),
+    );
   }
 
   private watchForTemplateChanges(): void {
     if (this.templateChanges) {
       return;
     }
-    this.templateChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+    // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
+    // and re-reading the template on each one would load a tree per keystroke.
+    this.templateChanges = this.onEntityWrite(FORMS_ENTITY.Form, ['delete'], () => {
+      if (this.tree) {
+        void this.refreshSavedTemplate(this.tree.form.ID);
+      }
+    });
+  }
+
+  /**
+   * Run `onWrite` whenever some other surface saves or deletes a row of `entityName`.
+   *
+   * `BaseEntity.Save()` / `.Delete()` raise an MJGlobal `ComponentEvent` tagged
+   * `BaseEntity.BaseEventCode`; decoding that shape — the event kind, the untyped `args`, the
+   * write kind, the entity name — is four guards that say nothing about why any given watcher
+   * exists. Stated once here, the three callers above read as what they actually are: which
+   * entity, which writes, and what to re-read. The reasoning that differs between them stays
+   * at the call sites, where it belongs.
+   */
+  private onEntityWrite(
+    entityName: string,
+    types: readonly ('save' | 'delete')[],
+    onWrite: () => void,
+  ): EventSubscription {
+    // Widened rather than cast: the caller states its intent with a literal union, and the
+    // event hands back a bare string. Assigning the narrow array to the wide type is the one
+    // direction that is safe without an assertion.
+    const wanted: readonly string[] = types;
+    return MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
       if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
         return;
       }
       const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
-      // and re-reading the template on each one would load a tree per keystroke.
-      if (args?.type !== 'delete' || args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.Form) {
+      if (!args?.type || !wanted.includes(args.type)) {
         return;
       }
-      if (!this.tree) {
+      if (args.baseEntity?.EntityInfo?.Name !== entityName) {
         return;
       }
-      void this.refreshSavedTemplate(this.tree.form.ID);
+      onWrite();
     });
   }
 

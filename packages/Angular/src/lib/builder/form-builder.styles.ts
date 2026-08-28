@@ -147,6 +147,10 @@ const LAYOUT_CSS = /* css */ `
 
 .fb-status { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 
+/* The publish control's persistent live region. Holds exactly one chip or button at a time,
+   so inline-flex reproduces what those elements did as direct children of the flex topbar. */
+.fb-publish-status { display: inline-flex; align-items: center; }
+
 /* The "nothing to publish" state. Quiet on purpose: it is a status, not an action, so it
    reads as text with a check rather than as a button you have failed to press. Success
    tone at low saturation — the point is reassurance, not celebration. */

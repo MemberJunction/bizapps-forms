@@ -12,7 +12,7 @@ import {
   slugify as buildSlug,
   randomSuffix,
 } from './distribution-links';
-import type { ShareLinkFacts } from './share-state';
+import { SHARE_LINK_FIELDS, type ShareLinkFacts } from './share-state';
 
 /** The channel kinds the builder can mint (Phase 1: PublicLink / Embed / QR). */
 export type DistributionChannel = mjBizAppsFormsFormDistributionEntityType['ChannelType'];
@@ -93,7 +93,9 @@ export class DistributionService {
     const result = await rv.RunView<mjBizAppsFormsFormDistributionEntity>(
       {
         EntityName: FORMS_ENTITY.FormDistribution,
-        ExtraFilter: `FormID='${formId}'`,
+        // Same escaping as every other filter this service builds. It was raw interpolation,
+        // which is a second spelling of one decision and the one that is wrong when it matters.
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
         OrderBy: '__mj_CreatedAt DESC',
         ResultType: 'entity_object',
       },
@@ -132,15 +134,9 @@ export class DistributionService {
       {
         EntityName: FORMS_ENTITY.FormDistribution,
         ExtraFilter: `FormID=${quoteSqlString(formId)}`,
-        Fields: [
-          'Status',
-          'IsActive',
-          'OpenAt',
-          'CloseAt',
-          'MaxResponses',
-          'ResponseCount',
-          'PublicLinkToken',
-        ],
+        // Owned by `share-state.ts`, not restated here: the field list and the facts the state
+        // machine reads have to be the same set, and only one of the two places can be right.
+        Fields: [...SHARE_LINK_FIELDS],
         ResultType: 'simple',
       },
       this.user,

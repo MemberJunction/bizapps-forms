@@ -81,8 +81,14 @@
          settles meant showing "Published" and then swapping it for "Publish changes" a moment
          later — which Angular reported as NG0100 (the branch changed after it was checked) and an
          author reads as the button changing its mind. -->
+    <!-- The live region is the WRAPPER, and it has to be: a screen reader announces a region
+         whose contents change, not one that is inserted already holding them. Every state below
+         replaces its predecessor, so the role sat on elements that came and went and announced
+         nothing — including the one state a person most needs told about, that their published
+         form is reachable by nobody. -->
+    <div class="fb-publish-status" role="status" aria-live="polite">
     @if (!publishStateReady) {
-      <span class="fb-published" role="status" aria-live="polite">
+      <span class="fb-published">
         <i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Checking…
       </span>
     } @else {
@@ -101,22 +107,26 @@
              links against a fresh `now`, so reading it three times could in principle disagree
              with itself across midnight on a link's closing date. -->
         @let reach = publishReach;
-        @if (reach.needsAttention) {
-          <!-- A button, not a badge, in exactly the states with something to do: the remedy is on
-               another tab, and a status that reports a problem and leaves you to find the tab is
-               half a message. Live and unknown stay text — there is nothing to press. -->
+        @if (reach.reachable) {
+          <span class="fb-published" [title]="reach.detail">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i> {{ reach.label }}
+          </span>
+        } @else {
+          <!-- A button, not a badge, in every state that is not reachable — including the one
+               where the links could not be read, because the Distribute tab is where that
+               failure is actually explained. The remedy lives on another tab, and a status that
+               reports a problem and leaves you to find the tab is half a message. The full
+               sentence goes on `aria-label` as well as `title`, so the instruction is not
+               hover-only for anyone. -->
           <button
             type="button"
             class="fb-published fb-published--unshared"
             [title]="reach.detail"
+            [attr.aria-label]="reach.detail"
             (click)="setTab('distribute')"
           >
             <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ reach.label }}
           </button>
-        } @else {
-          <span class="fb-published" role="status" [title]="reach.detail">
-            <i class="fa-solid fa-circle-check" aria-hidden="true"></i> {{ reach.label }}
-          </span>
         }
       }
       @case ('update') {
@@ -143,6 +153,7 @@
       }
     }
     }
+    </div>
   </header>
 
   <!-- A refused save or delete. Rendered here rather than logged and forgotten: BaseEntity
