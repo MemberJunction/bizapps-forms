@@ -160,7 +160,9 @@ describe('partial semantics (Task 4)', () => {
   });
 });
 
-describe('client-supplied responseId ownership guard (autosave seam)', () => {
+// These cover which row the LOOKUPS propose for a client-supplied responseId. Whether the caller
+// may then write to it is a separate decision made at persistence — `session-ownership.spec.ts`.
+describe('client-supplied responseId lookup (autosave seam)', () => {
   it('adopts a client responseId that belongs to THIS session (threads the same partial)', async () => {
     // Row owned by the current session; client sends its id explicitly as the autosave target.
     const { ctx, fake } = build({ existingResponses: [partialRow()] });

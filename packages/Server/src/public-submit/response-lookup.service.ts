@@ -203,10 +203,15 @@ export interface OwnedResponseLookupKey {
  * stored `AnonymousSessionID` is non-empty and is not the caller's. A candidate returned here that
  * belongs to somebody else is therefore refused rather than adopted.
  *
+ * It was called `findAdoptableResponseById`, and the name is half of how the gap survived review:
+ * "adoptable" asserts the very property the body never checked, so every call site read as though
+ * ownership had already been settled. RESUMABLE is what the query actually tests — the row is in
+ * a status a later save may continue writing to (see `RESUMABLE_RESPONSE_STATUSES`).
+ *
  * A blank/absent `responseId` returns "no match" without querying. A query error returns
  * `ok:false` so the caller falls back (never adopts an unverified row).
  */
-export async function findAdoptableResponseById(
+export async function findResumableResponseById(
   provider: DefinitionRunViewProvider,
   key: Pick<OwnedResponseLookupKey, 'responseId' | 'formVersionId'>,
   contextUser: UserInfo,

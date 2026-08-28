@@ -40,7 +40,7 @@ import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
 import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
   countPartialResponses,
-  findAdoptableResponseById,
+  findResumableResponseById,
   findOwnedResponseById,
   findResponseById,
   findSessionResponse,
@@ -737,16 +737,16 @@ async function resolveExistingPartial(
     //     session (the original duplicate-row bug). It is NOT the ownership check — persistence
     //     refuses the write if the row proposed here turns out to have an owner (issue #78).
     if (!ctx.sessionId) {
-      const adoptable = await findAdoptableResponseById(
+      const resumable = await findResumableResponseById(
         ctx.provider,
         { responseId: submission.clientResponseId, formVersionId: resolved.version.ID },
         ctx.elevatedUser,
       );
-      if (adoptable.ok && adoptable.response) {
-        return { response: adoptable.response };
+      if (resumable.ok && resumable.response) {
+        return { response: resumable.response };
       }
     }
-    // Hint did not resolve to an adoptable row (foreign id, wrong version, already Complete, or
+    // Hint did not resolve to a resumable row (unknown id, wrong version, already sealed, or a
     // lookup error): ignore it and fall through to the session-key lookup.
   }
   return findSessionResponse(
