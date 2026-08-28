@@ -140,7 +140,7 @@ describe('FormUploadStore — failure', () => {
       error: 'Network unavailable.',
       progress: null,
     });
-    expect(store.lastFileFor('q-resume')?.name).toBe('resume.txt');
+    expect(store.viewFor('q-resume').file?.name).toBe('resume.txt');
     expect(runtime.valueFor('q-resume')).toBeUndefined();
   });
 
@@ -166,7 +166,7 @@ describe('FormUploadStore — clearing', () => {
     store.clear('q-resume');
 
     expect(store.viewFor('q-resume')).toEqual(IDLE_UPLOAD);
-    expect(store.lastFileFor('q-resume')).toBeNull();
+    expect(store.viewFor('q-resume').file).toBeNull();
 
     // The respondent said they do not want this file; the upload already on the wire still
     // resolves, and must change nothing.

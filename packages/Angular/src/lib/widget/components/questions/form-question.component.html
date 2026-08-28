@@ -143,18 +143,36 @@
           </div>
         }
         @case ('FileUpload') {
-          <input
-            class="mjf-input mjf-file"
-            [id]="inputId()"
-            type="file"
-            #fileInput
-            [accept]="fileAccept()"
-            [disabled]="uploadStatus() === 'uploading'"
-            [attr.aria-required]="q.isRequired"
-            [attr.aria-invalid]="!!errorMessage() || uploadStatus() === 'error'"
-            [attr.aria-describedby]="describedBy()"
-            (change)="onFile(fileInput)"
-          />
+          <!-- The input is visually hidden and a label stands in for it, which is not styling.
+               A file input DRAWS ITS OWN STATUS — "No file chosen" — from its `files` list, and
+               that list is empty on a control Angular has just re-created. So after leaving the
+               section and coming back it sat beside our own line reading "licence.pdf uploaded",
+               contradicting it, and nothing can be written to it to make the two agree. Deleting
+               the second status display is the fix; the line below is the only one.
+
+               The input keeps the id, the validation attributes and the focus — it is still the
+               control — so a screen reader and the mobile camera-capture affordance are unchanged.
+               The label is `aria-hidden` because the question's own <label> already names the
+               input, and the ring is drawn with :focus-within since the input itself is off
+               screen. -->
+          <div class="mjf-file" [class.mjf-file--busy]="uploadStatus() === 'uploading'">
+            <input
+              class="mjf-visually-hidden"
+              [id]="inputId()"
+              type="file"
+              #fileInput
+              [accept]="fileAccept()"
+              [disabled]="uploadStatus() === 'uploading'"
+              [attr.aria-required]="q.isRequired"
+              [attr.aria-invalid]="!!errorMessage() || uploadStatus() === 'error'"
+              [attr.aria-describedby]="describedBy()"
+              (change)="onFile(fileInput)"
+            />
+            <label class="mjf-file__pick" [attr.for]="inputId()" aria-hidden="true">
+              <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+              {{ uploadFileName() || answerRecorded() ? 'Choose a different file' : 'Choose a file' }}
+            </label>
+          </div>
 
           @if (uploadStatus() === 'uploading') {
             <div
@@ -186,6 +204,17 @@
                   <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
                   {{ uploadFileName() }} uploaded
                 </span>
+              }
+              @case ('idle') {
+                <!-- An answer with nothing local to show for it: the file was attached in an
+                     earlier session, so this widget holds its id and not its name. Saying nothing
+                     here renders an empty-looking control over a stored answer. -->
+                @if (answerRecorded()) {
+                  <span class="mjf-file__ok">
+                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+                    A file is attached to this answer.
+                  </span>
+                }
               }
             }
           </p>
@@ -369,8 +398,15 @@
           <ng-container *ngTemplateOutlet="compositeControl" />
         }
         @case ('Signature') {
+          <!-- Controlled, like every other control in this switch. `subject` is the repaint key:
+               Scroll destroys this pad on leaving the section, and OneQuestion re-points ONE pad
+               at the next question without destroying it, and both must put the right drawing
+               back. See the component for what each binding closes. -->
           <mjf-signature-pad
             [label]="q.prompt"
+            [subject]="q.id"
+            [image]="uploadedFile()"
+            [recorded]="answerRecorded()"
             (drawn)="onSignatureDrawn($event)"
             (cleared)="onSignatureCleared()"
           />

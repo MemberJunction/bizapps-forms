@@ -252,7 +252,43 @@
   }
 }
 
-/* ---- File ---- */
+/* ---- File ----
+   The native input is off screen (see the template for why), so the label carries every visual
+   state it used to: the hit target, the focus ring, and the disabled look while an upload runs. */
+.mjf-file {
+  display: block;
+  /* Positioned so the clipped input sits HERE rather than against some far ancestor: a failed
+     submit focuses the first invalid control by id, and the browser scrolls to wherever that
+     off-screen element actually is. */
+  position: relative;
+}
+
+.mjf-file__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.9375rem;
+  color: var(--mjf-page-ink);
+  background: var(--mjf-choice-bg);
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-input-radius);
+  cursor: pointer;
+}
+
+/* The input is the thing that takes focus; the label is the thing that can show it. */
+.mjf-file:focus-within .mjf-file__pick {
+  border-color: var(--mjf-accent);
+  box-shadow: var(--mjf-focus-ring);
+}
+
+.mjf-file--busy .mjf-file__pick {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .mjf-file__name {
   margin: 0.5rem 0 0;
   font-size: 0.875rem;

@@ -133,6 +133,29 @@ export class FormQuestionComponent {
   protected readonly uploadFileName = computed(() => this.upload().fileName);
   /** Inline, respondent-facing upload error, or `null`. */
   protected readonly uploadError = computed(() => this.upload().error);
+  /**
+   * The file this question's answer is made of, or `null`.
+   *
+   * What the signature pad repaints itself from after Angular destroys it — leaving a section and
+   * coming back, or stepping past a question of another type — and what a failed upload is
+   * retried with. Read from the store, keyed by question id, for the same reason every other
+   * upload fact is: this component instance is recycled across questions and cannot be trusted to
+   * still be the one the file belongs to.
+   */
+  protected readonly uploadedFile = computed(() => this.upload().file);
+  /**
+   * Whether a file answer is on record for this question — the answer id, not the artifact.
+   *
+   * The two can come apart, and a control that reads only the artifact then renders EMPTY over a
+   * stored answer. That is the shape of the bug the signature pad had, one level up: the upload
+   * store is per-widget memory, so a signature or file captured in an earlier session leaves the
+   * answer with nothing local to show for it. Reading the answer itself is what keeps the control
+   * from claiming a question is unanswered when it is not.
+   */
+  protected readonly answerRecorded = computed(() => {
+    const value = this.value();
+    return typeof value === 'string' && value.trim() !== '';
+  });
   /** Whole-number progress percent for the aria-valuenow / label. */
   protected readonly uploadPercent = computed(() => {
     const p = this.uploadProgress();
@@ -597,7 +620,7 @@ export class FormQuestionComponent {
 
   /** Re-run the upload for the previously-selected file after a failure. */
   protected async retryUpload(): Promise<void> {
-    const last = this.uploads.lastFileFor(this.question().id);
+    const last = this.uploadedFile();
     if (last) {
       await this.uploadFile(last);
     }
