@@ -31,6 +31,7 @@ import {
   respondentPermissions,
   type ExistingResponseRow,
   type FakeProvider,
+  type SavedRecord,
 } from './fakes';
 
 const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
@@ -94,7 +95,7 @@ function submission(overrides?: Partial<PipelineSubmission>): PipelineSubmission
 }
 
 /** Every write the pipeline made against the victim's row. Must stay empty on a refusal. */
-function writesToVictimRow(fake: FakeProvider): unknown[] {
+function writesToVictimRow(fake: FakeProvider): SavedRecord[] {
   return fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY && r.values.ID === VICTIM_RESPONSE_ID);
 }
 
@@ -164,6 +165,21 @@ describe('an owned response cannot be taken over', () => {
     expect(result.responseId).toBe(ownRow.ID);
     expect(result.responseId).not.toBe(VICTIM_RESPONSE_ID);
     expect(writesToVictimRow(fake)).toHaveLength(0);
+  });
+
+  it('will not report a foreign row’s status back through the already-sealed short-circuit', async () => {
+    // A TERMINAL victim row takes a different branch: persistence loads it, sees it is sealed, and
+    // returns an idempotent no-op — the row's own id and status, with nothing written. That is the
+    // right answer for the respondent who owns it and a status oracle for anybody else, so
+    // ownership is settled before that branch rather than at the write it never reaches.
+    const sealed = victimPartial({ Status: 'Complete' });
+    const { ctx, fake } = build({ sessionId: '', concurrentlyCreated: [sealed] });
+
+    const result = await runSubmitPipeline(ctx, submission({ partial: true, clientResponseId: VICTIM_RESPONSE_ID }));
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBeUndefined();
+    expect(fake.saved).toHaveLength(0);
   });
 
   it('refuses a caller who reaches the row through the concurrent-insert race window', async () => {
@@ -280,6 +296,22 @@ describe('the flows that have to keep working', () => {
 
     const written = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
     expect(written?.values.AnonymousSessionID).toBe(VICTIM_SESSION);
+  });
+
+  it('stores an owner in the same form the ownership check reads it back in', async () => {
+    // Storing the RAW header let the column hold a value that did not mean what it looked like: a
+    // caller sending three spaces created a row that APPEARS owned but folds to "no owner", so
+    // anyone holding its id could adopt it. Store what we compare, and the gap cannot exist.
+    const { ctx, fake } = build({ sessionId: '  Mixed-Case-Session  ' });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      submission({ partial: true, clientResponseId: VICTIM_RESPONSE_ID }),
+    );
+
+    expect(result.success).toBe(true);
+    const written = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
+    expect(written?.values.AnonymousSessionID).toBe('mixed-case-session');
   });
 
   it('stamps the caller’s session on a row it creates', async () => {

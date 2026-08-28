@@ -12,6 +12,10 @@
 
 **The refusal tells the caller nothing they did not arrive with.** One message for every ownership failure — absent header, blank header, a different session, a session that owns some other response — so a refusal cannot be used to tell those cases apart, and it names neither the owner nor the fact that there is one. The write is refused rather than silently discarded, so the caller is no longer answered `success: true` for a submission that was not recorded. Each refusal logs the response id and form version for the operator, and neither session id.
 
+Ownership is settled the moment a pre-existing row is loaded, before the branch that short-circuits an already-sealed response to an idempotent no-op. That branch returns the row's id and status without writing anything, which is the right answer for the respondent who owns it and a status oracle for anybody else — so a decision about a read cannot wait for the write seam.
+
+`AnonymousSessionID` is also stored in the same normalized form the check reads it back in. Storing the raw header let the column hold a value that did not mean what it looked like: `x-session-id: '   '` stored three spaces, which reads back as "no owner" — a row that appears owned, is not, and is adoptable by anyone holding its id.
+
 Comparison is trimmed and case-folded, to agree with the SQL predicate it backs up: `AnonymousSessionID='…'` runs under SQL Server's case-insensitive default collation, so a stricter comparison here would have refused writes the lookup had just approved.
 
 **Nothing a real client does changes.** The widget mints its session id per instance and its client response id per form load, so a given response id is only ever presented alongside the session that created it. The genuinely headerless flow — where the row has no owner and the 122-bit client id in `SourceMetadata` is the only capability there is — keeps working exactly as before. No schema change, no migration, no new config, and no client change.
