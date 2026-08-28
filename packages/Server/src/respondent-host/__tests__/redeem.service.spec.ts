@@ -130,6 +130,18 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-closed');
   });
 
+  // The expiry half of that window was checked but never exercised — the test above only ever
+  // took the OpenAt branch, so a broken CloseAt comparison would have gone unnoticed at the door.
+  it('returns distribution-closed once the closing date has passed', async () => {
+    const past = new Date(Date.now() - 60_000);
+    const provider = fakeProvider({ rows: [fakeDistribution({ CloseAt: past })] }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-closed');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('returns distribution-full when the response limit has been reached, minting no token', async () => {
     const provider = fakeProvider({
       rows: [fakeDistribution({ MaxResponses: 6, ResponseCount: 6 })],
