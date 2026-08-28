@@ -98,10 +98,11 @@ export class FormSubmissionInputType {
       'Stable client-generated response id (v4 UUID) — the widget mints one per form load and ' +
       'sends it on every autosave AND the final submit. It is the PRIMARY idempotency key: the ' +
       'server adopts it as the FormResponse primary key on first save and upserts THIS row on ' +
-      'every repeat, so it works even when the anonymous session id is blank. Adoption of an ' +
-      'EXISTING row is gated on session ownership (when a session exists) or a SourceMetadata ' +
-      'client-id proof (when it does not), so a guessed id can never hijack another row. Not part ' +
-      'of the frozen FormSubmissionInput contract — a widget-session concern.',
+      'every repeat, so it works even when the anonymous session id is blank. Adopting an ' +
+      'EXISTING row is gated at the WRITE, not at the lookup that found it: a row whose ' +
+      'AnonymousSessionID is set may only be written by that session, whatever this id says and ' +
+      'whether or not an x-session-id header is sent. Not part of the frozen ' +
+      'FormSubmissionInput contract — a widget-session concern.',
   })
   responseId?: string;
 

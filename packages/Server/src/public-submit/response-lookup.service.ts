@@ -187,14 +187,21 @@ export interface OwnedResponseLookupKey {
 }
 
 /**
- * Resolve a client-supplied `responseId` to an adoptable Partial row when the anonymous
- * session id is BLANK (the common public-submit case — see source-metadata.service for why
- * `sessionId` is routinely empty). Ownership is proven by the id itself: the widget mints a
- * 122-bit random UUID, uses it as the FormResponse primary key, AND records it in
- * `SourceMetadata.clientResponseId`. We adopt the row only when it matches on
- * `(ID, FormVersionID)`, is still `Partial`, AND its stored `SourceMetadata` carries that same
- * client id — so a row created WITHOUT a client id (legacy / different flow) is never adopted
- * by a guessed PK.
+ * Resolve a client-supplied `responseId` to a candidate Partial row when the anonymous session id
+ * is BLANK (the common public-submit case — see source-metadata.service for why `sessionId` is
+ * routinely empty). The id is the correlator: the widget mints a 122-bit random UUID, uses it as
+ * the FormResponse primary key, AND records it in `SourceMetadata.clientResponseId`. A row is
+ * returned only when it matches on `(ID, FormVersionID)`, is still `Partial`, AND its stored
+ * `SourceMetadata` carries that same client id — so a row created WITHOUT a client id (legacy /
+ * different flow) is never returned for a guessed PK.
+ *
+ * WHAT THIS DOES NOT DECIDE (issue #78). It asks nothing about who OWNS the row, and it must not:
+ * this function used to be documented as "ownership is proven by the id itself", which made the
+ * session gate opt-in — a caller who simply omitted `x-session-id` came down this path instead of
+ * {@link findOwnedResponseById} and got another session's partial. Ownership is now settled once,
+ * at the write, by `applyResponseIdentity` in persistence.service, which refuses any row whose
+ * stored `AnonymousSessionID` is non-empty and is not the caller's. A candidate returned here that
+ * belongs to somebody else is therefore refused rather than adopted.
  *
  * A blank/absent `responseId` returns "no match" without querying. A query error returns
  * `ok:false` so the caller falls back (never adopts an unverified row).
@@ -233,10 +240,15 @@ export async function findAdoptableResponseById(
 /**
  * Resolve a CLIENT-SUPPLIED `responseId` (the widget's autosave hint) to a row this session is
  * allowed to keep editing. The row is returned ONLY when it matches on ALL of `(ID,
- * AnonymousSessionID, FormVersionID)` and is still `Partial` — so a guessed/leaked id from
- * another anonymous session can never be adopted (it fails the `AnonymousSessionID` predicate
- * and comes back empty). This preserves the pipeline's "never adopt another session's row"
- * invariant while still letting a same-session widget thread its own partial back in.
+ * AnonymousSessionID, FormVersionID)` and is still `Partial`, so a guessed/leaked id from another
+ * anonymous session comes back empty here — letting a same-session widget thread its own partial
+ * back in without offering it anybody else's.
+ *
+ * This narrows what the pipeline LOOKS FOR; it is not what makes "never adopt another session's
+ * row" true, and reading it as though it were is how that invariant came to be optional (issue
+ * #78). A caller who never reaches this function — no `x-session-id`, or a different one — used to
+ * reach a foreign row by another route entirely. The invariant is enforced once, at the write, by
+ * `applyResponseIdentity` in persistence.service; every route passes through it.
  *
  * A blank/absent `responseId` or `sessionId` returns "no match" without querying. A query error
  * returns `ok:false` so callers fall back to the session-key lookup (fail-open to a fresh row,
