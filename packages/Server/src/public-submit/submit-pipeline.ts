@@ -40,7 +40,7 @@ import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
 import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
   countPartialResponses,
-  findAdoptableResponseById,
+  findResumableResponseById,
   findOwnedResponseById,
   findResponseById,
   findSessionResponse,
@@ -92,9 +92,11 @@ export interface PipelineSubmission {
    * primary key, and every repeat upserts THAT row — so autosave + submit collapse to ONE row
    * even when the anonymous session id is blank (the routine public-submit case).
    *
-   * Adopting an EXISTING row is guarded so a guessed/leaked id can never hijack another's partial:
-   * with a session, the row must be owned by it (`findOwnedResponseById`); with no session, the
-   * row must carry the same id in its SourceMetadata proof (`findAdoptableResponseById`).
+   * Adopting an EXISTING row is guarded at the WRITE so a guessed/leaked id can never hijack
+   * another's partial: `applyResponseIdentity` (persistence.service) refuses any row whose stored
+   * `AnonymousSessionID` is non-empty and is not this caller's. The lookups below only narrow
+   * which row is a candidate — putting the guard in them made it opt-in, because a caller chose
+   * which lookup ran by deciding whether to send `x-session-id` (issue #78).
    */
   clientResponseId?: string;
 }
@@ -692,17 +694,23 @@ function rateLimitGatesFor(
 
 /**
  * Locate the Partial row this submit should UPDATE/PROMOTE, honoring the widget's client-supplied
- * `responseId` autosave hint ONLY when it is proven to belong to the CURRENT anonymous session.
+ * `responseId` autosave hint.
  *
- * Two-step, ownership-first:
- *   1. If the client sent a `responseId`, adopt it iff `findOwnedResponseById` confirms it matches
- *      on (ID, AnonymousSessionID, FormVersionID) and is still Partial. A foreign/guessed id comes
- *      back empty here and is silently dropped — one session can never hijack another's partial.
- *   2. Otherwise (no hint, or the hint did not resolve to an owned row), fall back to the plain
- *      session-key lookup — the pre-existing same-session behavior.
+ * Two-step:
+ *   1. If the client sent a `responseId`, prefer the row `findOwnedResponseById` confirms matches
+ *      on (ID, AnonymousSessionID, FormVersionID) and is still Partial; with no session to key on,
+ *      fall back to the SourceMetadata client-id proof.
+ *   2. Otherwise (no hint, or the hint resolved to nothing), fall back to the plain session-key
+ *      lookup — the pre-existing same-session behavior.
  *
- * Both lookups fail-open: a query error yields "no owned row", so persistence creates a fresh row
- * rather than ever adopting an unverified one.
+ * NOTHING HERE DECIDES OWNERSHIP, and it is important that it does not try (issue #78). This
+ * function only proposes a candidate; `persistSubmission` refuses to write any row owned by
+ * another session, so a candidate that turns out to be foreign is refused rather than adopted.
+ * Enforcing it here instead meant the check applied only to the branch a caller chose to take —
+ * and a caller who matched no branch at all still collided into the row on its primary key.
+ *
+ * Both lookups fail-open: a query error yields "no row", so persistence creates a fresh row (or
+ * refuses, if the id is already taken by someone else) rather than adopting an unverified one.
  */
 async function resolveExistingPartial(
   ctx: PipelineContext,
@@ -723,21 +731,22 @@ async function resolveExistingPartial(
     if (owned.ok && owned.response) {
       return { response: owned.response };
     }
-    // 1b. No usable session (the routine public-submit case — sessionId is blank): adopt the
-    //     row keyed by the client id itself, gated on the SourceMetadata client-id proof so a
-    //     guessed PK can never be adopted. THIS is what makes autosave upsert work with a blank
-    //     session (the original duplicate-row bug).
+    // 1b. No usable session (the routine public-submit case — sessionId is blank): propose the
+    //     row keyed by the client id itself, narrowed by the SourceMetadata client-id proof so a
+    //     merely-guessed PK matches nothing. THIS is what makes autosave upsert work with a blank
+    //     session (the original duplicate-row bug). It is NOT the ownership check — persistence
+    //     refuses the write if the row proposed here turns out to have an owner (issue #78).
     if (!ctx.sessionId) {
-      const adoptable = await findAdoptableResponseById(
+      const resumable = await findResumableResponseById(
         ctx.provider,
         { responseId: submission.clientResponseId, formVersionId: resolved.version.ID },
         ctx.elevatedUser,
       );
-      if (adoptable.ok && adoptable.response) {
-        return { response: adoptable.response };
+      if (resumable.ok && resumable.response) {
+        return { response: resumable.response };
       }
     }
-    // Hint did not resolve to an adoptable row (foreign id, wrong version, already Complete, or
+    // Hint did not resolve to a resumable row (unknown id, wrong version, already sealed, or a
     // lookup error): ignore it and fall through to the session-key lookup.
   }
   return findSessionResponse(
