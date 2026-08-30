@@ -115,6 +115,19 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-closed');
   });
 
+  // A link that was Active once keeps its minted token forever — `provisioning-decision.ts`
+  // mints only for `Status === 'Active'` but never un-mints — so "Draft has no token" is not the
+  // gate it looks like. Draft is the COLUMN DEFAULT, the builder badges it "Paused / Turned off.
+  // Anyone opening it is told the form is not taking responses", and the door served it in full.
+  it('returns distribution-closed for a Draft distribution, minting no token', async () => {
+    const provider = fakeProvider({ rows: [fakeDistribution({ Status: 'Draft' })] }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-closed');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('returns distribution-closed when IsActive is false', async () => {
     const provider = fakeProvider({ rows: [fakeDistribution({ IsActive: false })] }).provider;
     const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
