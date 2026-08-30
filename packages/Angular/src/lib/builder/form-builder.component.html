@@ -428,17 +428,20 @@
                   </div>
                 </div>
                 <div class="fb-q-side fb-reveal">
+                  <!-- Bound to `canMoveQuestion`, not to this loop's own `$first` / `$last`:
+                       the arrow and the guard that refuses the move are then one decision
+                       instead of two that can drift. See the method for why that matters. -->
                   <button
                     type="button"
                     class="fb-q-btn"
-                    [disabled]="busy"
+                    [disabled]="busy || !canMoveQuestion(page, node, -1)"
                     (click)="moveQuestion(page, node, -1); $event.stopPropagation()"
                     aria-label="Move up"
                   ><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
                   <button
                     type="button"
                     class="fb-q-btn"
-                    [disabled]="busy"
+                    [disabled]="busy || !canMoveQuestion(page, node, 1)"
                     (click)="moveQuestion(page, node, 1); $event.stopPropagation()"
                     aria-label="Move down"
                   ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
