@@ -1,5 +1,5 @@
 ---
-"@mj-biz-apps/forms-server": minor
+"@mj-biz-apps/forms-server": patch
 ---
 
 **A link that has had all the responses it asked for now says so at the door (#81).** Setting a share link's response limit to the number it has already collected left `GET /f/<slug>` answering **200 with the whole form** — every field editable, file uploads accepted — and turning the respondent away only at `SubmitFormResponse`, on a screen their answers cannot be recovered from. Turning the *same* link off gave the correct 410 "Form unavailable" before they typed anything, so two facts that both mean "this link is not taking responses" were handled in two different places, and the one that wastes the most of a respondent's time was the one handled last.
