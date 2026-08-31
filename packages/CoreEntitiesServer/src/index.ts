@@ -24,6 +24,8 @@ export {
   type MintAnonymousInviteParams,
   type MintAnonymousInviteResult,
   type InviteWriteResult,
+  type InviteExpiryBounds,
+  type AnonymousCredentialRef,
 } from './magic-link/minter.js';
 export {
   getMagicLinkProvisioningConfig,

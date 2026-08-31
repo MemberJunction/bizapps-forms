@@ -32,8 +32,18 @@
  *                                 is about the role that will actually be minted.
  */
 
-/** A `ChannelType` value on `FormDistribution`. */
-export type DistributionChannelType = 'Email' | 'Embed' | 'PublicLink' | 'QR';
+import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
+
+/**
+ * A `ChannelType` value on `FormDistribution`.
+ *
+ * DERIVED from the generated entity, never re-typed. The union is CodeGen's projection of the
+ * column's CHECK constraint, so a migration that widens the constraint widens this on the next
+ * run — where a hand-written copy would silently stay narrow, and `linkableChannels.has(...)`
+ * would classify the new value as not-linkable and revoke every such link's credential with no
+ * compile-time signal. `import type` is erased at build time, so this costs no runtime dependency.
+ */
+export type DistributionChannelType = mjBizAppsFormsFormDistributionEntityType['ChannelType'];
 
 /** Frozen, validated configuration for distribution magic-link provisioning. */
 export interface MagicLinkProvisioningConfig {

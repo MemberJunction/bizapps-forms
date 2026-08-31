@@ -5,6 +5,12 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
+import type { MJMagicLinkInviteEntity } from '@memberjunction/core-entities';
+
+/** The distribution every invite in these tests is scoped to. */
+const RESOURCE = 'dist-1';
+/** How the credential is addressed now: the invite, and the resource it must belong to. */
+const CRED = { inviteId: 'invite-7', resourceId: RESOURCE };
 
 /** Mutable mock state the tests drive. */
 const mockState: {
@@ -17,10 +23,20 @@ const mockState: {
   lastSavedInvite?: Record<string, unknown>;
   /** Whether `Load(id)` finds the invite row (revoke / re-bound paths). */
   loadSucceeds: boolean;
-  /** The Status a loaded invite starts at (revoke / re-bound paths). */
-  loadedStatus: string;
+  /**
+   * The Status a loaded invite starts at (revoke / re-bound paths).
+   *
+   * Derived from the entity, not re-typed: this drives the "leave a terminal invite exactly as it
+   * ended" loop below, so a core status this union does not know about must red the build rather
+   * than quietly go untested.
+   */
+  loadedStatus: MJMagicLinkInviteEntity['Status'];
   /** The ExpiresAt a loaded invite starts at (re-bound path). */
   loadedExpiresAt: Date;
+  /** The instant a loaded invite was issued — the anchor a host lifetime ceiling is measured from. */
+  loadedCreatedAt: Date;
+  /** The resource a loaded invite is scoped to — what the ownership check compares against. */
+  loadedResourceID: string;
   /** Ids passed to `Load` (revoke / re-bound paths). */
   loadedIds: string[];
   /** How the existence probe behind a failed `Load` answers. */
@@ -36,6 +52,8 @@ const mockState: {
   loadSucceeds: true,
   loadedStatus: 'Active',
   loadedExpiresAt: new Date('9999-12-31T00:00:00.000Z'),
+  loadedCreatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  loadedResourceID: 'dist-1',
   loadedIds: [],
   existenceProbe: { Success: true, TotalRowCount: 0 },
 };
@@ -70,6 +88,8 @@ vi.mock('@memberjunction/core', async () => {
             if (!mockState.loadSucceeds) return false;
             values.Status = mockState.loadedStatus;
             values.ExpiresAt = mockState.loadedExpiresAt;
+            values.__mj_CreatedAt = mockState.loadedCreatedAt;
+            values.ResourceID = mockState.loadedResourceID;
             return true;
           },
           Save: async () => {
@@ -133,6 +153,8 @@ describe('MagicLinkInviteMinter', () => {
     mockState.loadedStatus = 'Active';
     mockState.loadedExpiresAt = new Date('9999-12-31T00:00:00.000Z');
     mockState.loadedIds = [];
+    mockState.loadedCreatedAt = new Date('2026-01-01T00:00:00.000Z');
+    mockState.loadedResourceID = RESOURCE;
     mockState.existenceProbe = { Success: true, TotalRowCount: 0 };
   });
 
@@ -221,6 +243,8 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     mockState.loadedStatus = 'Active';
     mockState.loadedExpiresAt = new Date('9999-12-31T00:00:00.000Z');
     mockState.loadedIds = [];
+    mockState.loadedCreatedAt = new Date('2026-01-01T00:00:00.000Z');
+    mockState.loadedResourceID = RESOURCE;
     mockState.existenceProbe = { Success: true, TotalRowCount: 0 };
   });
 
@@ -228,7 +252,7 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     // `Status='Revoked'` is MJ's shipped revocation mechanism, not an invention here:
     // `evaluateInvite` rejects it with errorCode `revoked` before any other check, and
     // the atomic consume UPDATE matches only `Status='Active'`.
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(true);
     expect(mockState.loadedIds).toEqual(['invite-7']);
     expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
@@ -239,14 +263,14 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     // moment when live credentials should stop being live, so the gate that skips a
     // mint must not skip a revocation.
     mockState.magicLinkEnabled = false;
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(true);
     expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
   });
 
   it('is idempotent on an already-revoked invite, and writes nothing', async () => {
     mockState.loadedStatus = 'Revoked';
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(true);
     expect(mockState.lastSavedInvite).toBeUndefined();
   });
@@ -256,7 +280,7 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     // for a row that no longer exists would wedge the distribution permanently.
     mockState.loadSucceeds = false;
     mockState.existenceProbe = { Success: true, TotalRowCount: 0 };
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-gone', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite({ inviteId: 'invite-gone', resourceId: RESOURCE }, contextUser);
     expect(result).toMatchObject({ success: true, changed: false });
     expect(mockState.lastSavedInvite).toBeUndefined();
   });
@@ -267,21 +291,21 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     // still live — the orphaned invite this whole design exists to prevent.
     mockState.loadSucceeds = false;
     mockState.existenceProbe = { Success: true, TotalRowCount: 1 };
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(false);
   });
 
   it('does NOT report success when it cannot even tell whether the row is there', async () => {
     mockState.loadSucceeds = false;
     mockState.existenceProbe = { Success: false, TotalRowCount: 0, ErrorMessage: 'connection reset' };
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(false);
     expect(result.message).toMatch(/connection reset/);
   });
 
   it('reports a save failure with the entity message, and does NOT claim success', async () => {
     mockState.saveSucceeds = false;
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(false);
     expect(result.message).toMatch(/forced failure/);
   });
@@ -296,6 +320,8 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
 describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
   const CLOSE_AT = new Date('2026-10-01T00:00:00.000Z');
   const NO_EXPIRY = new Date('9999-12-31T00:00:00.000Z');
+  /** When the credential under test was issued — what a host lifetime ceiling is measured from. */
+  const ISSUED_AT = new Date('2026-01-01T00:00:00.000Z');
 
   beforeEach(() => {
     mockState.magicLinkEnabled = true;
@@ -304,12 +330,15 @@ describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
     mockState.loadSucceeds = true;
     mockState.loadedStatus = 'Active';
     mockState.loadedExpiresAt = NO_EXPIRY;
+    mockState.loadedCreatedAt = ISSUED_AT;
     mockState.loadedIds = [];
+    mockState.loadedCreatedAt = new Date('2026-01-01T00:00:00.000Z');
+    mockState.loadedResourceID = RESOURCE;
     mockState.existenceProbe = { Success: true, TotalRowCount: 0 };
   });
 
   it('moves a live invite onto the link closing date', async () => {
-    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('invite-7', CLOSE_AT, contextUser);
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: CLOSE_AT, maxLifetimeHours: undefined }, contextUser);
     expect(result).toMatchObject({ success: true, changed: true });
     expect(mockState.lastSavedInvite!.ExpiresAt).toBe(CLOSE_AT);
   });
@@ -318,7 +347,7 @@ describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
     // "Remove the expiry" in the builder produces exactly this call. Without it the
     // invite keeps expiring on the date that was just deleted.
     mockState.loadedExpiresAt = CLOSE_AT;
-    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('invite-7', null, contextUser);
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: null, maxLifetimeHours: undefined }, contextUser);
     expect(result.changed).toBe(true);
     expect((mockState.lastSavedInvite!.ExpiresAt as Date).toISOString()).toBe(NO_EXPIRY.toISOString());
   });
@@ -329,12 +358,12 @@ describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
     // now-plus-a-century: a relative one never compares equal, so every save would
     // rewrite it and walk the expiry forward forever.
     mockState.loadedExpiresAt = CLOSE_AT;
-    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('invite-7', CLOSE_AT, contextUser);
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: CLOSE_AT, maxLifetimeHours: undefined }, contextUser);
     expect(result).toMatchObject({ success: true, changed: false });
     expect(mockState.lastSavedInvite).toBeUndefined();
 
     mockState.loadedExpiresAt = NO_EXPIRY;
-    const unbounded = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('invite-7', null, contextUser);
+    const unbounded = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: null, maxLifetimeHours: undefined }, contextUser);
     expect(unbounded.changed).toBe(false);
     expect(mockState.lastSavedInvite).toBeUndefined();
   });
@@ -346,17 +375,119 @@ describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
     for (const status of ['Revoked', 'Consumed', 'Expired']) {
       mockState.loadedStatus = status;
       mockState.lastSavedInvite = undefined;
-      const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('invite-7', CLOSE_AT, contextUser);
+      const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: CLOSE_AT, maxLifetimeHours: undefined }, contextUser);
       expect(result, status).toMatchObject({ success: true, changed: false });
       expect(mockState.lastSavedInvite, status).toBeUndefined();
     }
   });
 
+  it('measures a host lifetime ceiling from the invite\'s ISSUE time, not from now', async () => {
+    // The same lesson as the sentinel two tests up, applied to the other bound.
+    // `FORMS_MAGICLINK_EXPIRY_HOURS` bounds how long a CREDENTIAL may live, so its anchor is
+    // the instant that credential was issued — a fact about this row. Anchored to `now` it is
+    // a different instant on every call, so this pass (which runs after EVERY save of a live
+    // link, including every completed public submission) rewrites the row every time and walks
+    // the expiry forward forever. A ceiling a host set in order to bound the credential would
+    // then never bound anything — the very "credential outlives what it authorises" shape this
+    // work exists to remove.
+    mockState.loadedExpiresAt = new Date('2026-01-02T00:00:00.000Z'); // ISSUED_AT + 24h
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: null, maxLifetimeHours: 24 },
+      contextUser,
+    );
+    expect(result).toMatchObject({ success: true, changed: false });
+    expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
+  it('takes the EARLIER of the closing date and the issue-anchored ceiling', async () => {
+    // Both are upper bounds, so the earlier wins — the combination `resolveExpiry` already
+    // owns. Proving it here is what keeps the resolution in one place now that the anchor
+    // (and therefore the resolution) has to happen where the invite row is.
+    mockState.loadedExpiresAt = NO_EXPIRY;
+    await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: CLOSE_AT, maxLifetimeHours: 24 }, // ceiling lands 2026-01-02, well before CLOSE_AT
+      contextUser,
+    );
+    expect((mockState.lastSavedInvite!.ExpiresAt as Date).toISOString()).toBe('2026-01-02T00:00:00.000Z');
+
+    mockState.lastSavedInvite = undefined;
+    mockState.loadedExpiresAt = NO_EXPIRY;
+    await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: new Date('2026-01-01T12:00:00.000Z'), maxLifetimeHours: 24 },
+      contextUser,
+    );
+    expect((mockState.lastSavedInvite!.ExpiresAt as Date).toISOString()).toBe('2026-01-01T12:00:00.000Z');
+  });
+
+  it('refuses to guess a ceiling it has no issue time to anchor, rather than anchoring it to now', async () => {
+    // `__mj_CreatedAt` is NOT NULL, so this is a "cannot happen" — guarded anyway because the
+    // fallback that suggests itself (anchor to `now`) is precisely the defect above, and it
+    // would reappear silently. Reported as a failure so the next save retries it.
+    mockState.loadedCreatedAt = new Date('nonsense');
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: null, maxLifetimeHours: 24 },
+      contextUser,
+    );
+    expect(result.success).toBe(false);
+    expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
   it('refuses a blank invite id, and reports a save failure honestly', async () => {
-    expect((await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('  ', CLOSE_AT, contextUser)).success).toBe(false);
+    expect((await new MagicLinkInviteMinter().SetAnonymousInviteExpiry({ inviteId: '  ', resourceId: RESOURCE }, { closeAt: CLOSE_AT, maxLifetimeHours: undefined }, contextUser)).success).toBe(false);
     mockState.saveSucceeds = false;
-    const failed = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry('invite-7', CLOSE_AT, contextUser);
+    const failed = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: CLOSE_AT, maxLifetimeHours: undefined }, contextUser);
     expect(failed.success).toBe(false);
     expect(failed.message).toMatch(/forced failure/);
+  });
+});
+
+describe('MagicLinkInviteMinter — the credential must belong to the link acting on it', () => {
+  beforeEach(() => {
+    mockState.magicLinkEnabled = true;
+    mockState.saveSucceeds = true;
+    mockState.lastSavedInvite = undefined;
+    mockState.loadSucceeds = true;
+    mockState.loadedStatus = 'Active';
+    mockState.loadedExpiresAt = new Date('9999-12-31T00:00:00.000Z');
+    mockState.loadedCreatedAt = new Date('2026-01-01T00:00:00.000Z');
+    mockState.loadedResourceID = RESOURCE;
+    mockState.loadedIds = [];
+    mockState.existenceProbe = { Success: true, TotalRowCount: 0 };
+  });
+
+  it('refuses to revoke an invite scoped to another distribution, and says so', async () => {
+    // `FormDistribution.MagicLinkInviteID` has no foreign key and rides the generated GraphQL
+    // update input, and these writes run under the elevated system user on the public submit
+    // path — so without this an id pointing at somebody else's invite revokes THEIR live
+    // credential on the next save of yours. The mint already recorded the scope; this reads it.
+    mockState.loadedResourceID = 'someone-elses-distribution';
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
+    expect(result.success).toBe(false);
+    expect(result.changed).toBe(false);
+    expect(result.message).toMatch(/scoped to resource/);
+    expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
+  it('refuses to re-bound the expiry of an invite scoped to another distribution', async () => {
+    mockState.loadedResourceID = 'someone-elses-distribution';
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: new Date('2026-10-01T00:00:00.000Z'), maxLifetimeHours: undefined },
+      contextUser,
+    );
+    expect(result.success).toBe(false);
+    expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
+  it('reports the refusal as a FAILURE, never as a postcondition that holds', async () => {
+    // The caller unlinks a credential it believes is dead. A refusal dressed as success would
+    // therefore orphan a live invite belonging to another link — worse than doing nothing.
+    mockState.loadedResourceID = 'someone-elses-distribution';
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
+    expect(result).toMatchObject({ success: false, changed: false });
   });
 });

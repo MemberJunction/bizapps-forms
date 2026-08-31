@@ -51,6 +51,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * would kill a live link's credential over a write that never happened.
    */
   public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+    this.refuseClientCredentialWrites();
     const saved = await super.Save(options);
     if (!saved || this.credentialWriteInFlight) {
       return saved;
@@ -86,6 +87,70 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     }
 
     return true;
+  }
+
+  /**
+   * Put back any credential value this save did not have the right to change.
+   *
+   * The credential pair is SERVER-OWNED, and until this existed nothing said so. Both columns
+   * ride the generated GraphQL update input, MJ's client sends every non-read-only field, and
+   * `ResolverBase.UpdateRecord` ends in an unconditional `SetMany(clientNewValues)` — so a
+   * builder tab holding a record from before a reissue writes the OLD pair back on its next
+   * ordinary save (a rename, a cap edit), with no conflict and no warning. That silently
+   * reverts a rotation: the link is badged Live on a token that no longer redeems, and the
+   * invite that replaced it is left `Active` with nothing referencing it — the orphaned live
+   * credential bizapps-forms#104 exists to remove, reintroduced by the act of rotating.
+   *
+   * The rule is asymmetric because the two halves mean different things to a client:
+   *
+   *  - `MagicLinkInviteID` is never a client's to write. It is the handle used to REVOKE, so a
+   *    write here also lets one distribution point at another's invite and kill it on the next
+   *    save — a save the public submit path performs, under the elevated system user.
+   *  - `PublicLinkToken` may only be CLEARED. Clearing is the documented reissue request and the
+   *    builder's Reissue button; setting it to a value is either a stale copy or an attempt to
+   *    install a token no invite hashes to, and both are refused.
+   *
+   * Skipped while {@link persistCredential} is writing, which is the one writer that owns these
+   * columns. A raw `UPDATE` bypasses this entirely — deliberately, since the invariant is
+   * restored from CURRENT state on the next save either way; the ownership check in the minter
+   * is what protects the invite itself from that direction.
+   */
+  private refuseClientCredentialWrites(): void {
+    if (this.credentialWriteInFlight) {
+      return;
+    }
+    if (!this.IsSaved) {
+      // A record being CREATED has no old value to restore, and a credential it arrived holding
+      // was never issued by this hook — it names an invite minted for some other distribution, or
+      // none at all. Either way the new row must start with none, and the decision below then
+      // mints it one. Without this the whole guard has a create-shaped hole straight through it.
+      if (this.MagicLinkInviteID || this.PublicLinkToken) {
+        LogError(
+          `[FormDistributionEntityServer] Ignoring a credential supplied on the creation of a ` +
+            `distribution (invite ${String(this.MagicLinkInviteID)}). New links are issued their own.`,
+        );
+        this.MagicLinkInviteID = null;
+        this.PublicLinkToken = null;
+      }
+      return;
+    }
+    const invite = this.GetFieldByName('MagicLinkInviteID');
+    if (invite?.Dirty) {
+      LogError(
+        `[FormDistributionEntityServer] Ignoring a client write of MagicLinkInviteID on distribution ` +
+          `${this.ID} (${String(invite.OldValue)} -> ${String(invite.Value)}). That column is written only by ` +
+          `this hook; clear PublicLinkToken to ask for a reissue.`,
+      );
+      this.MagicLinkInviteID = invite.OldValue as string | null;
+    }
+    const token = this.GetFieldByName('PublicLinkToken');
+    if (token?.Dirty && token.Value !== null && token.Value !== '') {
+      LogError(
+        `[FormDistributionEntityServer] Ignoring a client write of PublicLinkToken on distribution ` +
+          `${this.ID}. A token is issued only by this hook; clearing the column is the way to ask for a new one.`,
+      );
+      this.PublicLinkToken = token.OldValue as string | null;
+    }
   }
 
   /**
@@ -127,7 +192,7 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
     }
 
     try {
-      const revoked = await minter.RevokeAnonymousInvite(inviteId, contextUser);
+      const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser);
       if (!revoked.success) {
         LogError(
           `[FormDistributionEntityServer] Deleted distribution ${distributionId} but failed to revoke ` +

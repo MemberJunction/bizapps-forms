@@ -3,7 +3,9 @@ import type { UserInfo } from '@memberjunction/core';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type ProvisionContext } from '../provision-runner.js';
 import type { MagicLinkProvisioningConfig } from '../config.js';
 import type {
+  AnonymousCredentialRef,
   IAnonymousMagicLinkMinter,
+  InviteExpiryBounds,
   InviteWriteResult,
   MintAnonymousInviteParams,
   MintAnonymousInviteResult,
@@ -42,8 +44,8 @@ function livingCtx(overrides: Partial<ProvisionContext> = {}): ProvisionContext 
 interface FakeMinter {
   minter: IAnonymousMagicLinkMinter;
   mints: { params: MintAnonymousInviteParams; user: UserInfo }[];
-  revokes: { inviteId: string; user: UserInfo }[];
-  expiries: { inviteId: string; expiresAt: Date | null; user: UserInfo }[];
+  revokes: { credential: AnonymousCredentialRef; user: UserInfo }[];
+  expiries: { credential: AnonymousCredentialRef; bounds: InviteExpiryBounds; user: UserInfo }[];
 }
 
 /** Records every call and returns fixed results. */
@@ -53,8 +55,8 @@ function fakeMinter(
   expiryResult: InviteWriteResult = { success: true, changed: false },
 ): FakeMinter {
   const mints: { params: MintAnonymousInviteParams; user: UserInfo }[] = [];
-  const revokes: { inviteId: string; user: UserInfo }[] = [];
-  const expiries: { inviteId: string; expiresAt: Date | null; user: UserInfo }[] = [];
+  const revokes: { credential: AnonymousCredentialRef; user: UserInfo }[] = [];
+  const expiries: { credential: AnonymousCredentialRef; bounds: InviteExpiryBounds; user: UserInfo }[] = [];
   return {
     mints,
     revokes,
@@ -64,12 +66,12 @@ function fakeMinter(
         mints.push({ params, user });
         return mintResult;
       },
-      RevokeAnonymousInvite: async (inviteId, user) => {
-        revokes.push({ inviteId, user });
+      RevokeAnonymousInvite: async (credential, user) => {
+        revokes.push({ credential, user });
         return revokeResult;
       },
-      SetAnonymousInviteExpiry: async (inviteId, expiresAt, user) => {
-        expiries.push({ inviteId, expiresAt, user });
+      SetAnonymousInviteExpiry: async (credential, bounds, user) => {
+        expiries.push({ credential, bounds, user });
         return expiryResult;
       },
     },
@@ -197,7 +199,9 @@ describe('runProvisioning — revoking', () => {
     );
 
     expect(outcome).toEqual({ result: 'revoked', inviteId: OLD_INVITE });
-    expect(fake.revokes).toEqual([{ inviteId: OLD_INVITE, user: contextUser }]);
+    expect(fake.revokes).toEqual([
+      { credential: { inviteId: OLD_INVITE, resourceId: 'dist-1' }, user: contextUser },
+    ]);
     expect(persist).toHaveBeenCalledExactlyOnceWith(null);
     expect(fake.mints).toHaveLength(0);
   });
@@ -240,7 +244,11 @@ describe('runProvisioning — revoking', () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it('does not mint a replacement when unlinking the revoked credential failed', async () => {
+  it('reports a failed UNLINK apart from a failed revoke — the two mean opposite things', async () => {
+    // The credential here is dead: the revoke landed and only clearing the columns failed. Saying
+    // `revoke-failed` told the caller the leaked token might still redeem, which is the more
+    // alarming of the two answers and the wrong one — and it is exactly the question the builder's
+    // reissue flow asks. The retry differs too: this one owes two column writes, not a revocation.
     const fake = fakeMinter();
     const outcome = await runProvisioning(
       livingCtx({ publicLinkToken: null }),
@@ -249,8 +257,31 @@ describe('runProvisioning — revoking', () => {
       contextUser,
       async () => false,
     );
-    expect(outcome).toEqual({ result: 'revoke-failed', inviteId: OLD_INVITE });
+    expect(outcome).toEqual({ result: 'unlink-failed', inviteId: OLD_INVITE });
     expect(fake.mints).toHaveLength(0);
+    expect(fake.revokes).toHaveLength(1);
+  });
+
+  it('still reports revoke-failed when the revocation itself did not land', async () => {
+    const fake = fakeMinter(undefined, { success: false, changed: false, message: 'nope' });
+    const outcome = await runProvisioning(
+      livingCtx({ status: 'Closed' }),
+      config,
+      fake.minter,
+      contextUser,
+      async () => true,
+    );
+    expect(outcome).toEqual({ result: 'revoke-failed', inviteId: OLD_INVITE });
+  });
+
+  it('refuses to act on an invite scoped to a DIFFERENT distribution', async () => {
+    // The seam carries the owning resource with every write precisely so an implementation can
+    // refuse this. `MagicLinkInviteID` has no foreign key and rides the generated GraphQL input,
+    // and these writes run under the elevated system user on the public submit path — so an id
+    // pointing at another link's invite would otherwise revoke a credential that is not ours.
+    const fake = fakeMinter();
+    await runProvisioning(livingCtx({ status: 'Closed' }), config, fake.minter, contextUser, async () => true);
+    expect(fake.revokes[0].credential).toEqual({ inviteId: OLD_INVITE, resourceId: 'dist-1' });
   });
 
   it('revokes a stale credential even on a paused link that has already lost its token', async () => {
@@ -275,7 +306,13 @@ describe('runProvisioning — keeping the credential bounded by its link', () =>
     const closeAt = new Date('2026-10-01T00:00:00.000Z');
     const fake = fakeMinter();
     await runProvisioning(livingCtx({ closeAt }), config, fake.minter, contextUser, async () => true);
-    expect(fake.expiries).toEqual([{ inviteId: OLD_INVITE, expiresAt: closeAt, user: contextUser }]);
+    expect(fake.expiries).toEqual([
+      {
+        credential: { inviteId: OLD_INVITE, resourceId: 'dist-1' },
+        bounds: { closeAt, maxLifetimeHours: undefined },
+        user: contextUser,
+      },
+    ]);
   });
 
   it('asks for the bound to be REMOVED when the closing date is cleared', async () => {
@@ -284,7 +321,7 @@ describe('runProvisioning — keeping the credential bounded by its link', () =>
     const fake = fakeMinter();
     await runProvisioning(livingCtx(), config, fake.minter, contextUser, async () => true);
     expect(fake.expiries).toHaveLength(1);
-    expect(fake.expiries[0].expiresAt).toBeNull();
+    expect(fake.expiries[0].bounds).toEqual({ closeAt: null, maxLifetimeHours: undefined });
   });
 
   it('reports an unchanged expiry as a plain no-op, not as work done', async () => {
@@ -297,6 +334,28 @@ describe('runProvisioning — keeping the credential bounded by its link', () =>
     const fake = fakeMinter(undefined, undefined, { success: false, changed: false, message: 'nope' });
     const outcome = await runProvisioning(livingCtx(), config, fake.minter, contextUser, async () => true);
     expect(outcome).toEqual({ result: 'expiry-update-failed', inviteId: OLD_INVITE });
+  });
+
+  it('hands the minter the link BOUNDS, and never a wall-clock instant it resolved itself', async () => {
+    // The lesson the no-expiry sentinel already taught, one bound over. A host-wide
+    // `FORMS_MAGICLINK_EXPIRY_HOURS` is a bound on the credential's LIFE, so it can only be
+    // resolved against the instant that credential was ISSUED — which is a fact about the
+    // invite row, not about this save. Resolved here, against `now`, it is a different
+    // instant on every pass, so a pass that runs after EVERY save rewrites the row every
+    // time and walks the expiry forward forever: a ceiling a host configured in order to
+    // bound the credential ends up never bounding anything, which is the exact
+    // "credential outlives the thing it authorises" shape bizapps-forms#104 is about.
+    const ceilinged = { ...config, fixedExpiryHours: 24 };
+    const closeAt = new Date('2026-10-01T00:00:00.000Z');
+    const fake = fakeMinter();
+    await runProvisioning(livingCtx({ closeAt }), ceilinged, fake.minter, contextUser, async () => true);
+    expect(fake.expiries).toEqual([
+      {
+        credential: { inviteId: OLD_INVITE, resourceId: 'dist-1' },
+        bounds: { closeAt, maxLifetimeHours: 24 },
+        user: contextUser,
+      },
+    ]);
   });
 
   it('never re-bounds a credential it is about to revoke or replace', async () => {
@@ -342,7 +401,9 @@ describe('runProvisioning — reissuing', () => {
     );
 
     expect(outcome).toEqual({ result: 'reissued', inviteId: 'invite-new' });
-    expect(fake.revokes).toEqual([{ inviteId: OLD_INVITE, user: contextUser }]);
+    expect(fake.revokes).toEqual([
+      { credential: { inviteId: OLD_INVITE, resourceId: 'dist-1' }, user: contextUser },
+    ]);
     expect(fake.mints).toHaveLength(1);
     // Cleared first, then written: the record never points at two credentials at once.
     expect(persist.mock.calls).toEqual([[null], [{ inviteId: 'invite-new', rawToken: 'mj_ml_new' }]]);
