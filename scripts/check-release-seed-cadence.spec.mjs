@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { findUnconsolidatedSeedDeltas, readMigrationState } from './check-release-seed-cadence.mjs';
+import { findUnconsolidatedSeedDeltas, findUnshippedMetadataDrift, readReleaseState } from './check-release-seed-cadence.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(SCRIPTS_DIR, 'check-release-seed-cadence.mjs');
@@ -33,8 +33,8 @@ function check(name, condition, detail) {
     }
 }
 
-/** A stubbed git boundary: which migration files the tag holds, and which the tree holds. */
-const state = (tag, released, current) => () => ({ tag, released, current });
+/** A stubbed git boundary: what the tag holds, what the tree holds, what moved under metadata/. */
+const state = (tag, released, current, metadataChanged = []) => () => ({ tag, released, current, metadataChanged });
 
 const A = 'V202608081700__v0.8.x__Metadata_Sync.sql';
 const B = 'V202608182130__v0.11.x__Metadata_Sync_Designer_Taxonomy.sql';
@@ -99,6 +99,62 @@ console.log('release seed cadence:');
     check('non-seed migrations are ignored, including CodeGen metadata backfills', r.problems.length === 0, JSON.stringify(r.unreleased));
 }
 
+// ---------------------------------------------------------------------------------------------
+// DRIFT: metadata/ moved since the last release, so a seed is OWED. The half coverage cannot see.
+// ---------------------------------------------------------------------------------------------
+
+const REC = 'metadata/templates/templates/forms-form-designer.template.md';
+
+// 9. The Signature/Doodle shape, which is the reason this rule exists: a record file EDITED since
+//    the last release, its id unchanged and already shipped, and no new seed carrying the edit.
+//    Coverage is green over exactly this. Drift is not.
+{
+    const r = findUnshippedMetadataDrift('/x', state('v0.10.0', [A], [A], [REC]));
+    check('metadata moved with NO new seed fails', r.problems.length === 1);
+    check('  …and names the changed file', r.problems[0]?.includes(REC));
+    check('  …and names the tag compared against', r.problems[0]?.includes('v0.10.0'));
+    // The message wraps, so assert on a phrase that does not straddle the line break.
+    check('  …and says why coverage cannot catch it', (r.problems[0] ?? '').includes('Coverage cannot catch this'));
+}
+
+// 10. The same drift WITH the release's seed present is a correct release, not a finding.
+{
+    const r = findUnshippedMetadataDrift('/x', state('v0.10.0', [A], [A, B], [REC]));
+    check('metadata moved WITH a new seed is a pass', r.problems.length === 0, JSON.stringify(r.problems));
+}
+
+// 11. A release that changed no metadata owes no seed. Demanding one would teach people to
+//     generate empty migrations, which is worse than the gap.
+{
+    const r = findUnshippedMetadataDrift('/x', state('v0.10.0', [A], [A], []));
+    check('no metadata change and no seed is a pass', r.problems.length === 0);
+}
+
+// 12. Documentation is not a record. Gating on README would teach people that the way to quiet
+//     this check is to stop writing documentation.
+{
+    const r = findUnshippedMetadataDrift('/x', state('v0.10.0', [A], [A], ['metadata/README.md']));
+    check('a README-only change owes no seed', r.problems.length === 0, JSON.stringify(r.changed));
+}
+
+// 13. Push by-products are not records — the same two directories coverage ignores.
+{
+    const r = findUnshippedMetadataDrift('/x', state('v0.10.0', [A], [A], [
+        'metadata/sql_logging/2026-08-31.sql',
+        'metadata/actions/.backups/.actions.json.bak',
+    ]));
+    check('sql_logging and .backups changes owe no seed', r.problems.length === 0, JSON.stringify(r.changed));
+}
+
+// 14. Unanswerable is a problem, not a pass — the same standard the cadence rule holds.
+{
+    const noTag = findUnshippedMetadataDrift('/x', state(null, [], [], []));
+    check('drift: no release tag is a PROBLEM, not a pass', noTag.problems.length === 1);
+    const boom = findUnshippedMetadataDrift('/x', () => { throw new Error('detached HEAD'); });
+    check('drift: a git failure is a PROBLEM, not a pass', boom.problems.length === 1);
+    check('  …and keeps the reason', boom.problems[0]?.includes('detached HEAD'));
+}
+
 /** A throwaway git repo with a tag, so `readSeedState` is exercised for real. */
 function withGitRepo(build, assert) {
     const root = mkdtempSync(join(tmpdir(), 'seed-cadence-'));
@@ -115,7 +171,7 @@ function withGitRepo(build, assert) {
     }
 }
 
-// 9. Real git: a seed added AFTER the tag is unreleased; one in the tag is not.
+// 15. Real git: a seed added AFTER the tag is unreleased; one in the tag is not.
 withGitRepo(
     (root, git) => {
         writeFileSync(join(root, 'migrations', A), '-- released\n');
@@ -125,15 +181,17 @@ withGitRepo(
         git('add', '-A'); git('commit', '-qm', 'two deltas');
     },
     (root) => {
-        const s = readMigrationState(root);
+        const s = readReleaseState(root);
         check('real git: resolves the newest tag', s.tag === 'v0.10.0', s.tag);
         check('real git: released seed read from the tag', s.released.length === 1 && s.released[0] === A);
         const r = findUnconsolidatedSeedDeltas(root);
         check('real git: the two post-tag deltas fail the check', r.problems.length === 1 && r.unreleased.length === 2, JSON.stringify(r.unreleased));
+        const d = findUnshippedMetadataDrift(root);
+        check('real git: drift passes when seeds exist', d.problems.length === 0, JSON.stringify(d.problems));
     },
 );
 
-// 10. Real git: tags sort by version, not lexically — v0.10.0 is newer than v0.9.0.
+// 16. Real git: tags sort by version, not lexically — v0.10.0 is newer than v0.9.0.
 withGitRepo(
     (root, git) => {
         writeFileSync(join(root, 'migrations', A), '-- old\n');
@@ -142,13 +200,13 @@ withGitRepo(
         git('add', '-A'); git('commit', '-qm', 'v10'); git('tag', 'v0.10.0');
     },
     (root) => {
-        const s = readMigrationState(root);
+        const s = readReleaseState(root);
         check('real git: v0.10.0 beats v0.9.0 (version order, not lexical)', s.tag === 'v0.10.0', s.tag);
         check('real git: both seeds count as released at that tag', s.released.length === 2);
     },
 );
 
-// 11. The CLI is what CI reads: exit code and report text.
+// 17. The CLI is what CI reads: exit code and report text.
 {
     let code = 0, out = '';
     try {

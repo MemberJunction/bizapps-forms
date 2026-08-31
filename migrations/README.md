@@ -112,10 +112,18 @@ git tag --list 'v*' | while read t; do
 done
 ```
 
-`npm run check:seed-cadence` enforces exactly this: **at most one unreleased `Metadata_Sync`** — the
-release's own. Two or more means the per-PR loop came back. It runs at the release in `publish.yml`,
-beside the coverage check, and it will be **red on the first release after #105** until those two
-rows are folded in. That is the check working, not a defect.
+`npm run check:seed-cadence` enforces exactly this, in two halves:
+
+- **at most one unreleased `Metadata_Sync`** — the release's own. Two or more means the per-PR loop
+  came back.
+- **not zero when `metadata/` moved** — if any record file differs from the last release tag and no
+  new seed exists, a seed is owed. This is the only one of the three checks that can see an
+  **edited** record: `V202608182130` ships the AI Designer prompt saying `Signature` while
+  `metadata/` now says `Doodle` (#97 renamed the type), the id is identical, and coverage is green
+  over it.
+
+It runs at the release in `publish.yml`, beside the coverage check, and it is **red on `next` now**
+until those two rows are folded in (#111). That is the check working, not a defect.
 
 > **Not the same family, and not affected by #105.** Other migrations here also write `__mj` rows —
 > `V202608191300`, `V202608191400`, `V202608252300` — but that is **CodeGen** metadata: the
@@ -139,11 +147,17 @@ appendix.
 Start by asking what the seed owes: `npm run check:release-seed` lists every `primaryKey` under
 `metadata/` that no migration names.
 
-**An empty list does not mean there is nothing to generate.** The check reads ids, not content, so a
-record whose id already ships but whose *body* changed — a `@file:` template, a reworded description
-— passes it silently. Generate the seed anyway if `metadata/` moved at all since the last release
-(`git diff v<last> -- metadata/`); the push emits `spUpdate*` for those by construction, which is
-the half no repo-side check can see.
+**An empty list does not mean there is nothing to generate.** The coverage check reads ids, not
+content, so a record whose id already ships but whose *body* changed — a `@file:` template, a
+reworded description — passes it silently.
+
+**You no longer have to remember that.** `npm run check:seed-cadence` asks the content question
+directly: if any record file under `metadata/` differs from the last release tag and this release
+ships no new `Metadata_Sync`, it fails and lists the files. It is `git diff v<last> -- metadata/`
+turned into a gate, and it stores nothing — the only way to make it green is to ship a seed or
+revert the change, which is exactly what the hash manifest got wrong (#105: regenerating the stored
+hashes was how you silenced it). The push emits `spUpdate*` for edited records by construction,
+which remains the half no repo-side check can generate for you.
 
 ```bash
 # 1. Build the generation database from the SHIPPED CHAIN, not from dev work. Start empty and run

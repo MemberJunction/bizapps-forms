@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * RELEASE CADENCE: at most ONE unreleased `Metadata_Sync` migration — the release's own.
+ * RELEASE CADENCE: ONE consolidated `Metadata_Sync` per release — no more, and not zero when
+ * `metadata/` moved.
  *
  * #105 moved metadata seeding to MJ's release-time model: a PR carries declarative JSON, and the
  * build engineer generates ONE consolidated seed per release. `check-release-seed-coverage.mjs`
@@ -18,9 +19,24 @@
  * that exists only on `next` has reached nobody, so it is still editable — and it is the release's
  * job to fold it into the consolidated seed rather than ship the old cadence one more time.
  *
- * WHY "AT MOST ONE" AND NOT "EXACTLY ONE". A release with no metadata changes owes no seed, and
- * demanding one would teach people to generate empty migrations. The half that IS enforceable is
- * the half that catches the failure: two or more unreleased seeds means the per-PR loop came back.
+ * TWO RULES, because "exactly one" is only correct when something changed:
+ *
+ *   findUnconsolidatedSeedDeltas — at most one unreleased seed. Two or more = the per-PR loop
+ *                                  came back.
+ *   findUnshippedMetadataDrift   — `metadata/` moved since the last release tag, so a seed is
+ *                                  OWED. Zero unreleased seeds is then a release that silently
+ *                                  ships none of it.
+ *
+ * WHY THE SECOND RULE EARNS ITS KEEP, when coverage already reads `metadata/`. Coverage compares
+ * declared **ids** against shipped SQL, so it is structurally blind to an EDITED record whose id
+ * already ships. That is not hypothetical: `V202608182130` ships the AI Designer prompt saying
+ * `Signature`, `metadata/` now says `Doodle` (#97 renamed the type), the id is identical, and
+ * coverage is green over it. Drift is the only one of the three checks that sees that.
+ *
+ * WHY IT IS NOT THE HASH MANIFEST #105 KILLED. The manifest stored hashes IN THE REPO, so
+ * regenerating them was the way to make the gate quiet — and doing that without regenerating the
+ * seed was the silent pass. This stores nothing. The answer is derived from git history, and the
+ * only way to make it green is to actually ship a seed or actually revert the metadata change.
  *
  * This needs git (tags are the only record of what shipped), which is why it is a SEPARATE command
  * from the coverage check — that one is deliberately pure-fs and runs on any checkout, and folding
@@ -39,12 +55,13 @@ function git(repoRoot, args) {
 
 /**
  * The git boundary, and deliberately dumb: it reports which migration files exist at the newest
- * release tag and in the working tree, and decides nothing. Which of them counts as a SEED is
- * domain knowledge that lives in the rule below — a boundary that pre-filtered would make the rule
- * untestable without a git repository, and would let a stub disagree with production about the one
- * definition the check turns on.
+ * release tag and in the working tree, and which files under `metadata/` differ between the two.
+ * It decides nothing. Which files count as a SEED, and which count as a RECORD, is domain
+ * knowledge that lives in the rules below — a boundary that pre-filtered would make them
+ * untestable without a git repository, and would let a stub disagree with production about the
+ * definitions the checks turn on.
  */
-export function readMigrationState(repoRoot) {
+export function readReleaseState(repoRoot) {
     const tags = git(repoRoot, ['tag', '--list', 'v*'])
         .split('\n')
         .map((t) => t.trim())
@@ -66,10 +83,15 @@ export function readMigrationState(repoRoot) {
             .map((f) => f.trim().replace(/^migrations\//, ''))
             .filter(Boolean);
 
-    return { tag, released: listMigrations(tag), current: listMigrations('HEAD') };
+    const metadataChanged = git(repoRoot, ['diff', '--name-only', tag, 'HEAD', '--', 'metadata/'])
+        .split('\n')
+        .map((f) => f.trim())
+        .filter(Boolean);
+
+    return { tag, released: listMigrations(tag), current: listMigrations('HEAD'), metadataChanged };
 }
 
-export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = readMigrationState) {
+export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = readReleaseState) {
     let state;
     try {
         state = readState(repoRoot);
@@ -104,14 +126,58 @@ export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = r
     return { problems, tag: state.tag, unreleased };
 }
 
+/**
+ * Records only. `metadata/README.md` is prose about the directory, not a record in it, and a
+ * documentation edit owes no seed — gating on it would teach people that the way to quiet this
+ * check is to not write documentation. `.backups/` and `sql_logging/` are push by-products, ignored
+ * for the same reason `check-release-seed-coverage.mjs` ignores them.
+ */
+function isRecordPath(file) {
+    if (/(^|\/)README\.md$/i.test(file)) return false;
+    return !/(^|\/)(\.backups|sql_logging)(\/|$)/.test(file);
+}
+
+export function findUnshippedMetadataDrift(repoRoot = REPO_ROOT, readState = readReleaseState) {
+    let state;
+    try {
+        state = readState(repoRoot);
+    } catch (error) {
+        return { problems: [`could not read git history to compare metadata/ against the last release: ${error.message}`], tag: null, changed: [] };
+    }
+    if (state.tag === null) {
+        return {
+            problems: ['no v* release tag found, so "has metadata/ moved since the last release?" has no answer here. Fetch tags, or run it where they exist.'],
+            tag: null,
+            changed: [],
+        };
+    }
+
+    const changed = (state.metadataChanged ?? []).filter(isRecordPath).sort();
+    const unreleasedSeeds = state.current.filter((f) => SEED_PATTERN.test(f) && !new Set(state.released).has(f));
+    const problems = [];
+    if (changed.length > 0 && unreleasedSeeds.length === 0) {
+        problems.push(
+            `${changed.length} metadata record file(s) changed since ${state.tag}, but this release ships NO new Metadata_Sync.\n` +
+                changed.map((f) => `      ${f}`).join('\n') +
+                '\n\n  Coverage cannot catch this: it compares declared ids against shipped SQL, and an EDITED\n' +
+                '  record keeps its id. Generate the consolidated seed (migrations/README.md) — the push emits\n' +
+                '  spUpdate* for edited records by construction, which is the half no id check can see.',
+        );
+    }
+    return { problems, tag: state.tag, changed };
+}
+
 if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
-    const { problems, tag, unreleased } = findUnconsolidatedSeedDeltas();
+    const cadence = findUnconsolidatedSeedDeltas();
+    const drift = findUnshippedMetadataDrift();
+    const problems = [...cadence.problems, ...drift.problems];
     if (problems.length > 0) {
         console.error('\n❌ Release seed cadence failed:\n');
         for (const p of problems) console.error(`  • ${p}\n`);
         process.exit(1);
     }
     console.log(
-        `✅ Release seed cadence passed — ${unreleased.length} unreleased Metadata_Sync migration(s) since ${tag}; a release ships at most one.`,
+        `✅ Release seed cadence passed — ${cadence.unreleased.length} unreleased Metadata_Sync migration(s) since ${cadence.tag}, ` +
+            `and ${drift.changed.length} changed metadata record file(s): a release ships exactly one seed when metadata moved, and at most one always.`,
     );
 }
