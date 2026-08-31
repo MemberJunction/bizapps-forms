@@ -260,3 +260,21 @@ describe('autoShareName', () => {
     expect(autoShareName(['Careers poster', 'Homepage'])).toBe('Share link');
   });
 });
+
+describe('what a paused link is told about its token', () => {
+  it('never claims the token "has been withdrawn", because this state cannot know that', () => {
+    // Two reachable paused rows never held a token to withdraw: `Draft` is the column's own
+    // DEFAULT, so anything creating a distribution outside the builder starts there; and a link
+    // the host could never mint for is switched off with nothing to revoke. Revocation is also
+    // fail-soft server-side, so even the usual case is not something these facts establish.
+    for (const facts of [{ Status: 'Draft' as const }, { IsActive: false }, { Status: 'Closed' as const }]) {
+      const { detail } = shareState(link({ PublicLinkToken: null, ...facts }), NOW);
+      expect(detail, JSON.stringify(facts)).not.toMatch(/has been withdrawn/i);
+    }
+  });
+
+  it('still promises a fresh token at the same address on reopening, which is true in every case', () => {
+    const { detail } = shareState(link({ Status: 'Closed', PublicLinkToken: null }), NOW);
+    expect(detail).toMatch(/fresh one at the same/i);
+  });
+});

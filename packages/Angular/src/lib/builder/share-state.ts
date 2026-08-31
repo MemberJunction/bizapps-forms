@@ -111,9 +111,17 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
   paused: {
     label: 'Paused',
     tone: 'neutral',
+    // Deliberately does NOT say the token "has been withdrawn". That is the usual case and it is
+    // the one thing this state cannot see: a `Draft` row (the column's own default, so anything
+    // creating a distribution outside the builder starts there) never held a token to withdraw,
+    // and a link the host could never mint for never had one either. Asserting the withdrawal
+    // would be a confident claim about a fail-soft server action, from facts that do not contain
+    // it — the failure mode this whole module exists to prevent. What IS true in every case is
+    // that a paused link holds no working token, and that reopening asks for a fresh one.
     detail:
-      'Turned off. Anyone opening it is told the form is not taking responses, and its access ' +
-      'token has been withdrawn. Turning it back on issues a fresh one at the same web address.',
+      'Turned off. Anyone opening it is told the form is not taking responses, and it holds no ' +
+      'working access token while it is off. Turning it back on issues a fresh one at the same ' +
+      'web address.',
     accepting: false,
     fix: 'Turn it back on',
   },

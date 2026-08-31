@@ -172,3 +172,46 @@ describe('the Distribute component', () => {
     ]);
   });
 });
+
+describe('the reissue request, where the builder must not do the server\'s job', () => {
+  const service = source('distribution.service.ts');
+  const component = source('distribution-manager.component.ts');
+
+  it('clears ONLY the token — never the invite id, which is what tells the server what to revoke', () => {
+    // This is the one security-relevant line in the change, and it was guarded by reading the
+    // COMPONENT — the file that deliberately never touches these columns — so the guard could
+    // not see the service at all. Clearing `MagicLinkInviteID` here flips the server's verdict
+    // from `reissue` (revoke, then mint) to `mint`: the old invite stays Active and redeemable,
+    // referenced by no distribution, so no later save can ever find it to revoke. That is the
+    // orphaned live credential the whole change exists to remove.
+    const reissue = service.slice(service.indexOf('public async reissueLink'));
+    const body = reissue.slice(0, reissue.indexOf('\n  }'));
+    expect(body).toMatch(/PublicLinkToken\s*=\s*null/);
+    expect(body).not.toMatch(/MagicLinkInviteID\s*=/);
+  });
+
+  it('leaves both credential columns alone everywhere else in the service', () => {
+    const writes = service.match(/dist\.(?:MagicLinkInviteID|PublicLinkToken)\s*=/g) ?? [];
+    // Exactly one: the reissue request above.
+    expect(writes).toHaveLength(1);
+  });
+
+  it('never lets the component write a credential column itself', () => {
+    expect(component).not.toMatch(/(?:MagicLinkInviteID|PublicLinkToken)\s*=[^=]/);
+  });
+
+  it('routes every selection change through the one helper that drops armed confirmations', () => {
+    // A confirmation is armed against a RECORD; the flags holding it are not. Assigning
+    // `selectedId` anywhere else let an armed "Replace it" survive onto whatever was selected
+    // next, so one click rotated the token of a link the author never armed.
+    const assignments = component.match(/this\.selectedId\s*=/g) ?? [];
+    expect(assignments).toHaveLength(1);
+    const helper = component.slice(component.indexOf('private selectLink('));
+    expect(helper.slice(0, helper.indexOf('\n  }'))).toMatch(/confirmingReissue\s*=\s*false/);
+  });
+
+  it('re-reads the record QUIETLY after a credential write, so the pane is not unmounted', () => {
+    const helper = component.slice(component.indexOf('private async runCredentialWrite('));
+    expect(helper.slice(0, helper.indexOf('\n  }'))).toMatch(/this\.reload\(true\)/);
+  });
+});

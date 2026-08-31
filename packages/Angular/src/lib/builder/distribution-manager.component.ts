@@ -123,8 +123,18 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
 
   // ------------------------------------------------------------------ loading
 
-  protected async reload(): Promise<void> {
-    this.loading = true;
+  /**
+   * Re-read the links.
+   *
+   * `quiet` re-reads WITHOUT raising `loading`, which the template turns into a full-pane
+   * "Loading share links…" that unmounts the two-pane shell. Right for the first load and wrong
+   * after a credential write: those happen on the Settings switch below the fold, so blanking the
+   * pane threw the author's scroll position away and dropped keyboard focus to `<body>` — on every
+   * pause and every reopen — leaving the switch they had just pressed unreachable without tabbing
+   * from the top of the document. The data still refreshes; only the announcement is suppressed.
+   */
+  protected async reload(quiet = false): Promise<void> {
+    this.loading = !quiet;
     this.loadError = null;
     this.cdr.markForCheck();
 
@@ -139,9 +149,25 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     this.qrCache.clear();
     // Keep the author where they were across a reload; fall back to the newest link.
     if (!this.links.some((l) => l.ID === this.selectedId)) {
-      this.selectedId = this.links[0]?.ID ?? null;
+      this.selectLink(this.links[0]?.ID ?? null);
     }
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Move the selection, dropping every confirmation armed against the link being left.
+   *
+   * The one place `selectedId` is assigned, because a confirmation is armed against a RECORD and
+   * the flags holding it are not. `select()` cleared them; creating a link, deleting one, and a
+   * reload whose selected row is gone all reassigned `selectedId` without doing so — so an armed
+   * "Replace it" survived onto whatever was selected next, and one click then rotated the token
+   * of a link the author never armed. Making assignment and reset the same act is what stops the
+   * next new path reintroducing it.
+   */
+  private selectLink(id: string | null): void {
+    this.selectedId = id;
+    this.confirmingDelete = false;
+    this.confirmingReissue = false;
   }
 
   protected get selected(): mjBizAppsFormsFormDistributionEntity | null {
@@ -149,10 +175,8 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   }
 
   protected select(link: mjBizAppsFormsFormDistributionEntity): void {
-    this.selectedId = link.ID;
+    this.selectLink(link.ID);
     this.cancelRename();
-    this.confirmingDelete = false;
-    this.confirmingReissue = false;
     this.actionError = null;
   }
 
@@ -184,7 +208,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     await this.reload();
-    this.selectedId = created.ID;
+    this.selectLink(created.ID);
     this.view = 'link';
     this.cdr.markForCheck();
   }
@@ -233,12 +257,14 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     switch (kind) {
       case 'pending':
         await this.runCredentialWrite(() => this.service.issueLink(link));
-        this.warnIfStillUnissued(
-          'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.',
-        );
+        this.warnIfStillUnissued(link.ID, 'issue');
         return;
       case 'paused':
+        // Warns for the same reason `pending` does: reopening asks the server to mint, and the
+        // hook is fail-soft, so "turned it back on and got no web address" is a real outcome the
+        // author would otherwise have to notice from the badge alone.
         await this.runCredentialWrite(() => this.service.open(link));
+        this.warnIfStillUnissued(link.ID, 'issue');
         return;
       case 'ended':
         await this.run(() => this.service.setSchedule(link, link.OpenAt, null));
@@ -283,23 +309,47 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     }
     this.confirmingReissue = false;
     await this.runCredentialWrite(() => this.service.reissueLink(link));
-    this.warnIfStillUnissued(
-      'The old token was withdrawn but the server did not issue a new one, so this link is not working. Use "Issue the link" to try again.',
-    );
+    this.warnIfStillUnissued(link.ID, 'reissue');
   }
 
   /**
-   * Say so when a write that was supposed to produce a token did not.
+   * Say so when a write that was supposed to produce a token did not — and be exact about which
+   * of the two failures it was, because for a reissue they are opposites.
    *
    * The service reports whether the SAVE succeeded; the hook that mints is deliberately
-   * fail-soft, so a green save and a link with no web address are the same outcome from
-   * here. The reload has already run, so `selected` is the server's answer, not ours.
+   * fail-soft, so a green save and a link with no web address are the same outcome from here.
+   * The reloaded record carries the evidence, in the pair of columns the server writes together:
+   *
+   *  - a token          → nothing went wrong.
+   *  - no token, no invite → the old credential WAS withdrawn; only the replacement failed.
+   *  - no token, invite still linked → the revoke did NOT land. The server leaves it linked
+   *    precisely so the next save retries, and that is the state where the leaked token an
+   *    author just tried to kill is still redeemable. Saying "the old token was withdrawn"
+   *    here — which is what a single message did — is the inverse of the truth, on the one
+   *    flow whose entire purpose is killing a leaked credential.
+   *
+   * Takes the link's ID rather than reading `this.selected`, because the rail stays clickable
+   * through the two round-trips: the author can select a different link before this runs, and
+   * the warning would then be written under a record it says nothing about.
    */
-  private warnIfStillUnissued(message: string): void {
-    if (this.selected?.PublicLinkToken) {
+  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {
+    const link = this.links.find((l) => l.ID === linkId);
+    if (!link || link.PublicLinkToken) {
       return;
     }
-    this.actionError = message;
+    if (link.MagicLinkInviteID) {
+      this.actionError =
+        'The server could not withdraw this link\'s old access token, so it may still work. ' +
+        'This link has no working web address in the meantime. Try again, and if it keeps ' +
+        'failing someone technical needs to look at the server log.';
+    } else if (wrote === 'reissue') {
+      this.actionError =
+        'The old token was withdrawn, but the server did not issue a new one, so this link is ' +
+        'not working. Use "Issue the link" to try again.';
+    } else {
+      this.actionError =
+        'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.';
+    }
     this.cdr.markForCheck();
   }
 
@@ -375,7 +425,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    */
   private async runCredentialWrite(write: () => Promise<MutationOutcome>): Promise<void> {
     await this.run(write);
-    await this.reload();
+    await this.reload(true);
   }
 
   // -------------------------------------------------------------------- rename
@@ -440,7 +490,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     this.links = this.links.filter((l) => l.ID !== link.ID);
-    this.selectedId = this.links[0]?.ID ?? null;
+    this.selectLink(this.links[0]?.ID ?? null);
     this.cdr.markForCheck();
   }
 
