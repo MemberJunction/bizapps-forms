@@ -315,7 +315,16 @@ describe('FormRuntime.transmittedView', () => {
 });
 
 describe('FormRuntime progress', () => {
-  it('does not let optional questions dilute the bar', () => {
+  /**
+   * This used to read `does not let optional questions dilute the bar` and assert `toBe(1)` on
+   * exactly this form — #88 at runtime level: one required question answered, three blank optional
+   * ones sitting underneath, bar completely full. Same form, opposite verdict.
+   *
+   * SUBMITTABLE and COMPLETE are different facts. The bar reports the second; `isFormValid` (and
+   * the ready line it drives) reports the first, which is why the bar no longer has to overload
+   * its own top end to say "you can submit".
+   */
+  it('counts the optional questions too, so a merely submittable form does not read full', () => {
     const rt = new FormRuntime(
       formOf([
         { id: 'req', isRequired: true },
@@ -326,9 +335,27 @@ describe('FormRuntime progress', () => {
     );
 
     rt.setValue('req', 'answered');
+    expect(rt.isFormValid()).toBe(true);
+    expect(rt.progress()).toBeLessThan(1);
 
-    // Everything that could stop a submit is done, so the bar is done.
+    rt.setValue('opt-a', 'x');
+    rt.setValue('opt-b', 'x');
+    rt.setValue('opt-c', 'x');
     expect(rt.progress()).toBe(1);
+  });
+
+  // `isRequired` reaches the weighting — the mapping this class owns, and the one thing
+  // `progress.spec.ts` cannot see, since it is handed `ProgressQuestion` already built.
+  it('still weights the required answer above an optional one', () => {
+    const form = () =>
+      new FormRuntime(formOf([{ id: 'req', isRequired: true }, { id: 'opt-a' }, { id: 'opt-b' }]));
+
+    const afterRequired = form();
+    afterRequired.setValue('req', 'answered');
+    const afterOptional = form();
+    afterOptional.setValue('opt-a', 'answered');
+
+    expect(afterRequired.progress()).toBeGreaterThan(afterOptional.progress());
   });
 });
 
@@ -376,19 +403,105 @@ describe('FormRuntime progress and conditional questions', () => {
     rt.setValue('followup', 'done');
     expect(rt.progress()).toBe(1);
   });
+
+  it('only rises as the respondent works down one branch', () => {
+    const rt = new FormRuntime(conditionalForm());
+    const seen = [rt.progress()];
+
+    rt.setValue('trigger', 'yes');
+    seen.push(rt.progress());
+    rt.setValue('followup', 'done');
+    seen.push(rt.progress());
+
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i], `step ${i} moved the bar backwards`).toBeGreaterThan(seen[i - 1]);
+    }
+    expect(seen[seen.length - 1]).toBe(1);
+  });
+
+  /**
+   * Repro #2 in #88, at the level it was reported: the respondent picked "Blue", the bar read
+   * 100% with eight optional questions blank below it, and switching to "Other" then dropped it
+   * to 50% — the bar running BACKWARDS out of a state it had called finished.
+   *
+   * A bar over a branching form can legitimately fall: switching branches grows the path, and the
+   * denominator with it. Typeform has the same property, and the alternative — clamping to a
+   * high-water mark — would hold 100% over a required question the respondent has not answered,
+   * which is the lie this whole change is about. What must not happen is falling out of a CLAIMED
+   * COMPLETE state, and that is what this pins: on this form the bar never claims one.
+   */
+  it('never claims completion on a branching form while questions are still blank', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q-color', isRequired: true },
+        ...Array.from({ length: 8 }, (_, i) => ({ id: `opt-${i}` })),
+        {
+          id: 'q-other',
+          isRequired: true,
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-color', op: 'equals', value: 'other' }] },
+          },
+        },
+      ]),
+    );
+
+    rt.setValue('q-color', 'blue');
+    expect(rt.progress(), 'read complete with eight optional questions blank').toBeLessThan(1);
+
+    rt.setValue('q-color', 'other');
+    expect(rt.progress(), 'read complete with a revealed required question blank').toBeLessThan(1);
+  });
+
+  /**
+   * The boundary of the decision above, written down so it is a decision and not an oversight.
+   *
+   * A respondent who genuinely finishes a short branching form and then goes back and switches
+   * branches WILL see the bar fall from 100%, because the denominator is the current path and the
+   * new branch is longer. #88 asks that the bar never fall from 100%, and this is the one case
+   * where it still can — the difference being that the 100% is now earned rather than claimed over
+   * blank questions.
+   *
+   * The alternative is a high-water clamp, and it is worse in exactly the way the issue is about:
+   * it would hold 100% over a required follow-up nobody has answered, which is the original lie
+   * with the sign flipped. An honest bar over a path that can grow is the trade Typeform makes too.
+   */
+  it('falls from an EARNED completion when the respondent switches to a longer branch', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q-color', isRequired: true },
+        { id: 'q-opt' },
+        {
+          id: 'q-other',
+          isRequired: true,
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-color', op: 'equals', value: 'other' }] },
+          },
+        },
+      ]),
+    );
+    rt.setValue('q-color', 'blue');
+    rt.setValue('q-opt', 'noted');
+
+    // Earned: every question on this path is answered.
+    expect(rt.progress()).toBe(1);
+
+    rt.setValue('q-color', 'other');
+    expect(rt.progress()).toBeLessThan(1);
+    expect(rt.isFormValid()).toBe(false);
+  });
 });
 
-describe('FormRuntime progress agrees with the submit button', () => {
+describe('FormRuntime progress and the submit button read the same path', () => {
   /**
-   * The bar must agree with the submit button (progress.ts states this invariant outright).
-   * `computeProgress` short-circuits to 1 once every REQUIRED question is satisfied, so a bar
-   * that reads a different notion of "required" than validity does reports a full bar on a form
-   * the respondent cannot submit — and gives them no clue which field is holding it.
+   * The bar and the button answer DIFFERENT questions — how much is filled in, versus whether it
+   * can be submitted — and since #88 they are reported by different controls. What they must still
+   * share is the SET they judge: `progress` counts only visible questions and `isFormValid` judges
+   * only visible questions, so the pair has to move together as a show rule opens and closes. A
+   * full bar over a form the button will not accept leaves the respondent no clue what is missing;
+   * so does a bar that has already stopped counting a question the button is still holding.
    *
-   * These cases used to exercise the `require` verb, which was the way the two readings could
-   * diverge. Visibility is the way they still can: `progress` counts only visible questions, and
-   * `isFormValid` judges only visible questions, so the pair has to move together as a show rule
-   * opens and closes.
+   * These cases used to exercise the `require` verb, which was the other way the two could diverge.
+   * Visibility is the way they still can.
    */
   it('a required question revealed by a show rule holds both the bar and the button back', () => {
     const rt = new FormRuntime(
@@ -427,7 +540,18 @@ describe('FormRuntime progress agrees with the submit button', () => {
 
 describe('FormRuntime progress edge cases', () => {
   it('reports complete for a form with nothing to answer', () => {
+    // Vacuously: no unanswered question is left. The renderers do not show a bar in this state at
+    // all (see `hasAnswerableQuestions`), so the number is never painted — it is here so the
+    // function stays total rather than growing a null case.
     expect(new FormRuntime(formOf([{ id: 's', type: 'Statement' }])).progress()).toBe(1);
+  });
+
+  it('says when there is nothing to fill in, which is what suppresses the bar', () => {
+    const copyOnly = new FormRuntime(formOf([{ id: 's', type: 'Statement' }]));
+    const askSomething = new FormRuntime(formOf([{ id: 's', type: 'Statement' }, { id: 'q' }]));
+
+    expect(copyOnly.hasAnswerableQuestions()).toBe(false);
+    expect(askSomething.hasAnswerableQuestions()).toBe(true);
   });
 
   it('goes back down when an answer is cleared', () => {

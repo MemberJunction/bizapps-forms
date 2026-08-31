@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Metadata, RunView, LogError, LogStatus, type UserInfo } from '@memberjunction/core';
+import { Metadata, RunView, LogError, LogStatus, type BaseEntity, type UserInfo } from '@memberjunction/core';
 import {
   AUTHORED_AUTOMATION_FIELDS,
   buildPublishedAutomations,
@@ -7,6 +7,7 @@ import {
   type mjBizAppsFormsFormEntity,
   type mjBizAppsFormsFormStyleEntity,
   type mjBizAppsFormsFormVersionEntity,
+  quoteSqlString,
   type FormSettings,
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
@@ -16,9 +17,36 @@ import type { FormTree } from './builder-models';
 import { brokenRuleLines } from './rules-inventory';
 import { buildPublishedDefinition } from './snapshot-builder';
 
+/**
+ * The versions serving this form's public link right now — one, once the publish swap and
+ * `UQ_FormVersion_OnePublishedPerForm` have both been through a database.
+ *
+ * One predicate, one place: the publish swap has to retire exactly the rows the fingerprint
+ * baseline reads, and two copies of the same `WHERE` is how those two answers drift apart.
+ */
+function liveVersionsFilter(formId: string): string {
+  return `FormID=${quoteSqlString(formId)} AND Status='Published'`;
+}
+
+/**
+ * Why a save failed, as a message worth showing an author. Never empty.
+ *
+ * `swapLiveVersion` reports its outcome by returning a message or null, so an empty
+ * `CompleteMessage` would read as success — a rolled-back swap silently reporting a publish that
+ * wrote nothing. `??` does not cover that: an empty string is neither null nor undefined.
+ */
+function saveFailureMessage(entity: BaseEntity): string {
+  return entity.LatestResult?.CompleteMessage || 'unknown error';
+}
+
 /** Outcome of a publish attempt. */
 export interface PublishResult {
   success: boolean;
+  /**
+   * The version row as written — for reading, not for saving. It is still attached to the
+   * transaction group that wrote it, and MJ QUEUES a save on a bound entity instead of executing
+   * it, so a `Save()` here would return true and write nothing. Re-load the row to mutate it.
+   */
   version?: mjBizAppsFormsFormVersionEntity;
   versionNumber?: number;
   error?: string;
@@ -56,7 +84,8 @@ function brokenRuleRefusal(broken: readonly string[]): string {
  *
  * Publish steps:
  *  1. Build the PublishedFormDefinition from the live tree + the linked FormStyle.
- *  2. Create a FormVersion (VersionNumber = max+1, Status Published, PublishedAt now,
+ *  2. In ONE transaction: retire whichever version is Published now, and create the replacement
+ *     FormVersion (VersionNumber = max+1, Status Published, PublishedAt now,
  *     DefinitionSnapshot = the JSON).
  *  3. Flip the Form's Status to Published.
  */
@@ -107,6 +136,16 @@ export class PublishService {
       return { success: false, error };
     }
     const nextVersion = (await this.maxVersionNumber(tree.form.ID)) + 1;
+    const incumbents = await this.loadPublishedVersions(tree.form.ID);
+    if (!incumbents) {
+      // Same reasoning as the automations and settings reads: we do not know what is live, so we
+      // cannot retire it. Publishing anyway would either resurrect the several-live-versions bug
+      // or — once UQ_FormVersion_OnePublishedPerForm exists — fail at the index with a message
+      // about a constraint the author has never heard of.
+      const error = 'Could not read the form\'s live version; nothing was published.';
+      LogError(`Forms publish: ${error}`);
+      return { success: false, error };
+    }
 
     const version = await this.md.GetEntityObject<mjBizAppsFormsFormVersionEntity>(
       FORMS_ENTITY.FormVersion,
@@ -119,27 +158,46 @@ export class PublishService {
     version.PublishedAt = new Date();
 
     // MJ mints the uniqueidentifier PK client-side on NewRecord(), so the snapshot can
-    // embed its own version id and be written in a SINGLE atomic save (no broken
-    // half-published row if a second save were to fail). If the PK is not yet
-    // populated, fall back to the form id reference so formVersionId is never blank.
+    // embed its own version id and be written by the SAME insert that creates the row (no broken
+    // half-published row needing a follow-up save to complete it). An unpopulated PK leaves
+    // formVersionId empty, which the reconcile below then fills in from the row the server wrote.
     const versionId = version.ID && version.ID.length > 0 ? version.ID : '';
     const definition = buildPublishedDefinition(tree, style, versionId, automations, undefined, settings);
     version.DefinitionSnapshot = JSON.stringify(definition);
-    if (!(await version.Save())) {
-      const error = version.LatestResult?.CompleteMessage ?? 'unknown error';
-      LogError(`Forms publish: failed to create version: ${error}`);
+    const swapError = await this.swapLiveVersion(incumbents, version);
+    if (swapError) {
+      // The whole swap rolled back, so say so. MJ reports a rolled-back group as a bare
+      // "Transaction failed" on every member, which on its own reads to an author as though the
+      // form might be in some indeterminate half-published state. It is not: the previous version
+      // is still live and still serving.
+      const error = `Nothing was published; the form is still serving its previous version. ${swapError}`;
+      LogError(`Forms publish: failed to publish version ${nextVersion}: ${swapError}`);
       return { success: false, error };
     }
 
     // Reconcile if the server assigned a different ID than the client-minted one
     // (defensive: only re-saves when they actually diverge, so the common path is one save).
+    // It needs a transaction group of its own: `version` is still bound to the one that just
+    // committed, and MJ QUEUES a save on a bound entity rather than executing it — so re-saving
+    // through the spent group would return true and write nothing, leaving the published snapshot
+    // pointing at an id no row has.
     if (version.ID !== versionId) {
       definition.formVersionId = version.ID;
       version.DefinitionSnapshot = JSON.stringify(definition);
-      if (!(await version.Save())) {
-        const error = version.LatestResult?.CompleteMessage ?? 'unknown error';
-        LogError(`Forms publish: failed to reconcile snapshot id: ${error}`);
-        return { success: false, error };
+      const reconcile = await this.md.CreateTransactionGroup();
+      version.TransactionGroup = reconcile;
+      if (!(await version.Save()) || !(await reconcile.Submit())) {
+        // The swap has already committed and cannot be undone from here, so this reports the same
+        // way the form-status failure below does: the version IS live, and what failed is a
+        // follow-up write. Saying "nothing was published" would be a lie that invites a republish,
+        // which would mint yet another version over a form that already went live.
+        LogError(`Forms publish: failed to reconcile snapshot id: ${saveFailureMessage(version)}`);
+        return {
+          success: false,
+          version,
+          versionNumber: nextVersion,
+          error: 'Version published, but its snapshot could not be corrected. Publish again to replace it.',
+        };
       }
     }
 
@@ -154,6 +212,74 @@ export class PublishService {
     }
 
     return { success: true, version, versionNumber: nextVersion };
+  }
+
+  /**
+   * Retire the form's live version and publish `version` in its place, as ONE transaction.
+   * Returns null when it committed, or the message to surface to the author.
+   *
+   * The order is load-bearing. `UQ_FormVersion_OnePublishedPerForm` makes "at most one Published
+   * version per form" a property of the data rather than something each reader must remember with
+   * an `ORDER BY VersionNumber DESC`, so the incumbent has to be demoted BEFORE the replacement
+   * lands. That ordering is also why this is a transaction and not two saves: a retire that
+   * committed on its own, followed by an insert that failed, would leave the form with no live
+   * version at all and its public link answering `no-published-version`.
+   *
+   * A queued save returns true because the group defers it; only Submit() reports what the
+   * database did. A save that returns FALSE was rejected before it joined the group, so the group
+   * is abandoned unsubmitted and nothing is written — never half a swap. The atomicity claimed
+   * here is the swap's, not the whole publish's: the snapshot-id reconcile and the form-status
+   * flip are separate writes that run after this has already committed, and both report as such.
+   */
+  private async swapLiveVersion(
+    incumbents: mjBizAppsFormsFormVersionEntity[],
+    version: mjBizAppsFormsFormVersionEntity,
+  ): Promise<string | null> {
+    const swap = await this.md.CreateTransactionGroup();
+    for (const incumbent of incumbents) {
+      incumbent.Status = 'Retired';
+      incumbent.TransactionGroup = swap;
+      if (!(await incumbent.Save())) {
+        return saveFailureMessage(incumbent);
+      }
+    }
+    version.TransactionGroup = swap;
+    if (!(await version.Save()) || !(await swap.Submit())) {
+      return saveFailureMessage(version);
+    }
+    return null;
+  }
+
+  /**
+   * The versions this publish must retire, or null when the read itself failed.
+   *
+   * Plural because the data has been able to hold several since the beginning — a form on the dev
+   * database carried three simultaneously-Published versions — so a publish run against a database
+   * that predates the backfill migration has to demote all of them, not just the newest.
+   *
+   * Null and empty are different, as they are for {@link loadAutomations}: empty means this form
+   * has never been published, which is the normal first publish; null means we do not know what is
+   * live, and {@link publish} refuses rather than guessing.
+   */
+  private async loadPublishedVersions(
+    formId: string,
+  ): Promise<mjBizAppsFormsFormVersionEntity[] | null> {
+    const rv = new RunView();
+    const result = await rv.RunView<mjBizAppsFormsFormVersionEntity>(
+      {
+        EntityName: FORMS_ENTITY.FormVersion,
+        ExtraFilter: liveVersionsFilter(formId),
+        ResultType: 'entity_object',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(
+        `Forms publish: could not read the live versions of form ${formId}: ${result.ErrorMessage}`,
+      );
+      return null;
+    }
+    return result.Results ?? [];
   }
 
   private async loadStyle(
@@ -267,7 +393,7 @@ export class PublishService {
     const rv = new RunView();
     const result = await rv.RunView<{ DefinitionSnapshot: string | null }>({
       EntityName: FORMS_ENTITY.FormVersion,
-      ExtraFilter: `FormID='${formId}' AND Status='Published'`,
+      ExtraFilter: liveVersionsFilter(formId),
       OrderBy: 'VersionNumber DESC',
       Fields: ['DefinitionSnapshot'],
       MaxRows: 1,
