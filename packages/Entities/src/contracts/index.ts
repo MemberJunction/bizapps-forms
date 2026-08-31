@@ -10,6 +10,7 @@ export * from './conditional-rule';
 export * from './rule-verbs';
 export * from './scoring';
 export * from './question-types';
+export * from './doodle-pen';
 export * from './form-definition';
 export * from './form-screens';
 export * from './published-automation-builder';

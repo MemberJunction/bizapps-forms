@@ -411,6 +411,7 @@
             [subject]="q.id"
             [drawing]="localFile()"
             [recorded]="answerRecorded()"
+            [pen]="doodlePen()"
             (drawn)="onDoodleDrawn($event)"
             (cleared)="onDoodleCleared()"
           />

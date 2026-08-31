@@ -132,11 +132,16 @@ describe('the pad shows the drawing already held for the question it is bound to
 
   it('never claims "Drawn." over paper it failed to draw on', () => {
     // `hasInk` drives both the hint and the Clear button, so a decode that fails has to leave it
-    // false — and say why, since the respondent's only remaining move is to draw again. It must
+    // empty — and say why, since the respondent's only remaining move is to draw again. It must
     // do neither for a pad that has moved on: a rejection from the PREVIOUS question would
     // otherwise mark a visible drawing as missing.
+    //
+    // `hasInk` is DERIVED from the model now, so "leave it false" is structural rather than a
+    // `.set` to remember: the model is emptied before the decode starts and only a SUCCESSFUL
+    // decode puts a base back. These two assertions are that pair.
+    expect(pad()).toMatch(/this\.resetModel\(\);[\s\S]{0,300}await createImageBitmap\(drawing\)/);
     expect(pad()).toMatch(
-      /catch \(err\) \{[\s\S]{0,400}mayPaint\(claim, this\.subject\(\)\)[\s\S]{0,400}this\.hasInk\.set\(false\);\s*console\.warn\(/,
+      /catch \(err\) \{[\s\S]{0,400}mayPaint\(claim, this\.subject\(\)\)[\s\S]{0,400}console\.warn\(/,
     );
   });
 
@@ -223,6 +228,55 @@ describe('nothing that finishes late may speak for a pad that has moved on', () 
     // await is not reliably the question the drawing was made on.
     expect(pad()).toMatch(/this\.drawn\.emit\(\{\s*subject: claim\.subject,/);
     expect(question()).toMatch(/await this\.uploadFile\(capture\.file, capture\.subject\);/);
+  });
+});
+
+describe('undo is a change of meaning, so it plays by the same rules as a stroke and Clear', () => {
+  /**
+   * Undo does three things beyond removing a stroke, and each one is a silent defect if dropped.
+   * None is reachable from this package's node test environment (there is no canvas), so they are
+   * guarded here at the source — the same posture the rest of this file takes.
+   */
+  it('retires whatever is in flight, as a new stroke and Clear do', () => {
+    // Without it, the export started by the stroke being REMOVED lands afterwards and uploads the
+    // drawing that just went away, and a repaint still decoding buries the corrected canvas.
+    expect(pad()).toMatch(/public undo\(\): void \{[\s\S]{0,200}this\.captures\.supersede\(\);/);
+  });
+
+  it('re-exports, so the stored file never disagrees with the screen', () => {
+    // The response carries the FILE. Leaving it showing the undone stroke would be a discrepancy
+    // the respondent has no way to see, and the reviewer no way to question.
+    expect(pad()).toMatch(/public undo\(\)[\s\S]{0,700}if \(this\.hasInk\(\)\) \{\s*void this\.emitPng\(\);/);
+  });
+
+  it('drops the answer when it empties the pad, exactly as Clear does', () => {
+    // Otherwise undoing back to blank leaves a stored file behind with nothing on screen to
+    // explain it — the mirror of the bug `clear()` exists to prevent.
+    expect(pad()).toMatch(/public undo\(\)[\s\S]{0,800}\} else \{\s*this\.cleared\.emit\(\);/);
+  });
+
+  it('stops at the restored image rather than erasing it', () => {
+    // A repainted PNG is flat pixels with no stroke history, so there is nothing in it to undo.
+    // Undo reads THIS SESSION's strokes and nothing else; `base` is only reachable through Clear.
+    expect(pad()).toMatch(/canUndo = computed\(\(\) => this\.strokes\(\)\.length > 0\)/);
+    expect(pad()).toMatch(/public undo\(\): void \{\s*if \(this\.strokes\(\)\.length === 0\) \{\s*return;/);
+    // And the button says so, rather than presenting a no-op.
+    expect(pad()).toMatch(/\[disabled\]="!canUndo\(\)"/);
+  });
+
+  it('keeps a stroke that ages out of the cap ON the drawing', () => {
+    // The cap bounds memory, not the picture. An evicted stroke is baked into the base image on
+    // its way out; dropping it instead would make a long drawing erase its own beginning.
+    expect(pad()).toMatch(/for \(const old of evicted\) \{\s*this\.bakeIntoBase\(old\);/);
+  });
+});
+
+describe('the pen the author configured reaches the pad already validated', () => {
+  it('parses the open settings blob through the shared contract, not in the pad', () => {
+    // `Settings` is reachable by paste and by API. Validating at the boundary is what lets the
+    // pad assume every value it is handed is renderable — an unknown colour never gets that far.
+    expect(question()).toMatch(/doodlePen = computed\(\(\) => doodlePen\(this\.question\(\)\.settings\)\)/);
+    expect(stripped('form-question.component.html')).toMatch(/\[pen\]="doodlePen\(\)"/);
   });
 });
 

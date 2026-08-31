@@ -31,6 +31,7 @@ import { moveItem } from '../../../shared/move-item';
 import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
+  doodlePen,
   isAnswerableQuestionType,
   numericScalePoints,
   opinionScaleBounds,
@@ -589,6 +590,15 @@ export class FormQuestionComponent {
     this.uploads.clear(this.question().id);
     this.valueChange.emit(null);
   }
+
+  /**
+   * The pen this doodle question draws with, validated on the way out of the open settings blob.
+   *
+   * Parsed HERE rather than inside the pad so the pad receives a value it can always render:
+   * `Settings` is reachable by paste and by API, and `doodlePen` falls back key by key, so an
+   * unknown colour or a nonsense width becomes the default before it can reach a canvas.
+   */
+  protected readonly doodlePen = computed(() => doodlePen(this.question().settings));
 
   /** Read a string setting off the question, or '' when unset or the wrong type. */
   private settingText(key: string): string {

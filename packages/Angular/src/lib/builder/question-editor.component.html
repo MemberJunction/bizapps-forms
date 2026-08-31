@@ -175,7 +175,18 @@
         @for (field of otherSettingFields; track field.key) {
           <div class="mjf-field">
             <label class="mjf-field-label" [attr.for]="'qe-set-' + field.key">{{ field.label }}</label>
-            @if (field.kind === 'multiline') {
+            @if (field.kind === 'choice') {
+              <select
+                #setSelect
+                class="mjf-input"
+                [id]="'qe-set-' + field.key"
+                (change)="setSetting(field, setSelect.value)"
+              >
+                @for (choice of field.choices ?? []; track choice.value) {
+                  <option [value]="choice.value" [selected]="choice.value === settingValue(field)">{{ choice.label }}</option>
+                }
+              </select>
+            } @else if (field.kind === 'multiline') {
               <textarea
                 #setInput
                 class="mjf-textarea"
