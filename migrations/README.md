@@ -88,15 +88,34 @@ already ran it believes it ran.
 So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
 release's records. That delta is the path below.
 
-**The three `Metadata_Sync` files already here ship, and none of them is rewritten.**
-`V202608081700`, `V202608182130` and `V202608241800` are the ones that seed records **declared
-under `metadata/`** — the property `npm run check:release-seed` tests, and the one the release
-cadence is about. Two are `mj sync push` output; `V202608241800` was hand-written against the shape
-of the generated blocks because the author had no database to push from, and its header says so.
-That is the practice #105 ends, not a fourth category. All three were written under the older
-per-feature cadence and are applied on every host that installed those versions; migrations are
-append-only history and #105 changed the cadence going forward, not the past. The next one is the
-first consolidated release seed.
+**Three `Metadata_Sync` files are here, and only ONE of them is shipped history.** They are the
+migrations that seed records **declared under `metadata/`** — the property `npm run check:release-seed`
+tests, and the one the release cadence is about. Two are `mj sync push` output; `V202608241800` was
+hand-written against the shape of the generated blocks because the author had no database to push
+from, and its header says so. That is the practice #105 ends, not a fourth category.
+
+| file | in a release tag? | what that means |
+|---|---|---|
+| `V202608081700__v0.8.x__Metadata_Sync.sql` | **yes** — `v0.8.0`, `v0.9.0`, `v0.10.0` | append-only history. Hosts ran it. **Never rewrite or delete it.** |
+| `V202608182130__v0.11.x__Metadata_Sync_Designer_Taxonomy.sql` | **no** | on `next` only. Has reached nobody. Belongs in the next consolidated seed. |
+| `V202608241800__v0.11.x__Metadata_Sync_OnSubmit_Params.sql` | **no** | same. |
+
+**The append-only argument covers the first row and nothing else** — an earlier draft of this
+section applied it to all three, which would have frozen two deltas that never shipped and carried
+the retired per-PR cadence into the first release under the new model. A seed that is not in a
+release tag has reached no host, so nothing depends on it having been applied, and folding it into
+the release's consolidated seed is free. Check it, don't recall it:
+
+```bash
+git tag --list 'v*' | while read t; do
+  git ls-tree --name-only "$t" migrations/ | grep -i metadata_sync | sed "s/^/$t /"
+done
+```
+
+`npm run check:seed-cadence` enforces exactly this: **at most one unreleased `Metadata_Sync`** — the
+release's own. Two or more means the per-PR loop came back. It runs at the release in `publish.yml`,
+beside the coverage check, and it will be **red on the first release after #105** until those two
+rows are folded in. That is the check working, not a defect.
 
 > **Not the same family, and not affected by #105.** Other migrations here also write `__mj` rows —
 > `V202608191300`, `V202608191400`, `V202608252300` — but that is **CodeGen** metadata: the
