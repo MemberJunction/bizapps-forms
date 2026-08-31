@@ -362,9 +362,16 @@ describe('the flows that have to keep working', () => {
  * what the CALLER is told, not about which lookup fired.
  */
 describe('a sealed response tells its status to nobody but its owner', () => {
-  /** The probe from issue #101: a FINAL submit carrying a response id the caller does not own. */
-  function probeAsStranger(victimRow: ExistingResponseRow) {
-    const { ctx, fake } = build({ sessionId: 'attacker-session', existingResponses: [victimRow] });
+  /**
+   * The probe from issue #101: a FINAL submit carrying a response id the caller does not own.
+   *
+   * The stranger's session is a PARAMETER because "not the owner" has three spellings and they are
+   * not interchangeable — a wrong header, an absent one, and a blank one all have to land in the
+   * same place (issue #78). Defaulting to the forged one keeps the cases below reading as the
+   * issue wrote them.
+   */
+  function probeAsStranger(victimRow: ExistingResponseRow, sessionId = 'attacker-session') {
+    const { ctx, fake } = build({ sessionId, existingResponses: [victimRow] });
     return { run: () => runSubmitPipeline(ctx, submission({ clientResponseId: VICTIM_RESPONSE_ID })), fake };
   }
 
@@ -391,6 +398,32 @@ describe('a sealed response tells its status to nobody but its owner', () => {
     expect(sealed.success).toBe(unsealed.success);
     expect(sealed.status).toBe(unsealed.status);
     expect(sealed.errors?.[0].message).toBe(unsealed.errors?.[0].message);
+  });
+
+  it('answers a foreign SEALED row no differently when the header is ABSENT than when it is wrong', async () => {
+    // Route 2 of issue #78, on the branch this change touches. Every other probe here arrives with
+    // a WRONG session; the defect #78 actually reported arrived with NONE, and "an absent
+    // credential must never be more permissive than a wrong one" has to hold on a read the same
+    // way it holds on a write. It is not idly stated: `responseIsOurs` answers yes when the ROW's
+    // owner folds to empty, and a version of it that also answered yes when the CALLER's does —
+    // one `||`, and a plausible reading of "blank means unowned" — would hand this row's status to
+    // exactly the caller the issue is about while leaving every other test in this file green.
+    const absent = probeAsStranger(victimSealed('Complete'), '');
+    const blank = probeAsStranger(victimSealed('Complete'), '   ');
+
+    const onAbsent = await absent.run();
+    const onBlank = await blank.run();
+    const onForged = await probeAsStranger(victimSealed('Complete')).run();
+
+    expect(onAbsent.success).toBe(false);
+    expect(onAbsent.status).toBeUndefined();
+    expect(onBlank.success).toBe(false);
+    expect(onBlank.status).toBeUndefined();
+    // And refused by the same answer, so the spelling of the missing credential is not an oracle.
+    expect(onAbsent.errors?.[0].message).toBe(onForged.errors?.[0].message);
+    expect(onBlank.errors?.[0].message).toBe(onForged.errors?.[0].message);
+    expect(writesToVictimRow(absent.fake)).toHaveLength(0);
+    expect(writesToVictimRow(blank.fake)).toHaveLength(0);
   });
 
   it('does not let a stranger tell `Complete` from `Disqualified`', async () => {
