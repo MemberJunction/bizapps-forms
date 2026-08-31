@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { autoShareName, shareState, type ShareLinkFacts } from './share-state';
+import {
+  autoShareName,
+  formReach,
+  shareState,
+  SHARE_LINK_FIELDS,
+  type ShareLinkFacts,
+} from './share-state';
 
 const NOW = new Date('2026-08-19T12:00:00Z');
 const PAST = new Date('2026-08-01T12:00:00Z');
@@ -121,6 +127,101 @@ describe('shareState', () => {
 
   it('is full once the count passes the cap, not only when it lands on it', () => {
     expect(shareState(link({ MaxResponses: 5, ResponseCount: 9 }), NOW).kind).toBe('full');
+  });
+});
+
+describe('formReach', () => {
+  it('does not call a form with no share links reachable', () => {
+    // Issue #83: the builder header announced "Everything in this form is live on its public
+    // link" the instant a form was published, with FormDistribution holding zero rows for it.
+    expect(formReach([], NOW).kind).toBe('unshared');
+  });
+
+  it('is reachable as soon as one link would accept a response', () => {
+    expect(formReach([link()], NOW).kind).toBe('live');
+  });
+
+  it('is closed when no link would accept a response, for any of the reasons', () => {
+    // Not just "Open to responses: off". Every gate that makes `shareState` refuse counts,
+    // because every one of them turns a respondent away — a form whose only link sits at
+    // its cap, or past its closing date, is exactly as unreachable as one switched off.
+    const dead: Partial<ShareLinkFacts>[] = [
+      { Status: 'Closed' },
+      { IsActive: false },
+      { CloseAt: PAST },
+      { OpenAt: FUTURE },
+      { MaxResponses: 1, ResponseCount: 1 },
+      { PublicLinkToken: null },
+    ];
+    for (const override of dead) {
+      expect(formReach([link(override)], NOW).kind, JSON.stringify(override)).toBe('closed');
+    }
+    expect(formReach(dead.map(link), NOW).kind).toBe('closed');
+  });
+
+  it('needs only one survivor among many dead links', () => {
+    expect(formReach([link({ Status: 'Closed' }), link(), link({ CloseAt: PAST })], NOW).kind).toBe(
+      'live',
+    );
+  });
+
+  it('does not mistake links it could not read for links that do not exist', () => {
+    // A failed RunView is not an empty list — the same distinction `DistributionService.list`
+    // already makes. Sending an author to create a second link because we could not see the
+    // first is a worse answer than admitting we do not know.
+    expect(formReach(null, NOW).kind).toBe('unknown');
+  });
+
+  it('claims a public link in words only when there is a live one', () => {
+    // THE INVARIANT. Everything else here is machinery in service of this line: the wording
+    // that reaches the author may promise a reachable URL only in the `live` kind.
+    expect(formReach([link()], NOW).detail).toMatch(/live on its public link/i);
+    for (const unreachable of [formReach([], NOW), formReach([link({ Status: 'Closed' })], NOW), formReach(null, NOW)]) {
+      expect(unreachable.detail, unreachable.kind).not.toMatch(/live on its public link/i);
+    }
+  });
+
+  it('names the next step whenever there is one to name', () => {
+    // "Not shared" without "so go and share it" is half a message — the same reasoning
+    // `shareState.fix` is built on. Even the unreadable case has somewhere to send them:
+    // the Distribute tab is where the load failure is actually explained.
+    expect(formReach([], NOW).detail).toMatch(/Distribute/);
+    expect(formReach([link({ Status: 'Closed' })], NOW).detail).toMatch(/Distribute/);
+    expect(formReach(null, NOW).detail).toMatch(/Distribute/);
+  });
+
+  it('calls only the live form reachable, so only it gets the reassuring rendering', () => {
+    // `reachable` is what the header branches on. A failed read must land on the same side
+    // as a form with no links: not reassured. Rendering an unverified claim as a verified one
+    // is this bug wearing a different hat.
+    expect(formReach([link()], NOW).reachable).toBe(true);
+    expect(formReach([], NOW).reachable).toBe(false);
+    expect(formReach([link({ Status: 'Closed' })], NOW).reachable).toBe(false);
+    expect(formReach(null, NOW).reachable).toBe(false);
+  });
+
+  it('says on the chip itself what the tooltip says, because a phone has no hover', () => {
+    expect(formReach([link()], NOW).label).toBe('Published');
+    for (const unreachable of [
+      formReach([], NOW),
+      formReach([link({ Status: 'Closed' })], NOW),
+      formReach(null, NOW),
+    ]) {
+      expect(unreachable.label, unreachable.kind).not.toBe('Published');
+    }
+  });
+
+  it('tells "never shared" apart from "stopped collecting", because the cures differ', () => {
+    // One wants a link created, the other wants an existing link reopened. A chip that reads
+    // the same in both sends half its readers to the wrong control.
+    expect(formReach([], NOW).label).not.toBe(formReach([link({ Status: 'Closed' })], NOW).label);
+  });
+
+  it('asks for every column its own gates read, and cannot fall out of step with them', () => {
+    // A read that stops requesting a column hands `shareState` `undefined` for it and goes on
+    // producing a confident answer. Deriving the list from the interface makes that a compile
+    // error rather than a silent one; this pins the derivation itself.
+    expect([...SHARE_LINK_FIELDS].sort()).toEqual(Object.keys(link()).sort());
   });
 });
 
