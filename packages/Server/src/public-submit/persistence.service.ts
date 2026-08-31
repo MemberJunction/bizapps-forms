@@ -32,6 +32,7 @@ import type {
   mjBizAppsFormsFormResponseAnswerEntity,
   mjBizAppsFormsFormResponseAnswerEntityType,
   mjBizAppsFormsFormResponseEntity,
+  mjBizAppsFormsFormResponseEntityType,
 } from '@mj-biz-apps/forms-entities';
 import { syncFileLinks } from '../file-links/file-links.service';
 import { MJFileLinkGateway } from '../file-links/mj-file-link-gateway';
@@ -188,20 +189,28 @@ function foldSessionId(value: string | null | undefined): string {
 }
 
 /**
- * May a caller identified by `callerSessionId` write to a row whose stored owner is
- * `storedSessionId`?
+ * May a caller identified by `callerSessionId` ACT on `response`?
  *
  * Yes when the row has no owner (the genuinely headerless flow, where the 122-bit client id in
  * `SourceMetadata` is the only capability there is), or when the caller IS the owner. No
  * otherwise — and "no" covers the absent header exactly as it covers a forged one, which is the
  * whole point: an absent credential must never be more permissive than a wrong one.
  *
- * Kept as its own named predicate so the policy reads as one sentence rather than as a condition
- * inlined into {@link applyResponseIdentity}. Not exported: the behaviour it decides is observable
- * through the submit pipeline, which is where `session-ownership.spec.ts` tests it.
+ * THE ONE OWNERSHIP RULE, which is why it is exported rather than inlined. It read as a WRITE rule
+ * — it was called `sessionMayAdopt` — and #100/#101 showed the question is not really about
+ * writing: the pipeline's dedupe reads a row the caller named and reports its terminal status
+ * back, before persistence is reached at all. A second spelling of this (a session predicate
+ * bolted onto a lookup's SQL, say) would be two rules free to drift, which is the split-brain
+ * issue #78 was; callers ASK this one instead.
+ *
+ * It takes the ROW rather than its owner column so the two arguments cannot be transposed. As two
+ * strings they were interchangeable to the compiler, and swapping them inverts the gate silently.
  */
-function sessionMayAdopt(storedSessionId: string | null | undefined, callerSessionId: string): boolean {
-  const owner = foldSessionId(storedSessionId);
+export function responseIsOurs(
+  response: Pick<mjBizAppsFormsFormResponseEntityType, 'AnonymousSessionID'>,
+  callerSessionId: string,
+): boolean {
+  const owner = foldSessionId(response.AnonymousSessionID);
   return owner === '' || owner === foldSessionId(callerSessionId);
 }
 
@@ -239,12 +248,17 @@ interface IdentityResult {
  *     they can return before any write happens: a row that is already terminal short-circuits to
  *     an idempotent no-op, and answering that for somebody else's response tells a caller its
  *     status. Waiting for the write seam would be too late for a decision about a read.
+ *
+ * This is the only thing that REFUSES. The submit pipeline's dedupe reads {@link responseIsOurs}
+ * directly (#100/#101) and, when the answer is no, simply declines to recognise the row as its
+ * caller's repeat — it falls through to the write, where this refuses it. One rule, one refusal,
+ * and a read path that narrows what it will claim rather than growing a second gate of its own.
  */
 function refuseIfNotOurs(
   response: mjBizAppsFormsFormResponseEntity,
   inputs: PersistenceInputs,
 ): IdentityResult | undefined {
-  if (sessionMayAdopt(response.AnonymousSessionID, inputs.sessionId)) {
+  if (responseIsOurs(response, inputs.sessionId)) {
     return undefined;
   }
   // Logged with the row and version, never with either session id: the operator needs to know
