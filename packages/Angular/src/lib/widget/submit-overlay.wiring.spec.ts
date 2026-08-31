@@ -12,7 +12,7 @@
  * BRAND NEW children. In one-question mode `index` is `signal(0)`, so a respondent who filled in
  * twenty questions and lost the network on the last one is returned to question one; in scroll
  * mode the viewport jumps to the top; and in both, the uploaded-file confirmation and the drawn
- * signature bitmap disappear while the answers themselves survive. That converts a recoverable
+ * doodle bitmap disappear while the answers themselves survive. That converts a recoverable
  * network failure into "fill the form in again", which is the exact loss the sending state was
  * added to prevent, on the connection profile most likely to hit it.
  *

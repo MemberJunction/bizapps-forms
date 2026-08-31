@@ -4,7 +4,7 @@
  * Its own tested module because the filename half is genuinely fiddly and gets shipped wrong all
  * the time. Three things have to hold at once:
  *
- *  - `attachment` is what turns a click into a download. Without it a PNG signature opens in the
+ *  - `attachment` is what turns a click into a download. Without it a PNG drawing opens in the
  *    tab and the reader has to right-click-save, which is the behaviour this route exists to
  *    replace.
  *  - The quoted `filename=` parameter is ASCII-only per RFC 6266. A résumé called `Lebenslauf

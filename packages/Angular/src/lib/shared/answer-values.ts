@@ -124,7 +124,7 @@ export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
     return renderComposite(q, a);
   }
   if (answerColumnFor(q.type) === 'file') {
-    // Same reasoning as FileUpload before Signature joined it: the file's name and type live on
+    // Same reasoning as FileUpload before Doodle joined it: the file's name and type live on
     // the FormUpload provenance row, so a bare GUID here is the one thing guaranteed to mean
     // nothing to a reader. The detail view joins uploads and renders the real filename.
     return '';

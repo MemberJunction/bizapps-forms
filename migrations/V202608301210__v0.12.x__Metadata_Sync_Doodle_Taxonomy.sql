@@ -1,4 +1,26 @@
-You are a form-design assistant for MJ Forms. Given a natural-language brief, design a clear, friendly, mobile-first form and return it as a single JSON object — no prose, no markdown fences, JSON only.
+-- =============================================================================================
+-- MJ Forms v0.12.x — metadata delta: the Form Designer prompt learns that Signature is Doodle
+-- =============================================================================================
+-- Issue #97, and the other half of `V202608301200__v0.12.x__Rename_Signature_Question_To_Doodle`.
+--
+-- The Designer prompt enumerates the allowed `type` values and describes each one that needs
+-- describing. Left stale it keeps emitting `Signature`, and the blueprint schema — which derives
+-- its accepted types from the contract — then rejects every form the model authors, with the
+-- failure surfacing as a validation error about a type the prompt itself told it to use.
+--
+-- A DELTA beside the 0.11.x seed, never an edit to it: migrations are append-only history, and
+-- rewriting `V202608182130` would change what an already-migrated host believes it ran. Scope is
+-- the same one record that migration touched — the Designer's TemplateContent text — under the id
+-- the 0.8.x seed created, so this updates in place on every host that ran it.
+--
+-- The text below is the verbatim content of `metadata/templates/templates/forms-form-designer.template.md`.
+-- `npm run lint:distribution` CHECK 1 fails if that file changes without this seed being
+-- regenerated, which is what keeps the two from drifting.
+-- =============================================================================================
+
+DECLARE @DesignerTemplateID UNIQUEIDENTIFIER = '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61';
+DECLARE @DesignerContentID UNIQUEIDENTIFIER = '8F1B6C2A-3D4E-4F50-9A61-7B2C3D4E5F60';
+DECLARE @TemplateText NVARCHAR(MAX) = N'You are a form-design assistant for MJ Forms. Given a natural-language brief, design a clear, friendly, mobile-first form and return it as a single JSON object — no prose, no markdown fences, JSON only.
 
 The JSON MUST match this shape exactly:
 {
@@ -59,3 +81,23 @@ Fix it and return ONLY the corrected JSON blueprint.
 {% else %}
 Return ONLY the JSON blueprint.
 {% endif %}
+';
+
+-- Guard: on a host where the 0.8.x seed never ran, there is nothing to update and the core SP
+-- would fail on a missing row. Skipping is correct — a host without the Designer template does
+-- not have a stale prompt to fix.
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[TemplateContent] WHERE ID = @DesignerContentID)
+BEGIN
+    DECLARE @TemplateID UNIQUEIDENTIFIER, @TypeID UNIQUEIDENTIFIER, @Priority INT, @IsActive BIT;
+    SELECT @TemplateID = TemplateID, @TypeID = TypeID, @Priority = [Priority], @IsActive = IsActive
+    FROM [${mjSchema}].[TemplateContent] WHERE ID = @DesignerContentID;
+
+    EXEC [${mjSchema}].spUpdateTemplateContent
+        @ID = @DesignerContentID,
+        @TemplateID = @TemplateID,
+        @TypeID = @TypeID,
+        @TemplateText = @TemplateText,
+        @Priority = @Priority,
+        @IsActive = @IsActive;
+END
+GO

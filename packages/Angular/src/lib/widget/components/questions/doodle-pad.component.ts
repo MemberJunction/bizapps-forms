@@ -1,25 +1,25 @@
 /**
- * A draw-your-signature pad that hands back a PNG `File` — and shows the one it was given.
+ * A freehand drawing pad that hands back a PNG `File` — and shows the one it was given.
  *
  * Its own component rather than another arm of `form-question`'s `@switch`, because it is the
  * one control here with real internal machinery — a bitmap, a pointer-drag state machine and a
  * canvas-to-blob export — none of which the surrounding component has any reason to see. What
- * it exposes is two lines wide: "here is the signature for this question" in, "the respondent
+ * it exposes is two lines wide: "here is the drawing for this question" in, "the respondent
  * drew something, here is the file" out.
  *
  * The question component then uploads that file through the SAME path a `FileUpload` answer
- * takes, which is why `Signature` needs no server work at all: it is a file answer whose file
+ * takes, which is why `Doodle` needs no server work at all: it is a file answer whose file
  * happens to be produced by a canvas instead of a file picker.
  *
  * IT IS CONTROLLED, like every other control in this widget, and that is not decoration. The
  * pad used to be write-only: ink lived in the canvas bitmap and in a private `hasInk` flag, both
  * of which die with the component. Angular destroys it whenever the respondent leaves the
  * section (Scroll) or steps to a question of another type (OneQuestion), so coming back built a
- * blank pad reading "Draw your signature above." over an answer that was, in fact, safely
- * stored — the respondent's signature "disappearing". The mirror-image failure was worse: in
- * OneQuestion mode two consecutive Signature questions share ONE pad instance, so the first
- * question's ink stayed on screen for the second, which then read "Signed." while unanswered.
- * Painting from {@link signature} on every (re)binding is one mechanism that closes both.
+ * blank pad reading "Draw here." over an answer that was, in fact, safely stored — the
+ * respondent's drawing "disappearing". The mirror-image failure was worse: in OneQuestion mode
+ * two consecutive Doodle questions share ONE pad instance, so the first question's ink stayed on
+ * screen for the second, which then read "Drawn." while unanswered. Painting from
+ * {@link drawing} on every (re)binding is one mechanism that closes both.
  */
 import {
   ChangeDetectionStrategy,
@@ -37,26 +37,26 @@ import {
 import { PadCaptures, type CaptureClaim } from './pad-captures';
 
 /**
- * Bitmap resolution of the exported signature, independent of the CSS size the pad is drawn at.
+ * Bitmap resolution of the exported drawing, independent of the CSS size the pad is drawn at.
  *
  * Fixed rather than derived from the element's layout size so the stored artifact does not
- * change resolution with the viewport — a signature captured on a phone and one captured on a
- * desktop should be the same document. Coordinates are scaled from CSS pixels on the way in.
+ * change resolution with the viewport — a drawing captured on a phone and one captured on a
+ * desktop should be the same artifact. Coordinates are scaled from CSS pixels on the way in.
  */
 const PAD_WIDTH = 600;
 const PAD_HEIGHT = 200;
 
-const SIGNATURE_PAD_CSS = /* css */ `
+const DOODLE_PAD_CSS = /* css */ `
 :host { display: block; }
 
-.mjf-sig {
+.mjf-doodle {
   display: flex;
   flex-direction: column;
   gap: var(--mjf-gap-sm, 8px);
 }
 
 /* The pad is a FIELD, and looks like the other fields. It used to be a hardcoded white
-   rectangle on the theory that a signature is paper — which read as a hole punched through any
+   rectangle on the theory that a drawing wants paper — which read as a hole punched through any
    themed form, most obviously a dark one, where it was the single brightest thing on the page.
 
    The export is what that white was really protecting, and it does not need it: toPNG composites
@@ -66,9 +66,9 @@ const SIGNATURE_PAD_CSS = /* css */ `
    guarantees is readable on --mjf-page-bg, so ink-on-paper here inherits that guarantee rather
    than restating it. Defined as tokens, not literals, so the canvas can read them back with
    getComputedStyle instead of the component hardcoding a colour. */
-.mjf-sig__pad {
-  --mjf-sig-paper: var(--mjf-input-bg);
-  --mjf-sig-ink: var(--mjf-page-ink);
+.mjf-doodle__pad {
+  --mjf-doodle-paper: var(--mjf-input-bg);
+  --mjf-doodle-ink: var(--mjf-page-ink);
   width: 100%;
   max-width: 100%;
   height: auto;
@@ -77,14 +77,14 @@ const SIGNATURE_PAD_CSS = /* css */ `
   cursor: crosshair;
   border: 1px dashed var(--mjf-page-edge);
   border-radius: var(--mjf-input-radius, 8px);
-  background: var(--mjf-sig-paper);
-  color: var(--mjf-sig-ink);
+  background: var(--mjf-doodle-paper);
+  color: var(--mjf-doodle-ink);
 }
-.mjf-sig__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
+.mjf-doodle__pad:focus-visible { outline: none; border-color: var(--mjf-accent); box-shadow: var(--mjf-focus-ring); }
 
-.mjf-sig__bar { display: flex; align-items: center; gap: var(--mjf-gap-sm, 8px); }
-.mjf-sig__hint { flex: 1; margin: 0; font-size: var(--mjf-label, 0.8125rem); color: var(--mjf-page-ink-muted); }
-.mjf-sig__clear {
+.mjf-doodle__bar { display: flex; align-items: center; gap: var(--mjf-gap-sm, 8px); }
+.mjf-doodle__hint { flex: 1; margin: 0; font-size: var(--mjf-label, 0.8125rem); color: var(--mjf-page-ink-muted); }
+.mjf-doodle__clear {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -98,19 +98,19 @@ const SIGNATURE_PAD_CSS = /* css */ `
   background: var(--mjf-page-bg);
   color: var(--mjf-page-ink-soft);
 }
-.mjf-sig__clear:hover:not(:disabled) { background: var(--mjf-page-sunken); }
-.mjf-sig__clear:disabled { opacity: 0.5; cursor: default; }
+.mjf-doodle__clear:hover:not(:disabled) { background: var(--mjf-page-sunken); }
+.mjf-doodle__clear:disabled { opacity: 0.5; cursor: default; }
 `;
 
 @Component({
-  selector: 'mjf-signature-pad',
+  selector: 'mjf-doodle-pad',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  styles: [SIGNATURE_PAD_CSS],
+  styles: [DOODLE_PAD_CSS],
   template: `
-    <div class="mjf-sig">
+    <div class="mjf-doodle">
       <canvas
-        class="mjf-sig__pad"
+        class="mjf-doodle__pad"
         #pad
         tabindex="0"
         role="img"
@@ -122,25 +122,25 @@ const SIGNATURE_PAD_CSS = /* css */ `
         (pointerup)="onPointerUp($event)"
         (pointercancel)="onPointerUp($event)"
       ></canvas>
-      <div class="mjf-sig__bar">
-        <p class="mjf-sig__hint">{{ hint() }}</p>
-        <button type="button" class="mjf-sig__clear" [disabled]="!hasInk() && !recorded()" (click)="clear()">
+      <div class="mjf-doodle__bar">
+        <p class="mjf-doodle__hint">{{ hint() }}</p>
+        <button type="button" class="mjf-doodle__clear" [disabled]="!hasInk() && !recorded()" (click)="clear()">
           <i class="fa-solid fa-eraser" aria-hidden="true"></i> Clear
         </button>
       </div>
     </div>
   `,
 })
-export class SignaturePadComponent {
+export class DoodlePadComponent {
   /** Accessible name for the canvas. */
-  public readonly label = input<string>('Signature');
+  public readonly label = input<string>('Doodle');
   /**
-   * The signature already held for {@link subject}, or `null` for an unsigned question.
+   * The drawing already held for {@link subject}, or `null` for an unanswered question.
    *
    * The same `File` this pad last emitted for it, handed back by whoever is holding the answer.
    * Painted onto the canvas whenever the pad is bound to a subject — see the constructor.
    */
-  public readonly signature = input<File | null>(null);
+  public readonly drawing = input<File | null>(null);
   /**
    * WHAT this pad is currently signing — the question id, in the widget.
    *
@@ -154,22 +154,22 @@ export class SignaturePadComponent {
    * Whether an answer is on record for {@link subject}, whether or not it can be shown.
    *
    * A separate fact from {@link image}, and it earns its place on exactly the occasions the pad
-   * would otherwise lie: a signature captured in an earlier session (the widget holds the answer
+   * would otherwise lie: a drawing captured in an earlier session (the widget holds the answer
    * id, not the artifact) and one whose repaint failed to decode. Both leave a pad with no ink
-   * over an answer that stands, and "Draw your signature above." invites the respondent to redo
-   * work that is already done — or worse, reads as the signature having been lost again.
+   * over an answer that stands, and "Draw here." invites the respondent to redo work that is
+   * already done — or worse, reads as the drawing having been lost again.
    */
   public readonly recorded = input<boolean>(false);
   /**
-   * Emitted once a stroke settles, carrying the signature AND the subject it was drawn on.
+   * Emitted once a stroke settles, carrying the drawing AND the subject it was drawn on.
    *
    * The subject travels with the file because the export finishes later than the gesture that
    * started it, and an `output()` is routed by whatever the view is bound to when it fires. In
-   * OneQuestion mode one pad instance serves consecutive Signature questions, so a respondent
+   * OneQuestion mode one pad instance serves consecutive Doodle questions, so a respondent
    * who advances while `toBlob` is still encoding had the first question's drawing stored as the
    * SECOND question's answer. Naming the subject here is what makes that impossible to express.
    */
-  public readonly drawn = output<SignatureCapture>();
+  public readonly drawn = output<DoodleCapture>();
   /** Emitted when the respondent clears the pad. */
   public readonly cleared = output<void>();
 
@@ -181,37 +181,38 @@ export class SignaturePadComponent {
    * What the pad says about itself — three states, because there are three.
    *
    * The middle one is the honest answer to "there is an answer here but no picture of it": the
-   * respondent is told their signature stands, and Clear stays available so they can withdraw a
-   * signature they cannot see. Saying nothing, or saying "Draw your signature above.", would
-   * both be the control claiming an empty answer that is not empty.
+   * respondent is told their drawing stands, and Clear stays available so they can withdraw a
+   * drawing they cannot see. Saying nothing, or saying "Draw here.", would both be the control
+   * claiming an empty answer that is not empty.
    */
   protected readonly hint = computed(() => {
     if (this.hasInk()) {
-      return 'Signed.';
+      return 'Drawn.';
     }
-    return this.recorded() ? 'Signed — your saved signature is not shown here.' : 'Draw your signature above.';
+    return this.recorded() ? 'Drawn — your saved drawing is not shown here.' : 'Draw here.';
   });
 
   private readonly pad = viewChild<ElementRef<HTMLCanvasElement>>('pad');
-  private drawing = false;
+  /** Whether the pen is currently down — a stroke is being drawn right now. */
+  private penDown = false;
   /** Which outstanding exports and repaints still speak for this pad. See {@link PadCaptures}. */
   private readonly captures = new PadCaptures();
 
   constructor() {
-    // Put the stored signature back whenever this pad starts standing for a subject — a fresh
+    // Put the stored drawing back whenever this pad starts standing for a subject — a fresh
     // instance after the section was left and re-entered, or the same instance re-pointed at the
     // next question without being destroyed.
     //
     // `subject()` and the canvas are the only things tracked, deliberately. The canvas is tracked
     // because a view query resolves after construction and the repaint has to wait for it.
-    // `signature()` is NOT: every stroke starts an upload that rewrites the held file, so
-    // repainting on it would wipe the drawing out from under the respondent mid-signature.
+    // `drawing()` is NOT: every stroke starts an upload that rewrites the held file, so
+    // repainting on it would wipe the drawing out from under the respondent mid-stroke.
     // Reading it untracked means this fires exactly when the pad changes what it stands for.
     effect(() => {
       const canvas = this.pad()?.nativeElement;
       const subject = this.subject();
       if (canvas) {
-        void untracked(() => this.repaint(canvas, subject, this.signature()));
+        void untracked(() => this.repaint(canvas, subject, this.drawing()));
       }
     });
   }
@@ -228,11 +229,11 @@ export class SignaturePadComponent {
     // exists: a repaint would bury this stroke under the stored image, and the previous stroke's
     // export is about to be superseded by this one's anyway.
     this.captures.supersede();
-    this.drawing = true;
+    this.penDown = true;
   }
 
   protected onPointerMove(event: PointerEvent): void {
-    if (!this.drawing) {
+    if (!this.penDown) {
       return;
     }
     const canvas = this.pad()?.nativeElement;
@@ -247,25 +248,25 @@ export class SignaturePadComponent {
   }
 
   protected onPointerUp(event: PointerEvent): void {
-    if (!this.drawing) {
+    if (!this.penDown) {
       return;
     }
-    this.drawing = false;
+    this.penDown = false;
     const canvas = this.pad()?.nativeElement;
     if (canvas?.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
     // Export on every stroke, deliberately.
     //
-    // A settle timer looks like the obvious improvement here — a two-word signature is several
-    // strokes and each one starts its own upload — and it was tried. It cannot be made safe. The
-    // window it opens is real time in which the pad already reads "Signed." and the respondent
+    // A settle timer looks like the obvious improvement here — a drawing is many strokes and
+    // each one starts its own upload — and it was tried. It cannot be made safe. The
+    // window it opens is real time in which the pad already reads "Drawn." and the respondent
     // can tap Next or Submit, which destroys this component with the export still pending; and it
     // cannot be flushed on the way out, because `output()` registers its OWN destroy hook in a
     // field initializer that runs BEFORE any hook a constructor adds, so by then `emit()` only
     // logs "Unexpected emit for destroyed OutputRef" and returns. `emitPng` is async besides, so
     // the emit lands after destruction regardless. The respondent would be left with a null answer
-    // under a pad that says "Signed." — a worse bug than the one being optimised away.
+    // under a pad that says "Drawn." — a worse bug than the one being optimised away.
     //
     // Correctness does not depend on coalescing anyway: every upload carries a generation stamp
     // (see FormQuestionComponent.uploadFile), so the LAST one started wins no matter which
@@ -277,15 +278,15 @@ export class SignaturePadComponent {
   }
 
   /**
-   * Draw `signature` onto the pad, or empty it when there is none.
+   * Draw `drawing` onto the pad, or empty it when there is none.
    *
    * `createImageBitmap` rather than an `Image` + object URL: it decodes the same PNG with no URL
    * whose lifetime someone then has to own. A decode that fails clears {@link hasInk} and stops
-   * there, which lands the pad on the {@link recorded} wording — "signed, just not shown" — and
-   * never on "Draw your signature above.", because the answer is still there and inviting the
+   * there, which lands the pad on the {@link recorded} wording — "drawn, just not shown" — and
+   * never on "Draw here.", because the answer is still there and inviting the
    * respondent to redo it would be the original bug wearing a different face.
    */
-  private async repaint(canvas: HTMLCanvasElement, subject: string, signature: File | null): Promise<void> {
+  private async repaint(canvas: HTMLCanvasElement, subject: string, drawing: File | null): Promise<void> {
     const ctx = canvas.getContext('2d');
     if (!ctx) {
       return;
@@ -293,13 +294,13 @@ export class SignaturePadComponent {
     // Synchronously, before the decode: on a re-point the previous question's ink has to leave
     // the screen NOW, not whenever the next image finishes decoding.
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!signature) {
+    if (!drawing) {
       this.hasInk.set(false);
       return;
     }
     const claim = this.captures.claim(subject);
     try {
-      const bitmap = await createImageBitmap(signature);
+      const bitmap = await createImageBitmap(drawing);
       // The pad may have been cleared, drawn on, or re-pointed while that decoded.
       if (!this.captures.mayPaint(claim, this.subject())) {
         bitmap.close();
@@ -311,13 +312,13 @@ export class SignaturePadComponent {
     } catch (err) {
       if (!this.captures.mayPaint(claim, this.subject())) {
         // A rejection for a pad that has moved on says nothing about the pad now on screen —
-        // reporting it would mark a visible signature as missing, or stop a stroke in progress
+        // reporting it would mark a visible drawing as missing, or stop a stroke in progress
         // from being emitted.
         return;
       }
       this.hasInk.set(false);
       console.warn(
-        `[mj-form] could not redraw the stored signature for "${subject}", so the pad shows it as ` +
+        `[mj-form] could not redraw the stored drawing for "${subject}", so the pad shows it as ` +
           'recorded but not displayed. The answer itself is unaffected.',
         err,
       );
@@ -330,7 +331,7 @@ export class SignaturePadComponent {
    * Superseding is half the work. The parent retires the running UPLOAD, which is not the same
    * thing: an export still encoding has not started its upload yet, so there is nothing there to
    * retire — it would begin a fresh one afterwards and commit the drawing the respondent has
-   * just withdrawn, leaving a stored signature under an empty pad.
+   * just withdrawn, leaving a stored drawing under an empty pad.
    */
   public clear(): void {
     this.captures.supersede();
@@ -375,7 +376,7 @@ export class SignaturePadComponent {
    * Export the drawing as a PNG on an OPAQUE paper background.
    *
    * `toBlob` on the live canvas would export the strokes over transparency, and a dark-ink
-   * signature on a transparent background disappears entirely against a dark viewer. Compositing
+   * drawing on a transparent background disappears entirely against a dark viewer. Compositing
    * onto the paper colour first makes the artifact self-contained.
    */
   private async emitPng(): Promise<void> {
@@ -398,7 +399,7 @@ export class SignaturePadComponent {
     const blob = await new Promise<Blob | null>((resolve) => flat.toBlob(resolve, 'image/png'));
     if (!blob) {
       console.warn(
-        `[mj-form] the browser could not encode the signature drawn for "${claim.subject}", so ` +
+        `[mj-form] the browser could not encode the drawing made for "${claim.subject}", so ` +
           'this stroke was not stored. The respondent can draw again.',
       );
       return;
@@ -408,13 +409,13 @@ export class SignaturePadComponent {
     }
     this.drawn.emit({
       subject: claim.subject,
-      file: new File([blob], 'signature.png', { type: 'image/png' }),
+      file: new File([blob], 'doodle.png', { type: 'image/png' }),
     });
   }
 }
 
-/** One finished capture: the signature, and the subject it was drawn for. */
-export interface SignatureCapture {
+/** One finished capture: the drawing, and the subject it was made for. */
+export interface DoodleCapture {
   readonly subject: string;
   readonly file: File;
 }

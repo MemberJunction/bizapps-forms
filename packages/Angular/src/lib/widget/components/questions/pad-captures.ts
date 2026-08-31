@@ -1,5 +1,5 @@
 /**
- * Which of the signature pad's outstanding async jobs still speak for it.
+ * Which of the doodle pad's outstanding async jobs still speak for it.
  *
  * The pad has two operations that finish LATER than the gesture that started them: exporting the
  * drawing (`toBlob`) and repainting a stored one (`createImageBitmap`). In between, the

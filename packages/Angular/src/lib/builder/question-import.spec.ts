@@ -59,8 +59,8 @@ describe('parseImportedQuestions', () => {
   });
 
   it('accepts canonical contract type names case-insensitively', () => {
-    expect(flat('Sign here [signature]')[0].type).toBe('Signature');
-    expect(flat('Sign here [SIGNATURE]')[0].type).toBe('Signature');
+    expect(flat('Draw a picture [doodle]')[0].type).toBe('Doodle');
+    expect(flat('Draw a picture [DOODLE]')[0].type).toBe('Doodle');
     expect(flat('Rate us [OpinionScale]')[0].type).toBe('OpinionScale');
   });
 
