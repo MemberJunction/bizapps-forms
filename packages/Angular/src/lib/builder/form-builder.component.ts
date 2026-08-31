@@ -528,11 +528,10 @@ export class FormBuilderComponent extends BaseFormComponent {
    * Start a new section.
    *
    * Pages shipped end to end — entity, published contract, page header on the canvas, the widget
-   * rendering a title and description per section — with no way for an author to CREATE one.
-   * `addPage` had exactly two callers: the implicit first page, and the import/paste path when a
-   * pasted block named a section. So a multi-page form was reachable only by pasting one, and
-   * the page header hides itself below two pages, which meant an author who had never pasted
-   * never saw page controls at all and had no way to discover they existed.
+   * rendering a title and description per section — with no way for an author to CREATE one, so
+   * this button is the only thing that brings a second page into existence. The gap hid itself:
+   * the page header does not render below two pages, so an author who never got a second page
+   * never saw the page controls at all and had no way to discover they existed.
    */
   protected async addPage(): Promise<void> {
     if (!this.tree || this.busy) {
