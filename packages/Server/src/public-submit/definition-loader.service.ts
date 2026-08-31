@@ -77,7 +77,17 @@ async function loadDistribution(
   return result.Results[0];
 }
 
-/** Load the single Published version for a form, or `undefined`. */
+/**
+ * Load the single Published version for a form, or `undefined`.
+ *
+ * "Single" is now true of the data: publishing retires the incumbent in the same transaction and
+ * `UQ_FormVersion_OnePublishedPerForm` keeps a second one unrepresentable (#82). It used to be an
+ * assumption the data contradicted — one dev form carried three simultaneously-Published versions
+ * — and this `ORDER BY` was the only reason the newest one was the one being served.
+ *
+ * The ordering stays for exactly that reason: it is what makes this correct on a host whose
+ * database has not yet run the backfill migration.
+ */
 async function loadPublishedVersion(
   provider: DefinitionRunViewProvider,
   formId: string,
