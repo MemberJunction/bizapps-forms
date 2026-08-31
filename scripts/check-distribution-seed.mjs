@@ -1235,6 +1235,114 @@ function checkIdOnlyGuards(repoRoot, violations) {
 }
 
 // ---------------------------------------------------------------------------
+// CHECK 6 — an extended-property value is never a MAX-typed variable
+// ---------------------------------------------------------------------------
+
+/**
+ * CHECK 6 — A MIGRATION THAT CANNOT EXECUTE NEVER SHIPS.
+ *
+ * `sp_addextendedproperty` and `sp_updateextendedproperty` declare `@value` as `sql_variant`, and
+ * `sql_variant` cannot hold ANY of the MAX types. Hand one an `NVARCHAR(MAX)` variable and the
+ * batch dies with `Operand type clash: nvarchar(max) is incompatible with sql_variant` — which
+ * fails the migration, and with it the whole run, on someone else's database.
+ *
+ * Every earlier migration here escaped this by accident: they pass string LITERALS, which SQL
+ * Server types as `nvarchar(n)`. The moment one routes the text through a variable — a good idea,
+ * since a description written once cannot drift between its three writes — the declared type
+ * starts mattering, and `NVARCHAR(MAX)` is the reflex.
+ *
+ * This is the first check here that asks whether shipped SQL can RUN rather than what it means,
+ * and it exists because a migration shipped that could not. The gates are all static, so nothing
+ * else could have noticed: the defect is invisible until the file is executed, and a migration
+ * authored in a branch that never applied it is executed for the first time by whoever installs
+ * the release.
+ *
+ * `4000` is the ceiling `sql_variant` allows for `nvarchar` (an extended property is capped at
+ * 7500 bytes regardless), so a bounded declaration is both correct and sufficient.
+ */
+/** The extended-property procedures, whose `@value` parameter is `sql_variant`. */
+const EXTENDED_PROPERTY_PROCS = /\b(?:sp_addextendedproperty|sp_updateextendedproperty)\b/gi;
+
+/**
+ * Every type `sql_variant` cannot hold, as a variable declaration.
+ *
+ * `NVARCHAR`/`VARCHAR`/`VARBINARY` only when declared `(MAX)`; `XML` always, since it has no
+ * length to qualify and is rejected outright. `AS` is optional in T-SQL's `DECLARE`, so it is
+ * optional here — leaving it out was one of the ways a broken migration stayed invisible.
+ */
+// The `\b` sits INSIDE the XML alternative on purpose. Trailing it after the whole group put it
+// straight after a literal `)`, and `)` followed by a space is two non-word characters — never a
+// word boundary — so every parenthesised type silently failed to match while `XML` still did.
+const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\s+(?:AS\s+)?((?:N?VARCHAR|VARBINARY)\s*\(\s*MAX\s*\)|XML\b)/gi;
+
+/**
+ * The MAX-typed variables handed to an extended-property procedure in `sql`.
+ *
+ * Two passes: collect every MAX-typed declaration, then read each extended-property CALL'S OWN
+ * ARGUMENT LIST and report any of those variables appearing in it.
+ *
+ * Reading the call's arguments — rather than finding `@value = @x` and walking back to the
+ * nearest preceding `EXEC` — is what makes this sound, and the walk-back is why the first cut
+ * leaked. It searched for the substring `EXEC`, so a named argument whose VALUE contains those
+ * four letters (`@level1name = N'ActionExecutionLog'`, a table these migrations already write
+ * to) captured the walk-back and hid the call completely. Reading forwards also gates a
+ * POSITIONAL `@value`, which the named-parameter pattern could never see, and T-SQL allows
+ * named arguments in any order, so there was no ordering assumption left to rescue it.
+ *
+ * The argument list ends at the statement terminator. `;` is required by every call in this
+ * tree; a bare newline-then-blank-line or a batch separator closes an unterminated one so a
+ * missing semicolon cannot swallow the rest of the file.
+ */
+export function findMaxTypedExtendedPropertyValues(sql) {
+    const maxTyped = new Map();
+    for (const m of sql.matchAll(MAX_TYPED_DECLARATION)) {
+        maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\s+/g, ''));
+    }
+    if (maxTyped.size === 0) {
+        return [];
+    }
+    const hits = [];
+    for (const call of sql.matchAll(EXTENDED_PROPERTY_PROCS)) {
+        const from = call.index + call[0].length;
+        const terminator = sql.slice(from).search(/;|\n\s*\n|^\s*GO\s*$/m);
+        const args = sql.slice(from, terminator < 0 ? sql.length : from + terminator);
+        for (const ref of args.matchAll(/@[A-Za-z0-9_]+/g)) {
+            const declaredType = maxTyped.get(ref[0].toLowerCase());
+            // A parameter NAME is also an `@identifier`; only a declared MAX variable can be the
+            // argument, and `@value` itself is never declared, so name/value cannot be confused.
+            if (!declaredType) continue;
+            hits.push({
+                variable: ref[0],
+                declaredType,
+                line: sql.slice(0, from + ref.index).split('\n').length,
+            });
+        }
+    }
+    return hits;
+}
+
+function checkExtendedPropertyValueTypes(repoRoot, violations) {
+    for (const dirName of [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown']) {
+        const dir = join(repoRoot, dirName);
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+            const rel = relative(repoRoot, join(dir, file));
+            const sql = readFileSync(join(dir, file), 'utf-8');
+            for (const { variable, declaredType, line } of findMaxTypedExtendedPropertyValues(sql)) {
+                violations.push(
+                    `${rel}:${line} passes \`${variable}\`, declared \`${declaredType}\`, as \`@value\` to an ` +
+                        'extended-property procedure. That parameter is `sql_variant`, which cannot hold a MAX type or XML: ' +
+                        'SQL Server rejects the batch with `Operand type clash: nvarchar(max) is incompatible with ' +
+                        'sql_variant`, so this migration does not merely misbehave — it does not run, and it fails the ' +
+                        'whole migration run on whichever database applies it first. Declare it `NVARCHAR(4000)` ' +
+                        '(the ceiling `sql_variant` allows, and more than an extended property can hold anyway).',
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point. Skipped when imported (by the spec and the mutation harness).
 // ---------------------------------------------------------------------------
 
@@ -1245,6 +1353,7 @@ export function runChecks(repoRoot = REPO_ROOT) {
     checkRespondentGrants(repoRoot, violations);
     checkIdOnlyGuards(repoRoot, violations);
     checkSchemaSyncScope(repoRoot, violations);
+    checkExtendedPropertyValueTypes(repoRoot, violations);
     return violations;
 }
 
@@ -1260,6 +1369,7 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
     console.log(
         '✅ Distribution gate passed — shipped SQL uses only install-supplied placeholders; no post-hardening ' +
             'seed re-grants the Form Respondent role unfiltered access; no new core-metadata insert is guarded ' +
-            'on its own ID alone; no shipped schema sync reaches a schema this app does not own.',
+            'on its own ID alone; no shipped schema sync reaches a schema this app does not own; no extended-property ' +
+            'write hands `sql_variant` a MAX-typed value.',
     );
 }

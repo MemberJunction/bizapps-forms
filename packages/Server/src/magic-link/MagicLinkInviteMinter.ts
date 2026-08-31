@@ -31,8 +31,11 @@ import { UUIDsEqual } from '@memberjunction/global';
 import { configInfo } from '@memberjunction/server';
 import type { MJMagicLinkInviteEntity, MJResourceTypeEntity } from '@memberjunction/core-entities';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
+import { resolveExpiry } from '@mj-biz-apps/forms-core-entities-server';
 import type {
+  AnonymousCredentialRef,
   IAnonymousMagicLinkMinter,
+  InviteExpiryBounds,
   InviteWriteResult,
   MintAnonymousInviteParams,
   MintAnonymousInviteResult,
@@ -69,11 +72,49 @@ const RESOURCE_TYPE_ENTITY = 'MJ: Resource Types';
  */
 const NO_EXPIRY_SENTINEL = new Date('9999-12-31T00:00:00.000Z');
 
+/**
+ * A fixed instant standing in for an anchor that is not needed on the branch being taken.
+ *
+ * Deliberately not `new Date()`: the whole point of resolving a lifetime ceiling against the
+ * credential's issue time is that no wall clock reaches the calculation, and a `now` fallback
+ * would quietly reintroduce exactly that. Any path that would actually READ this has already
+ * been refused.
+ */
+const EPOCH = new Date(0);
+
 /** Whether two instants are the same, treating an unparseable stored value as "different". */
 function sameInstant(a: Date | null | undefined, b: Date): boolean {
   const left = a instanceof Date ? a.getTime() : Number.NaN;
   return Number.isFinite(left) && left === b.getTime();
 }
+
+/**
+ * A usable `Date` from a value the store may hand back as a `Date` or as a string, or `null`
+ * when it is neither. Used for the invite's issue instant, which anchors a host lifetime
+ * ceiling; anything unreadable must fail loudly rather than fall back to the wall clock.
+ */
+function asInstant(value: Date | string | null | undefined): Date | null {
+  if (value == null) {
+    return null;
+  }
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * What a per-invite change decided.
+ *
+ * Three outcomes rather than two booleans, because the third is genuinely different and used
+ * to be unrepresentable: `settled` and `refuse` both write nothing, and reporting `refuse` as
+ * a success would tell the caller a postcondition holds when nobody checked.
+ */
+type InviteChangeVerdict =
+  /** Apply the mutation `change` just made and save. */
+  | { verdict: 'write' }
+  /** The postcondition already holds; write nothing and report success. */
+  | { verdict: 'settled'; message?: string }
+  /** Could not decide safely; write nothing and report failure so the next save retries. */
+  | { verdict: 'refuse'; message: string };
 
 export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
   public async MintAnonymousInvite(
@@ -112,19 +153,19 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * refuses to unlink a credential it could not kill, and would retry forever.
    */
   public async RevokeAnonymousInvite(
-    inviteId: string,
+    credential: AnonymousCredentialRef,
     contextUser: UserInfo,
   ): Promise<InviteWriteResult> {
-    return this.writeToInvite(inviteId, contextUser, 'revoke', (invite) => {
+    return this.writeToInvite(credential, contextUser, 'revoke', (invite) => {
       if (invite.Status === 'Revoked') {
-        return { done: true, message: `Invite ${invite.ID} was already revoked.` };
+        return { verdict: 'settled', message: `Invite ${invite.ID} was already revoked.` };
       }
       // Status alone, deliberately: it is the first thing `evaluateInvite` checks and
       // the consume UPDATE's `Status='Active'` guard already excludes it, so also
       // collapsing `ExpiresAt` would be a second write buying no additional refusal —
       // while destroying the record of when the credential was originally to expire.
       invite.Status = 'Revoked';
-      return { done: false };
+      return { verdict: 'write' };
     });
   }
 
@@ -136,20 +177,38 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * no gain — none of those statuses is redeemable whatever `ExpiresAt` says.
    */
   public async SetAnonymousInviteExpiry(
-    inviteId: string,
-    expiresAt: Date | null,
+    credential: AnonymousCredentialRef,
+    bounds: InviteExpiryBounds,
     contextUser: UserInfo,
   ): Promise<InviteWriteResult> {
-    const target = this.resolveExpiresAt(expiresAt);
-    return this.writeToInvite(inviteId, contextUser, 'set the expiry of', (invite) => {
+    return this.writeToInvite(credential, contextUser, 'set the expiry of', (invite) => {
       if (invite.Status !== 'Active') {
-        return { done: true, message: `Invite ${invite.ID} is ${invite.Status}; expiry left as it was.` };
+        return { verdict: 'settled', message: `Invite ${invite.ID} is ${invite.Status}; expiry left as it was.` };
       }
+      // The ceiling is a DURATION, so it names an instant only relative to when this credential
+      // was issued — which is why the bounds arrive as a rule and are resolved here, against the
+      // row. Anchoring to `now` instead would make this a different answer on every call, and
+      // this runs after every save of a live link: the row would be rewritten each time and the
+      // expiry walked forward forever, so a configured ceiling would bound nothing at all.
+      const issuedAt = asInstant(invite.__mj_CreatedAt);
+      if (bounds.maxLifetimeHours !== undefined && !issuedAt) {
+        return {
+          verdict: 'refuse',
+          message:
+            `Invite ${invite.ID} has no readable issue time, so the host lifetime ceiling ` +
+            `cannot be anchored; its expiry was left as it was.`,
+        };
+      }
+      // `issuedAt` is read only on the ceiling branch, which the guard above has already
+      // refused without one. The epoch stands in so no wall clock can reach this call.
+      const target = this.resolveExpiresAt(
+        resolveExpiry(bounds.closeAt, bounds.maxLifetimeHours, issuedAt ?? EPOCH),
+      );
       if (sameInstant(invite.ExpiresAt, target)) {
-        return { done: true };
+        return { verdict: 'settled' };
       }
       invite.ExpiresAt = target;
-      return { done: false };
+      return { verdict: 'write' };
     });
   }
 
@@ -157,8 +216,11 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * Load one invite and apply `change` to it, saving only if `change` asked for a write.
    *
    * The shared body of revoke and re-bound, which are the same five steps around one
-   * different line. `change` returns `done: true` to mean "the postcondition already
-   * holds, write nothing" — the no-op success both callers rely on.
+   * different line.
+   *
+   * `change` returns one of three verdicts — see {@link InviteChangeVerdict}. `settled` is the
+   * no-op success both callers rely on; `refuse` is a decision it could not make safely, which
+   * must not be dressed up as a postcondition that holds.
    *
    * A failed `Load` is NOT assumed to mean "deleted". `Load()` returns false for a row
    * that is gone AND for a read that failed, and the two demand opposite answers: gone
@@ -168,12 +230,12 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * there, and anything short of a confident "no" is reported as a failure to retry.
    */
   private async writeToInvite(
-    inviteId: string,
+    credential: AnonymousCredentialRef,
     contextUser: UserInfo,
     verb: string,
-    change: (invite: MJMagicLinkInviteEntity) => { done: boolean; message?: string },
+    change: (invite: MJMagicLinkInviteEntity) => InviteChangeVerdict,
   ): Promise<InviteWriteResult> {
-    const id = inviteId?.trim();
+    const id = credential?.inviteId?.trim();
     if (!id) {
       return { success: false, changed: false, message: 'No invite id supplied.' };
     }
@@ -185,9 +247,27 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
         return await this.reportUnloadableInvite(id, contextUser, verb);
       }
 
+      // OWNERSHIP, before any write. The id arrives from `FormDistribution.MagicLinkInviteID`,
+      // a column with no foreign key that rides the generated GraphQL update input — so it is
+      // whatever a writer put there, and these writes run under the elevated system user on the
+      // public submit path. The mint recorded the scope on the invite itself; reading it back is
+      // what stops one distribution revoking or re-bounding another's live credential. Refused
+      // rather than silently skipped: the caller must not read this as "the postcondition holds".
+      if (!UUIDsEqual(invite.ResourceID ?? '', credential.resourceId)) {
+        const message =
+          `Invite ${id} is scoped to resource ${String(invite.ResourceID)}, not ${credential.resourceId}; ` +
+          `refusing to ${verb} it.`;
+        LogError(`[MagicLinkInviteMinter] ${message}`);
+        return { success: false, changed: false, message };
+      }
+
       const outcome = change(invite);
-      if (outcome.done) {
+      if (outcome.verdict === 'settled') {
         return { success: true, changed: false, message: outcome.message };
+      }
+      if (outcome.verdict === 'refuse') {
+        LogError(`[MagicLinkInviteMinter] Could not ${verb} invite ${id}: ${outcome.message}`);
+        return { success: false, changed: false, message: outcome.message };
       }
       if (!(await invite.Save())) {
         return {
@@ -217,7 +297,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     verb: string,
   ): Promise<InviteWriteResult> {
     const rv = new RunView();
-    const found = await rv.RunView(
+    const found = await rv.RunView<MJMagicLinkInviteEntity>(
       {
         EntityName: INVITE_ENTITY,
         ExtraFilter: `ID=${quoteSqlString(id)}`,
@@ -319,7 +399,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     const result = await rv.RunView<MJResourceTypeEntity>(
       {
         EntityName: RESOURCE_TYPE_ENTITY,
-        ExtraFilter: `EntityID = '${entity.ID}'`,
+        ExtraFilter: `EntityID = ${quoteSqlString(entity.ID)}`,
         ResultType: 'simple',
         Fields: ['ID', 'EntityID'],
         MaxRows: 1,
@@ -344,6 +424,10 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     if (expiresAt instanceof Date && !Number.isNaN(expiresAt.getTime())) {
       return expiresAt;
     }
-    return NO_EXPIRY_SENTINEL;
+    // A copy, not the constant. `Date` is mutable and this value is assigned onto an entity that
+    // other code may normalise in place; handing out the module-level instance would let one such
+    // write move the sentinel for the whole process, and every "already unbounded" comparison
+    // with it. The VALUE is what is fixed, not the object.
+    return new Date(NO_EXPIRY_SENTINEL.getTime());
   }
 }

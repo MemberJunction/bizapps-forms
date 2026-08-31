@@ -52,6 +52,7 @@ export interface ProvisionOutcome {
     | 'expiry-updated'
     | 'expiry-update-failed'
     | 'revoke-failed'
+    | 'unlink-failed'
     | 'skipped-no-minter'
     | 'skipped-no-user'
     | 'skipped-minter'
@@ -115,9 +116,14 @@ export async function runProvisioning(
   }
 
   if (decision.revoke) {
-    const revoked = await withdrawCredential(ctx, minter, contextUser, persistCredential);
-    if (!revoked) {
-      return { result: 'revoke-failed', inviteId: ctx.magicLinkInviteId ?? undefined };
+    // Two failures, deliberately told apart. `revoke-failed` means the credential MAY STILL BE
+    // REDEEMABLE and the retry must be the revocation; `unlink-failed` means it is dead and the
+    // record is merely still advertising it, where the retry is clearing two columns. Collapsing
+    // them told every caller, log reader and test the more alarming of the two regardless, and it
+    // is the reissue path's answer to "did the leaked token stop working?".
+    const withdrawn = await withdrawCredential(ctx, minter, contextUser, persistCredential);
+    if (withdrawn !== 'withdrawn') {
+      return { result: withdrawn, inviteId: ctx.magicLinkInviteId ?? undefined };
     }
     if (!decision.mint) {
       LogStatus(
@@ -151,9 +157,15 @@ async function realignExpiry(
     return { result: 'noop', reason: 'current' };
   }
 
+  // The BOUNDS, not a resolved instant. `fixedExpiryHours` is a duration, and the instant it
+  // runs from is when the credential was ISSUED — a fact about the invite row, which only the
+  // minter holds. Resolving it here would mean anchoring it to `now`, and since this pass runs
+  // after EVERY save that answer moves every time: the row would be rewritten on each save and
+  // the expiry walked forward forever, so a host ceiling meant to bound the credential would
+  // never bound anything. Same lesson as the no-expiry sentinel, one bound over.
   const outcome = await minter.SetAnonymousInviteExpiry(
-    inviteId,
-    resolveExpiry(ctx.closeAt, config.fixedExpiryHours, new Date()),
+    { inviteId, resourceId: ctx.distributionId },
+    { closeAt: ctx.closeAt, maxLifetimeHours: config.fixedExpiryHours },
     contextUser,
   );
   if (!outcome.success) {
@@ -169,14 +181,17 @@ async function realignExpiry(
   }
   LogStatus(
     `[FormDistribution] Re-bounded magic-link invite ${inviteId} for distribution ` +
-      `${ctx.distributionId} to follow its closing date.`,
+      `${ctx.distributionId} to the bounds its link now carries.`,
   );
   return { result: 'expiry-updated', inviteId };
 }
 
 /**
- * Kill the linked invite and unlink it. Returns false — leaving the record pointing
- * at the credential — whenever the credential might still be live.
+ * Kill the linked invite and unlink it.
+ *
+ * Reports which of three things happened, because two of them are opposites: `revoke-failed`
+ * leaves a credential that MAY STILL REDEEM, while `unlink-failed` means it is dead and only the
+ * record's copy of it is stale. Both leave the invite id in place so the next save retries.
  *
  * The order matters and is the whole point: revoke FIRST, unlink only on success.
  * Unlinking a credential we could not kill orphans a live invite that no distribution
@@ -189,7 +204,7 @@ async function withdrawCredential(
   minter: IAnonymousMagicLinkMinter,
   contextUser: UserInfo,
   persistCredential: PersistCredential,
-): Promise<boolean> {
+): Promise<'withdrawn' | 'revoke-failed' | 'unlink-failed'> {
   const inviteId = ctx.magicLinkInviteId?.trim();
   if (!inviteId) {
     // Unreachable via decideProvisioning, which only asks for a revoke when one is
@@ -198,17 +213,20 @@ async function withdrawCredential(
       `[FormDistribution] Asked to revoke the credential of distribution ${ctx.distributionId}, ` +
         `which has no MagicLinkInviteID. Nothing was revoked.`,
     );
-    return false;
+    return 'revoke-failed';
   }
 
-  const revoked = await minter.RevokeAnonymousInvite(inviteId, contextUser);
+  const revoked = await minter.RevokeAnonymousInvite(
+    { inviteId, resourceId: ctx.distributionId },
+    contextUser,
+  );
   if (!revoked.success) {
     LogError(
       `[FormDistribution] Could not revoke magic-link invite ${inviteId} for distribution ` +
         `${ctx.distributionId}: ${revoked.message ?? 'unknown error'}. The credential is left LINKED ` +
         `and may still be redeemable; the next save of this distribution retries the revocation.`,
     );
-    return false;
+    return 'revoke-failed';
   }
 
   if (!(await persistCredential(null))) {
@@ -217,9 +235,9 @@ async function withdrawCredential(
         `distribution ${ctx.distributionId}. The invite is dead; the distribution still points at it ` +
         `and will read as issued until the next save clears it.`,
     );
-    return false;
+    return 'unlink-failed';
   }
-  return true;
+  return 'withdrawn';
 }
 
 /**
@@ -245,6 +263,16 @@ async function issueCredential(
       resourceTypeName: DISTRIBUTION_ENTITY_NAME,
       resourceId: ctx.distributionId,
       maxUses: config.defaultMaxUses,
+      // Resolved HERE, and only here, because a mint is the one moment when the credential's
+      // issue instant and `now` are the same thing. Every later pass hands the minter the
+      // rule instead — see {@link realignExpiry}.
+      //
+      // "The same thing" to within a few milliseconds: this is the JS clock, while the row's
+      // `__mj_CreatedAt` — the anchor every later pass resolves against — is stamped by the
+      // database. So a ceilinged credential's expiry is corrected once, on its first subsequent
+      // save, onto the row's own instant, and then never moves again. Settling on the more
+      // authoritative of the two anchors is the right direction, and paying for it eagerly here
+      // would cost the same extra write with more code.
       expiresAt: resolveExpiry(ctx.closeAt, config.fixedExpiryHours, new Date()),
     },
     contextUser,

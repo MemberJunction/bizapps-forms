@@ -25,10 +25,20 @@
 -- drift apart, which is a peculiar way to ship a fix whose entire purpose is that two copies of a
 -- sentence had gone out of step. Variables do not survive a batch separator, so each column gets
 -- its own `GO`-delimited batch.
+--
+-- The variables are NVARCHAR(4000), NOT NVARCHAR(MAX), and that is load-bearing rather than
+-- stylistic. `sp_addextendedproperty` / `sp_updateextendedproperty` declare `@value` as
+-- `sql_variant`, and `sql_variant` cannot hold ANY of the MAX types: passing one fails the whole
+-- batch with `Operand type clash: nvarchar(max) is incompatible with sql_variant`, so the
+-- migration would abort on its first statement and take the release's migration run with it.
+-- Every other migration in this directory passes a string LITERAL — which SQL Server types as
+-- `nvarchar(n)` — which is why routing the text through a variable is the first thing here to
+-- meet the restriction. 4000 is the ceiling `sql_variant` allows for `nvarchar`, and an extended
+-- property is capped at 7500 bytes regardless; both descriptions below are well under 700 chars.
 
 -- ---- FormDistribution.PublicLinkToken ----
 
-DECLARE @tokenDescription NVARCHAR(MAX) = N'Raw redeemable magic-link token for this distribution''s public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.';
+DECLARE @tokenDescription NVARCHAR(4000) = N'Raw redeemable magic-link token for this distribution''s public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.';
 
 IF EXISTS (
     SELECT 1 FROM sys.extended_properties ep
@@ -59,7 +69,7 @@ GO
 
 -- ---- FormDistribution.MagicLinkInviteID ----
 
-DECLARE @inviteDescription NVARCHAR(MAX) = N'ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.';
+DECLARE @inviteDescription NVARCHAR(4000) = N'ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.';
 
 IF EXISTS (
     SELECT 1 FROM sys.extended_properties ep

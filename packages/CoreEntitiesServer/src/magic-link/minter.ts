@@ -95,6 +95,45 @@ export interface InviteWriteResult {
 }
 
 /**
+ * WHICH credential, and what it must belong to.
+ *
+ * The resource travels with the invite id on every write, because the id alone is not a
+ * capability anyone should act on. `FormDistribution.MagicLinkInviteID` carries no foreign key
+ * and rides the generated GraphQL update input, so the value reaching a revoke or a re-bound is
+ * whatever some writer put in the column — and these writes run under an elevated user on the
+ * public submit path. Pairing the two lets the implementation check the invite's own
+ * `ResourceID`, which the mint already wrote, and refuse to touch a credential that belongs to a
+ * different link. Without it, pointing one distribution at another's invite is enough to kill
+ * that link's credential on the next save of yours.
+ */
+export interface AnonymousCredentialRef {
+  /** The `MJ: Magic Link Invites` row to act on (`FormDistribution.MagicLinkInviteID`). */
+  inviteId: string;
+  /** The resource this invite must be scoped to — the distribution's primary key. */
+  resourceId: string;
+}
+
+/**
+ * The bounds a credential's life must stay inside.
+ *
+ * The RULE rather than a resolved instant, and that distinction is load-bearing. `closeAt`
+ * is a fixed date, but `maxLifetimeHours` is a DURATION, and a duration is only an instant
+ * once you say what it runs from: the moment the credential was ISSUED. That instant is a
+ * fact about the invite row, so only the implementation holding that row can resolve it.
+ * A caller that resolved the ceiling itself would have to anchor it to the wall clock, and
+ * since this is asked after EVERY save of a live link the answer would differ every time —
+ * rewriting the row on every save and walking the expiry forward forever, so a ceiling a
+ * host configured in order to bound the credential would never bound anything. Handing over
+ * the rule instead of the answer is what makes that unrepresentable.
+ */
+export interface InviteExpiryBounds {
+  /** The link's own closing date, or `null` when it has none. */
+  closeAt: Date | null;
+  /** Host-wide ceiling on a credential's life, in hours FROM ISSUE; `undefined` for none. */
+  maxLifetimeHours: number | undefined;
+}
+
+/**
  * The contract a host registers to manage the life of an anonymous magic-link
  * credential: issue it, re-bound it, withdraw it. Implemented in
  * `@mj-biz-apps/forms-server` over MJ core's magic-link tables. All three belong to
@@ -125,14 +164,20 @@ export interface IAnonymousMagicLinkMinter {
    * a failure is reported so the caller can leave the credential LINKED and retry
    * on the next save, rather than orphaning a live invite nothing points at.
    *
-   * @param inviteId    the invite to withdraw (`FormDistribution.MagicLinkInviteID`)
+   * Implementations MUST refuse an invite that is not scoped to `credential.resourceId`.
+   *
+   * @param credential  the invite to withdraw, and the resource it must belong to
    * @param contextUser the internal staff user whose save triggered the revocation
    */
-  RevokeAnonymousInvite(inviteId: string, contextUser: UserInfo): Promise<InviteWriteResult>;
+  RevokeAnonymousInvite(
+    credential: AnonymousCredentialRef,
+    contextUser: UserInfo,
+  ): Promise<InviteWriteResult>;
 
   /**
-   * Re-bounds a live invite's hard expiry to `expiresAt`, or removes the bound when
-   * given `null`.
+   * Re-bounds a live invite's hard expiry to whatever `bounds` now imply — the earlier of
+   * the link's closing date and the host lifetime ceiling, or no bound at all when neither
+   * applies.
    *
    * This exists because the expiry is the ONE part of the credential that has to
    * survive nobody saving anything: revocation happens on a distribution's save, and
@@ -142,18 +187,22 @@ export interface IAnonymousMagicLinkMinter {
    * one, is otherwise left with a credential expiring on the old date while the
    * builder reports the link as live.
    *
-   * Implementations MUST be idempotent and MUST NOT throw: re-bounding an invite
-   * already at `expiresAt` is `{ success: true, changed: false }`, and a caller runs
-   * this after every save of a distribution that keeps its credential.
+   * Implementations MUST be idempotent and MUST NOT throw: an invite already inside
+   * `bounds` is `{ success: true, changed: false }`, and a caller runs this after every save
+   * of a distribution that keeps its credential. That idempotence is exactly why
+   * {@link InviteExpiryBounds} is the rule rather than an instant — see the note there.
    *
-   * @param inviteId    the invite to re-bound (`FormDistribution.MagicLinkInviteID`)
-   * @param expiresAt   the new hard expiry, or `null` for "no bound" — which the
+   * Implementations MUST refuse an invite that is not scoped to `credential.resourceId`.
+   *
+   * @param credential  the invite to re-bound, and the resource it must belong to
+   * @param bounds      how long this credential may now live; `{ closeAt: null,
+   *                    maxLifetimeHours: undefined }` means "no bound", which the
    *                    implementation renders however its store expresses that
    * @param contextUser the internal staff user whose save triggered the change
    */
   SetAnonymousInviteExpiry(
-    inviteId: string,
-    expiresAt: Date | null,
+    credential: AnonymousCredentialRef,
+    bounds: InviteExpiryBounds,
     contextUser: UserInfo,
   ): Promise<InviteWriteResult>;
 }

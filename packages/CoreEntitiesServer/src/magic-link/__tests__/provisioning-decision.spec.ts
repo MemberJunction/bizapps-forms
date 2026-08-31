@@ -131,10 +131,33 @@ describe('decideProvisioning', () => {
 });
 
 describe('resolveExpiry', () => {
-  const now = new Date('2026-01-01T00:00:00.000Z');
+  /**
+   * When the CREDENTIAL WAS ISSUED — not "now". The host ceiling is a duration, so it names an
+   * instant only relative to something, and the only stable something is the credential's own
+   * birth. Named for what it is because the wall clock is the wrong answer everywhere except at
+   * mint: on the pass that re-bounds an existing credential after every save, a `now` anchor is a
+   * different value each time, so it rewrites the row on every save and walks the expiry forward
+   * forever — leaving a configured ceiling bounding nothing at all.
+   */
+  const issuedAt = new Date('2026-01-01T00:00:00.000Z');
+  const now = issuedAt;
 
-  it('uses a configured fixed expiry (hours from now) when set', () => {
+  it('uses a configured fixed expiry (hours from the issue instant) when set', () => {
     expect(resolveExpiry(null, 48, now)?.toISOString()).toBe('2026-01-03T00:00:00.000Z');
+  });
+
+  it('measures the ceiling from the instant it is GIVEN, so two calls at different moments agree', () => {
+    // The property the re-bounding pass depends on: called twice with the same issue instant, it
+    // must return the same answer, whatever the wall clock says in between. A `now`-anchored
+    // implementation passes the first assertion and fails the second.
+    const first = resolveExpiry(null, 24, issuedAt);
+    const later = resolveExpiry(null, 24, issuedAt);
+    expect(first?.toISOString()).toBe('2026-01-02T00:00:00.000Z');
+    expect(later?.getTime()).toBe(first?.getTime());
+
+    // And a DIFFERENT issue instant genuinely moves it — the anchor is read, not ignored.
+    const younger = resolveExpiry(null, 24, new Date('2026-03-01T00:00:00.000Z'));
+    expect(younger?.toISOString()).toBe('2026-03-02T00:00:00.000Z');
   });
 
   it('falls back to CloseAt when no fixed expiry is configured', () => {

@@ -78,6 +78,25 @@ const SPEC = join(SCRIPTS_DIR, 'check-distribution-seed.spec.mjs');
  * is what a survivor's error message has to tell someone who has never read this file.
  */
 const MUTANTS = [
+    // --- CHECK 6: an extended-property write never hands `sql_variant` a MAX type ----------------
+    // Every one of these was a real hole in a shipped cut of the check, found by review rather
+    // than by the spec — which is exactly the state this harness exists to make impossible.
+    ['sqlvariant/case-insensitive-type', 'the MAX-type scan is case-insensitive, so `nvarchar(max)` is caught as readily as the shouted form',
+        `const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\\s+(?:AS\\s+)?((?:N?VARCHAR|VARBINARY)\\s*\\(\\s*MAX\\s*\\)|XML\\b)/gi;`,
+        `const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\\s+(?:AS\\s+)?((?:N?VARCHAR|VARBINARY)\\s*\\(\\s*MAX\\s*\\)|XML\\b)/g;`],
+    ['sqlvariant/optional-as', 'the optional `AS` in a DECLARE is tolerated, so `DECLARE @d AS NVARCHAR(MAX)` cannot hide the type',
+        `(?:AS\\s+)?`, ``],
+    ['sqlvariant/xml-included', 'XML is a rejected type in its own right, not only the parenthesised MAX ones',
+        `|XML\\b)/gi;`, `)/gi;`],
+    ['sqlvariant/varbinary-included', 'VARBINARY(MAX) is rejected too — the restriction is the MAX type, not the string types',
+        `(?:N?VARCHAR|VARBINARY)`, `(?:N?VARCHAR)`],
+    ['sqlvariant/positional-arguments', 'every argument of the call is read, not only a NAMED `@value =` — T-SQL allows the value positionally, and the named-only form was the shape that let a broken migration through',
+        `        for (const ref of args.matchAll(/@[A-Za-z0-9_]+/g)) {`,
+        `        for (const ref of args.matchAll(/(?<=@value\\s{0,4}=\\s{0,4})@[A-Za-z0-9_]+/gi)) {`],
+    ['sqlvariant/proc-restriction', 'only the extended-property procedures are gated, so an ordinary procedure taking a MAX argument is not blamed',
+        `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty)\\b/gi;`,
+        `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty|spSomethingElse)\\b/gi;`],
+
     // --- the masking layer: the gate's worst bug history, every entry a former silent pass -------
     ['mask/code-units', 'the mask is built from UTF-16 code units, so an astral character cannot slide it out of alignment with the source',
         `    const structure = sql.split('');\n    const values = sql.split('');`,

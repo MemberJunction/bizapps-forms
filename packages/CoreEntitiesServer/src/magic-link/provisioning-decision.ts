@@ -17,12 +17,20 @@
  * Being a state function also makes it idempotent — running it twice changes nothing
  * the first run did not already settle.
  */
+import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
+
 import type { MagicLinkProvisioningConfig, DistributionChannelType } from './config.js';
 
 /** The subset of `FormDistribution` state the provisioning decision needs. */
 export interface DistributionProvisioningState {
   channelType: DistributionChannelType;
-  status: 'Active' | 'Closed' | 'Draft';
+  /**
+   * DERIVED from the generated entity, never re-typed — the same rule the channel follows.
+   * `decideProvisioning` tests `status === 'Active'` and treats everything else as not warranting
+   * a credential, so a fifth value added to the column's CHECK would be classified as "revoke" the
+   * moment CodeGen widened the entity, silently, while a hand-copied union kept compiling.
+   */
+  status: mjBizAppsFormsFormDistributionEntityType['Status'];
   isActive: boolean;
   /** Current value of `MagicLinkInviteID` (null/empty when no invite is linked). */
   magicLinkInviteId: string | null;
@@ -127,17 +135,27 @@ function revocationReason(linkable: boolean): ProvisioningReason {
  * shut on Friday: the exact "credential outlives the thing it authorises" shape
  * bizapps-forms#104 is about, one field over.
  *
+ * `issuedAt` is WHEN THE CREDENTIAL WAS ISSUED, never merely "now". The ceiling is a
+ * duration, so it only names an instant relative to something, and the only stable
+ * something is the credential's own birth. Passing the wall clock instead makes this a
+ * different answer on every call, which is harmless at mint (where the two coincide) and
+ * corrupting on the pass that re-bounds an existing credential after every save: it would
+ * rewrite the row each time and walk the expiry forward forever, leaving a configured
+ * ceiling bounding nothing. Callers holding an existing invite must pass that invite's
+ * issue instant — which is why `IAnonymousMagicLinkMinter.SetAnonymousInviteExpiry` takes
+ * the bounds and resolves this itself.
+ *
  * `null` means no expiry from here; the minter decides what to write, since the core
  * `MagicLinkInvite.ExpiresAt` column is NOT NULL and cannot record "never".
  */
 export function resolveExpiry(
   closeAt: Date | null,
   fixedExpiryHours: number | undefined,
-  now: Date,
+  issuedAt: Date,
 ): Date | null {
   const bounds: Date[] = [];
   if (typeof fixedExpiryHours === 'number' && fixedExpiryHours > 0) {
-    bounds.push(new Date(now.getTime() + fixedExpiryHours * 3600 * 1000));
+    bounds.push(new Date(issuedAt.getTime() + fixedExpiryHours * 3600 * 1000));
   }
   if (closeAt instanceof Date && !Number.isNaN(closeAt.getTime())) {
     bounds.push(closeAt);
