@@ -1,6 +1,17 @@
 <div class="mjf-scroll">
   <div class="mjf-scroll__progress">
-    <mjf-form-progress [value]="progress()" />
+    <!--
+      Nothing to fill in, nothing to report: a bar over an empty set reads either "done" or "not
+      started" and both are noise above "This form has no questions to display." The readiness
+      line goes with it deliberately — it exists to explain a bar that is not full, so with no bar
+      there is nothing for it to say, and the Submit button below is the whole affordance.
+
+      The step label stays outside this guard: on a multi-section form of pure Statement copy,
+      "Section 1 of 2" is still worth saying.
+    -->
+    @if (runtime().hasAnswerableQuestions()) {
+      <mjf-form-progress [value]="progress()" [ready]="readyToSubmit()" />
+    }
     @if (stepLabel(); as label) {
       <span class="mjf-scroll__step" aria-live="polite">{{ label }}</span>
     }

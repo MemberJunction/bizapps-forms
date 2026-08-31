@@ -19,6 +19,7 @@ import type {
   mjBizAppsFormsFormVersionEntityType,
   PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
+import { distributionWindowClosed } from './distribution-window';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from './entity-names';
 import { parsePublishedDefinition } from './snapshot-parser';
 
@@ -107,23 +108,6 @@ async function loadPublishedVersion(
   return result.Results[0];
 }
 
-/** Distribution is open if Active, not Closed, and within its open/close window. */
-function distributionIsOpen(
-  dist: mjBizAppsFormsFormDistributionEntityType,
-  now: Date,
-): boolean {
-  if (!dist.IsActive || dist.Status === 'Closed') {
-    return false;
-  }
-  if (dist.OpenAt && new Date(dist.OpenAt) > now) {
-    return false;
-  }
-  if (dist.CloseAt && new Date(dist.CloseAt) < now) {
-    return false;
-  }
-  return true;
-}
-
 /**
  * Resolve a slug to its published definition. `expectedVersionId`, when supplied
  * (submit path), pins the response to the version the widget rendered; a mismatch
@@ -156,7 +140,13 @@ export async function resolvePublishedDefinition(
   if (!distribution) {
     return { ok: false, failure: 'distribution-not-found' };
   }
-  if (!distributionIsOpen(distribution, now)) {
+  // The window only — deliberately not the response cap, unlike the respondent-host door, which
+  // refuses a full link outright (bizapps-forms#81). This gate runs for EVERY submit, including a
+  // partial save and a disqualifying knockout, neither of which consumes a slot; folding the cap
+  // in here would strand a respondent already mid-form and would replace `checkQuotas`' specific
+  // "(quota reached)" message with a generic closure. The cap belongs where that gate applies it:
+  // on a terminal completion, as the authority for the last-slot race between two respondents.
+  if (distributionWindowClosed(distribution, now)) {
     return { ok: false, failure: 'distribution-closed' };
   }
 

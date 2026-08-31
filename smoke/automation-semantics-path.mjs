@@ -264,7 +264,13 @@ async function main() {
     const def = await definitionFor(token);
     const email = emailFor('ledger');
     const first = await submit(token, def, { email, name: 'Ledger' });
-    const again = await submit(await newSession(), def, {
+    // The SAME session, deliberately: a replay is one client retrying its own submit, which is
+    // the only shape a real widget produces (it mints `sessionId` per instance and
+    // `clientResponseId` per load, so an id is never presented under a foreign session). This
+    // used to call `newSession()`, which made the replay a DIFFERENT session writing to another
+    // session's row — route 3 of issue #78. That only ever "worked" because duplicate-key
+    // recovery handed back a foreign terminal row; the ownership gate now refuses it, correctly.
+    const again = await submit(token, def, {
       email, name: 'Ledger', responseId: first.responseId,
     });
     check(again.responseId === first.responseId, 'the replay reuses the same response id');

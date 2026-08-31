@@ -1256,6 +1256,23 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.markDirty();
   }
 
+  /**
+   * Whether the arrow offering `delta` on this card would move anything (issue #84).
+   *
+   * The read half of {@link moveQuestion}, and deliberately the SAME predicate: each arrow's
+   * `[disabled]` is this, and `reorderQuestion` refuses on this, so the affordance and the guard
+   * cannot disagree. Re-deriving "where the ends of the list are" in the template would be a
+   * second copy of that decision, free to drift from the one that actually decides — and the
+   * symptom of the drift is either a dead control or a question that cannot be moved at all.
+   *
+   * The boundary is the PAGE's, because that is the only boundary reordering has: every path
+   * here indexes `page.questions`, and nothing moves a question to another section.
+   */
+  protected canMoveQuestion(page: PageNode, node: QuestionNode, delta: number): boolean {
+    const index = page.questions.indexOf(node);
+    return isValidReorder(index, index + delta, page.questions.length);
+  }
+
   protected async moveQuestion(page: PageNode, node: QuestionNode, delta: number): Promise<void> {
     const index = page.questions.indexOf(node);
     await this.reorderQuestion(page, index, index + delta);
