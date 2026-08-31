@@ -297,7 +297,8 @@ absent show group means VISIBLE).
   `mjf-setting-row` idiom; respondent-facing changes (disqualify ending) held to §2 UX bar
   (mobile-first, WCAG AA).
 - No `any`, no `.Get()`/`.Set()` weak typing, `${flyway:defaultSchema}`/`${mjSchema}` only in
-  shipped SQL, seed manifest + `lint:distribution` before every PR that touches migrations/metadata.
+  shipped SQL, `lint:distribution` before every PR that touches migrations. Metadata ships as
+  declarative JSON only — the seed is generated once per release (#105), not per PR.
 
 ## 7. Open decisions — RESOLVED at implementation
 

@@ -14,7 +14,7 @@ And every response is a **first-class record in your MemberJunction database** �
 
 [![Live design gallery](https://img.shields.io/badge/%F0%9F%8E%A8_live_design_gallery-view_now-7c5cff?style=for-the-badge)](https://memberjunction.github.io/bizapps-forms/)
 [![Built on MemberJunction](https://img.shields.io/badge/built%20on-MemberJunction-264FAF?style=for-the-badge)](https://github.com/MemberJunction/MJ)
-[![MemberJunction 5.50.0](https://img.shields.io/badge/MJ-5.50.0-264FAF?style=for-the-badge)](https://www.npmjs.com/package/@memberjunction/core)
+[![MemberJunction 6.1.x](https://img.shields.io/badge/MJ-6.1.x-264FAF?style=for-the-badge)](https://www.npmjs.com/package/@memberjunction/core)
 [![License: ISC](https://img.shields.io/badge/license-ISC-2c7be5?style=for-the-badge)](#-license)
 [![Status: scaffold](https://img.shields.io/badge/status-Phase%201-e8a33d?style=for-the-badge)](plans/FORMS_BUILD_PLAN.md)
 
@@ -155,7 +155,7 @@ respondents link to a `bizapps-common` Person via `RespondentPersonID`) · `Form
 
 Anonymous magic-link `mj_scopes` · API-key scopes · Actions / Agents / AI Prompts · RunView / RunQuery /
 dashboards · RSU (`RuntimeSchemaManager` + `SchemaEvolution`) · bizapps-common identity. **All present in
-published MJ 5.50.0** — see the [reuse map](plans/FORMS_BUILD_PLAN.md#33-reuse-map--what-mj-already-gives-us-the-heart-of-this-plan).
+published MJ on the line this app pins** (`mjVersionRange` in `mj-app.json`) — see the [reuse map](plans/FORMS_BUILD_PLAN.md#33-reuse-map--what-mj-already-gives-us-the-heart-of-this-plan).
 
 ---
 
@@ -286,7 +286,7 @@ watch the host's boot log after installing.
 
 | Host requirement | Why |
 |---|---|
-| **MJ `>=5.50.0`** | Set by our dependencies, not preference — `bizapps-common` and `bizapps-tasks` both require `>=5.44.0`, and 5.50.0 is where CodeGen's `includeSchemas` lands |
+| **MJ — the range in `mj-app.json`** | `node -p "require('./mj-app.json').mjVersionRange"`. Read it rather than trusting a number written here; the floor is set by our dependencies, not by preference. (It said `>=5.50.0` until 2026-08-31, two majors behind what the repo built against.) |
 | **`bizapps-common` + `bizapps-tasks` installed** | Hard `mj-app.json` dependencies. The on-submit hooks write a `Person` and a `Task` across schema boundaries |
 | **Their entity subclasses registered** | The hooks call `GetEntityObject` for both siblings' entities; unregistered, MJ returns a bare `BaseEntity` and every field assignment is silently lost |
 | **`magicLink` configured** | As above — the anonymous respondent path depends on it entirely |
@@ -301,7 +301,7 @@ the mirror image of what this repo does.
 | **Database schema** | `__mj_BizAppsForms` |
 | **Entity prefix** | `MJ_BizApps_Forms: ` |
 | **npm scope** | `@mj-biz-apps/forms-*` |
-| **MJ version** | pinned to exactly **`5.50.0`**. The floor is set by our own dependencies, not by us: `bizapps-common` and `bizapps-tasks` both require `>=5.44.0`, and 5.50.0 is the first release with CodeGen's `includeSchemas` allow-list |
+| **MJ version** | **not restated here, on purpose.** The supported range is `mjVersionRange` in `mj-app.json`; the exact pin is `@memberjunction/core` in `apps/MJAPI/package.json`. Those are the files an upgrade edits — a version copied into prose is one nobody updates, which is how this row claimed `5.50.0` while the repo built against the 6.1 line |
 | **Ports** | MJAPI `4121` · MJExplorer `4321` |
 
 ---
@@ -323,7 +323,8 @@ the mirror image of what this repo does.
 </td><td>
 
 - `FormGroup` + **view-projection** & opt-in **RSU materialization**
-- Advanced question types (Matrix, Ranking, Address, Signature, Payment)
+- Advanced question types — **Payment** is what is left; Matrix, Ranking, Address and Doodle (the
+  Signature type, renamed in #97) all shipped in Phase 1
 - **LLM-judge** scoring on free-text answers
 - **Review/approve-before-publish** routing via bizapps-tasks
 - Partial-response resume · advanced quotas · richer logic

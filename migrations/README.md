@@ -88,10 +88,18 @@ already ran it believes it ran.
 So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
 release's records. That delta is the path below.
 
-**The six `Metadata_Sync` files already here ship, and none of them is rewritten.** They were
-generated under the older per-feature cadence and are applied on every host that installed those
-versions; migrations are append-only history and #105 changed the cadence going forward, not the
-past. The next one is the first consolidated release seed.
+**The three `Metadata_Sync` files already here ship, and none of them is rewritten.**
+`V202608081700`, `V202608182130` and `V202608241800` are the ones carrying `mj sync push` seed
+output. They were generated under the older per-feature cadence and are applied on every host that
+installed those versions; migrations are append-only history and #105 changed the cadence going
+forward, not the past. The next one is the first consolidated release seed.
+
+> **Not the same family, and not affected by #105.** Other migrations here also write `__mj` rows —
+> `V202608191300`, `V202608191400`, `V202608252300` — but that is **CodeGen** metadata: the
+> `Entity` / `EntityField` rows behind a schema change, not a seed push. Those still ship in the
+> feature migration that needs them, exactly as before, and `check-migration-order` exists because
+> of their ordering. #105 changed the cadence of the metadata **seed** and nothing else. Counting
+> the two families together is how this paragraph previously said "six".
 
 **Nothing generates this at build time.** There is no CI step that produces a seed — generating one
 requires a database with MJ and both sibling apps installed, which no build agent has. What CI does
@@ -160,7 +168,9 @@ had. The from-empty recipe used to prevent this structurally by demanding an emp
 delta path has to ask for it explicitly instead.
 
 **What CHECK 3 will hold you to** (`npm run lint:distribution`, and the Distribution Gate workflow
-on every push and PR that touches `migrations/`, `migrations-pg/`, `metadata/` or the gate itself). Any
+on every push and PR that touches `migrations/`, `migrations-pg/`, `migrations-teardown/`,
+`mj-app.json` or the gate's own sources — **not** `metadata/`, which #105 removed from its triggers
+because the gate reads shipped SQL and can say nothing about declarative JSON). Any
 seed sorting after `V202608131600` grants the anonymous `Form Respondent` role a filtered create or
 read, or nothing at all: a `CanCreate`/`CanRead` whose RLS filter is cleared, omitted or NULL fails,
 `CanUpdate`/`CanDelete` for that role fails outright, and one of the four guarded grants pointed at
