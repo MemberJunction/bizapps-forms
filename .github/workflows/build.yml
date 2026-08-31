@@ -93,3 +93,9 @@ jobs:
       # failure whose whole character is that the run still looks like it passed.
       - name: Smoke fixture wiring check tests
         run: node smoke/lib/fixture.spec.mjs
+
+      # Also stdlib-only. Guards the session options every sqlcmd batch runs under: a filtered
+      # index added to any Forms table makes SQL Server refuse writes from a QUOTED_IDENTIFIER=OFF
+      # session, which is sqlcmd's default and nothing else's, so the break lands only here.
+      - name: Smoke sqlcmd session-option tests
+        run: node smoke/lib/sqlcmd.spec.mjs

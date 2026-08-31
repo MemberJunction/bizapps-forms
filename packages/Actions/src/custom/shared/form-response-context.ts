@@ -14,6 +14,7 @@ import {
   mjBizAppsFormsFormResponseAnswerEntity,
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormEntity,
+  quoteSqlString,
   type FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
 
@@ -104,7 +105,7 @@ async function loadAnswerRows(
   const answerResult = await rv.RunView<mjBizAppsFormsFormResponseAnswerEntity>(
     {
       EntityName: ENTITY.FormResponseAnswer,
-      ExtraFilter: `ResponseID='${responseId}'`,
+      ExtraFilter: `ResponseID=${quoteSqlString(responseId)}`,
       ResultType: 'entity_object',
     },
     contextUser,
@@ -152,7 +153,7 @@ async function loadQuestionsById(
   if (unique.length === 0) {
     return map;
   }
-  const inList = unique.map((id) => `'${id}'`).join(',');
+  const inList = unique.map((id) => quoteSqlString(id)).join(',');
   const rv = new RunView();
   const result = await rv.RunView<mjBizAppsFormsFormQuestionEntity>(
     {

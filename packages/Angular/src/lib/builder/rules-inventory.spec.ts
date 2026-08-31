@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import type { ConditionalRule } from '@mj-biz-apps/forms-entities';
+import type {
+  ConditionalRule,
+  mjBizAppsFormsFormPageEntity,
+  mjBizAppsFormsFormQuestionEntity,
+  mjBizAppsFormsFormScreenEntity,
+} from '@mj-biz-apps/forms-entities';
+import type { FormTree } from './builder-models';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { describeCondition } from './rules-panel-model';
 import {
+  brokenRuleLines,
   collectRuleEntries,
   endingReachFor,
   ruleBadgesFor,
+  ruleInventoryFormOf,
   type EndingReach,
   type RuleInventoryForm,
 } from './rules-inventory';
@@ -1115,5 +1123,77 @@ describe('a rule reading a source answered later than it runs', () => {
       });
       expect(brokenOf(f, 'question:q1:show')).toEqual([UNREADABLE]);
     });
+  });
+});
+
+/**
+ * The adapter from the builder's loaded tree — the half of the projection that nothing else
+ * exercises.
+ *
+ * Questions and their conditions are covered from both ends already (the publish gate's spec
+ * drives real trees through it). The ENDING SCREENS are not: they live beside the pages rather
+ * than among them, they carry two flags that decide what a screen even means, and a projection
+ * that dropped either would report a healthy form while the canvas badged it.
+ */
+describe('ruleInventoryFormOf', () => {
+  function screen(overrides: Partial<mjBizAppsFormsFormScreenEntity>): mjBizAppsFormsFormScreenEntity {
+    return {
+      ID: 'screen-1',
+      ScreenType: 'Ending',
+      Title: 'Thanks',
+      DisplayOrder: 1,
+      ConditionalRule: null,
+      IsDisqualification: false,
+      IsDefault: false,
+      ...overrides,
+    } as mjBizAppsFormsFormScreenEntity;
+  }
+
+  function treeWith(screens: mjBizAppsFormsFormScreenEntity[]): FormTree {
+    return {
+      form: { ID: 'form-1' } as FormTree['form'],
+      pages: [
+        {
+          entity: { ID: 'p1', Title: 'Page 1', DisplayOrder: 1, ConditionalRule: null } as mjBizAppsFormsFormPageEntity,
+          questions: [
+            {
+              entity: {
+                ID: 'q1',
+                Prompt: 'Ticket type',
+                QuestionType: 'ShortText',
+                IsRequired: false,
+                DisplayOrder: 1,
+                ConditionalRule: null,
+                Settings: null,
+              } as mjBizAppsFormsFormQuestionEntity,
+              options: [],
+            },
+          ],
+        },
+      ],
+      screens,
+    };
+  }
+
+  it('carries a screened-out ending, so one nothing routes to is reported broken', () => {
+    const tree = treeWith([screen({ ID: 'e1', Title: 'Not eligible', IsDisqualification: true })]);
+
+    expect(ruleInventoryFormOf(tree).endings).toEqual([
+      { id: 'e1', label: 'Not eligible', conditionalRule: undefined, isDisqualification: true, isDefault: false },
+    ]);
+    expect(brokenRuleLines(tree)).toEqual([
+      expect.stringContaining('no rule sends anyone to this screen'),
+    ]);
+  });
+
+  it('reads the ending screens only — a welcome screen is not an ending', () => {
+    const tree = treeWith([
+      screen({ ID: 'w1', ScreenType: 'Welcome', Title: 'Hello' }),
+      screen({ ID: 'e1', Title: 'Thanks', IsDefault: true }),
+    ]);
+
+    expect(ruleInventoryFormOf(tree).endings.map((ending) => ending.id)).toEqual(['e1']);
+    // A plain default ending carries no rule at all, so a healthy form stays publishable.
+    expect(brokenRuleLines(tree)).toEqual([]);
   });
 });
