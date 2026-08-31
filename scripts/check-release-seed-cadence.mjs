@@ -43,6 +43,7 @@
  * git into it would break that. Both run at the release, in publish.yml, and nowhere else.
  */
 import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -51,6 +52,45 @@ const SEED_PATTERN = /Metadata_Sync.*\.sql$/i;
 
 function git(repoRoot, args) {
     return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+/** `v0.10.0-rc.1` → core [0,10,0] plus the prerelease `rc.1`. A non-numeric core part scores -1 so
+ *  junk tags (`v-latest`, `vNEXT`) sort below every real version rather than above them. */
+function parseVersion(tag) {
+    const raw = tag.replace(/^v/, '');
+    const dash = raw.indexOf('-');
+    const core = (dash === -1 ? raw : raw.slice(0, dash)).split('.').map((n) => (/^\d+$/.test(n) ? Number(n) : -1));
+    return { core, pre: dash === -1 ? null : raw.slice(dash + 1) };
+}
+
+/**
+ * Semver order, and the prerelease rule is the whole reason this is not a one-liner: `0.10.0-rc.1`
+ * is LOWER than `0.10.0` (semver §11). Getting that backwards picks the rc as the release baseline,
+ * so everything shipped in the final looks unreleased and the gate fails the release that did
+ * everything right. A gate that cries wolf is one somebody switches off. The MJ family tags
+ * prereleases (`6.1.0-edge.2`), so this is a shape this repo will meet.
+ */
+function compareVersions(a, b) {
+    const [x, y] = [parseVersion(a), parseVersion(b)];
+    for (let i = 0; i < Math.max(x.core.length, y.core.length); i++) {
+        const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
+        if (d !== 0) return d;
+    }
+    if (x.pre === null || y.pre === null) return (x.pre === null ? 1 : 0) - (y.pre === null ? 1 : 0);
+
+    const [xs, ys] = [x.pre.split('.'), y.pre.split('.')];
+    for (let i = 0; i < Math.max(xs.length, ys.length); i++) {
+        const [p, q] = [xs[i], ys[i]];
+        if (p === undefined || q === undefined) return p === undefined ? -1 : 1;
+        const bothNumeric = /^\d+$/.test(p) && /^\d+$/.test(q);
+        if (bothNumeric) {
+            const d = Number(p) - Number(q);
+            if (d !== 0) return d;
+        } else if (p !== q) {
+            return p < q ? -1 : 1;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -66,14 +106,7 @@ export function readReleaseState(repoRoot) {
         .split('\n')
         .map((t) => t.trim())
         .filter(Boolean)
-        .sort((a, b) => {
-            const p = (v) => v.replace(/^v/, '').split(/[.-]/).map((n) => (/^\d+$/.test(n) ? Number(n) : -1));
-            const [x, y] = [p(a), p(b)];
-            for (let i = 0; i < Math.max(x.length, y.length); i++) {
-                if ((x[i] ?? -1) !== (y[i] ?? -1)) return (x[i] ?? -1) - (y[i] ?? -1);
-            }
-            return 0;
-        });
+        .sort(compareVersions);
     if (tags.length === 0) return { tag: null, released: [], current: [] };
 
     const tag = tags[tags.length - 1];
@@ -83,12 +116,18 @@ export function readReleaseState(repoRoot) {
             .map((f) => f.trim().replace(/^migrations\//, ''))
             .filter(Boolean);
 
-    const metadataChanged = git(repoRoot, ['diff', '--name-only', tag, 'HEAD', '--', 'metadata/'])
+    // No `HEAD` argument: `git diff <tag> -- <path>` compares the tag against the WORKING TREE, so
+    // an edit the engineer has not committed yet still counts. Untracked files are the one thing
+    // this cannot see; a brand-new record with a brand-new id is caught by the coverage check.
+    const metadataChanged = git(repoRoot, ['diff', '--name-only', tag, '--', 'metadata/'])
         .split('\n')
         .map((f) => f.trim())
         .filter(Boolean);
 
-    return { tag, released: listMigrations(tag), current: listMigrations('HEAD'), metadataChanged };
+    const migrationsDir = join(repoRoot, 'migrations');
+    const current = existsSync(migrationsDir) ? readdirSync(migrationsDir) : [];
+
+    return { tag, released: listMigrations(tag), current, metadataChanged };
 }
 
 export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = readReleaseState) {
@@ -134,6 +173,7 @@ export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = r
  */
 function isRecordPath(file) {
     if (/(^|\/)README\.md$/i.test(file)) return false;
+    if (/(^|\/)\.mj-sync\.json$/.test(file)) return false;
     return !/(^|\/)(\.backups|sql_logging)(\/|$)/.test(file);
 }
 

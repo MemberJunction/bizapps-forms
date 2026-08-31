@@ -18,7 +18,7 @@
  * Runs at the release boundary, in `publish.yml`, immediately before the check itself — and not on
  * PRs, for the reason the check's own header gives.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -230,6 +230,43 @@ withFixture(
     },
     ({ problems }) => {
         check('calls an empty migrations/ a broken run, not a finding', problems.some((p) => p.includes('broken run')), JSON.stringify(problems));
+    },
+);
+
+// -------------------------------------------------------------------------------------------
+// Cases 13-14 were written RED, from probing the script with hostile trees.
+// -------------------------------------------------------------------------------------------
+
+// 13. A BYTE-ORDER MARK must not be reported as broken JSON. `\uFEFF` at the head of a UTF-8 file
+//     is what Windows editors and PowerShell redirection leave behind, and `JSON.parse` rejects it
+//     while every other reader in the chain strips it. Failing here is loud rather than silent, so
+//     it is not the dangerous direction — but it fails a file that is not actually wrong, at the
+//     release boundary, with a message pointing at the parser rather than at the BOM.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'metadata', 'a'), { recursive: true });
+        writeFileSync(join(root, 'metadata', 'a', '.r.json'), '\uFEFF' + records(COVERED));
+        writeFileSync(join(root, 'migrations', 'V1.sql'), COVERED);
+    },
+    ({ problems, idsChecked }) => {
+        check('a BOM-prefixed record file parses', problems.length === 0 && idsChecked === 1, JSON.stringify(problems));
+    },
+);
+
+// 14. A DANGLING ENTRY MUST NOT CRASH THE RUN. `statSync` throws ENOENT on a broken symlink — and
+//     on any path that vanishes between the readdir and the stat — so the walk dies with a node
+//     stack trace instead of a verdict. CI then shows a crash where it should show a finding, and
+//     nothing in the output names the file responsible.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'metadata', 'a'), { recursive: true });
+        writeFileSync(join(root, 'metadata', 'a', '.r.json'), records(COVERED));
+        writeFileSync(join(root, 'migrations', 'V1.sql'), COVERED);
+        symlinkSync(join(root, 'metadata', 'a', 'gone.json'), join(root, 'metadata', 'a', '.dangling.json'));
+    },
+    ({ problems, idsChecked }) => {
+        check('a dangling symlink is a reported problem, not a crash', problems.length === 1 && idsChecked === 1, JSON.stringify(problems));
+        check('  …and the problem names the file', problems[0]?.includes('.dangling.json'), JSON.stringify(problems));
     },
 );
 

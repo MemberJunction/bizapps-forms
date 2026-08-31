@@ -46,7 +46,7 @@
  * `migrations/` only, NOT `migrations-pg/`. A record present only in the PostgreSQL twin has not
  * shipped on the chain every host runs; counting it would report coverage this app does not have.
  */
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -72,11 +72,20 @@ const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a
 
 /** Every record file under `metadata/`, sorted, excluding generator output. */
 function collectRecordFiles(dir, acc = []) {
-    for (const name of readdirSync(dir).sort()) {
-        const full = join(dir, name);
-        if (statSync(full).isDirectory()) {
-            if (!IGNORED_DIRS.has(name)) collectRecordFiles(full, acc);
-        } else if (name.endsWith('.json') && name !== NOT_A_RECORD_FILE) {
+    // `withFileTypes` answers "directory or not?" from the directory entry, with no stat syscall —
+    // which is also what stops a DANGLING SYMLINK killing the walk. `statSync` follows the link and
+    // throws ENOENT when the target is gone, so the run died with a node stack trace instead of a
+    // verdict, naming nothing. A dangling entry now falls through to the reader below and is
+    // reported like any other file that cannot be read.
+    //
+    // One deliberate consequence: a symlink POINTING AT a directory is no longer traversed, because
+    // a Dirent reports it as a symlink rather than a directory. `metadata/` has none, following one
+    // was never intended, and not following them also means this walk cannot be sent round a loop.
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            if (!IGNORED_DIRS.has(entry.name)) collectRecordFiles(full, acc);
+        } else if (entry.name.endsWith('.json') && entry.name !== NOT_A_RECORD_FILE) {
             acc.push(full);
         }
     }
@@ -140,12 +149,14 @@ export function findSeedCoverageGaps(repoRoot = REPO_ROOT) {
         const shown = relative(repoRoot, file).split(sep).join('/');
         let parsed;
         try {
-            parsed = JSON.parse(readFileSync(file, 'utf8'));
+            // A leading U+FEFF is stripped: JSON.parse rejects it, `mj sync` and every other
+            // reader accept it, so failing here would fail a file that is not actually wrong.
+            parsed = JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
         } catch (error) {
             // Never skipped, and never collapsed into the vacuity message below: a record file this
             // script cannot read is a record it cannot vouch for, and the parser's reason is the
             // only thing that tells anyone which it is.
-            problems.push(`${shown} could not be parsed, so its records were not checked: ${error.message}`);
+            problems.push(`${shown} could not be read as JSON, so its records were not checked: ${error.message}`);
             continue;
         }
         filesRead++;

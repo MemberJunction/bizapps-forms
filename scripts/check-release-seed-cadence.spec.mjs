@@ -206,6 +206,55 @@ withGitRepo(
     },
 );
 
+// ---------------------------------------------------------------------------------------------
+// Cases 18-20 were written RED, from probing, and each names a defect the earlier cases missed.
+// ---------------------------------------------------------------------------------------------
+
+// 18. A PRERELEASE MUST NOT OUTRANK ITS OWN FINAL RELEASE. Semver is explicit: 0.10.0-rc.1 < 0.10.0.
+//     Picking the rc as the baseline makes everything released in the final look unreleased, so the
+//     gate cries wolf at exactly the release that is doing the right thing — and a gate that cries
+//     wolf is one somebody switches off. The MJ family tags prereleases (`6.1.0-edge.2`), so this
+//     is a shape this repo will meet, not a hypothetical.
+withGitRepo(
+    (root, git) => {
+        writeFileSync(join(root, 'migrations', A), '-- released\n');
+        git('add', '-A'); git('commit', '-qm', 'release');
+        git('tag', 'v0.10.0-rc.1');
+        git('tag', 'v0.10.0');
+    },
+    (root) => {
+        const s = readReleaseState(root);
+        check('a prerelease does NOT outrank its own final release', s.tag === 'v0.10.0', `picked ${s.tag}`);
+    },
+);
+
+// 19. THE WORKING TREE IS WHAT THE ENGINEER IS LOOKING AT. migrations/README.md step 6 says to move
+//     the generated seed into migrations/ and run these checks — before committing. Reading HEAD
+//     instead of the disk shows them red for the seed they just wrote. The coverage check running
+//     in the SAME publish.yml step reads the filesystem, so the two would disagree about what
+//     "shipped" means in the one moment both are consulted.
+withGitRepo(
+    (root, git) => {
+        writeFileSync(join(root, 'migrations', A), '-- released\n');
+        git('add', '-A'); git('commit', '-qm', 'release'); git('tag', 'v0.10.0');
+        // The release seed, written but not yet committed — exactly the README's step 6 state.
+        writeFileSync(join(root, 'migrations', B), '-- the consolidated release seed\n');
+    },
+    (root) => {
+        const s = readReleaseState(root);
+        check('an uncommitted seed on disk counts as present', s.current.includes(B), JSON.stringify(s.current));
+    },
+);
+
+// 20. `.mj-sync.json` IS NOT A RECORD FILE. It carries the entity name and push options; editing it
+//     creates nothing and so owes no seed. `check-release-seed-coverage.mjs` already excludes it by
+//     name when collecting records, and two checks in the same step must not disagree about what a
+//     record is.
+{
+    const r = findUnshippedMetadataDrift('/x', state('v0.10.0', [A], [A], ['metadata/actions/.mj-sync.json']));
+    check('a .mj-sync.json-only change owes no seed', r.problems.length === 0, JSON.stringify(r.changed));
+}
+
 // 17. The CLI is what CI reads: exit code and report text.
 {
     let code = 0, out = '';
