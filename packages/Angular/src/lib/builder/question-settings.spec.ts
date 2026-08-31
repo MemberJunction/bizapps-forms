@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { settingsFor, settingText, withSetting } from './question-settings';
-import type { JSONValue } from '@mj-biz-apps/forms-entities';
+import { doodlePen, type JSONValue } from '@mj-biz-apps/forms-entities';
 
 const numberField = { key: 'max', label: 'Max', kind: 'number' } as const;
 const textField = { key: 'labelMin', label: 'Low label', kind: 'text' } as const;
@@ -19,8 +19,12 @@ describe('settingsFor', () => {
     expect(settingsFor('SingleChoice')).toEqual([]);
   });
 
+  it('offers the pen, the width and what the respondent may change on Doodle', () => {
+    expect(settingsFor('Doodle').map((f) => f.key)).toEqual(['penColor', 'penWidth', 'penControls']);
+  });
+
   it('every declared key is non-empty and labelled', () => {
-    for (const type of ['ShortText', 'LongText', 'Rating', 'OpinionScale', 'Legal', 'Checkbox', 'FileUpload'] as const) {
+    for (const type of ['ShortText', 'LongText', 'Rating', 'OpinionScale', 'Legal', 'Checkbox', 'FileUpload', 'Doodle'] as const) {
       for (const field of settingsFor(type)) {
         expect(field.key.length, `${type}.${field.key}`).toBeGreaterThan(0);
         expect(field.label.length, `${type}.${field.key}`).toBeGreaterThan(0);
@@ -78,5 +82,46 @@ describe('withSetting', () => {
     const original: Record<string, JSONValue> = { max: 7 };
     withSetting(original, numberField, '9');
     expect(original).toEqual({ max: 7 });
+  });
+});
+
+describe('the Doodle pen rows and the pad agree, by construction', () => {
+  /**
+   * The failure this pairing exists to prevent: the panel offers a value the widget does not
+   * recognise, so the author picks a pen, the pad silently falls back, and nothing anywhere says
+   * why. `doodlePen` is the widget's own validator — running the panel's own options through it
+   * is the only check that cannot be satisfied by a stale copy of the list.
+   */
+  it('offers only pens, widths and control modes the widget accepts', () => {
+    const [color, width, controls] = settingsFor('Doodle');
+
+    for (const choice of color.choices ?? []) {
+      const expected = choice.value === '' ? 'Ink' : choice.value;
+      expect(doodlePen({ penColor: choice.value }).color, choice.value).toBe(expected);
+    }
+    for (const choice of width.choices ?? []) {
+      const expected = choice.value === '' ? 'Medium' : choice.value;
+      expect(doodlePen({ penWidth: choice.value }).width, choice.value).toBe(expected);
+    }
+    for (const choice of controls.choices ?? []) {
+      const pen = doodlePen({ penControls: choice.value });
+      expect(pen.offerColor || pen.offerWidth, choice.value).toBe(choice.value !== '');
+    }
+  });
+
+  it('gives every choice a label, so no option renders blank in the dropdown', () => {
+    for (const field of settingsFor('Doodle')) {
+      expect(field.choices, field.key).toBeDefined();
+      for (const choice of field.choices ?? []) {
+        expect(choice.label.length, `${field.key}=${choice.value}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('deletes the key when the author picks the blank option, so the default applies', () => {
+    // The `choice` kind inherits the blank-means-default rule the text fields follow, which is
+    // what makes "Follow the form" and "an unset question" the same stored state.
+    const [color] = settingsFor('Doodle');
+    expect(withSetting({ penColor: 'Blue' }, color, '')).toEqual({});
   });
 });

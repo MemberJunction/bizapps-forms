@@ -53,7 +53,7 @@ describe('toAnswerInputs — the types added with element parity', () => {
       q('legal', 'Legal'),
       q('pic', 'PictureChoice'),
       q('rank', 'Ranking'),
-      q('sign', 'Signature'),
+      q('draw', 'Doodle'),
     ];
     const answers = new Map<string, AnswerValue>([
       ['web', 'https://example.com'],
@@ -62,7 +62,7 @@ describe('toAnswerInputs — the types added with element parity', () => {
       ['legal', false],
       ['pic', 'workshop'],
       ['rank', ['a', 'b']],
-      ['sign', 'file-sig'],
+      ['draw', 'file-doodle'],
     ]);
     expect(toAnswerInputs(questions, answers)).toEqual([
       { questionId: 'web', textValue: 'https://example.com' },
@@ -71,7 +71,7 @@ describe('toAnswerInputs — the types added with element parity', () => {
       { questionId: 'legal', booleanValue: false },
       { questionId: 'pic', textValue: 'workshop' },
       { questionId: 'rank', jsonValue: ['a', 'b'] },
-      { questionId: 'sign', fileId: 'file-sig' },
+      { questionId: 'draw', fileId: 'file-doodle' },
     ]);
   });
 

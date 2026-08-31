@@ -243,7 +243,7 @@ export function requireQuestion(question, wanted, slug, questions) {
  * `submission-mapping.ts` serialises it — so `jsonValue` is a JSON STRING in the SDL, and passing
  * an array straight through is rejected before any resolver runs.
  *
- * `Signature` and `FileUpload` return null: both need a real artifact, and a file id has to come
+ * `Doodle` and `FileUpload` return null: both need a real artifact, and a file id has to come
  * from an actual upload so its provenance can be attributed. Callers supply those through
  * `overrides`.
  */
@@ -270,7 +270,7 @@ export function answerFor(question, { email, name } = {}) {
       return { textValue: email ?? 'smoke@example.com' };
     case 'Phone':
       return { textValue: '+1 555 010 1234' };
-    case 'Signature':
+    case 'Doodle':
     case 'FileUpload':
       return null;
     default:

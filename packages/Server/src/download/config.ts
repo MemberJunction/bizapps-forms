@@ -4,7 +4,7 @@
  * Its own module rather than a corner of `asset/config.ts`, because the two answer opposite
  * questions. The asset route serves bytes that are PUBLIC BY LOCATION — anything under
  * `forms-assets/` renders for a respondent with no session at all. This route serves the exact
- * opposite: respondent-uploaded answers, a résumé or a signature, which must never be readable
+ * opposite: respondent-uploaded answers, a résumé or a drawing, which must never be readable
  * without a session. Keeping the two configurations apart keeps the two invariants apart.
  *
  * Env vars:

@@ -212,7 +212,7 @@ async function main() {
     'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', { slug: SLUG });
   const definition = JSON.parse(published?.PublishedForm?.definitionJSON ?? '{}');
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
-  const fileQuestion = questions.find((q) => q.type === 'FileUpload' || q.type === 'Signature');
+  const fileQuestion = questions.find((q) => q.type === 'FileUpload' || q.type === 'Doodle');
 
   // One response id for the whole arc — minted by the client, adopted as the FormResponse primary
   // key, and recorded on every upload. It is what ties the three together.

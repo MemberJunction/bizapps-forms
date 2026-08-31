@@ -401,22 +401,23 @@
         @case ('ContactInfo') {
           <ng-container *ngTemplateOutlet="compositeControl" />
         }
-        @case ('Signature') {
+        @case ('Doodle') {
           <!-- Controlled, like every other control in this switch. `subject` is the repaint key:
                Scroll destroys this pad on leaving the section, and OneQuestion re-points ONE pad
                at the next question without destroying it, and both must put the right drawing
                back. See the component for what each binding closes. -->
-          <mjf-signature-pad
+          <mjf-doodle-pad
             [label]="q.prompt"
             [subject]="q.id"
-            [signature]="localFile()"
+            [drawing]="localFile()"
             [recorded]="answerRecorded()"
-            (drawn)="onSignatureDrawn($event)"
-            (cleared)="onSignatureCleared()"
+            [pen]="pen()"
+            (drawn)="onDoodleDrawn($event)"
+            (cleared)="onDoodleCleared()"
           />
           @if (uploadStatus() === 'uploading') {
             <p class="mjf-file__status" aria-live="polite">
-              <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Saving signature…
+              <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Saving drawing…
             </p>
           }
           @if (uploadStatus() === 'error') {
