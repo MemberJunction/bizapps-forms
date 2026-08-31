@@ -17,6 +17,7 @@
     "dashboards",
     "application-roles",
     "entity-permissions",
+    "entity-relationships",
     "actions",
     "users",
     "user-roles"

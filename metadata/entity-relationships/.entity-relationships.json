@@ -1,0 +1,86 @@
+[
+  {
+    "_comments": [
+      "The builder's editable tree, declared as owned collections so a delete or a reorder commits",
+      "as ONE transaction instead of a loop of individual Save()/Delete() calls with no rollback.",
+      "Issue #103. Before this, a refusal partway through left a section two-thirds deleted, or a",
+      "question live with some of its options gone, with the builder still rendering the rows.",
+      "",
+      "Source/ReadOnly are stated explicitly rather than left to default, following MJ core's one",
+      "writable collection (MJ: AI Agents -> Prompts): in a file of cache-backed read-only",
+      "projections, an implicit writable one reads as an oversight.",
+      "",
+      "Sequence.From is 0, NOT the default 1: every DisplayOrder already stored is zero-based, and",
+      "From: 1 would mark every page, question and option in every form dirty on the first reorder",
+      "and rewrite the lot.",
+      "",
+      "RelatedEntity and RelatedEntityJoinField are deliberately absent from the JSON — they are",
+      "read from this row's own columns (per the column's own description). The lookup below",
+      "carries RelatedEntityJoinField because MJ_BizApps_Forms: Forms has relationships to BOTH",
+      "Form Pages and Form Questions on FormID, and the join field is what keeps them apart."
+    ],
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Pages",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 0
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages&RelatedEntityJoinField=FormID"
+    }
+  },
+  {
+    "_comments": [
+      "Joined on PageID, not FormID. FormQuestion carries BOTH keys, and MJ metadata has a",
+      "'Forms -> Form Questions' relationship on FormID as well — declaring the collection there",
+      "would put every question in the form on every page."
+    ],
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Questions",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 0
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Pages&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions&RelatedEntityJoinField=PageID"
+    }
+  },
+  {
+    "fields": {
+      "RelatedRecordCollection": {
+        "Name": "Options",
+        "Source": "database",
+        "ReadOnly": false,
+        "Load": "explicit",
+        "OnRemove": "delete",
+        "OrderBy": "DisplayOrder ASC",
+        "Sequence": {
+          "Field": "DisplayOrder",
+          "From": 0
+        },
+        "ClearAfterSave": false
+      }
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Questions&RelatedEntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Question Options&RelatedEntityJoinField=QuestionID"
+    }
+  }
+]
