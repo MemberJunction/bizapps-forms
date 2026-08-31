@@ -139,7 +139,7 @@ describe('the pad shows the drawing already held for the question it is bound to
     // `hasInk` is DERIVED from the model now, so "leave it false" is structural rather than a
     // `.set` to remember: the model is emptied before the decode starts and only a SUCCESSFUL
     // decode puts a base back. These two assertions are that pair.
-    expect(pad()).toMatch(/this\.resetModel\(\);[\s\S]{0,300}await createImageBitmap\(drawing\)/);
+    expect(pad()).toMatch(/this\.resetForNewSubject\(\);[\s\S]{0,300}await createImageBitmap\(drawing\)/);
     expect(pad()).toMatch(
       /catch \(err\) \{[\s\S]{0,400}mayPaint\(claim, this\.subject\(\)\)[\s\S]{0,400}console\.warn\(/,
     );
@@ -269,7 +269,16 @@ describe('undo is a change of meaning, so it plays by the same rules as a stroke
   it('keeps a stroke that ages out of the cap ON the drawing', () => {
     // The cap bounds memory, not the picture. An evicted stroke is baked into the base image on
     // its way out; dropping it instead would make a long drawing erase its own beginning.
-    expect(pad()).toMatch(/for \(const old of evicted\) \{\s*if \(this\.bakeIntoBase\(old\)\) \{/);
+    expect(pad()).toMatch(/for \(const old of evicted\) \{\s*if \(!this\.bakeIntoBase\(old\)\) \{/);
+  });
+
+  it('re-retains only the strokes that failed to bake, never the whole batch', () => {
+    // `addStroke` evicts EVERY stroke over the cap at once, so a batch can be mixed: an earlier
+    // stroke may already be in `base` when a later one fails. Putting the whole pre-eviction list
+    // back would leave the baked one in `base` AND in `strokes`, and `paint` would draw it twice.
+    // Collecting the failures individually is what keeps the two layers disjoint.
+    expect(pad()).toMatch(/unbaked\.push\(old\);/);
+    expect(pad()).toMatch(/this\.strokes\.set\(unbaked\.length > 0 \? \[\.\.\.unbaked, \.\.\.strokes\] : strokes\)/);
   });
 });
 

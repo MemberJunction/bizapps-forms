@@ -17,7 +17,10 @@ export class PadCaptures {
   /**
    * Retire every outstanding claim: what the pad means has changed.
    *
-   * Called for the two gestures that change it — Clear, and the start of a new stroke.
+   * Called for the three gestures that change it — Clear, Undo, and the start of a new stroke.
+   * Undo joined that list with the stroke model (#98): taking a stroke back changes what the pad
+   * means exactly as adding one does, so a repaint or an export still in flight is describing a
+   * drawing that no longer exists.
    */
   public supersede(): void {
     this.generation++;

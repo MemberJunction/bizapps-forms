@@ -36,6 +36,7 @@ import {
 
 import {
   DOODLE_PEN_COLORS,
+  DOODLE_PEN_DEFAULTS,
   DOODLE_PEN_WIDTHS,
   DOODLE_PEN_WIDTH_NAMES,
   type DoodlePen,
@@ -315,7 +316,7 @@ export class DoodlePadComponent {
    * so everything reaching this component is already a value the pad can render. That is what
    * keeps "an unknown colour must not break the pad" out of the pad entirely.
    */
-  public readonly pen = input<DoodlePen>({ color: 'Ink', width: 'Medium', offerColor: false, offerWidth: false });
+  public readonly pen = input<DoodlePen>(DOODLE_PEN_DEFAULTS);
 
   protected readonly padWidth = PAD_WIDTH;
   protected readonly padHeight = PAD_HEIGHT;
@@ -381,7 +382,7 @@ export class DoodlePadComponent {
    * non-null, the fact that the pen IS down.
    *
    * One field rather than a `penDown` boolean beside it, because two would be one fact stated
-   * twice and they can come apart: `resetModel` cancels a stroke in progress, and a separate flag
+   * twice and they can come apart: `resetDrawing` cancels a stroke in progress, and a separate flag
    * left standing would have the next pointer move drawing onto a canvas the model says is empty.
    *
    * It carries its own colour and width, fixed at pointer-DOWN. Reading the pen at commit time
@@ -546,18 +547,22 @@ export class DoodlePadComponent {
    */
   private commitStroke(stroke: DoodleStroke): void {
     const { strokes, evicted } = addStroke(this.strokes(), stroke);
+    // A stroke that could not be made permanent must NOT leave the retained list: dropping it is
+    // the one outcome the cap's contract forbids — it would erase part of the drawing the
+    // respondent is looking at, and the next export would upload the erasure. Keeping it means
+    // the list runs over its bound, which is memory, and memory is the cheaper thing to lose.
+    //
+    // Collected per stroke rather than by restoring the whole pre-eviction list, because the
+    // batch can be mixed: `addStroke` evicts every stroke over the cap at once, so an earlier one
+    // may already have been baked when a later one fails. Putting the baked stroke back would
+    // leave it in `base` AND in `strokes`, and `paint` would draw it twice.
+    const unbaked: DoodleStroke[] = [];
     for (const old of evicted) {
-      if (this.bakeIntoBase(old)) {
-        continue;
+      if (!this.bakeIntoBase(old)) {
+        unbaked.push(old);
       }
-      // The stroke could not be made permanent, so it must NOT leave the retained list: dropping
-      // it is the one outcome the cap's contract forbids — it would erase part of the drawing the
-      // respondent is looking at, and the next export would upload the erasure. Keeping it means
-      // the list runs over its bound, which is memory, and memory is the cheaper thing to lose.
-      this.strokes.set([...this.strokes(), stroke]);
-      return;
     }
-    this.strokes.set(strokes);
+    this.strokes.set(unbaked.length > 0 ? [...unbaked, ...strokes] : strokes);
   }
 
   /**
@@ -626,7 +631,7 @@ export class DoodlePadComponent {
     }
     // Synchronously, before the decode: on a re-point the previous question's ink has to leave
     // the screen NOW, not whenever the next image finishes decoding.
-    this.resetModel();
+    this.resetForNewSubject();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!drawing) {
       return;
@@ -669,7 +674,7 @@ export class DoodlePadComponent {
    */
   public clear(): void {
     this.captures.supersede();
-    this.resetModel();
+    this.resetDrawing();
     const canvas = this.pad()?.nativeElement;
     const ctx = canvas?.getContext('2d');
     if (canvas && ctx) {
@@ -679,20 +684,39 @@ export class DoodlePadComponent {
   }
 
   /**
-   * Forget everything this pad was holding — the drawing AND the pen in the respondent's hand.
+   * Forget the DRAWING: the restored base, this session's strokes, and any stroke in progress.
    *
-   * All of it, always. A reset that kept the base would leave a restored image under a pad that
-   * has moved to another question, and one that kept the strokes would replay them onto it.
-   *
-   * The PEN belongs on that list for the same reason and it is easy to miss: one pad instance
-   * serves consecutive Doodle questions in OneQuestion mode, so a respondent who picked Red on
-   * one question would keep drawing Red on the next — over the author's chosen default for it,
-   * and with no way back on a question that offers no colour control at all.
+   * Deliberately says nothing about the pen — see {@link resetForNewSubject}. Emptying the
+   * picture and changing what the pad stands for are two different events that happen to leave
+   * the canvas looking the same, and only one of them is entitled to take the respondent's tool
+   * out of their hand.
    */
-  private resetModel(): void {
+  private resetDrawing(): void {
     this.base.set(null);
     this.strokes.set([]);
     this.current = null;
+  }
+
+  /**
+   * Forget everything — the drawing AND the pen in the respondent's hand.
+   *
+   * ONLY for a change of {@link subject}. A reset that kept the base would leave a restored image
+   * under a pad that has moved to another question, and one that kept the strokes would replay
+   * them onto it.
+   *
+   * The PEN belongs on that list for a reason that is easy to miss: one pad instance serves
+   * consecutive Doodle questions in OneQuestion mode, so a respondent who picked Red on one
+   * question would keep drawing Red on the next — over the author's chosen default for it, and
+   * with no way back on a question that offers no colour control at all.
+   *
+   * That argument is about the SUBJECT changing, so it does not reach {@link clear}, which stays
+   * on the same question. Clear used to call this and silently put the author's pen back; undo
+   * back to an empty pad — the identical end state, by the identical `cleared` emit — left the
+   * respondent's pen alone. Two routes to one state disagreeing is how you know the reset was
+   * incidental rather than chosen.
+   */
+  private resetForNewSubject(): void {
+    this.resetDrawing();
     this.chosenColor.set(null);
     this.chosenWidth.set(null);
   }
