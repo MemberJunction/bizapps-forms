@@ -42,7 +42,7 @@ function check(name, condition, detail) {
  * A minimal repo-shaped fixture: whatever migrations the case needs, and nothing else.
  *
  * It used to copy the whole real `metadata/` tree into every fixture, because CHECK 1 hashed it.
- * With CHECK 1 gone the gate reads only SQL, so the copy would be ~60 pointless tree copies per
+ * With CHECK 1 gone the gate reads only SQL, so the copy would be 43 pointless tree copies per
  * run — and the mutation harness runs this whole spec once per mutant.
  */
 function fixture(build) {

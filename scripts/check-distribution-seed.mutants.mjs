@@ -50,12 +50,13 @@
  * without an install.
  *
  * Serial, and it costs about 40 seconds (measured 2026-08-30, 66 mutants): each one runs the whole
- * spec in a fresh process. The spec no longer copies the `metadata/` tree into every fixture — that
- * was CHECK 1's, and #105 removed the check and the copy together. Each run is capped by
- * SPEC_TIMEOUT_MS: `mask/block-comment-first-close` injects a `while` loop into the gate, and a
- * mutant that hangs would otherwise hang CI with no signal at all. That is the honest number — a
- * workflow step whose real cost is double what its comment claims is a step someone deletes in a
- * hurry later.
+ * spec in a fresh process, and the spec builds 43 fixtures. It no longer copies the `metadata/`
+ * tree into each of those — that was CHECK 1's, and #105 removed the check and the copy together.
+ * Each run is capped by SPEC_TIMEOUT_MS: `mask/block-comment-first-close` injects a `while` loop
+ * into the gate, and a mutant that hangs would otherwise hang CI with no signal at all. That is the
+ * honest number — a workflow step whose real cost is double what its comment claims is a step
+ * someone deletes in a hurry later.
+ *
  * Parallelising is possible and deliberately not done: the gate only runs on paths that touch it,
  * and a worker pool is more of this harness to own for forty seconds nobody is waiting on.
  */
