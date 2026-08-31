@@ -91,13 +91,6 @@ export function uploadsForFileIdsFilter(fileIds: readonly string[]): string | nu
 }
 
 /**
- * The four reads that make up a response's detail, batched into one `RunViews` call.
- *
- * A pure function returning the params rather than an inline literal, so a test can assert
- * WHICH entities are read and WHICH columns are asked for — a silently-missing column is a
- * class of bug nothing else here would catch. Exported for unit testing.
- */
-/**
  * The read that turns a response's pinned `FormVersionID` into the definition its answers are
  * labelled from — BY ID, never by status.
  *
@@ -115,6 +108,13 @@ export function definitionForVersionQuery(formVersionId: string): RunViewParams 
   };
 }
 
+/**
+ * The four reads that make up a response's detail, batched into one `RunViews` call.
+ *
+ * A pure function returning the params rather than an inline literal, so a test can assert
+ * WHICH entities are read and WHICH columns are asked for — a silently-missing column is a
+ * class of bug nothing else here would catch. Exported for unit testing.
+ */
 export function responseDetailQueries(responseId: string): RunViewParams[] {
   return [
     {
