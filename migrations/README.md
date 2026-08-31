@@ -13,13 +13,11 @@ exists only because someone ran `mj sync push` on their laptop exists only on th
 | File | Produced by | Regenerate when |
 |---|---|---|
 | `B…__Schema_and_Tables.sql`, `V…__<Feature>.sql` | hand-written DDL, with CodeGen's SQL **appended** below the `-- CodeGen output (appended)` marker | the schema changes |
-| `V…__Metadata_Sync.sql` | `mj sync push --dir metadata --exclude users` against a database migrated to head, shipped as a **new delta** file beside the existing ones | anything under `metadata/` changes |
+| `V…__Metadata_Sync.sql` | `mj sync push --dir metadata --exclude users` against a database built from the shipped chain, shipped as a **new delta** file beside the existing ones | **once per release**, by the build engineer — never in a feature PR |
 | `../migrations-teardown/V001__…` | hand-written; retires the seed's core-schema rows on `mj app remove` | the seed gains or loses a root record |
 
 `migrations/codegen/` is gitignored: CodeGen's raw run files are an intermediate, and its SQL is
-appended into the feature migration instead. `migrations/metadata-seed.manifest.json` records the
-metadata hashes the current seed was generated from — `npm run lint:distribution` fails if they
-have drifted, which is the only thing standing between a metadata edit and a silent non-ship.
+appended into the feature migration instead.
 
 ## Order is a correctness property — `npm run lint:migrations`
 
@@ -47,13 +45,26 @@ are reconstructions of defects that actually reached a pull request here (2026-0
 ## The loop, whenever you touch `metadata/`
 
 ```
-edit metadata/  →  regenerate the seed migration  →  npm run seed:manifest  →  commit both
+your PR:      edit metadata/ (declarative JSON only)  →  commit  →  review
+the release:  mj sync push against a clean DB  →  ONE consolidated Metadata_Sync  →  ship
 ```
 
-Miss the middle step and the edit exists only in your database. `npm run lint:distribution` fails
-the build when the manifest and `metadata/` disagree, which is the only thing standing between a
-metadata edit and a silent non-ship. Its CHECK 3 then reads what you regenerated: a seed sorting
-after `V202608131600` may not grant the anonymous `Form Respondent` role anything MJ would not
+**A feature PR carries no `Metadata_Sync` migration.** It carries the JSON: fields, `@lookup` /
+`@file` / `@parent` references, a `primaryKey` UUID from `uuidgen`, and no `sync` block — the
+release push writes that back. The build engineer takes everything merged on `next` and generates
+one consolidated seed for the release. This is MJ's model (`MJ/metadata/CLAUDE.md` §1b and §10) and
+the reason for it is drift: per-PR sync migrations duplicate the release step, produce many small
+files instead of one per build, and diverge from what the real push emits.
+
+`npm run check:release-seed` is the release-readiness check and the answer to "what does the next
+seed still owe?" — it walks every `primaryKey` under `metadata/` and reports the ones that appear in
+no shipped migration. No database, runs anywhere, and it reproduces that list from the repo rather
+than asking anyone to maintain one. It runs in `publish.yml` before anything is published or
+tagged; it is deliberately **not** on `lint:distribution` or the Distribution Gate workflow, because
+no feature PR can answer a question about a seed generated after it merges.
+
+`npm run lint:distribution` still reads whatever seed you regenerate: its CHECK 3 refuses a seed
+sorting after `V202608131600` that grants the anonymous `Form Respondent` role anything MJ would not
 row-level filter (#41). See [Regenerating the metadata seed](#regenerating-the-metadata-seed).
 
 **Add a NEW seed migration; never edit an existing one.** Migrations are append-only history —
@@ -69,23 +80,84 @@ already ran it believes it ran.
 > to a chain that applies. It is safe for hosts that already applied it because Skyway's `Migrate()`
 > resolves applied migrations by version and never checksum-validates them (checksums live only in
 > the separate `Validate()`), so an applied host skips the file and a stuck host runs the corrected
-> text. The edit changed no record — only how the role id is resolved — so `metadata/` and the seed
-> manifest were untouched. Everything else #39 fixed shipped as a new migration
-> (`V202608131600__v0.10.x__Respondent_Grant_Hardening.sql`), which is the rule, not the exception.
+> text. The edit changed no record — only how the role id is resolved — so `metadata/` and the hash
+> manifest that then existed were untouched. Everything else #39 fixed shipped as a new
+> migration (`V202608131600__v0.10.x__Respondent_Grant_Hardening.sql`), which is the rule, not the
+> exception.
 
-So a later metadata change becomes a new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying just that
-change's records, exactly as `bizapps-tasks` ships two. That delta is the default path below.
+So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
+release's records. That delta is the path below.
 
-**Nothing generates this at build time.** There is no CI step that produces a seed; the gate only
-detects that you owed one. That is deliberate — generating it requires a database with MJ and both
-sibling apps installed, which no build agent has.
+**Three `Metadata_Sync` files are here, and only ONE of them is shipped history.** They are the
+migrations that seed records **declared under `metadata/`** — the property `npm run check:release-seed`
+tests, and the one the release cadence is about. Two are `mj sync push` output; `V202608241800` was
+hand-written against the shape of the generated blocks because the author had no database to push
+from, and its header says so. That is the practice #105 ends, not a fourth category.
+
+| file | in a release tag? | what that means |
+|---|---|---|
+| `V202608081700__v0.8.x__Metadata_Sync.sql` | **yes** — `v0.8.0`, `v0.9.0`, `v0.10.0` | append-only history. Hosts ran it. **Never rewrite or delete it.** |
+| `V202608182130__v0.11.x__Metadata_Sync_Designer_Taxonomy.sql` | **no** | on `next` only. Has reached nobody. Belongs in the next consolidated seed. |
+| `V202608241800__v0.11.x__Metadata_Sync_OnSubmit_Params.sql` | **no** | same. |
+
+**The append-only argument covers the first row and nothing else** — an earlier draft of this
+section applied it to all three, which would have frozen two deltas that never shipped and carried
+the retired per-PR cadence into the first release under the new model. A seed that is not in a
+release tag has reached no host, so nothing depends on it having been applied, and folding it into
+the release's consolidated seed is free. Check it, don't recall it:
+
+```bash
+git tag --list 'v*' | while read t; do
+  git ls-tree --name-only "$t" migrations/ | grep -i metadata_sync | sed "s/^/$t /"
+done
+```
+
+`npm run check:seed-cadence` enforces exactly this, in two halves:
+
+- **at most one unreleased `Metadata_Sync`** — the release's own. Two or more means the per-PR loop
+  came back.
+- **not zero when `metadata/` moved** — if any record file differs from the last release tag and no
+  new seed exists, a seed is owed. This is the only one of the three checks that can see an
+  **edited** record: `V202608182130` ships the AI Designer prompt saying `Signature` while
+  `metadata/` now says `Doodle` (#97 renamed the type), the id is identical, and coverage is green
+  over it.
+
+It runs at the release in `publish.yml`, beside the coverage check, and it is **red on `next` now**
+until those two rows are folded in (#111). That is the check working, not a defect.
+
+> **Not the same family, and not affected by #105.** Other migrations here also write `__mj` rows —
+> `V202608191300`, `V202608191400`, `V202608252300` — but that is **CodeGen** metadata: the
+> `Entity` / `EntityField` rows behind a schema change, not a seed push. Those still ship in the
+> feature migration that needs them, exactly as before, and `check-migration-order` exists because
+> of their ordering. #105 changed the cadence of the metadata **seed** and nothing else. Counting
+> the two families together is how this paragraph previously said "six".
+
+**Nothing generates this at build time.** There is no CI step that produces a seed — generating one
+requires a database with MJ and both sibling apps installed, which no build agent has. What CI does
+at release is *detect* that you owed one: `npm run check:release-seed`, in `publish.yml`.
 
 ## Regenerating the metadata seed
 
-**Push against a database migrated to head, and ship what comes out as a new delta file.** The push
-then logs only what actually changed — `spCreate*` for records you added, `spUpdate*` for records
-you edited — and that delta appends to the chain rather than replacing it. This is the whole
-recipe; you do not need the appendix.
+**Release work, done once per release by the build engineer.** Push against a database migrated to
+head, and ship what comes out as one new delta file. The push logs only what actually changed —
+`spCreate*` for records added since the last release, `spUpdate*` for records edited — and that
+delta appends to the chain rather than replacing it. This is the whole recipe; you do not need the
+appendix.
+
+Start by asking what the seed owes: `npm run check:release-seed` lists every `primaryKey` under
+`metadata/` that no migration names.
+
+**An empty list does not mean there is nothing to generate.** The coverage check reads ids, not
+content, so a record whose id already ships but whose *body* changed — a `@file:` template, a
+reworded description — passes it silently.
+
+**You no longer have to remember that.** `npm run check:seed-cadence` asks the content question
+directly: if any record file under `metadata/` differs from the last release tag and this release
+ships no new `Metadata_Sync`, it fails and lists the files. It is `git diff v<last> -- metadata/`
+turned into a gate, and it stores nothing — the only way to make it green is to ship a seed or
+revert the change, which is exactly what the hash manifest got wrong (#105: regenerating the stored
+hashes was how you silenced it). The push emits `spUpdate*` for edited records by construction,
+which remains the half no repo-side check can generate for you.
 
 ```bash
 # 1. Build the generation database from the SHIPPED CHAIN, not from dev work. Start empty and run
@@ -93,7 +165,8 @@ recipe; you do not need the appendix.
 #    and leaves you at head. Restoring a backup of MJ_Forms_Dev is the tempting shortcut and the
 #    wrong one: a dev database holds records no seed ever shipped, so the push diffs against rows a
 #    fresh install does not have and emits spUpdate* calls that quietly match nothing there.
-#    Nothing detects that — CHECK 1 compares metadata/ to a hash manifest, not to seed contents.
+#    Nothing in CI detects that: check:release-seed asks whether an ID is NAMED by the shipped SQL,
+#    not whether the statement naming it can replay on a host. Only a clean install proves that.
 # 2. If you started from a copy rather than empty, bring it to HEAD — core first, then this app:
 npx mj migrate -t v<mj-version>     # core __mj — NOT npm run mj:migrate; see the root CLAUDE.md
 npm run mj:migrate                  # through V202608131600 and whatever follows it
@@ -112,7 +185,7 @@ DB_DATABASE=MJ_Forms_SeedGen npx mj sync push --dir metadata --exclude users --c
 #    cannot see a grant bound to an id it does not recognise — see its header.
 # 5. Move it to migrations/V<stamp>__v<ver>__Metadata_Sync.sql — a NEW file, beside the existing
 #    seeds, with a header saying what changed and why.
-npm run seed:manifest && npm run lint:distribution
+npm run lint:distribution && npm run check:release-seed
 ```
 
 Then prove it on a database that has never seen your dev work: install from empty, run the chain
@@ -132,7 +205,9 @@ had. The from-empty recipe used to prevent this structurally by demanding an emp
 delta path has to ask for it explicitly instead.
 
 **What CHECK 3 will hold you to** (`npm run lint:distribution`, and the Distribution Gate workflow
-on every push and PR that touches `migrations/`, `migrations-pg/`, `metadata/` or the gate itself). Any
+on every push and PR that touches `migrations/`, `migrations-pg/`, `migrations-teardown/`,
+`mj-app.json` or the gate's own sources — **not** `metadata/`, which #105 removed from its triggers
+because the gate reads shipped SQL and can say nothing about declarative JSON). Any
 seed sorting after `V202608131600` grants the anonymous `Form Respondent` role a filtered create or
 read, or nothing at all: a `CanCreate`/`CanRead` whose RLS filter is cleared, omitted or NULL fails,
 `CanUpdate`/`CanDelete` for that role fails outright, and one of the four guarded grants pointed at
@@ -140,13 +215,19 @@ a filter record other than its own `7F0E000x` fails. `V202608131600` asserts the
 the host, but only at its own point in the chain — a regenerated seed carries a later timestamp and
 would otherwise silently win (#41). If it fires, the fix is in `metadata/`, never in the gate.
 
-**Cadence: this repo regenerates per feature, and that is a decision, not an omission.** MJ,
-bizapps-common and bizapps-caliber all consolidate at release time instead. We do not, because
-CHECK 1 makes forgetting the seed impossible here while all three of those repos document their
-release step as having "no automated detection at all" — and caliber shipped v6.0.0 in violation of
-its own step. Revisit release-time consolidation only if delta files start accumulating noisily per
-release, and then adopt it *with* a redesigned enforcement point for CHECK 1, never without.
-`plans/RESEARCH-METADATA-SYNC-RELEASE-PRACTICE.md` has the evidence.
+**Cadence: one seed per release, like MJ (#105, 2026-08-30).** This repo used to regenerate per
+feature, held there by a CI check comparing `metadata/` to a hash manifest. That check was retired:
+it inferred "the seed ships this record" from the presence of a manifest key, which is a silent pass
+in one direction — regenerate the manifest without regenerating the seed and it goes green while the
+record reaches no host. `bizapps-sales` hit exactly that.
+
+What replaced it is a check on the property rather than the proxy (`npm run check:release-seed`),
+run at the release rather than on every PR. The earlier decision was recorded in
+`plans/RESEARCH-METADATA-SYNC-RELEASE-PRACTICE.md`, whose comparison remains accurate and whose
+conclusion this reverses — it carries a note saying so. The risk it named is real and is now
+answered rather than avoided: MJ, bizapps-common and bizapps-caliber all document their release step
+with "no automated detection at all", and caliber shipped v6.0.0 in violation of its own step. Here
+the release step is checked automatically, in `publish.yml`, before anything is published or tagged.
 
 ## Placeholders
 
@@ -198,7 +279,7 @@ DB_DATABASE=MJ_Forms_SeedGen npx mj sync push --dir metadata --exclude users --c
 # 3-4. Identical to steps 4-5 of the delta recipe: the same two substitutions, then a NEW
 #      V<stamp>__v<ver>__Metadata_Sync.sql. Written from nothing, it must also tolerate rows that
 #      already exist on a host that ran the earlier seeds.
-npm run seed:manifest && npm run lint:distribution
+npm run lint:distribution && npm run check:release-seed
 ```
 
 Then prove it: empty the copy again and run the migration itself, not the push. Count the records.

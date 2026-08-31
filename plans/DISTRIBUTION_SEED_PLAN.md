@@ -1,5 +1,15 @@
 # Distribution seed plan — the metadata sync migration Forms never shipped
 
+> **⚠️ Step 6.1 was retired by [#105](https://github.com/MemberJunction/bizapps-forms/issues/105)
+> (2026-08-30).** The CI check it asked for shipped as CHECK 1, comparing `metadata/` against a hash
+> manifest — and it passed whenever someone regenerated the manifest, seed or no seed, which is a
+> silent pass in exactly the direction that matters. Forms now follows MJ: PRs carry declarative JSON
+> and the build engineer generates ONE consolidated `Metadata_Sync` per release, with
+> `scripts/check-release-seed-coverage.mjs` checking the property (every declared `primaryKey`
+> appears in a shipped migration) at the release boundary. **Everything else in this plan stands** —
+> the diagnosis, the seed itself, the teardown, step 6.2 (placeholders, which became CHECK 2), and
+> the `metadata.directory` fact that started it all.
+
 **Status: ALL STEPS DONE and verified on 2026-08-08** (branch
 `feat/distribution-metadata-seed`, 5 commits). Step 4 was run in the only form available before
 release — see §9. Automations now ship ON by default; §7's `users/` caveat is superseded.
@@ -257,7 +267,7 @@ which is what Step 6.1/6.2 exist to enforce.
 | 2 | `migrations/V202608081700__v0.8.x__Metadata_Sync.sql` — **80 records** | replayed on an emptied database; all 80 present |
 | 3 | `${commonSchema}` removed from 2 migrations + `mj.config.cjs` | `npm run lint:distribution` |
 | 5 | `migrations-teardown/V001__Retire_Forms_Core_Rows.sql` + `mj-app.json` | run against a used database; postcondition passed |
-| 6 | `scripts/check-distribution-seed.mjs` + `.spec.mjs`, `write-seed-manifest.mjs`, `distribution-gate.yml`, doc updates | 7/7 self-tests |
+| 6 | `scripts/check-distribution-seed.mjs` + `.spec.mjs`, `write-seed-manifest.mjs`, `distribution-gate.yml`, doc updates — *the manifest writer and CHECK 1 were later removed in #105; see the note at the top* | 7/7 self-tests |
 | 7 | `migrations/V202608081800__v0.8.x__Seed_SchemaInfo_EntityNamePrefix.sql` | `SchemaInfo.EntityNamePrefix` was confirmed NULL even in dev |
 
 **How the seed was generated.** `MJ_Forms_Dev` was backed up and restored as `MJ_Forms_SeedGen`;
@@ -305,7 +315,7 @@ not the **user**, and automations stay off until an operator provisions one. Thi
 `metadata/users/README.md`, which argued for seeding it to produce a better first failure. Both
 were written for the merged automation layer; they disagree. The conservative reading won because
 writing a `User` row into a host's identity table is the higher-consequence direction. To reverse:
-drop `--exclude users`, regenerate the seed, `npm run seed:manifest`.
+drop `--exclude users`; the next release seed picks the records up.
 
 ## 8. What is left
 

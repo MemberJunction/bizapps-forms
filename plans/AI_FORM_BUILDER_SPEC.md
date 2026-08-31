@@ -84,10 +84,11 @@ From `packages/Entities/src/generated/entity_subclasses.ts` (verified):
   (line 214), and `screens` (line ~232). **The preview can therefore render everything this spec generates
   with zero contract changes.**
 
-**No schema migration is required for any phase of this spec.** New AIPrompt/template metadata *does*
-require a regenerated `V…__Metadata_Sync.sql` migration + `npm run seed:manifest` (repo rule: `migrations/`
-is the only thing that ships; `npm run lint:distribution` enforces). Follow `migrations/README.md` for the
-regeneration recipe — it is not a plain re-push.
+**No schema migration is required for any phase of this spec.** New AIPrompt/template metadata ships
+as declarative JSON under `metadata/`; the `V…__Metadata_Sync.sql` that carries it is generated once
+per release by the build engineer, not in this work's PRs (repo rule: `migrations/` is the only thing
+that ships, but the seed is release work — `migrations/README.md`, and MJ/metadata/CLAUDE.md §1b).
+`npm run check:release-seed` lists what the next seed owes.
 
 ### MJ-core APIs this spec depends on — availability verified at the `v5.51.0` tag
 
@@ -172,7 +173,7 @@ existing `generate-form.action.spec.ts` stubs the Designer.
 
 ## 4. Workstream A — Extend the blueprint + Designer (closes G1/G2/G3, part of G6)
 
-**Packages:** `packages/Actions` (schema + builder), `metadata/` (prompt), one regenerated Metadata_Sync migration.
+**Packages:** `packages/Actions` (schema + builder), `metadata/` (prompt). No Metadata_Sync migration — the release seed carries the prompt records.
 
 ### A1. Blueprint schema (`form-blueprint.ts`)
 
@@ -238,8 +239,9 @@ Update `metadata/templates/templates/forms-form-designer.template.md` +
 - Keep `OutputType='object'`, `ResponseFormat='JSON'`, `SelectionStrategy='Specific'` as-is. Model changes
   are metadata operations (AI Prompt Model row), never code.
 
-Then: `mj sync push` → regenerate the Metadata_Sync migration per `migrations/README.md` →
-`npm run seed:manifest` → `npm run lint:distribution` must pass.
+Then: commit the changed JSON under `metadata/` (no `sync` block, no `Metadata_Sync` migration in the
+PR) and confirm `npm run check:release-seed` lists the new records as owed — the release seed picks
+them up. `npm run lint:distribution` must pass, as on any PR.
 
 ### A4. Theme input — text-only in this phase
 
@@ -425,7 +427,7 @@ live; kill the websocket mid-run and confirm the identical final form.
 
 **Phase A (correctness):** Workstream A. Ships alone: single-shot generation now emits theme-less but
 screen/logic/validation-complete forms. Commits: (1) blueprint+builder extension + tests, (2) prompt
-metadata + regenerated Metadata_Sync migration.
+metadata (JSON only; the release seed carries it).
 **Phase B (streaming):** D3 fix commit → Workstream B + §6 seam/events → Workstream D. The dashboard
 keeps working between commits because no-`SessionID` behavior is unchanged.
 **Phase C (media + theme):** Workstream C (image stage commit, theme stage commit).

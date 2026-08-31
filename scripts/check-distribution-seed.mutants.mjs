@@ -49,11 +49,15 @@
  * Node stdlib only and no build step, same constraint as the gate and its spec, so CI runs it
  * without an install.
  *
- * Serial, and it costs about a minute: ~1s per mutant, because each one runs the whole spec in a
- * fresh process and the spec copies `metadata/` per fixture. Each run is capped by SPEC_TIMEOUT_MS:
- * `mask/block-comment-first-close` injects a `while` loop into the gate, and a mutant that hangs
- * would otherwise hang CI with no signal at all. That is the honest number — a workflow
- * step whose real cost is double what its comment claims is a step someone deletes in a hurry later.
+ * Serial, and it costs about 40 seconds (measured 2026-08-30, 66 mutants): each one runs the whole
+ * spec in a fresh process, and the spec builds 87 fixtures (measured at `mkdtempSync`, not counted
+ * off the source — the table-driven loops multiply 11 call sites into 87). It no longer copies the `metadata/`
+ * tree into each of those — that was CHECK 1's, and #105 removed the check and the copy together.
+ * Each run is capped by SPEC_TIMEOUT_MS: `mask/block-comment-first-close` injects a `while` loop
+ * into the gate, and a mutant that hangs would otherwise hang CI with no signal at all. That is the
+ * honest number — a workflow step whose real cost is double what its comment claims is a step
+ * someone deletes in a hurry later.
+ *
  * Parallelising is possible and deliberately not done: the gate only runs on paths that touch it,
  * and a worker pool is more of this harness to own for forty seconds nobody is waiting on.
  */
@@ -184,23 +188,12 @@ const MUTANTS = [
     ['scope/migrations-pg', 'migrations-pg/ is scanned, so the first PostgreSQL seed is checked from birth',
         `const SHIPPED_MIGRATION_DIRS = ['migrations', 'migrations-pg'];`, `const SHIPPED_MIGRATION_DIRS = ['migrations'];`],
 
-    // --- CHECK 1 and CHECK 2 ---------------------------------------------------------------------
-    ['seed/missing-migration', 'metadata with no seed migration at all is reported',
-        '    if (seeds.length === 0) {', '    if (false && seeds.length === 0) {'],
-    ['seed/missing-manifest', 'a seed with no manifest to date it is reported',
-        // Deletes the violation and keeps the early return. `if (false)` would be the obvious
-        // mutant and a weak one: it falls through to a readFileSync on the file it just proved
-        // absent, so the spec dies on ENOENT and "killed" says only that the module broke.
-        `        violations.push(\n            \`Seed migration(s) present (\${seeds.join(', ')}) but \${relative(repoRoot, MANIFEST_PATH)} is \` +\n                'missing, so nothing can tell whether they are current. Run \`npm run seed:manifest\`.',\n        );\n        return;`,
-        '        return;'],
-    ['seed/changed-metadata', 'metadata edited after the seed was generated is reported',
-        '        } else if (recorded[file] !== hash) {', '        } else if (false) {'],
-    ['seed/new-metadata', 'metadata added after the seed was generated is reported as NEW, not as changed',
-        '        if (!(file in recorded)) {', '        if (false) {'],
-    ['seed/deleted-metadata', 'metadata deleted after the seed was generated is reported — the seed still creates its records',
-        '        if (!(file in current)) {', '        if (false) {'],
-    ['seed/sync-block-ignored', 'a rewritten `sync` bookkeeping block is not content, so the gate does not cry wolf on the push that regenerated the seed',
-        `                    .filter(([k]) => k !== 'sync')\n`, ''],
+    // --- CHECK 2 -----------------------------------------------------------------------------------
+    //
+    // Six `seed/*` mutants pinned CHECK 1, the hash manifest, and were removed with it in #105. They
+    // are not replaced here: what took CHECK 1's place is a release-readiness check on the actual
+    // property (scripts/check-release-seed-coverage.mjs), which has its own spec and is not part of
+    // this gate.
     ['placeholder/teardown-map', 'teardown scripts get the stricter map — MJ substitutes only ${mjSchema} there',
         `dir.endsWith('migrations-teardown') ? new Set(['mjSchema']) : INSTALL_SUPPLIED_PLACEHOLDERS`,
         'INSTALL_SUPPLIED_PLACEHOLDERS'],
@@ -297,19 +290,19 @@ const SPEC_TIMEOUT_MS = 60_000;
 /**
  * A repo-shaped directory whose `scripts/` is real files and whose data directories are symlinks —
  * the spec resolves REPO_ROOT from its own location, so it must sit two levels inside something that
- * looks like this repo, but `metadata/` and the three migration directories are read-only to it and
- * cost nothing to share.
+ * looks like this repo, but the three migration directories are read-only to it and cost nothing to
+ * share. `metadata/` is NOT among them: with CHECK 1 gone the gate reads only SQL, so a link to it
+ * would be a dependency this harness does not have.
  *
  * The teardown below `rmSync`s this tree, and its children are links INTO the working tree. That is
- * safe — Node unlinks a symlink rather than recursing through it — but the spec's own `cpSync`
- * carries a `dereference` comment about the mirror image of this hazard, so it is worth saying here
- * too: nothing in this file may ever follow these links while deleting.
+ * safe — Node unlinks a symlink rather than recursing through it — but it is worth saying out loud:
+ * nothing in this file may ever follow these links while deleting.
  */
 function buildHarnessTree() {
     const root = mkdtempSync(join(tmpdir(), 'seed-mutants-'));
     mkdirSync(join(root, 'scripts'));
     writeFileSync(join(root, 'scripts', 'check-distribution-seed.spec.mjs'), readFileSync(SPEC, 'utf-8'));
-    for (const dir of ['metadata', 'migrations', 'migrations-pg', 'migrations-teardown']) {
+    for (const dir of ['migrations', 'migrations-pg', 'migrations-teardown']) {
         if (existsSync(join(REPO_ROOT, dir))) symlinkSync(join(REPO_ROOT, dir), join(root, dir), 'dir');
     }
     return root;

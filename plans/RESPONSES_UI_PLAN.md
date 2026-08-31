@@ -228,8 +228,8 @@ focused grants on the `Form Respondent` (deny-all-write RLS) and `Forms Automati
 Uploads, Form Automation Runs, Form Entity Binding Records) for normal admin users must
 be verified** before S1 renders them. If missing: add `EntityPermission` rows in
 `metadata/entity-permissions/` **and** a `V…__Metadata_Sync.sql` migration (both, per
-the migrations-are-the-only-thing-that-ships rule + `npm run seed:manifest` +
-`npm run lint:distribution`). This is the only potential migration in the whole plan.
+the migrations-are-the-only-thing-that-ships rule) — but the seed migration is release work, so
+the PR carries only the JSON and `npm run check:release-seed` reports it as owed. This is the only potential migration in the whole plan.
 
 **[as built] Gate cleared; no migration needed.** All three entities already ship the
 grants, in the migrations that create them — `Form Uploads` in

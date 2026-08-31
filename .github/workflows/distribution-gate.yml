@@ -1,19 +1,27 @@
 name: Distribution Gate
 
-# Catches the two ways this app can ship something that works here and nowhere else:
-# metadata that never made it into a seed migration (MJ never reads mj-app.json's
-# metadata.directory at install), and SQL carrying a placeholder `mj app install` cannot resolve
-# (Skyway leaves unknown ones untouched, so they ship as literal strings rather than erroring).
-# See plans/DISTRIBUTION_SEED_PLAN.md.
+# Reads the SQL this app ships for hazards that are invisible from inside a working checkout: a
+# placeholder `mj app install` cannot resolve (Skyway leaves unknown ones untouched, so they ship as
+# literal strings rather than erroring), a regenerated seed re-granting the anonymous Form Respondent
+# role unfiltered access, a core-metadata insert guarded on its own ID alone, and a schema sync
+# reaching a schema this app does not own. See plans/DISTRIBUTION_SEED_PLAN.md.
+#
+# Metadata currency is NOT gated here (#105). PRs contribute declarative JSON only and the build
+# engineer generates one consolidated Metadata_Sync per release, so no PR can answer "has the seed
+# been regenerated yet?" — asking it here produced a check that passed whenever someone regenerated
+# a hash manifest, whether or not the seed had moved. That question now belongs to
+# scripts/check-release-seed-coverage.mjs, which runs at the release in publish.yml.
 
 on:
   workflow_dispatch:
   # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
-  # land unshipped metadata without the gate ever running.
+  # land shipped SQL without the gate ever reading it.
   push:
     branches: [next, main]
     paths:
-      - 'metadata/**'
+      # metadata/** is deliberately absent (#105): this gate reads shipped SQL and nothing else,
+      # so a metadata-only PR gives it nothing to say. It triggers on the directories that carry
+      # shipped SQL, plus its own sources.
       - 'migrations/**'
       # CHECK 3 scans this directory, so the first PostgreSQL seed must trigger the gate that
       # will refuse it. Without this entry a PR adding one runs no gate at all.
@@ -28,12 +36,13 @@ on:
       # The mutation gate and, just as importantly, its list of load-bearing behaviours: editing
       # that list is how coverage is dropped, so it has to be able to fail the PR that does it.
       - 'scripts/check-distribution-seed.mutants.mjs'
-      - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
   pull_request:
     branches: [next, main]
     paths:
-      - 'metadata/**'
+      # metadata/** is deliberately absent (#105): this gate reads shipped SQL and nothing else,
+      # so a metadata-only PR gives it nothing to say. It triggers on the directories that carry
+      # shipped SQL, plus its own sources.
       - 'migrations/**'
       # CHECK 3 scans this directory, so the first PostgreSQL seed must trigger the gate that
       # will refuse it. Without this entry a PR adding one runs no gate at all.
@@ -48,7 +57,6 @@ on:
       # The mutation gate and, just as importantly, its list of load-bearing behaviours: editing
       # that list is how coverage is dropped, so it has to be able to fail the PR that does it.
       - 'scripts/check-distribution-seed.mutants.mjs'
-      - 'scripts/write-seed-manifest.mjs'
       - '.github/workflows/distribution-gate.yml'
 
 jobs:
@@ -63,7 +71,7 @@ jobs:
 
       # No `npm ci`: the gate is Node stdlib only, deliberately, so a dependency problem can never
       # be the reason nobody finds out the app does not install.
-      - name: Check the distribution seed and shipped placeholders
+      - name: Check shipped SQL for the four install-time hazards
         run: npm run lint:distribution
 
       - name: Check the gate itself still fires
@@ -71,7 +79,7 @@ jobs:
 
       # The step above proves the gate FIRES; this one proves its spec would NOTICE a behaviour
       # going missing. CHECK 3's failure mode is silence, so an untested behaviour is one a
-      # refactor deletes with the suite green — which is what #44 found nine of. Takes ~1 minute:
+      # refactor deletes with the suite green — which is what #44 found nine of. Takes ~40 seconds:
       # it runs the spec once per mutant, in a fresh process each time.
       - name: Check the gate's spec still kills what it claims to cover
         run: npm run lint:distribution:mutants
