@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { PublishedFormAutomation, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-import type { FormTree } from './builder-models';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ConditionalRule,
+  PublishedFormAutomation,
+  PublishedFormDefinition,
+  mjBizAppsFormsFormPageEntity,
+  mjBizAppsFormsFormQuestionEntity,
+} from '@mj-biz-apps/forms-entities';
+import type { FormTree, PageNode, QuestionNode } from './builder-models';
 
 /**
  * Publish is the only place the authored automation rows become executable.
@@ -37,32 +43,118 @@ let formsRowMissing = false;
 /** Every EntityName the service asked RunView for, so we can assert it queried at all. */
 const queriedEntities: string[] = [];
 
-class FakeVersion {
-  public ID = 'version-1';
-  public FormID = '';
-  public VersionNumber = 0;
-  public Status = '';
-  public PublishedAt: Date | null = null;
-  public DefinitionSnapshot = '';
-  public LatestResult = { CompleteMessage: '' };
-  public NewRecord(): void {}
-  public async Save(): Promise<boolean> {
+type VersionStatus = 'Draft' | 'Published' | 'Retired';
+
+/**
+ * A committed `FormVersion` row.
+ *
+ * The fake keeps rows separate from the entity objects that write them so a rolled-back
+ * transaction leaves the table exactly as it found it. Mutating a shared object in place
+ * would report a retire that a rollback never actually persisted.
+ */
+interface VersionRow {
+  ID: string;
+  FormID: string;
+  VersionNumber: number;
+  Status: VersionStatus;
+  DefinitionSnapshot: string;
+}
+
+/** The `FormVersion` table. */
+const versionRows: VersionRow[] = [];
+/** Version entities the service asked Metadata for, oldest first. */
+const createdVersions: FakeVersion[] = [];
+/** Transaction groups the service opened, in the order it opened them. */
+const transactionGroups: FakeTransactionGroup[] = [];
+/** When false, every transaction group rolls back rather than committing. */
+let transactionSucceeds = true;
+/** When false, the read of the form's currently-published versions fails. */
+let publishedVersionsReadSucceeds = true;
+
+class FakeTransactionGroup {
+  /** The entities queued into this group, in the order their Save() was called. */
+  public readonly Queued: FakeVersion[] = [];
+
+  public async Submit(): Promise<boolean> {
+    if (!transactionSucceeds) {
+      return false;
+    }
+    for (const entity of this.Queued) {
+      entity.Commit();
+    }
     return true;
   }
 }
 
-const savedVersion = new FakeVersion();
+class FakeVersion {
+  public FormID = '';
+  public VersionNumber = 0;
+  public Status: VersionStatus | '' = '';
+  public PublishedAt: Date | null = null;
+  public DefinitionSnapshot = '';
+  public LatestResult = { CompleteMessage: '' };
+  public TransactionGroup: FakeTransactionGroup | null = null;
+
+  constructor(public ID: string) {}
+
+  public NewRecord(): void {}
+
+  /** Matches MJ: inside a transaction group a save is QUEUED, and only Submit() writes it. */
+  public async Save(): Promise<boolean> {
+    if (this.TransactionGroup) {
+      this.TransactionGroup.Queued.push(this);
+      return true;
+    }
+    this.Commit();
+    return true;
+  }
+
+  public Commit(): void {
+    const row = versionRows.find((r) => r.ID === this.ID);
+    const values = {
+      FormID: this.FormID,
+      VersionNumber: this.VersionNumber,
+      Status: this.Status as VersionStatus,
+      DefinitionSnapshot: this.DefinitionSnapshot,
+    };
+    if (row) {
+      Object.assign(row, values);
+    } else {
+      versionRows.push({ ID: this.ID, ...values });
+    }
+  }
+}
+
+/** An entity object over an existing row, as `ResultType: 'entity_object'` hands back. */
+function hydrate(row: VersionRow): FakeVersion {
+  const entity = new FakeVersion(row.ID);
+  entity.FormID = row.FormID;
+  entity.VersionNumber = row.VersionNumber;
+  entity.Status = row.Status;
+  entity.DefinitionSnapshot = row.DefinitionSnapshot;
+  return entity;
+}
 
 vi.mock('@memberjunction/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@memberjunction/core')>();
   class Metadata {
     public CurrentUser = { Name: 'tester' };
     public async GetEntityObject(): Promise<FakeVersion> {
-      return savedVersion;
+      const version = new FakeVersion(`version-${createdVersions.length + 1}`);
+      createdVersions.push(version);
+      return version;
+    }
+    public async CreateTransactionGroup(): Promise<FakeTransactionGroup> {
+      const group = new FakeTransactionGroup();
+      transactionGroups.push(group);
+      return group;
     }
   }
   class RunView {
-    public async RunView(params: { EntityName: string }): Promise<{ Success: boolean; Results: unknown[] }> {
+    public async RunView(params: {
+      EntityName: string;
+      ResultType?: string;
+    }): Promise<{ Success: boolean; Results: unknown[] }> {
       queriedEntities.push(params.EntityName);
       if (params.EntityName === 'MJ_BizApps_Forms: Form Automations') {
         return { Success: true, Results: automationRows };
@@ -73,11 +165,19 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
         }
         return { Success: true, Results: formsRowMissing ? [] : [{ Settings: storedSettings }] };
       }
-      // The version-number probe: no prior versions.
-      return { Success: true, Results: [] };
+      // Form Versions. Entity objects are what a publish mutates (the incumbents it retires);
+      // the simple read is the version-number probe.
+      if (params.ResultType === 'entity_object') {
+        if (!publishedVersionsReadSucceeds) {
+          return { Success: false, Results: [] };
+        }
+        return { Success: true, Results: versionRows.filter((r) => r.Status === 'Published').map(hydrate) };
+      }
+      const highest = versionRows.map((r) => r.VersionNumber).sort((a, b) => b - a)[0];
+      return { Success: true, Results: highest === undefined ? [] : [{ VersionNumber: highest }] };
     }
   }
-  return { ...actual, Metadata, RunView, LogError: () => {} };
+  return { ...actual, Metadata, RunView, LogError: () => {}, LogStatus: () => {} };
 });
 
 const { PublishService } = await import('./publish.service');
@@ -98,7 +198,22 @@ function tree(): FormTree {
 }
 
 function publishedSnapshot(): PublishedFormDefinition {
-  return JSON.parse(savedVersion.DefinitionSnapshot) as PublishedFormDefinition;
+  const version = createdVersions[createdVersions.length - 1];
+  return JSON.parse(version.DefinitionSnapshot) as PublishedFormDefinition;
+}
+
+/** Everything the fakes carry between tests. */
+function resetWorld(): void {
+  automationRows.length = 0;
+  queriedEntities.length = 0;
+  versionRows.length = 0;
+  createdVersions.length = 0;
+  transactionGroups.length = 0;
+  transactionSucceeds = true;
+  publishedVersionsReadSucceeds = true;
+  storedSettings = null;
+  formsReadSucceeds = true;
+  formsRowMissing = false;
 }
 
 function row(overrides: Partial<AutomationRow>): AutomationRow {
@@ -121,10 +236,8 @@ function row(overrides: Partial<AutomationRow>): AutomationRow {
 
 describe('PublishService — automations in the snapshot', () => {
   function reset(rows: AutomationRow[]): void {
-    automationRows.length = 0;
+    resetWorld();
     automationRows.push(...rows);
-    queriedEntities.length = 0;
-    savedVersion.DefinitionSnapshot = '';
   }
 
   it('carries a configured entity binding into the published snapshot', async () => {
@@ -187,12 +300,8 @@ describe('PublishService — automations in the snapshot', () => {
  */
 describe('PublishService — settings in the snapshot', () => {
   function reset(stored: string | null): void {
-    automationRows.length = 0;
-    queriedEntities.length = 0;
-    savedVersion.DefinitionSnapshot = '';
+    resetWorld();
     storedSettings = stored;
-    formsReadSucceeds = true;
-    formsRowMissing = false;
   }
 
   it('publishes the stored on-submit mode, not the stale one the builder holds', async () => {
@@ -244,7 +353,7 @@ describe('PublishService — settings in the snapshot', () => {
     const result = await new PublishService().publish(tree());
 
     expect(result.success).toBe(false);
-    expect(savedVersion.DefinitionSnapshot).toBe('');
+    expect(createdVersions).toHaveLength(0);
   });
 
   it('refuses to publish when the form\'s settings cannot be read', async () => {
@@ -256,6 +365,251 @@ describe('PublishService — settings in the snapshot', () => {
     const result = await new PublishService().publish(tree());
 
     expect(result.success).toBe(false);
-    expect(savedVersion.DefinitionSnapshot).toBe('');
+    expect(createdVersions).toHaveLength(0);
   });
-})
+});
+
+/**
+ * At most ONE Published version per form.
+ *
+ * Publishing minted a new `Published` FormVersion and left every earlier one Published too, so
+ * forms accumulated several simultaneously-live versions (three on one dev form). Nothing broke,
+ * because all three readers here disambiguate with `VersionNumber DESC` — which is exactly the
+ * problem: the invariant was a convention each caller had to remember rather than a property of
+ * the data, and `loadPublishedVersion`'s own docstring already claimed it held. See #82.
+ */
+describe('PublishService — one live version per form', () => {
+  beforeEach(resetWorld);
+
+  function givenPublishedVersion(versionNumber: number): void {
+    versionRows.push({
+      ID: `existing-${versionNumber}`,
+      FormID: 'form-1',
+      VersionNumber: versionNumber,
+      Status: 'Published',
+      DefinitionSnapshot: '{}',
+    });
+  }
+
+  function statusOf(versionNumber: number): VersionStatus | undefined {
+    return versionRows.find((r) => r.VersionNumber === versionNumber)?.Status;
+  }
+
+  function publishedCount(): number {
+    return versionRows.filter((r) => r.FormID === 'form-1' && r.Status === 'Published').length;
+  }
+
+  it('retires the version that was published before this one', async () => {
+    givenPublishedVersion(1);
+
+    const result = await new PublishService().publish(tree());
+
+    expect(result.success).toBe(true);
+    expect(statusOf(1)).toBe('Retired');
+    expect(statusOf(2)).toBe('Published');
+  });
+
+  it('retires the incumbent and publishes its replacement in one transaction, retire first', async () => {
+    givenPublishedVersion(1);
+
+    await new PublishService().publish(tree());
+
+    // One group, not two: a retire that committed on its own ahead of an insert that then failed
+    // would leave the form with no live version and its public link answering
+    // `no-published-version`. Retire-first is what the filtered unique index requires — the
+    // replacement cannot be inserted as Published while the incumbent still is.
+    expect(transactionGroups).toHaveLength(1);
+    expect(transactionGroups[0].Queued.map((e) => [e.ID, e.Status])).toEqual([
+      ['existing-1', 'Retired'],
+      ['version-1', 'Published'],
+    ]);
+  });
+
+  it('leaves exactly one Published version after two consecutive publishes', async () => {
+    const service = new PublishService();
+
+    await service.publish(tree());
+    await service.publish(tree());
+
+    expect(versionRows).toHaveLength(2);
+    expect(publishedCount()).toBe(1);
+    expect(statusOf(2)).toBe('Published');
+    expect(statusOf(1)).toBe('Retired');
+  });
+
+  it('retires every live version, not just the newest', async () => {
+    // What the dev database actually holds until the backfill migration runs: one form carried
+    // three simultaneously-Published versions. A publish that demoted only the newest would leave
+    // the older two live and the next insert would then be refused by the unique index.
+    givenPublishedVersion(1);
+    givenPublishedVersion(2);
+    givenPublishedVersion(3);
+
+    await new PublishService().publish(tree());
+
+    expect(publishedCount()).toBe(1);
+    expect(statusOf(4)).toBe('Published');
+    expect([statusOf(1), statusOf(2), statusOf(3)]).toEqual(['Retired', 'Retired', 'Retired']);
+  });
+
+  it('leaves the incumbent live when the swap transaction rolls back', async () => {
+    givenPublishedVersion(1);
+    transactionSucceeds = false;
+
+    const result = await new PublishService().publish(tree());
+
+    // The failure that must never happen is a retired incumbent with no replacement. A rolled-back
+    // swap has to leave the form exactly as it was — still serving version 1.
+    expect(result.success).toBe(false);
+    expect(statusOf(1)).toBe('Published');
+    expect(versionRows).toHaveLength(1);
+  });
+
+  it('refuses to publish when the form\'s live version cannot be read', async () => {
+    givenPublishedVersion(1);
+    publishedVersionsReadSucceeds = false;
+
+    const result = await new PublishService().publish(tree());
+
+    // Publishing without knowing what is live is how a second Published row appears — the very
+    // state this fix exists to remove.
+    expect(result.success).toBe(false);
+    expect(createdVersions).toHaveLength(0);
+    expect(statusOf(1)).toBe('Published');
+  });
+});
+
+/**
+ * A rule the builder is ALREADY flagging as broken must not reach the published snapshot
+ * (issue #79).
+ *
+ * The canvas puts a "Rule is broken" badge on the item and names the cause, but Publish neither
+ * blocked nor warned: the dangling `questionId` was baked into `DefinitionSnapshot`, the widget
+ * then rendered one fewer question than the author believes the form has, and the dashboard
+ * reported that question as "0 answers · 100% skipped" — indistinguishable from respondents who
+ * chose not to answer it.
+ *
+ * The gate lives in this SERVICE rather than on the button, because this is the only code that
+ * writes a Published `FormVersion`. A check on the click is a check every other caller — the AI
+ * builder, a template clone, whatever ships next — walks straight past.
+ */
+describe('PublishService — rules the builder already calls broken', () => {
+  beforeEach(resetWorld);
+
+  function question(id: string, prompt: string, rule: ConditionalRule | null): QuestionNode {
+    return {
+      entity: {
+        ID: id,
+        QuestionType: 'ShortText',
+        Prompt: prompt,
+        HelpText: null,
+        IsRequired: false,
+        DisplayOrder: 1,
+        ConditionalRule: rule ? JSON.stringify(rule) : null,
+        ValidationRule: null,
+        Settings: null,
+      } as mjBizAppsFormsFormQuestionEntity,
+      options: [],
+    };
+  }
+
+  /** One page carrying the given questions in the order supplied — the order the rules read in. */
+  function treeOf(questions: QuestionNode[]): FormTree {
+    const page: PageNode = {
+      entity: {
+        ID: 'page-1',
+        Title: 'Page 1',
+        Description: null,
+        DisplayOrder: 1,
+        ConditionalRule: null,
+      } as mjBizAppsFormsFormPageEntity,
+      questions,
+    };
+    return { ...tree(), pages: [page] };
+  }
+
+  /** The show rule from the issue, in shape: one equality against another question's answer. */
+  const showsWhen = (questionId: string): ConditionalRule => ({
+    show: { all: [{ questionId, op: 'equals', value: 'Pro' }] },
+  });
+
+  it('refuses a rule whose source question no longer exists, and says which rule', async () => {
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-deleted')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    // Pinned in full, because the refusal IS the fix instruction: it has to say which rule and
+    // what is wrong with it, in the same words the canvas badge is already using.
+    expect(result.error).toBe(
+      'Publish refused — 1 broken rule would ship with this form. Fix it and publish again: ' +
+        'Show "Want onboarding?" when (deleted question) equals Pro — references a question that no longer exists.',
+    );
+    // The dangling questionId never reaches DefinitionSnapshot — the refusal is before the
+    // first read, so no version entity was even asked for, let alone written.
+    expect(createdVersions).toHaveLength(0);
+    expect(versionRows).toHaveLength(0);
+  });
+
+  it('refuses a rule whose source is answered after the rule runs', async () => {
+    // The reorder shape. The source is right there on the canvas, so nothing looks wrong — but
+    // the rule runs before anything has been put in the answer map under that id, decides the
+    // same way for every respondent, and then changes its mind once the source is answered.
+    const form = treeOf([
+      question('q-1', 'Want onboarding?', showsWhen('q-2')),
+      question('q-2', 'Which plan?', null),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('answered later than this rule runs');
+    expect(createdVersions).toHaveLength(0);
+  });
+
+  it('carries the rules it refused over, so the caller can retract the refusal later', async () => {
+    // `error` is a sentence; this is the fact behind it. A refusal about rules STOPS BEING TRUE
+    // when the author fixes them, and the caller showing it has to be able to tell that kind from
+    // "could not read the form's settings", which an edit to a question says nothing about.
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-deleted')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.brokenRules).toEqual([
+      // No trailing stop: these are the badge's own lines, and the full stop belongs to the
+      // sentence `error` assembles around them.
+      'Show "Want onboarding?" when (deleted question) equals Pro — references a question that no longer exists',
+    ]);
+  });
+
+  it('leaves brokenRules off a refusal that is not about rules', async () => {
+    // The settings read failing is not something fixing a rule repairs, so a caller must not
+    // retract it on the next edit. Absent, not empty: "no broken rules" and "not that kind of
+    // refusal" are different answers and an empty array reads as the first.
+    const form = treeOf([question('q-1', 'Which plan?', null)]);
+    formsReadSucceeds = false;
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    expect(result.brokenRules).toBeUndefined();
+  });
+
+  it('publishes a form whose rules all work, with no extra friction', async () => {
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-1')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(true);
+    expect(publishedSnapshot().pages[0].questions).toHaveLength(2);
+  });
+});

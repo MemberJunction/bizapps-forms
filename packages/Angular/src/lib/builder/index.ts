@@ -119,7 +119,10 @@ export {
 } from './distribution.service';
 export {
   autoShareName,
+  formReach,
   shareState,
+  type FormReach,
+  type FormReachKind,
   type ShareLinkFacts,
   type ShareState,
   type ShareStateKind,

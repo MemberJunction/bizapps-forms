@@ -115,6 +115,19 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-closed');
   });
 
+  // A link that was Active once keeps its minted token forever — `provisioning-decision.ts`
+  // mints only for `Status === 'Active'` but never un-mints — so "Draft has no token" is not the
+  // gate it looks like. Draft is the COLUMN DEFAULT, the builder badges it "Paused / Turned off.
+  // Anyone opening it is told the form is not taking responses", and the door served it in full.
+  it('returns distribution-closed for a Draft distribution, minting no token', async () => {
+    const provider = fakeProvider({ rows: [fakeDistribution({ Status: 'Draft' })] }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-closed');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('returns distribution-closed when IsActive is false', async () => {
     const provider = fakeProvider({ rows: [fakeDistribution({ IsActive: false })] }).provider;
     const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
@@ -128,6 +141,42 @@ describe('redeemSlugToToken', () => {
     const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
     expect(out.ok).toBe(false);
     expect(out.reason).toBe('distribution-closed');
+  });
+
+  // The expiry half of that window was checked but never exercised — the test above only ever
+  // took the OpenAt branch, so a broken CloseAt comparison would have gone unnoticed at the door.
+  it('returns distribution-closed once the closing date has passed', async () => {
+    const past = new Date(Date.now() - 60_000);
+    const provider = fakeProvider({ rows: [fakeDistribution({ CloseAt: past })] }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-closed');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('returns distribution-full when the response limit has been reached, minting no token', async () => {
+    const provider = fakeProvider({
+      rows: [fakeDistribution({ MaxResponses: 6, ResponseCount: 6 })],
+    }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-full');
+    // The whole point of refusing at the door: no anonymous session is minted for a link
+    // that cannot accept what it would invite the respondent to write.
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // Documents the boundary rather than having driven it: paired with the test above, an
+  // off-by-one in the cap breaks exactly one of the two, so the last slot stays claimable.
+  it('still opens the form on the last remaining slot', async () => {
+    const provider = fakeProvider({
+      rows: [fakeDistribution({ MaxResponses: 6, ResponseCount: 5 })],
+    }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(out.ok).toBe(true);
+    expect(out.token).toBe('redeemed-jwt');
   });
 
   it('returns no-token when the distribution has no PublicLinkToken', async () => {
