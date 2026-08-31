@@ -121,8 +121,10 @@ export class FormsGraphQLApiService implements IFormsApiService {
   ): Promise<TData> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      // Anonymous session correlator (see this.sessionId). Best-effort — captured server-side
-      // into AnonymousSessionID when present; never the idempotency key.
+      // The ownership record for every row this widget writes, not telemetry — see
+      // `this.sessionId` for what the server does with it, and why omitting it is refused rather
+      // than degraded. Still never the idempotency key: that is the client response id, in the
+      // payload.
       'x-session-id': this.sessionId,
     };
     if (this.config.token) {

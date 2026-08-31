@@ -46,6 +46,17 @@ const VICTIM_RESPONSE_ID = 'a1b2c3d4-1111-4222-8333-444455556666';
 const VICTIM_SESSION = 'victim-session';
 
 /**
+ * A status that seals the row, DERIVED rather than restated.
+ *
+ * `.claude/rules/typescript-style.md` forbids hand-copying a value-list union, "test mock
+ * interfaces" included, because the union is CodeGen'd from a CHECK constraint and a hand-written
+ * copy does not grow with it. Written as the exclusion of the one status that is not terminal —
+ * the very row {@link victimPartial} builds — so a migration that widens the constraint widens
+ * this too, which `'Complete' | 'Disqualified'` spelled out longhand would not.
+ */
+type SealedStatus = Exclude<ExistingResponseRow['Status'], 'Partial'>;
+
+/**
  * A row the widget has already SEALED, exactly as one sits in the table after a submit: terminal,
  * owned, and carrying the client-id proof `findResponseById` matches on.
  *
@@ -54,7 +65,7 @@ const VICTIM_SESSION = 'victim-session';
  * are about the second.
  */
 function victimSealed(
-  status: 'Complete' | 'Disqualified',
+  status: SealedStatus,
   overrides?: Partial<ExistingResponseRow>,
 ): ExistingResponseRow {
   return victimPartial({ Status: status, ...overrides });
