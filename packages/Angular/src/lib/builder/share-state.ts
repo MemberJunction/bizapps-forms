@@ -87,7 +87,9 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
   paused: {
     label: 'Paused',
     tone: 'neutral',
-    detail: 'Turned off. Anyone opening it is told the form is not taking responses.',
+    detail:
+      'Turned off. Anyone opening it is told the form is not taking responses, and its access ' +
+      'token has been withdrawn. Turning it back on issues a fresh one at the same web address.',
     accepting: false,
     fix: 'Turn it back on',
   },
@@ -124,12 +126,18 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
 /**
  * The state of a share link at `now`.
  *
- * Order is deliberate, and it is "most fundamental problem first" rather than the order
- * the server happens to check in: a link with no token is broken no matter what else is
- * true, and telling someone their link is "Scheduled" when it was never issued sends
- * them to fix the wrong thing. Below that, an explicit human decision (paused) outranks
- * a calendar one, and a calendar one outranks the cap — because that is the order in
- * which they can act on it.
+ * Order is deliberate, and it is "the thing the author can act on first" rather than the
+ * order the server happens to check in: an explicit human decision (paused) outranks a
+ * missing token, which outranks a calendar reason, which outranks the cap.
+ *
+ * Paused leads because of bizapps-forms#104: pausing a link now REVOKES its magic-link
+ * credential and clears `PublicLinkToken`, so a paused link legitimately has no token.
+ * The two used to be the other way round, on the reasoning that a link with no token is
+ * broken however else it looks — true while a token was minted once and never withdrawn,
+ * and wrong now, because it would badge every deliberately-paused link "Not ready" and
+ * offer "Issue the link" as the cure for a switch the author had turned off themselves.
+ * `pending` still leads the rest: it means the host could not mint, and telling someone
+ * that link is merely "Scheduled" sends them to edit a date that is not the problem.
  */
 export function shareState(facts: ShareLinkFacts, now: Date): ShareState {
   const kind = stateKind(facts, now);
@@ -137,11 +145,11 @@ export function shareState(facts: ShareLinkFacts, now: Date): ShareState {
 }
 
 function stateKind(facts: ShareLinkFacts, now: Date): ShareStateKind {
-  if (!facts.PublicLinkToken) {
-    return 'pending';
-  }
   if (!facts.IsActive || facts.Status !== 'Active') {
     return 'paused';
+  }
+  if (!facts.PublicLinkToken) {
+    return 'pending';
   }
   const closeAt = toDate(facts.CloseAt);
   if (closeAt && closeAt.getTime() < now.getTime()) {

@@ -92,6 +92,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   protected renaming = false;
   protected nameDraft = '';
   protected confirmingDelete = false;
+  protected confirmingReissue = false;
 
   /**
    * Focus and pre-select the rename box the moment it exists.
@@ -151,6 +152,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     this.selectedId = link.ID;
     this.cancelRename();
     this.confirmingDelete = false;
+    this.confirmingReissue = false;
     this.actionError = null;
   }
 
@@ -218,9 +220,9 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    *
    * One handler rather than five buttons: the state already decides which remedy is on
    * offer, so the alternative is five conditionals in the template each duplicating that
-   * decision. The `pending` branch reloads because issuing a link only asks the server to
-   * try — the token, if one is minted, is written by a second server-side save that this
-   * client's copy of the record knows nothing about.
+   * decision. `pending` and `paused` both go through {@link runCredentialWrite}, because
+   * both ask the server to mint a token and that is written by a second server-side save
+   * this client's copy of the record knows nothing about.
    */
   protected async applyFix(): Promise<void> {
     const link = this.selected;
@@ -230,8 +232,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     const kind = this.stateOf(link).kind;
     switch (kind) {
       case 'pending':
-        await this.run(() => this.service.issueLink(link));
-        await this.reload();
+        await this.runCredentialWrite(() => this.service.issueLink(link));
         if (!this.selected?.PublicLinkToken) {
           this.actionError =
             'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.';
@@ -239,7 +240,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
         }
         return;
       case 'paused':
-        await this.run(() => this.service.open(link));
+        await this.runCredentialWrite(() => this.service.open(link));
         return;
       case 'ended':
         await this.run(() => this.service.setSchedule(link, link.OpenAt, null));
@@ -263,7 +264,32 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     const reopening = link.Status !== 'Active';
-    await this.run(() => (reopening ? this.service.open(link) : this.service.close(link)));
+    await this.runCredentialWrite(() =>
+      reopening ? this.service.open(link) : this.service.close(link),
+    );
+  }
+
+  /**
+   * Ask the server for a new access token, keeping the web address.
+   *
+   * Two clicks, because it cannot be undone: the previous token stops working the instant
+   * this lands, and anyone holding it (a scraped `PublicLinkToken`, a copied redeem URL)
+   * loses access. What it does NOT break is the shared link itself — `/f/:slug` looks the
+   * token up at request time, so posters, QR codes and embeds carry on working. That is
+   * the whole reason this exists instead of "delete it and make another".
+   */
+  protected async confirmReissue(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    this.confirmingReissue = false;
+    await this.runCredentialWrite(() => this.service.reissueLink(link));
+    if (!this.selected?.PublicLinkToken) {
+      this.actionError =
+        'The old token was withdrawn but the server did not issue a new one, so this link is not working. Use "Issue the link" to try again.';
+      this.cdr.markForCheck();
+    }
   }
 
   /**
@@ -324,6 +350,21 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       this.busy = false;
       this.cdr.markForCheck();
     }
+  }
+
+  /**
+   * Run one write that changes this link's access token, then re-read the record.
+   *
+   * The reload is not optional here, and is what separates these writes from the others.
+   * Pausing, reopening, issuing and reissuing all make the server's lifecycle hook write
+   * `MagicLinkInviteID` / `PublicLinkToken` in a SECOND save that this client's copy of
+   * the record never sees. Skipping the re-read leaves the screen rendering a token that
+   * has been revoked, or none where one was just minted — which the badge reads as "Not
+   * ready" on a link that is live.
+   */
+  private async runCredentialWrite(write: () => Promise<MutationOutcome>): Promise<void> {
+    await this.run(write);
+    await this.reload();
   }
 
   // -------------------------------------------------------------------- rename

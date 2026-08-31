@@ -69,11 +69,24 @@ describe('shareState', () => {
   });
 
   describe('when several things are wrong at once', () => {
-    it('puts a missing link ahead of every other reason', () => {
+    it('calls a paused link paused, even though pausing takes its token away', () => {
+      // The order of these two flipped with bizapps-forms#104. A paused link now
+      // legitimately has no token — pausing revokes the credential — so leading with
+      // "Not ready · Issue the link" would send the author to a button when the honest
+      // answer is the switch they themselves turned off.
+      const state = shareState(
+        link({ PublicLinkToken: null, Status: 'Closed', OpenAt: FUTURE, MaxResponses: 0 }),
+        NOW,
+      );
+      expect(state.kind).toBe('paused');
+      expect(state.fix).toBe('Turn it back on');
+    });
+
+    it('puts a missing link ahead of every calendar or cap reason', () => {
       // Telling someone their never-issued link is merely "Scheduled" sends them to
       // edit a date when the actual problem is that the host never minted a token.
       const state = shareState(
-        link({ PublicLinkToken: null, Status: 'Closed', OpenAt: FUTURE, MaxResponses: 0 }),
+        link({ PublicLinkToken: null, OpenAt: FUTURE, MaxResponses: 0 }),
         NOW,
       );
       expect(state.kind).toBe('pending');

@@ -116,4 +116,36 @@ describe('the Distribute component', () => {
     expect(component).toContain('ngOnDestroy');
     expect(component).toContain('clearTimeout');
   });
+
+  it('confirms before reissuing, confirm left and cancel right', () => {
+    // Irreversible: the previous token stops working the instant it lands.
+    expect(template).toContain('confirmingReissue');
+    const confirmAt = template.indexOf('confirmReissue()');
+    const cancelAt = template.indexOf('confirmingReissue = false');
+    expect(confirmAt).toBeGreaterThanOrEqual(0);
+    expect(cancelAt).toBeGreaterThan(confirmAt);
+  });
+
+  it('asks the service to reissue, never clearing the token itself', () => {
+    // Clearing the columns from here would leave the OLD invite Active and unreferenced —
+    // the orphaned-credential defect. The server hook is the only thing that revokes.
+    expect(component).toContain('service.reissueLink');
+    expect(component).not.toMatch(/PublicLinkToken\s*=/);
+    expect(component).not.toMatch(/MagicLinkInviteID\s*=/);
+  });
+
+  it('re-reads the record after every write that changes the token', () => {
+    // Pause / reopen / issue / reissue each make the server write the credential in a
+    // SECOND save this client never sees. Without the re-read the screen renders a token
+    // that has been revoked, or none where one was just minted.
+    expect(component).toContain('runCredentialWrite');
+    for (const call of [
+      'this.runCredentialWrite(() => this.service.issueLink(link))',
+      'this.runCredentialWrite(() => this.service.open(link))',
+      'this.runCredentialWrite(() => this.service.reissueLink(link))',
+    ]) {
+      expect(component, `${call} is not routed through the reloading path`).toContain(call);
+    }
+    expect(component).toContain('reopening ? this.service.open(link) : this.service.close(link)');
+  });
 });

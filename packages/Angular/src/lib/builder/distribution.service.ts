@@ -164,12 +164,26 @@ export class DistributionService {
     return `${base}-${randomSuffix()}`;
   }
 
-  /** Open a distribution for responses (Status -> Active). */
+  /**
+   * Open a distribution for responses (Status -> Active).
+   *
+   * The server mints a FRESH access token on the way through, because closing revoked the
+   * previous one. The slug is untouched, so every shared URL keeps working; only the
+   * credential behind it is new. The caller must reload afterwards — see {@link close}.
+   */
   public async open(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
     return this.setStatus(dist, 'Active');
   }
 
-  /** Close a distribution (Status -> Closed). */
+  /**
+   * Close a distribution (Status -> Closed).
+   *
+   * The server-side hook revokes this link's magic-link credential and clears
+   * `PublicLinkToken` on the same save, so the token stops being redeemable rather than
+   * merely being refused by the Forms door. That second write is invisible to this
+   * client's copy of the record, which is why both this and {@link open} are paired with
+   * a reload at the call site.
+   */
   public async close(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
     return this.setStatus(dist, 'Closed');
   }
@@ -209,6 +223,30 @@ export class DistributionService {
     const options = new EntitySaveOptions();
     options.IgnoreDirtyState = true;
     return this.saveDist(dist, 'issue a link for this share link', options);
+  }
+
+  /**
+   * Give this link a brand-new access token, keeping its web address.
+   *
+   * The recourse for a leaked or over-shared credential, and the reason bizapps-forms#104
+   * exists: before it, the only way to stop a token being redeemable was to delete the
+   * distribution, which changes the slug and breaks every poster, QR code and embed
+   * already in the wild.
+   *
+   * There is no "reissue" API to call, and deliberately so. Clearing `PublicLinkToken`
+   * IS the request: the server-side hook reads a live link with no usable token as "this
+   * credential is gone, and one is warranted", so it revokes the old invite and mints a
+   * replacement in the same save. That keeps ONE enforcement point — a builder that
+   * cleared the columns itself would leave the old invite Active and unreferenced, which
+   * is precisely the orphaned-credential defect being fixed.
+   *
+   * `MagicLinkInviteID` is deliberately left alone: it is what tells the server WHICH
+   * invite to revoke. Success here means the SAVE succeeded, not that a new token
+   * appeared — the hook is fail-soft — so this is paired with a reload at the call site.
+   */
+  public async reissueLink(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    dist.PublicLinkToken = null;
+    return this.saveDist(dist, 'reissue this link');
   }
 
   /** Rename a distribution. The caller is responsible for trimming and rejecting blanks. */

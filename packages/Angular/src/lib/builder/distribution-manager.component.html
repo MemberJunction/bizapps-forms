@@ -252,8 +252,9 @@
               <span class="dm-setting-text">
                 <span class="dm-setting-label" id="dm-open-label">Open to responses</span>
                 <span class="dm-setting-hint">
-                  Turn off to stop taking responses. The link keeps working, so anything already
-                  printed still works when you turn it back on.
+                  Turn off to stop taking responses and withdraw this link's access token. The web
+                  address never changes, so anything already printed works again the moment you
+                  turn it back on.
                 </span>
               </span>
               <span class="dm-setting-control">
@@ -327,6 +328,52 @@
                   [value]="asInputValue(link.CloseAt)"
                   (change)="setCloseAt(closeBox.value)"
                 />
+              </span>
+            </div>
+
+            <!-- Reissue. The honest recourse for a leaked token, and the reason it is here
+                 rather than under Delete: deleting changes the slug, which breaks every
+                 poster and QR code already printed. This changes only the credential. -->
+            <div class="dm-setting">
+              <span class="dm-setting-text">
+                <span class="dm-setting-label" id="dm-reissue-label">Access token</span>
+                <span class="dm-setting-hint">
+                  If this link's token has been shared somewhere it should not have been, replace
+                  it. The web address stays the same, so printed links and QR codes keep working.
+                </span>
+              </span>
+              <span class="dm-setting-control dm-setting-control--stack">
+                @if (confirmingReissue) {
+                  <!-- Confirm LEFT, cancel RIGHT, per the house rule. -->
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--danger mjf-btn--sm"
+                    aria-labelledby="dm-reissue-label"
+                    [disabled]="busy"
+                    (click)="confirmReissue()"
+                  >
+                    <i class="fa-solid fa-key" aria-hidden="true"></i> Replace it
+                  </button>
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                    [disabled]="busy"
+                    (click)="confirmingReissue = false"
+                  >
+                    Keep it
+                  </button>
+                  <span class="dm-setting-hint">The old token stops working immediately.</span>
+                } @else {
+                  <button
+                    type="button"
+                    class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                    aria-labelledby="dm-reissue-label"
+                    [disabled]="busy"
+                    (click)="confirmingReissue = true"
+                  >
+                    <i class="fa-solid fa-key" aria-hidden="true"></i> Reissue link
+                  </button>
+                }
               </span>
             </div>
 
