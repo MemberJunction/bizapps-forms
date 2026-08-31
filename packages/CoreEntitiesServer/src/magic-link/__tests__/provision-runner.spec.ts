@@ -6,6 +6,7 @@ import type {
   IAnonymousMagicLinkMinter,
   MintAnonymousInviteParams,
   MintAnonymousInviteResult,
+  RevokeAnonymousInviteResult,
 } from '../minter.js';
 
 const config: MagicLinkProvisioningConfig = Object.freeze({
@@ -17,7 +18,9 @@ const config: MagicLinkProvisioningConfig = Object.freeze({
 });
 
 const contextUser = { ID: 'staff-1', Name: 'Staff' } as unknown as UserInfo;
+const OLD_INVITE = 'invite-old';
 
+/** A live, linkable distribution with no credential yet — the first-mint case. */
 function ctx(overrides: Partial<ProvisionContext> = {}): ProvisionContext {
   return {
     distributionId: 'dist-1',
@@ -25,125 +28,266 @@ function ctx(overrides: Partial<ProvisionContext> = {}): ProvisionContext {
     status: 'Active',
     isActive: true,
     magicLinkInviteId: null,
+    publicLinkToken: null,
     closeAt: null,
     ...overrides,
   };
 }
 
-/** A minter that records the params it was called with and returns a fixed result. */
-function recordingMinter(result: MintAnonymousInviteResult): {
-  minter: IAnonymousMagicLinkMinter;
-  calls: { params: MintAnonymousInviteParams; user: UserInfo }[];
-} {
-  const calls: { params: MintAnonymousInviteParams; user: UserInfo }[] = [];
-  const minter: IAnonymousMagicLinkMinter = {
-    MintAnonymousInvite: async (params, user) => {
-      calls.push({ params, user });
-      return result;
-    },
-  };
-  return { minter, calls };
+/** A live link already holding a working credential. */
+function livingCtx(overrides: Partial<ProvisionContext> = {}): ProvisionContext {
+  return ctx({ magicLinkInviteId: OLD_INVITE, publicLinkToken: 'mj_ml_old', ...overrides });
 }
 
-describe('runProvisioning', () => {
-  it('mints and stores when warranted, passing the correct CreateInvite params', async () => {
-    const { minter, calls } = recordingMinter({
-      success: true,
-      inviteId: 'invite-99',
-      rawToken: 'mj_ml_raw99',
-    });
-    const store = vi.fn(async () => true);
+interface FakeMinter {
+  minter: IAnonymousMagicLinkMinter;
+  mints: { params: MintAnonymousInviteParams; user: UserInfo }[];
+  revokes: { inviteId: string; user: UserInfo }[];
+}
 
-    const outcome = await runProvisioning(ctx(), config, minter, contextUser, store);
+/** Records every call and returns fixed results. */
+function fakeMinter(
+  mintResult: MintAnonymousInviteResult = { success: true, inviteId: 'invite-new', rawToken: 'mj_ml_new' },
+  revokeResult: RevokeAnonymousInviteResult = { success: true },
+): FakeMinter {
+  const mints: { params: MintAnonymousInviteParams; user: UserInfo }[] = [];
+  const revokes: { inviteId: string; user: UserInfo }[] = [];
+  return {
+    mints,
+    revokes,
+    minter: {
+      MintAnonymousInvite: async (params, user) => {
+        mints.push({ params, user });
+        return mintResult;
+      },
+      RevokeAnonymousInvite: async (inviteId, user) => {
+        revokes.push({ inviteId, user });
+        return revokeResult;
+      },
+    },
+  };
+}
 
-    expect(outcome).toEqual({ result: 'minted', inviteId: 'invite-99' });
-    // The runner hands the store BOTH the invite id and the raw public-link token.
-    expect(store).toHaveBeenCalledExactlyOnceWith({ inviteId: 'invite-99', rawToken: 'mj_ml_raw99' });
-    expect(calls).toHaveLength(1);
-    expect(calls[0].user).toBe(contextUser);
-    expect(calls[0].params).toEqual({
+describe('runProvisioning — minting', () => {
+  it('mints and stores when warranted, passing the correct invite params', async () => {
+    const fake = fakeMinter();
+    const persist = vi.fn(async () => true);
+
+    const outcome = await runProvisioning(ctx(), config, fake.minter, contextUser, persist);
+
+    expect(outcome).toEqual({ result: 'minted', inviteId: 'invite-new' });
+    expect(persist).toHaveBeenCalledExactlyOnceWith({ inviteId: 'invite-new', rawToken: 'mj_ml_new' });
+    expect(fake.revokes).toHaveLength(0);
+    expect(fake.mints).toHaveLength(1);
+    expect(fake.mints[0].user).toBe(contextUser);
+    expect(fake.mints[0].params).toEqual({
       applicationName: 'Forms',
       roleName: 'Form Respondent',
       resourceTypeName: DISTRIBUTION_ENTITY_NAME,
       resourceId: 'dist-1',
       maxUses: 1_000_000,
-      expiresAt: null, // no fixed expiry + no CloseAt => permanent
+      expiresAt: null,
     });
   });
 
-  it('passes CloseAt as the expiry when set and no fixed expiry configured', async () => {
+  it('bounds the invite by CloseAt when one is set', async () => {
     const closeAt = new Date('2026-09-01T00:00:00.000Z');
-    const { minter, calls } = recordingMinter({ success: true, inviteId: 'invite-1' });
-    await runProvisioning(ctx({ closeAt }), config, minter, contextUser, async () => true);
-    expect(calls[0].params.expiresAt).toBe(closeAt);
+    const fake = fakeMinter();
+    await runProvisioning(ctx({ closeAt }), config, fake.minter, contextUser, async () => true);
+    expect(fake.mints[0].params.expiresAt).toBe(closeAt);
   });
 
-  it('is idempotent: does not mint when an invite already exists', async () => {
-    const { minter, calls } = recordingMinter({ success: true, inviteId: 'x' });
-    const store = vi.fn(async () => true);
-    const outcome = await runProvisioning(
-      ctx({ magicLinkInviteId: 'already-here' }),
-      config,
-      minter,
-      contextUser,
-      store,
-    );
-    expect(outcome.result).toBe('skipped-decision');
-    expect(calls).toHaveLength(0);
-    expect(store).not.toHaveBeenCalled();
+  it('leaves a live link with a working credential entirely untouched', async () => {
+    const fake = fakeMinter();
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(livingCtx(), config, fake.minter, contextUser, persist);
+    expect(outcome).toEqual({ result: 'noop', reason: 'current' });
+    expect(fake.mints).toHaveLength(0);
+    expect(fake.revokes).toHaveLength(0);
+    expect(persist).not.toHaveBeenCalled();
   });
 
-  it('does not mint for the Email channel', async () => {
-    const { minter, calls } = recordingMinter({ success: true, inviteId: 'x' });
-    const outcome = await runProvisioning(ctx({ channelType: 'Email' }), config, minter, contextUser, async () => true);
-    expect(outcome.result).toBe('skipped-decision');
-    expect(calls).toHaveLength(0);
-  });
-
-  it('does not mint a draft/inactive distribution', async () => {
-    const { minter } = recordingMinter({ success: true, inviteId: 'x' });
-    expect((await runProvisioning(ctx({ status: 'Draft' }), config, minter, contextUser, async () => true)).result).toBe(
-      'skipped-decision',
-    );
-    expect((await runProvisioning(ctx({ isActive: false }), config, minter, contextUser, async () => true)).result).toBe(
-      'skipped-decision',
-    );
+  it('refuses a mint that produced no raw token, and stores nothing', async () => {
+    // A tokenless invite is a dead `/f/:slug` link, and "linked invite, no token" is
+    // the reissue signal — so writing one would churn a fresh credential on every save.
+    const fake = fakeMinter({ success: true, inviteId: 'invite-new' });
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(ctx(), config, fake.minter, contextUser, persist);
+    expect(outcome.result).toBe('mint-failed');
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it('gates gracefully when NO minter is registered (host has not enabled magicLink)', async () => {
-    const store = vi.fn(async () => true);
-    const outcome = await runProvisioning(ctx(), config, undefined, contextUser, store);
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(ctx(), config, undefined, contextUser, persist);
     expect(outcome.result).toBe('skipped-no-minter');
-    expect(store).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it('gates gracefully when the minter itself skips (magicLink disabled at mint time)', async () => {
-    const { minter } = recordingMinter({ success: false, skipped: true, message: 'magicLink off' });
-    const store = vi.fn(async () => true);
-    const outcome = await runProvisioning(ctx(), config, minter, contextUser, store);
+    const fake = fakeMinter({ success: false, skipped: true, message: 'magicLink off' });
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(ctx(), config, fake.minter, contextUser, persist);
     expect(outcome.result).toBe('skipped-minter');
-    expect(store).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it('reports a mint failure without storing anything', async () => {
-    const { minter } = recordingMinter({ success: false, message: 'boom' });
-    const store = vi.fn(async () => true);
-    const outcome = await runProvisioning(ctx(), config, minter, contextUser, store);
+    const fake = fakeMinter({ success: false, message: 'boom' });
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(ctx(), config, fake.minter, contextUser, persist);
     expect(outcome.result).toBe('mint-failed');
-    expect(store).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it('reports a store failure but keeps the invite id', async () => {
-    const { minter } = recordingMinter({ success: true, inviteId: 'invite-7' });
-    const store = vi.fn(async () => false);
-    const outcome = await runProvisioning(ctx(), config, minter, contextUser, store);
-    expect(outcome).toEqual({ result: 'store-failed', inviteId: 'invite-7' });
+    const fake = fakeMinter();
+    const outcome = await runProvisioning(ctx(), config, fake.minter, contextUser, async () => false);
+    expect(outcome).toEqual({ result: 'store-failed', inviteId: 'invite-new' });
   });
 
   it('skips when there is no context user', async () => {
-    const { minter, calls } = recordingMinter({ success: true, inviteId: 'x' });
-    const outcome = await runProvisioning(ctx(), config, minter, undefined, async () => true);
+    const fake = fakeMinter();
+    const outcome = await runProvisioning(ctx(), config, fake.minter, undefined, async () => true);
     expect(outcome.result).toBe('skipped-no-user');
-    expect(calls).toHaveLength(0);
+    expect(fake.mints).toHaveLength(0);
+    expect(fake.revokes).toHaveLength(0);
+  });
+
+  it('does nothing at all for a distribution that neither holds nor warrants a credential', async () => {
+    const fake = fakeMinter();
+    for (const override of [{ status: 'Draft' as const }, { isActive: false }, { channelType: 'Email' as const }]) {
+      const outcome = await runProvisioning(ctx(override), config, fake.minter, contextUser, async () => true);
+      expect(outcome).toEqual({ result: 'noop', reason: 'not-eligible' });
+    }
+    expect(fake.mints).toHaveLength(0);
+    expect(fake.revokes).toHaveLength(0);
+  });
+});
+
+describe('runProvisioning — revoking', () => {
+  it('revokes and unlinks the credential when the link leaves Active', async () => {
+    const fake = fakeMinter();
+    const persist = vi.fn(async () => true);
+
+    const outcome = await runProvisioning(
+      livingCtx({ status: 'Closed' }),
+      config,
+      fake.minter,
+      contextUser,
+      persist,
+    );
+
+    expect(outcome).toEqual({ result: 'revoked', inviteId: OLD_INVITE });
+    expect(fake.revokes).toEqual([{ inviteId: OLD_INVITE, user: contextUser }]);
+    expect(persist).toHaveBeenCalledExactlyOnceWith(null);
+    expect(fake.mints).toHaveLength(0);
+  });
+
+  it('revokes for every way of leaving Active, and for an unlinkable channel', async () => {
+    for (const override of [
+      { status: 'Draft' as const },
+      { status: 'Closed' as const },
+      { isActive: false },
+      { channelType: 'Email' as const },
+    ]) {
+      const fake = fakeMinter();
+      const outcome = await runProvisioning(
+        livingCtx(override),
+        config,
+        fake.minter,
+        contextUser,
+        async () => true,
+      );
+      expect(outcome.result, JSON.stringify(override)).toBe('revoked');
+      expect(fake.revokes).toHaveLength(1);
+    }
+  });
+
+  it('keeps the credential LINKED when the revoke fails, so the next save retries it', async () => {
+    // Unlinking a credential we could not kill would orphan a live invite with nothing
+    // pointing at it — unrevokable by any later save, and invisible in the builder.
+    const fake = fakeMinter(undefined, { success: false, message: 'row locked' });
+    const persist = vi.fn(async () => true);
+
+    const outcome = await runProvisioning(
+      livingCtx({ isActive: false }),
+      config,
+      fake.minter,
+      contextUser,
+      persist,
+    );
+
+    expect(outcome).toEqual({ result: 'revoke-failed', inviteId: OLD_INVITE });
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('does not mint a replacement when unlinking the revoked credential failed', async () => {
+    const fake = fakeMinter();
+    const outcome = await runProvisioning(
+      livingCtx({ publicLinkToken: null }),
+      config,
+      fake.minter,
+      contextUser,
+      async () => false,
+    );
+    expect(outcome).toEqual({ result: 'revoke-failed', inviteId: OLD_INVITE });
+    expect(fake.mints).toHaveLength(0);
+  });
+
+  it('revokes a stale credential even on a paused link that has already lost its token', async () => {
+    const fake = fakeMinter();
+    const outcome = await runProvisioning(
+      livingCtx({ status: 'Closed', publicLinkToken: null }),
+      config,
+      fake.minter,
+      contextUser,
+      async () => true,
+    );
+    expect(outcome.result).toBe('revoked');
+    expect(fake.mints).toHaveLength(0);
+  });
+});
+
+describe('runProvisioning — reissuing', () => {
+  it('revokes the old credential and mints a fresh one when a live link loses its token', async () => {
+    const fake = fakeMinter();
+    const persist = vi.fn(async () => true);
+
+    const outcome = await runProvisioning(
+      livingCtx({ publicLinkToken: null }),
+      config,
+      fake.minter,
+      contextUser,
+      persist,
+    );
+
+    expect(outcome).toEqual({ result: 'reissued', inviteId: 'invite-new' });
+    expect(fake.revokes).toEqual([{ inviteId: OLD_INVITE, user: contextUser }]);
+    expect(fake.mints).toHaveLength(1);
+    // Cleared first, then written: the record never points at two credentials at once.
+    expect(persist.mock.calls).toEqual([[null], [{ inviteId: 'invite-new', rawToken: 'mj_ml_new' }]]);
+  });
+
+  it('reissues under the same distribution — the slug is never part of the credential', async () => {
+    const fake = fakeMinter();
+    await runProvisioning(livingCtx({ publicLinkToken: null }), config, fake.minter, contextUser, async () => true);
+    expect(fake.mints[0].params.resourceId).toBe('dist-1');
+  });
+
+  it('leaves the link credential-less when the replacement mint fails after a successful revoke', async () => {
+    // Fail-safe direction: no credential beats a stale one. The builder shows "Not ready"
+    // and its "Issue the link" fix mints again.
+    const fake = fakeMinter({ success: false, message: 'boom' });
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(
+      livingCtx({ publicLinkToken: null }),
+      config,
+      fake.minter,
+      contextUser,
+      persist,
+    );
+    expect(outcome.result).toBe('mint-failed');
+    expect(persist).toHaveBeenCalledExactlyOnceWith(null);
   });
 });

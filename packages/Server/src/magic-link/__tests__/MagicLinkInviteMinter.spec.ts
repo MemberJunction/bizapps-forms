@@ -15,6 +15,12 @@ const mockState: {
   entityByName: Record<string, { ID: string } | null>;
   saveSucceeds: boolean;
   lastSavedInvite?: Record<string, unknown>;
+  /** Whether `Load(id)` finds the invite row (revoke path). */
+  loadSucceeds: boolean;
+  /** The Status a loaded invite starts at (revoke path). */
+  loadedStatus: string;
+  /** Ids passed to `Load` (revoke path). */
+  loadedIds: string[];
 } = {
   magicLinkEnabled: true,
   applications: [{ ID: 'app-forms', Name: 'Forms' }],
@@ -23,6 +29,9 @@ const mockState: {
   entityByName: {},
   saveSucceeds: true,
   lastSavedInvite: undefined,
+  loadSucceeds: true,
+  loadedStatus: 'Active',
+  loadedIds: [],
 };
 
 vi.mock('@memberjunction/server', () => ({
@@ -50,6 +59,12 @@ vi.mock('@memberjunction/core', async () => {
           ID: 'invite-new',
           LatestResult: { CompleteMessage: 'forced failure' },
           NewRecord: () => true,
+          Load: async (id: string) => {
+            mockState.loadedIds.push(id);
+            if (!mockState.loadSucceeds) return false;
+            values.Status = mockState.loadedStatus;
+            return true;
+          },
           Save: async () => {
             if (!mockState.saveSucceeds) return false;
             mockState.lastSavedInvite = { ...values };
@@ -102,6 +117,9 @@ describe('MagicLinkInviteMinter', () => {
     mockState.entityByName = {};
     mockState.saveSucceeds = true;
     mockState.lastSavedInvite = undefined;
+    mockState.loadSucceeds = true;
+    mockState.loadedStatus = 'Active';
+    mockState.loadedIds = [];
   });
 
   it('gracefully skips (no throw) when core magicLink is not enabled', async () => {
@@ -177,5 +195,65 @@ describe('MagicLinkInviteMinter', () => {
     const closeAt = new Date('2027-01-01T00:00:00.000Z');
     await new MagicLinkInviteMinter().MintAnonymousInvite({ ...params(), expiresAt: closeAt }, contextUser);
     expect(mockState.lastSavedInvite!.ExpiresAt).toBe(closeAt);
+  });
+});
+
+describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
+  beforeEach(() => {
+    mockState.magicLinkEnabled = true;
+    mockState.saveSucceeds = true;
+    mockState.lastSavedInvite = undefined;
+    mockState.loadSucceeds = true;
+    mockState.loadedStatus = 'Active';
+    mockState.loadedIds = [];
+  });
+
+  it("writes core's own revocation status onto the invite", async () => {
+    // `Status='Revoked'` is MJ's shipped revocation mechanism, not an invention here:
+    // `evaluateInvite` rejects it with errorCode `revoked` before any other check, and
+    // the atomic consume UPDATE matches only `Status='Active'`.
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    expect(result.success).toBe(true);
+    expect(mockState.loadedIds).toEqual(['invite-7']);
+    expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
+  });
+
+  it('revokes even when the host has magic links switched off', async () => {
+    // Deliberately asymmetric with minting. "Magic links were turned off" is exactly a
+    // moment when live credentials should stop being live, so the gate that skips a
+    // mint must not skip a revocation.
+    mockState.magicLinkEnabled = false;
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    expect(result.success).toBe(true);
+    expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
+  });
+
+  it('is idempotent on an already-revoked invite, and writes nothing', async () => {
+    mockState.loadedStatus = 'Revoked';
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    expect(result.success).toBe(true);
+    expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
+  it('treats a missing invite row as already unredeemable', async () => {
+    // The caller refuses to unlink a credential it could not kill, so reporting failure
+    // for a row that no longer exists would wedge the distribution permanently.
+    mockState.loadSucceeds = false;
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-gone', contextUser);
+    expect(result.success).toBe(true);
+    expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
+  it('reports a save failure with the entity message, and does NOT claim success', async () => {
+    mockState.saveSucceeds = false;
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('invite-7', contextUser);
+    expect(result.success).toBe(false);
+    expect(result.message).toMatch(/forced failure/);
+  });
+
+  it('refuses a blank invite id rather than silently succeeding', async () => {
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('   ', contextUser);
+    expect(result.success).toBe(false);
+    expect(mockState.loadedIds).toEqual([]);
   });
 });

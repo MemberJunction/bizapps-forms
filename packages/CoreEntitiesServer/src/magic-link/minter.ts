@@ -1,23 +1,28 @@
 /**
- * Dependency-inversion seam for magic-link invite minting.
+ * Dependency-inversion seam for the lifecycle of a distribution's anonymous
+ * magic-link credential — minting it, and revoking it again.
  *
  * WHY a seam (and not a direct call into MJ core's `MagicLinkService`):
  *  - `@memberjunction/server` does NOT re-export `MagicLinkService`, and its
  *    package `exports` map only exposes `.`, so the class cannot be imported
  *    from this package (deep imports throw `ERR_PACKAGE_PATH_NOT_EXPORTED`).
+ *    Re-checked on the current `6.1.0-edge` pin — still true.
  *  - Even where reachable, `@memberjunction/server` is heavy (Apollo, the whole
  *    GraphQL stack, AI/action bundles) and validates DB config at import time —
  *    pulling it into this lightweight entity-subclass package would be wrong.
- *  - On the pinned MJ 5.43.0, `MagicLinkService.CreateInvite` cannot set the
- *    `IdentityMode='anonymous'` / `Kind='resource-share'` / resource-scope fields
- *    a Forms distribution link requires anyway.
+ *  - `MagicLinkService.CreateInvite` cannot set the `IdentityMode='anonymous'` /
+ *    `Kind='resource-share'` / resource-scope fields a Forms distribution link
+ *    requires anyway, and MJ ships no revoke method at all (see the revoke side
+ *    of the contract below).
  *
- * So this package (the entity-lifecycle layer) defines a minimal minting
- * CONTRACT and a registry; `@mj-biz-apps/forms-server` (which already depends on
- * `@memberjunction/server`) registers a concrete minter at bootstrap. The hook
- * calls whatever is registered, and gates gracefully when nothing is — which is
- * exactly the "host has not enabled magicLink" case. Any host could register a
- * different minting backend without touching this package.
+ * So this package (the entity-lifecycle layer) defines a minimal CONTRACT and a
+ * registry; `@mj-biz-apps/forms-server` (which already depends on
+ * `@memberjunction/server`) registers a concrete implementation at bootstrap. The
+ * hook calls whatever is registered, and gates gracefully when nothing is — which
+ * is exactly the "host has not enabled magicLink" case. Any host could register a
+ * different backend without touching this package, and gets both halves of the
+ * lifecycle by implementing one interface: a backend that can issue a credential
+ * but not withdraw it is the defect bizapps-forms#104 was filed about.
  */
 import { BaseSingleton } from '@memberjunction/global';
 import type { UserInfo } from '@memberjunction/core';
@@ -51,6 +56,13 @@ export interface MintAnonymousInviteResult {
    * public redeem URL. A public form link is low-secrecy by design (the URL is meant
    * to be shared), so persisting the raw token on the distribution is intentional —
    * the raw token is NOT stored on the invite row.
+   *
+   * REQUIRED on a successful mint. It is optional in the type only because the
+   * failure shape shares it; a `success:true` result without one is treated as a
+   * mint FAILURE by the runner. Two reasons: `/f/:slug` reads `PublicLinkToken` to
+   * redeem, so a tokenless invite is a dead link however healthy the row looks; and
+   * "linked invite, no token" is the reissue signal, so the hook must never be able
+   * to produce that state itself.
    */
   rawToken?: string;
   /**
@@ -63,9 +75,25 @@ export interface MintAnonymousInviteResult {
   message?: string;
 }
 
+/** Outcome of a revocation attempt. */
+export interface RevokeAnonymousInviteResult {
+  /**
+   * True when the invite is no longer redeemable. An invite that was ALREADY dead
+   * — revoked earlier, or whose row has since been deleted — is a success: the
+   * caller's postcondition is "this credential cannot be redeemed", not "this call
+   * changed a row". Reporting failure there would wedge the distribution, because
+   * the caller refuses to unlink a credential it could not kill.
+   */
+  success: boolean;
+  /** Human-readable reason for a failure, or a note on a no-op success. */
+  message?: string;
+}
+
 /**
- * The contract a host registers to provision anonymous magic-link invites.
- * Implemented in `@mj-biz-apps/forms-server` over MJ core's magic-link tables.
+ * The contract a host registers to provision AND withdraw anonymous magic-link
+ * invites. Implemented in `@mj-biz-apps/forms-server` over MJ core's magic-link
+ * tables. Both halves belong to one implementation on purpose: whatever backend
+ * issues a credential is the only thing that knows how to kill it.
  */
 export interface IAnonymousMagicLinkMinter {
   /**
@@ -80,6 +108,21 @@ export interface IAnonymousMagicLinkMinter {
     params: MintAnonymousInviteParams,
     creatingUser: UserInfo,
   ): Promise<MintAnonymousInviteResult>;
+
+  /**
+   * Makes a previously minted invite permanently unredeemable.
+   *
+   * There is no `skipped` here, and that asymmetry is deliberate. Minting is
+   * gated on the host having magic links switched on; revoking must work
+   * regardless, because "the host turned magic links off" is precisely a moment
+   * when live credentials should stop being live. Implementations MUST NOT throw:
+   * a failure is reported so the caller can leave the credential LINKED and retry
+   * on the next save, rather than orphaning a live invite nothing points at.
+   *
+   * @param inviteId    the invite to withdraw (`FormDistribution.MagicLinkInviteID`)
+   * @param contextUser the internal staff user whose save triggered the revocation
+   */
+  RevokeAnonymousInvite(inviteId: string, contextUser: UserInfo): Promise<RevokeAnonymousInviteResult>;
 }
 
 /**
