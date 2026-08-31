@@ -236,3 +236,58 @@ describe('only a reorder can invert a pair, so only a reorder is watched', () =>
     expect(source).not.toMatch(/persistPageOrder/);
   });
 });
+
+/**
+ * A publish refusal must not outlive the rules it names.
+ *
+ * THE DEFECT, found smoke-testing the gate. Publish is refused, the toolbar reads *Publish
+ * refused — 4 broken rules would ship with this form*, the author fixes all four, the badges go
+ * green — and that line is still on screen, now beside the "Published" pill. Two answers on one
+ * toolbar, one of them false, which is precisely the failure the gate exists to remove: the
+ * message that enforces "the badge and the gate agree" must not itself start disagreeing with
+ * the badges.
+ *
+ * Retired on TRUTH, not on identity, and from the same clock as the reorder band — `markDirty`
+ * fires wherever an edit lands, and a spurious call can only re-confirm a still-broken form; it
+ * can never retract a refusal that still applies. Asked of `brokenRuleLines`, the function the
+ * refusal came from, so the message and its retraction cannot answer differently.
+ */
+describe('a publish refusal is retracted when its rules are fixed', () => {
+  /** The component's retirement method, comments stripped — what actually runs. */
+  const retireStaleRefusal = (): string => {
+    const source = builder();
+    const start = source.indexOf('private retireStaleRefusal(');
+    expect(start).toBeGreaterThan(-1);
+    return source.slice(start, source.indexOf('\n  }', start));
+  };
+
+  it('retires the refusal from the same clock that retires the reorder band', () => {
+    // `markDirty()` is the one seam every edit already passes through — the same reason
+    // `retireStaleNotice` is called there. Hanging this off any single edit path instead would
+    // retract the refusal for the ways of fixing a rule that path knows about, and strand it for
+    // every other way the author might have fixed it.
+    const source = builder();
+    const markDirty = source.slice(
+      source.indexOf('private markDirty()'),
+      source.indexOf('\n  }', source.indexOf('private markDirty()')),
+    );
+    expect(markDirty).toMatch(/this\.retireStaleRefusal\(\)/);
+    expect(markDirty).toMatch(/this\.retireStaleNotice\(\)/);
+  });
+
+  it('asks brokenRuleLines, not a second opinion assembled here', () => {
+    // The whole point of issue #79 is that "is this rule broken" has ONE answer. A retraction
+    // computed from its own walk of the tree is a third reader that can disagree with both the
+    // badge and the gate, and the disagreement would be silent.
+    expect(retireStaleRefusal()).toMatch(/brokenRuleLines\(/);
+  });
+
+  it('clears only a refusal that was about rules', () => {
+    // "Could not read the form's settings" is not something fixing a rule repairs, so it must
+    // survive the next edit. The guard is the stored `brokenRules` from the result, which the
+    // service sets on that refusal and no other.
+    const method = retireStaleRefusal();
+    expect(method).toMatch(/refusedRules/);
+    expect(method).toMatch(/statusMessage = ''/);
+  });
+});

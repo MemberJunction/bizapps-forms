@@ -570,6 +570,37 @@ describe('PublishService — rules the builder already calls broken', () => {
     expect(createdVersions).toHaveLength(0);
   });
 
+  it('carries the rules it refused over, so the caller can retract the refusal later', async () => {
+    // `error` is a sentence; this is the fact behind it. A refusal about rules STOPS BEING TRUE
+    // when the author fixes them, and the caller showing it has to be able to tell that kind from
+    // "could not read the form's settings", which an edit to a question says nothing about.
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-deleted')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.brokenRules).toEqual([
+      // No trailing stop: these are the badge's own lines, and the full stop belongs to the
+      // sentence `error` assembles around them.
+      'Show "Want onboarding?" when (deleted question) equals Pro — references a question that no longer exists',
+    ]);
+  });
+
+  it('leaves brokenRules off a refusal that is not about rules', async () => {
+    // The settings read failing is not something fixing a rule repairs, so a caller must not
+    // retract it on the next edit. Absent, not empty: "no broken rules" and "not that kind of
+    // refusal" are different answers and an empty array reads as the first.
+    const form = treeOf([question('q-1', 'Which plan?', null)]);
+    formsReadSucceeds = false;
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    expect(result.brokenRules).toBeUndefined();
+  });
+
   it('publishes a form whose rules all work, with no extra friction', async () => {
     const form = treeOf([
       question('q-1', 'Which plan?', null),

@@ -50,6 +50,20 @@ export interface PublishResult {
   version?: mjBizAppsFormsFormVersionEntity;
   versionNumber?: number;
   error?: string;
+  /**
+   * The broken rules this publish was refused over — absent unless that is why it was refused.
+   *
+   * Carried so the refusal can be RETRACTED. `error` is a sentence; this is the fact behind it,
+   * and the distinction matters to whoever displays it: a refusal about rules stops being true
+   * the moment the author fixes them, whereas "could not read the form's settings" is not
+   * something editing a question says anything about. A caller that could not tell the two apart
+   * would either strand the first on screen after it became false, or drop the second for a
+   * reason that has nothing to do with it.
+   *
+   * Absent rather than empty on every other refusal: "no rule is broken" and "this refusal was
+   * never about rules" are different answers, and `[]` reads as the first.
+   */
+  brokenRules?: readonly string[];
 }
 
 /**
@@ -117,7 +131,7 @@ export class PublishService {
       // A status, not an error: nothing failed. The author's form is not ready, they are being
       // told which rules and why, and the failure result carries the same words back to them.
       LogStatus(`Forms publish: refused form ${tree.form.ID} — ${error}`);
-      return { success: false, error };
+      return { success: false, error, brokenRules: broken };
     }
     const style = await this.loadStyle(tree.form.StyleID);
     const automations = await this.loadAutomations(tree.form.ID);

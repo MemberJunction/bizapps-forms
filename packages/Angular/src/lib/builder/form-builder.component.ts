@@ -64,6 +64,7 @@ import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-ta
 import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
 import { RuleBadgeComponent } from './rule-badge.component';
 import {
+  brokenRuleLines,
   collectRuleEntries,
   conditionSourcesOf,
   endingReachFor,
@@ -207,6 +208,16 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected busy = false;
   protected statusMessage = '';
 
+  /**
+   * The rules the last publish was refused over, or null when no refusal is standing.
+   *
+   * `statusMessage` alone cannot answer this. Most of what lands there is a fact that stays true
+   * — "Published version 4." is history — but a broken-rule refusal is a claim about the form as
+   * it is right now, and the author's next act is usually to falsify it. Keeping the rules it
+   * named is what lets the retraction fire for THAT message and leave the others alone.
+   */
+  private refusedRules: readonly string[] | null = null;
+
   /** Whether the "Save as template" dialog is up. */
   protected templateDialogOpen = false;
   /** The template saved from this form, if one still exists. */
@@ -346,6 +357,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   private markDirty(): void {
     this.retireStaleNotice();
+    this.retireStaleRefusal();
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
           buildPublishedDefinition(
@@ -1393,6 +1405,32 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
+   * Drop the publish refusal once no rule is broken any more — HOWEVER they were fixed.
+   *
+   * Exactly the reasoning of {@link retireStaleNotice}, on the same clock, for the same reason:
+   * a refusal names rules, and repairing them by any route — reordering the question back,
+   * repairing the rule in the dialog, deleting the item outright — leaves a warning that has
+   * outlived what it warned about. It is worse than merely stale. `publishState` re-derives on
+   * the same edit, so the toolbar ends up showing the "Published" pill beside a line insisting
+   * four broken rules would ship: two answers about one form, one of them false. That is the
+   * failure issue #79 exists to remove, and the message enforcing it must not re-introduce it.
+   *
+   * Asked of `brokenRuleLines` — the very function the refusal was assembled from, not a second
+   * walk that could answer differently. Only a refusal that was ABOUT rules is retractable this
+   * way, which is what `refusedRules` records: an unreadable settings row is not something
+   * fixing a rule repairs, so that message stays until the author publishes again.
+   *
+   * Cheap by construction: the guard short-circuits unless a refusal is actually standing, so
+   * the inventory walk happens on the edits after a refusal and nowhere else.
+   */
+  private retireStaleRefusal(): void {
+    if (this.refusedRules !== null && this.tree && brokenRuleLines(this.tree).length === 0) {
+      this.refusedRules = null;
+      this.statusMessage = '';
+    }
+  }
+
+  /**
    * Every item that can carry a rule, by id, named the way the canvas names it.
    *
    * Read from the same projection the badges are built from, so the band and the badge it points
@@ -1605,6 +1643,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.busy = true;
     this.statusMessage = '';
+    this.refusedRules = null;
     // Land every coalesced edit before publishing. The snapshot is built from the in-memory tree
     // so it would be correct either way, but a form whose published version contains an edit its
     // own draft rows do not is a genuinely confusing thing to debug later.
@@ -1619,6 +1658,9 @@ export class FormBuilderComponent extends BaseFormComponent {
       await this.refreshPublishState();
     } else {
       this.statusMessage = result.error ?? 'Publish failed.';
+      // Only a broken-rule refusal is retractable by editing; `brokenRules` is absent on every
+      // other one, which is what leaves those messages standing until the next publish.
+      this.refusedRules = result.brokenRules ?? null;
       // A failed publish changed nothing, so the state we already had still holds. Without this
       // the control would sit on "Checking…" forever and the author would have no way to retry.
       this.publishStateReady = true;
