@@ -1232,6 +1232,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     // Read BEFORE the array moves — it is the question this one used to sit in front of, which is
     // what Undo puts it back before. `null` when it was last on the page.
     const wasBefore = page.questions[from + 1]?.entity.ID ?? null;
+    const previousNotice = this.reorderNotice;
     const before = this.ruleEntries;
     moveItemInArray(page.questions, from, to);
 
@@ -1268,15 +1269,22 @@ export class FormBuilderComponent extends BaseFormComponent {
     // can throw, and a stuck `busy` freezes every guarded handler on the screen at once.
     this.busy = true;
     try {
-      // Checked rather than discarded: this writes one question at a time and can fail halfway,
-      // leaving `DisplayOrder` matching neither the order before this move nor the one after.
-      // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
-      // refused write — and the notice below it stays true either way, because it is about what
-      // is on screen. Logged as well so a partial write is not invisible once that band is gone.
+      // Checked, and now acted on: the reorder is one transaction (issue #103), so a refusal means
+      // the stored order is EXACTLY what it was and the entities have had their `DisplayOrder` put
+      // back. The two things the author can see have to follow, or the canvas shows an arrangement
+      // the database rejected and the band below describes consequences of a move that never
+      // happened.
+      //
+      // `to, from` rather than `from, to`: `moveItemInArray` splices out and then in, so moving the
+      // same element back is its exact inverse — the property `undoReorderMove` relies on too.
+      // The notice is RESTORED, not cleared: a band standing from an earlier costly move is still
+      // true, and nulling it here would take away an Undo the author had not finished with.
       if (!(await this.state.persistQuestionOrder(page))) {
+        moveItemInArray(page.questions, to, from);
+        this.reorderNotice = previousNotice;
         LogError(
-          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
-            'DisplayOrder may match neither the previous nor the new order.',
+          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was refused and rolled ` +
+            'back; the canvas has been put back to the stored order.',
         );
       }
     } finally {

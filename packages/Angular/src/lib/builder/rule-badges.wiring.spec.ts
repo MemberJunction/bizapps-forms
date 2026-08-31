@@ -184,9 +184,24 @@ describe('a reorder that breaks a rule says so at the drag', () => {
   });
 
   it('checks that the new order was actually written', () => {
-    // `persistQuestionOrder` writes one question at a time and returns false when a write is
-    // refused halfway — a third state matching neither the order before the move nor after it.
+    // `persistQuestionOrder` commits as one transaction and returns false when the database
+    // refused it (issue #103). The stored order is then untouched — but this handler has already
+    // moved `page.questions`, so the return value is the only thing that knows they disagree.
     expect(builder()).toMatch(/if \(!\(await this\.state\.persistQuestionOrder\(page\)\)\)/);
+  });
+
+  it('puts the canvas back when the reorder is refused', () => {
+    // WAS: the array stayed moved and the notice stayed standing, so the author was looking at an
+    // arrangement the database had rejected — with a band about consequences of a move that never
+    // happened. The transaction rolls the database and the entities back; nothing rolled back the
+    // two pieces of state the author can actually SEE.
+    const method = reorderMethod();
+    expect(method).toMatch(/moveItemInArray\(page\.questions, to, from\)/);
+    expect(method).toMatch(/this\.reorderNotice = previousNotice/);
+    // The revert must be INSIDE the refusal branch — reverting unconditionally would undo every
+    // successful drag on the page.
+    const refusal = method.indexOf('persistQuestionOrder');
+    expect(method.indexOf('moveItemInArray(page.questions, to, from)')).toBeGreaterThan(refusal);
   });
 
   it('is its own band, not the failure band, and carries an Undo that outlives the tick', () => {

@@ -3,6 +3,7 @@ import {
   Metadata,
   RunView,
   LogError,
+  type TransactionGroupBase,
   type UserInfo,
 } from '@memberjunction/core';
 import type {
@@ -40,6 +41,23 @@ type SaveableEntity =
   | mjBizAppsFormsFormQuestionEntity
   | mjBizAppsFormsFormQuestionOptionEntity
   | mjBizAppsFormsFormScreenEntity;
+
+/**
+ * Anything a structural change deletes.
+ *
+ * Narrower than {@link SaveableEntity} on purpose: these three are the tree the cascade walks, and
+ * a Form or a Screen appearing in a delete plan would mean the caller built the wrong list.
+ */
+type DeletableEntity =
+  | mjBizAppsFormsFormPageEntity
+  | mjBizAppsFormsFormQuestionEntity
+  | mjBizAppsFormsFormQuestionOptionEntity;
+
+/** A row whose position among its siblings is stored as `DisplayOrder`. */
+type SequencedEntity = mjBizAppsFormsFormQuestionEntity | mjBizAppsFormsFormQuestionOptionEntity;
+
+/** Whether a transaction group committed, and the reason it did not. */
+type CommitOutcome = { Committed: boolean; Detail: string | null };
 
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
@@ -577,24 +595,131 @@ export class BuilderStateService {
     return this.saveChecked(entity, 'save');
   }
 
-  /** Delete a page and all its questions/options (cascade handled in order). */
+  /**
+   * Delete a page with everything under it, as one transaction.
+   *
+   * The list is built deepest-first — every option, then its question, then the page — because a
+   * foreign key points at each row from the ones that must go before it.
+   */
   public async deletePage(page: PageNode): Promise<boolean> {
-    for (const q of [...page.questions]) {
-      if (!(await this.deleteQuestion(q))) {
-        return false;
-      }
+    if (!(await this.beginStructuralChange())) {
+      return false;
     }
-    return this.deleteChecked(page.entity, 'delete page');
+    const rows: DeletableEntity[] = [];
+    for (const question of page.questions) {
+      rows.push(...question.options, question.entity);
+    }
+    rows.push(page.entity);
+    return this.deleteAsOneTransaction(rows, 'delete page');
   }
 
-  /** Delete a question and all its options. */
+  /** Delete a question and all its options, as one transaction. */
   public async deleteQuestion(node: QuestionNode): Promise<boolean> {
-    for (const opt of [...node.options]) {
-      if (!(await this.deleteChecked(opt, 'delete option'))) {
+    if (!(await this.beginStructuralChange())) {
+      return false;
+    }
+    return this.deleteAsOneTransaction([...node.options, node.entity], 'delete question');
+  }
+
+  /**
+   * Drain anything the debounce is still holding, and report whether it is safe to restructure.
+   *
+   * A field edit sits on a 400ms timer. Restructuring the tree while one is pending races it: the
+   * pending save may target a row this transaction is about to delete, and whichever lands second
+   * fails, reporting against a record the author has already moved on from.
+   *
+   * Compared against the failure signal's value BEFORE the flush, not against null. A refusal the
+   * author has not yet dismissed is still sitting on that signal, and treating it as a reason to
+   * refuse every later delete would make the builder progressively unusable after one unrelated
+   * foreign-key error.
+   */
+  private async beginStructuralChange(): Promise<boolean> {
+    const before = this._lastFailure();
+    await this.flushPendingSaves();
+    return this._lastFailure() === before;
+  }
+
+  /**
+   * Delete rows as ONE database transaction, in the order given.
+   *
+   * A `TransactionGroup` rather than `entity.Delete()`, and the difference is the whole of issue
+   * #103. Declaring the children as an owned `RelatedRecordCollection` and letting `Delete()`
+   * cascade looks like the framework-native answer, but core says otherwise in its own doc comment
+   * on `deleteGraph`: a delete graph has no remote counterpart, so on a client provider "the nodes
+   * execute in order over ordinary mutations. That is not atomic — a failure partway leaves earlier
+   * deletions committed." That is the defect, relocated. `GraphQLTransactionGroup` bundles every
+   * enlisted mutation into one `ExecuteTransactionGroup` call the server runs inside a real
+   * database transaction, so a refusal rolls back all of it.
+   *
+   * MJ's own guide calls a transaction group "NOT a composite-save engine" and points parent/child
+   * work at an entity graph instead. Its four objections are all about SAVES — no primary key after
+   * the parent, no read-your-writes, `Save()` returning true early, no dependency graph — and a
+   * delete needs none of them: no key is minted, nothing is read back, and the ordering is a flat
+   * deepest-first list this method builds itself. The third objection does bite, which is why
+   * failure here is read from `Submit()` and the notification stream, never from `Delete()`'s
+   * return value.
+   *
+   * The cost is the message. A refused group reports "Transaction failed to commit" against every
+   * row rather than the specific constraint — the provider asks the server for `ErrorMessages` and
+   * then discards them — so the detail survives only on the throw path, where the notification
+   * carries it. Worth it: a wrong-but-specific message about a half-deleted page describes a state
+   * the product should never have been able to reach.
+   */
+  private async deleteAsOneTransaction(rows: DeletableEntity[], action: string): Promise<boolean> {
+    const group = await this.md.CreateTransactionGroup();
+    for (const row of rows) {
+      row.TransactionGroup = group;
+      // `IsGraphNodeDelete` means "this is one node of a plan somebody already built", and here
+      // that somebody is this method. Without it, a row whose owned collection happens to be
+      // loaded takes BaseEntity's own graph path — which never reaches the provider's
+      // transaction-group deferral, silently undoing everything above.
+      //
+      // On a newer core this should become `SkipRelatedCollections: true`, which says the same
+      // thing without borrowing the graph executor's private vocabulary; MJ's transactions guide
+      // names the save-path equivalent of this flag an anti-pattern for exactly that reason. That
+      // option does not exist at our pin (6.1.0-edge.2) — check for it on the next MJ upgrade.
+      if (!(await row.Delete({ IsGraphNodeDelete: true }))) {
+        this.reportFailure(action, row);
         return false;
       }
     }
-    return this.deleteChecked(node.entity, 'delete question');
+
+    const outcome = await this.submitGroup(group);
+    if (outcome.Committed) {
+      return true;
+    }
+    // Reported against the row the author acted on — the last one, since the list is deepest-first.
+    // Every row in a refused group carries the same generic message, so there is no better one to
+    // pick, and naming an option the author never touched would only confuse.
+    this.reportFailure(action, rows[rows.length - 1], outcome.Detail);
+    return false;
+  }
+
+  /**
+   * Submit a transaction group, and recover the reason when it refuses.
+   *
+   * The reason needs recovering because nothing else carries it: a refused group stamps the same
+   * generic "Transaction failed to commit" on every enlisted record, and the server's
+   * `ErrorMessages` are asked for by the provider's mutation and then dropped on the floor. The
+   * notification stream is what is left, and it carries a real error on the throw path — a dropped
+   * connection, a rejected mutation. On an ordinary refusal it stays quiet and the caller falls
+   * back to the record's own `LatestResult`.
+   *
+   * The subscription is released in a `finally` so a throwing submit cannot leak it.
+   */
+  private async submitGroup(group: TransactionGroupBase): Promise<CommitOutcome> {
+    let detail: string | null = null;
+    const notifications = group.TransactionNotifications$.subscribe((status) => {
+      if (!status.success && status.error) {
+        detail = status.error instanceof Error ? status.error.message : String(status.error);
+      }
+    });
+    try {
+      const committed = await group.Submit();
+      return { Committed: committed, Detail: committed ? null : detail };
+    } finally {
+      notifications.unsubscribe();
+    }
   }
 
   /** Delete a single option. */
@@ -604,28 +729,67 @@ export class BuilderStateService {
 
   /** Renumber + persist DisplayOrder on a page's questions to match array order. */
   public async persistQuestionOrder(page: PageNode): Promise<boolean> {
-    let ok = true;
-    for (let i = 0; i < page.questions.length; i++) {
-      const q = page.questions[i].entity;
-      if (q.DisplayOrder !== i) {
-        q.DisplayOrder = i;
-        ok = (await this.saveChecked(q, 'reorder question')) && ok;
-      }
+    if (!(await this.beginStructuralChange())) {
+      return false;
     }
-    return ok;
+    return this.persistSequence(
+      page.questions.map((q) => q.entity),
+      'reorder question',
+    );
   }
 
   /** Renumber + persist DisplayOrder on a question's options to match array order. */
   public async persistOptionOrder(node: QuestionNode): Promise<boolean> {
-    let ok = true;
-    for (let i = 0; i < node.options.length; i++) {
-      const opt = node.options[i];
-      if (opt.DisplayOrder !== i) {
-        opt.DisplayOrder = i;
-        ok = (await this.saveChecked(opt, 'reorder option')) && ok;
-      }
+    if (!(await this.beginStructuralChange())) {
+      return false;
     }
-    return ok;
+    return this.persistSequence(node.options, 'reorder option');
+  }
+
+  /**
+   * Renumber rows to match their array order and persist the move as one transaction.
+   *
+   * Only rows that actually moved are written — `DisplayOrder` is compared against the position
+   * before anything is assigned — which is the one virtue the row-at-a-time loop this replaces
+   * had. What it lacked was rollback: a refusal halfway left `DisplayOrder` matching neither the
+   * old order nor the new one, in the database AND in memory, with no way back.
+   *
+   * A transaction group is the right mechanism here rather than a borrowed one. These are sibling
+   * rows with no structural relationship to each other, which is precisely what MJ's guide says a
+   * group is for; the parent is not written at all.
+   *
+   * The in-memory values are restored on refusal. Without that the builder keeps rendering the new
+   * order — the tree it draws from is not put back either — so the author is looking at an
+   * arrangement the database never accepted and has no reason to doubt it.
+   */
+  private async persistSequence(rows: SequencedEntity[], action: string): Promise<boolean> {
+    const moved = rows
+      .map((entity, position) => ({ entity, position, previous: entity.DisplayOrder }))
+      .filter((row) => row.previous !== row.position);
+    if (moved.length === 0) {
+      return true; // a drag that ended where it started: no rows to write, no round trip to make
+    }
+
+    for (const row of moved) {
+      row.entity.DisplayOrder = row.position;
+    }
+    const group = await this.md.CreateTransactionGroup();
+    for (const row of moved) {
+      row.entity.TransactionGroup = group;
+      // Not checked: under a group `Save()` returns true before anything is written. The commit
+      // is the only place that knows, which is why the outcome is read from `submitGroup`.
+      await row.entity.Save();
+    }
+
+    const outcome = await this.submitGroup(group);
+    if (outcome.Committed) {
+      return true;
+    }
+    for (const row of moved) {
+      row.entity.DisplayOrder = row.previous;
+    }
+    this.reportFailure(action, moved[0].entity, outcome.Detail);
+    return false;
   }
 
   // -------------------------------------------------------------------------
@@ -663,9 +827,17 @@ export class BuilderStateService {
    * typed was simply gone. The reason is included verbatim rather than softened: this surface is
    * for people who build forms, and "conflicted with a FOREIGN KEY constraint" is the difference
    * between fixing it and filing a bug.
+   *
+   * @param detail - An explicit reason, for the one caller that has a better one than the entity
+   *                 does: a transaction group attaches only a generic message to its rows, while
+   *                 the real error arrives on the group's notification stream.
    */
-  private reportFailure(action: string, entity: Parameters<BuilderStateService['save']>[0]): void {
-    const reason = entity.LatestResult?.CompleteMessage ?? 'unknown error';
+  private reportFailure(
+    action: string,
+    entity: Parameters<BuilderStateService['save']>[0],
+    detail?: string | null,
+  ): void {
+    const reason = detail ?? entity.LatestResult?.CompleteMessage ?? 'unknown error';
     LogError(`Forms builder failed to ${action}: ${reason}`);
     this._lastFailure.set(`Could not ${action}. ${reason}`);
   }
