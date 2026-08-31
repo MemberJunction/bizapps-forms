@@ -30,8 +30,6 @@ import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
 import { PageEditorComponent } from './page-editor.component';
-import { ImportQuestionsComponent } from './import-questions.component';
-import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
@@ -156,7 +154,6 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     QuestionEditorComponent,
     ScreenEditorComponent,
     PageEditorComponent,
-    ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
     FormPreviewModalComponent,
@@ -200,8 +197,6 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
-  /** Whether the paste-to-import dialog is open. */
-  protected importOpen = false;
   protected activeTab: BuilderTab = 'build';
   protected busy = false;
   protected statusMessage = '';
@@ -983,95 +978,6 @@ export class FormBuilderComponent extends BaseFormComponent {
       // endings get this: mid-form rules reading a mid-form score would be circular.
       SCORE_SOURCE,
     ];
-  }
-
-  // -- import ---------------------------------------------------------------
-
-  protected openImport(): void {
-    this.importOpen = true;
-    this.cdr.markForCheck();
-  }
-
-  protected closeImport(): void {
-    this.importOpen = false;
-    this.cdr.markForCheck();
-  }
-
-  /**
-   * Create the pages and questions a paste described.
-   *
-   * Appends rather than replaces. Import is used to ADD a section far more often than to start
-   * over, and an import that silently wiped an existing form would be unrecoverable — there is
-   * no undo here.
-   */
-  protected async onImported(result: ImportResult): Promise<void> {
-    if (!this.tree || this.busy) {
-      return;
-    }
-    this.importOpen = false;
-    this.busy = true;
-    try {
-      for (const importedPage of result.pages) {
-        const page = await this.pageForImport(importedPage.title);
-        if (!page) {
-          continue;
-        }
-        for (const q of importedPage.questions) {
-          await this.createImportedQuestion(page, q);
-        }
-      }
-      this.markDirty();
-    } finally {
-      this.busy = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  /**
-   * The page an imported block goes on: a new one when the paste named it, else the last
-   * existing page so an untitled paste extends the form the author is already looking at.
-   */
-  private async pageForImport(title: string | undefined): Promise<PageNode | undefined> {
-    if (!this.tree) {
-      return undefined;
-    }
-    if (title) {
-      const created = await this.state.addPage(this.tree, title);
-      if (created) {
-        this.tree.pages.push(created);
-      }
-      return created;
-    }
-    return this.tree.pages[this.tree.pages.length - 1];
-  }
-
-  private async createImportedQuestion(page: PageNode, imported: ImportedQuestion): Promise<void> {
-    if (!this.tree) {
-      return;
-    }
-    const node = await this.state.addQuestion(this.tree, page, imported.type, imported.prompt);
-    if (!node) {
-      return;
-    }
-    if (imported.isRequired) {
-      node.entity.IsRequired = true;
-      await this.state.save(node.entity);
-    }
-    if (imported.options.length > 0) {
-      // The seeded "Option 1 / Option 2" pair is a placeholder for an author who will edit it;
-      // a paste that named its options has already done that, so the placeholders go.
-      for (const seeded of [...node.options]) {
-        await this.state.deleteOption(seeded);
-      }
-      node.options = [];
-      for (const label of imported.options) {
-        const option = await this.state.addOption(node, label);
-        if (option) {
-          node.options.push(option);
-        }
-      }
-    }
-    page.questions.push(node);
   }
 
   protected get selectedNode(): QuestionNode | null {

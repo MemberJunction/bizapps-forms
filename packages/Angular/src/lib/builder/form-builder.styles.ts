@@ -230,17 +230,15 @@ const LAYOUT_CSS = /* css */ `
 
 /* ------------------------------------------------------------------- palette */
 
-/* Palette tools — search + import, pinned above the groups. At 25 types across seven groups,
-   scanning is slower than typing, and an author who knows what they want should not have to
-   know which heading we filed it under. */
-.fb-palette-tools {
+/* Palette search, pinned above the groups. At 25 types across seven groups, scanning is slower
+   than typing, and an author who knows what they want should not have to know which heading we
+   filed it under. */
+.fb-palette-search {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
   margin-bottom: var(--mjf-stack);
 }
-
-.fb-palette-search { position: relative; display: flex; align-items: center; }
 .fb-palette-search i {
   position: absolute;
   left: 10px;
@@ -249,26 +247,6 @@ const LAYOUT_CSS = /* css */ `
   pointer-events: none;
 }
 .fb-palette-search .mjf-input { padding-left: 30px; }
-
-.fb-palette-import {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--mjf-meta);
-  color: var(--mj-text-secondary);
-  background: transparent;
-  border: 1px dashed var(--mj-border-default);
-  border-radius: var(--mjf-radius-sm);
-  transition: background var(--mjf-ease), border-color var(--mjf-ease);
-}
-.fb-palette-import:hover:not(:disabled) { border-color: var(--mj-brand-primary); background: var(--mj-bg-surface-hover); }
-.fb-palette-import:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -2px; }
-.fb-palette-import:disabled { opacity: 0.45; cursor: not-allowed; }
-.fb-palette-import i { width: 16px; text-align: center; color: var(--mj-text-muted); }
 
 /* ---- Screens on the canvas ----
    Rendered as a distinct card rather than as another question row, because that visual

@@ -13,7 +13,7 @@ flow** into their own abstraction.
 | 3 | Widget: render the 10 new types | ✅ |
 | 4 | Widget: Welcome / Ending screen phases | ✅ |
 | 5 | Server: parse, validate, persist, select ending | ✅ |
-| 6 | Builder: palette, per-type editors, Screens editor, Import questions | ✅ |
+| 6 | Builder: palette, per-type editors, Screens editor | ✅ |
 | 7 | Reporting / responses / export / AI authoring | ✅ |
 
 ## Found on the way
@@ -58,8 +58,17 @@ persist → aggregate → export):
 **Two new screen kinds** — `Welcome` and `Ending` — modelled as a separate `FormScreen`
 entity, not as question types. See §3.
 
-**Two structural additions**: `FormPage.IsPartialSubmitPoint` (reaching the page banks a
-partial response) and **Import questions** in the builder (paste lines → questions).
+**One structural addition**: `FormPage.IsPartialSubmitPoint` (reaching the page banks a
+partial response).
+
+**Import questions was built here and has since been removed** (2026-08-30, issue #87). It was a
+builder-side paste box: its own dialog, a 200-question cap, and a parser that inferred type and
+options from punctuation. Retired at the product owner's call — the palette's own question types
+are the supported way to add questions. Removed rather than deprecated because it had no data
+model of its own: the parser was pure, nothing published depends on it, so there is no migration
+and no stored shape still to be read. Noted here because the released
+`element-parity-and-screens` changeset announced the feature, and this table used to claim it
+shipped; both are now history rather than description.
 
 **Already covered, no work**: Question Group (= `FormPage`), Redirect to URL
 (`FormSettings.redirectUrl`, now also per-ending), Create with AI (`generate-form.action`).
