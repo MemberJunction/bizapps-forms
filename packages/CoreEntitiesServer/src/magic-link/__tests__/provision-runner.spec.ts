@@ -4,9 +4,9 @@ import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type ProvisionContext } from
 import type { MagicLinkProvisioningConfig } from '../config.js';
 import type {
   IAnonymousMagicLinkMinter,
+  InviteWriteResult,
   MintAnonymousInviteParams,
   MintAnonymousInviteResult,
-  RevokeAnonymousInviteResult,
 } from '../minter.js';
 
 const config: MagicLinkProvisioningConfig = Object.freeze({
@@ -43,18 +43,22 @@ interface FakeMinter {
   minter: IAnonymousMagicLinkMinter;
   mints: { params: MintAnonymousInviteParams; user: UserInfo }[];
   revokes: { inviteId: string; user: UserInfo }[];
+  expiries: { inviteId: string; expiresAt: Date | null; user: UserInfo }[];
 }
 
 /** Records every call and returns fixed results. */
 function fakeMinter(
   mintResult: MintAnonymousInviteResult = { success: true, inviteId: 'invite-new', rawToken: 'mj_ml_new' },
-  revokeResult: RevokeAnonymousInviteResult = { success: true },
+  revokeResult: InviteWriteResult = { success: true, changed: true },
+  expiryResult: InviteWriteResult = { success: true, changed: false },
 ): FakeMinter {
   const mints: { params: MintAnonymousInviteParams; user: UserInfo }[] = [];
   const revokes: { inviteId: string; user: UserInfo }[] = [];
+  const expiries: { inviteId: string; expiresAt: Date | null; user: UserInfo }[] = [];
   return {
     mints,
     revokes,
+    expiries,
     minter: {
       MintAnonymousInvite: async (params, user) => {
         mints.push({ params, user });
@@ -63,6 +67,10 @@ function fakeMinter(
       RevokeAnonymousInvite: async (inviteId, user) => {
         revokes.push({ inviteId, user });
         return revokeResult;
+      },
+      SetAnonymousInviteExpiry: async (inviteId, expiresAt, user) => {
+        expiries.push({ inviteId, expiresAt, user });
+        return expiryResult;
       },
     },
   };
@@ -102,6 +110,16 @@ describe('runProvisioning — minting', () => {
     const persist = vi.fn(async () => true);
     const outcome = await runProvisioning(livingCtx(), config, fake.minter, contextUser, persist);
     expect(outcome).toEqual({ result: 'noop', reason: 'current' });
+    expect(fake.mints).toHaveLength(0);
+    expect(fake.revokes).toHaveLength(0);
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it('does not mint or revoke when only the expiry needed re-bounding', async () => {
+    const fake = fakeMinter(undefined, undefined, { success: true, changed: true });
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(livingCtx(), config, fake.minter, contextUser, persist);
+    expect(outcome).toEqual({ result: 'expiry-updated', inviteId: OLD_INVITE });
     expect(fake.mints).toHaveLength(0);
     expect(fake.revokes).toHaveLength(0);
     expect(persist).not.toHaveBeenCalled();
@@ -246,6 +264,67 @@ describe('runProvisioning — revoking', () => {
     );
     expect(outcome.result).toBe('revoked');
     expect(fake.mints).toHaveLength(0);
+  });
+});
+
+describe('runProvisioning — keeping the credential bounded by its link', () => {
+  it('re-bounds a kept credential to the link CloseAt on every save', async () => {
+    // The gap this closes: expiry used to be set at mint and never revisited, so moving
+    // or clearing a closing date afterwards left the credential dying on the old one
+    // while the builder reported the link as live.
+    const closeAt = new Date('2026-10-01T00:00:00.000Z');
+    const fake = fakeMinter();
+    await runProvisioning(livingCtx({ closeAt }), config, fake.minter, contextUser, async () => true);
+    expect(fake.expiries).toEqual([{ inviteId: OLD_INVITE, expiresAt: closeAt, user: contextUser }]);
+  });
+
+  it('asks for the bound to be REMOVED when the closing date is cleared', async () => {
+    // "Remove the expiry" is the builder's own fix for a link that has ended. Without
+    // this the invite stays expired and the fix produces a Live badge on a dead link.
+    const fake = fakeMinter();
+    await runProvisioning(livingCtx(), config, fake.minter, contextUser, async () => true);
+    expect(fake.expiries).toHaveLength(1);
+    expect(fake.expiries[0].expiresAt).toBeNull();
+  });
+
+  it('reports an unchanged expiry as a plain no-op, not as work done', async () => {
+    const fake = fakeMinter();
+    const outcome = await runProvisioning(livingCtx(), config, fake.minter, contextUser, async () => true);
+    expect(outcome).toEqual({ result: 'noop', reason: 'current' });
+  });
+
+  it('reports a failed re-bound rather than letting the drift pass silently', async () => {
+    const fake = fakeMinter(undefined, undefined, { success: false, changed: false, message: 'nope' });
+    const outcome = await runProvisioning(livingCtx(), config, fake.minter, contextUser, async () => true);
+    expect(outcome).toEqual({ result: 'expiry-update-failed', inviteId: OLD_INVITE });
+  });
+
+  it('never re-bounds a credential it is about to revoke or replace', async () => {
+    const paused = fakeMinter();
+    await runProvisioning(livingCtx({ status: 'Closed' }), config, paused.minter, contextUser, async () => true);
+    expect(paused.expiries).toHaveLength(0);
+
+    const reissuing = fakeMinter();
+    await runProvisioning(
+      livingCtx({ publicLinkToken: null }),
+      config,
+      reissuing.minter,
+      contextUser,
+      async () => true,
+    );
+    expect(reissuing.expiries).toHaveLength(0);
+  });
+
+  it('stays quiet when there is no minter or no user to re-bound with', async () => {
+    // An ordinary rename on a host without magic links must not log a failure.
+    expect(
+      await runProvisioning(livingCtx(), config, undefined, contextUser, async () => true),
+    ).toEqual({ result: 'noop', reason: 'current' });
+    const fake = fakeMinter();
+    expect(
+      await runProvisioning(livingCtx(), config, fake.minter, undefined, async () => true),
+    ).toEqual({ result: 'noop', reason: 'current' });
+    expect(fake.expiries).toHaveLength(0);
   });
 });
 

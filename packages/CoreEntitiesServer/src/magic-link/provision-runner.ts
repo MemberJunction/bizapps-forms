@@ -49,6 +49,8 @@ export interface ProvisionOutcome {
     | 'minted'
     | 'revoked'
     | 'reissued'
+    | 'expiry-updated'
+    | 'expiry-update-failed'
     | 'revoke-failed'
     | 'skipped-no-minter'
     | 'skipped-no-user'
@@ -57,7 +59,7 @@ export interface ProvisionOutcome {
     | 'store-failed';
   /** The invite the outcome is about: the new one after a mint, the old one after a revoke. */
   inviteId?: string;
-  /** The decision's reason, on a `noop` — which of the two do-nothing cases this was. */
+  /** The decision's reason, on a `noop` — which of the do-nothing cases this was. */
   reason?: ProvisioningReason;
 }
 
@@ -84,7 +86,16 @@ export async function runProvisioning(
 ): Promise<ProvisionOutcome> {
   const decision = decideProvisioning(ctx, config);
   if (!decision.revoke && !decision.mint) {
-    return { result: 'noop', reason: decision.reason };
+    // Nothing to issue or withdraw. A credential we are KEEPING still has to stay
+    // bounded by the link's own closing date, and that is the one part of it nobody's
+    // save will fix later: revocation rides a save, but a closing date passes at
+    // midnight with nobody watching, so the invite's own expiry is the only thing that
+    // ends the credential on time. Which means it has to keep up with the date it
+    // mirrors — an author moving or clearing `CloseAt` otherwise leaves a credential
+    // expiring on the old one while the builder reports the link as live.
+    return decision.reason === 'current'
+      ? await realignExpiry(ctx, config, minter, contextUser)
+      : { result: 'noop', reason: decision.reason };
   }
 
   if (!minter) {
@@ -117,7 +128,50 @@ export async function runProvisioning(
     }
   }
 
-  return issueCredential(ctx, config, minter, contextUser, persistCredential, decision.revoke);
+  return issueCredential(ctx, config, minter, contextUser, persistCredential, decision.reason);
+}
+
+/**
+ * Keep a credential we are not replacing bounded by the link it belongs to.
+ *
+ * Runs on every save of a live, credentialled distribution — the common case — so it
+ * has to be cheap and silent when nothing moved, which is what the minter's
+ * `{ changed: false }` reports. Missing minter or user is not an error here: there is
+ * nothing to correct that a later save cannot correct, and this path must never turn
+ * an ordinary rename into a logged failure.
+ */
+async function realignExpiry(
+  ctx: ProvisionContext,
+  config: MagicLinkProvisioningConfig,
+  minter: IAnonymousMagicLinkMinter | undefined,
+  contextUser: UserInfo | undefined,
+): Promise<ProvisionOutcome> {
+  const inviteId = ctx.magicLinkInviteId?.trim();
+  if (!inviteId || !minter || !contextUser) {
+    return { result: 'noop', reason: 'current' };
+  }
+
+  const outcome = await minter.SetAnonymousInviteExpiry(
+    inviteId,
+    resolveExpiry(ctx.closeAt, config.fixedExpiryHours, new Date()),
+    contextUser,
+  );
+  if (!outcome.success) {
+    LogError(
+      `[FormDistribution] Could not re-bound magic-link invite ${inviteId} for distribution ` +
+        `${ctx.distributionId}: ${outcome.message ?? 'unknown error'}. Its credential may outlive, ` +
+        `or die before, the link's closing date; the next save of this distribution retries.`,
+    );
+    return { result: 'expiry-update-failed', inviteId };
+  }
+  if (!outcome.changed) {
+    return { result: 'noop', reason: 'current' };
+  }
+  LogStatus(
+    `[FormDistribution] Re-bounded magic-link invite ${inviteId} for distribution ` +
+      `${ctx.distributionId} to follow its closing date.`,
+  );
+  return { result: 'expiry-updated', inviteId };
 }
 
 /**
@@ -171,9 +225,9 @@ async function withdrawCredential(
 /**
  * Mint a fresh credential and write it onto the record.
  *
- * @param replacing true when this follows a revocation in the same run — a reissue,
- *                  which is worth distinguishing in the outcome and the log because
- *                  it is the one path that invalidates a token someone may be holding.
+ * @param reason the decision's own word for why. `reissue` is the one mint that follows
+ *               a revocation in the same run, and so the one that invalidates a token
+ *               somebody may be holding — worth saying in both the outcome and the log.
  */
 async function issueCredential(
   ctx: ProvisionContext,
@@ -181,8 +235,9 @@ async function issueCredential(
   minter: IAnonymousMagicLinkMinter,
   contextUser: UserInfo,
   persistCredential: PersistCredential,
-  replacing: boolean,
+  reason: ProvisioningReason,
 ): Promise<ProvisionOutcome> {
+  const replacing = reason === 'reissue';
   const mint = await minter.MintAnonymousInvite(
     {
       applicationName: config.applicationName,

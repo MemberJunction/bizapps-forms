@@ -66,19 +66,6 @@ function hasValue(value: string | null): boolean {
 }
 
 /**
- * Whether this distribution is the kind of thing that should hold an anonymous
- * credential at all: a linkable channel, switched on, and open for responses.
- */
-function warrantsCredential(
-  state: DistributionProvisioningState,
-  config: MagicLinkProvisioningConfig,
-): boolean {
-  return (
-    config.linkableChannels.has(state.channelType) && state.status === 'Active' && state.isActive
-  );
-}
-
-/**
  * Decide what this save owes the invariant above.
  *
  * Read it as a two-by-two over "does it hold a credential" and "should it":
@@ -106,17 +93,18 @@ export function decideProvisioning(
 ): ProvisioningDecision {
   const linked = hasValue(state.magicLinkInviteId);
   const usable = linked && hasValue(state.publicLinkToken);
-  const warranted = warrantsCredential(state, config);
+  const linkable = config.linkableChannels.has(state.channelType);
+  const warranted = linkable && state.status === 'Active' && state.isActive;
 
   if (usable) {
     return warranted
       ? { revoke: false, mint: false, reason: 'current' }
-      : { revoke: true, mint: false, reason: revocationReason(state, config) };
+      : { revoke: true, mint: false, reason: revocationReason(linkable) };
   }
   if (!warranted) {
     // Nothing usable to keep. Revoke a dead-but-linked invite; otherwise stand down.
     return linked
-      ? { revoke: true, mint: false, reason: revocationReason(state, config) }
+      ? { revoke: true, mint: false, reason: revocationReason(linkable) }
       : { revoke: false, mint: false, reason: 'not-eligible' };
   }
   return linked
@@ -125,13 +113,8 @@ export function decideProvisioning(
 }
 
 /** Which half of "no longer a live public link" a revocation is answering. */
-function revocationReason(
-  state: DistributionProvisioningState,
-  config: MagicLinkProvisioningConfig,
-): ProvisioningReason {
-  return config.linkableChannels.has(state.channelType)
-    ? 'revoke-deactivated'
-    : 'revoke-channel-not-linkable';
+function revocationReason(linkable: boolean): ProvisioningReason {
+  return linkable ? 'revoke-deactivated' : 'revoke-channel-not-linkable';
 }
 
 /**

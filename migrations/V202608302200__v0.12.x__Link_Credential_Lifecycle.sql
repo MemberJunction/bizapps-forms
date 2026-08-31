@@ -13,13 +13,22 @@
 -- Column descriptions reach TypeScript (CodeGen writes them into the generated entity classes) and
 -- the Explorer field UI through `__mj.EntityField.Description`, so both the extended property and
 -- that row are updated — otherwise the next CodeGen run would find them disagreeing and one of the
--- two surfaces would keep publishing the old claim.
+-- two surfaces would keep publishing the old claim. **Run `npm run mj:codegen` after applying this**
+-- so the generated entity classes carry the corrected text too.
 --
 -- The `EntityField` rows are addressed by the IDs `V202606301305` and the baseline inserted, not by
 -- a fresh GUID: `__mj.EntityField` has no unique constraint on (EntityID, Name), so an insert-shaped
 -- fix would silently duplicate the field rather than correct it.
+--
+-- Each description is written ONCE, into a variable used by all three writes. The three spellings
+-- this replaces (update-property / add-property / EntityField) were three chances for the text to
+-- drift apart, which is a peculiar way to ship a fix whose entire purpose is that two copies of a
+-- sentence had gone out of step. Variables do not survive a batch separator, so each column gets
+-- its own `GO`-delimited batch.
 
 -- ---- FormDistribution.PublicLinkToken ----
+
+DECLARE @tokenDescription NVARCHAR(MAX) = N'Raw redeemable magic-link token for this distribution''s public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.';
 
 IF EXISTS (
     SELECT 1 FROM sys.extended_properties ep
@@ -32,26 +41,25 @@ IF EXISTS (
       AND c.name = N'PublicLinkToken'
 )
     EXEC sp_updateextendedproperty
-        @name = N'MS_Description',
-        @value = N'Raw redeemable magic-link token for this distribution''s public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.',
+        @name = N'MS_Description', @value = @tokenDescription,
         @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}',
         @level1type = N'TABLE',  @level1name = N'FormDistribution',
         @level2type = N'COLUMN', @level2name = N'PublicLinkToken';
 ELSE
     EXEC sp_addextendedproperty
-        @name = N'MS_Description',
-        @value = N'Raw redeemable magic-link token for this distribution''s public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.',
+        @name = N'MS_Description', @value = @tokenDescription,
         @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}',
         @level1type = N'TABLE',  @level1name = N'FormDistribution',
         @level2type = N'COLUMN', @level2name = N'PublicLinkToken';
-GO
 
 UPDATE [${mjSchema}].[EntityField]
-SET Description = N'Raw redeemable magic-link token for this distribution''s public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.'
+SET Description = @tokenDescription
 WHERE ID = '7DE1A89C-4880-4E08-A49E-ADF410C8FC44';
 GO
 
 -- ---- FormDistribution.MagicLinkInviteID ----
+
+DECLARE @inviteDescription NVARCHAR(MAX) = N'ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.';
 
 IF EXISTS (
     SELECT 1 FROM sys.extended_properties ep
@@ -64,21 +72,18 @@ IF EXISTS (
       AND c.name = N'MagicLinkInviteID'
 )
     EXEC sp_updateextendedproperty
-        @name = N'MS_Description',
-        @value = N'ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.',
+        @name = N'MS_Description', @value = @inviteDescription,
         @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}',
         @level1type = N'TABLE',  @level1name = N'FormDistribution',
         @level2type = N'COLUMN', @level2name = N'MagicLinkInviteID';
 ELSE
     EXEC sp_addextendedproperty
-        @name = N'MS_Description',
-        @value = N'ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.',
+        @name = N'MS_Description', @value = @inviteDescription,
         @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}',
         @level1type = N'TABLE',  @level1name = N'FormDistribution',
         @level2type = N'COLUMN', @level2name = N'MagicLinkInviteID';
-GO
 
 UPDATE [${mjSchema}].[EntityField]
-SET Description = N'ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.'
+SET Description = @inviteDescription
 WHERE ID = 'B77F00D4-F944-4023-9A5E-3EE46E242B6A';
 GO

@@ -51,6 +51,24 @@ export interface MagicLinkProvisioningConfig {
 
 const ALL_CHANNELS: readonly DistributionChannelType[] = ['Email', 'Embed', 'PublicLink', 'QR'];
 const DEFAULT_CHANNELS: readonly DistributionChannelType[] = ['PublicLink', 'Embed', 'QR'];
+
+/**
+ * Default `maxUses` — effectively unlimited, and deliberately so.
+ *
+ * bizapps-forms#104 called a million out as "no limit dressed as a limit", and it is;
+ * this is the reasoning for keeping it rather than the absence of any. A redemption is
+ * one respondent OPENING the link, not one submission — a person who opens the form,
+ * abandons it and comes back tomorrow spends two — so this is not a quota and cannot be
+ * made into one. The real quota is the distribution's own `MaxResponses`, enforced at
+ * submit and surfaced in the builder as a meter with a fix beside it.
+ *
+ * A lower cap would therefore not limit responses; it would lock respondents out of a
+ * popular form with no signal anywhere that it had happened, since nothing on the
+ * distribution reflects the invite's use count. The credential's real bound is now its
+ * lifecycle — revoked when the link stops being live, expiring with the link's closing
+ * date — which is what makes an unbounded use count safe. A host that wants a hard
+ * ceiling anyway sets `FORMS_MAGICLINK_MAX_USES`.
+ */
 const DEFAULT_MAX_USES = 1_000_000;
 const DEFAULT_APPLICATION = 'Forms';
 const DEFAULT_ROLE = 'Form Respondent';

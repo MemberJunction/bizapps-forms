@@ -10,11 +10,14 @@ import { describe, expect, it } from 'vitest';
  * DOM-free component test would reach anyway — it is a set of design decisions that a
  * later edit could quietly undo while every other test stayed green.
  *
- * Source-text assertions are weak evidence and worth only what their subject is worth. The
- * two here are worth it because both failure modes have already happened once: gating an
- * artifact on `ChannelType` is the defect this redesign exists to remove, and showing a
- * raw `Status` is the defect that let a link at its response cap advertise itself as
- * "Active". The real behaviour lives in `share-state.spec.ts`, which tests the logic.
+ * Source-text assertions are weak evidence and worth only what their subject is worth.
+ * Each one here guards a decision whose failure mode has already happened, or would be
+ * silent: gating an artifact on `ChannelType` is the defect this redesign exists to
+ * remove; showing a raw `Status` is what let a link at its response cap advertise itself
+ * as "Active"; and skipping the re-read after a credential write puts a revoked token on
+ * screen. They match loosely — on the call or the attribute, not on formatting — so a
+ * reflow cannot red them. The real behaviour lives in `share-state.spec.ts`, which tests
+ * the logic.
  */
 const here = __dirname;
 const source = (file: string): string => readFileSync(join(here, file), 'utf8');
@@ -138,14 +141,34 @@ describe('the Distribute component', () => {
     // Pause / reopen / issue / reissue each make the server write the credential in a
     // SECOND save this client never sees. Without the re-read the screen renders a token
     // that has been revoked, or none where one was just minted.
-    expect(component).toContain('runCredentialWrite');
-    for (const call of [
-      'this.runCredentialWrite(() => this.service.issueLink(link))',
-      'this.runCredentialWrite(() => this.service.open(link))',
-      'this.runCredentialWrite(() => this.service.reissueLink(link))',
-    ]) {
-      expect(component, `${call} is not routed through the reloading path`).toContain(call);
+    //
+    // Matched loosely on purpose — the point is which service call sits inside
+    // runCredentialWrite, not how the line happens to be wrapped.
+    for (const call of ['issueLink', 'open', 'close', 'reissueLink']) {
+      expect(
+        component,
+        `service.${call} is not routed through the reloading path`,
+      ).toMatch(new RegExp(String.raw`runCredentialWrite\([\s\S]{0,160}?service\.${call}\(`));
     }
-    expect(component).toContain('reopening ? this.service.open(link) : this.service.close(link)');
+  });
+
+  it('offers Reissue only where there is a token to replace', () => {
+    // On a paused or never-issued link there is nothing to reissue, and pressing it
+    // would report that the old token was withdrawn and no new one arrived — false on
+    // both counts.
+    expect(template).toMatch(/@if \(link\.PublicLinkToken\)\s*\{/);
+  });
+
+  it('does not rename a button that already says what it does', () => {
+    // aria-labelledby REPLACES the accessible name, so pointing the reissue buttons at
+    // the "Access token" label would give two controls one name and drop their visible
+    // text out of it (WCAG 2.5.3). The other uses here are on a switch, a number and a
+    // date — controls with no text of their own.
+    const labelled = template.match(/aria-labelledby="dm-[a-z]+-label"/g) ?? [];
+    expect(labelled.sort()).toEqual([
+      'aria-labelledby="dm-cap-label"',
+      'aria-labelledby="dm-exp-label"',
+      'aria-labelledby="dm-open-label"',
+    ]);
   });
 });

@@ -20,7 +20,7 @@
  *
  * See FORMS_BUILD_PLAN §4 item 4.
  */
-import { BaseEntity, LogError, type EntitySaveOptions } from '@memberjunction/core';
+import { BaseEntity, LogError, type EntityDeleteOptions, type EntitySaveOptions } from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
 import { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
 import { getMagicLinkProvisioningConfig } from './config.js';
@@ -85,6 +85,63 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
       this.credentialWriteInFlight = false;
     }
 
+    return true;
+  }
+
+  /**
+   * Deletes the distribution, then withdraws the credential it was holding.
+   *
+   * Without this the invariant survives every state change and not the one that ends
+   * the record: a deleted distribution took its only reference to a still-`Active`
+   * invite with it, leaving a live credential nothing points at and no later save can
+   * reach. Deleting and recreating was also the pre-#104 recourse for a leaked link,
+   * so it is the very path most likely to be used on a credential someone wants dead.
+   *
+   * Order is deliberate: delete FIRST, revoke after it succeeds. The alternative kills
+   * a live link's credential whenever the delete is then refused — and refusal is the
+   * common case here, since `FormUpload.DistributionID` is a required FK, so any link
+   * that has taken an upload cannot be deleted at all. A revoke that fails after a
+   * successful delete leaves an orphaned invite, which is why the log names its id: it
+   * is the only remaining handle on it.
+   */
+  public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {
+    const inviteId = this.MagicLinkInviteID?.trim();
+    const contextUser = this.ContextCurrentUser;
+    const distributionId = this.ID;
+
+    if (!(await super.Delete(options))) {
+      return false;
+    }
+    if (!inviteId) {
+      return true;
+    }
+
+    const minter = MagicLinkMinterRegistry.Instance.Minter;
+    if (!minter || !contextUser) {
+      LogError(
+        `[FormDistributionEntityServer] Deleted distribution ${distributionId} but could not revoke ` +
+          `its magic-link invite ${inviteId}: ${minter ? 'no context user' : 'no minter registered'}. ` +
+          `That invite is now orphaned and must be revoked by hand.`,
+      );
+      return true;
+    }
+
+    try {
+      const revoked = await minter.RevokeAnonymousInvite(inviteId, contextUser);
+      if (!revoked.success) {
+        LogError(
+          `[FormDistributionEntityServer] Deleted distribution ${distributionId} but failed to revoke ` +
+            `its magic-link invite ${inviteId}: ${revoked.message ?? 'unknown error'}. That invite is ` +
+            `now orphaned and must be revoked by hand.`,
+        );
+      }
+    } catch (e) {
+      LogError(
+        `[FormDistributionEntityServer] Revoking invite ${inviteId} after deleting distribution ` +
+          `${distributionId} threw: ${e instanceof Error ? e.message : String(e)}. That invite is now ` +
+          `orphaned and must be revoked by hand.`,
+      );
+    }
     return true;
   }
 

@@ -75,25 +75,31 @@ export interface MintAnonymousInviteResult {
   message?: string;
 }
 
-/** Outcome of a revocation attempt. */
-export interface RevokeAnonymousInviteResult {
-  /**
-   * True when the invite is no longer redeemable. An invite that was ALREADY dead
-   * — revoked earlier, or whose row has since been deleted — is a success: the
-   * caller's postcondition is "this credential cannot be redeemed", not "this call
-   * changed a row". Reporting failure there would wedge the distribution, because
-   * the caller refuses to unlink a credential it could not kill.
-   */
+/**
+ * Outcome of a write against an existing invite (revocation, or a change of expiry).
+ *
+ * One shape for both because both answer the same two questions and would otherwise
+ * be the same three fields written twice. `success` is about the POSTCONDITION, not
+ * about whether a row moved: an invite that was already revoked, or whose expiry is
+ * already correct, is `{ success: true, changed: false }`. That distinction matters
+ * to the caller — it refuses to unlink a credential it could not kill, so reporting
+ * failure for an invite that is already dead would wedge the distribution forever.
+ */
+export interface InviteWriteResult {
+  /** True when the invite now holds the requested state, whether or not this call changed it. */
   success: boolean;
+  /** True only when a row was actually written. Diagnostic; drives the "nothing to do" log. */
+  changed: boolean;
   /** Human-readable reason for a failure, or a note on a no-op success. */
   message?: string;
 }
 
 /**
- * The contract a host registers to provision AND withdraw anonymous magic-link
- * invites. Implemented in `@mj-biz-apps/forms-server` over MJ core's magic-link
- * tables. Both halves belong to one implementation on purpose: whatever backend
- * issues a credential is the only thing that knows how to kill it.
+ * The contract a host registers to manage the life of an anonymous magic-link
+ * credential: issue it, re-bound it, withdraw it. Implemented in
+ * `@mj-biz-apps/forms-server` over MJ core's magic-link tables. All three belong to
+ * one implementation on purpose: whatever backend issues a credential is the only
+ * thing that knows how to change or kill it.
  */
 export interface IAnonymousMagicLinkMinter {
   /**
@@ -122,7 +128,34 @@ export interface IAnonymousMagicLinkMinter {
    * @param inviteId    the invite to withdraw (`FormDistribution.MagicLinkInviteID`)
    * @param contextUser the internal staff user whose save triggered the revocation
    */
-  RevokeAnonymousInvite(inviteId: string, contextUser: UserInfo): Promise<RevokeAnonymousInviteResult>;
+  RevokeAnonymousInvite(inviteId: string, contextUser: UserInfo): Promise<InviteWriteResult>;
+
+  /**
+   * Re-bounds a live invite's hard expiry to `expiresAt`, or removes the bound when
+   * given `null`.
+   *
+   * This exists because the expiry is the ONE part of the credential that has to
+   * survive nobody saving anything: revocation happens on a distribution's save, and
+   * a link whose closing date passes at midnight is not saved by anyone. Baking the
+   * date into the invite is what makes it die on time — and that is exactly why it
+   * must be kept in step afterwards. An author who moves a closing date, or clears
+   * one, is otherwise left with a credential expiring on the old date while the
+   * builder reports the link as live.
+   *
+   * Implementations MUST be idempotent and MUST NOT throw: re-bounding an invite
+   * already at `expiresAt` is `{ success: true, changed: false }`, and a caller runs
+   * this after every save of a distribution that keeps its credential.
+   *
+   * @param inviteId    the invite to re-bound (`FormDistribution.MagicLinkInviteID`)
+   * @param expiresAt   the new hard expiry, or `null` for "no bound" — which the
+   *                    implementation renders however its store expresses that
+   * @param contextUser the internal staff user whose save triggered the change
+   */
+  SetAnonymousInviteExpiry(
+    inviteId: string,
+    expiresAt: Date | null,
+    contextUser: UserInfo,
+  ): Promise<InviteWriteResult>;
 }
 
 /**

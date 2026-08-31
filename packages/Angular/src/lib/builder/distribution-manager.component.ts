@@ -233,11 +233,9 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     switch (kind) {
       case 'pending':
         await this.runCredentialWrite(() => this.service.issueLink(link));
-        if (!this.selected?.PublicLinkToken) {
-          this.actionError =
-            'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.';
-          this.cdr.markForCheck();
-        }
+        this.warnIfStillUnissued(
+          'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.',
+        );
         return;
       case 'paused':
         await this.runCredentialWrite(() => this.service.open(link));
@@ -285,11 +283,24 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     }
     this.confirmingReissue = false;
     await this.runCredentialWrite(() => this.service.reissueLink(link));
-    if (!this.selected?.PublicLinkToken) {
-      this.actionError =
-        'The old token was withdrawn but the server did not issue a new one, so this link is not working. Use "Issue the link" to try again.';
-      this.cdr.markForCheck();
+    this.warnIfStillUnissued(
+      'The old token was withdrawn but the server did not issue a new one, so this link is not working. Use "Issue the link" to try again.',
+    );
+  }
+
+  /**
+   * Say so when a write that was supposed to produce a token did not.
+   *
+   * The service reports whether the SAVE succeeded; the hook that mints is deliberately
+   * fail-soft, so a green save and a link with no web address are the same outcome from
+   * here. The reload has already run, so `selected` is the server's answer, not ours.
+   */
+  private warnIfStillUnissued(message: string): void {
+    if (this.selected?.PublicLinkToken) {
+      return;
     }
+    this.actionError = message;
+    this.cdr.markForCheck();
   }
 
   /**

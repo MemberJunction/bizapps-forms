@@ -23,7 +23,7 @@ export {
   type IAnonymousMagicLinkMinter,
   type MintAnonymousInviteParams,
   type MintAnonymousInviteResult,
-  type RevokeAnonymousInviteResult,
+  type InviteWriteResult,
 } from './magic-link/minter.js';
 export {
   getMagicLinkProvisioningConfig,
