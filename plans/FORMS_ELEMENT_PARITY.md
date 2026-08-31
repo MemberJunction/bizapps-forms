@@ -53,7 +53,7 @@ persist → aggregate → export):
 | `Matrix` | rows × columns, single or multi per row | `JSONValue` (row → value(s)) |
 | `Address` | street / line2 / city / region / postal / country | `JSONValue` |
 | `ContactInfo` | first / last / email / phone / company | `JSONValue` |
-| `Signature` | canvas → PNG → existing upload path | `FileID` |
+| `Doodle` | canvas → PNG → existing upload path | `FileID` |
 
 **Two new screen kinds** — `Welcome` and `Ending` — modelled as a separate `FormScreen`
 entity, not as question types. See §3.
