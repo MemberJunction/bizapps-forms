@@ -66,9 +66,11 @@ builder-side paste box: its own dialog, a 200-question cap, and a parser that in
 options from punctuation. Retired at the product owner's call — the palette's own question types
 are the supported way to add questions. Removed rather than deprecated because it had no data
 model of its own: the parser was pure, nothing published depends on it, so there is no migration
-and no stored shape still to be read. Noted here because the released
-`element-parity-and-screens` changeset announced the feature, and this table used to claim it
-shipped; both are now history rather than description.
+and no stored shape still to be read. **It never reached a release**: it was built during this
+element-parity work and removed before that work shipped, so no published version ever carried
+it. Recorded here rather than quietly deleted because the phase table above used to claim it,
+and because the `element-parity-and-screens` changeset — still unreleased in `.changeset/` —
+announced it in prose that has now been corrected for the same reason.
 
 **Already covered, no work**: Question Group (= `FormPage`), Redirect to URL
 (`FormSettings.redirectUrl`, now also per-ending), Create with AI (`generate-form.action`).
