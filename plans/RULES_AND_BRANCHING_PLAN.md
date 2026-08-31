@@ -122,8 +122,8 @@ no `__mj_*` timestamps, no FK indexes):
 3. Extended properties documenting both.
 
 Then: `npm run mj:codegen`, **write no TypeScript against the new columns until it runs**
-(critical rule 2b), regenerate `V…__Metadata_Sync.sql` if metadata rows change, and
-`npm run seed:manifest` + `npm run lint:distribution` before the PR.
+(critical rule 2b), commit any changed `metadata/` JSON without a `Metadata_Sync.sql` (that is release work), and run
+`npm run lint:distribution` before the PR.
 
 `ScoringConfig` needs **no** migration — the column exists (V9); this plan finally reads it.
 

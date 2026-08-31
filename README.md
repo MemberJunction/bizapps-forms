@@ -205,10 +205,11 @@ npm run mj:codegen          # generate entity / action / resolver / Angular subc
 > role and no anonymous submit path, while reporting success at every step.
 >
 > **`mj sync push` is an authoring tool, not an install step, and a host never runs it.** It is how a
-> *contributor* who edited `metadata/` pushes the change into a dev database and generates the seed
-> migration. The push is how metadata gets into a migration; the migration is how it reaches anybody
-> else. See [`migrations/README.md`](migrations/README.md) — and `npm run lint:distribution` fails
-> the build if you edit `metadata/` without regenerating.
+> *contributor* who edited `metadata/` pushes the change into a dev database, and how the build
+> engineer generates the release's seed migration. The push is how metadata gets into a migration;
+> the migration is how it reaches anybody else. A contributor's PR carries the JSON and no seed —
+> one consolidated `Metadata_Sync` is generated per release, and `npm run check:release-seed` says
+> what that seed still owes. See [`migrations/README.md`](migrations/README.md).
 
 **5. Build and run.**
 

@@ -158,5 +158,6 @@ the existing option editor extends rather than forks.
   rejects, and the failure surfaces as a save error with no explanation.
 - Requires a CodeGen run (`npm run mj:codegen`) after the migration; TypeScript against the
   new columns is written only after it.
-- `metadata/` changes need `mj sync push` + a regenerated `Metadata_Sync.sql`, or they ship
-  as nothing.
+- `metadata/` changes ship only once a `Metadata_Sync.sql` carries them — but that migration is
+  generated once per release by the build engineer, not in this work. Commit the JSON;
+  `npm run check:release-seed` lists what the next seed owes.

@@ -15,20 +15,34 @@ and left no artifact, so a clean `mj app install` produced a Forms deployment wi
 application, nav, dashboards or AI authoring — the anonymous submit path, the product, could not
 run. Every step reported success.
 
-## So: editing anything here is only half the change
+## So: editing anything here is only half the change — but the other half is the release's
 
 ```
-edit metadata/  →  regenerate the seed migration  →  npm run seed:manifest  →  commit both
+your PR:        edit metadata/ (declarative JSON only)  →  commit  →  review
+the release:    mj sync push against a clean DB  →  ONE consolidated Metadata_Sync  →  ship
 ```
 
-The recipe for the middle step is in [`../migrations/README.md`](../migrations/README.md). It is
-**not** a plain re-push — the push must run against a database whose Forms metadata is empty (or it
-logs `spUpdate*` calls that cannot replay on a fresh install), and its output needs two schema
-substitutions before it can ship.
+**Do not hand-author a `*__Metadata_Sync.sql` in a feature PR.** This follows MJ
+(`MJ/metadata/CLAUDE.md` §1b and §10): PRs contribute the JSON — fields, `@lookup` / `@file` /
+`@parent` references, and a `primaryKey` UUID from `uuidgen`, with **no `sync` block** (the release
+push writes that back). The build engineer takes everything merged on `next` and generates one
+consolidated seed for the release. Per-PR sync migrations duplicate that step, produce a pile of
+small files instead of one per build, and drift from what the real push emits.
 
-`npm run lint:distribution` fails the build when these files and
-`migrations/metadata-seed.manifest.json` disagree. It compares content, ignoring the `sync` block a
-push writes back, so the push that regenerates a seed cannot trip its own gate.
+The release recipe is in [`../migrations/README.md`](../migrations/README.md). It is **not** a plain
+re-push — the push must run against a database built from the shipped chain (or it logs `spUpdate*`
+calls that cannot replay on a fresh install), and its output needs documented schema substitutions
+before it can ship.
+
+`npm run check:release-seed` is what tells you whether that has happened: it lists every
+`primaryKey` declared here that appears in no shipped migration, which is exactly the set the next
+release seed owes. It runs at the release (`publish.yml`), not on your PR — a PR cannot answer a
+question about a seed that is generated after it merges. Run it any time; it needs no database.
+
+> **What used to be here, so nobody rebuilds it.** A `metadata-seed.manifest.json` of content hashes
+> once gated every PR, on the theory that a manifest key proves the seed ships that record. It does
+> not: regenerate the manifest without regenerating the seed and the gate goes green while the
+> record reaches no host. That is #105, and the manifest, its writer and the check went with it.
 
 ## What lives here
 

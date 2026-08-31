@@ -1,5 +1,14 @@
 # Issue #41 — Seed-regeneration gate, and the delta-first regeneration path
 
+> **⚠️ D5's cadence decision and §6's first out-of-scope item were reversed by
+> [#105](https://github.com/MemberJunction/bizapps-forms/issues/105) (2026-08-30).** Forms now
+> consolidates one `Metadata_Sync` per release, MJ-style, and CHECK 1 — the manifest comparison this
+> plan leaned on as making a forgotten seed "impossible" — is gone: it passed whenever the manifest
+> was regenerated, seed or no seed. Its replacement, `scripts/check-release-seed-coverage.mjs`, is
+> the "enforcement redesign" D5 said any such move would require, so the move happened *with* one, as
+> D5 asked. **CHECK 3, which is what this plan actually delivered, is untouched and still runs on
+> every PR.** Everything below about the grant rules, the watershed and the delta-first recipe stands.
+
 **Issue:** [MemberJunction/bizapps-forms#41](https://github.com/MemberJunction/bizapps-forms/issues/41)
 **Status:** IMPLEMENTED on `plan/issue-41-seed-regeneration-gate` — §4 commit 1 (the gate + spec)
 is `d9924ee`, §4 commit 2 (the README) is `ec836ec`. AC1-AC6 verified on that head; AC7's outward
