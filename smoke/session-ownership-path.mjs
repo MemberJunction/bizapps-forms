@@ -101,7 +101,66 @@ const SUBMIT = `
     SubmitFormResponse(input: $input) { success responseId status errors { message } }
   }`;
 
-/** One submission attempt. Returns the `SubmitFormResponse` payload. */
+/** A refusal that came from the rate limiter, which is not a result this script can interpret. */
+class RateLimitedError extends Error {}
+
+/** The first words of `rateLimitedMessage` in `rate-limit.service.ts`, both of its branches. */
+const RATE_LIMIT_PREFIX = 'Too many submissions.';
+
+/**
+ * Stop the run if the limiter answered, rather than letting that answer reach an assertion.
+ *
+ * EVERY security assertion in this script is shaped `success === false`, so ANY refusal satisfies
+ * it — including one this script provoked itself. MJ's per-(session, distribution) limiter allows
+ * 5 submissions a minute and hashes a blank session to ONE bucket that every headerless caller
+ * shares (`rateLimitKey` → `distributionId:sha256(salt + '')`). `smoke/lib/session.mjs` exists so
+ * the other suites can stay out of that bucket by sending a real per-session header; this one
+ * cannot, because the absent and blank headers ARE the attack it reproduces, so four of its
+ * submissions land there by design and a second run inside the same minute exhausts it.
+ *
+ * What that looked like before this guard, and why it is worse than a flaky failure: the run
+ * printed `ok  REFUSED: attacker omits x-session-id` — the ownership gate credited for a refusal
+ * the limiter issued, on the one route issue #78 was actually reported on — while the message
+ * comparisons failed as though the status oracle were back. A green that proves nothing next to a
+ * red that names the wrong bug.
+ *
+ * So this aborts instead. The wait is in the server's own message, and nothing below it would
+ * mean what it says.
+ */
+function assertNotRateLimited(result, sessionId) {
+  const message = result?.errors?.[0]?.message ?? '';
+  if (!message.startsWith(RATE_LIMIT_PREFIX)) {
+    return;
+  }
+  const bucket = sessionId === undefined || sessionId.trim() === ''
+    ? 'a HEADERLESS submission, and every headerless caller to this distribution shares one bucket'
+    : `session "${sessionId}"`;
+  throw new RateLimitedError(
+    `rate-limited on ${bucket}: "${message}"\n` +
+      '  That refusal is the limiter\'s, not the ownership gate\'s, and every check below it would\n' +
+      '  pass or fail for a reason that has nothing to do with what this script tests. Wait out the\n' +
+      '  window named above and re-run. Two runs inside one minute do this to themselves; the gate\n' +
+      '  is not implicated either way.',
+  );
+}
+
+/**
+ * One submission attempt. Returns the `SubmitFormResponse` payload.
+ *
+ * THE HEADERLESS BUDGET, because it is a real ceiling and not an abstract one: of the 5 submissions
+ * a minute the shared blank-session bucket allows, this script spends 4 — the route-2 probe that
+ * omits the header, the BLANK one, and the two saves in "a genuinely headerless client still adopts
+ * its OWN row". The blank probe counts because HTTP strips a field value's surrounding whitespace,
+ * so `x-session-id: '   '` reaches the server as `''`: over the wire the blank and absent routes
+ * are the same request, and only `session-ownership.spec.ts` — which hands `'   '` straight to the
+ * pipeline — can tell them apart at all.
+ *
+ * That leaves ONE submission of margin in a clean window, which is why the absent-header case on
+ * the FINAL route is pinned in the spec rather than added here: a fifth would spend the bucket
+ * outright and the next headerless caller — this script's own next run, or anyone else's — would
+ * be refused by the limiter. The routes this script does drive against the victim's row already
+ * cover the primary-key collision and the SQL collation it exists for.
+ */
 async function submit(token, sessionId, { responseId, answers, formVersionId, partial }) {
   const data = await gql(token, sessionId, SUBMIT, {
     input: {
@@ -114,7 +173,9 @@ async function submit(token, sessionId, { responseId, answers, formVersionId, pa
       answers,
     },
   });
-  return data?.SubmitFormResponse;
+  const result = data?.SubmitFormResponse;
+  assertNotRateLimited(result, sessionId);
+  return result;
 }
 
 /** The victim row as SQL Server holds it: status and stored owner. */
@@ -322,6 +383,10 @@ async function main() {
 
 main().catch((e) => {
   console.error(`\nSMOKE ERROR: ${e.message}`);
-  console.error('Is MJAPI running against the branch build, and is a form published at this slug?');
+  // The limiter's abort already says what to do; the setup hint would send the reader off to check
+  // a server that answered them perfectly well.
+  if (!(e instanceof RateLimitedError)) {
+    console.error('Is MJAPI running against the branch build, and is a form published at this slug?');
+  }
   process.exit(1);
 });
