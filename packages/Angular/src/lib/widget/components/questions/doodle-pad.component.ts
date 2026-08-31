@@ -60,10 +60,26 @@ const PAD_HEIGHT = 200;
 const DOODLE_PAD_CSS = /* css */ `
 :host { display: block; }
 
+/* THE PEN TOKENS LIVE HERE, ON THE WRAPPER, AND THE SCOPE IS THE WHOLE POINT.
+
+   They were on .mjf-doodle__pad — the <canvas> — which looks right (it is "the pad") and is wrong.
+   Custom properties inherit DOWNWARD, and the swatches are not inside the canvas: they sit in
+   .mjf-doodle__tools, a SIBLING subtree. So a swatch's own background: var(--mjf-doodle-pen-Blue)
+   resolved to nothing, the declaration was dropped as invalid, and every swatch painted its
+   button's background — six identical white dots on a picker whose entire job is to show colour.
+
+   The strokes were right the whole time, which is what made it survive review: strokeColor()
+   reads the token off the CANVAS with getComputedStyle, where it WAS defined. Only the part a
+   test can't see without rendering — the swatch's own fill — was broken.
+
+   On .mjf-doodle both subtrees inherit them, and reading them off the canvas still works, because
+   an inherited custom property is readable on every descendant. */
 .mjf-doodle {
   display: flex;
   flex-direction: column;
   gap: var(--mjf-gap-sm, 8px);
+  --mjf-doodle-paper: var(--mjf-input-bg);
+  --mjf-doodle-ink: var(--mjf-page-ink);
 }
 
 /* The pad is a FIELD, and looks like the other fields. It used to be a hardcoded white
@@ -78,8 +94,6 @@ const DOODLE_PAD_CSS = /* css */ `
    than restating it. Defined as tokens, not literals, so the canvas can read them back with
    getComputedStyle instead of the component hardcoding a colour. */
 .mjf-doodle__pad {
-  --mjf-doodle-paper: var(--mjf-input-bg);
-  --mjf-doodle-ink: var(--mjf-page-ink);
   width: 100%;
   max-width: 100%;
   height: auto;
@@ -122,8 +136,11 @@ const DOODLE_PAD_CSS = /* css */ `
    The five hues are the Insights chart palette's, by value rather than by import: forms-viz.ts
    says not to import it from lib/widget/ (the widget is themed from FormStyle.Tokens, not from
    the Explorer cascade), but a doodle pen and a chart series should still look like the same
-   product. */
-.mjf-doodle__pad {
+   product.
+
+   ON .mjf-doodle, NOT .mjf-doodle__pad — see the scope note at the top of this stylesheet. The
+   swatches have to resolve these too, and they are not inside the canvas. */
+.mjf-doodle {
   --mjf-doodle-pen-Ink: var(--mjf-doodle-ink);
   --mjf-doodle-pen-Blue: color-mix(in srgb, #378ADD 65%, var(--mjf-doodle-ink));
   --mjf-doodle-pen-Green: color-mix(in srgb, #1D9E75 65%, var(--mjf-doodle-ink));

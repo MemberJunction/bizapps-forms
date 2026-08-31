@@ -98,6 +98,29 @@ describe('the exported PNG is legible on every page a form can wear', () => {
     expect([...new Set(declared)].sort()).toEqual([...DOODLE_PEN_COLORS].sort());
   });
 
+  it('declares the pen tokens where the SWATCHES can see them, not only the canvas', () => {
+    // The bug this pins: the tokens were declared on `.mjf-doodle__pad`, the <canvas>. Custom
+    // properties inherit DOWNWARD, and a swatch is not inside the canvas — it lives in
+    // `.mjf-doodle__tools`, a sibling subtree. So `background: var(--mjf-doodle-pen-Blue)` on a
+    // swatch resolved to nothing and every swatch painted its button's background: six identical
+    // white dots on a colour picker.
+    //
+    // It survived review because the STROKES were never wrong — `strokeColor` reads the token off
+    // the canvas, where it was defined. Only the swatch's own fill broke, and that is invisible to
+    // every test in this package (node env, no layout). Hence a source assertion.
+    const source = readFileSync(join(__dirname, 'doodle-pad.component.ts'), 'utf8');
+    // The block that opens the pen declarations must be the wrapper, which is an ancestor of BOTH
+    // the canvas and the tools.
+    expect(source).toMatch(/\.mjf-doodle \{[^}]*--mjf-doodle-pen-Ink:/);
+    // ...and no pen token may be scoped to the canvas alone.
+    const canvasBlocks = source.match(/\.mjf-doodle__pad\s*\{[^}]*\}/g) ?? [];
+    for (const block of canvasBlocks) {
+      expect(block, 'pen tokens must not be scoped to the canvas').not.toMatch(/--mjf-doodle-pen-/);
+    }
+    // `--mjf-doodle-ink` is what every pen mixes toward, so it has to be visible there too.
+    expect(source).toMatch(/\.mjf-doodle \{[^}]*--mjf-doodle-ink:/);
+  });
+
   it('gives Ink the form’s own ink rather than a hue, because that is what makes it the safe default', () => {
     // Ink is the only pen that is not mixed, and it is the only one that cannot fail: it IS
     // `--mjf-doodle-ink`, which theming.ts repairs against the page whenever the pair collides.
