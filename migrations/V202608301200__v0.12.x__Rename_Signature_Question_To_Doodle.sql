@@ -32,6 +32,18 @@
 --
 -- ORDER IS LOAD-BEARING: the CHECK constraint has to come off before the data can move, and the
 -- new one cannot go on while any 'Signature' row remains.
+--
+-- ⚠️ RUN `npm run mj:codegen` AFTER THIS MIGRATION. This CHECK constraint is the value list
+-- CodeGen turns into the generated `QuestionType` union in
+-- `packages/Entities/src/generated/entity_subclasses.ts`. That file was HAND-EDITED in the same
+-- commit as this migration — the rename does not compile otherwise, and the environment it was
+-- written in had no database to regenerate from. The edit reproduces exactly what CodeGen emits
+-- from the state below: `syncEntityFieldValues` sorts the parsed constraint values and rewrites
+-- every `Sequence` to `1 + index`, and `sortBySequenceAndCreatedAt` then emits in that order, so
+-- 'Doodle' lands alphabetically between 'Date' and 'Dropdown'. A real run must produce NO diff.
+-- Nothing here is taken on trust: `question-types.spec.ts`'s "matches the generated QuestionType
+-- value list" pairs the contract to the generated file and fails loudly if a later CodeGen run
+-- against an unmigrated database reverts it.
 -- =============================================================================================
 
 -- ---------------------------------------------------------------------------------------------

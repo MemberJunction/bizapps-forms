@@ -216,7 +216,9 @@ describe('nothing that finishes late may speak for a pad that has moved on', () 
   });
 
   it('retires them when a new stroke begins', () => {
-    expect(pad()).toMatch(/this\.captures\.supersede\(\);\s*this\.penDown = true;/);
+    // `beginStroke` has already opened `this.current` — which IS "the pen is down" — by the time
+    // this runs, so superseding here is the last thing pointer-down does.
+    expect(pad()).toMatch(/onPointerDown\([\s\S]{0,600}this\.captures\.supersede\(\);\s*\}/);
   });
 
   it('checks the claim before emitting an export', () => {
@@ -267,7 +269,7 @@ describe('undo is a change of meaning, so it plays by the same rules as a stroke
   it('keeps a stroke that ages out of the cap ON the drawing', () => {
     // The cap bounds memory, not the picture. An evicted stroke is baked into the base image on
     // its way out; dropping it instead would make a long drawing erase its own beginning.
-    expect(pad()).toMatch(/for \(const old of evicted\) \{\s*this\.bakeIntoBase\(old\);/);
+    expect(pad()).toMatch(/for \(const old of evicted\) \{\s*if \(this\.bakeIntoBase\(old\)\) \{/);
   });
 });
 
@@ -275,8 +277,8 @@ describe('the pen the author configured reaches the pad already validated', () =
   it('parses the open settings blob through the shared contract, not in the pad', () => {
     // `Settings` is reachable by paste and by API. Validating at the boundary is what lets the
     // pad assume every value it is handed is renderable — an unknown colour never gets that far.
-    expect(question()).toMatch(/doodlePen = computed\(\(\) => doodlePen\(this\.question\(\)\.settings\)\)/);
-    expect(stripped('form-question.component.html')).toMatch(/\[pen\]="doodlePen\(\)"/);
+    expect(question()).toMatch(/pen = computed\(\(\) => doodlePen\(this\.question\(\)\.settings\)\)/);
+    expect(stripped('form-question.component.html')).toMatch(/\[pen\]="pen\(\)"/);
   });
 });
 

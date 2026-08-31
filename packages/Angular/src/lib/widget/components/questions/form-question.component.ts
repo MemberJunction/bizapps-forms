@@ -598,7 +598,7 @@ export class FormQuestionComponent {
    * `Settings` is reachable by paste and by API, and `doodlePen` falls back key by key, so an
    * unknown colour or a nonsense width becomes the default before it can reach a canvas.
    */
-  protected readonly doodlePen = computed(() => doodlePen(this.question().settings));
+  protected readonly pen = computed(() => doodlePen(this.question().settings));
 
   /** Read a string setting off the question, or '' when unset or the wrong type. */
   private settingText(key: string): string {

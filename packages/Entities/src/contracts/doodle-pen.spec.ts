@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DOODLE_PEN_COLORS,
   DOODLE_PEN_WIDTHS,
+  DOODLE_PEN_WIDTH_NAMES,
   DOODLE_PEN_CONTROL_CHOICES,
+  DOODLE_PEN_DEFAULTS,
   doodlePen,
-  doodlePenLineWidth,
 } from './doodle-pen';
 import type { JSONValue } from './json-value';
 
@@ -89,9 +90,17 @@ describe('the pen tables', () => {
     expect(DOODLE_PEN_WIDTHS.Medium).toBeLessThan(DOODLE_PEN_WIDTHS.Broad);
   });
 
-  it('resolves a width name to the number the canvas takes', () => {
-    expect(doodlePenLineWidth('Fine')).toBe(DOODLE_PEN_WIDTHS.Fine);
-    expect(doodlePenLineWidth('Broad')).toBe(DOODLE_PEN_WIDTHS.Broad);
+  it('offers every width the table defines — the list is derived, not restated', () => {
+    // The failure a hand-written list has no way to prevent: a fourth width added to the table
+    // compiles cleanly and simply never appears in the picker or the author's dropdown.
+    expect([...DOODLE_PEN_WIDTH_NAMES].sort()).toEqual(Object.keys(DOODLE_PEN_WIDTHS).sort());
+  });
+
+  it('names a default that is itself on offer', () => {
+    // A default outside its own list would be unreachable from the picker: a respondent who moved
+    // off it could never get back, and the author's dropdown could not describe it.
+    expect(DOODLE_PEN_COLORS).toContain(DOODLE_PEN_DEFAULTS.color);
+    expect(DOODLE_PEN_WIDTH_NAMES).toContain(DOODLE_PEN_DEFAULTS.width);
   });
 
   it('offers the empty choice first, so "no controls" is what an author lands on', () => {

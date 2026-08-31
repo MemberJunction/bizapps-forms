@@ -15,6 +15,7 @@
 import {
   DOODLE_PEN_COLORS,
   DOODLE_PEN_CONTROL_CHOICES,
+  DOODLE_PEN_DEFAULTS,
   DOODLE_PEN_WIDTH_NAMES,
   type FormQuestionType,
   type JSONValue,
@@ -48,9 +49,25 @@ export interface QuestionSettingField {
   choices?: readonly { readonly value: string; readonly label: string }[];
 }
 
-/** Turn a contract's value tuple into `choice` options, with a named blank at the front. */
+/**
+ * Turn a contract's value tuple into `choice` options, ALWAYS with a named blank at the front.
+ *
+ * The blank is not optional and not conditional on the tuple containing one. It is the row's
+ * "leave it to the default" option, and it carries two jobs: `withSetting` deletes the key when
+ * it is picked (so the widget's own default applies), and its LABEL is the only place the panel
+ * tells the author what that default is. A list with no blank cannot be cleared once set, and —
+ * worse — renders the first value as though it were the default, so the panel says `Fine` over a
+ * pad that draws `Medium`.
+ *
+ * Values equal to the blank are dropped, so a tuple that already carries `''` does not produce a
+ * duplicate. Pass `values` WITHOUT the default's own name: the blank already means it, and two
+ * entries with one outcome is a choice that is not a choice.
+ */
 function choicesOf(values: readonly string[], blankLabel: string): QuestionSettingField['choices'] {
-  return values.map((value) => ({ value, label: value === '' ? blankLabel : value }));
+  return [
+    { value: '', label: blankLabel },
+    ...values.filter((value) => value !== '').map((value) => ({ value, label: value })),
+  ];
 }
 
 const PLACEHOLDER: QuestionSettingField = {
@@ -117,15 +134,21 @@ const SETTINGS: Partial<Record<FormQuestionType, readonly QuestionSettingField[]
       key: 'penColor',
       label: 'Pen colour',
       kind: 'choice',
-      choices: choicesOf(DOODLE_PEN_COLORS, 'Follow the form'),
+      choices: choicesOf(
+        DOODLE_PEN_COLORS.filter((c) => c !== DOODLE_PEN_DEFAULTS.color),
+        `${DOODLE_PEN_DEFAULTS.color} — follow the form’s text colour`,
+      ),
       hint: 'The colour a drawing starts in. Every pen is mixed toward the form’s text colour so it stays legible on any background.',
     },
     {
       key: 'penWidth',
       label: 'Stroke width',
       kind: 'choice',
-      choices: choicesOf(DOODLE_PEN_WIDTH_NAMES, 'Medium'),
-      hint: 'How thick a drawing starts. Default Medium.',
+      choices: choicesOf(
+        DOODLE_PEN_WIDTH_NAMES.filter((w) => w !== DOODLE_PEN_DEFAULTS.width),
+        `${DOODLE_PEN_DEFAULTS.width} (default)`,
+      ),
+      hint: 'How thick a drawing starts.',
     },
     {
       key: 'penControls',

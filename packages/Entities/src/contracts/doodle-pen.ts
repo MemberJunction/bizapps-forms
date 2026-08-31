@@ -51,8 +51,18 @@ export const DOODLE_PEN_WIDTHS = { Fine: 1.25, Medium: 2.5, Broad: 5 } as const;
 /** One named stroke width. */
 export type DoodlePenWidth = keyof typeof DOODLE_PEN_WIDTHS;
 
-/** The width names in offer order, thin to thick. */
-export const DOODLE_PEN_WIDTH_NAMES: readonly DoodlePenWidth[] = ['Fine', 'Medium', 'Broad'];
+/**
+ * The width names in offer order, thin to thick.
+ *
+ * DERIVED from the table rather than listed again, for the reason `FORM_QUESTION_TYPES` is: a
+ * hand-written copy has no way to learn that the table grew, so a fourth width would compile
+ * cleanly and simply never appear in the picker or the author's dropdown. `Object.keys` loses the
+ * literal key types, so the cast restores what the table already proves — the same one place a
+ * cast is warranted there.
+ */
+export const DOODLE_PEN_WIDTH_NAMES: readonly DoodlePenWidth[] = Object.keys(
+  DOODLE_PEN_WIDTHS,
+) as DoodlePenWidth[];
 
 /**
  * Which pen controls the respondent may use, as the author stores it.
@@ -79,8 +89,15 @@ export interface DoodlePen {
   readonly offerWidth: boolean;
 }
 
-/** What a question with no pen settings draws with — today's pad, stated once. */
-const DEFAULT_PEN: DoodlePen = { color: 'Ink', width: 'Medium', offerColor: false, offerWidth: false };
+/**
+ * What a question with no pen settings draws with — today's pad, stated once.
+ *
+ * Exported because the BUILDER needs it too: its dropdowns label the blank option with the
+ * default's name ("Medium"), and a hand-copied name there would eventually say Medium while the
+ * pad drew Fine. The panel would then be lying about behaviour, which is worse than offering
+ * nothing.
+ */
+export const DOODLE_PEN_DEFAULTS: DoodlePen = { color: 'Ink', width: 'Medium', offerColor: false, offerWidth: false };
 
 /**
  * Read a doodle question's pen configuration out of its `Settings` blob.
@@ -91,20 +108,15 @@ const DEFAULT_PEN: DoodlePen = { color: 'Ink', width: 'Medium', offerColor: fals
  */
 export function doodlePen(settings?: Record<string, JSONValue>): DoodlePen {
   if (!settings) {
-    return DEFAULT_PEN;
+    return DOODLE_PEN_DEFAULTS;
   }
   const controls = asMember(settings['penControls'], DOODLE_PEN_CONTROL_CHOICES) ?? '';
   return {
-    color: asMember(settings['penColor'], DOODLE_PEN_COLORS) ?? DEFAULT_PEN.color,
-    width: asMember(settings['penWidth'], DOODLE_PEN_WIDTH_NAMES) ?? DEFAULT_PEN.width,
+    color: asMember(settings['penColor'], DOODLE_PEN_COLORS) ?? DOODLE_PEN_DEFAULTS.color,
+    width: asMember(settings['penWidth'], DOODLE_PEN_WIDTH_NAMES) ?? DOODLE_PEN_DEFAULTS.width,
     offerColor: controls === 'Colour' || controls === 'Colour and width',
     offerWidth: controls === 'Width' || controls === 'Colour and width',
   };
-}
-
-/** The canvas `lineWidth` for a named width. */
-export function doodlePenLineWidth(width: DoodlePenWidth): number {
-  return DOODLE_PEN_WIDTHS[width];
 }
 
 /**

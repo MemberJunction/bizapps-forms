@@ -36,8 +36,8 @@ import {
 
 import {
   DOODLE_PEN_COLORS,
+  DOODLE_PEN_WIDTHS,
   DOODLE_PEN_WIDTH_NAMES,
-  doodlePenLineWidth,
   type DoodlePen,
   type DoodlePenColor,
   type DoodlePenWidth,
@@ -376,10 +376,13 @@ export class DoodlePadComponent {
   });
 
   private readonly pad = viewChild<ElementRef<HTMLCanvasElement>>('pad');
-  /** Whether the pen is currently down — a stroke is being drawn right now. */
-  private penDown = false;
   /**
-   * The stroke being drawn right now, accumulating points until the pen lifts.
+   * The stroke being drawn right now, accumulating points until the pen lifts — and, by being
+   * non-null, the fact that the pen IS down.
+   *
+   * One field rather than a `penDown` boolean beside it, because two would be one fact stated
+   * twice and they can come apart: `resetModel` cancels a stroke in progress, and a separate flag
+   * left standing would have the next pointer move drawing onto a canvas the model says is empty.
    *
    * It carries its own colour and width, fixed at pointer-DOWN. Reading the pen at commit time
    * instead would let a stroke be stored in a pen it was not drawn in — the respondent draws,
@@ -420,7 +423,6 @@ export class DoodlePadComponent {
     // exists: a repaint would bury this stroke under the stored image, and the previous stroke's
     // export is about to be superseded by this one's anyway.
     this.captures.supersede();
-    this.penDown = true;
   }
 
   /**
@@ -431,7 +433,8 @@ export class DoodlePadComponent {
    * a long drawing progressively laggier. Only undo and eviction repaint from the model.
    */
   protected onPointerMove(event: PointerEvent): void {
-    if (!this.penDown) {
+    const stroke = this.current;
+    if (!stroke) {
       return;
     }
     const canvas = this.pad()?.nativeElement;
@@ -440,16 +443,17 @@ export class DoodlePadComponent {
       return;
     }
     const point = this.toBitmapPoint(canvas, event);
-    this.current?.points.push(point);
+    stroke.points.push(point);
     ctx.lineTo(point.x, point.y);
     ctx.stroke();
   }
 
   protected onPointerUp(event: PointerEvent): void {
-    if (!this.penDown) {
+    const stroke = this.current;
+    if (!stroke) {
       return;
     }
-    this.penDown = false;
+    this.current = null;
     const canvas = this.pad()?.nativeElement;
     if (canvas?.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
@@ -457,9 +461,7 @@ export class DoodlePadComponent {
     // A tap that never moved is not a stroke — the same as before this pad had a model, where
     // `hasInk` was only set on pointer MOVE. Committing one would make a stray finger-brush on a
     // scrolling page an answer, and start an upload for it.
-    const stroke = this.current;
-    this.current = null;
-    if (stroke && stroke.points.length > 1) {
+    if (stroke.points.length > 1) {
       this.commitStroke(stroke);
     }
     // Export on every stroke, deliberately.
@@ -532,7 +534,7 @@ export class DoodlePadComponent {
 
   /** The line a width button draws, at least 2px so `Fine` is visible as a button glyph. */
   protected ruleHeight(width: DoodlePenWidth): number {
-    return Math.max(2, Math.round(doodlePenLineWidth(width)));
+    return Math.max(2, Math.round(DOODLE_PEN_WIDTHS[width]));
   }
 
   /**
@@ -545,20 +547,38 @@ export class DoodlePadComponent {
   private commitStroke(stroke: DoodleStroke): void {
     const { strokes, evicted } = addStroke(this.strokes(), stroke);
     for (const old of evicted) {
-      this.bakeIntoBase(old);
+      if (this.bakeIntoBase(old)) {
+        continue;
+      }
+      // The stroke could not be made permanent, so it must NOT leave the retained list: dropping
+      // it is the one outcome the cap's contract forbids — it would erase part of the drawing the
+      // respondent is looking at, and the next export would upload the erasure. Keeping it means
+      // the list runs over its bound, which is memory, and memory is the cheaper thing to lose.
+      this.strokes.set([...this.strokes(), stroke]);
+      return;
     }
     this.strokes.set(strokes);
   }
 
-  /** Render a stroke permanently into the base image, creating one if this is the first. */
-  private bakeIntoBase(stroke: DoodleStroke): void {
+  /**
+   * Render a stroke permanently into the base image, creating one if this is the first.
+   *
+   * Returns whether it landed. A 2D context is not something this code can go on without — the
+   * caller has to know, because the alternative to knowing is quietly losing a stroke.
+   */
+  private bakeIntoBase(stroke: DoodleStroke): boolean {
     const base = this.base() ?? this.newBaseCanvas();
     const ctx = base.getContext('2d');
     if (!ctx) {
-      return;
+      console.warn(
+        `[mj-form] could not add a stroke to the drawing held for "${this.subject()}", so the ` +
+          'oldest strokes stay undoable rather than being dropped. The drawing is unaffected.',
+      );
+      return false;
     }
     drawStroke(ctx, stroke);
     this.base.set(base);
+    return true;
   }
 
   /** A blank offscreen canvas at the pad's bitmap resolution. */
@@ -659,15 +679,22 @@ export class DoodlePadComponent {
   }
 
   /**
-   * Forget the whole drawing — base image and undo history together.
+   * Forget everything this pad was holding — the drawing AND the pen in the respondent's hand.
    *
-   * Both, always. A reset that kept the base would leave a restored image under a pad that has
-   * moved to another question, and one that kept the strokes would replay them onto it.
+   * All of it, always. A reset that kept the base would leave a restored image under a pad that
+   * has moved to another question, and one that kept the strokes would replay them onto it.
+   *
+   * The PEN belongs on that list for the same reason and it is easy to miss: one pad instance
+   * serves consecutive Doodle questions in OneQuestion mode, so a respondent who picked Red on
+   * one question would keep drawing Red on the next — over the author's chosen default for it,
+   * and with no way back on a question that offers no colour control at all.
    */
   private resetModel(): void {
     this.base.set(null);
     this.strokes.set([]);
     this.current = null;
+    this.chosenColor.set(null);
+    this.chosenWidth.set(null);
   }
 
   /** Start a stroke, configuring the brush from the pen currently in the respondent's hand. */
@@ -712,11 +739,11 @@ export class DoodlePadComponent {
   }
 
   private strokeWidth(): number {
-    return doodlePenLineWidth(this.activeWidth());
+    return DOODLE_PEN_WIDTHS[this.activeWidth()];
   }
 
   /** CSS-pixel pointer position → bitmap coordinates, which differ whenever the pad is scaled. */
-  private toBitmapPoint(canvas: HTMLCanvasElement, event: PointerEvent): { x: number; y: number } {
+  private toBitmapPoint(canvas: HTMLCanvasElement, event: PointerEvent): DoodlePoint {
     const rect = canvas.getBoundingClientRect();
     const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
     const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
