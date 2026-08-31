@@ -31,11 +31,12 @@ import {
   type FormAnswerInput,
   type FormSubmissionResult,
   type FieldError,
+  type mjBizAppsFormsFormResponseEntityType,
   type PublishedFormScreen,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
-import { persistSubmission } from './persistence.service';
+import { persistSubmission, responseIsOurs } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
 import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
@@ -97,6 +98,11 @@ export interface PipelineSubmission {
    * `AnonymousSessionID` is non-empty and is not this caller's. The lookups below only narrow
    * which row is a candidate — putting the guard in them made it opt-in, because a caller chose
    * which lookup ran by deciding whether to send `x-session-id` (issue #78).
+   *
+   * So this id is a CAPABILITY, not an identity, and only for a row that has no owner. Holding it
+   * is not grounds for being told anything about a row that has one — not even whether it is
+   * finished — which is what `checkDuplicate` now asks `responseIsOurs` before it answers
+   * (issues #100/#101).
    */
   clientResponseId?: string;
 }
@@ -767,6 +773,20 @@ async function resolveExistingPartial(
  * result reports the row's OWN status and copy rather than a generic confirmation — a respondent
  * whose first attempt was screened out must not be told on their retry that it was recorded.
  *
+ * WHOSE REPEAT IT IS, though, is a question this has to ask (#100/#101). Reporting a row's status
+ * is disclosure, and the id is not on its own proof of anything: it is a capability only for a row
+ * that has no owner. The session branch narrows to the caller's own rows in SQL and needs nothing
+ * more; the by-id branch does not, so it asks `responseIsOurs` — THE ownership rule, imported from
+ * the persistence seam that enforces it rather than restated here as a second predicate.
+ *
+ * WHAT A STRANGER CAN STILL LEARN, recorded so it is a bound somebody chose. A caller naming an id
+ * that belongs to NOBODY is answered `success` — a row is created at that id, and it is theirs —
+ * so "this id is taken by someone else" stays distinguishable from "this id is free". That is
+ * structural: the client mints the primary key, and an endpoint that lets a caller create a row at
+ * an id of their choosing cannot also hide whether that id is in use. It is empty within the
+ * threat model these issues assume, where the caller has already observed the id in traffic. What
+ * is closed is everything ABOUT the response — sealed or not, `Complete` or `Disqualified`.
+ *
  * Fail-CLOSED on a lookup error: a resubmit is refused rather than risking a second row.
  */
 async function checkDuplicate(
@@ -787,18 +807,27 @@ async function checkDuplicate(
     if (!byId.ok) {
       return fail('Could not verify submission status; please retry shortly.');
     }
-    if (byId.response && isTerminalResponseStatus(byId.response.Status)) {
-      return {
-        success: true,
-        responseId: byId.response.ID,
-        status: byId.response.Status,
-        // The repeat is shown what the original outcome was, not a generic thank-you: a
-        // respondent whose first attempt was screened out must not be told on their retry that
-        // their response has been recorded.
-        ...(byId.response.Status === 'Disqualified'
-          ? terminalRepeatFields(disqualifiedBy)
-          : confirmationFields(resolved, buildAnswerMap(submission.answers))),
-      };
+    // Ownership BEFORE the terminal test — `reconcileDuplicate` orders it the same way, and for
+    // the same reason: the branch below reports the row's status while writing nothing, so a
+    // foreign row reaching it is disclosure the write seam never sees (#100/#101).
+    //
+    // A row that is not ours is simply NOT A REPEAT WE RECOGNISE, and we do not refuse it here.
+    // The submission carries on to persistence, collides on the primary key it named, and the one
+    // gate refuses it with the one message every ownership failure gets. Refusing here would add a
+    // second place that says no; declining to recognise adds none.
+    //
+    // THE COST, so it is a decision and not a surprise: a re-fire that presents an owned row's id
+    // under a blank or different session used to be answered here and is now refused. That caller
+    // is already refused everywhere else (issue #78 — an absent credential must not be more
+    // permissive than a wrong one), so this makes the read agree with the write rather than
+    // introducing a new refusal. No real widget reaches it: the session and the client id are
+    // minted together, so an id is only ever presented alongside the session that created it.
+    if (
+      byId.response &&
+      responseIsOurs(byId.response, ctx.sessionId) &&
+      isTerminalResponseStatus(byId.response.Status)
+    ) {
+      return recognisedRepeat(resolved, byId.response, submission, disqualifiedBy);
     }
   }
 
@@ -818,25 +847,39 @@ async function checkDuplicate(
     return fail('Could not verify submission status; please retry shortly.');
   }
   if (existing.response) {
-    // Idempotent resubmit: surface the ORIGINAL response id and THE ROW'S OWN status and copy, so
-    // the client treats it as an already-recorded submission without creating a second row. The
-    // status is not always `Complete` — this branch now recognises every terminal status, and a
-    // session sealed by a knockout must be told that rather than congratulated. (No dedicated
-    // `duplicate` flag is added to the shared FormSubmissionResult contract — that lives in
-    // @mj-biz-apps/forms-entities, outside this change's scope; the responseId plus the row's
-    // status is the client-visible signal.)
-    return {
-      success: true,
-      responseId: existing.response.ID,
-      // The row's OWN status and copy, for the same reason the by-id branch above uses them: a
-      // session sealed by a knockout must not be told its response has been recorded.
-      status: existing.response.Status,
-      ...(existing.response.Status === 'Disqualified'
-        ? terminalRepeatFields(disqualifiedBy)
-        : confirmationFields(resolved, buildAnswerMap(submission.answers))),
-    };
+    return recognisedRepeat(resolved, existing.response, submission, disqualifiedBy);
   }
   return undefined;
+}
+
+/**
+ * What a recognised repeat is answered: the ROW's own id, status and copy.
+ *
+ * Both branches of {@link checkDuplicate} built this object, identically, and the duplication was
+ * load-bearing rather than cosmetic — the two copies each carried their own comment explaining the
+ * `Disqualified` case, so a change to what a repeat may be told had two places to reach and the
+ * gate that decides WHOSE repeat it is now has one shape to protect.
+ *
+ * The status is not always `Complete`: a session sealed by a knockout must be told it was screened
+ * out rather than congratulated, which is why the copy follows the row's status and not the form's
+ * confirmation. (No dedicated `duplicate` flag is added to the shared `FormSubmissionResult` — that
+ * contract lives in @mj-biz-apps/forms-entities; the responseId plus the row's status is the
+ * client-visible signal.)
+ */
+function recognisedRepeat(
+  resolved: ResolvedDefinition,
+  row: Pick<mjBizAppsFormsFormResponseEntityType, 'ID' | 'Status'>,
+  submission: PipelineSubmission,
+  disqualifiedBy: PublishedFormScreen | undefined,
+): FormSubmissionResult {
+  return {
+    success: true,
+    responseId: row.ID,
+    status: row.Status,
+    ...(row.Status === 'Disqualified'
+      ? terminalRepeatFields(disqualifiedBy)
+      : confirmationFields(resolved, buildAnswerMap(submission.answers))),
+  };
 }
 
 /**

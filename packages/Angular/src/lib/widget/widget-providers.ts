@@ -33,8 +33,8 @@ import { FormsMockUploadService } from './api/form-upload.mock.service';
  *
  * Read and upload are deliberately branched on the SAME expression. They were once
  * branched on nothing at all — the uploader was bound unconditionally — and the preview
- * answered every drawn signature with "Uploads are not available for this form.", which
- * also made a required Signature question impossible to get past. Splitting the condition
+ * answered every drawing with "Uploads are not available for this form.", which also made
+ * a required Doodle question impossible to get past. Splitting the condition
  * is how that comes back.
  */
 export function formsWidgetProviders(config: FormsApiConfig): Provider[] {

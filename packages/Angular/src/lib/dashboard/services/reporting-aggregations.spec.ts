@@ -48,7 +48,7 @@ describe('insightRoleFor', () => {
     expect(insightRoleFor('ShortText')).toBe('openText');
     expect(insightRoleFor('LongText')).toBe('openText');
     expect(insightRoleFor('FileUpload')).toBe('attachment');
-    expect(insightRoleFor('Signature')).toBe('attachment');
+    expect(insightRoleFor('Doodle')).toBe('attachment');
   });
 });
 

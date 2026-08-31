@@ -30,9 +30,9 @@ import { PublishService, type PublishResult } from './publish.service';
 import { QuestionEditorComponent } from './question-editor.component';
 import { ScreenEditorComponent } from './screen-editor.component';
 import { PageEditorComponent } from './page-editor.component';
-import { ImportQuestionsComponent } from './import-questions.component';
-import type { ImportedQuestion, ImportResult } from './question-import';
 import { DistributionManagerComponent } from './distribution-manager.component';
+import { DistributionService } from './distribution.service';
+import { formReach, type FormReach, type ShareLinkFacts } from './share-state';
 import { AutomationTabComponent, type MappableQuestion } from './automation-tab.component';
 import { SaveAsTemplateDialogComponent, type SaveAsTemplateRequest } from '../templates/save-as-template-dialog.component';
 import { FormCloneService } from '../templates/form-clone.service';
@@ -48,7 +48,7 @@ import { DesignPanelComponent } from './design-panel.component';
 import { FormPreviewModalComponent } from './form-preview-modal.component';
 import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
-import { endScreensOf, welcomeScreenOf } from './builder-models';
+import { allQuestions, endScreensOf, welcomeScreenOf } from './builder-models';
 import { defaultEndingId } from './default-ending';
 import {
   QUESTION_PALETTE_GROUPS,
@@ -59,20 +59,22 @@ import {
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
-import { SCORE_SOURCE, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
+import { SCORE_SOURCE, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpTargetOptions, targetValue, type JumpTargetOption } from './jump-target-options';
 import { jumpReach, reachNote, readHorizon, type ReachPage, type ReachSource } from './jump-reach';
 import { RuleBadgeComponent } from './rule-badge.component';
 import {
+  brokenRuleLines,
   collectRuleEntries,
+  conditionSourcesOf,
   endingReachFor,
   ruleBadgesFor,
+  ruleInventoryFormOf,
   type EndingReach,
   type RuleBadge,
   type RuleEntry,
   type RuleInventoryForm,
 } from './rules-inventory';
-import { parseConditionalRule } from './json-fields';
 import { FORM_BUILDER_STYLES } from './form-builder.styles';
 import {
   definitionFingerprint,
@@ -156,7 +158,6 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     QuestionEditorComponent,
     ScreenEditorComponent,
     PageEditorComponent,
-    ImportQuestionsComponent,
     DistributionManagerComponent,
     DesignPanelComponent,
     FormPreviewModalComponent,
@@ -165,7 +166,14 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     SaveAsTemplateDialogComponent,
     RuleBadgeComponent,
   ],
-  providers: [BuilderStateService, DesignStateService, PublishService, FormCloneService, FormTemplatesService],
+  providers: [
+    BuilderStateService,
+    DesignStateService,
+    PublishService,
+    DistributionService,
+    FormCloneService,
+    FormTemplatesService,
+  ],
   templateUrl: './form-builder.component.html',
   styles: [FORM_BUILDER_STYLES],
 })
@@ -175,6 +183,7 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected readonly state = inject(BuilderStateService);
   private readonly design = inject(DesignStateService);
   private readonly publisher = inject(PublishService);
+  private readonly distributions = inject(DistributionService);
   private readonly clone = inject(FormCloneService);
   private readonly templates = inject(FormTemplatesService);
 
@@ -200,11 +209,19 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   /** Live palette filter. At 25 types, scanning seven groups is slower than typing. */
   protected paletteQuery = '';
-  /** Whether the paste-to-import dialog is open. */
-  protected importOpen = false;
   protected activeTab: BuilderTab = 'build';
   protected busy = false;
   protected statusMessage = '';
+
+  /**
+   * The rules the last publish was refused over, or null when no refusal is standing.
+   *
+   * `statusMessage` alone cannot answer this. Most of what lands there is a fact that stays true
+   * — "Published version 4." is history — but a broken-rule refusal is a claim about the form as
+   * it is right now, and the author's next act is usually to falsify it. Keeping the rules it
+   * named is what lets the retraction fire for THAT message and leave the others alone.
+   */
+  private refusedRules: readonly string[] | null = null;
 
   /** Whether the "Save as template" dialog is up. */
   protected templateDialogOpen = false;
@@ -274,6 +291,9 @@ export class FormBuilderComponent extends BaseFormComponent {
   /** MJGlobal subscription behind {@link watchForAutomationChanges}; released on destroy. */
   private automationChanges?: EventSubscription;
 
+  /** MJGlobal subscription behind {@link watchForDistributionChanges}; released on destroy. */
+  private distributionChanges?: EventSubscription;
+
   /**
    * The style the draft currently resolves to, cached so the fingerprint stays synchronous.
    * A style change is publishable, so this is refreshed whenever one is applied.
@@ -327,6 +347,28 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   protected builderReady = false;
 
+  /**
+   * This form's share links, or `null` while unread or unreadable.
+   *
+   * Null is the honest starting value AND the honest failure value, and it has to be both:
+   * seeding `[]` would have the header announce "not shared" for the moment before the read
+   * lands, and go on announcing it forever if the read failed.
+   */
+  private shareLinks: ShareLinkFacts[] | null = null;
+
+  /**
+   * What the Published chip is entitled to say about this form being reachable.
+   *
+   * Publishing writes a `FormVersion`. It does not write a `FormDistribution`, and without
+   * one of those there is no URL — so the chip used to congratulate an author on a public
+   * link that did not exist, with the Distribute tab one click away still offering to create
+   * the first one (issue #83). Derived on read, from `now`, so a link that reaches its
+   * closing date or its response cap while the builder sits open stops counting.
+   */
+  protected get publishReach(): FormReach {
+    return formReach(this.shareLinks, new Date());
+  }
+
   protected get publishState(): PublishControlState {
     return publishControlState({
       dirty: this.dirty,
@@ -345,6 +387,7 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   private markDirty(): void {
     this.retireStaleNotice();
+    this.retireStaleRefusal();
     this.draftFingerprint = this.tree
       ? definitionFingerprint(
           buildPublishedDefinition(
@@ -406,9 +449,11 @@ export class FormBuilderComponent extends BaseFormComponent {
       }
     }
     await this.refreshPublishState();
+    await this.refreshShareLinks();
     await this.refreshSavedTemplate(this.record.ID);
     this.watchForTemplateChanges();
     this.watchForAutomationChanges();
+    this.watchForDistributionChanges();
     this.busy = false;
     this.announceReady();
   }
@@ -533,11 +578,10 @@ export class FormBuilderComponent extends BaseFormComponent {
    * Start a new section.
    *
    * Pages shipped end to end — entity, published contract, page header on the canvas, the widget
-   * rendering a title and description per section — with no way for an author to CREATE one.
-   * `addPage` had exactly two callers: the implicit first page, and the import/paste path when a
-   * pasted block named a section. So a multi-page form was reachable only by pasting one, and
-   * the page header hides itself below two pages, which meant an author who had never pasted
-   * never saw page controls at all and had no way to discover they existed.
+   * rendering a title and description per section — with no way for an author to CREATE one, so
+   * this button is the only thing that brings a second page into existence. The gap hid itself:
+   * the page header does not render below two pages, so an author who never got a second page
+   * never saw the page controls at all and had no way to discover they existed.
    */
   protected async addPage(): Promise<void> {
     if (!this.tree || this.busy) {
@@ -650,32 +694,20 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
-   * The questions in this list that a rule may actually read.
-   *
-   * ONE definition, for all six source lists — a page's show gate and its jump, a question's
-   * show gate and its jump, an ending's, and the Rules tab's inventory. Each of those used to
-   * map the tree itself, so "which questions can a rule read" was answered six times, and the
-   * first exclusion to arrive would have had to be remembered in all six.
-   *
-   * `toConditionalSource` returns `undefined` for a question that collects no answer — a
-   * `Statement` renders prose and never reaches the answer map, so every operator on it is a
-   * constant, and it was offered in the question dropdown all the same.
-   */
-  private sourcesOf(questions: readonly QuestionNode[]): ConditionalSourceQuestion[] {
-    return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
-  }
-
-  /**
    * The sources a rule whose read horizon is `horizon` may reference.
    *
    * Slices the FULL question list and filters afterwards, never the other way round.
-   * `sourcesOf` drops a question that collects no answer, so slicing an already-filtered list
-   * would shift every horizon on any form carrying a `Statement` — silently, and in the
+   * `conditionSourcesOf` drops a question that collects no answer, so slicing an already-filtered
+   * list would shift every horizon on any form carrying a `Statement` — silently, and in the
    * direction that makes a legal rule look broken.
    */
   private sourcesUpTo(horizon: number): ConditionalSourceQuestion[] {
-    const questions = (this.tree?.pages ?? []).flatMap((page) => page.questions);
-    return this.sourcesOf(questions.slice(0, horizon + 1));
+    return conditionSourcesOf(this.questionsInFlowOrder.slice(0, horizon + 1));
+  }
+
+  /** Every question on the form, in page-then-display order — what both source lists read. */
+  private get questionsInFlowOrder(): QuestionNode[] {
+    return this.tree ? allQuestions(this.tree) : [];
   }
 
   /**
@@ -853,9 +885,13 @@ export class FormBuilderComponent extends BaseFormComponent {
    * reach is still a rule that reads. The condition editor differences it against the offered
    * sources to tell "this question was deleted" from "this question is answered after your rule
    * runs" — see `staleSourceLabel`.
+   *
+   * Literally the list `ruleInventoryFormOf` puts in `sources`, from the same function. Two
+   * walks would be two answers to "which questions can a rule read", and the editor differences
+   * one against a list the badges resolve through the other.
    */
   protected get formSources(): ConditionalSourceQuestion[] {
-    return (this.tree?.pages ?? []).flatMap((page) => this.sourcesOf(page.questions));
+    return conditionSourcesOf(this.questionsInFlowOrder);
   }
 
   /** Every ending screen, as a jump destination. */
@@ -985,95 +1021,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     ];
   }
 
-  // -- import ---------------------------------------------------------------
-
-  protected openImport(): void {
-    this.importOpen = true;
-    this.cdr.markForCheck();
-  }
-
-  protected closeImport(): void {
-    this.importOpen = false;
-    this.cdr.markForCheck();
-  }
-
-  /**
-   * Create the pages and questions a paste described.
-   *
-   * Appends rather than replaces. Import is used to ADD a section far more often than to start
-   * over, and an import that silently wiped an existing form would be unrecoverable — there is
-   * no undo here.
-   */
-  protected async onImported(result: ImportResult): Promise<void> {
-    if (!this.tree || this.busy) {
-      return;
-    }
-    this.importOpen = false;
-    this.busy = true;
-    try {
-      for (const importedPage of result.pages) {
-        const page = await this.pageForImport(importedPage.title);
-        if (!page) {
-          continue;
-        }
-        for (const q of importedPage.questions) {
-          await this.createImportedQuestion(page, q);
-        }
-      }
-      this.markDirty();
-    } finally {
-      this.busy = false;
-      this.cdr.markForCheck();
-    }
-  }
-
-  /**
-   * The page an imported block goes on: a new one when the paste named it, else the last
-   * existing page so an untitled paste extends the form the author is already looking at.
-   */
-  private async pageForImport(title: string | undefined): Promise<PageNode | undefined> {
-    if (!this.tree) {
-      return undefined;
-    }
-    if (title) {
-      const created = await this.state.addPage(this.tree, title);
-      if (created) {
-        this.tree.pages.push(created);
-      }
-      return created;
-    }
-    return this.tree.pages[this.tree.pages.length - 1];
-  }
-
-  private async createImportedQuestion(page: PageNode, imported: ImportedQuestion): Promise<void> {
-    if (!this.tree) {
-      return;
-    }
-    const node = await this.state.addQuestion(this.tree, page, imported.type, imported.prompt);
-    if (!node) {
-      return;
-    }
-    if (imported.isRequired) {
-      node.entity.IsRequired = true;
-      await this.state.save(node.entity);
-    }
-    if (imported.options.length > 0) {
-      // The seeded "Option 1 / Option 2" pair is a placeholder for an author who will edit it;
-      // a paste that named its options has already done that, so the placeholders go.
-      for (const seeded of [...node.options]) {
-        await this.state.deleteOption(seeded);
-      }
-      node.options = [];
-      for (const label of imported.options) {
-        const option = await this.state.addOption(node, label);
-        if (option) {
-          node.options.push(option);
-        }
-      }
-    }
-    page.questions.push(node);
-  }
-
   protected get selectedNode(): QuestionNode | null {
     if (!this.tree || !this.selectedQuestionId) {
       return null;
@@ -1131,41 +1078,17 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * The whole form as the inventory reads it.
    *
-   * One shape, two readers — the sentences on the canvas and the reach line on each ending. They
-   * have to be built from the same walk: the badges say a rule is broken and the reach line says
-   * whether anyone arrives, and a row showing two answers assembled from two different views of
-   * the form is a row that can contradict itself.
+   * One shape, several readers — the sentences on the canvas, the reach line on each ending, the
+   * reorder notice, and the publish gate. They have to be built from the same walk: the badges
+   * say a rule is broken and the reach line says whether anyone arrives, and a row showing two
+   * answers assembled from two different views of the form is a row that can contradict itself.
    *
-   * Only called with a tree present; the getters above guard for it.
+   * The projection itself is `ruleInventoryFormOf` in `rules-inventory.ts` rather than code here,
+   * because publish reads it too and it must be the same one — see issue #79. This getter is only
+   * the component's null-tree guard.
    */
   private get ruleInventoryForm(): RuleInventoryForm {
-    const tree = this.tree;
-    if (!tree) {
-      return { sources: [], pages: [], endings: [] };
-    }
-    return {
-      sources: this.formSources,
-      pages: tree.pages.map((page, index) => ({
-        id: page.entity.ID,
-        label: page.entity.Title || `Page ${index + 1}`,
-        conditionalRule: parseConditionalRule(page.entity.ConditionalRule),
-        questions: page.questions.map((q) => ({
-          id: q.entity.ID,
-          label: q.entity.Prompt,
-          conditionalRule: parseConditionalRule(q.entity.ConditionalRule),
-          // Carried so a `Go to` can say how many REQUIRED questions it passes over, which is
-          // the half of "this rule skips things" an author actually needs to weigh.
-          isRequired: q.entity.IsRequired === true,
-        })),
-      })),
-      endings: this.endScreens.map((screen) => ({
-        id: screen.ID,
-        label: screen.Title || 'Ending screen',
-        conditionalRule: parseConditionalRule(screen.ConditionalRule),
-        isDisqualification: screen.IsDisqualification === true,
-        isDefault: screen.IsDefault === true,
-      })),
-    };
+    return this.tree ? ruleInventoryFormOf(this.tree) : { sources: [], pages: [], endings: [] };
   }
 
   /** Every question on the form, in page/display order — what the Automate tab maps from. */
@@ -1424,6 +1347,32 @@ export class FormBuilderComponent extends BaseFormComponent {
   }
 
   /**
+   * Drop the publish refusal once no rule is broken any more — HOWEVER they were fixed.
+   *
+   * Exactly the reasoning of {@link retireStaleNotice}, on the same clock, for the same reason:
+   * a refusal names rules, and repairing them by any route — reordering the question back,
+   * repairing the rule in the dialog, deleting the item outright — leaves a warning that has
+   * outlived what it warned about. It is worse than merely stale. `publishState` re-derives on
+   * the same edit, so the toolbar ends up showing the "Published" pill beside a line insisting
+   * four broken rules would ship: two answers about one form, one of them false. That is the
+   * failure issue #79 exists to remove, and the message enforcing it must not re-introduce it.
+   *
+   * Asked of `brokenRuleLines` — the very function the refusal was assembled from, not a second
+   * walk that could answer differently. Only a refusal that was ABOUT rules is retractable this
+   * way, which is what `refusedRules` records: an unreadable settings row is not something
+   * fixing a rule repairs, so that message stays until the author publishes again.
+   *
+   * Cheap by construction: the guard short-circuits unless a refusal is actually standing, so
+   * the inventory walk happens on the edits after a refusal and nowhere else.
+   */
+  private retireStaleRefusal(): void {
+    if (this.refusedRules !== null && this.tree && brokenRuleLines(this.tree).length === 0) {
+      this.refusedRules = null;
+      this.statusMessage = '';
+    }
+  }
+
+  /**
    * Every item that can carry a rule, by id, named the way the canvas names it.
    *
    * Read from the same projection the badges are built from, so the band and the badge it points
@@ -1483,6 +1432,8 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.templateChanges = undefined;
     this.automationChanges?.unsubscribe();
     this.automationChanges = undefined;
+    this.distributionChanges?.unsubscribe();
+    this.distributionChanges = undefined;
     super.ngOnDestroy();
   }
 
@@ -1510,39 +1461,89 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (this.automationChanges) {
       return;
     }
-    this.automationChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
-      if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
-        return;
-      }
-      const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      if (args?.type !== 'save' && args?.type !== 'delete') {
-        return;
-      }
-      if (args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.FormAutomation) {
-        return;
-      }
-      void this.refreshDraftAutomations().then(() => this.markDirty());
-    });
+    this.automationChanges = this.onEntityWrite(
+      FORMS_ENTITY.FormAutomation,
+      ['save', 'delete'],
+      () => void this.refreshDraftAutomations().then(() => this.markDirty()),
+    );
+  }
+
+  /**
+   * Re-read the share links this form is reachable through.
+   *
+   * A failed read leaves {@link shareLinks} null, which the header renders as "we could not
+   * check" — never as "there are none", which would send the author off to create a second
+   * link beside one they already have.
+   */
+  private async refreshShareLinks(): Promise<void> {
+    this.shareLinks = await this.distributions.shareLinkFacts(this.record.ID);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Keep the header honest about links created, paused, scheduled or deleted elsewhere.
+   *
+   * The builder stays mounted while its tabs change, so without this the Distribute tab
+   * minting the very first share link would leave the header still insisting the form is not
+   * shared — the inverse of #83 and no more true. Both save AND delete, and unfiltered by
+   * form: this component never writes `FormDistribution` rows itself, so any event for that
+   * entity came from somewhere else and is worth one cheap seven-column read.
+   */
+  private watchForDistributionChanges(): void {
+    if (this.distributionChanges) {
+      return;
+    }
+    this.distributionChanges = this.onEntityWrite(
+      FORMS_ENTITY.FormDistribution,
+      ['save', 'delete'],
+      () => void this.refreshShareLinks(),
+    );
   }
 
   private watchForTemplateChanges(): void {
     if (this.templateChanges) {
       return;
     }
-    this.templateChanges = MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
+    // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
+    // and re-reading the template on each one would load a tree per keystroke.
+    this.templateChanges = this.onEntityWrite(FORMS_ENTITY.Form, ['delete'], () => {
+      if (this.tree) {
+        void this.refreshSavedTemplate(this.tree.form.ID);
+      }
+    });
+  }
+
+  /**
+   * Run `onWrite` whenever some other surface saves or deletes a row of `entityName`.
+   *
+   * `BaseEntity.Save()` / `.Delete()` raise an MJGlobal `ComponentEvent` tagged
+   * `BaseEntity.BaseEventCode`; decoding that shape — the event kind, the untyped `args`, the
+   * write kind, the entity name — is four guards that say nothing about why any given watcher
+   * exists. Stated once here, the three callers above read as what they actually are: which
+   * entity, which writes, and what to re-read. The reasoning that differs between them stays
+   * at the call sites, where it belongs.
+   */
+  private onEntityWrite(
+    entityName: string,
+    types: readonly ('save' | 'delete')[],
+    onWrite: () => void,
+  ): EventSubscription {
+    // Widened rather than cast: the caller states its intent with a literal union, and the
+    // event hands back a bare string. Assigning the narrow array to the wide type is the one
+    // direction that is safe without an assertion.
+    const wanted: readonly string[] = types;
+    return MJGlobal.Instance.GetEventListener(false).subscribe((event) => {
       if (event.event !== MJEventType.ComponentEvent || event.eventCode !== BaseEntity.BaseEventCode) {
         return;
       }
       const args = event.args as { type?: string; baseEntity?: BaseEntity | null } | undefined;
-      // Only a DELETE: a save fires constantly while this very builder autosaves its own rows,
-      // and re-reading the template on each one would load a tree per keystroke.
-      if (args?.type !== 'delete' || args.baseEntity?.EntityInfo?.Name !== FORMS_ENTITY.Form) {
+      if (!args?.type || !wanted.includes(args.type)) {
         return;
       }
-      if (!this.tree) {
+      if (args.baseEntity?.EntityInfo?.Name !== entityName) {
         return;
       }
-      void this.refreshSavedTemplate(this.tree.form.ID);
+      onWrite();
     });
   }
 
@@ -1636,6 +1637,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     }
     this.busy = true;
     this.statusMessage = '';
+    this.refusedRules = null;
     // Land every coalesced edit before publishing. The snapshot is built from the in-memory tree
     // so it would be correct either way, but a form whose published version contains an edit its
     // own draft rows do not is a genuinely confusing thing to debug later.
@@ -1650,6 +1652,9 @@ export class FormBuilderComponent extends BaseFormComponent {
       await this.refreshPublishState();
     } else {
       this.statusMessage = result.error ?? 'Publish failed.';
+      // Only a broken-rule refusal is retractable by editing; `brokenRules` is absent on every
+      // other one, which is what leaves those messages standing until the next publish.
+      this.refusedRules = result.brokenRules ?? null;
       // A failed publish changed nothing, so the state we already had still holds. Without this
       // the control would sit on "Checking…" forever and the author would have no way to retry.
       this.publishStateReady = true;

@@ -1,5 +1,9 @@
 # Issues #64 + #66 + #67 — metadata convergence repair, CodeGen unblock, and one SQL escaper
 
+> *Historical record. `migrations/metadata-seed.manifest.json` and `npm run seed:manifest`, named
+> below, were retired by [#105](https://github.com/MemberJunction/bizapps-forms/issues/105) on
+> 2026-08-30 — the steps involving them no longer exist. Nothing else here changed.*
+
 **One branch, one PR.** Branch `fix/issues-64-66-67-metadata-converge` cut **from `next`**, tracking
 `origin/fix/issues-64-66-67-metadata-converge` (verify with `git branch -vv` before every push — never
 track `origin/next`). PR targets `next`. Closes #64, #66, #67.

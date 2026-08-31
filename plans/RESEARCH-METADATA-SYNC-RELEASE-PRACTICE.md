@@ -1,5 +1,21 @@
 # Research: when the sibling repos create `Metadata_Sync` migrations — and whether that cadence resolves #41
 
+> **⚠️ SUPERSEDED ON THE CADENCE QUESTION (2026-08-30, [#105]).** The comparison below is still
+> accurate and worth reading; its recommendation is not. Forms has since adopted the release-time
+> model. Two things changed the answer:
+>
+> 1. **CHECK 1 was not the safety net this document treats it as.** It inferred "the seed ships this
+>    record" from the presence of a manifest key, so regenerating the manifest without regenerating
+>    the seed passed it — green while the record reached no host. `bizapps-sales` hit that twice in
+>    three commits. The "Forgotten-seed risk: **Impossible**" row below was wrong.
+> 2. **The release step no longer has to be unverified.** The sibling repos' documented weakness —
+>    "no automated detection at all" — is answered here by `npm run check:release-seed`, which tests
+>    the property directly (every declared `primaryKey` appears in shipped SQL, no database needed)
+>    and runs in `publish.yml` before anything is published or tagged.
+>
+> The verdict on #41 itself is untouched: the grant gate (CHECK 3) is the fix under either cadence,
+> and it still runs on every PR.
+
 **Question** (Soham, 2026-08-13): MJ, bizapps-common, and bizapps-caliber create `Metadata_Sync`
 at release time — when the builder is upgrading `main` and publishing packages — not per feature.
 Does adopting that model resolve

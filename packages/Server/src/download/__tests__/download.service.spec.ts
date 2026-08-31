@@ -176,10 +176,10 @@ describe('loadResponseFile — files that cannot be served', () => {
 describe('loadResponseFile — what the reader gets', () => {
   it("prefers the provenance row's name, which is the name they clicked", async () => {
     const result = await loadResponseFile(
-      context({ upload: ok([provenance({ FileName: 'signature.png' })]), file: ok([fileRow({ Name: 'blob' })]) }),
+      context({ upload: ok([provenance({ FileName: 'doodle.png' })]), file: ok([fileRow({ Name: 'blob' })]) }),
       FILE_ID,
     );
-    expect(result.payload?.fileName).toBe('signature.png');
+    expect(result.payload?.fileName).toBe('doodle.png');
   });
 
   it('falls back to the file record when provenance recorded no name', async () => {

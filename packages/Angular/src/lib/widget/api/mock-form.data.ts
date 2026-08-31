@@ -296,9 +296,9 @@ export function buildMockForm(_distributionSlug: string): PublishedFormDefinitio
             },
           },
           {
-            id: 'q-signature',
-            type: 'Signature',
-            prompt: 'Sign to confirm',
+            id: 'q-doodle',
+            type: 'Doodle',
+            prompt: 'Draw something to finish',
             isRequired: false,
             displayOrder: 10,
             options: [],

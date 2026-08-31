@@ -118,7 +118,7 @@ async function main() {
   // The question a real upload would be made against, from the published definition.
   const fileQuestion = (definition.pages ?? [])
     .flatMap((p) => p.questions ?? [])
-    .find((q) => q.type === 'FileUpload' || q.type === 'Signature');
+    .find((q) => q.type === 'FileUpload' || q.type === 'Doodle');
   let fileId;
 
   const uploaded = await upload(tokenA, responseA, fileQuestion?.id);

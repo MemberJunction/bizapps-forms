@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Exploit-shaped smoke for issue #78: an owned response cannot be taken over.
+ * Exploit-shaped smoke for issue #78 and its residue #100/#101: an owned response cannot be taken
+ * over, and cannot be asked about either.
  *
- * WHY THIS EXISTS. `session-ownership.spec.ts` covers the same invariant with 15 unit tests, and
+ * WHY THIS EXISTS. `session-ownership.spec.ts` covers the same invariants in unit tests, and
  * they are the reason to believe the gate is closed. They cannot be the whole story:
  * `.claude/rules/testing.md` is explicit that the anonymous respondent path is not visible to
  * unit tests, and issue #78's own reproduction was performed against a live API against real SQL
@@ -22,11 +23,12 @@
  * row back OUT OF SQL SERVER rather than believing the API's own report about it. The load-bearing
  * assertions are the database ones: a refusal that still wrote is not a refusal.
  *
- * WHAT IT DELIBERATELY DOES NOT ASSERT. `checkDuplicate` -> `findResponseById` has no session
- * predicate and was left that way on purpose (issue #101). Probing it is reported as a `note`, not
- * a pass or a fail: asserting the leak is present would turn fixing #101 into a red smoke, and
- * asserting it is absent would fail today for a reason nobody chose. It is printed so the residual
- * stays visible, and so a change in it is noticed.
+ * THE LAST SECTION USED TO BE A `note`. `checkDuplicate` -> `findResponseById` had no session
+ * predicate and was left that way on purpose by PR #94, so probing it was printed rather than
+ * asserted: claiming the leak was present would have turned FIXING it into a red smoke, and
+ * claiming it absent would have failed for a reason nobody had chosen yet. Issues #100/#101 chose
+ * one — the by-id branch now consults the same ownership rule the write seam does — so the probe
+ * is an assertion like every other, and the residual it was watching is gone.
  *
  * Zero dependencies beyond the suite's own helpers: Node's fetch, and sqlcmd through lib/sqlcmd.
  *
@@ -50,7 +52,8 @@ let failures = 0;
 const pass = (m) => console.log(`  ok    ${m}`);
 const fail = (m, detail) => { failures++; console.error(`  FAIL  ${m}${detail ? `\n          ${detail}` : ''}`); };
 const check = (cond, m, detail) => (cond ? pass(m) : fail(m, detail));
-const note = (m) => console.log(`  note  ${m}`);
+// `note` lived here to report the #101 residual without asserting it. That residual is closed, and
+// every probe in this script is now a pass or a fail — nothing is merely observed.
 const section = (m) => console.log(`--- ${m} ---`);
 
 const VICTIM_EMAIL = 'smoke78-victim@example.com';
@@ -98,7 +101,66 @@ const SUBMIT = `
     SubmitFormResponse(input: $input) { success responseId status errors { message } }
   }`;
 
-/** One submission attempt. Returns the `SubmitFormResponse` payload. */
+/** A refusal that came from the rate limiter, which is not a result this script can interpret. */
+class RateLimitedError extends Error {}
+
+/** The first words of `rateLimitedMessage` in `rate-limit.service.ts`, both of its branches. */
+const RATE_LIMIT_PREFIX = 'Too many submissions.';
+
+/**
+ * Stop the run if the limiter answered, rather than letting that answer reach an assertion.
+ *
+ * EVERY security assertion in this script is shaped `success === false`, so ANY refusal satisfies
+ * it — including one this script provoked itself. MJ's per-(session, distribution) limiter allows
+ * 5 submissions a minute and hashes a blank session to ONE bucket that every headerless caller
+ * shares (`rateLimitKey` → `distributionId:sha256(salt + '')`). `smoke/lib/session.mjs` exists so
+ * the other suites can stay out of that bucket by sending a real per-session header; this one
+ * cannot, because the absent and blank headers ARE the attack it reproduces, so four of its
+ * submissions land there by design and a second run inside the same minute exhausts it.
+ *
+ * What that looked like before this guard, and why it is worse than a flaky failure: the run
+ * printed `ok  REFUSED: attacker omits x-session-id` — the ownership gate credited for a refusal
+ * the limiter issued, on the one route issue #78 was actually reported on — while the message
+ * comparisons failed as though the status oracle were back. A green that proves nothing next to a
+ * red that names the wrong bug.
+ *
+ * So this aborts instead. The wait is in the server's own message, and nothing below it would
+ * mean what it says.
+ */
+function assertNotRateLimited(result, sessionId) {
+  const message = result?.errors?.[0]?.message ?? '';
+  if (!message.startsWith(RATE_LIMIT_PREFIX)) {
+    return;
+  }
+  const bucket = sessionId === undefined || sessionId.trim() === ''
+    ? 'a HEADERLESS submission, and every headerless caller to this distribution shares one bucket'
+    : `session "${sessionId}"`;
+  throw new RateLimitedError(
+    `rate-limited on ${bucket}: "${message}"\n` +
+      '  That refusal is the limiter\'s, not the ownership gate\'s, and every check below it would\n' +
+      '  pass or fail for a reason that has nothing to do with what this script tests. Wait out the\n' +
+      '  window named above and re-run. Two runs inside one minute do this to themselves; the gate\n' +
+      '  is not implicated either way.',
+  );
+}
+
+/**
+ * One submission attempt. Returns the `SubmitFormResponse` payload.
+ *
+ * THE HEADERLESS BUDGET, because it is a real ceiling and not an abstract one: of the 5 submissions
+ * a minute the shared blank-session bucket allows, this script spends 4 — the route-2 probe that
+ * omits the header, the BLANK one, and the two saves in "a genuinely headerless client still adopts
+ * its OWN row". The blank probe counts because HTTP strips a field value's surrounding whitespace,
+ * so `x-session-id: '   '` reaches the server as `''`: over the wire the blank and absent routes
+ * are the same request, and only `session-ownership.spec.ts` — which hands `'   '` straight to the
+ * pipeline — can tell them apart at all.
+ *
+ * That leaves ONE submission of margin in a clean window, which is why the absent-header case on
+ * the FINAL route is pinned in the spec rather than added here: a fifth would spend the bucket
+ * outright and the next headerless caller — this script's own next run, or anyone else's — would
+ * be refused by the limiter. The routes this script does drive against the victim's row already
+ * cover the primary-key collision and the SQL collation it exists for.
+ */
 async function submit(token, sessionId, { responseId, answers, formVersionId, partial }) {
   const data = await gql(token, sessionId, SUBMIT, {
     input: {
@@ -111,7 +173,9 @@ async function submit(token, sessionId, { responseId, answers, formVersionId, pa
       answers,
     },
   });
-  return data?.SubmitFormResponse;
+  const result = data?.SubmitFormResponse;
+  assertNotRateLimited(result, sessionId);
+  return result;
 }
 
 /** The victim row as SQL Server holds it: status and stored owner. */
@@ -142,7 +206,7 @@ function countRows(responseId) {
 }
 
 async function main() {
-  console.log(`Session-ownership exploit smoke (issue #78)\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
+  console.log(`Session-ownership exploit smoke (issues #78, #100, #101)\n  target : ${BASE}\n  slug   : ${SLUG}\n`);
 
   // ---------------------------------------------------------------- the victim
   section('the victim starts filling in a form');
@@ -265,34 +329,64 @@ async function main() {
     'no status is reported back for a response the caller does not own',
     `got status=${oracle?.status}`);
 
-  // ------------------------------------------------------- the documented residual
-  section('known-open: the idempotent-resubmit lookup (issue #101)');
+  // -------------------------------------------- the idempotent-resubmit lookup
+  section('the FINAL-submit route (issues #100 / #101)');
 
-  // NOT an assertion, by design — see the header. `checkDuplicate` runs only on a completion and
-  // resolves the id through `findResponseById`, which has no session predicate. PR #94 left this
-  // deliberately rather than reintroduce a second enforcement point in the lookup layer.
-  const residual = await submit(attackerToken, attackerSession,
+  // The route the partial probe above does NOT cover: `checkDuplicate` runs only on a completion,
+  // and it is read-only, so it returns before the write seam is ever reached. It resolved the
+  // caller's id through `findResponseById` — id + version + the SourceMetadata proof, and nothing
+  // about ownership — and answered `success: true` with the row's own terminal status. The victim's
+  // row is Complete by now, so this probes exactly that.
+  const strangerFinal = await submit(attackerToken, attackerSession,
     { responseId: victimResponseId, answers: attackerAnswers, formVersionId, partial: false });
-  if (residual?.success === true && residual?.status) {
-    note(`#101 still open, as documented: a FINAL submit reports status="${residual.status}" ` +
-      'to a caller holding only the id (read-only; no answers disclosed, nothing written).');
-    const stillVictims = readAnswers(victimResponseId);
-    check(!stillVictims.includes(ATTACKER_EMAIL),
-      'even so, the residual leak wrote nothing to the victim\'s row',
-      `stored answers: ${stillVictims.join(', ')}`);
-  } else {
-    note(`#101 appears CLOSED: final-submit probe returned success=${residual?.success}. ` +
-      'If that was deliberate, update this script and close the issue.');
-  }
+  check(strangerFinal?.success === false,
+    'REFUSED: attacker probes the victim\'s SEALED row with a FINAL submit',
+    `got success=${strangerFinal?.success} status=${strangerFinal?.status}`);
+  check(strangerFinal?.status === null || strangerFinal?.status === undefined,
+    'no status for a FINAL submit either — Complete and Disqualified are equally unknowable',
+    `got status=${strangerFinal?.status}`);
+
+  // Asserted on the MESSAGE, so a quota, a throttle or a validation failure cannot pass for the
+  // ownership gate — the same discipline the three routes above are held to.
+  const strangerRefusal = strangerFinal?.errors?.[0]?.message ?? '(none)';
+  check(strangerRefusal === messages[0],
+    'the FINAL-submit refusal is the same answer as every other route (no oracle)',
+    `final: "${strangerRefusal}" / ownership: "${messages[0]}"`);
+
+  const afterFinal = readRow(victimResponseId);
+  check(afterFinal?.status === 'Complete' && afterFinal?.owner?.toLowerCase() === victimSession.toLowerCase(),
+    'the victim\'s row is untouched — still Complete, still theirs',
+    `status ${afterFinal?.status}, owner "${afterFinal?.owner}"`);
+  const stillVictims = readAnswers(victimResponseId);
+  check(!stillVictims.includes(ATTACKER_EMAIL), 'nothing of the attacker\'s was written',
+    `stored answers: ${stillVictims.join(', ') || '(none)'}`);
+  check(countRows(victimResponseId) === 1, 'still exactly one row at that id');
+
+  // The other half of the fix, and the half a security assertion can silently break: the OWNER's
+  // own idempotent repeat still gets their row back. Same session, same id, a second final submit —
+  // it must answer with the original id and the row's real status, not create a second row.
+  section('the owner\'s idempotent resubmit still works');
+
+  const repeat = await submit(victimToken, victimSession,
+    { responseId: victimResponseId, answers: victimAnswers, formVersionId, partial: false });
+  check(repeat?.success === true, 'the owner re-fires their final submit', repeat?.errors?.[0]?.message);
+  check(repeat?.responseId?.toLowerCase() === victimResponseId.toLowerCase(),
+    'it returns the ORIGINAL response id', `got ${repeat?.responseId}`);
+  check(repeat?.status === 'Complete', `and the row's own status (got ${repeat?.status})`);
+  check(countRows(victimResponseId) === 1, 'no second terminal row was written');
 
   console.log(failures === 0
-    ? '\nPASS — an owned response cannot be taken over, and the flows that had to keep working still do.'
+    ? '\nPASS — an owned response cannot be taken over or asked about, and the flows that had to keep working still do.'
     : `\nFAIL — ${failures} check(s) failed.`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
 main().catch((e) => {
   console.error(`\nSMOKE ERROR: ${e.message}`);
-  console.error('Is MJAPI running against the branch build, and is a form published at this slug?');
+  // The limiter's abort already says what to do; the setup hint would send the reader off to check
+  // a server that answered them perfectly well.
+  if (!(e instanceof RateLimitedError)) {
+    console.error('Is MJAPI running against the branch build, and is a form published at this slug?');
+  }
   process.exit(1);
 });

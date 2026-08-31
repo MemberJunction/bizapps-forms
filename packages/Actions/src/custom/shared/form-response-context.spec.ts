@@ -8,6 +8,12 @@ interface MockState {
   answersReadSucceeds: boolean;
   questionsReadSucceeds: boolean;
   responseLoads: boolean;
+  /**
+   * The `ExtraFilter` each read actually sent. `RunView` takes SQL TEXT and offers no parameter
+   * binding, so the filter string is this module's real contract with the database — asserting on
+   * the rows it returns cannot tell a quoted literal from an interpolated one.
+   */
+  filters: { answers?: string; questions?: string };
 }
 
 const state: MockState = {
@@ -16,6 +22,7 @@ const state: MockState = {
   answersReadSucceeds: true,
   questionsReadSucceeds: true,
   responseLoads: true,
+  filters: {},
 };
 
 /** Spy on the real LogError so the failure paths can assert they actually reported. */
@@ -37,13 +44,15 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
     }
   }
   class RunView {
-    async RunView<T>(opts: { EntityName: string }): Promise<{ Success: boolean; ErrorMessage?: string; Results: T[] }> {
+    async RunView<T>(opts: { EntityName: string; ExtraFilter?: string }): Promise<{ Success: boolean; ErrorMessage?: string; Results: T[] }> {
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Response Answers') {
+        state.filters.answers = opts.ExtraFilter;
         return state.answersReadSucceeds
           ? { Success: true, Results: state.answers as T[] }
           : { Success: false, ErrorMessage: 'connection reset', Results: [] };
       }
       if (opts.EntityName === 'MJ_BizApps_Forms: Form Questions') {
+        state.filters.questions = opts.ExtraFilter;
         return state.questionsReadSucceeds
           ? { Success: true, Results: state.questions as T[] }
           : { Success: false, ErrorMessage: 'deadlock victim', Results: [] };
@@ -82,6 +91,7 @@ beforeEach(() => {
   state.answersReadSucceeds = true;
   state.questionsReadSucceeds = true;
   state.responseLoads = true;
+  state.filters = {};
   logError.mockClear();
 });
 
@@ -148,6 +158,36 @@ describe('loadFormResponseContext', () => {
 
       expect(ctx?.answers).toHaveLength(1);
       expect(ctx?.canonicalAnswers.Has('q-skipped')).toBe(false);
+    });
+  });
+
+  describe('ids reach the filters as quoted literals, not as interpolation', () => {
+    // Both ids are DB-sourced validated GUIDs on today's only caller, so neither of these is
+    // reachable in production — which is exactly why the escaping had nothing holding it in place.
+    // This is a SHARED loader on the on-submit automation path, and the next caller to pass it a
+    // less-constrained id inherits whatever this file does. Asserting the filter text is the only
+    // assertion that can tell the two apart: the rows come back identical either way.
+
+    it('escapes a quote in the response id rather than letting it close the literal', async () => {
+      await loadFormResponseContext("resp-1' OR '1'='1", fakeUser);
+
+      expect(state.filters.answers).toBe("ResponseID='resp-1'' OR ''1''=''1'");
+    });
+
+    it('escapes a quote in every question id of the IN list', async () => {
+      state.answers = [answerRow({ QuestionID: "q1' OR '1'='1" })];
+
+      await loadFormResponseContext('resp-1', fakeUser);
+
+      expect(state.filters.questions).toBe("ID IN ('q1'' OR ''1''=''1')");
+    });
+
+    it('quotes each id separately when several questions are read', async () => {
+      state.answers = [answerRow({ ID: 'a1', QuestionID: 'q1' }), answerRow({ ID: 'a2', QuestionID: "q2'" })];
+
+      await loadFormResponseContext('resp-1', fakeUser);
+
+      expect(state.filters.questions).toBe("ID IN ('q1','q2''')");
     });
   });
 

@@ -65,7 +65,7 @@ export type QuestionAnalysisKind =
   | 'text'
   /** Composite objects (Address, ContactInfo, Matrix) — listed, not bucketed. */
   | 'composite'
-  /** Nothing meaningful to aggregate: files, signatures, dates, display-only content. */
+  /** Nothing meaningful to aggregate: files, drawings, dates, display-only content. */
   | 'none';
 
 /** What the rest of the system derives from a question's type. */
@@ -151,7 +151,21 @@ export const QUESTION_TYPE_BEHAVIOR = {
 
   // --- Files --------------------------------------------------------------
   FileUpload: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false, ordered: false },
-  Signature: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false, ordered: false },
+  // Named for what it IS — a freehand drawing exported as a PNG. It was called `Signature` and
+  // is deliberately NOT any more: it has no identity verification, no content hash, no signing
+  // certificate and no audit trail of a signing event, so a customer reaching for it to collect
+  // a legally-meaningful signature would have been reading a promise nothing here keeps. Real
+  // e-signature is separate work through a signing provider (#97).
+  //
+  // NO `Signature` ALIAS. `isFormQuestionType` deliberately stops recognising the old key, and
+  // the rename's migration rewrites `"type":"Signature"` in every stored snapshot. An alias here
+  // would not be the cheap insurance it looks like: a key this test admits with no row in this
+  // table turns a clean fail-closed into `questionTypeBehavior` THROWING on the first
+  // `answerColumnFor`, and a key with a row is not a rename at all — the palette's total
+  // `Record<FormQuestionType, …>` would have to offer "Signature" again, and the CHECK
+  // constraint would have to keep accepting it. See the migration for why nothing can be missed:
+  // the snapshot token is written by `JSON.stringify`, so it has exactly one spelling.
+  Doodle: { answerable: true, optionMode: 'none', answerColumn: 'file', analysis: 'none', multiValued: false, ordered: false },
 
   // --- Display-only -------------------------------------------------------
   Statement: { answerable: false, optionMode: 'none', answerColumn: 'text', analysis: 'none', multiValued: false, ordered: false },

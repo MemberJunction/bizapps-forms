@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PublishedFormAutomation, PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
-import type { FormTree } from './builder-models';
+import type {
+  ConditionalRule,
+  PublishedFormAutomation,
+  PublishedFormDefinition,
+  mjBizAppsFormsFormPageEntity,
+  mjBizAppsFormsFormQuestionEntity,
+} from '@mj-biz-apps/forms-entities';
+import type { FormTree, PageNode, QuestionNode } from './builder-models';
 
 /**
  * Publish is the only place the authored automation rows become executable.
@@ -171,7 +177,7 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
       return { Success: true, Results: highest === undefined ? [] : [{ VersionNumber: highest }] };
     }
   }
-  return { ...actual, Metadata, RunView, LogError: () => {} };
+  return { ...actual, Metadata, RunView, LogError: () => {}, LogStatus: () => {} };
 });
 
 const { PublishService } = await import('./publish.service');
@@ -361,7 +367,7 @@ describe('PublishService — settings in the snapshot', () => {
     expect(result.success).toBe(false);
     expect(createdVersions).toHaveLength(0);
   });
-})
+});
 
 /**
  * At most ONE Published version per form.
@@ -470,5 +476,140 @@ describe('PublishService — one live version per form', () => {
     expect(result.success).toBe(false);
     expect(createdVersions).toHaveLength(0);
     expect(statusOf(1)).toBe('Published');
+  });
+});
+
+/**
+ * A rule the builder is ALREADY flagging as broken must not reach the published snapshot
+ * (issue #79).
+ *
+ * The canvas puts a "Rule is broken" badge on the item and names the cause, but Publish neither
+ * blocked nor warned: the dangling `questionId` was baked into `DefinitionSnapshot`, the widget
+ * then rendered one fewer question than the author believes the form has, and the dashboard
+ * reported that question as "0 answers · 100% skipped" — indistinguishable from respondents who
+ * chose not to answer it.
+ *
+ * The gate lives in this SERVICE rather than on the button, because this is the only code that
+ * writes a Published `FormVersion`. A check on the click is a check every other caller — the AI
+ * builder, a template clone, whatever ships next — walks straight past.
+ */
+describe('PublishService — rules the builder already calls broken', () => {
+  beforeEach(resetWorld);
+
+  function question(id: string, prompt: string, rule: ConditionalRule | null): QuestionNode {
+    return {
+      entity: {
+        ID: id,
+        QuestionType: 'ShortText',
+        Prompt: prompt,
+        HelpText: null,
+        IsRequired: false,
+        DisplayOrder: 1,
+        ConditionalRule: rule ? JSON.stringify(rule) : null,
+        ValidationRule: null,
+        Settings: null,
+      } as mjBizAppsFormsFormQuestionEntity,
+      options: [],
+    };
+  }
+
+  /** One page carrying the given questions in the order supplied — the order the rules read in. */
+  function treeOf(questions: QuestionNode[]): FormTree {
+    const page: PageNode = {
+      entity: {
+        ID: 'page-1',
+        Title: 'Page 1',
+        Description: null,
+        DisplayOrder: 1,
+        ConditionalRule: null,
+      } as mjBizAppsFormsFormPageEntity,
+      questions,
+    };
+    return { ...tree(), pages: [page] };
+  }
+
+  /** The show rule from the issue, in shape: one equality against another question's answer. */
+  const showsWhen = (questionId: string): ConditionalRule => ({
+    show: { all: [{ questionId, op: 'equals', value: 'Pro' }] },
+  });
+
+  it('refuses a rule whose source question no longer exists, and says which rule', async () => {
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-deleted')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    // Pinned in full, because the refusal IS the fix instruction: it has to say which rule and
+    // what is wrong with it, in the same words the canvas badge is already using.
+    expect(result.error).toBe(
+      'Publish refused — 1 broken rule would ship with this form. Fix it and publish again: ' +
+        'Show "Want onboarding?" when (deleted question) equals Pro — references a question that no longer exists.',
+    );
+    // The dangling questionId never reaches DefinitionSnapshot — the refusal is before the
+    // first read, so no version entity was even asked for, let alone written.
+    expect(createdVersions).toHaveLength(0);
+    expect(versionRows).toHaveLength(0);
+  });
+
+  it('refuses a rule whose source is answered after the rule runs', async () => {
+    // The reorder shape. The source is right there on the canvas, so nothing looks wrong — but
+    // the rule runs before anything has been put in the answer map under that id, decides the
+    // same way for every respondent, and then changes its mind once the source is answered.
+    const form = treeOf([
+      question('q-1', 'Want onboarding?', showsWhen('q-2')),
+      question('q-2', 'Which plan?', null),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('answered later than this rule runs');
+    expect(createdVersions).toHaveLength(0);
+  });
+
+  it('carries the rules it refused over, so the caller can retract the refusal later', async () => {
+    // `error` is a sentence; this is the fact behind it. A refusal about rules STOPS BEING TRUE
+    // when the author fixes them, and the caller showing it has to be able to tell that kind from
+    // "could not read the form's settings", which an edit to a question says nothing about.
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-deleted')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.brokenRules).toEqual([
+      // No trailing stop: these are the badge's own lines, and the full stop belongs to the
+      // sentence `error` assembles around them.
+      'Show "Want onboarding?" when (deleted question) equals Pro — references a question that no longer exists',
+    ]);
+  });
+
+  it('leaves brokenRules off a refusal that is not about rules', async () => {
+    // The settings read failing is not something fixing a rule repairs, so a caller must not
+    // retract it on the next edit. Absent, not empty: "no broken rules" and "not that kind of
+    // refusal" are different answers and an empty array reads as the first.
+    const form = treeOf([question('q-1', 'Which plan?', null)]);
+    formsReadSucceeds = false;
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(false);
+    expect(result.brokenRules).toBeUndefined();
+  });
+
+  it('publishes a form whose rules all work, with no extra friction', async () => {
+    const form = treeOf([
+      question('q-1', 'Which plan?', null),
+      question('q-2', 'Want onboarding?', showsWhen('q-1')),
+    ]);
+
+    const result = await new PublishService().publish(form);
+
+    expect(result.success).toBe(true);
+    expect(publishedSnapshot().pages[0].questions).toHaveLength(2);
   });
 });

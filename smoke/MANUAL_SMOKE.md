@@ -137,7 +137,10 @@ Each row is *action → expected*. Mark ⚠️ and capture the evidence when exp
 ### D. Publish and versioning
 - [ ] Publish a clean form → `FormVersion` row, `Status='Published'`, `DefinitionSnapshot` populated
 - [ ] Publish with a **broken rule** on screen → *expected once #79 lands:* blocked or confirmed. Verify the dangling `questionId` is/is not present in `DefinitionSnapshot`
-- [ ] After publish with no share link → the header must not claim the form is "live on its public link" (#83)
+- [ ] After publish with no share link → header chip reads **"Published, not shared"** in amber and is a button; clicking it lands on **Distribute**. It must not claim the form is "live on its public link" (#83)
+- [ ] Create the first share link → the chip flips to plain **"Published"** with no reload
+- [ ] Switch that link's *Open to responses* off (or let it hit its response limit / expiry) → chip reads **"Published, not collecting"** (#83)
+- [ ] No state of that chip shows a green check unless a link is genuinely accepting responses
 - [ ] Edit anything after publishing → button becomes **"Publish changes"** and the panel reads *"Saved · publish to put it live"*
 - [ ] After a second publish → *expected once #82 lands:* exactly **one** `Published` version per `FormID`, the previous one `Retired`
 

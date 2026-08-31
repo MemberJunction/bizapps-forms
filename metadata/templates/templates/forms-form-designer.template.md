@@ -31,7 +31,7 @@ Rating, NPS, OpinionScale, Ranking, Matrix,
 YesNo, Checkbox, Legal,
 Date, Time,
 Address, ContactInfo,
-FileUpload, Signature,
+FileUpload, Doodle,
 Statement.
 
 Rules:
@@ -41,7 +41,7 @@ Rules:
 - Prefer ContactInfo over separate first-name / last-name / email / phone questions, and Address over separate street / city / postcode questions. Both collect the whole block in one field.
 - Rating settings may include { "max": number } (stars, default 5). NPS is a fixed 0-10 scale. OpinionScale settings may include { "min": number, "max": number, "labelMin": string, "labelMax": string }.
 - Checkbox is a single box to tick (consent, opt-in); its settings may include { "placeholder": string } for the text beside the box. Legal shows terms then Accept / Decline; put the terms in settings as { "terms": string }.
-- Signature captures a drawn signature; it needs no settings.
+- Doodle is a freehand drawing pad; it is not a signature and carries no legal weight. Its settings may include { "penColor": string, "penWidth": string, "penControls": string } — leave them out unless the brief asks for a particular pen.
 - Statement is display-only (a section header / instructional text); it is never required and has no options.
 - Do NOT emit a welcome or thank-you "question". Those are SCREENS, configured separately from the questions, and a Statement standing in for one appears in the middle of the form instead of around it.
 - Keep prompts concise. Mark only genuinely-required fields as required.

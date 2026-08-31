@@ -122,8 +122,8 @@ no `__mj_*` timestamps, no FK indexes):
 3. Extended properties documenting both.
 
 Then: `npm run mj:codegen`, **write no TypeScript against the new columns until it runs**
-(critical rule 2b), regenerate `V…__Metadata_Sync.sql` if metadata rows change, and
-`npm run seed:manifest` + `npm run lint:distribution` before the PR.
+(critical rule 2b), commit any changed `metadata/` JSON without a `Metadata_Sync.sql` (that is release work), and run
+`npm run lint:distribution` before the PR.
 
 `ScoringConfig` needs **no** migration — the column exists (V9); this plan finally reads it.
 
@@ -297,7 +297,8 @@ absent show group means VISIBLE).
   `mjf-setting-row` idiom; respondent-facing changes (disqualify ending) held to §2 UX bar
   (mobile-first, WCAG AA).
 - No `any`, no `.Get()`/`.Set()` weak typing, `${flyway:defaultSchema}`/`${mjSchema}` only in
-  shipped SQL, seed manifest + `lint:distribution` before every PR that touches migrations/metadata.
+  shipped SQL, `lint:distribution` before every PR that touches migrations. Metadata ships as
+  declarative JSON only — the seed is generated once per release (#105), not per PR.
 
 ## 7. Open decisions — RESOLVED at implementation
 
