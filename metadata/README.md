@@ -15,7 +15,7 @@ and left no artifact, so a clean `mj app install` produced a Forms deployment wi
 application, nav, dashboards or AI authoring — the anonymous submit path, the product, could not
 run. Every step reported success.
 
-## So: editing anything here is only half the change — but the other half is the release's
+## So: editing anything here is only half the change — and the other half happens at the release
 
 ```
 your PR:        edit metadata/ (declarative JSON only)  →  commit  →  review
@@ -24,8 +24,10 @@ the release:    mj sync push against a clean DB  →  ONE consolidated Metadata_
 
 **Do not hand-author a `*__Metadata_Sync.sql` in a feature PR.** This follows MJ
 (`MJ/metadata/CLAUDE.md` §1b and §10): PRs contribute the JSON — fields, `@lookup` / `@file` /
-`@parent` references, and a `primaryKey` UUID from `uuidgen`, with **no `sync` block** (the release
-push writes that back). The build engineer takes everything merged on `next` and generates one
+`@parent` references, and a `primaryKey` UUID from `uuidgen`, with **no hand-written `sync` block**
+(the release push writes that back). The `sync` blocks already in 17 of the 19 record files here are
+exactly that write-back — a `lastModified` and a `checksum` from an earlier push. Leave them alone;
+the rule is "do not author one", not "strip the ones that are there". The build engineer takes everything merged on `next` and generates one
 consolidated seed for the release. Per-PR sync migrations duplicate that step, produce a pile of
 small files instead of one per build, and drift from what the real push emits.
 

@@ -89,10 +89,14 @@ So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sy
 release's records. That delta is the path below.
 
 **The three `Metadata_Sync` files already here ship, and none of them is rewritten.**
-`V202608081700`, `V202608182130` and `V202608241800` are the ones carrying `mj sync push` seed
-output. They were generated under the older per-feature cadence and are applied on every host that
-installed those versions; migrations are append-only history and #105 changed the cadence going
-forward, not the past. The next one is the first consolidated release seed.
+`V202608081700`, `V202608182130` and `V202608241800` are the ones that seed records **declared
+under `metadata/`** — the property `npm run check:release-seed` tests, and the one the release
+cadence is about. Two are `mj sync push` output; `V202608241800` was hand-written against the shape
+of the generated blocks because the author had no database to push from, and its header says so.
+That is the practice #105 ends, not a fourth category. All three were written under the older
+per-feature cadence and are applied on every host that installed those versions; migrations are
+append-only history and #105 changed the cadence going forward, not the past. The next one is the
+first consolidated release seed.
 
 > **Not the same family, and not affected by #105.** Other migrations here also write `__mj` rows —
 > `V202608191300`, `V202608191400`, `V202608252300` — but that is **CodeGen** metadata: the

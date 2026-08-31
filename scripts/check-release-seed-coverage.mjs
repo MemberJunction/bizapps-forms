@@ -101,6 +101,9 @@ function collectIds(node, acc) {
 }
 
 /** The shipped SQL as one lower-cased haystack, or `null` when there is none to read. */
+// Top level only, deliberately: `migrations/` is flat here and `migrations/codegen/` is gitignored
+// intermediate output that ships nothing. If that layout ever changes, this fails LOUDLY — every id
+// reports as uncovered — rather than quietly missing the subdirectory that holds the real seed.
 function readShippedSql(migrationsDir) {
     if (!existsSync(migrationsDir)) return null;
     const files = readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'));

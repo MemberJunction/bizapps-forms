@@ -50,7 +50,8 @@
  * without an install.
  *
  * Serial, and it costs about 40 seconds (measured 2026-08-30, 66 mutants): each one runs the whole
- * spec in a fresh process, and the spec builds 43 fixtures. It no longer copies the `metadata/`
+ * spec in a fresh process, and the spec builds 87 fixtures (measured at `mkdtempSync`, not counted
+ * off the source — the table-driven loops multiply 11 call sites into 87). It no longer copies the `metadata/`
  * tree into each of those — that was CHECK 1's, and #105 removed the check and the copy together.
  * Each run is capped by SPEC_TIMEOUT_MS: `mask/block-comment-first-close` injects a `while` loop
  * into the gate, and a mutant that hangs would otherwise hang CI with no signal at all. That is the
