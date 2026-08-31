@@ -6,14 +6,19 @@
  *
  * Plain Node rather than Vitest on purpose: the gate is stdlib-only so it can run in CI without
  * `npm ci`, and its test should not reintroduce the dependency it was designed to avoid.
+ *
+ * CASE NUMBERS ARE STABLE, INCLUDING THE GAPS. Cases 1–4, 47 and 48 covered CHECK 1, the hash
+ * manifest retired in #105, and went with it; the numbers are not reused. Dozens of comments below
+ * cite each other by number ("the shape case 43 covers", "case 18 pins…") and renumbering would
+ * make every one of those quietly wrong — which is the class of defect this whole file exists to
+ * catch. A gap is a fact about the history; a stale cross-reference is a lie.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
     runChecks,
-    buildManifest,
     findRespondentGrants,
     findPermissionCalls,
     countPermissionProcedureMentions,
@@ -33,16 +38,15 @@ function check(name, condition, detail) {
     }
 }
 
-/** A minimal repo-shaped fixture: real metadata, plus whatever migrations the case needs. */
+/**
+ * A minimal repo-shaped fixture: whatever migrations the case needs, and nothing else.
+ *
+ * It used to copy the whole real `metadata/` tree into every fixture, because CHECK 1 hashed it.
+ * With CHECK 1 gone the gate reads only SQL, so the copy would be ~60 pointless tree copies per
+ * run — and the mutation harness runs this whole spec once per mutant.
+ */
 function fixture(build) {
     const root = mkdtempSync(join(tmpdir(), 'dist-gate-'));
-    cpSync(join(REPO_ROOT, 'metadata'), join(root, 'metadata'), {
-        recursive: true,
-        // `dereference` so a symlink under metadata/ is copied as content: cases below WRITE into
-        // this copy, and through a link those writes would land in the real working tree.
-        dereference: true,
-        filter: (src) => !src.includes(`${'metadata'}/sql_logging`),
-    });
     mkdirSync(join(root, 'migrations'), { recursive: true });
     build(root);
     return root;
@@ -59,84 +63,13 @@ function withFixture(build, assert) {
 
 console.log('distribution gate:');
 
-// 1. The state MJ Forms was actually in: metadata present, no seed migration anywhere.
-withFixture(
-    () => {},
-    (violations) => {
-        check(
-            'flags metadata that ships nowhere (no Metadata_Sync migration)',
-            violations.some((v) => v.includes('ships') && v.includes('NOWHERE')),
-            JSON.stringify(violations),
-        );
-    },
-);
-
-// 2. A seed exists but nothing records what it was generated from.
-withFixture(
-    (root) => writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n'),
-    (violations) => {
-        check(
-            'flags a seed migration with no manifest to date it',
-            violations.some((v) => v.includes('metadata-seed.manifest.json')),
-            JSON.stringify(violations),
-        );
-    },
-);
-
-// 3. The common case this exists for: someone edits metadata and does not regenerate the seed.
-withFixture(
-    (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-        writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
-        );
-        // Edit a record AFTER the manifest was written — exactly the drift being guarded against.
-        const rolesPath = join(root, 'metadata', 'roles', '.roles.json');
-        const roles = JSON.parse(readFileSync(rolesPath, 'utf-8'));
-        roles[0].fields.Description = 'edited after the seed was generated';
-        writeFileSync(rolesPath, JSON.stringify(roles, null, 2));
-    },
-    (violations) => {
-        check(
-            'flags metadata edited after the seed was generated',
-            violations.some((v) => v.includes('.roles.json') && v.includes('changed since')),
-            JSON.stringify(violations),
-        );
-    },
-);
-
-// 4. A `sync` block rewritten by a push is bookkeeping, not content — it must NOT fire, or the
-//    gate cries wolf on the very push that regenerated the seed.
-withFixture(
-    (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-        writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
-        );
-        const rolesPath = join(root, 'metadata', 'roles', '.roles.json');
-        const roles = JSON.parse(readFileSync(rolesPath, 'utf-8'));
-        roles[0].sync = { lastModified: '2099-01-01T00:00:00.000Z', checksum: 'deadbeef' };
-        writeFileSync(rolesPath, JSON.stringify(roles, null, 2));
-    },
-    (violations) => {
-        check(
-            'ignores a rewritten sync block (bookkeeping, not content)',
-            !violations.some((v) => v.includes('.roles.json')),
-            JSON.stringify(violations),
-        );
-    },
-);
+// 1–4 were CHECK 1's cases (metadata with no seed, a seed with no manifest, metadata edited after
+//     the manifest was written, and a rewritten `sync` block that must NOT fire). They were removed
+//     with CHECK 1 in #105 — see this file's header for why the numbers are not reused.
 
 // 5. The placeholder leak, in the form it actually shipped in.
 withFixture(
     (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-        writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
-        );
         writeFileSync(
             join(root, 'migrations', 'V2__Leak.sql'),
             "EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,${commonSchema}';\n",
@@ -154,11 +87,6 @@ withFixture(
 // 6. Teardown scripts get a stricter map — only ${mjSchema} is substituted there.
 withFixture(
     (root) => {
-        writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-        writeFileSync(
-            join(root, 'migrations', 'metadata-seed.manifest.json'),
-            JSON.stringify(buildManifest(root), null, 2),
-        );
         mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
         writeFileSync(
             join(root, 'migrations-teardown', 'V001__Teardown.sql'),
@@ -282,19 +210,15 @@ function seedSql(...records) {
     return `-- MJ Forms metadata seed (fixture)\n-- =====================================\nGO\n\n${records.join('\n')}`;
 }
 
-/** A fixture where CHECKs 1 and 2 are already satisfied, so only CHECK 3 can speak. */
-function quietRepo(root) {
-    writeFileSync(join(root, 'migrations', 'V1__Metadata_Sync.sql'), '-- seed\n');
-    writeFileSync(join(root, 'migrations', 'metadata-seed.manifest.json'), JSON.stringify(buildManifest(root), null, 2));
-}
-
-/** Drops one extra seed file into an otherwise-quiet repo and asserts on what CHECK 3 says. */
+/**
+ * Drops one seed file into an empty repo and asserts on what CHECK 3 says about it.
+ *
+ * The filter by file name is what makes each case speak for itself: an assertion on the whole
+ * violation list would pass or fail on anything else the fixture happened to trip.
+ */
 function withSeed(fileName, sql, assert) {
     withFixture(
-        (root) => {
-            quietRepo(root);
-            writeFileSync(join(root, 'migrations', fileName), sql);
-        },
+        (root) => writeFileSync(join(root, 'migrations', fileName), sql),
         (violations) => assert(violations.filter((v) => v.includes(fileName))),
     );
 }
@@ -496,7 +420,6 @@ withSeed(
 // 19. migrations-pg/ ships no seed today, and the scan covers it so the first one is born checked.
 withFixture(
     (root) => {
-        quietRepo(root);
         mkdirSync(join(root, 'migrations-pg'), { recursive: true });
         writeFileSync(
             join(root, 'migrations-pg', 'V202609010000__v0.11.x__Metadata_Sync.pg.sql'),
@@ -661,7 +584,6 @@ withSeed(
 //     renders these calls as `SELECT`s.
 withFixture(
     (root) => {
-        quietRepo(root);
         writeFileSync(
             join(root, 'migrations', POST),
             `SELECT \${mjSchema}.spcreateentitypermission('60470c16-21ab-48df-bd12-eb3482f365f7'::uuid, '${FORM_RESPONSES.toLowerCase()}'::uuid, (SELECT id FROM \${mjSchema}.role WHERE name = 'Form Respondent'), true, false, false, false, NULL, NULL, 'Allow');\n`,
@@ -970,38 +892,10 @@ withSeed('V202608131601__v0.10.x__Metadata_Sync.sql', AT_WATERSHED, (violations)
     );
 });
 
-// 47. seed/new-metadata. CHECK 1 has three branches and only "changed" was tested. A metadata file
-//     ADDED after the seed was generated ships nowhere at all, which is the worse of the two — and
-//     it must say "new", because "changed" sends the reader looking for an edit that never happened.
-withFixture(
-    (root) => {
-        quietRepo(root);
-        writeFileSync(join(root, 'metadata', 'roles', '.extra-roles.json'), '[]');
-    },
-    (violations) => {
-        check(
-            'flags metadata added after the seed was generated, as new rather than as changed',
-            violations.some((v) => v.includes('.extra-roles.json') && v.includes('is new metadata')),
-            JSON.stringify(violations),
-        );
-    },
-);
-
-// 48. seed/deleted-metadata. The third branch: the file is gone but the seed still creates its
-//     records, so a fresh install gets rows the source tree no longer describes.
-withFixture(
-    (root) => {
-        quietRepo(root);
-        rmSync(join(root, 'metadata', 'roles', '.roles.json'));
-    },
-    (violations) => {
-        check(
-            'flags metadata deleted after the seed was generated, which still ships its records',
-            violations.some((v) => v.includes('.roles.json') && v.includes('was deleted')),
-            JSON.stringify(violations),
-        );
-    },
-);
+// 47–48 were CHECK 1's remaining two branches (metadata added, and metadata deleted, after the
+//       manifest was written). Removed with CHECK 1 in #105; the property they approximated —
+//       "does a declared record actually reach a host?" — is now checked directly, without a
+//       manifest, by scripts/check-release-seed-coverage.mjs at the release boundary.
 
 // 49. Not a mutant — a coverage gap, and the one item on #44 that no mutant expresses. D3 names
 //     three ways a call may bind the role and every fixture used the same one, because
@@ -1023,7 +917,6 @@ const PRE_GUARD = 'V202608200000__v0.11.x__Old_Metadata.sql';
 function withMigration(fileName, sql, assert) {
     withFixture(
         (root) => {
-            quietRepo(root);
             writeFileSync(join(root, 'migrations', fileName), sql);
         },
         (violations) => assert(violations.filter((v) => v.includes(fileName))),
@@ -1286,7 +1179,6 @@ END;
 // earlier migration excludes it; a later one must not quietly stop.
 withFixture(
     (root) => {
-        quietRepo(root);
         writeFileSync(
             join(root, 'migrations', PRE_GUARD),
             syncMigration(` @ExcludedSchemaNames=${FULL_EXCLUSIONS.slice(0, -1)},\${mjSchema}_BizAppsSomethingElse'`),
@@ -1307,7 +1199,6 @@ withFixture(
 // per proc would be noise; a case for the one that was actually missed is the case that matters.
 withFixture(
     (root) => {
-        quietRepo(root);
         writeFileSync(
             join(root, 'migrations', POST_GUARD),
             'EXEC [\${mjSchema}].[spDeleteUnneededEntityFields];\n',
@@ -1326,7 +1217,6 @@ withFixture(
 // no sibling Open App, which is exactly the drift CHECK 5 exists to catch. Both dialects now.
 withFixture(
     (root) => {
-        quietRepo(root);
         mkdirSync(join(root, 'migrations-pg'), { recursive: true });
         writeFileSync(
             join(root, 'migrations-pg', 'V202609010000__v0.12.x__Probe.pg.sql'),
@@ -1399,7 +1289,6 @@ withMigration('R__Repeatable_Sync.sql', 'EXEC [${mjSchema}].[spUpdateExistingEnt
 // GUID as an exclusion list and corrupt the history floor for every later migration.
 withFixture(
     (root) => {
-        quietRepo(root);
         mkdirSync(join(root, 'migrations-pg'), { recursive: true });
         writeFileSync(
             join(root, 'migrations-pg', 'V202609030000__v0.12.x__Probe.pg.sql'),
