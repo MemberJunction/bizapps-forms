@@ -8,6 +8,10 @@
 > the "enforcement redesign" D5 said any such move would require, so the move happened *with* one, as
 > D5 asked. **CHECK 3, which is what this plan actually delivered, is untouched and still runs on
 > every PR.** Everything below about the grant rules, the watershed and the delta-first recipe stands.
+>
+> Two commands named below no longer exist: `npm run seed:manifest` (D5's recipe, and the "Deliberately
+> unchanged" list's `scripts/write-seed-manifest.mjs`). Drop that step; the current recipe is in
+> `migrations/README.md`.
 
 **Issue:** [MemberJunction/bizapps-forms#41](https://github.com/MemberJunction/bizapps-forms/issues/41)
 **Status:** IMPLEMENTED on `plan/issue-41-seed-regeneration-gate` — §4 commit 1 (the gate + spec)

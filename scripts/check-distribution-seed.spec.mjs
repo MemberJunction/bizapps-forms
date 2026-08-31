@@ -618,7 +618,9 @@ withSeed(
 );
 
 // ---------------------------------------------------------------------------
-// CHECK 1 and CHECK 3 — behaviours a mutation pass found unpinned (#44).
+// CHECK 3 — behaviours a mutation pass found unpinned (#44).
+//
+// This section covered CHECK 1's branches too, in cases 47 and 48; both went with it in #105.
 //
 // `scripts/check-distribution-seed.mutants.mjs` deletes each of the behaviours
 // below one at a time and fails if no case here notices. Every case names the

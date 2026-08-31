@@ -106,7 +106,13 @@ delta appends to the chain rather than replacing it. This is the whole recipe; y
 appendix.
 
 Start by asking what the seed owes: `npm run check:release-seed` lists every `primaryKey` under
-`metadata/` that no migration names. An empty list means there is nothing to generate.
+`metadata/` that no migration names.
+
+**An empty list does not mean there is nothing to generate.** The check reads ids, not content, so a
+record whose id already ships but whose *body* changed — a `@file:` template, a reworded description
+— passes it silently. Generate the seed anyway if `metadata/` moved at all since the last release
+(`git diff v<last> -- metadata/`); the push emits `spUpdate*` for those by construction, which is
+the half no repo-side check can see.
 
 ```bash
 # 1. Build the generation database from the SHIPPED CHAIN, not from dev work. Start empty and run

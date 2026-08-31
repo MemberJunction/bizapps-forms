@@ -3,23 +3,27 @@
  * Proves the release-readiness check FIRES.
  *
  * The check it covers replaced one that passed while asserting something false (#105), so "it went
- * green" is not evidence of anything until something has watched it go red. Every case below builds
- * a throwaway repo, runs the real script against it as a child process, and asserts on the exit code
- * and the message — the script is a CLI, and a spec that imported its internals would test a
- * different thing than the one CI runs.
+ * green" is not evidence of anything until something has watched it go red. Six of the cases below
+ * assert a failure.
  *
- * Plain Node rather than Vitest, matching the gate it sits beside: the script is stdlib-only so it
+ * In-process against `findSeedCoverageGaps(repoRoot)`, the same shape as
+ * `check-distribution-seed.spec.mjs` next door — the check takes a repo root precisely so its tests
+ * do not have to build a tree with a copy of the script in it and spawn a process per case. One
+ * case at the end runs the real CLI, because exit codes and the report text are what CI reads and
+ * nothing in-process exercises them.
+ *
+ * Plain Node rather than Vitest, matching the gate it sits beside: the check is stdlib-only so it
  * can run without `npm ci`, and its test must not reintroduce the dependency it avoids.
  *
- * Runs at the release boundary, in `publish.yml`, immediately before the check itself. Not on PRs —
- * the check does not run on PRs either, and a self-test for something that never runs there would be
- * surface without a question behind it.
+ * Runs at the release boundary, in `publish.yml`, immediately before the check itself — and not on
+ * PRs, for the reason the check's own header gives.
  */
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { findSeedCoverageGaps } from './check-release-seed-coverage.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPTS_DIR, '..');
@@ -35,34 +39,14 @@ function check(name, condition, detail) {
     }
 }
 
-/**
- * A repo-shaped tree whose `scripts/` holds a real copy of the script.
- *
- * A copy rather than a symlink because the script resolves its repo root from its own location:
- * through a link it would resolve to THIS repo and every case would measure the working tree
- * instead of the fixture.
- */
-function fixture(build) {
+/** A repo-shaped fixture: a `metadata/` and a `migrations/`, plus whatever the case puts in them. */
+function withFixture(build, assert) {
     const root = mkdtempSync(join(tmpdir(), 'release-seed-'));
-    mkdirSync(join(root, 'scripts'));
-    cpSync(SCRIPT, join(root, 'scripts', 'check-release-seed-coverage.mjs'));
     mkdirSync(join(root, 'metadata'), { recursive: true });
     mkdirSync(join(root, 'migrations'), { recursive: true });
-    build(root);
-    return root;
-}
-
-/** Runs the script in a fixture and hands back what a build engineer would see. */
-function run(build) {
-    const root = fixture(build);
     try {
-        const out = execFileSync(process.execPath, [join(root, 'scripts', 'check-release-seed-coverage.mjs')], {
-            stdio: 'pipe',
-            encoding: 'utf-8',
-        });
-        return { status: 0, output: out };
-    } catch (error) {
-        return { status: error.status ?? -1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
+        build(root);
+        assert(findSeedCoverageGaps(root));
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
@@ -70,10 +54,16 @@ function run(build) {
 
 const COVERED = 'AAAA1111-2222-4333-8444-555566667777';
 const UNCOVERED = 'BBBB1111-2222-4333-8444-555566667777';
+const ALSO_UNCOVERED = 'CCCC1111-2222-4333-8444-555566667777';
 
 /** One record file, in the shape `mj sync push` reads. */
 function records(...ids) {
     return JSON.stringify(ids.map((id) => ({ fields: { Name: id }, primaryKey: { ID: id } })), null, 2);
+}
+
+/** A migration naming whichever ids the case wants covered. */
+function seed(...ids) {
+    return ids.map((id) => `EXEC spCreateThing @ID = '${id}';`).join('\n') + '\n';
 }
 
 console.log('release seed coverage:');
@@ -81,113 +71,175 @@ console.log('release seed coverage:');
 // 1. The defect this exists for, and the exact shape that reached bizapps-sales: a record declared
 //    under metadata/ that no shipped migration names. CHECK 1 passed on this whenever the manifest
 //    had been regenerated; here it must not.
-{
-    const { status, output } = run((root) => {
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.things.json'), records(UNCOVERED));
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `-- nothing about ${COVERED}\n`);
-    });
-    check('flags a declared primaryKey that appears in no migration', status === 1 && output.includes(UNCOVERED), output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        check('flags a declared primaryKey that appears in no migration', problems.some((p) => p.includes(UNCOVERED)), JSON.stringify(problems));
+    },
+);
 
-// 2. A MUST PASS, or the check is just always-red and nobody will believe the red one either.
-{
-    const { status, output } = run((root) => {
+// 2. EVERY uncovered id, not a count and a sample. This output IS the pending list that replaced a
+//    hand-maintained table, so a file owing two records must name both — otherwise the build
+//    engineer goes back to the repo to derive the rest, which is the maintenance being retired.
+withFixture(
+    (root) => {
+        writeFileSync(join(root, 'metadata', '.things.json'), records(UNCOVERED, ALSO_UNCOVERED));
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        const report = problems.join('\n');
+        check(
+            'names every uncovered id, not just the first',
+            report.includes(UNCOVERED) && report.includes(ALSO_UNCOVERED),
+            report,
+        );
+    },
+);
+
+// 3. A MUST PASS, or the check is just always-red and nobody will believe the red one either.
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `EXEC spCreateThing @ID = '${COVERED}';\n`);
-    });
-    check('passes when every declared primaryKey is named by the shipped chain', status === 0, output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems, idsChecked }) => {
+        check('passes when every declared primaryKey is named by the shipped chain', problems.length === 0 && idsChecked === 1, JSON.stringify(problems));
+    },
+);
 
-// 3. Case matters nowhere in T-SQL and must not matter here. `uuidgen` yields upper case, the
+// 4. Case matters nowhere in T-SQL and must not matter here. `uuidgen` yields upper case, the
 //    generator has shipped both, and a case-sensitive compare would report a record as missing
 //    that is right there in the file.
-{
-    const { status, output } = run((root) => {
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `EXEC spCreateThing @ID = '${COVERED.toLowerCase()}';\n`);
-    });
-    check('matches a UUID regardless of case', status === 0, output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED.toLowerCase()));
+    },
+    ({ problems }) => {
+        check('matches a UUID regardless of case', problems.length === 0, JSON.stringify(problems));
+    },
+);
 
-// 4. `@parent` nesting puts child records inside the parent's file. A child that ships nowhere is as
+// 5. `@parent` nesting puts child records inside the parent's file. A child that ships nowhere is as
 //    invisible to a host as a root one, so the walk must reach it.
-{
-    const { status, output } = run((root) => {
+withFixture(
+    (root) => {
         writeFileSync(
             join(root, 'metadata', '.things.json'),
             JSON.stringify(
-                [{ fields: { Name: 'parent' }, primaryKey: { ID: COVERED }, relatedEntities: { Children: [{ fields: {}, primaryKey: { ID: UNCOVERED } }] } }],
+                [
+                    {
+                        fields: { Name: 'parent' },
+                        primaryKey: { ID: COVERED },
+                        relatedEntities: { Children: [{ fields: {}, primaryKey: { ID: UNCOVERED } }] },
+                    },
+                ],
                 null,
                 2,
             ),
         );
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `EXEC spCreateThing @ID = '${COVERED}';\n`);
-    });
-    check('reaches a nested @parent child record', status === 1 && output.includes(UNCOVERED), output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        check('reaches a nested @parent child record', problems.some((p) => p.includes(UNCOVERED)), JSON.stringify(problems));
+    },
+);
 
-// 5. `sql_logging/` is the raw push output that BECOMES a seed, and `.backups/` is what a push
-//    writes before updating in place. Both are gitignored and both are left on disk by a local run,
-//    so reading either would report ids nobody declared — red on the very push that fixed things.
-{
-    const { status, output } = run((root) => {
+// 6. `sql_logging/` is the raw push output that BECOMES a seed, and `.backups/` is what a push
+//    writes before updating in place — every .mj-sync.json here configures one. Both are left on
+//    disk by a local run, so reading either would report ids nobody declared, red on the very push
+//    that fixed things.
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
         mkdirSync(join(root, 'metadata', 'sql_logging'));
         mkdirSync(join(root, 'metadata', '.backups'));
         writeFileSync(join(root, 'metadata', 'sql_logging', 'push.json'), records(UNCOVERED));
         writeFileSync(join(root, 'metadata', '.backups', 'old.json'), records(UNCOVERED));
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `EXEC spCreateThing @ID = '${COVERED}';\n`);
-    });
-    check('ignores generator output and push backups', status === 0, output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        check('ignores generator output and push backups', problems.length === 0, JSON.stringify(problems));
+    },
+);
 
-// 6. `.mj-sync.json` is directory configuration, never a record. It carries no primaryKey today, so
+// 7. `.mj-sync.json` is directory configuration, never a record. It carries no primaryKey today, so
 //    this pins the exclusion rather than an outcome that happens to hold.
-{
-    const { status, output } = run((root) => {
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.mj-sync.json'), records(UNCOVERED));
         writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `EXEC spCreateThing @ID = '${COVERED}';\n`);
-    });
-    check('does not read .mj-sync.json as a record file', status === 0, output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        check('does not read .mj-sync.json as a record file', problems.length === 0, JSON.stringify(problems));
+    },
+);
 
-// 7. Never swallowed. A record file the script cannot parse is a record it cannot vouch for, and
+// 8. Never swallowed. A record file the script cannot parse is a record it cannot vouch for, and
 //    passing over it silently is the exact failure mode that retired CHECK 1.
-{
-    const { status, output } = run((root) => {
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.broken.json'), '{ not json');
         writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
-        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), `EXEC spCreateThing @ID = '${COVERED}';\n`);
-    });
-    check('reports an unparseable record file instead of skipping it', status === 1 && output.includes('.broken.json'), output);
-}
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        check('reports an unparseable record file instead of skipping it', problems.some((p) => p.includes('.broken.json')), JSON.stringify(problems));
+    },
+);
 
-// 8. The vacuity guard, and the reason this file exists at all. A walk that finds nothing must not
-//    report success — "I examined zero records" and "every record is fine" are the same green
-//    otherwise, which is how CHECK 1 went green over a record that shipped nowhere.
-{
-    const { status, output } = run((root) => {
+// 9. …and the parse failure survives the vacuity guard. When EVERY record file is unreadable there
+//    are no ids, so the "measured nothing" message fires too — and an early return there would have
+//    thrown away the only line saying which file could not be read and why.
+withFixture(
+    (root) => {
+        writeFileSync(join(root, 'metadata', '.broken.json'), '{ not json');
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems }) => {
+        check(
+            'keeps the parse reason when nothing at all could be measured',
+            problems.some((p) => p.includes('.broken.json')) && problems.some((p) => p.includes('measured NOTHING')),
+            JSON.stringify(problems),
+        );
+    },
+);
+
+// 10. The vacuity guard, and the reason this file exists at all. A walk that finds nothing must not
+//     report success — "I examined zero records" and "every record is fine" are the same green
+//     otherwise, which is how CHECK 1 went green over a record that shipped nowhere.
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.things.json'), '[]');
         writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), '-- a seed\n');
-    });
-    check('refuses to pass when it measured nothing', status === 1 && output.includes('measured NOTHING'), output);
-}
+    },
+    ({ problems }) => {
+        check('refuses to pass when it measured nothing', problems.some((p) => p.includes('measured NOTHING')), JSON.stringify(problems));
+    },
+);
 
-// 9. An empty migrations/ would make every record look missing, which is a broken run dressed as a
-//    finding. It must say so instead.
-{
-    const { status, output } = run((root) => {
+// 11. An empty migrations/ would make every record look missing, which is a broken run dressed as a
+//     finding. It must say so instead, in the same words for a missing directory and an empty one.
+withFixture(
+    (root) => {
         writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
-    });
-    check('fails loudly when migrations/ holds no SQL at all', status !== 0 && output.includes('no .sql files'), output);
-}
+    },
+    ({ problems }) => {
+        check('calls an empty migrations/ a broken run, not a finding', problems.some((p) => p.includes('broken run')), JSON.stringify(problems));
+    },
+);
 
-// 10. The real repository must pass, or the check is not describing this codebase. This is the
-//     assertion a release actually leans on.
-{
-    const out = execFileSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, stdio: 'pipe', encoding: 'utf-8' });
-    check('the repository itself passes', out.includes('Release seed coverage passed'), out);
+// 12. The CLI wiring — exit code and report text, which is all CI reads and the only thing the
+//     in-process cases above cannot see. Run against the real repository, which must pass.
+try {
+    const output = execFileSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, stdio: 'pipe', encoding: 'utf-8' });
+    check('the CLI exits 0 and says so on this repository', output.includes('Release seed coverage passed'), output);
+} catch (error) {
+    check('the CLI exits 0 and says so on this repository', false, `exited ${error.status}: ${error.stdout ?? ''}${error.stderr ?? ''}`);
 }
 
 if (failures > 0) {
