@@ -34,14 +34,53 @@ GO
 --    token behind would leave `/f/:slug` handing a dead token to the redeem endpoint, and
 --    leave the builder badging a link that has no working credential as though it had one.
 --
---    Matched on the invite's status rather than re-deriving the distribution predicate from
---    step 1, so this cannot clear a credential step 1 did not actually revoke — including on
---    a re-run, where the rows step 1 has already handled are precisely the ones still needing
---    this half if it failed the first time.
+--    Matched on the invite's status AND step 1's own distribution predicate. The status match
+--    alone is what makes the re-run correct — after step 1 has run, its rows are exactly the
+--    ones this half still owes if it failed the first time — but it is not sufficient on its
+--    own, because step 1 is not the only thing that writes `Revoked`.
+--
+--    `Revoked` is the status MJ core documents as "the primary revocation mechanism", and
+--    before this release it was the ONLY way to kill a leaked Forms link without deleting the
+--    distribution and losing its slug. So a LIVE distribution pointing at a revoked invite is
+--    not a half-finished state to tidy up — it is an operator's deliberate kill, and clearing
+--    its columns would revive it: the hook reads a live link holding no credential as "mint
+--    one", so the next save of any kind hands the leaked URL a fresh working token under the
+--    unchanged slug. The distribution predicate is what keeps this migration to the population
+--    the file is about, and it costs nothing: step 1 never revokes a live link's invite, so
+--    every row it DID revoke satisfies this too.
 UPDATE d
 SET d.MagicLinkInviteID = NULL,
     d.PublicLinkToken = NULL
 FROM [${flyway:defaultSchema}].[FormDistribution] d
 INNER JOIN [${mjSchema}].[MagicLinkInvite] i ON i.ID = d.MagicLinkInviteID
-WHERE i.Status = 'Revoked';
+WHERE i.Status = 'Revoked'
+  AND (d.Status <> 'Active' OR d.IsActive = 0);
+GO
+
+-- 3. The other half of the same argument, for links that are still LIVE.
+--
+--    Steps 1 and 2 answer "a closed link must not keep a redeemable credential". They leave the
+--    mirror case untouched: a link that is still open but whose closing date has passed, or is
+--    yet to pass, whose invite was minted before an expiry followed that date at all. Those
+--    invites carry the ~century `ExpiresAt` this release replaces, and the pass that re-bounds
+--    them rides a save — the same save nobody performs on a link they set up last month, which
+--    is the entire reason this file exists. Without this, "the expiry now keeps up with the date
+--    it mirrors" is true only for links saved after the upgrade.
+--
+--    It matters because the two gates are independent: the Forms door refuses a submission past
+--    `CloseAt`, but core's `/magic-link/redeem` consults only the invite, so a credential whose
+--    link shut in June still mints an anonymous session scoped to that distribution until its
+--    own `ExpiresAt` — a hundred years out — arrives.
+--
+--    Only ever moves an expiry EARLIER (`i.ExpiresAt > d.CloseAt`), so it cannot extend the life
+--    of any credential, and re-running it matches nothing. `CloseAt IS NULL` means the link has
+--    no closing date to mirror and is left alone; a host-wide ceiling is configuration this SQL
+--    cannot read, so it stays the running code's business.
+UPDATE i
+SET i.ExpiresAt = d.CloseAt
+FROM [${mjSchema}].[MagicLinkInvite] i
+INNER JOIN [${flyway:defaultSchema}].[FormDistribution] d ON d.MagicLinkInviteID = i.ID
+WHERE i.Status = 'Active'
+  AND d.CloseAt IS NOT NULL
+  AND i.ExpiresAt > d.CloseAt;
 GO
