@@ -105,7 +105,19 @@ function sqlLikeLiteral(value: string): string {
  * client-id proof. Used to detect an idempotent repeat FINAL submit that carries the same
  * client response id (the row was already promoted to Complete, so the `Partial`-only
  * adopt/session lookups miss it). Returns the row so the pipeline can short-circuit to the
- * existing id instead of writing a second Complete. Fail-open on a query error.
+ * existing id instead of writing a second Complete.
+ *
+ * WHAT THIS DOES NOT DECIDE, exactly as {@link findResumableResponseById} does not: it asks
+ * nothing about who OWNS the row, and it must not. A session predicate here would be a second
+ * spelling of the ownership rule — in SQL, and needing to stay in agreement with the fold
+ * `responseIsOurs` applies — which is the split-brain issue #78 was. The caller consults that one
+ * rule against the row this proposes, and a row belonging to somebody else is not recognised as
+ * the caller's repeat (issues #100/#101).
+ *
+ * A blank/absent `responseId` returns "no match" without querying. Fail-CLOSED on a query error:
+ * `ok:false` is returned and the pipeline refuses the resubmit rather than risk a second terminal
+ * row. (This said "fail-open" for as long as the caller has done the opposite; the behaviour was
+ * always the right one.)
  */
 export async function findResponseById(
   provider: DefinitionRunViewProvider,

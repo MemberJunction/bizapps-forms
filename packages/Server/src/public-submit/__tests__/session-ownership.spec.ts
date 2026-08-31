@@ -19,6 +19,7 @@
  * refused here too, whether or not it is one of the two that exist today.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
+import { SCREENED_OUT_MESSAGE } from '@mj-biz-apps/forms-entities';
 import { runSubmitPipeline, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';
 import { FormsRateLimiter } from '../rate-limit.service';
 import { resetPublicSubmitConfigForTests } from '../config';
@@ -43,6 +44,32 @@ const FORM_RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
  */
 const VICTIM_RESPONSE_ID = 'a1b2c3d4-1111-4222-8333-444455556666';
 const VICTIM_SESSION = 'victim-session';
+
+/**
+ * A status that seals the row, DERIVED rather than restated.
+ *
+ * `.claude/rules/typescript-style.md` forbids hand-copying a value-list union, "test mock
+ * interfaces" included, because the union is CodeGen'd from a CHECK constraint and a hand-written
+ * copy does not grow with it. Written as the exclusion of the one status that is not terminal —
+ * the very row {@link victimPartial} builds — so a migration that widens the constraint widens
+ * this too, which `'Complete' | 'Disqualified'` spelled out longhand would not.
+ */
+type SealedStatus = Exclude<ExistingResponseRow['Status'], 'Partial'>;
+
+/**
+ * A row the widget has already SEALED, exactly as one sits in the table after a submit: terminal,
+ * owned, and carrying the client-id proof `findResponseById` matches on.
+ *
+ * Named apart from {@link victimPartial} because the two describe different exposures — a partial
+ * can be taken over (#78), a sealed row can only be read about (#100/#101) — and the tests below
+ * are about the second.
+ */
+function victimSealed(
+  status: SealedStatus,
+  overrides?: Partial<ExistingResponseRow>,
+): ExistingResponseRow {
+  return victimPartial({ Status: status, ...overrides });
+}
 
 /** The victim's in-flight partial, exactly as the widget writes one: owned, and id-proofed. */
 function victimPartial(overrides?: Partial<ExistingResponseRow>): ExistingResponseRow {
@@ -327,5 +354,193 @@ describe('the flows that have to keep working', () => {
     expect(result.success).toBe(true);
     const written = fake.saved.find((r) => r.entityName === FORM_RESPONSE_ENTITY);
     expect(written?.values.AnonymousSessionID).toBe('first-caller');
+  });
+});
+
+/**
+ * A sealed response's STATUS is not readable by id alone (issues #100 / #101).
+ *
+ * The residue of #78. PR #94 put the ownership gate at the write seam and at both loads that can
+ * return before a write — but `checkDuplicate` runs EARLIER, in the pipeline, and is a genuinely
+ * read-only path: it resolves the caller's `responseId` through `findResponseById` (which matches
+ * on id + version + the `SourceMetadata.clientResponseId` proof and asks nothing about ownership)
+ * and, when the row is terminal, answers `success: true` with the row's own `Status`. So a caller
+ * holding an id they do not own learned whether that response was `Complete` or `Disqualified` —
+ * which is more than a liveness bit, because it distinguishes "this person submitted" from "this
+ * person was screened out".
+ *
+ * These drive the whole pipeline for the same reason the tests above do: the invariant is about
+ * what the CALLER is told, not about which lookup fired.
+ */
+describe('a sealed response tells its status to nobody but its owner', () => {
+  /**
+   * The probe from issue #101: a FINAL submit carrying a response id the caller does not own.
+   *
+   * The stranger's session is a PARAMETER because "not the owner" has three spellings and they are
+   * not interchangeable — a wrong header, an absent one, and a blank one all have to land in the
+   * same place (issue #78). Defaulting to the forged one keeps the cases below reading as the
+   * issue wrote them.
+   */
+  function probeAsStranger(victimRow: ExistingResponseRow, sessionId = 'attacker-session') {
+    const { ctx, fake } = build({ sessionId, existingResponses: [victimRow] });
+    return { run: () => runSubmitPipeline(ctx, submission({ clientResponseId: VICTIM_RESPONSE_ID })), fake };
+  }
+
+  it('refuses a FINAL submit against a foreign SEALED row, and reports no status', async () => {
+    // The reported defect, verbatim: `success: true, status: "Complete"` to a caller who arrived
+    // with nothing but the id.
+    const { run, fake } = probeAsStranger(victimSealed('Complete'));
+
+    const result = await run();
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBeUndefined();
+    expect(writesToVictimRow(fake)).toHaveLength(0);
+  });
+
+  it('answers a foreign SEALED row exactly as it answers a foreign UNSEALED one', async () => {
+    // The acceptance criterion, and the reason a status is not enough on its own: whether the row
+    // is finished has to be as unknowable as everything else about it. Before the fix the sealed
+    // row short-circuited to success while the unsealed one was refused at the write — one probe
+    // told the caller which of the two they were holding.
+    const sealed = await probeAsStranger(victimSealed('Complete')).run();
+    const unsealed = await probeAsStranger(victimPartial()).run();
+
+    expect(sealed.success).toBe(unsealed.success);
+    expect(sealed.status).toBe(unsealed.status);
+    expect(sealed.errors?.[0].message).toBe(unsealed.errors?.[0].message);
+  });
+
+  it('answers a foreign SEALED row no differently when the header is ABSENT than when it is wrong', async () => {
+    // Route 2 of issue #78, on the branch this change touches. Every other probe here arrives with
+    // a WRONG session; the defect #78 actually reported arrived with NONE, and "an absent
+    // credential must never be more permissive than a wrong one" has to hold on a read the same
+    // way it holds on a write. It is not idly stated: `responseIsOurs` answers yes when the ROW's
+    // owner folds to empty, and a version of it that also answered yes when the CALLER's does —
+    // one `||`, and a plausible reading of "blank means unowned" — would hand this row's status to
+    // exactly the caller the issue is about while leaving every other test in this file green.
+    const absent = probeAsStranger(victimSealed('Complete'), '');
+    const blank = probeAsStranger(victimSealed('Complete'), '   ');
+
+    const onAbsent = await absent.run();
+    const onBlank = await blank.run();
+    const onForged = await probeAsStranger(victimSealed('Complete')).run();
+
+    expect(onAbsent.success).toBe(false);
+    expect(onAbsent.status).toBeUndefined();
+    expect(onBlank.success).toBe(false);
+    expect(onBlank.status).toBeUndefined();
+    // And refused by the same answer, so the spelling of the missing credential is not an oracle.
+    expect(onAbsent.errors?.[0].message).toBe(onForged.errors?.[0].message);
+    expect(onBlank.errors?.[0].message).toBe(onForged.errors?.[0].message);
+    expect(writesToVictimRow(absent.fake)).toHaveLength(0);
+    expect(writesToVictimRow(blank.fake)).toHaveLength(0);
+  });
+
+  it('does not let a stranger tell `Complete` from `Disqualified`', async () => {
+    // The one bit issue #101 is actually about. `Disqualified` took a visibly different path
+    // (`terminalRepeatFields`) from `Complete` (`confirmationFields`), so the two answers differed
+    // in status AND in copy — for a response the caller could only name, never own.
+    const completed = await probeAsStranger(victimSealed('Complete')).run();
+    const screenedOut = await probeAsStranger(victimSealed('Disqualified')).run();
+
+    expect(completed.status).toBe(screenedOut.status);
+    expect(completed.confirmationMessage).toBe(screenedOut.confirmationMessage);
+    expect(completed.errors?.[0].message).toBe(screenedOut.errors?.[0].message);
+  });
+});
+
+/**
+ * ...and still tells its OWNER, which is the whole point of the short-circuit.
+ *
+ * `checkDuplicate` exists so a re-fired final submit returns the original response id instead of
+ * writing a second terminal row, and so a respondent who was screened out on their first attempt
+ * is not congratulated on their retry. Both survive the fix, and these pin them: they are green
+ * before it and after it, which is what makes them the guard rather than the proof.
+ */
+describe('the idempotent resubmit its owner is entitled to', () => {
+  it('gives a headerless client its own sealed row back, by id', async () => {
+    // The flow the by-id branch exists for: no session to key on, so the 122-bit client id in
+    // `SourceMetadata` is the only capability there is — and for an UNOWNED row it still is.
+    const ownSealed = victimSealed('Complete', { AnonymousSessionID: '' });
+    const { ctx, fake } = build({ sessionId: '', existingResponses: [ownSealed] });
+
+    const result = await runSubmitPipeline(ctx, submission({ clientResponseId: VICTIM_RESPONSE_ID }));
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe(VICTIM_RESPONSE_ID);
+    expect(result.status).toBe('Complete');
+    expect(fake.saved).toHaveLength(0);
+  });
+
+  it('gives the OWNING session its own sealed row back, by id', async () => {
+    const { ctx, fake } = build({ sessionId: VICTIM_SESSION, existingResponses: [victimSealed('Complete')] });
+
+    const result = await runSubmitPipeline(ctx, submission({ clientResponseId: VICTIM_RESPONSE_ID }));
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe(VICTIM_RESPONSE_ID);
+    expect(result.status).toBe('Complete');
+    expect(fake.saved).toHaveLength(0);
+  });
+
+  it('tells a screened-out respondent they were screened out, not that they were recorded', async () => {
+    // The distinction the fix must NOT flatten for the owner. A retry of a disqualified submission
+    // gets the knockout copy; being told "thanks, your response has been recorded" would be untrue
+    // of the row and of them.
+    const ownScreenedOut = victimSealed('Disqualified', { AnonymousSessionID: '' });
+    const { ctx } = build({ sessionId: '', existingResponses: [ownScreenedOut] });
+
+    const result = await runSubmitPipeline(ctx, submission({ clientResponseId: VICTIM_RESPONSE_ID }));
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Disqualified');
+    expect(result.confirmationMessage).toBe(SCREENED_OUT_MESSAGE);
+  });
+
+  it('recognises a re-`load()`ed widget’s retry from the session, with a brand-new client id', async () => {
+    // The flow that makes a session predicate on the by-id lookup the wrong instrument: the widget
+    // mints a fresh `clientResponseId` on every `load()`, so a retry after one never matches by id
+    // at all. The session branch recognises it, and the fix leaves that branch alone.
+    //
+    // A re-`load()` WITHIN one widget instance, precisely — which is what holding `sessionId`
+    // fixed models. `FormsGraphQLApiService` mints its session per SERVICE instance and
+    // `mj-form.component` mints the client id per `load()`, so a full page reload rotates BOTH and
+    // is recognised by neither branch; it writes a fresh row, as it did before this change.
+    const { ctx } = build({
+      sessionId: VICTIM_SESSION,
+      existingResponses: [victimSealed('Complete')],
+    });
+
+    const result = await runSubmitPipeline(
+      ctx,
+      submission({ clientResponseId: 'c3d4e5f6-1111-4222-8333-444455556668' }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.responseId).toBe(VICTIM_RESPONSE_ID);
+    expect(result.status).toBe('Complete');
+  });
+
+  it('refuses a re-fire that presents an owned row’s id under a DIFFERENT session', async () => {
+    // The cost of the fix, pinned so it is a decision rather than a discovery. Issue #100 asks that
+    // "same client, same id, session blank or changed" keep short-circuiting, and it does whenever
+    // the row is unowned (the case above). When the row HAS an owner, that request is the same one
+    // issue #78 established must be refused — an absent or wrong credential is not a credential —
+    // and the two asks cannot both be honoured: answering it IS the disclosure #101 is about.
+    //
+    // So the read now agrees with the write instead of contradicting it: this caller is already
+    // refused on every partial save and every write. No real widget reaches it — session and client
+    // id are minted together, so an id only ever travels with the session that created it.
+    const { ctx, fake } = build({
+      sessionId: 'a-different-session',
+      existingResponses: [victimSealed('Complete')],
+    });
+
+    const result = await runSubmitPipeline(ctx, submission({ clientResponseId: VICTIM_RESPONSE_ID }));
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBeUndefined();
+    expect(writesToVictimRow(fake)).toHaveLength(0);
   });
 });
