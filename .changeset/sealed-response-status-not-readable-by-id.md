@@ -1,0 +1,25 @@
+---
+"@mj-biz-apps/forms-server": patch
+---
+
+**A sealed response tells its status to nobody but its owner.** `checkDuplicate` recognises an idempotent repeat of a final submit by resolving the caller's `responseId` through `findResponseById` — id, form version, and the `SourceMetadata.clientResponseId` proof — and, when the row it finds is terminal, answers `success: true` with that row's own `Status`. It asked nothing about who owned the row. So a caller holding a response id they did not own learned whether that response was `Complete` or `Disqualified`: not a liveness bit, but the difference between "this person submitted" and "this person was screened out". `Complete` and `Disqualified` even returned different copy, through different code paths.
+
+This is the residue of the takeover PR #94 closed, and it survived that PR for a structural reason: #94 put the ownership gate at the write seam and at the two loads that can return before a write, and `checkDuplicate` is neither. It runs earlier, in the pipeline, and is genuinely read-only — it returns without touching the row, so the write-seam gate never sees it.
+
+**The id is a capability, not an identity.** That is the rule the fix states outright. A client-minted `responseId` is 122 bits of randomness that proves possession, and possession is authority only over a row that has no owner — the genuinely headerless flow, where it is the only capability there is. A row whose `AnonymousSessionID` is set belongs to that session, and holding its id is not grounds for being told anything about it, up to and including whether it is finished.
+
+**Asked, not restated.** The rule already existed as `sessionMayAdopt` in `persistence.service`, one function behind the refusal every write passes through. It is now exported as `responseIsOurs` and the pipeline's dedupe asks it. The alternative — a session predicate bolted onto `findResponseById`'s SQL — would have been a second spelling of the same rule, in a different language, needing to stay in agreement with the fold the write side applies: exactly the split-brain that made the original gate opt-in. The lookups stay what PR #94 made them, candidate-proposers that decide nothing.
+
+**And it still refuses in exactly one place.** When the row is not the caller's, `checkDuplicate` does not refuse — it declines to recognise the submission as a repeat and falls through. Persistence then adopts the named id as the primary key, the insert collides with the row already sitting there, and the one ownership gate refuses it with the one message every ownership failure gets. A foreign sealed row and a foreign unsealed row now answer identically, because they take the same path; before, one was refused at the write and the other short-circuited to success, so a single probe told the caller which it was holding.
+
+**What the owner is entitled to is unchanged**, and this is the half a security fix can quietly break. A re-fired final submit still returns the original response id rather than writing a second terminal row — by id when the row has no owner or the caller is it, and by session when the widget re-`load()`s and arrives with a fresh `clientResponseId` (it mints one per `load()`). A respondent screened out on their first attempt is still told they were screened out on their retry, never that their response was recorded.
+
+**Two bounds, stated rather than discovered.** Both are recorded in the code as well as here.
+
+A re-fire that presents an **owned** row's id under a blank or different session used to be answered and is now refused. Issue #100 asked that "same client, same id, session blank or changed" keep short-circuiting, and it does for a row with no owner — but when the row has one, that request is the same one issue #78 established must be refused, and the two asks cannot both be honoured, because answering it *is* the disclosure. The read now agrees with the write instead of contradicting it; that caller was already refused on every partial save and every write. No real widget reaches it: the session is minted per service instance and the client id per `load()`, so an id only ever travels with the session that created it.
+
+And a caller naming an id that belongs to **nobody** is still answered `success` — a row is created at that id and it is theirs — so "this id is taken by someone else" stays distinguishable from "this id is free". That is structural: the client mints the primary key, and an endpoint that lets a caller create a row at an id of their choosing cannot also hide whether that id is in use. It is unchanged by this fix (a foreign *unsealed* row has answered that way since PR #94) and empty within these issues' own threat model, which assumes the caller has already observed the id in traffic. What is closed is everything *about the response*.
+
+`findResponseById`'s docstring also ended "Fail-open on a query error" while its only caller has always failed closed. The behaviour was right; the sentence is now too.
+
+No schema change, no migration, no new config, and no client change.
