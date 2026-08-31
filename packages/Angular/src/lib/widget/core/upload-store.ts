@@ -34,10 +34,10 @@ export interface UploadView {
   /**
    * The file itself, for a control that has to RENDER it rather than name it.
    *
-   * The signature pad is that control, and this field is what puts the drawing back after the
+   * The doodle pad is that control, and this field is what puts the drawing back after the
    * respondent leaves the section and returns. Its canvas dies with the component, so a pad
    * with nothing to repaint from shows an empty box over an answer that is stored — which is
-   * exactly what the respondent reads as "my signature is gone". Every other control in the
+   * exactly what the respondent reads as "my drawing is gone". Every other control in the
    * widget renders from the answer it is given; this is what lets the pad do the same.
    *
    * It doubles as the file a failed upload is retried with. One field, because it is one fact:
@@ -58,7 +58,7 @@ export const IDLE_UPLOAD: UploadView = {
 /**
  * Permission to write the result of one upload.
  *
- * Uploads are not serialized — the signature pad can start a second while the first is still
+ * Uploads are not serialized — the doodle pad can start a second while the first is still
  * going, and a respondent can pick a different file mid-upload — so without a stamp the answer
  * becomes whichever response ARRIVES last rather than whichever was asked for last. On a lossy
  * mobile link those differ routinely.

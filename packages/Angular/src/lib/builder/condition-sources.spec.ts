@@ -192,7 +192,7 @@ describe('source kinds', () => {
     it('an answer nothing can be compared against offers presence only', () => {
       // Composites and files are objects and GUIDs; a Ranking answer is EVERY option in the
       // order they were put, so membership against it is true for anyone who answered at all.
-      for (const type of ['Address', 'ContactInfo', 'Matrix', 'FileUpload', 'Signature', 'Ranking']) {
+      for (const type of ['Address', 'ContactInfo', 'Matrix', 'FileUpload', 'Doodle', 'Ranking']) {
         expect(sourceOf(type).kind).toBe('presence');
       }
     });

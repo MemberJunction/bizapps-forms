@@ -35,8 +35,10 @@ import type {
   JumpTarget,
 } from '@mj-biz-apps/forms-entities';
 
-import { SCORE_SOURCE_ID, type ConditionalSourceQuestion } from './condition-sources';
+import { allQuestions, endScreensOf, type FormTree, type QuestionNode } from './builder-models';
+import { SCORE_SOURCE_ID, toConditionalSource, type ConditionalSourceQuestion } from './condition-sources';
 import { jumpReach, reachNote, readHorizon, type ReachSource } from './jump-reach';
+import { parseConditionalRule } from './json-fields';
 import { describeCondition, groupConditions, type RuleVerb } from './rules-panel-model';
 
 /** Which kind of item a rule hangs off — what the hub needs to route a click back to. */
@@ -78,6 +80,66 @@ export interface RuleInventoryForm {
    * "deleted", and reporting a healthy rule broken for it.
    */
   sources: ReadonlyArray<ConditionalSourceQuestion>;
+}
+
+/**
+ * The builder's loaded tree, read as rules — the ONE adapter into {@link RuleInventoryForm}.
+ *
+ * Every reader of a form's rule health goes through here: the canvas badges, the ending-reach
+ * lines, the reorder notice, and the publish gate. That is the whole point of it being a
+ * function rather than a getter on the builder component, which is where it used to live: a
+ * gate assembled from its own view of the form is a second opinion, and the failure mode is
+ * silent — the canvas says a rule is broken while publish says the form is fine, and one of
+ * them is wrong on every form that ever hits the disagreement.
+ *
+ * `sources` drops a question that collects no answer (a `Statement`), because a condition
+ * naming one can never read anything — see {@link RuleInventoryForm.sources}.
+ */
+export function ruleInventoryFormOf(tree: FormTree): RuleInventoryForm {
+  return {
+    sources: conditionSourcesOf(allQuestions(tree)),
+    pages: tree.pages.map((page, index) => ({
+      id: page.entity.ID,
+      label: page.entity.Title || `Page ${index + 1}`,
+      conditionalRule: parseConditionalRule(page.entity.ConditionalRule),
+      questions: page.questions.map((q) => ({
+        id: q.entity.ID,
+        label: q.entity.Prompt,
+        conditionalRule: parseConditionalRule(q.entity.ConditionalRule),
+        // Carried so a `Go to` can say how many REQUIRED questions it passes over, which is
+        // the half of "this rule skips things" an author actually needs to weigh.
+        isRequired: q.entity.IsRequired === true,
+      })),
+    })),
+    endings: endScreensOf(tree).map((screen) => ({
+      id: screen.ID,
+      label: screen.Title || 'Ending screen',
+      conditionalRule: parseConditionalRule(screen.ConditionalRule),
+      isDisqualification: screen.IsDisqualification === true,
+      isDefault: screen.IsDefault === true,
+    })),
+  };
+}
+
+/**
+ * The questions in this list that a CONDITION may read.
+ *
+ * ONE definition, for every source list the builder produces — a page's show gate and its jump,
+ * a question's show gate and its jump, an ending's, and the whole-form list the badges resolve
+ * prompts against. Each of those used to map the tree itself, so "which questions can a rule
+ * read" was answered six times over, and the first exclusion to arrive would have had to be
+ * remembered in all six.
+ *
+ * `toConditionalSource` returns `undefined` for a question that collects no answer — a
+ * `Statement` renders prose and never reaches the answer map, so every operator on it is a
+ * constant, and it was offered in the question dropdown all the same.
+ *
+ * Takes a QUESTION LIST rather than the tree, because its two kinds of caller want different
+ * lists from the same rule: {@link ruleInventoryFormOf} wants the whole form, and a source
+ * picker wants the prefix its rule may legally reach.
+ */
+export function conditionSourcesOf(questions: readonly QuestionNode[]): ConditionalSourceQuestion[] {
+  return questions.flatMap((q) => toConditionalSource(q.entity, q.options) ?? []);
 }
 
 /** One row of the hub: a rule, said in full, with a way back to where it is edited. */
@@ -171,6 +233,25 @@ export function collectRuleEntries(form: RuleInventoryForm): RuleEntry[] {
     }
   }
   return entries;
+}
+
+/**
+ * Every broken rule on a form, in the words its badge already uses — empty when none is broken.
+ *
+ * The question "may this form go live?" and the question "does this item wear a broken badge?"
+ * are ONE question, answered here, from one walk of one projection. The publish gate consumes
+ * this (see `publish.service.ts`); the canvas consumes {@link ruleBadgesFor} over the same
+ * entries. Neither can start disagreeing with the other, and any breakage class
+ * {@link collectRuleEntries} learns later blocks publish without this function being touched.
+ *
+ * Lines, not entries, because both callers want the same sentence: what the rule says, and what
+ * it can no longer reach. `detailFor` is what writes it, so the refusal an author reads is
+ * verbatim the tooltip they were already being shown.
+ */
+export function brokenRuleLines(tree: FormTree): string[] {
+  return collectRuleEntries(ruleInventoryFormOf(tree))
+    .filter((entry) => entry.broken.length > 0)
+    .map((entry) => detailFor(entry));
 }
 
 /** A page's own rules: its show gate, then its forward jump. */

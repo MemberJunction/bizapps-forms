@@ -13,7 +13,7 @@ const email = q('qe', 'Email', 0);
 const phone = q('qp', 'Phone', 1);
 const contact = q('qc', 'ContactInfo', 2);
 const address = q('qa', 'Address', 3);
-const signature = q('qs', 'Signature', 4);
+const doodle = q('qs', 'Doodle', 4);
 const choice = q('qch', 'SingleChoice', 5);
 
 describe('contact coverage', () => {
@@ -204,15 +204,15 @@ describe('when the section applies at all', () => {
     expect(buildRespondentProfile([email], [], 0).isEmpty).toBe(false);
   });
 
-  it('counts signatures and files separately from each other', () => {
+  it('counts drawings and files separately from each other', () => {
     const profile = buildRespondentProfile(
-      [signature],
+      [doodle],
       [answer('r1', 'qs', { FileID: 'f1' }), answer('r2', 'qs', { FileID: 'f2' })],
       4,
     );
-    const signed = profile.metrics.find((m) => m.label === 'Signed')!;
-    expect(signed.value).toBe('2');
-    expect(signed.fraction).toBe(0.5);
+    const drawn = profile.metrics.find((m) => m.label === 'Drawing given')!;
+    expect(drawn.value).toBe('2');
+    expect(drawn.fraction).toBe(0.5);
   });
 });
 

@@ -101,7 +101,7 @@ export const QUESTION_INSIGHT_ROLE: Record<FormQuestionType, QuestionInsightRole
   LongText: 'openText',
 
   FileUpload: 'attachment',
-  Signature: 'attachment',
+  Doodle: 'attachment',
 
   Date: 'temporal',
   Time: 'temporal',

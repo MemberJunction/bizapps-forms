@@ -91,7 +91,7 @@ describe('QUESTION_TYPE_BEHAVIOR', () => {
     for (const type of ['YesNo', 'Checkbox', 'Legal'] as const) {
       expect(answerColumnFor(type)).toBe('boolean');
     }
-    for (const type of ['FileUpload', 'Signature'] as const) {
+    for (const type of ['FileUpload', 'Doodle'] as const) {
       expect(answerColumnFor(type)).toBe('file');
     }
   });
@@ -126,7 +126,7 @@ describe('QUESTION_TYPE_BEHAVIOR', () => {
   it('keeps every new type reachable — nothing added to the union without a behaviour row', () => {
     const added: FormQuestionType[] = [
       'Website', 'Checkbox', 'Legal', 'PictureChoice', 'OpinionScale',
-      'Ranking', 'Matrix', 'Address', 'ContactInfo', 'Signature',
+      'Ranking', 'Matrix', 'Address', 'ContactInfo', 'Doodle',
     ];
     for (const type of added) {
       expect(FORM_QUESTION_TYPES).toContain(type);
@@ -137,11 +137,29 @@ describe('QUESTION_TYPE_BEHAVIOR', () => {
 describe('isFormQuestionType', () => {
   it('accepts a real type and rejects everything else', () => {
     expect(isFormQuestionType('ShortText')).toBe(true);
-    expect(isFormQuestionType('Signature')).toBe(true);
+    expect(isFormQuestionType('Doodle')).toBe(true);
     expect(isFormQuestionType('Payment')).toBe(false);
     expect(isFormQuestionType('')).toBe(false);
     expect(isFormQuestionType(null)).toBe(false);
     expect(isFormQuestionType(42)).toBe(false);
+  });
+
+  /**
+   * The retired `Signature` key is NOT kept alive as an alias, and that is a decision (#97).
+   *
+   * An alias looks like cheap insurance against a snapshot the rename's migration missed, and it
+   * is not: admitted here with no row in `QUESTION_TYPE_BEHAVIOR`, it converts the parser's clean
+   * fail-closed into `questionTypeBehavior` THROWING on the first `answerColumnFor` — a 500
+   * instead of a handled `undefined`. Admitted WITH a row it is not a rename: the builder's total
+   * `Record<FormQuestionType, …>` palette would have to offer "Signature" again and the CHECK
+   * constraint would have to keep accepting it, which is the whole thing being removed.
+   *
+   * What makes the migration sufficient on its own: the snapshot token is written by
+   * `JSON.stringify` (`publish.service.ts`), so `"type":"Signature"` has exactly one spelling and
+   * a scoped REPLACE cannot miss it.
+   */
+  it('does not answer to the retired Signature key', () => {
+    expect(isFormQuestionType('Signature')).toBe(false);
   });
 
   it('is not fooled by inherited Object properties', () => {

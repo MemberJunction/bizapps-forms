@@ -698,7 +698,7 @@ export const mjBizAppsFormsFormQuestionSchema = z.object({
         * * Display Name: Page ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Pages (vwFormPages.ID)`),
-    QuestionType: z.union([z.literal('Address'), z.literal('Checkbox'), z.literal('ContactInfo'), z.literal('Date'), z.literal('Dropdown'), z.literal('Email'), z.literal('FileUpload'), z.literal('Legal'), z.literal('LongText'), z.literal('Matrix'), z.literal('MultiChoice'), z.literal('NPS'), z.literal('Number'), z.literal('OpinionScale'), z.literal('Phone'), z.literal('PictureChoice'), z.literal('Ranking'), z.literal('Rating'), z.literal('ShortText'), z.literal('Signature'), z.literal('SingleChoice'), z.literal('Statement'), z.literal('Time'), z.literal('Website'), z.literal('YesNo')]).describe(`
+    QuestionType: z.union([z.literal('Address'), z.literal('Checkbox'), z.literal('ContactInfo'), z.literal('Date'), z.literal('Doodle'), z.literal('Dropdown'), z.literal('Email'), z.literal('FileUpload'), z.literal('Legal'), z.literal('LongText'), z.literal('Matrix'), z.literal('MultiChoice'), z.literal('NPS'), z.literal('Number'), z.literal('OpinionScale'), z.literal('Phone'), z.literal('PictureChoice'), z.literal('Ranking'), z.literal('Rating'), z.literal('ShortText'), z.literal('SingleChoice'), z.literal('Statement'), z.literal('Time'), z.literal('Website'), z.literal('YesNo')]).describe(`
         * * Field Name: QuestionType
         * * Display Name: Question Type
         * * SQL Data Type: nvarchar(50)
@@ -708,6 +708,7 @@ export const mjBizAppsFormsFormQuestionSchema = z.object({
     *   * Checkbox
     *   * ContactInfo
     *   * Date
+    *   * Doodle
     *   * Dropdown
     *   * Email
     *   * FileUpload
@@ -723,7 +724,6 @@ export const mjBizAppsFormsFormQuestionSchema = z.object({
     *   * Ranking
     *   * Rating
     *   * ShortText
-    *   * Signature
     *   * SingleChoice
     *   * Statement
     *   * Time
@@ -3171,6 +3171,7 @@ export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsF
     *   * Checkbox
     *   * ContactInfo
     *   * Date
+    *   * Doodle
     *   * Dropdown
     *   * Email
     *   * FileUpload
@@ -3186,7 +3187,6 @@ export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsF
     *   * Ranking
     *   * Rating
     *   * ShortText
-    *   * Signature
     *   * SingleChoice
     *   * Statement
     *   * Time
@@ -3194,10 +3194,10 @@ export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsF
     *   * YesNo
     * * Description: Question input type (ShortText, Email, SingleChoice, Rating, NPS, FileUpload, Statement, etc.)
     */
-    get QuestionType(): 'Address' | 'Checkbox' | 'ContactInfo' | 'Date' | 'Dropdown' | 'Email' | 'FileUpload' | 'Legal' | 'LongText' | 'Matrix' | 'MultiChoice' | 'NPS' | 'Number' | 'OpinionScale' | 'Phone' | 'PictureChoice' | 'Ranking' | 'Rating' | 'ShortText' | 'Signature' | 'SingleChoice' | 'Statement' | 'Time' | 'Website' | 'YesNo' {
+    get QuestionType(): 'Address' | 'Checkbox' | 'ContactInfo' | 'Date' | 'Doodle' | 'Dropdown' | 'Email' | 'FileUpload' | 'Legal' | 'LongText' | 'Matrix' | 'MultiChoice' | 'NPS' | 'Number' | 'OpinionScale' | 'Phone' | 'PictureChoice' | 'Ranking' | 'Rating' | 'ShortText' | 'SingleChoice' | 'Statement' | 'Time' | 'Website' | 'YesNo' {
         return this.Get('QuestionType');
     }
-    set QuestionType(value: 'Address' | 'Checkbox' | 'ContactInfo' | 'Date' | 'Dropdown' | 'Email' | 'FileUpload' | 'Legal' | 'LongText' | 'Matrix' | 'MultiChoice' | 'NPS' | 'Number' | 'OpinionScale' | 'Phone' | 'PictureChoice' | 'Ranking' | 'Rating' | 'ShortText' | 'Signature' | 'SingleChoice' | 'Statement' | 'Time' | 'Website' | 'YesNo') {
+    set QuestionType(value: 'Address' | 'Checkbox' | 'ContactInfo' | 'Date' | 'Doodle' | 'Dropdown' | 'Email' | 'FileUpload' | 'Legal' | 'LongText' | 'Matrix' | 'MultiChoice' | 'NPS' | 'Number' | 'OpinionScale' | 'Phone' | 'PictureChoice' | 'Ranking' | 'Rating' | 'ShortText' | 'SingleChoice' | 'Statement' | 'Time' | 'Website' | 'YesNo') {
         this.Set('QuestionType', value);
     }
 

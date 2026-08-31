@@ -147,6 +147,10 @@ const LAYOUT_CSS = /* css */ `
 
 .fb-status { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 
+/* The publish control's persistent live region. Holds exactly one chip or button at a time,
+   so inline-flex reproduces what those elements did as direct children of the flex topbar. */
+.fb-publish-status { display: inline-flex; align-items: center; }
+
 /* The "nothing to publish" state. Quiet on purpose: it is a status, not an action, so it
    reads as text with a check rather than as a button you have failed to press. Success
    tone at low saturation — the point is reassurance, not celebration. */
@@ -165,6 +169,30 @@ const LAYOUT_CSS = /* css */ `
   border: 1px solid var(--mj-status-success-border);
 }
 .fb-published i { font-size: 0.875rem; }
+
+/* Published, but no respondent can reach it: no share link exists, or every one of them has
+   been switched off, expired or filled up. Warning tone rather than success, because the
+   author's mental model after pressing Publish is "it is out there" and it is not.
+
+   This one IS a button — the remedy lives on another tab — so it needs the affordances a
+   span got for free: a pointer, a hover, and a visible focus ring for anyone arriving by
+   keyboard. It keeps the .fb-published box, so the chip does not move or resize when the
+   author creates a link and it flips back to the reassuring version. */
+.fb-published--unshared {
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--mj-status-warning-text);
+  background: var(--mj-status-warning-bg);
+  border-color: var(--mj-status-warning-border);
+  transition: filter var(--mjf-ease);
+}
+.fb-published--unshared:hover { filter: brightness(0.97); }
+.fb-published--unshared:focus-visible {
+  outline: 2px solid var(--mj-brand-primary);
+  outline-offset: 2px;
+}
 
 /* The publish action itself carries no extra ring: it only appears when there is
    genuinely something to publish, so its presence is the signal. */
@@ -230,17 +258,15 @@ const LAYOUT_CSS = /* css */ `
 
 /* ------------------------------------------------------------------- palette */
 
-/* Palette tools — search + import, pinned above the groups. At 25 types across seven groups,
-   scanning is slower than typing, and an author who knows what they want should not have to
-   know which heading we filed it under. */
-.fb-palette-tools {
+/* Palette search, pinned above the groups. At 25 types across seven groups, scanning is slower
+   than typing, and an author who knows what they want should not have to know which heading we
+   filed it under. */
+.fb-palette-search {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
   margin-bottom: var(--mjf-stack);
 }
-
-.fb-palette-search { position: relative; display: flex; align-items: center; }
 .fb-palette-search i {
   position: absolute;
   left: 10px;
@@ -249,26 +275,6 @@ const LAYOUT_CSS = /* css */ `
   pointer-events: none;
 }
 .fb-palette-search .mjf-input { padding-left: 30px; }
-
-.fb-palette-import {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--mjf-meta);
-  color: var(--mj-text-secondary);
-  background: transparent;
-  border: 1px dashed var(--mj-border-default);
-  border-radius: var(--mjf-radius-sm);
-  transition: background var(--mjf-ease), border-color var(--mjf-ease);
-}
-.fb-palette-import:hover:not(:disabled) { border-color: var(--mj-brand-primary); background: var(--mj-bg-surface-hover); }
-.fb-palette-import:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -2px; }
-.fb-palette-import:disabled { opacity: 0.45; cursor: not-allowed; }
-.fb-palette-import i { width: 16px; text-align: center; color: var(--mj-text-muted); }
 
 /* ---- Screens on the canvas ----
    Rendered as a distinct card rather than as another question row, because that visual

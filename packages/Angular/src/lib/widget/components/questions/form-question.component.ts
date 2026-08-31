@@ -7,8 +7,8 @@
  * `@case`; ShortText, Email, Phone, Website, Date and Time share the `@default` input, differing
  * only in the `type`/`inputmode`/`autocomplete` triple `input-mode.ts` derives.
  *
- * `Signature` is delegated to {@link SignaturePadComponent} and then travels the SAME upload
- * path a `FileUpload` answer does — it is a file answer whose file came from a canvas.
+ * `Doodle` is delegated to {@link DoodlePadComponent} and then travels the SAME upload path a
+ * `FileUpload` answer does — it is a file answer whose file came from a canvas.
  */
 import {
   afterNextRender,
@@ -31,6 +31,7 @@ import { moveItem } from '../../../shared/move-item';
 import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
+  doodlePen,
   isAnswerableQuestionType,
   numericScalePoints,
   opinionScaleBounds,
@@ -52,7 +53,7 @@ import {
   inputModeFor,
   inputTypeFor,
 } from './input-mode';
-import { SignaturePadComponent, type SignatureCapture } from './signature-pad.component';
+import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
 /** How long a reordered row takes to travel to its new place. */
@@ -82,7 +83,7 @@ type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
   selector: 'mjf-form-question',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, SignaturePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
+  imports: [NgTemplateOutlet, DoodlePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
   templateUrl: './form-question.component.html',
   styleUrls: ['./form-question.component.css'],
 })
@@ -139,7 +140,7 @@ export class FormQuestionComponent {
    * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
    * file is here from the moment it is chosen or drawn, while it is uploading, and after an
    * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
-   * rendering — the signature pad repaints itself from it after Angular destroys the control —
+   * rendering — the doodle pad repaints itself from it after Angular destroys the control —
    * and retrying. Read from the store, keyed by question id, for the same reason every other
    * upload fact is: this component instance is recycled across questions and cannot be trusted
    * to still be the one the file belongs to.
@@ -149,8 +150,8 @@ export class FormQuestionComponent {
    * Whether a file answer is on record for this question — the answer id, not the artifact.
    *
    * The two can come apart, and a control that reads only the artifact then renders EMPTY over a
-   * stored answer. That is the shape of the bug the signature pad had, one level up: the upload
-   * store is per-widget memory, so a signature or file captured in an earlier session leaves the
+   * stored answer. That is the shape of the bug the doodle pad had, one level up: the upload
+   * store is per-widget memory, so a drawing or file captured in an earlier session leaves the
    * answer with nothing local to show for it. Reading the answer itself is what keeps the control
    * from claiming a question is unanswered when it is not.
    */
@@ -567,28 +568,37 @@ export class FormQuestionComponent {
     this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
   }
 
-  // --- Signature -----------------------------------------------------------
+  // --- Doodle --------------------------------------------------------------
 
   /**
-   * A drawn signature takes the ordinary file-answer path from here.
+   * A drawing takes the ordinary file-answer path from here.
    *
    * Stored against the question the capture NAMES, not against `this.question()`. The export
    * finishes after the gesture, and this handler is routed by the view — in OneQuestion mode one
-   * pad serves consecutive Signature questions, so reading the current question here filed the
+   * pad serves consecutive Doodle questions, so reading the current question here filed the
    * first one's drawing as the second one's answer.
    */
-  protected async onSignatureDrawn(capture: SignatureCapture): Promise<void> {
+  protected async onDoodleDrawn(capture: DoodleCapture): Promise<void> {
     await this.uploadFile(capture.file, capture.subject);
   }
 
-  protected onSignatureCleared(): void {
+  protected onDoodleCleared(): void {
     // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it
-    // and taps Clear gets the discarded signature back a moment later: the in-flight upload
-    // resolves and emits its fileId over the null, leaving a stored signature beside an empty pad
-    // that reads "Draw your signature above."
+    // and taps Clear gets the discarded drawing back a moment later: the in-flight upload
+    // resolves and emits its fileId over the null, leaving a stored drawing beside an empty pad
+    // that reads "Draw here."
     this.uploads.clear(this.question().id);
     this.valueChange.emit(null);
   }
+
+  /**
+   * The pen this doodle question draws with, validated on the way out of the open settings blob.
+   *
+   * Parsed HERE rather than inside the pad so the pad receives a value it can always render:
+   * `Settings` is reachable by paste and by API, and `doodlePen` falls back key by key, so an
+   * unknown colour or a nonsense width becomes the default before it can reach a canvas.
+   */
+  protected readonly pen = computed(() => doodlePen(this.question().settings));
 
   /** Read a string setting off the question, or '' when unset or the wrong type. */
   private settingText(key: string): string {

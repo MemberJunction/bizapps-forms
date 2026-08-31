@@ -74,8 +74,19 @@ export class FormsGraphQLApiService implements IFormsApiService {
   /**
    * Per-widget-instance anonymous session correlator, sent as the `x-session-id` header MJ
    * core reads into `UserPayload.sessionId` (and thence `FormResponse.AnonymousSessionID`).
-   * Best-effort telemetry ONLY — correctness (dedupe/upsert) rides the stable client
-   * response id in the payload, never this header — so a stripped header degrades gracefully.
+   *
+   * NOT best-effort telemetry, whatever this said before. It is the OWNERSHIP RECORD: the server
+   * stamps it on the row this widget creates, and thereafter only that session may write to the
+   * row (issue #78) or be told its status (issues #100/#101). The client response id in the
+   * payload is still the idempotency key, and it is the whole capability for a row created with
+   * NO session — but once a row has an owner, a request that arrives without this header, or with
+   * a different value, is refused rather than degrading gracefully.
+   *
+   * That costs a real client nothing, because the two identifiers travel together: this one is
+   * minted per SERVICE instance and the client response id per `load()`, so a given response id is
+   * only ever presented alongside the session that created it. An intermediary that strips the
+   * header on a retry but not on the original request is what would break, and it would break
+   * loudly rather than by taking somebody else's row.
    */
   private readonly sessionId = generateClientResponseId();
 
@@ -110,8 +121,10 @@ export class FormsGraphQLApiService implements IFormsApiService {
   ): Promise<TData> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      // Anonymous session correlator (see this.sessionId). Best-effort — captured server-side
-      // into AnonymousSessionID when present; never the idempotency key.
+      // The ownership record for every row this widget writes, not telemetry — see
+      // `this.sessionId` for what the server does with it, and why omitting it is refused rather
+      // than degraded. Still never the idempotency key: that is the client response id, in the
+      // payload.
       'x-session-id': this.sessionId,
     };
     if (this.config.token) {

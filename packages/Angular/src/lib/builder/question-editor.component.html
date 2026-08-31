@@ -175,7 +175,25 @@
         @for (field of otherSettingFields; track field.key) {
           <div class="mjf-field">
             <label class="mjf-field-label" [attr.for]="'qe-set-' + field.key">{{ field.label }}</label>
-            @if (field.kind === 'multiline') {
+            @if (field.kind === 'choice') {
+              <select
+                #setSelect
+                class="mjf-select"
+                [id]="'qe-set-' + field.key"
+                [value]="settingValue(field)"
+                (change)="setSetting(field, setSelect.value)"
+              >
+                <!-- [selected] as well as the select's [value], for the reason spelled out in
+                     conditional-rule-editor: Angular writes that value BEFORE these options
+                     exist, so it does not stick and the browser selects the first option on its
+                     own. One editor instance serves every question, so this <select> survives a
+                     switch between two Doodle questions and would otherwise show the previous
+                     one's pen. -->
+                @for (choice of field.choices ?? []; track choice.value) {
+                  <option [value]="choice.value" [selected]="choice.value === settingValue(field)">{{ choice.label }}</option>
+                }
+              </select>
+            } @else if (field.kind === 'multiline') {
               <textarea
                 #setInput
                 class="mjf-textarea"

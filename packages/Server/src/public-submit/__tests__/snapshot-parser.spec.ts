@@ -83,6 +83,32 @@ describe('the types added with element parity', () => {
     expect(parsePublishedDefinition(JSON.stringify(broken))).toBeUndefined();
   });
 
+  /**
+   * WHY RENAMING A TYPE IS A DATABASE OPERATION (#97).
+   *
+   * `parseQuestion` fails closed, `parsePage` fails closed on any question, and
+   * `buildDefinition` fails closed on any page — so ONE question at a retired type does not
+   * degrade to a missing field, it takes the whole snapshot and therefore the whole public link
+   * down, along with every other question on every other page. Retiring `Signature` in favour of
+   * `Doodle` in the contract while a published `DefinitionSnapshot` still says `"type":"Signature"`
+   * is that outage, which is why the snapshot rewrite ships in the same change as the rename.
+   */
+  it('takes the WHOLE definition down for one question at a retired type', () => {
+    const def = JSON.parse(JSON.stringify(makeDefinition()));
+    const good = def.pages[0].questions[0];
+    def.pages[0].questions = [
+      { ...good, id: 'q1', type: 'ShortText' },
+      { ...good, id: 'q2', type: 'Email' },
+      { ...good, id: 'q3', type: 'Doodle', prompt: 'Draw your favourite animal' },
+      { ...good, id: 'q4', type: 'YesNo' },
+    ];
+    expect(parsePublishedDefinition(JSON.stringify(def))).toBeDefined();
+
+    // The unmigrated snapshot: everything else about this form is still perfectly readable.
+    def.pages[0].questions[2].type = 'Signature';
+    expect(parsePublishedDefinition(JSON.stringify(def))).toBeUndefined();
+  });
+
   it('is not fooled by an inherited Object property posing as a type', () => {
     const broken = JSON.parse(JSON.stringify(makeDefinition()));
     broken.pages[0].questions[0].type = 'constructor';
