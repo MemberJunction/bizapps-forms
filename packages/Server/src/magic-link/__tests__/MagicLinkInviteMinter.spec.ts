@@ -311,7 +311,10 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
   });
 
   it('refuses a blank invite id rather than silently succeeding', async () => {
-    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite('   ', contextUser);
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(
+      { inviteId: '   ', resourceId: RESOURCE },
+      contextUser,
+    );
     expect(result.success).toBe(false);
     expect(mockState.loadedIds).toEqual([]);
   });
@@ -372,7 +375,7 @@ describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
     // Revoked / Consumed / Expired each record how that credential finished, and none
     // of them is redeemable whatever ExpiresAt says, so moving it rewrites history for
     // nothing.
-    for (const status of ['Revoked', 'Consumed', 'Expired']) {
+    for (const status of ['Revoked', 'Consumed', 'Expired'] as const) {
       mockState.loadedStatus = status;
       mockState.lastSavedInvite = undefined;
       const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: CLOSE_AT, maxLifetimeHours: undefined }, contextUser);

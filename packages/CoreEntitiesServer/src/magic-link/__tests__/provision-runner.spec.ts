@@ -229,7 +229,7 @@ describe('runProvisioning — revoking', () => {
   it('keeps the credential LINKED when the revoke fails, so the next save retries it', async () => {
     // Unlinking a credential we could not kill would orphan a live invite with nothing
     // pointing at it — unrevokable by any later save, and invisible in the builder.
-    const fake = fakeMinter(undefined, { success: false, message: 'row locked' });
+    const fake = fakeMinter(undefined, { success: false, changed: false, message: 'row locked' });
     const persist = vi.fn(async () => true);
 
     const outcome = await runProvisioning(
