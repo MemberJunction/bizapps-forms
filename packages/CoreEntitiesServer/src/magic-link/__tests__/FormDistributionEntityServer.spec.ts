@@ -1,12 +1,12 @@
 /**
  * Structural guards for the credential lifecycle hook.
  *
- * WHY SOURCE TEXT. `FormDistributionEntityServer` extends a generated `BaseEntity` subclass and
- * calls `super.Save()` / `super.Delete()`, so instantiating it needs MJ metadata, a provider and a
- * database — none of which exist in this vitest env. The decision (`provisioning-decision.ts`) and
- * the orchestration (`provision-runner.ts`) were pulled out precisely so they COULD be tested that
- * way, and they are, thoroughly. What is left in this class is the part that cannot be: the order
- * two `await`s happen in, which fields are read into the context, and the re-entrancy guard.
+ * WHY SOURCE TEXT, AND WHAT IT IS NOW FOR. This file predates the discovery that the class CAN be
+ * instantiated here — `vi.mock` the generated base and `@RegisterClass`, and the real subclass runs
+ * over a fake (`FormDistributionEntityServer.behaviour.spec.ts`). It was written on the belief that
+ * `super.Save()` / `super.Delete()` made that impossible, and its assertions are shaped by that
+ * belief: they read the file. The decision (`provisioning-decision.ts`) and the orchestration
+ * (`provision-runner.ts`) were pulled out to be tested properly and are, thoroughly.
  *
  * That is exactly why it needs guarding rather than why it can be skipped. A review pass found the
  * class had no test of any kind and listed four one-line mutations that leave the whole suite
@@ -14,9 +14,11 @@
  * order, mis-mapping a context field. Every one of those is a defect the file's own comments
  * describe at length as load-bearing, and the comments were the only thing enforcing them.
  *
- * They match on the call and the ordering rather than on formatting, so a reflow does not red
- * them, and each guards a decision whose failure mode is silence. Same trade-off, and the same
- * reasoning, as `distribution-manager.spec.ts` in the Angular package.
+ * These assert PRESENCE and TEXTUAL POSITION — that a call exists, that one string precedes
+ * another. They cannot assert a condition or a sequence: mutation testing showed the client-write
+ * guard deleted outright, and the delete/revoke order reversed, with every case here green. The
+ * behaviour is tested in `FormDistributionEntityServer.behaviour.spec.ts`; what remains here is a
+ * cheap structural smoke that a refactor did not remove a call entirely, titled as exactly that.
  *
  * That tolerance is a PROPERTY OF THE ASSERTIONS, not a promise the header can make on their
  * behalf. This file said "a reflow cannot red them" while the context-mapping check below used
@@ -61,7 +63,7 @@ describe('the credential pair is written as one value', () => {
 });
 
 describe('re-entrancy is bounded, not lucky', () => {
-  it('keeps the in-flight guard, and checks it before provisioning', () => {
+  it('mentions the in-flight guard in Save, and resets it in a finally', () => {
     // persistCredential calls Save(), which re-enters this override. One boolean is what makes
     // the nesting depth provably one; without it the reissue path — which is triggered BY a
     // cleared column — has no argument that it terminates at all.
@@ -71,13 +73,10 @@ describe('re-entrancy is bounded, not lucky', () => {
     expect(save).toMatch(/finally\s*\{\s*this\.credentialWriteInFlight = false/);
   });
 
-  it('resets the guard in a finally, so a throw cannot wedge the record permanently', () => {
-    expect(bodyOf('public override async Save')).toMatch(/finally/);
-  });
 });
 
 describe('the credential columns are server-owned', () => {
-  it('refuses client writes BEFORE the record is persisted, not after', () => {
+  it('places refuseClientCredentialWrites textually before super.Save (the effect is tested behaviourally)', () => {
     // Both columns ride the generated GraphQL update input and MJ's client sends every writable
     // field, so a stale builder tab writes the pre-rotation pair back on its next ordinary save.
     // Running the refusal after super.Save() would let that reach the database first.
@@ -107,7 +106,7 @@ describe('the credential columns are server-owned', () => {
 });
 
 describe('deleting a distribution', () => {
-  it('deletes FIRST and revokes after, so a refused delete cannot kill a live credential', () => {
+  it('mentions super.Delete before RevokeAnonymousInvite in the source (the ORDER OF CALLS is tested behaviourally)', () => {
     // `FormUpload.DistributionID` is a required FK, so any link that has taken an upload cannot
     // be deleted at all — refusal is the common case here, and revoking first would kill a live
     // link's credential every time one bounced.
@@ -123,7 +122,7 @@ describe('deleting a distribution', () => {
     expect(body.indexOf('this.MagicLinkInviteID')).toBeLessThan(body.indexOf('super.Delete'));
   });
 
-  it('returns false without revoking when the delete itself was refused', () => {
+  it('has an early return on a refused super.Delete (that it skips the revoke is tested behaviourally)', () => {
     expect(bodyOf('public override async Delete')).toMatch(/if\s*\(!\(await super\.Delete\([^)]*\)\)\)\s*\{\s*return false/);
   });
 
