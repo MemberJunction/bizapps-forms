@@ -46,7 +46,9 @@
     "vitest": "^3.2.4",
     "@aws-sdk/credential-providers": "3.1109.0",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "socks": "2.8.9"
+    "socks": "2.8.9",
+    "@types/compression": "^1.8.1",
+    "compression": "^1.8.1"
   },
   "repository": {
     "type": "git",
