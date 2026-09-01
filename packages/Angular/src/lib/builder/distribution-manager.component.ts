@@ -296,9 +296,16 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   /**
    * Ask the server for a new access token, keeping the web address.
    *
-   * Two clicks, because it cannot be undone: the previous token stops working the instant
-   * this lands, and anyone holding it (a scraped `PublicLinkToken`, a copied redeem URL)
-   * loses access. What it does NOT break is the shared link itself — `/f/:slug` looks the
+   * Two clicks, because it cannot be undone: the previous token stops being redeemable the
+   * instant this lands, so anyone holding it (a scraped `PublicLinkToken`, a copied redeem URL)
+   * can no longer trade it for a session.
+   *
+   * It does NOT end sessions already granted. Revocation stops new redemptions; a respondent who
+   * had already opened the link holds a JWT that stays valid until its own `exp` — core ships no
+   * session revocation for magic-link tokens to hook into. The control's copy says so rather than
+   * promising an instant cutoff the product cannot deliver.
+   *
+   * What it also does NOT break is the shared link itself — `/f/:slug` looks the
    * token up at request time, so posters, QR codes and embeds carry on working. That is
    * the whole reason this exists instead of "delete it and make another".
    */
