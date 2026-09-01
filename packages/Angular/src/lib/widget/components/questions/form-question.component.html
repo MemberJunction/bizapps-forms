@@ -9,7 +9,7 @@
       }
     </div>
   } @else {
-    <label class="mjf-question__label" [attr.for]="inputId()">
+    <label class="mjf-question__label" [id]="labelId()" [attr.for]="inputId()">
       <span class="mjf-question__prompt">{{ q.prompt }}</span>
       @if (q.isRequired) {
         <span class="mjf-question__required" aria-hidden="true">*</span>
@@ -50,7 +50,7 @@
           />
         }
         @case ('SingleChoice') {
-          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -68,7 +68,7 @@
         }
         @case ('MultiChoice') {
           <p class="mjf-choices__hint">Choose as many as you like.</p>
-          <div class="mjf-choices" role="group" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-choices" role="group" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -101,7 +101,7 @@
           </select>
         }
         @case ('Rating') {
-          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (star of ratingScale(); track star) {
               <button
                 type="button"
@@ -118,7 +118,7 @@
           </div>
         }
         @case ('NPS') {
-          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (n of npsScale; track n) {
               <button
                 type="button"
@@ -133,7 +133,7 @@
           </div>
         }
         @case ('YesNo') {
-          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
               [class.mjf-choice--selected]="booleanValue() === true"
               [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">Yes</button>
@@ -234,7 +234,7 @@
           }
         }
         @case ('PictureChoice') {
-          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -261,7 +261,7 @@
         }
         @case ('OpinionScale') {
           <div class="mjf-scale">
-            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               @for (point of scalePoints(); track point) {
                 <button
                   type="button"
@@ -385,7 +385,7 @@
                 {{ legalTerms() }}
               </div>
             }
-            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
                 [class.mjf-choice--selected]="booleanValue() === true"
                 [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">I accept</button>
