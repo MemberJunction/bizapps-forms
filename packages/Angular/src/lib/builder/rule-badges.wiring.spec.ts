@@ -43,6 +43,26 @@ const reorderMethod = (): string => {
   return source.slice(start, end);
 };
 
+/**
+ * The body of the `if (!(await this.state.persistQuestionOrder(page)))` branch, brace-matched.
+ *
+ * A text-position comparison cannot tell "inside the branch" from "after the branch", and the two
+ * mean opposite things here: one reverts a refused drag, the other reverts every drag. Counting
+ * braces is crude, but it is the difference between a guard and a decoration.
+ */
+const refusalBranchOf = (method: string): string => {
+  const guard = method.indexOf('if (!(await this.state.persistQuestionOrder(page)))');
+  expect(guard).toBeGreaterThan(-1);
+  const open = method.indexOf('{', guard);
+  expect(open).toBeGreaterThan(-1);
+  let depth = 0;
+  for (let i = open; i < method.length; i++) {
+    if (method[i] === '{') depth++;
+    else if (method[i] === '}' && --depth === 0) return method.slice(open + 1, i);
+  }
+  throw new Error('reorderQuestion: the refusal branch never closes — did the method change shape?');
+};
+
 describe('the Rules tab is gone, not hidden', () => {
   it('leaves no tab to open', () => {
     // A tab left in the union but unreachable in the template is a state the component can still
@@ -195,13 +215,13 @@ describe('a reorder that breaks a rule says so at the drag', () => {
     // arrangement the database had rejected — with a band about consequences of a move that never
     // happened. The transaction rolls the database and the entities back; nothing rolled back the
     // two pieces of state the author can actually SEE.
-    const method = reorderMethod();
-    expect(method).toMatch(/moveItemInArray\(page\.questions, to, from\)/);
-    expect(method).toMatch(/this\.reorderNotice = previousNotice/);
     // The revert must be INSIDE the refusal branch — reverting unconditionally would undo every
-    // successful drag on the page.
-    const refusal = method.indexOf('persistQuestionOrder');
-    expect(method.indexOf('moveItemInArray(page.questions, to, from)')).toBeGreaterThan(refusal);
+    // successful drag on the page. `indexOf(revert) > indexOf(guard)` does NOT establish that: it
+    // is satisfied by a revert moved out of the `if` and below it, which is precisely the broken
+    // variant. So take the branch's own body by matching its braces, and assert against that.
+    const body = refusalBranchOf(reorderMethod());
+    expect(body).toMatch(/moveItemInArray\(page\.questions, to, from\)/);
+    expect(body).toMatch(/this\.reorderNotice = previousNotice/);
   });
 
   it('is its own band, not the failure band, and carries an Undo that outlives the tick', () => {
