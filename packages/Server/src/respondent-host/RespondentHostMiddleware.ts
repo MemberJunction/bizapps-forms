@@ -117,7 +117,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     );
 
     if (!outcome.ok) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed'));
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome.opensAt));
       return;
     }
 
@@ -140,6 +140,11 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   private sendError(res: Response, view: RedeemErrorView): void {
     if (res.headersSent) {
       return;
+    }
+    if (view.retryAfter) {
+      // A temporary refusal (a link that has not opened yet) says until when, in the header the
+      // HTTP spec reserves for exactly that — so a monitor or crawler records "later", not "gone".
+      res.set('Retry-After', view.retryAfter);
     }
     res
       .status(view.status)

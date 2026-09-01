@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
+import { publishedVersionFilter } from '../../public-submit/definition-loader.service';
 import {
   redeemSlugToToken,
   type RedeemDeps,
@@ -34,29 +35,42 @@ function fakeDistribution(
   return { ...base, ...overrides } as mjBizAppsFormsFormDistributionEntityType;
 }
 
-/** A RunView provider fake that returns a single distribution row (or a failure / empty set). */
+const FORM_DISTRIBUTION_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
+const FORM_VERSION_ENTITY = 'MJ_BizApps_Forms: Form Versions';
+
+/**
+ * A RunView provider fake that answers per entity: the distribution row(s) for the slug read and
+ * the published-version row(s) for the door's existence read. The default is one published
+ * version, so a test that says nothing about publishing exercises an ordinary open link.
+ */
 function fakeProvider(opts: {
   success?: boolean;
   rows?: mjBizAppsFormsFormDistributionEntityType[];
-}): { provider: RedeemRunViewProvider; lastParams: () => RunViewParams | undefined } {
-  let captured: RunViewParams | undefined;
+  /** Rows the version read returns; `[]` means the form has no published version. */
+  versions?: Array<{ ID: string }>;
+  /** Make the version read fail (`Success: false`) while the distribution read succeeds. */
+  versionReadFails?: boolean;
+}): { provider: RedeemRunViewProvider; calls: RunViewParams[] } {
+  const calls: RunViewParams[] = [];
   const provider: RedeemRunViewProvider = {
     async RunView<T = mjBizAppsFormsFormDistributionEntityType>(
       params: RunViewParams,
     ): Promise<RunViewResult<T>> {
-      captured = params;
-      const success = opts.success ?? true;
+      calls.push(params);
+      const isVersionRead = params.EntityName === FORM_VERSION_ENTITY;
+      const success = isVersionRead ? !(opts.versionReadFails ?? false) : (opts.success ?? true);
+      const rows: unknown[] = isVersionRead ? (opts.versions ?? [{ ID: 'version-1' }]) : (opts.rows ?? []);
       return {
         Success: success,
-        Results: (opts.rows ?? []) as unknown as T[],
-        RowCount: opts.rows?.length ?? 0,
-        TotalRowCount: opts.rows?.length ?? 0,
+        Results: rows as T[],
+        RowCount: rows.length,
+        TotalRowCount: rows.length,
         ExecutionTime: 0,
         ErrorMessage: success ? '' : 'forced failure',
       } as RunViewResult<T>;
     },
   };
-  return { provider, lastParams: () => captured };
+  return { provider, calls };
 }
 
 /** A `fetch` stub returning the given JSON body + ok status. */
@@ -135,12 +149,83 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-closed');
   });
 
-  it('returns distribution-closed when the open/close window excludes now', async () => {
+  // A form that opens next Monday has not started; "no longer accepting responses" states the
+  // opposite and sends the holder away for good (bizapps-forms#118). The door reports the
+  // opening time so the page can say when to come back and send `Retry-After`.
+  it('returns distribution-not-yet-open, carrying OpenAt, when the link has not opened yet', async () => {
     const future = new Date(Date.now() + 60_000);
     const provider = fakeProvider({ rows: [fakeDistribution({ OpenAt: future })] }).provider;
-    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
+    expect(out.reason).toBe('distribution-not-yet-open');
+    expect(out.opensAt?.getTime()).toBe(future.getTime());
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('carries no opensAt on any other refusal', async () => {
+    const provider = fakeProvider({ rows: [fakeDistribution({ Status: 'Closed' })] }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
     expect(out.reason).toBe('distribution-closed');
+    expect(out.opensAt).toBeUndefined();
+  });
+
+  // A distribution whose form has no published version used to mint a full anonymous session,
+  // hand the widget a `null` definition, and offer a "Try again" that could never succeed. It is
+  // exactly the work the door exists to refuse before inviting it (bizapps-forms#118).
+  it('returns form-unpublished when the form has no Published version, minting no token', async () => {
+    const provider = fakeProvider({ rows: [fakeDistribution()], versions: [] }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('form-unpublished');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // The door needs a yes/no, not the snapshot: the read asks for the ID only and stops at one row.
+  it('checks for a published version with a narrow existence read', async () => {
+    const { provider, calls } = fakeProvider({ rows: [fakeDistribution()] });
+    await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    const versionRead = calls.find((c) => c.EntityName === FORM_VERSION_ENTITY);
+    expect(versionRead).toBeDefined();
+    expect(versionRead?.ExtraFilter).toBe(publishedVersionFilter('form-1'));
+    expect(versionRead?.Fields).toEqual(['ID']);
+    expect(versionRead?.MaxRows).toBe(1);
+    expect(versionRead?.ResultType).toBe('simple');
+  });
+
+  // The window and the cap are decided from the row already in hand; the version read costs a
+  // round trip and is paid only by a link that is open and not full.
+  it('does not read versions for a link its window or cap already refuses', async () => {
+    for (const overrides of [
+      { Status: 'Closed' as const },
+      { OpenAt: new Date(Date.now() + 60_000) },
+      { MaxResponses: 1, ResponseCount: 1 },
+    ]) {
+      const { provider, calls } = fakeProvider({ rows: [fakeDistribution(overrides)], versions: [] });
+      const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+      expect(out.ok).toBe(false);
+      expect(calls.map((c) => c.EntityName)).toEqual([FORM_DISTRIBUTION_ENTITY]);
+    }
+  });
+
+  // Both true at once: the holder is told when it opens, which is the distribution's stated
+  // intent and something they can act on; if it is still unpublished then, they are told that.
+  it('reports not-yet-open, not unpublished, when both apply', async () => {
+    const future = new Date(Date.now() + 60_000);
+    const provider = fakeProvider({ rows: [fakeDistribution({ OpenAt: future })], versions: [] }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(out.reason).toBe('distribution-not-yet-open');
+  });
+
+  // A database error is not "the author has not published"; it must not be reported as one.
+  it('fails closed as redeem-failed, minting no token, when the version read fails', async () => {
+    const provider = fakeProvider({ rows: [fakeDistribution()], versionReadFails: true }).provider;
+    const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
+    const out = await redeemSlugToToken(deps({ provider, fetchImpl }), 'customer-survey');
+    expect(out.ok).toBe(false);
+    expect(out.reason).toBe('redeem-failed');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   // The expiry half of that window was checked but never exercised — the test above only ever
