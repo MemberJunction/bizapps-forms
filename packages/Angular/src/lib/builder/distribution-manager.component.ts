@@ -22,7 +22,13 @@ import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 import { resolveApiOrigin } from '../shared/mj-api-origin';
 import { textToQrSvg } from './qr-code';
 import { readResponseLimit } from './response-limit';
-import { autoShareName, shareState, type ShareState } from './share-state';
+import {
+  autoShareName,
+  credentialMayStillRedeem,
+  isOpenToResponses,
+  shareState,
+  type ShareState,
+} from './share-state';
 
 /** The three renderings of one link. Not three kinds of link — see the class comment. */
 type ShareView = 'link' | 'qr' | 'embed';
@@ -216,6 +222,17 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   // -------------------------------------------------------------------- state
 
   /** The effective state of a link — what a respondent opening it right now would get. */
+  /**
+   * Whether the "Open to responses" switch should read ON for this link.
+   *
+   * Delegates to the one exported predicate rather than restating it, because the template
+   * used to test `Status === 'Active'` here and that is only half of what "open" means — see
+   * {@link isOpenToResponses} for what the half-answer did to the control.
+   */
+  protected isOpen(link: mjBizAppsFormsFormDistributionEntity): boolean {
+    return isOpenToResponses(link);
+  }
+
   protected stateOf(link: mjBizAppsFormsFormDistributionEntity): ShareState {
     return shareState(link, new Date());
   }
@@ -287,10 +304,40 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     if (!link || this.busy) {
       return;
     }
-    const reopening = link.Status !== 'Active';
+    const reopening = !this.isOpen(link);
     await this.runCredentialWrite(() =>
       reopening ? this.service.open(link) : this.service.close(link),
     );
+    if (reopening) {
+      this.warnIfStillUnissued(link.ID, 'issue');
+    } else {
+      this.warnIfStillRedeemable(link.ID);
+    }
+  }
+
+  /**
+   * Say so when turning a link OFF did not actually take its access token away.
+   *
+   * The mirror of {@link warnIfStillUnissued}, and a separate method because the evidence is
+   * the opposite: that one fires on an EMPTY token, this one on a token still present. Both
+   * exist for the same reason — `FormDistributionEntityServer.Save()` logs a failed revoke and
+   * still returns true, so the service reports a green save either way and the reloaded record
+   * is the only place the difference shows.
+   *
+   * Worth saying out loud rather than leaving to the badge: an author turning a link off is
+   * usually doing it BECAUSE they want it to stop working, and "it is off" is what they will
+   * read from the switch. Silence here is the same overclaim the badge used to make.
+   */
+  private warnIfStillRedeemable(linkId: string): void {
+    const link = this.links.find((l) => l.ID === linkId);
+    if (!link || !credentialMayStillRedeem(link)) {
+      return;
+    }
+    this.actionError =
+      'This link is turned off, but the server could not withdraw its access token, so the old ' +
+      'web address may still open the form. It will try again the next time this link is saved. ' +
+      'If it keeps failing, someone technical needs to look at the server log.';
+    this.cdr.markForCheck();
   }
 
   /**

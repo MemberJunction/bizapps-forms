@@ -122,6 +122,8 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
       'Turned off. Anyone opening it is told the form is not taking responses, and it holds no ' +
       'working access token while it is off. Turning it back on issues a fresh one at the same ' +
       'web address.',
+    // NOTE: that sentence is true only when the withdrawal actually landed, which is why
+    // {@link pausedDetail} replaces it when the record says otherwise.
     accepting: false,
     fix: 'Turn it back on',
   },
@@ -171,13 +173,96 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
  * `pending` still leads the rest: it means the host could not mint, and telling someone
  * that link is merely "Scheduled" sends them to edit a date that is not the problem.
  */
+/**
+ * Is this link open to responses — the thing the Distribute tab's switch is labelled with?
+ *
+ * ONE definition, exported, because there were three and two disagreed with the server.
+ * "Open to responses" is `Status='Active'` AND `IsActive`: that is the pair
+ * `decideProvisioning` requires before it warrants a credential, and the pair
+ * `DistributionService.openForResponses` writes. Reading either half alone answers a
+ * different question while wearing the same label.
+ *
+ * The cost of the duplicate was not theoretical. The switch rendered its on/off state from
+ * `Status` alone, so a row at `Status='Active', IsActive=0` — the exact shape
+ * `openForResponses` exists to repair — drew the switch ON next to a "Paused" badge, and its
+ * click handler, reading the same half-predicate, concluded the link was already open and
+ * CLOSED it. A control that misreports its state and then does the opposite of what it offers.
+ *
+ * Kept here rather than on the component because {@link stateKind} needs the same sentence
+ * for its `paused` branch, and a predicate the badge and the control derive separately is a
+ * predicate they can drift apart on.
+ */
+export function isOpenToResponses(facts: Pick<ShareLinkFacts, 'Status' | 'IsActive'>): boolean {
+  return facts.IsActive && facts.Status === 'Active';
+}
+
+/**
+ * Does this link's record still advertise an access token it is no longer entitled to?
+ *
+ * The signature a fail-soft revocation leaves behind. When a link stops being open to
+ * responses the server revokes its invite and clears BOTH credential columns — but only
+ * after the revoke succeeds; a revoke that failed leaves the pair in place deliberately, so
+ * the next save retries it. So a link that is off and still carrying a `PublicLinkToken` is
+ * the server saying, in the only channel it has, that the credential was not withdrawn.
+ *
+ * Named once and shared, because two surfaces need the same answer and had reached opposite
+ * ones: the badge asserted the token was withdrawn, and the switch that withdrew it reported
+ * nothing at all. Both now ask this.
+ *
+ * It is deliberately not "the token is definitely still redeemable" — the record cannot see
+ * the invite. It is "nothing here proves it was withdrawn", which is the claim the author
+ * needs and the strongest one these facts support.
+ */
+export function credentialMayStillRedeem(
+  facts: Pick<ShareLinkFacts, 'Status' | 'IsActive' | 'PublicLinkToken'>,
+): boolean {
+  return !isOpenToResponses(facts) && !!facts.PublicLinkToken;
+}
+
+/**
+ * What to tell the author about a paused link's access token.
+ *
+ * The static `paused` copy asserts the credential was withdrawn. That is the usual case and
+ * it is not a safe thing to assert, because the withdrawal is FAIL-SOFT on the server:
+ * `FormDistributionEntityServer.Save()` logs a revoke that failed and still returns true, so
+ * a green save and a still-redeemable token are the same outcome from the client's side. On a
+ * host that does not grant Update on `MJ: Magic Link Invites`, it is the only outcome.
+ *
+ * The record carries the answer, and carries it precisely because the server wants it to: a
+ * failed revoke leaves the credential LINKED so the next save retries, and the pair is cleared
+ * together only after a revoke succeeds. So an empty `PublicLinkToken` on a paused link IS the
+ * server reporting the credential dead, and a token still sitting there is the server reporting
+ * that it is not — or, on a link not yet saved since the upgrade, that nothing has tried. Both
+ * of those mean the same thing to an author, and it is not "withdrawn".
+ *
+ * This is the same rule the rest of the module follows: never assert something the facts do not
+ * contain. Asserting withdrawal here would be the module's own failure mode, on the one flow
+ * whose entire purpose is stopping a link being redeemed.
+ */
+function pausedDetail(facts: ShareLinkFacts): string | null {
+  if (!credentialMayStillRedeem(facts)) {
+    return null;
+  }
+  return (
+    'Turned off. Anyone opening it is told the form is not taking responses. Its access token ' +
+    'has NOT been withdrawn yet, though — the server retries that on the next save of this ' +
+    'link, and until it succeeds the old web address can still be traded for a session. ' +
+    'Turning it back on issues a fresh token at the same web address.'
+  );
+}
+
 export function shareState(facts: ShareLinkFacts, now: Date): ShareState {
   const kind = stateKind(facts, now);
-  return { kind, ...STATES[kind] };
+  const state = { kind, ...STATES[kind] };
+  // One state, two sentences. `paused` stays a single kind because both cases wear the same
+  // badge, refuse the same submissions and are cured by the same click — only the claim about
+  // the access token differs, and that is what `detail` is for.
+  const detail = kind === 'paused' ? pausedDetail(facts) : null;
+  return detail ? { ...state, detail } : state;
 }
 
 function stateKind(facts: ShareLinkFacts, now: Date): ShareStateKind {
-  if (!facts.IsActive || facts.Status !== 'Active') {
+  if (!isOpenToResponses(facts)) {
     return 'paused';
   }
   if (!facts.PublicLinkToken) {

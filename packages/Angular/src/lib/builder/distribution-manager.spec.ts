@@ -27,6 +27,16 @@ const withoutComments = (html: string): string => html.replace(/<!--[\s\S]*?-->/
 
 const template = withoutComments(source('distribution-manager.component.html'));
 
+/**
+ * The component's source with comments stripped. These guards are about CODE, and this
+ * component's prose names the server methods (`FormDistributionEntityServer.Save()`) whose
+ * absence some of them check for — an unstripped read makes the doc comment fail the test.
+ */
+const component = source('distribution-manager.component.ts').replace(
+  /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+  '',
+);
+
 describe('the Distribute template', () => {
   it('never decides what to show from the channel', () => {
     // The whole point. A link is a link; QR and embed are renderings of it. The moment a
@@ -46,11 +56,15 @@ describe('the Distribute template', () => {
     expect(template).not.toMatch(/\{\{\s*link\.Status\s*\}\}/);
   });
 
-  it('reads Status only to draw the open switch, where it is the actual control', () => {
-    const statusReads = template.match(/link\.Status/g) ?? [];
-    // Exactly two, both on the switch itself: its `is-on` class and its `aria-checked`.
-    // Anything beyond that is a display decision being made from the column again.
-    expect(statusReads).toHaveLength(2);
+  it('never reads the Status column, not even for the open switch', () => {
+    // This test used to allow exactly two reads — the switch's `is-on` and `aria-checked` —
+    // on the reasoning that Status "is the actual control" there. It is not. "Open to
+    // responses" is `Status='Active'` AND `IsActive`, which is what the server requires
+    // before it warrants a credential and what `openForResponses` writes. So the two
+    // permitted reads were the same display-from-the-column defect as all the others, and
+    // this test was holding them in place: the switch drew ON for a paused link and its
+    // handler then closed it. The allowance is gone; the control asks `isOpen(link)`.
+    expect(template.match(/link\.Status/g) ?? []).toHaveLength(0);
   });
 
   it('shows a failed load as a failure, never as an empty list', () => {
@@ -73,8 +87,6 @@ describe('the Distribute template', () => {
 });
 
 describe('the Distribute component', () => {
-  const component = source('distribution-manager.component.ts');
-
   it('writes through the service, never through the entity directly', () => {
     // Every write has to go where the failure message is turned into something showable.
     expect(component).not.toMatch(/\.Save\(\)/);
@@ -213,5 +225,32 @@ describe('the reissue request, where the builder must not do the server\'s job',
   it('re-reads the record QUIETLY after a credential write, so the pane is not unmounted', () => {
     const helper = component.slice(component.indexOf('private async runCredentialWrite('));
     expect(helper.slice(0, helper.indexOf('\n  }'))).toMatch(/this\.reload\(true\)/);
+  });
+});
+
+describe('the "Open to responses" switch asks the whole question', () => {
+  // `isOpenToResponses` is tested behaviourally in `share-state.spec.ts`. What cannot be
+  // tested there is that the CONTROL asks it — the defect was never in the logic, it was
+  // `Status === 'Active'` written straight into a template binding, and a template binding
+  // is exactly what a later edit could put back with every pure test still green.
+  it('renders its on/off state from the shared predicate, not from Status alone', () => {
+    const html = template;
+    expect(html).toMatch(/\[class\.is-on\]="isOpen\(link\)"/);
+    expect(html).toMatch(/\[attr\.aria-checked\]="isOpen\(link\)"/);
+    // The half-predicate must not come back anywhere on the switch.
+    expect(html).not.toMatch(/\[class\.is-on\]="link\.Status/);
+    expect(html).not.toMatch(/\[attr\.aria-checked\]="link\.Status/);
+  });
+
+  it('decides which way to move from the same predicate it rendered', () => {
+    // The two disagreeing is what made the control close a link it had drawn as open.
+    const ts = component;
+    expect(ts).toMatch(/const reopening = !this\.isOpen\(link\);/);
+  });
+
+  it('reports a close that did not withdraw the token, as it already does for an issue', () => {
+    const ts = component;
+    expect(ts).toMatch(/warnIfStillRedeemable\(link\.ID\)/);
+    expect(ts).toMatch(/credentialMayStillRedeem\(link\)/);
   });
 });

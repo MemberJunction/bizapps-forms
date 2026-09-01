@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   autoShareName,
   formReach,
+  credentialMayStillRedeem,
+  isOpenToResponses,
   shareState,
   SHARE_LINK_FIELDS,
   type ShareLinkFacts,
@@ -276,5 +278,111 @@ describe('what a paused link is told about its token', () => {
   it('still promises a fresh token at the same address on reopening, which is true in every case', () => {
     const { detail } = shareState(link({ Status: 'Closed', PublicLinkToken: null }), NOW);
     expect(detail).toMatch(/fresh one at the same/i);
+  });
+});
+
+describe('isOpenToResponses', () => {
+  // The predicate behind the "Open to responses" switch. It exists as one exported function
+  // because it had been written out three times — in `stateKind`, in the switch's own
+  // `[class.is-on]`, and in `toggleOpen`'s `reopening` — and two of the three copies were
+  // wrong in the same way: they read `Status` alone.
+  it('needs BOTH halves, because that is what the server needs', () => {
+    // `decideProvisioning` warrants a credential on `status === 'Active' && isActive`, and
+    // `openForResponses` writes both. A predicate that reads one of them answers a different
+    // question from the one the switch is labelled with.
+    expect(isOpenToResponses(link())).toBe(true);
+    expect(isOpenToResponses(link({ Status: 'Closed' }))).toBe(false);
+    expect(isOpenToResponses(link({ Status: 'Draft' }))).toBe(false);
+    expect(isOpenToResponses(link({ IsActive: false }))).toBe(false);
+  });
+
+  it('is false for the row the switch used to render as ON', () => {
+    // Status='Active' with IsActive=0 is the exact shape `openForResponses` was written for
+    // (see its docstring). Reading `Status` alone renders the switch ON for a link the server
+    // treats as paused and whose credential it has revoked — and then the click handler, using
+    // the same half-predicate, decides it is "already open" and CLOSES it. The control showed
+    // the wrong state and then did the opposite of what it offered.
+    const halfOff = link({ Status: 'Active', IsActive: false });
+    expect(isOpenToResponses(halfOff)).toBe(false);
+    expect(shareState(halfOff, NOW).kind).toBe('paused');
+  });
+
+  it('agrees with the badge in every combination', () => {
+    // The two must never disagree: a switch reading ON beside a "Paused" badge is a
+    // contradiction the author cannot resolve from the screen.
+    for (const Status of ['Active', 'Draft', 'Closed'] as const) {
+      for (const IsActive of [true, false]) {
+        const facts = link({ Status, IsActive });
+        expect(isOpenToResponses(facts), `${Status}/${IsActive}`).toBe(
+          shareState(facts, NOW).kind !== 'paused',
+        );
+      }
+    }
+  });
+});
+
+describe('a paused link is honest about its access token', () => {
+  // The server's revocation is fail-soft BY DESIGN: `FormDistributionEntityServer.Save()`
+  // logs a failed revoke and still returns true, because a distribution save must not fail
+  // over provisioning. So "the author clicked pause, the save came back green, and the
+  // credential is still redeemable" is a real, reachable outcome — and on a host that does
+  // not grant Update on `MJ: Magic Link Invites` it is the ONLY outcome.
+  //
+  // The record carries the evidence, because the server leaves the credential LINKED
+  // precisely so the next save retries it. The badge must read that evidence rather than
+  // assert the happy path from Status alone.
+  it('does not claim withdrawal while the record still carries a token', () => {
+    const stillTokened = shareState(link({ Status: 'Closed', PublicLinkToken: 'tok_abc' }), NOW);
+    expect(stillTokened.kind).toBe('paused');
+    expect(stillTokened.detail).not.toMatch(/holds no working access token/);
+    expect(stillTokened.detail).toMatch(/withdraw/i);
+  });
+
+  it('does claim it once the token is gone, which is what withdrawal looks like', () => {
+    // The pair is cleared together and only after a successful revoke, so an empty token on
+    // a paused link IS the server reporting the credential dead.
+    const withdrawn = shareState(link({ Status: 'Closed', PublicLinkToken: null }), NOW);
+    expect(withdrawn.kind).toBe('paused');
+    expect(withdrawn.detail).toMatch(/holds no working access token/);
+  });
+
+  it('still offers the same one-click remedy either way', () => {
+    // Both are paused and both are cured by turning it back on; only the sentence differs.
+    for (const PublicLinkToken of ['tok_abc', null]) {
+      const state = shareState(link({ Status: 'Closed', PublicLinkToken }), NOW);
+      expect(state.fix, String(PublicLinkToken)).toBe('Turn it back on');
+      expect(state.accepting, String(PublicLinkToken)).toBe(false);
+      expect(state.label, String(PublicLinkToken)).toBe('Paused');
+    }
+  });
+});
+
+describe('credentialMayStillRedeem', () => {
+  // The evidence a fail-soft revoke leaves behind, named once so the badge and the
+  // post-close warning read it the same way.
+  it('is true for a link that is off but still advertising a token', () => {
+    expect(credentialMayStillRedeem(link({ Status: 'Closed', PublicLinkToken: 'tok_abc' }))).toBe(true);
+    expect(credentialMayStillRedeem(link({ IsActive: false, PublicLinkToken: 'tok_abc' }))).toBe(true);
+  });
+
+  it('is false once the pair has been cleared — that is what a landed revoke looks like', () => {
+    expect(credentialMayStillRedeem(link({ Status: 'Closed', PublicLinkToken: null }))).toBe(false);
+  });
+
+  it('is false for a live link, whose token is SUPPOSED to redeem', () => {
+    // The obvious mis-read: a working live link is not a failed revocation.
+    expect(credentialMayStillRedeem(link())).toBe(false);
+  });
+
+  it('says exactly what the paused badge says, so the two cannot drift', () => {
+    for (const Status of ['Active', 'Closed'] as const) {
+      for (const PublicLinkToken of ['tok_abc', null]) {
+        const facts = link({ Status, PublicLinkToken });
+        const claimsWithdrawn = /holds no working access token/.test(shareState(facts, NOW).detail);
+        expect(credentialMayStillRedeem(facts), `${Status}/${PublicLinkToken}`).toBe(
+          shareState(facts, NOW).kind === 'paused' && !claimsWithdrawn,
+        );
+      }
+    }
   });
 });
