@@ -29,6 +29,8 @@
  *   pnpm run smoke:credentials:least-privilege
  */
 import 'dotenv/config';
+// Must precede the server imports below — see smoke-harness-env.mjs for why a plain statement cannot do this.
+import { PORT, BASE } from './smoke-harness-env.mjs';
 import { createMJServer } from '@memberjunction/server-bootstrap';
 import { RESOLVER_PATHS } from '@mj-biz-apps/forms-server';
 import '@memberjunction/server-bootstrap/mj-class-registrations';
@@ -38,8 +40,6 @@ import { sql, requireDbEnv } from '../../smoke/lib/sqlcmd.mjs';
 
 const DIST_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 const INVITE_ENTITY = 'MJ: Magic Link Invites';
-const PORT = process.env.GRAPHQL_PORT || '4151';
-const BASE = `http://localhost:${PORT}`;
 
 /**
  * Fixed ids for the seeded principal, so a crashed run is repaired by the next one rather than

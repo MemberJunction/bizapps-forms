@@ -1812,8 +1812,8 @@ EOF
 - [ ] `TURBO_FORCE=1 npm run typecheck` — 5/5.
 - [ ] `for g in lint:migrations lint:distribution lint:ui lint:generated lint:distribution:mutants lint:guard-mutants:test lint:guard-mutants; do npm run $g || echo "FAILED: $g"; done` — none failed; distribution mutants reads 75; guard mutants all KILLED.
 - [ ] Both smokes against a booted server — the reissue change touches the live write path:
-  `set -a && . ./.env && set +a && GRAPHQL_PORT=4141 pnpm run smoke:credentials` → 28/28;
-  `GRAPHQL_PORT=4151 pnpm run smoke:credentials:least-privilege` → 16/16, `seeded principal removed`.
+  `set -a && . ./.env && set +a && pnpm run smoke:credentials` → 28/28;
+  `pnpm run smoke:credentials:least-privilege` → 16/16, `seeded principal removed`. (No port export: the smokes claim their own via `smoke-harness-env.mjs`; `FORMS_SMOKE_PORT` overrides.)
 - [ ] `git status --short` — clean. `git log --oneline -8` — seven new commits above `9386836`.
 - [ ] `git push origin feat/104-link-credential-lifecycle`.
 

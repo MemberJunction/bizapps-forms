@@ -48,8 +48,9 @@
  */
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const SLUG = resolveSlug('respondent-scope-path.mjs');
 const OTHER_DISTRIBUTION_ID = process.argv[3] || process.env.FORMS_SMOKE_OTHER_DISTRIBUTION_ID || '';
 

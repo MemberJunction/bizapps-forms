@@ -39,6 +39,8 @@
  *   pnpm run smoke:credentials
  */
 import 'dotenv/config';
+// Must precede the server imports below — see smoke-harness-env.mjs for why a plain statement cannot do this.
+import { PORT, BASE } from './smoke-harness-env.mjs';
 import { createMJServer } from '@memberjunction/server-bootstrap';
 import { RESOLVER_PATHS } from '@mj-biz-apps/forms-server';
 import '@memberjunction/server-bootstrap/mj-class-registrations';
@@ -47,8 +49,6 @@ import { UserCache } from '@memberjunction/generic-database-provider';
 
 const DIST_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
 const INVITE_ENTITY = 'MJ: Magic Link Invites';
-const PORT = process.env.GRAPHQL_PORT || '4141';
-const BASE = `http://localhost:${PORT}`;
 
 let passed = 0;
 let failed = 0;

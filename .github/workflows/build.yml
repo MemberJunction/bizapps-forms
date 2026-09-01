@@ -114,3 +114,9 @@ jobs:
       # session, which is sqlcmd's default and nothing else's, so the break lands only here.
       - name: Smoke sqlcmd session-option tests
         run: node smoke/lib/sqlcmd.spec.mjs
+
+      # Stdlib-only. Every smoke script asks one helper which server it is testing; one script had
+      # drifted to a hardcoded default and would have reported another checkout's behaviour as the
+      # branch's. Also covers the in-process smokes' claim on their own port and public URL.
+      - name: Smoke target resolution tests
+        run: node smoke/lib/target.spec.mjs
