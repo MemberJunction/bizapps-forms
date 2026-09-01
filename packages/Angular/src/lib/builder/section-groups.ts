@@ -30,6 +30,15 @@ export interface FormSection {
 
 /** One `<optgroup>`: its heading, and the options under it. */
 export interface SectionGroup<T> {
+  /**
+   * Stable identity for the `@for` track expression — a section id, never the heading.
+   *
+   * The heading is DISPLAY TEXT and two sections can produce the same one: titles are free text,
+   * so two can share a name, and with equal filtered counts their headings are then identical
+   * character for character. Tracking by that gives Angular duplicate keys for distinct groups
+   * (NG0955), and rows reconcile onto the wrong group.
+   */
+  readonly key: string;
   readonly group: string;
   readonly options: readonly T[];
 }
@@ -74,12 +83,12 @@ export function groupedConditionSources(
       continue;
     }
     owned.forEach((s) => placed.add(s.id));
-    groups.push({ group: sectionHeading(section.label, owned.length), options: owned });
+    groups.push({ key: section.id, group: sectionHeading(section.label, owned.length), options: owned });
   }
 
   const rest = sources.filter((s) => !placed.has(s.id));
   if (rest.length > 0) {
-    groups.push({ group: UNSECTIONED_GROUP, options: rest });
+    groups.push({ key: UNSECTIONED_GROUP, group: UNSECTIONED_GROUP, options: rest });
   }
   return groups;
 }

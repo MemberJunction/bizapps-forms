@@ -126,8 +126,8 @@ export function jumpTargetOptions(
 export function groupedJumpTargets(
   options: ReadonlyArray<JumpTargetOption>,
   sections: ReadonlyArray<FormSection>,
-): Array<{ group: string; options: JumpTargetOption[] }> {
-  const groups: Array<{ group: string; options: JumpTargetOption[] }> = [];
+): Array<{ key: string; group: string; options: JumpTargetOption[] }> {
+  const groups: Array<{ key: string; group: string; options: JumpTargetOption[] }> = [];
   const placed = new Set<JumpTargetOption>();
 
   for (const section of sections) {
@@ -144,20 +144,20 @@ export function groupedJumpTargets(
     options
       .filter((o) => lead.some((l) => l.value === o.value) || owned.includes(o))
       .forEach((o) => placed.add(o));
-    groups.push({ group: sectionHeading(section.label, owned.length), options: [...lead, ...owned] });
+    groups.push({ key: section.id, group: sectionHeading(section.label, owned.length), options: [...lead, ...owned] });
   }
 
   const strays = options.filter(
     (o) => !placed.has(o) && o.group !== 'Endings' && o.group !== 'Finish',
   );
   if (strays.length > 0) {
-    groups.push({ group: 'Questions', options: [...strays] });
+    groups.push({ key: 'Questions', group: 'Questions', options: [...strays] });
   }
 
   for (const trailing of ['Endings', 'Finish'] satisfies JumpTargetGroup[]) {
     const inGroup = options.filter((o) => o.group === trailing);
     if (inGroup.length > 0) {
-      groups.push({ group: trailing, options: inGroup });
+      groups.push({ key: trailing, group: trailing, options: inGroup });
     }
   }
   return groups;

@@ -144,6 +144,33 @@ describe('the type picker takes focus when it opens', () => {
     expect(source).toMatch(/ngAfterViewInit\(\)[\s\S]{0,200}?\.focus\(\)/);
   });
 
+  it('lets its rows be activated by the browser, not by a hand-rolled key handler', () => {
+    // Rows used to fire on `mousedown` only. A <button> activates on Enter AND Space natively,
+    // but nothing listened for the resulting click — so Space did nothing, and the panel's own
+    // Enter handler picked whatever was HIGHLIGHTED instead of what was focused. Reproduced
+    // against the running builder: Tab to Close, press Enter, and a question was inserted.
+    const source = picker();
+    expect(source).not.toMatch(/\(mousedown\)/);
+    expect(source.match(/\(click\)="pick\(meta\.type\)"/g) ?? []).toHaveLength(2);
+  });
+
+  it('releases the highlight anywhere in the dialog — rail and head included', () => {
+    // Wired only to the grid, hovering a Common rail row left a grid row keyboard-lit beside it.
+    // On the PANEL, not the grid or the body: scoped to the grid it missed the Common rail, and
+    // scoped to the body it missed the Close button in the head. Both were reproduced.
+    const panel = /<div\s+#panel[\s\S]*?>/.exec(picker())?.[0] ?? '';
+    expect(panel).toMatch(/\(mouseenter\)="releaseHighlight\(\)"/);
+    expect(panel).toMatch(/\(focusin\)="releaseHighlight\(\)"/);
+    expect(picker()).not.toMatch(/class="qtp-columns"[^>]*mouseenter/);
+    expect(picker()).not.toMatch(/class="qtp-body"[^>]*mouseenter/);
+  });
+
+  it('traps Tab and gives focus back when it closes', () => {
+    const source = picker();
+    expect(source).toMatch(/moveTrappedFocus\(/);
+    expect(source).toMatch(/ngOnDestroy\(\)[\s\S]{0,200}?openedFrom\?\.focus/);
+  });
+
   it('does not paint a focus ring on the panel itself', () => {
     // It is focused to receive keys, not because the author aimed at it; a ring around the whole
     // dialog reads as a selection they made.

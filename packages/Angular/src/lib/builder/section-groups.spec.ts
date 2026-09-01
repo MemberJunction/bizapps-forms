@@ -38,6 +38,38 @@ const source = (id: string, prompt: string): ConditionalSourceQuestion => ({
   kind: 'text',
 });
 
+describe('two sections that look identical', () => {
+  // Section titles are free text, so two can genuinely share one — and with equal filtered counts
+  // their HEADINGS are then character-for-character identical. Both templates tracked the @for by
+  // that heading, which makes duplicate Angular keys out of two distinct sections: NG0955, and
+  // rows that reconcile onto the wrong group.
+  const TWINS: FormSection[] = [
+    { id: 'p1', label: 'Details', questionIds: ['q1'] },
+    { id: 'p2', label: 'Details', questionIds: ['q2'] },
+  ];
+
+  it('produces identical headings, which is exactly why the key cannot be the heading', () => {
+    const groups = groupedConditionSources([source('q1', 'One'), source('q2', 'Two')], TWINS);
+    expect(groups[0].group).toBe(groups[1].group);
+  });
+
+  it('still gives each group a distinct key', () => {
+    const groups = groupedConditionSources([source('q1', 'One'), source('q2', 'Two')], TWINS);
+    expect(groups[0].key).not.toBe(groups[1].key);
+  });
+
+  it('gives the jump picker distinct keys too', () => {
+    const options = jumpTargetOptions(
+      [{ id: 'q1', label: 'One' }, { id: 'q2', label: 'Two' }],
+      [],
+      [],
+    );
+    const groups = groupedJumpTargets(options, TWINS);
+    expect(groups[0].group).toBe(groups[1].group);
+    expect(groups[0].key).not.toBe(groups[1].key);
+  });
+});
+
 describe('groupedConditionSources', () => {
   it('puts each question under the section that owns it, in section order', () => {
     const groups = groupedConditionSources(

@@ -94,3 +94,45 @@ export const COMMON_TYPES: readonly FormQuestionType[] = ['ShortText', 'SingleCh
 export function commonTypes(): QuestionTypeMeta[] {
   return COMMON_TYPES.map((type) => questionTypeMeta(type));
 }
+
+/**
+ * What the DIALOG does with a keypress — as opposed to what the focused control does with it.
+ *
+ * THE DEFECT THIS ENCODES AWAY, reproduced against the running builder: with a row
+ * keyboard-highlighted, tabbing to the dialog's Close button and pressing Enter inserted a
+ * question into the form. The panel's handler caught the Enter meant for Close and picked the
+ * highlighted row. Trying to dismiss the dialog silently edited the form, which is the worst
+ * shape a keyboard bug can take — the key that means "get me out of here" committed a write.
+ *
+ * The rule: THE PANEL HANDLES KEYS ONLY WHILE THE PANEL ITSELF HOLDS FOCUS. The moment focus is
+ * on a control inside it, that control owns its keys — and for a `<button>` that means the
+ * browser's own Enter and Space activation, which is why the rows need no key handling at all.
+ * Space is never claimed here for the same reason; claiming it is how the rows came to do
+ * nothing on Space while Enter did something wrong.
+ *
+ * TAB IS THE EXCEPTION and must be trapped wherever focus sits, because the thing it does
+ * otherwise is walk out of the modal into the builder behind the overlay.
+ */
+export type PickerKeyAction =
+  | 'move-down'
+  | 'move-up'
+  | 'activate'
+  | 'trap-forward'
+  | 'trap-back'
+  | 'ignore';
+
+export function pickerKeyAction(key: string, shiftKey: boolean, focusIsOnPanel: boolean): PickerKeyAction {
+  if (key === 'Tab') {
+    return shiftKey ? 'trap-back' : 'trap-forward';
+  }
+  if (!focusIsOnPanel) {
+    return 'ignore';
+  }
+  if (key === 'ArrowDown') {
+    return 'move-down';
+  }
+  if (key === 'ArrowUp') {
+    return 'move-up';
+  }
+  return key === 'Enter' ? 'activate' : 'ignore';
+}

@@ -26,15 +26,19 @@
  * shortcut list alone — see `COMMON_TYPES`, a fixed curated set that says so, because nothing
  * here records what this author actually reaches for.
  *
- * THE HIGHLIGHT HAS ONE OWNER AT A TIME. The mouse highlights through CSS `:hover`, which cannot
- * get stuck because it is not state; the keyboard highlights through an index. The mouse used to
- * WRITE that index on `mouseenter`, and nothing cleared it — so a row stayed lit after the
- * pointer left, and two rows could be lit at once. Entering the list now clears the index back to
- * `NO_HIGHLIGHT` and leaves the pointer to `:hover`; the first arrow key takes it back.
+ * THE HIGHLIGHT HAS ONE OWNER AT A TIME, and there are three claimants: the pointer (CSS
+ * `:hover`, which cannot get stuck because it is not state), Tab (the browser's own focus ring),
+ * and the arrow keys (the `highlighted` index). The pointer used to WRITE that index on
+ * `mouseenter` and nothing cleared it, so a row stayed lit after the pointer left.
+ *
+ * Both release hooks sit on the PANEL rather than on the list. Scoped to the grid, hovering a
+ * Common rail row left a grid row lit beside it, and focusing the Close button left one lit in
+ * the head — the same defect twice, in the two places the grid does not cover.
  */
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
+  OnDestroy,
   ChangeDetectorRef,
   Component,
   ElementRef,
@@ -54,6 +58,7 @@ import {
   movedHighlight,
   NO_HIGHLIGHT,
   pickerGroups,
+  pickerKeyAction,
   pickerTypes,
   type PickerGroup,
 } from './question-type-picker-model';
@@ -219,6 +224,8 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
       aria-label="Insert a question"
       tabindex="-1"
       (keydown)="onKeydown($event)"
+      (mouseenter)="releaseHighlight()"
+      (focusin)="releaseHighlight()"
     >
       <div class="qtp-head">
         <h2 class="qtp-title">Insert a question</h2>
@@ -236,7 +243,7 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
                   type="button"
                   class="qtp-row qtp-row--card"
                   [title]="meta.hint"
-                  (mousedown)="$event.preventDefault(); pick(meta.type)"
+                  (click)="pick(meta.type)"
                 >
                   <span [class]="'qtp-tile ' + colorClassFor(meta.type)">
                     <i [class]="'mjf-type-glyph ' + meta.icon" aria-hidden="true"></i>
@@ -248,9 +255,7 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
         </div>
 
         <div class="qtp-main">
-          <!-- Entering the list hands the highlight to the pointer: the index goes back to
-               NO_HIGHLIGHT and :hover takes over, so nothing stays lit once the pointer leaves. -->
-          <div class="qtp-columns" role="listbox" aria-label="Question types" (mouseenter)="releaseHighlight()">
+          <div class="qtp-columns" role="listbox" aria-label="Question types">
             @for (group of groups; track group.heading) {
               <div class="qtp-group">
                 <p class="qtp-heading">{{ group.heading }}</p>
@@ -262,7 +267,7 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
                     [class.is-highlighted]="indexOf(meta.type) === highlighted"
                     [attr.aria-selected]="indexOf(meta.type) === highlighted"
                     [title]="meta.hint"
-                    (mousedown)="$event.preventDefault(); pick(meta.type)"
+                    (click)="pick(meta.type)"
                   >
                     <span [class]="'qtp-tile ' + colorClassFor(meta.type)">
                       <i [class]="'mjf-type-glyph ' + meta.icon" aria-hidden="true"></i>
@@ -278,7 +283,7 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
     </div>
   `,
 })
-export class QuestionTypePickerComponent implements AfterViewInit {
+export class QuestionTypePickerComponent implements AfterViewInit, OnDestroy {
   /** The author chose a type; the caller inserts it at the seam this dialog was opened from. */
   @Output() Picked = new EventEmitter<FormQuestionType>();
 
@@ -286,6 +291,9 @@ export class QuestionTypePickerComponent implements AfterViewInit {
   @Output() Dismissed = new EventEmitter<void>();
 
   @ViewChild('panel') private panel?: ElementRef<HTMLElement>;
+
+  /** Whatever had focus when this dialog was created — see {@link ngOnDestroy}. */
+  private readonly openedFrom = document.activeElement as HTMLElement | null;
 
   protected highlighted = NO_HIGHLIGHT;
 
@@ -296,6 +304,18 @@ export class QuestionTypePickerComponent implements AfterViewInit {
 
   ngAfterViewInit(): void {
     this.panel?.nativeElement.focus();
+  }
+
+  /**
+   * Put focus back where it came from.
+   *
+   * The dialog is opened from the "Add content" bar, and that bar disappears with the dialog's
+   * own `@if` on some paths — so without this, closing drops focus to `<body>` and a keyboard
+   * user restarts from the top of the page. Captured at construction, while the trigger still
+   * holds focus and before `ngAfterViewInit` takes it away.
+   */
+  ngOnDestroy(): void {
+    this.openedFrom?.focus?.();
   }
 
   /** Escape closes, which is what anyone expects of a modal — matching the image picker. */
@@ -325,20 +345,53 @@ export class QuestionTypePickerComponent implements AfterViewInit {
   }
 
   protected onKeydown(event: KeyboardEvent): void {
-    const types = pickerTypes(this.groups);
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      this.highlighted = movedHighlight(this.highlighted, event.key === 'ArrowDown' ? 1 : -1, types.length);
-      this.cdr.markForCheck();
+    const panel = this.panel?.nativeElement;
+    const action = pickerKeyAction(event.key, event.shiftKey, event.target === panel);
+    if (action === 'ignore') {
       return;
     }
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      const chosen = types[this.highlighted];
+
+    event.preventDefault();
+    if (action === 'trap-forward' || action === 'trap-back') {
+      this.moveTrappedFocus(action === 'trap-back');
+      return;
+    }
+    if (action === 'activate') {
+      const chosen = pickerTypes(this.groups)[this.highlighted];
       if (chosen) {
         this.pick(chosen.type);
       }
+      return;
     }
+    this.highlighted = movedHighlight(
+      this.highlighted,
+      action === 'move-down' ? 1 : -1,
+      pickerTypes(this.groups).length,
+    );
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Keep Tab inside the dialog.
+   *
+   * Without this, Tab walks off the last row and into the builder behind the overlay — a keyboard
+   * user ends up operating a canvas they cannot see, under a modal they cannot get back to.
+   * `movedHighlight` already wraps an index and treats NO_HIGHLIGHT as "start at an end", which
+   * is exactly the arithmetic a wrap-around trap needs, so it is reused rather than restated.
+   */
+  private moveTrappedFocus(back: boolean): void {
+    const panel = this.panel?.nativeElement;
+    if (!panel) {
+      return;
+    }
+    const focusable = Array.from(
+      panel.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    );
+    if (focusable.length === 0) {
+      return;
+    }
+    const next = movedHighlight(focusable.indexOf(document.activeElement as HTMLElement), back ? -1 : 1, focusable.length);
+    focusable[next]?.focus();
   }
 
   protected pick(type: FormQuestionType): void {

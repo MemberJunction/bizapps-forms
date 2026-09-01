@@ -257,7 +257,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
                        value before these optgroups exist, so it is discarded and the browser
                        selects the first destination instead — a saved rule read as going
                        somewhere it does not go. -->
-                  @for (group of groupedTargets; track group.group) {
+                  @for (group of groupedTargets; track group.key) {
                     <optgroup [label]="group.group">
                       @for (option of group.options; track option.value) {
                         <option [value]="option.value" [selected]="option.value === valueFor(rule)">{{ option.label }}</option>
@@ -384,7 +384,7 @@ export class LogicEditorComponent {
     return canAddJumpRule(this.draft);
   }
 
-  protected get groupedTargets(): Array<{ group: string; options: JumpTargetOption[] }> {
+  protected get groupedTargets(): Array<{ key: string; group: string; options: JumpTargetOption[] }> {
     return groupedJumpTargets(this.targets, this.sections);
   }
 

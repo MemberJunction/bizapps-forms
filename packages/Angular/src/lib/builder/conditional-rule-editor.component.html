@@ -48,7 +48,7 @@
                  question 1. The [value] above stays as the intent; this is what makes it true.
                  Moving the options into optgroups does not change that — it is the OPTIONS
                  arriving late that breaks the binding, wherever they sit. -->
-            @for (group of groupedSources; track group.group) {
+            @for (group of groupedSources; track group.key) {
               <optgroup [label]="group.group">
                 @for (src of group.options; track src.id) {
                   <option [value]="src.id" [selected]="src.id === questionSelectValue(cond)">{{ src.prompt }}</option>

@@ -25,6 +25,7 @@ import {
   movedHighlight,
   NO_HIGHLIGHT,
   pickerGroups,
+  pickerKeyAction,
   pickerTypes,
 } from './question-type-picker-model';
 import { QUESTION_PALETTE_GROUPS } from './question-type-catalog';
@@ -95,5 +96,56 @@ describe('commonTypes', () => {
     for (const type of commonTypes()) {
       expect(everything).toContain(type.type);
     }
+  });
+});
+
+describe('pickerKeyAction', () => {
+  // THE DEFECT, reproduced against the running builder: with a row keyboard-highlighted, Tab to
+  // the dialog's Close button and press Enter — and an "Untitled Email question" was inserted
+  // into the form. The panel's keydown handler caught the Enter meant for Close and picked the
+  // highlighted row instead. Trying to dismiss the dialog silently edited the form.
+  //
+  // The rule that makes that unrepresentable: the panel handles keys ONLY while the panel itself
+  // holds focus. The moment focus is on a control inside it, that control owns its own keys —
+  // which for a <button> means the browser's native Enter/Space activation.
+
+  it('moves the highlight with the arrows while the panel holds focus', () => {
+    expect(pickerKeyAction('ArrowDown', false, true)).toBe('move-down');
+    expect(pickerKeyAction('ArrowUp', false, true)).toBe('move-up');
+  });
+
+  it('picks the highlighted row on Enter while the panel holds focus', () => {
+    expect(pickerKeyAction('Enter', false, true)).toBe('activate');
+  });
+
+  it('keeps its hands off Enter once a control inside has focus', () => {
+    // The reproduced bug. Close must close, not insert a question.
+    expect(pickerKeyAction('Enter', false, false)).toBe('ignore');
+  });
+
+  it('keeps its hands off Space too', () => {
+    // Space activates a focused <button> natively; intercepting it would break the other half of
+    // keyboard activation, which is how the rows came to do nothing on Space at all.
+    expect(pickerKeyAction(' ', false, false)).toBe('ignore');
+    expect(pickerKeyAction(' ', false, true)).toBe('ignore');
+  });
+
+  it('keeps its hands off the arrows once a control inside has focus', () => {
+    // Otherwise the index highlight moves while a focus ring sits somewhere else — two
+    // indicators, the thing the one-owner rule exists to prevent.
+    expect(pickerKeyAction('ArrowDown', false, false)).toBe('ignore');
+  });
+
+  it('traps Tab in both directions, wherever focus currently is', () => {
+    // The trap is the one thing that must work regardless: without it Tab walks out of the modal
+    // and into the builder behind the overlay.
+    expect(pickerKeyAction('Tab', false, true)).toBe('trap-forward');
+    expect(pickerKeyAction('Tab', true, true)).toBe('trap-back');
+    expect(pickerKeyAction('Tab', false, false)).toBe('trap-forward');
+    expect(pickerKeyAction('Tab', true, false)).toBe('trap-back');
+  });
+
+  it('ignores keys it has no business in', () => {
+    expect(pickerKeyAction('a', false, true)).toBe('ignore');
   });
 });
