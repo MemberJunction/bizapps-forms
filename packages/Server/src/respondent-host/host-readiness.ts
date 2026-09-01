@@ -1,26 +1,77 @@
 /**
- * Boot-time readiness check for the anonymous respondent path.
+ * Boot-time readiness checks for the anonymous respondent path.
  *
- * Forms needs one thing from its HOST that it cannot install itself: core `magicLink`
- * must be enabled, with the restricted respondent role grantable. Without it the
- * minter's graceful gate skips, `FormDistribution.PublicLinkToken` stays null, and
- * every public link answers 409 "This form link is not ready yet."
+ * Forms needs three things from its HOST that it cannot install itself, and each one stays
+ * silent until a respondent pays for it if nobody asks at boot:
  *
- * The problem is *when* that surfaces. The gate fires when a distribution is saved —
- * long after install, on someone else's screen, with a message that reads like a
- * transient glitch rather than a missing setting. A host can install Forms, watch a
- * clean boot, publish a form, and only then discover its public link never worked.
+ *  1. core `magicLink` enabled, with the respondent role grantable. Without it the minter's
+ *     graceful gate skips, `FormDistribution.PublicLinkToken` stays null, and every public link
+ *     answers 409 "This form link is not ready yet."
+ *  2. a real magic-link provisioning user. Core's default for it is a literal placeholder that
+ *     resolves to nobody, so every link open logged an error and provisioned the respondent's
+ *     anonymous account under whichever user happened to be an Owner (#122).
+ *  3. Turnstile keys, IF anything on this host asks for a captcha. A link that requires one on a
+ *     keyless host refused every final submit — after the respondent had typed everything — with
+ *     copy that said THEY had failed verification (#122).
  *
- * So the check runs at startup, where the operator can still act on it. Kept as a pure
- * function over plain config so it is testable without booting a server, and so the
- * message lives next to the reason rather than inside a middleware.
+ * The problem in every case is *when* it surfaces: long after install, on someone else's screen,
+ * with a message that reads like a transient glitch rather than a missing setting. So the checks
+ * run at startup, where the operator can still act on them. Each is a pure function over plain
+ * config so it is testable without booting a server, and so the message lives next to the reason
+ * rather than inside a middleware. {@link assessRespondentReadiness} runs them all and returns
+ * every failing reason at once — one per defect, so the operator is not sent through a
+ * fix-restart-read loop as long as the number of things wrong.
  */
 
-/** The shape this check needs from the host's MJ config. */
+/** The shape these checks need from the host's core `magicLink` config. */
 export interface HostMagicLinkConfig {
   enabled?: boolean;
   restrictedRoleName?: string;
   grantableRoleNames?: string[];
+  /** Name of the user whose context provisions magic-link users (core matches it on `User.Name`). */
+  contextUserForProvisioning?: string;
+}
+
+/** The one field of the host's core `userHandling` config that magic-link provisioning falls back to. */
+export interface HostUserHandlingConfig {
+  contextUserForNewUserCreation?: string;
+}
+
+/**
+ * Whether each half of Turnstile is configured on this host. They are two env vars read by two
+ * files — `FORMS_TURNSTILE_SECRET` by the submit pipeline (siteverify), `FORMS_TURNSTILE_SITE_KEY`
+ * by the host page (handed to the widget so it can render the challenge) — so setting one and not
+ * the other is the realistic slip, and each half missing fails somewhere different.
+ */
+export interface TurnstileHostConfig {
+  secretConfigured: boolean;
+  siteKeyConfigured: boolean;
+}
+
+/**
+ * What on this host actually asks for a captcha, as read from the database at boot. `undefined`
+ * where the check is called means the read failed (and was logged): a verdict is not invented from
+ * evidence that is not there.
+ */
+export interface CaptchaDemand {
+  /** At least one Active, IsActive distribution has `CaptchaRequired = 1`. */
+  activeDistributions: boolean;
+  /** At least one Published version's snapshot says `settings.captchaRequired: true`. */
+  publishedForms: boolean;
+}
+
+/** Everything {@link assessRespondentReadiness} needs, gathered by the middleware at boot. */
+export interface RespondentReadinessInputs {
+  magicLink: HostMagicLinkConfig | undefined;
+  /** The role THIS app's minter grants — see {@link checkRespondentReadiness}. */
+  roleName: string;
+  userHandling: HostUserHandlingConfig | undefined;
+  /** Core's own lookup (`UserCache.UserByName`), injected so this stays a pure function. */
+  userExists: (name: string) => boolean;
+  /** `User.Name` of this host's system user, offered to the operator as the value to configure. */
+  systemUserName: string | undefined;
+  turnstile: TurnstileHostConfig;
+  captchaDemand: CaptchaDemand | undefined;
 }
 
 /** Outcome of the readiness check: ready, or not with a reason the operator can act on. */
@@ -109,4 +160,131 @@ export function checkRespondentReadiness(
     };
   }
   return { ready: true };
+}
+
+/**
+ * Whether this host can verify the captchas its forms and links ask for.
+ *
+ * Two ways to be unready, each with a different fix: the two halves of Turnstile disagree (one env
+ * var set, the other not), or nothing is configured while something on the host requires a captcha.
+ * A keyless host with no demand is fine — captcha is opt-in — and a host with both halves set is
+ * fine whatever the demand.
+ *
+ * `demand` is what the boot-time probe read. When it is `undefined` the read failed and has been
+ * logged; this check then says nothing about demand rather than guessing. A miss here only ever
+ * costs a boot warning: the submit pipeline is the enforcement, and it fails closed on its own.
+ */
+export function checkTurnstileReadiness(
+  turnstile: TurnstileHostConfig,
+  demand: CaptchaDemand | undefined,
+): RespondentReadiness {
+  if (turnstile.secretConfigured && !turnstile.siteKeyConfigured) {
+    return {
+      ready: false,
+      reason:
+        `FORMS_TURNSTILE_SECRET is set but FORMS_TURNSTILE_SITE_KEY is not, so the widget can never ` +
+        `render the challenge that the server would verify: every captcha-required form shows the ` +
+        `respondent a configuration message instead of a submit. Set FORMS_TURNSTILE_SITE_KEY to the ` +
+        `public site key that pairs with the secret.`,
+    };
+  }
+  if (turnstile.siteKeyConfigured && !turnstile.secretConfigured) {
+    return {
+      ready: false,
+      reason:
+        `FORMS_TURNSTILE_SITE_KEY is set but FORMS_TURNSTILE_SECRET is not, so the widget renders a ` +
+        `challenge the server cannot verify: every captcha-required submit is refused as a server ` +
+        `misconfiguration after the respondent has solved it. Set FORMS_TURNSTILE_SECRET to the ` +
+        `secret key that pairs with the site key.`,
+    };
+  }
+  if (!turnstile.secretConfigured && demand && (demand.activeDistributions || demand.publishedForms)) {
+    const who = [
+      demand.activeDistributions ? 'an active link' : undefined,
+      demand.publishedForms ? 'a published form' : undefined,
+    ].filter((w): w is string => w !== undefined);
+    return {
+      ready: false,
+      reason:
+        `Turnstile is not configured, but ${who.join(' and ')} on this host ` +
+        `${who.length > 1 ? 'require' : 'requires'} a captcha: every final submit there is refused as a ` +
+        `server misconfiguration. Set FORMS_TURNSTILE_SECRET and FORMS_TURNSTILE_SITE_KEY, or turn the ` +
+        `captcha off on that form or link.`,
+    };
+  }
+  return { ready: true };
+}
+
+/**
+ * Whether magic-link provisioning will run under a user the operator chose.
+ *
+ * Deliberately mirrors core's `MagicLinkService.resolveProvisioningContextUser`: the candidate is
+ * `magicLink.contextUserForProvisioning || userHandling.contextUserForNewUserCreation`, and it is
+ * resolved with `UserCache.UserByName` — by `User.Name`, NOT by email, whatever core's config
+ * comment says. When that lookup misses, core logs an error and falls back to whichever user
+ * happens to be an Owner, on every redeem. Core does not export the resolution, so the candidate
+ * rule is duplicated here (two lines) and the lookup itself is injected as `userExists`, so the
+ * verdict cannot disagree with the call core will actually make.
+ *
+ * The placeholder core ships as its default (`not.set@nowhere.com`) is not special-cased: it is
+ * simply a name that resolves to nobody, and "does not resolve" covers it without this file having
+ * to know core's current default string.
+ */
+export function checkProvisioningUserReadiness(
+  magicLink: Pick<HostMagicLinkConfig, 'contextUserForProvisioning'> | undefined,
+  userHandling: HostUserHandlingConfig | undefined,
+  userExists: (name: string) => boolean,
+  systemUserName?: string,
+): RespondentReadiness {
+  // `typeof` rather than a truthiness check for the same reason as the role check above: host
+  // config parsed from JSON hands us `null` for a blanked value, which the type does not admit.
+  const configured = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+  const candidate =
+    configured(magicLink?.contextUserForProvisioning) ??
+    configured(userHandling?.contextUserForNewUserCreation);
+  const suggestion = systemUserName
+    ? ` This host's system user is '${systemUserName}'.`
+    : '';
+  if (candidate === undefined) {
+    return {
+      ready: false,
+      reason:
+        `no magic-link provisioning user is configured, so core provisions every anonymous ` +
+        `respondent under whichever user happens to be an Owner, and logs an error on every link ` +
+        `open. Set magicLink.contextUserForProvisioning to the Name of a dedicated service ` +
+        `user.${suggestion}`,
+    };
+  }
+  if (!userExists(candidate)) {
+    return {
+      ready: false,
+      reason:
+        `magic-link provisioning user '${candidate}' matches no user — core matches it against ` +
+        `User.Name, not Email — so core logs an error and falls back to an arbitrary Owner on ` +
+        `every link open. Set magicLink.contextUserForProvisioning to an existing user's ` +
+        `Name.${suggestion}`,
+    };
+  }
+  return { ready: true };
+}
+
+/**
+ * Every reason this host is not ready to serve anonymous respondents — empty when it is.
+ *
+ * Runs each check once and keeps every failure, so one boot log lists everything an operator has
+ * to fix. The checks stay independent and individually testable; this is only their union.
+ */
+export function assessRespondentReadiness(inputs: RespondentReadinessInputs): string[] {
+  const verdicts: RespondentReadiness[] = [
+    checkRespondentReadiness(inputs.magicLink, inputs.roleName),
+    checkProvisioningUserReadiness(
+      inputs.magicLink,
+      inputs.userHandling,
+      inputs.userExists,
+      inputs.systemUserName,
+    ),
+    checkTurnstileReadiness(inputs.turnstile, inputs.captchaDemand),
+  ];
+  return verdicts.flatMap((v) => (v.ready === false ? [v.reason] : []));
 }

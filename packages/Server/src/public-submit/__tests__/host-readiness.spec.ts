@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { checkRespondentReadiness, RESPONDENT_ROLE } from '../../respondent-host/host-readiness';
-import type { HostMagicLinkConfig } from '../../respondent-host/host-readiness';
+import {
+  assessRespondentReadiness,
+  checkProvisioningUserReadiness,
+  checkRespondentReadiness,
+  checkTurnstileReadiness,
+  RESPONDENT_ROLE,
+} from '../../respondent-host/host-readiness';
+import type {
+  CaptchaDemand,
+  HostMagicLinkConfig,
+  RespondentReadinessInputs,
+} from '../../respondent-host/host-readiness';
 
 /**
  * These describe what an OPERATOR needs to be told, not how the check is written.
@@ -110,5 +120,146 @@ describe('checkRespondentReadiness', () => {
   it('never treats a blank role name as grantable, as core does not', () => {
     const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [''] }, '   ');
     expect(result.ready).toBe(false);
+  });
+});
+
+/**
+ * Issue #122. Two more things a host can get wrong that stayed silent until a respondent paid for
+ * them: Turnstile keys (a link demanding a captcha on a keyless host refused every final submit as
+ * "Captcha verification failed"), and the magic-link provisioning user (core's default is a literal
+ * placeholder, so every link open logged an error and provisioned under an arbitrary Owner).
+ */
+describe('checkTurnstileReadiness', () => {
+  const noDemand: CaptchaDemand = { activeDistributions: false, publishedForms: false };
+
+  it('is ready on a host with no Turnstile keys when nothing asks for a captcha', () => {
+    expect(checkTurnstileReadiness({ secretConfigured: false, siteKeyConfigured: false }, noDemand))
+      .toEqual({ ready: true });
+  });
+
+  it('is ready when both halves are configured, whatever the demand', () => {
+    expect(checkTurnstileReadiness(
+      { secretConfigured: true, siteKeyConfigured: true },
+      { activeDistributions: true, publishedForms: true },
+    )).toEqual({ ready: true });
+  });
+
+  // The two halves live in two different env vars read by two different files (the server
+  // verifies with the secret, the host page hands the widget the site key). Setting one and not
+  // the other is the realistic install slip, and each half missing fails in a different place.
+  it('fails when the secret is set without the site key, naming the missing variable', () => {
+    const result = checkTurnstileReadiness({ secretConfigured: true, siteKeyConfigured: false }, noDemand);
+    expect(result.ready).toBe(false);
+    expect(result.ready === false && result.reason).toContain('FORMS_TURNSTILE_SITE_KEY');
+  });
+
+  it('fails when the site key is set without the secret, naming the missing variable', () => {
+    const result = checkTurnstileReadiness({ secretConfigured: false, siteKeyConfigured: true }, noDemand);
+    expect(result.ready).toBe(false);
+    expect(result.ready === false && result.reason).toContain('FORMS_TURNSTILE_SECRET');
+  });
+
+  it('fails when an active link requires a captcha and no secret is configured', () => {
+    const result = checkTurnstileReadiness(
+      { secretConfigured: false, siteKeyConfigured: false },
+      { activeDistributions: true, publishedForms: false },
+    );
+    expect(result.ready).toBe(false);
+    expect(result.ready === false && result.reason).toContain('FORMS_TURNSTILE_SECRET');
+  });
+
+  it('fails when a published form requires a captcha and no secret is configured', () => {
+    const result = checkTurnstileReadiness(
+      { secretConfigured: false, siteKeyConfigured: false },
+      { activeDistributions: false, publishedForms: true },
+    );
+    expect(result.ready).toBe(false);
+  });
+
+  // The demand is read from the database at boot. When that read fails the probe logs it; this
+  // check must not invent a verdict from evidence it does not have.
+  it('does not fail on demand it could not read', () => {
+    expect(checkTurnstileReadiness({ secretConfigured: false, siteKeyConfigured: false }, undefined))
+      .toEqual({ ready: true });
+  });
+});
+
+describe('checkProvisioningUserReadiness', () => {
+  const exists = (name: string): boolean => name === 'System';
+
+  it('is ready when magicLink.contextUserForProvisioning names an existing user', () => {
+    expect(checkProvisioningUserReadiness({ contextUserForProvisioning: 'System' }, undefined, exists))
+      .toEqual({ ready: true });
+  });
+
+  // Core resolves `magicLink.contextUserForProvisioning || userHandling.contextUserForNewUserCreation`.
+  // The fallback is part of the contract, so a host that only set the userHandling one is ready.
+  it('falls back to userHandling.contextUserForNewUserCreation, as core does', () => {
+    expect(checkProvisioningUserReadiness(
+      { contextUserForProvisioning: '' },
+      { contextUserForNewUserCreation: 'System' },
+      exists,
+    )).toEqual({ ready: true });
+  });
+
+  it('fails when neither setting is present', () => {
+    const result = checkProvisioningUserReadiness(undefined, undefined, exists);
+    expect(result.ready).toBe(false);
+    expect(result.ready === false && result.reason).toContain('contextUserForProvisioning');
+  });
+
+  // Core's config comment says "email"; its code calls `UserCache.UserByName`. An operator who
+  // followed the comment gets a value that never resolves, so the message has to say which one.
+  it('fails when the configured name matches no user, naming it and what it is matched against', () => {
+    const result = checkProvisioningUserReadiness(
+      { contextUserForProvisioning: 'not.set@nowhere.com' },
+      undefined,
+      exists,
+    );
+    expect(result.ready).toBe(false);
+    expect(result.ready === false && result.reason).toContain("'not.set@nowhere.com'");
+    expect(result.ready === false && result.reason).toMatch(/User\.Name/);
+  });
+
+  it('tells the operator which user to configure when the host has a system user', () => {
+    const result = checkProvisioningUserReadiness(undefined, undefined, exists, 'System');
+    expect(result.ready === false && result.reason).toContain("'System'");
+  });
+
+  // Host config is parsed from JSON, where blanking a value writes `null`, not `undefined`.
+  it('treats null settings as unset instead of throwing on them', () => {
+    const fromJson = JSON.parse('{"contextUserForProvisioning":null}') as HostMagicLinkConfig;
+    expect(() => checkProvisioningUserReadiness(fromJson, undefined, exists)).not.toThrow();
+    expect(checkProvisioningUserReadiness(fromJson, undefined, exists).ready).toBe(false);
+  });
+});
+
+describe('assessRespondentReadiness', () => {
+  const readyHost: RespondentReadinessInputs = {
+    magicLink: { enabled: true, grantableRoleNames: [RESPONDENT_ROLE], contextUserForProvisioning: 'System' },
+    roleName: RESPONDENT_ROLE,
+    userHandling: undefined,
+    userExists: (name) => name === 'System',
+    systemUserName: 'System',
+    turnstile: { secretConfigured: false, siteKeyConfigured: false },
+    captchaDemand: { activeDistributions: false, publishedForms: false },
+  };
+
+  it('reports nothing for a host configured the way this app requires', () => {
+    expect(assessRespondentReadiness(readyHost)).toEqual([]);
+  });
+
+  // One reason per defect, all at once. Reporting only the first would send the operator through
+  // a fix-restart-read loop as long as the number of things wrong.
+  it('reports every unready condition, not just the first', () => {
+    const reasons = assessRespondentReadiness({
+      ...readyHost,
+      magicLink: { enabled: false },
+      turnstile: { secretConfigured: true, siteKeyConfigured: false },
+    });
+    expect(reasons).toHaveLength(3);
+    expect(reasons.join('\n')).toMatch(/magicLink.*not enabled/i);
+    expect(reasons.join('\n')).toContain('contextUserForProvisioning');
+    expect(reasons.join('\n')).toContain('FORMS_TURNSTILE_SITE_KEY');
   });
 });

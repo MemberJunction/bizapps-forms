@@ -62,7 +62,7 @@ import {
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
-import { captchaRequired, verifyTurnstile } from './turnstile.service';
+import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
 import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
 import {
   evaluateProvenance,
@@ -173,6 +173,14 @@ function refusalSuffix(result: FormSubmissionResult): string {
   const reason = result.errors?.[0]?.message?.trim();
   return ` — REFUSED: ${reason || 'no reason given'}`;
 }
+
+/**
+ * What the respondent reads when a captcha is required and the host cannot verify one. Mirrors the
+ * widget's own config-gap copy (`captchaBlockedMessage` in mj-form.component) so the two surfaces
+ * say the same thing; names nobody's failure, because there was none.
+ */
+const CAPTCHA_MISCONFIGURED_MESSAGE =
+  'This form requires a security check that has not been set up on this server. Please contact the form owner.';
 
 function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
   return { success: false, status: undefined, errors: errors ?? [{ message }] };
@@ -411,6 +419,20 @@ async function runSubmitPipelineInner(
   const needCaptcha =
     complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
+  if (!turnstile.success && turnstile.errorCode === TURNSTILE_NOT_CONFIGURED) {
+    // The one refusal here that is not the respondent's doing: this form or link asks for a
+    // captcha and the host never configured Turnstile. Said as such — to them, without blame,
+    // and to the operator, by setting name. The boot-time readiness check reports the same
+    // condition for whatever required a captcha at startup; this catches what was published
+    // after it. Same shape as every other refusal (a result, not a throw) so the widget renders
+    // it rather than a blank screen (#122).
+    LogError(
+      `[Forms] submit to '${submission.distributionSlug}' requires a captcha but FORMS_TURNSTILE_SECRET is ` +
+        `not set on this host. Set FORMS_TURNSTILE_SECRET and FORMS_TURNSTILE_SITE_KEY, or turn the captcha ` +
+        `off on that form or link. Refusing as a server misconfiguration.`,
+    );
+    return report(fail(CAPTCHA_MISCONFIGURED_MESSAGE));
+  }
   if (!turnstile.success) {
     return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
   }

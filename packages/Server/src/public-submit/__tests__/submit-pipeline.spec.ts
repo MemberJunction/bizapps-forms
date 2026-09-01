@@ -37,6 +37,8 @@ function makeContext(
   perms: CreatePermissions,
   options: {
     captcha?: boolean;
+    /** The distribution's own `CaptchaRequired` column — OR-ed with the form's setting by the gate. */
+    distributionCaptcha?: boolean;
     maxResponses?: number | null;
     responseCount?: number;
     formResponseCount?: number;
@@ -51,7 +53,7 @@ function makeContext(
       : undefined,
   );
   const distribution = makeDistribution({
-    CaptchaRequired: false,
+    CaptchaRequired: options.distributionCaptcha ?? false,
     MaxResponses: options.maxResponses ?? null,
     ResponseCount: options.responseCount ?? 0,
   });
@@ -209,6 +211,36 @@ describe('runSubmitPipeline', () => {
     expect(result.success).toBe(false);
     expect(result.errors?.[0].message).toMatch(/captcha/i);
     expect(saved()).toHaveLength(0);
+  });
+
+  // #122. A link born with `CaptchaRequired = 1` (the column's old default) on a host that never
+  // configured Turnstile refused every final submit with "Captcha verification failed
+  // (turnstile-not-configured)" — telling the respondent THEY failed a check that was never set up,
+  // and telling the operator nothing at error level. Misconfiguration is the server's problem:
+  // the respondent gets copy that says so, the operator gets the env var by name.
+  it('words a captcha-required submit on a Turnstile-less host as a server misconfiguration, not a respondent failure', async () => {
+    // FORMS_TURNSTILE_SECRET is cleared by beforeEach: this host has no Turnstile.
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx, saved } = makeContext(respondentPermissions(), { distributionCaptcha: true });
+
+      const result = await runSubmitPipeline(ctx, validSubmission());
+
+      expect(result.success).toBe(false);
+      const message = result.errors?.[0].message ?? '';
+      expect(message).toMatch(/contact the form owner/i);
+      expect(message).not.toMatch(/failed|verification|turnstile-not-configured/i);
+      expect(saved()).toHaveLength(0);
+
+      const line = errors.find((l) => l.includes('FORMS_TURNSTILE_SECRET'));
+      expect(line, 'the operator should be told which setting is missing').toBeDefined();
+      expect(line).toContain('public-1');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('saves the response + answers and fires on-submit hooks (happy path)', async () => {
