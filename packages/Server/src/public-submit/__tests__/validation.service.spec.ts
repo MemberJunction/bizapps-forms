@@ -501,7 +501,10 @@ describe('validateSubmission', () => {
       ],
     };
     const outcome = validateSubmission(def, [{ questionId: 'q-trigger', textValue: '   ' }], 'complete');
-    expect(outcome.errors).toEqual([]);
+    // The branch stayed hidden, so nothing asks for `q-dependent`. The one error left is the
+    // form-level "nothing to submit" (#124): a whitespace-only answer stores nothing, and a
+    // completion that stores nothing is refused rather than sealed.
+    expect(outcome.errors.map((e) => e.questionId)).toEqual([undefined]);
     expect(outcome.answers).toEqual([]);
   });
 
@@ -593,6 +596,110 @@ describe('validateSubmission — what each mode waives', () => {
       expect(validateSubmission(emailForm(), malformed, 'screened-out').errors.map((e) => e.questionId)).toEqual([
         'q-email',
       ]);
+    });
+  });
+});
+
+/**
+ * Issue #124. An answer whose question id names NO question in the published version used to
+ * fall straight through: the walk visits the definition's questions and looks the inputs up, so
+ * an input nothing looks up is neither an error nor an answer. Persistence then sealed whatever
+ * was left — including nothing — as `Complete` and counted it against the quota.
+ */
+describe('validateSubmission — answers that match no question (#124)', () => {
+  /** Two OPTIONAL questions plus a Statement, so "nothing answered" is reachable without a required error. */
+  function optionalForm(): PublishedFormDefinition {
+    return {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Optional',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-first', type: 'ShortText', prompt: 'First name', isRequired: false, displayOrder: 1, options: [] },
+            { id: 'q-colour', type: 'ShortText', prompt: 'Colour', isRequired: false, displayOrder: 2, options: [] },
+            { id: 'q-note', type: 'Statement', prompt: 'Display only', isRequired: false, displayOrder: 3, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  const ghost = { questionId: 'q-ghost', textValue: 'boo' };
+
+  describe('unknown question id', () => {
+    it('refuses an answer set that matches nothing, naming the id it could not place', () => {
+      const outcome = validateSubmission(optionalForm(), [ghost], 'complete');
+      expect(outcome.errors).toHaveLength(1);
+      expect(outcome.errors[0].questionId).toBe('q-ghost');
+      expect(outcome.answers).toEqual([]);
+    });
+
+    it('refuses a MIXED set whole, and names only the unknown id', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [{ questionId: 'q-first', textValue: 'Ada' }, ghost],
+        'complete',
+      );
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-ghost']);
+    });
+
+    it('is malformed input in every mode, so a draft is refused too', () => {
+      expect(validateSubmission(optionalForm(), [ghost], 'draft').errors.map((e) => e.questionId)).toEqual(['q-ghost']);
+    });
+
+    it('still drops a KNOWN question hidden by a rule silently (an autosave may predate the rule)', () => {
+      const outcome = validateSubmission(
+        conditionalDefinition(),
+        [
+          { questionId: 'q-choice', textValue: 'Yes' },
+          { questionId: 'q-other', textValue: 'stale' },
+        ],
+        'complete',
+      );
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-choice']);
+    });
+
+    it('still drops an answer to a display-only question silently', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [
+          { questionId: 'q-first', textValue: 'Ada' },
+          { questionId: 'q-note', textValue: 'noise' },
+        ],
+        'complete',
+      );
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-first']);
+    });
+  });
+
+  describe('a completion that stores nothing', () => {
+    it('refuses an empty answer set on a final submit with a form-level error', () => {
+      const outcome = validateSubmission(optionalForm(), [], 'complete');
+      expect(outcome.errors).toHaveLength(1);
+      expect(outcome.errors[0].questionId).toBeUndefined();
+      expect(outcome.errors[0].message).toMatch(/at least one/i);
+    });
+
+    it('refuses a final submit whose only answers are blank', () => {
+      const outcome = validateSubmission(optionalForm(), [{ questionId: 'q-first', textValue: '   ' }], 'complete');
+      expect(outcome.errors.map((e) => e.questionId)).toEqual([undefined]);
+    });
+
+    it('lets an empty draft through — an autosave with nothing typed yet is normal', () => {
+      expect(validateSubmission(optionalForm(), [], 'draft').errors).toEqual([]);
+    });
+
+    it('does not double up on a required-field error', () => {
+      const outcome = validateSubmission(conditionalDefinition(), [], 'complete');
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-choice']);
     });
   });
 });

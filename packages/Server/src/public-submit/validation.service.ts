@@ -5,6 +5,8 @@
  * decisions cannot be bypassed.
  *
  * Pipeline:
+ *  0. Refuse any answer whose question id is in NO page of the definition — malformed input
+ *     in every mode (#124). A hidden or display-only question is a KNOWN id and is not this.
  *  1. Build `Map<questionId, AnswerValue>` from the raw answer inputs.
  *  2. Evaluate page + question `ConditionalRule` with the shared
  *     {@link evaluateConditionalRule}; questions that resolve hidden are DROPPED
@@ -12,6 +14,8 @@
  *  3. For each visible question: enforce `isRequired`, then the format implied by the
  *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
  *     `ValidationRule` (length / numeric bounds / regex pattern).
+ *  4. Refuse a `complete` submission that left nothing to persist and raised no other error
+ *     (#124) — it would otherwise be sealed `Complete` and counted against both quotas.
  *
  * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`).
  * It is a draft, and the widget autosaves on a debounce with no validity gate, so a half-typed
@@ -152,6 +156,12 @@ function asksForEverything(mode: ValidationMode): boolean {
   return mode === 'complete';
 }
 
+/** What a respondent is told when their final submit would store nothing (#124). */
+const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question before submitting.';
+
+/** What an answer naming a question this form does not have is told (#124). */
+const UNKNOWN_QUESTION_MESSAGE = 'That answer does not belong to any question on this form.';
+
 /**
  * Run full server-side validation. See {@link ValidationMode} for what each mode waives.
  */
@@ -165,6 +175,19 @@ export function validateSubmission(
   const errors: FieldError[] = [];
   const visible: ValidatedAnswer[] = [];
 
+  // An answer naming a question this version does not have is malformed input, in every mode —
+  // the same class of defect as the shape guard's "missing its question id", detectable only
+  // once the definition is loaded. It used to fall straight through the walk below, which visits
+  // the definition's questions and looks the inputs up: an input nothing looks up was neither
+  // an error nor an answer, so a submission matching NOTHING sailed on to be sealed `Complete`
+  // and counted against the quota (#124). Refused whole rather than trimmed: within a pinned
+  // version the question set is fixed, so only a client bug or a crafted request sends one, and
+  // keeping the rest silently is exactly the "vanished without trace" that made the bug invisible.
+  // Only ids in NO page are unknown. A question hidden by a rule or a display-only type is a
+  // known id, and its answer is still dropped silently below — deliberately, since a widget
+  // legitimately autosaves an answer before a later answer hides the question.
+  collectUnknownAnswers(definition, answers, errors);
+
   // ONE forward walk decides what the respondent saw — page show rules, question show rules,
   // forward jumps and the terminal jump that ends the form, all folded together. Iterating
   // `resolveVisiblePages` and re-filtering each page's own list was the same answer only for
@@ -176,7 +199,50 @@ export function validateSubmission(
   for (const question of resolveRenderedQuestions(definition.pages, answerMap)) {
     collectVisibleQuestion(question, answerMap, inputByQuestion, mode, errors, visible);
   }
+
+  // A finished submission that stores nothing is not a response, and must not become a
+  // `Complete` row: both quotas count those — the distribution's `ResponseCount` and the form's
+  // `COUNT(Status='Complete')` — so an empty one spends a slot a real respondent needed (#124).
+  // Refused here, before anything is written, rather than written-and-not-counted, because the
+  // form-level count would still see the row. Only on a real completion: a draft with nothing
+  // typed yet is the normal autosave case, and a screened-out submission always carries the
+  // answer that screened it. Only when nothing else is wrong: a required-field error already
+  // says what is missing, more precisely than this can.
+  if (asksForEverything(mode) && errors.length === 0 && visible.length === 0) {
+    errors.push({ message: NOTHING_TO_SUBMIT_MESSAGE });
+  }
   return { errors, answers: visible, answerMap };
+}
+
+/** Every question id the published version carries, rendered or not, answerable or not. */
+function knownQuestionIds(definition: PublishedFormDefinition): Set<string> {
+  const ids = new Set<string>();
+  for (const page of definition.pages) {
+    for (const question of page.questions) {
+      ids.add(question.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Append one error per answer whose question id is in no page of the definition.
+ *
+ * Matched EXACTLY — the same key {@link validateSubmission}'s `inputByQuestion` lookup uses — so
+ * "known" means "would be matched", and an id that would silently miss the lookup cannot
+ * masquerade as known here.
+ */
+function collectUnknownAnswers(
+  definition: PublishedFormDefinition,
+  answers: FormAnswerInput[],
+  errors: FieldError[],
+): void {
+  const known = knownQuestionIds(definition);
+  for (const answer of answers) {
+    if (!known.has(answer.questionId)) {
+      errors.push({ questionId: answer.questionId, message: UNKNOWN_QUESTION_MESSAGE });
+    }
+  }
 }
 
 /**
