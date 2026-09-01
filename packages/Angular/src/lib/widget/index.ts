@@ -38,6 +38,8 @@ export { FormOneQuestionComponent } from './components/form-one-question.compone
 export { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
 export { FormQuestionComponent } from './components/questions/form-question.component';
 export { FormProgressComponent } from './components/form-progress.component';
+export { IconComponent } from './components/icon.component';
+export { WIDGET_ICON_GLYPHS, type WidgetIconGlyph, type WidgetIconName } from './components/icon-glyphs';
 
 // Headless runtime + helpers
 export { FormRuntime } from './core/form-runtime';
