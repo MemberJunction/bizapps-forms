@@ -193,6 +193,17 @@ describe('redeemSlugToToken', () => {
     expect(out.token).toBe('redeemed-jwt');
   });
 
+  // The host page needs the form's identity (name, description) and the door has ALREADY read the
+  // row that names the form. Handing it up is what keeps the route at one distribution read per
+  // open instead of a second, identical one (bizapps-forms#120; the read cost is finding #6).
+  it('hands the loaded distribution row up with the token, so the caller never re-reads it', async () => {
+    const row = fakeDistribution({ Form: 'Customer Satisfaction Survey' });
+    const provider = fakeProvider({ rows: [row] }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(out.ok).toBe(true);
+    expect(out.distribution).toBe(row);
+  });
+
   it('POSTs the raw token to the redeem endpoint with format=json and a JSON body', async () => {
     const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
     await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
