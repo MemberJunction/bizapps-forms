@@ -12,9 +12,13 @@
  * because `Remove` queues a delete for a persisted child and `Add` does not take it back off. The
  * only safe expression of a move is `SetLoadedItems([])` then re-`Add` in the new order.
  *
- * That trap is still live for the server-side callers the Task 8 follow-up covers — `form-clone`
- * and `form-blueprint-builder` run where a delete graph IS atomic, so collections are the right
- * answer *there* — which is why this stays.
+ * That trap is still live for any caller that does adopt collections, which is why this stays. Be
+ * precise about who that is: `form-blueprint-builder` (`packages/Actions/`) genuinely runs on the
+ * server, where the provider supports entity transactions and a delete graph IS atomic.
+ * `form-clone` does NOT — it is an `@Injectable()` Angular service that runs in the browser
+ * alongside the builder, so it inherits exactly the non-atomic client path described above. An
+ * earlier version of this comment claimed both were server-side; anyone converting `form-clone` to
+ * owned collections on that basis would reinstate issue #103 inside the clone service.
  *
  * Fakes follow MJ core's own `relatedRecordCollection.load.test.ts` — duck-typed owner and records.
  * The one thing modelled more carefully here is DIRTY: a real `BaseEntity.Set` marks the record
