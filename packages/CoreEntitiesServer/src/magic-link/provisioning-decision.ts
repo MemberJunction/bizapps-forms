@@ -11,11 +11,22 @@
  *
  * Everything below is that sentence, mechanised. It is deliberately a function of
  * the distribution's CURRENT state rather than of a transition, which is what makes
- * it writer-agnostic (bizapps-forms#104): a link closed by the builder, an Action, an
- * import or a hand-run `UPDATE` all reach the same verdict, and there is no old value
- * to read, no dirty-field check to get wrong, and no way for a save to be missed.
+ * it writer-agnostic (bizapps-forms#104): the builder, an Action, an import and the
+ * public submit path all reach the same verdict, and there is no old value to read, no
+ * dirty-field check to get wrong, and no transition for a writer to forget to announce.
  * Being a state function also makes it idempotent — running it twice changes nothing
  * the first run did not already settle.
+ *
+ * "Writer-agnostic" is about WHICH writer, not about bypassing the write path. This runs
+ * from `BaseEntity.Save()`, so a raw SQL `UPDATE` — which reaches no entity object —
+ * does not trigger it at all; what a state function buys there is that the very next save
+ * of that row, whoever performs it and whatever it was for, restores the invariant with
+ * no memory of the transition it missed. That is genuinely different from a transition
+ * function, which would have nothing to detect and would leave the row wrong forever. It
+ * is not the same as revoking at the moment of the `UPDATE`, and the two were run together
+ * in an earlier draft of this comment. Direct SQL against `MagicLinkInviteID` is instead
+ * defended one layer down, by the minter's `ResourceID` ownership check, and by the
+ * backfill migration that repairs the rows written before any of this existed.
  */
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 

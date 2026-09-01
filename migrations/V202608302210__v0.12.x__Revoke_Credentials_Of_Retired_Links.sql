@@ -7,7 +7,7 @@
 -- something happens to touch its row, and the headline of bizapps-forms#104 stays true for
 -- the whole existing corpus while being false for everything created afterwards.
 --
--- No schema change: two guarded UPDATEs, both idempotent, both no-ops on a database that has
+-- No schema change: three guarded UPDATEs, all idempotent, all no-ops on a database that has
 -- nothing to fix (the development database this was authored against matches 0 rows).
 --
 -- Deliberately NOT gated on ChannelType. The hook revokes an unlinkable channel's credential
@@ -15,6 +15,26 @@
 -- this backfill takes only the half that is settled by data: a link that is not open for
 -- responses has no business holding a live credential whatever channel it was created under.
 -- The remaining case self-heals the next time such a record is saved.
+
+-- OWNERSHIP, on every join below. `FormDistribution.MagicLinkInviteID` carries no foreign key
+-- and rides the generated GraphQL update input, so before the hook shipped alongside this it was
+-- whatever any client had written there — and this migration's whole population is rows written
+-- BEFORE that protection existed. Joining on it alone therefore lets one distribution's row
+-- decide the fate of another distribution's invite. The mint recorded the true scope on the
+-- invite itself (`ResourceID`, set to the distribution's own ID), so every statement here
+-- re-derives it rather than trusting the pointer, exactly as `MagicLinkInviteMinter.writeToInvite`
+-- does at runtime for the same reason.
+--
+-- Getting this wrong is not a near-miss. A CLOSED row pointing at a LIVE row's invite would have
+-- step 1 revoke the live credential and step 2 clear only the closed row's columns — leaving the
+-- live link holding both halves of a dead credential, which `decideProvisioning` reads as
+-- `current` and never re-mints, and which `shareState` badges "Live". A permanently dead public
+-- link that the builder reports as healthy, caused by the repair.
+--
+-- `ResourceID` is nvarchar and `FormDistribution.ID` is uniqueidentifier; SQL Server converts the
+-- uniqueidentifier to its canonical string form for the comparison, and the default collation is
+-- case-insensitive, so the match does not depend on how a writer cased the UUID. An invite with a
+-- NULL or mismatched `ResourceID` is left alone by design: nothing proves it is this link's.
 
 -- 1. The credential itself. `Revoked` is MJ core's own terminal status for an invite that must
 --    never be redeemed again — `evaluateInvite` rejects it ahead of every other check, and the
@@ -26,6 +46,7 @@ SET i.Status = 'Revoked'
 FROM [${mjSchema}].[MagicLinkInvite] i
 INNER JOIN [${flyway:defaultSchema}].[FormDistribution] d ON d.MagicLinkInviteID = i.ID
 WHERE i.Status = 'Active'
+  AND i.ResourceID = CAST(d.ID AS nvarchar(50))
   AND (d.Status <> 'Active' OR d.IsActive = 0);
 GO
 
@@ -54,6 +75,7 @@ SET d.MagicLinkInviteID = NULL,
 FROM [${flyway:defaultSchema}].[FormDistribution] d
 INNER JOIN [${mjSchema}].[MagicLinkInvite] i ON i.ID = d.MagicLinkInviteID
 WHERE i.Status = 'Revoked'
+  AND i.ResourceID = CAST(d.ID AS nvarchar(50))
   AND (d.Status <> 'Active' OR d.IsActive = 0);
 GO
 
@@ -81,6 +103,7 @@ SET i.ExpiresAt = d.CloseAt
 FROM [${mjSchema}].[MagicLinkInvite] i
 INNER JOIN [${flyway:defaultSchema}].[FormDistribution] d ON d.MagicLinkInviteID = i.ID
 WHERE i.Status = 'Active'
+  AND i.ResourceID = CAST(d.ID AS nvarchar(50))
   AND d.CloseAt IS NOT NULL
   AND i.ExpiresAt > d.CloseAt;
 GO
