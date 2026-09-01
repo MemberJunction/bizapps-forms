@@ -1,22 +1,35 @@
 {
   "entity": "MJ: Entity Relationships",
   "filePattern": "**/.*.json",
-  "defaults": {},
+  "_comment": [
+    "These rows are NOT created here. CodeGen mints one EntityRelationship per foreign key, so all",
+    "three Forms parent -> child relationships already exist by the time this directory is pushed;",
+    "what this directory does is fill in ONE column on them -- `RelatedRecordCollection`, the JSON",
+    "that turns a plain relationship into a typed, writable child collection on the parent entity.",
+    "",
+    "autoCreateMissingRecords is FALSE, deliberately overriding the repo-root default. Every record",
+    "here resolves its primary key with @lookup against Entity + RelatedEntity, and the CodeGen row",
+    "it targets is re-minted with a NEW ID on every rebuild-db -- which is exactly why the lookup is",
+    "by name rather than by a hardcoded UUID. If a lookup ever fails to resolve, the correct outcome",
+    "is a LOUD FAILURE. With auto-create on, the push would instead insert a SECOND, half-populated",
+    "EntityRelationship beside CodeGen's, and the collection would appear to work while the",
+    "duplicate quietly broke the next codegen run. That is not hypothetical here: #69 exists because",
+    "a duplicated `Forms -> Form Screens` row made regeneration emit the same array property twice",
+    "and forms-server stopped compiling on every machine that ran codegen for five weeks.",
+    "",
+    "The pull side creates nothing and appends nothing. `RelatedRecordCollection IS NOT NULL` is a",
+    "property, not an ownership predicate -- MJ core ships a dozen rows matching it and every",
+    "co-installed Open App adds more, so an appending pull would rake other people's declarations",
+    "into this file and the next release seed would ship them."
+  ],
+  "push": {
+    "autoCreateMissingRecords": false
+  },
   "pull": {
-    "createNewFileIfNotFound": true,
-    "newFileName": ".entity-relationships.json",
-    "appendRecordsToExistingFile": true,
+    "createNewFileIfNotFound": false,
+    "appendRecordsToExistingFile": false,
     "updateExistingRecords": true,
-    "preserveFields": [],
-    "excludeFields": [],
-    "mergeStrategy": "merge",
-    "backupBeforeUpdate": true,
-    "backupDirectory": ".backups",
-    "filter": "RelatedRecordCollection IS NOT NULL",
-    "externalizeFields": [],
     "ignoreNullFields": true,
-    "ignoreVirtualFields": true,
-    "lookupFields": {},
-    "relatedEntities": {}
+    "ignoreVirtualFields": true
   }
 }
