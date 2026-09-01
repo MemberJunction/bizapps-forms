@@ -25,10 +25,14 @@
  *
  * So we reproduce the (small, well-specified) create path here over the same
  * entity + token format the shipped redeem path expects.
+ *
+ * WHOSE rights those writes carry is a separate question with its own answer: not the caller's.
+ * See {@link MagicLinkInviteMinter.resolveWriter} — bizapps-forms#114.
  */
 import { Metadata, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UUIDsEqual } from '@memberjunction/global';
 import { configInfo } from '@memberjunction/server';
+import { UserCache } from '@memberjunction/generic-database-provider';
 import type { MJMagicLinkInviteEntity, MJResourceTypeEntity } from '@memberjunction/core-entities';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import { resolveExpiry } from '@mj-biz-apps/forms-core-entities-server';
@@ -213,6 +217,71 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
   }
 
   /**
+   * The identity this host writes core's magic-link rows under.
+   *
+   * NOT the caller, and that is the whole of bizapps-forms#114. `MJ: Magic Link Invites` is a CORE
+   * entity whose permissions no Forms seed touches — on a stock database only Developer and
+   * Integration hold Create/Read/Update — yet every write below is driven by an ordinary save of a
+   * Form Distribution. Run as the saver, the feature therefore worked only for form authors who
+   * happened to be Developers: on the ordinary least-privilege shape (full rights on the links they
+   * own, nothing on core's table) `Load` threw on Read before the revoke was attempted, and because
+   * provisioning is fail-soft by design the pause returned green with the token still redeeming —
+   * the exact defect bizapps-forms#104 exists to remove, surviving on precisely the deployments
+   * careful enough to build a narrow role. Minting failed the same way, one permission over.
+   *
+   * The alternative — seed the missing grant — was rejected. Forms does not own which role a host
+   * gives its authors, so the grant would have to be attached per deployment (a step whose omission
+   * fails silently, exactly as today) or handed to everyone; and the entity is shared, with no row
+   * scoping in the default seed, so a grant wide enough to work would let any form author revoke
+   * another app's invites. More fundamentally it is a leak: an operator deciding "may Alice publish
+   * forms?" grants rights on forms, and nothing in that decision says anything about core's
+   * magic-link table. The permission requirement corresponds to no decision they actually make.
+   *
+   * Elevating is safe here because the caller's authority has already been spent and checked: MJ
+   * refused the distribution save unless they could write it, the invite is scoped to that
+   * distribution, {@link writeToInvite} refuses any invite whose `ResourceID` says otherwise, and
+   * not one field on a minted row comes from the caller — application, role, identity mode, kind
+   * and resource are all fixed by the code. The elevated surface is exactly "manage the credential
+   * of a link I am allowed to write", which is what saving a live public link already means.
+   *
+   * Resolution follows MJ core's own `MagicLinkService.resolveProvisioningContextUser` key for key
+   * and in the same order, so Forms and core agree about who owns the table they share.
+   */
+  private resolveWriter(caller: UserInfo): UserInfo {
+    const configured = configInfo.magicLink?.contextUserForProvisioning;
+    const candidate = configured || configInfo.userHandling?.contextUserForNewUserCreation;
+    if (candidate) {
+      const named = UserCache.Instance.UserByName(candidate);
+      if (named) {
+        return named;
+      }
+      if (configured) {
+        // Only a name the operator set FOR MAGIC LINKS is worth a line here. MJ's stock config
+        // ships `not.set@nowhere.com` in `userHandling.contextUserForNewUserCreation`, so treating
+        // that one as an error would log on every save of every live link on a default host —
+        // including every public response, which re-bounds the credential's expiry.
+        LogError(
+          `[MagicLinkInviteMinter] Configured provisioning user '${configured}' not found; falling back to an Owner.`,
+        );
+      }
+    }
+    const owner = UserCache.Users.find((u) => u.Type?.trim().toLowerCase() === 'owner');
+    if (owner) {
+      return owner;
+    }
+    // Last resort: the caller's own rights, which is what this did before it did anything. The
+    // fail-safe direction is toward LESS privilege, so the fallback narrows rather than widens —
+    // deliberately the opposite conclusion from `automation/service-principal.ts`, which refuses to
+    // fall back at all, and for the same reason: there the fallback would have been the system user.
+    LogError(
+      `[MagicLinkInviteMinter] No provisioning identity resolved (no configured user and no Owner in ` +
+        `the user cache); writing invites as the caller ${caller.Name}, whose rights on ` +
+        `'${INVITE_ENTITY}' may not be sufficient.`,
+    );
+    return caller;
+  }
+
+  /**
    * Load one invite and apply `change` to it, saving only if `change` asked for a write.
    *
    * The shared body of revoke and re-bound, which are the same five steps around one
@@ -241,10 +310,13 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     }
 
     try {
+      // Inside the try: the contract on this method is that it never throws, and resolving the
+      // principal reads process state that a caller cannot vet.
+      const writer = this.resolveWriter(contextUser);
       const md = new Metadata();
-      const invite = await md.GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, contextUser);
+      const invite = await md.GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
       if (!(await invite.Load(id))) {
-        return await this.reportUnloadableInvite(id, contextUser, verb);
+        return await this.reportUnloadableInvite(id, writer, verb);
       }
 
       // OWNERSHIP, before any write. The id arrives from `FormDistribution.MagicLinkInviteID`,
@@ -321,6 +393,9 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     creatingUser: UserInfo,
   ): Promise<MintAnonymousInviteResult> {
     const md = new Metadata();
+    // Every read and the write itself run as the host's provisioning identity; only the ROW names
+    // the author — see {@link resolveWriter} and `CreatedByUserID` below.
+    const writer = this.resolveWriter(creatingUser);
 
     const applicationId = this.resolveApplicationId(md, params.applicationName);
     if (!applicationId) {
@@ -338,10 +413,10 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
       };
     }
 
-    const resourceTypeId = await this.resolveResourceTypeId(params.resourceTypeName, creatingUser);
+    const resourceTypeId = await this.resolveResourceTypeId(params.resourceTypeName, writer);
     const expiresAt = this.resolveExpiresAt(params.expiresAt);
 
-    const invite = await md.GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, creatingUser);
+    const invite = await md.GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
     invite.NewRecord();
     const rawToken = generateRawToken();
     invite.TokenHash = hashToken(rawToken);
@@ -357,6 +432,10 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     invite.UseCount = 0;
     invite.ExpiresAt = expiresAt;
     invite.Status = 'Active';
+    // The AUTHOR, never the writer. This is not an authorization field, and two things depend on it
+    // staying the person: it is the audit trail for who published the link, and core's redeem path
+    // fails CLOSED on it — `isInviterActive` refuses every outstanding invite of a deactivated
+    // inviter, which stamping a service identity here would quietly retire.
     invite.CreatedByUserID = creatingUser.ID;
 
     if (!(await invite.Save())) {

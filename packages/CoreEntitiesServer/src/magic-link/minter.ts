@@ -139,6 +139,14 @@ export interface InviteExpiryBounds {
  * `@mj-biz-apps/forms-server` over MJ core's magic-link tables. All three belong to
  * one implementation on purpose: whatever backend issues a credential is the only
  * thing that knows how to change or kill it.
+ *
+ * The `contextUser` every method takes is WHO ASKED — the staff user whose save triggered this —
+ * and not necessarily the identity the implementation performs the write under. The credential is
+ * the application's own record rather than the caller's, and the caller's authority has already
+ * been spent proving they may write the distribution it belongs to; requiring a second permission
+ * on the backend's storage would make the feature work only for whichever roles a host happens to
+ * have granted there. The shipped implementation elevates for exactly that reason
+ * (bizapps-forms#114); callers must not read `contextUser` as a promise about rights.
  */
 export interface IAnonymousMagicLinkMinter {
   /**

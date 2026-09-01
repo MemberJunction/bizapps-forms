@@ -325,8 +325,9 @@ describe('a paused link is honest about its access token', () => {
   // The server's revocation is fail-soft BY DESIGN: `FormDistributionEntityServer.Save()`
   // logs a failed revoke and still returns true, because a distribution save must not fail
   // over provisioning. So "the author clicked pause, the save came back green, and the
-  // credential is still redeemable" is a real, reachable outcome — and on a host that does
-  // not grant Update on `MJ: Magic Link Invites` it is the ONLY outcome.
+  // credential is still redeemable" is a real, reachable outcome. It was once the ONLY outcome
+  // on any host whose form authors are not Developers, because the write ran as the caller
+  // (bizapps-forms#114); it is now an ordinary failure rather than a whole class of deployment.
   //
   // The record carries the evidence, because the server leaves the credential LINKED
   // precisely so the next save retries it. The badge must read that evidence rather than

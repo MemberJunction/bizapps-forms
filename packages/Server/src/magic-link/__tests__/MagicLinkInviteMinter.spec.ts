@@ -41,6 +41,16 @@ const mockState: {
   loadedIds: string[];
   /** How the existence probe behind a failed `Load` answers. */
   existenceProbe: { Success: boolean; TotalRowCount: number; ErrorMessage?: string };
+  /** `magicLink.contextUserForProvisioning`, the host's chosen writer of core's invite rows. */
+  contextUserForProvisioning: string | undefined;
+  /** `userHandling.contextUserForNewUserCreation`, core's own second choice for the same job. */
+  contextUserForNewUserCreation: string | undefined;
+  /** What `UserCache` holds. Empty means no provisioning identity resolves at all. */
+  cachedUsers: UserInfo[];
+  /** Context users handed to `GetEntityObject`, in call order — the subject of bizapps-forms#114. */
+  entityUsers: (UserInfo | undefined)[];
+  /** Context users handed to `RunView`, in call order. The reads need the same rights as the writes. */
+  readUsers: (UserInfo | undefined)[];
 } = {
   magicLinkEnabled: true,
   applications: [{ ID: 'app-forms', Name: 'Forms' }],
@@ -56,13 +66,45 @@ const mockState: {
   loadedResourceID: 'dist-1',
   loadedIds: [],
   existenceProbe: { Success: true, TotalRowCount: 0 },
+  contextUserForProvisioning: undefined,
+  contextUserForNewUserCreation: undefined,
+  cachedUsers: [],
+  entityUsers: [],
+  readUsers: [],
 };
 
 vi.mock('@memberjunction/server', () => ({
   get configInfo() {
-    return { magicLink: { enabled: mockState.magicLinkEnabled } };
+    return {
+      magicLink: {
+        enabled: mockState.magicLinkEnabled,
+        contextUserForProvisioning: mockState.contextUserForProvisioning,
+      },
+      userHandling: { contextUserForNewUserCreation: mockState.contextUserForNewUserCreation },
+    };
   },
 }));
+
+/**
+ * `UserCache` shaped the way MJ core's own `MagicLinkService.resolveProvisioningContextUser`
+ * reaches it — `Instance.UserByName` for the configured name, the static `Users` for the Owner
+ * fallback. Both spellings are core's, and the minter follows core deliberately, so the fake
+ * offers both rather than the one that happens to be convenient here.
+ */
+vi.mock('@memberjunction/generic-database-provider', () => {
+  const byName = (name: string) =>
+    mockState.cachedUsers.find((u) => (u.Name ?? '').trim().toLowerCase() === name.trim().toLowerCase());
+  return {
+    UserCache: {
+      get Instance() {
+        return { UserByName: byName, Users: mockState.cachedUsers };
+      },
+      get Users() {
+        return mockState.cachedUsers;
+      },
+    },
+  };
+});
 
 vi.mock('@memberjunction/core', async () => {
   const actual = await vi.importActual<typeof import('@memberjunction/core')>('@memberjunction/core');
@@ -76,7 +118,8 @@ vi.mock('@memberjunction/core', async () => {
     EntityByName(name: string) {
       return mockState.entityByName[name] ?? null;
     }
-    async GetEntityObject() {
+    async GetEntityObject(_entityName: string, user?: UserInfo) {
+      mockState.entityUsers.push(user);
       const values: Record<string, unknown> = {};
       return new Proxy(
         {
@@ -112,7 +155,8 @@ vi.mock('@memberjunction/core', async () => {
     }
   }
   class FakeRunView {
-    async RunView(params: { EntityName: string }) {
+    async RunView(params: { EntityName: string }, user?: UserInfo) {
+      mockState.readUsers.push(user);
       // Two different reads share this fake: the resource-type lookup on the mint path,
       // and the "does this invite row still exist?" probe behind a failed Load.
       if (params.EntityName === 'MJ: Magic Link Invites') {
@@ -139,6 +183,19 @@ function params() {
     expiresAt: null,
   };
 }
+
+/**
+ * The provisioning-principal state, reset for EVERY test in this file rather than in each of the
+ * four `describe` blocks' own hooks. Which user writes the invite row is a property of all three
+ * operations, so a per-block copy would be four chances for one to drift out of step.
+ */
+beforeEach(() => {
+  mockState.contextUserForProvisioning = undefined;
+  mockState.contextUserForNewUserCreation = undefined;
+  mockState.cachedUsers = [];
+  mockState.entityUsers = [];
+  mockState.readUsers = [];
+});
 
 describe('MagicLinkInviteMinter', () => {
   beforeEach(() => {
@@ -492,5 +549,127 @@ describe('MagicLinkInviteMinter — the credential must belong to the link actin
     mockState.loadedResourceID = 'someone-elses-distribution';
     const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result).toMatchObject({ success: false, changed: false });
+  });
+});
+
+/**
+ * WHOSE rights the invite row is written with — bizapps-forms#114.
+ *
+ * `MJ: Magic Link Invites` is a CORE entity, and no Forms seed touches its permissions: on a stock
+ * database only Developer and Integration hold Create/Read/Update on it. Every write here is
+ * driven by an ordinary save of a Form Distribution, so until this existed they ran as whoever
+ * saved it — a form author, whose role the HOST chooses and Forms cannot see. On the ordinary
+ * least-privilege shape (full rights on the links they own, nothing on core's magic-link table)
+ * `BaseEntity.Load` threw on Read before a revoke was even attempted; provisioning is fail-soft by
+ * design, so the pause returned green and the token went on redeeming. Reproduced end to end in
+ * `apps/MJAPI/least-privilege-credential-smoke.mjs`.
+ *
+ * The fix is not a wider grant. The invite is the APPLICATION's row: not one field on it comes
+ * from the caller, and the caller's authority was already spent — and checked by MJ — proving they
+ * may write the distribution. Requiring a second permission on an unrelated core entity is an
+ * implementation detail leaking into the operator's access model, where it corresponds to no
+ * decision they actually make. So the row is written under the same provisioning identity MJ
+ * core's own `MagicLinkService` uses for the same table, resolved the same way and in the same
+ * order.
+ */
+describe('MagicLinkInviteMinter — which principal writes core’s invite rows', () => {
+  /** The form author: they may write the distribution, and nothing on the invite entity. */
+  const author = { ID: 'staff-1', Name: 'Staff' } as unknown as UserInfo;
+  /** The host's configured provisioning identity. */
+  const provisioner = { ID: 'prov-1', Name: 'forms.provisioner@example.com', Type: 'User' } as unknown as UserInfo;
+  /** Core's last resort, and the one this database actually has. */
+  const owner = { ID: 'owner-1', Name: 'System', Type: 'Owner' } as unknown as UserInfo;
+
+  beforeEach(() => {
+    mockState.magicLinkEnabled = true;
+    mockState.saveSucceeds = true;
+    mockState.lastSavedInvite = undefined;
+    mockState.loadSucceeds = true;
+    mockState.loadedStatus = 'Active';
+    mockState.loadedExpiresAt = new Date('9999-12-31T00:00:00.000Z');
+    mockState.loadedCreatedAt = new Date('2026-01-01T00:00:00.000Z');
+    mockState.loadedResourceID = RESOURCE;
+    mockState.loadedIds = [];
+    mockState.existenceProbe = { Success: true, TotalRowCount: 0 };
+    mockState.cachedUsers = [provisioner, owner];
+    mockState.contextUserForProvisioning = provisioner.Name;
+  });
+
+  it('mints as the configured provisioning user, never as the author', async () => {
+    const result = await new MagicLinkInviteMinter().MintAnonymousInvite(params(), author);
+    expect(result.success).toBe(true);
+    expect(mockState.entityUsers).toEqual([provisioner]);
+  });
+
+  it('reads on the mint path as the provisioning user too', async () => {
+    // The resource-type lookup needs Read on `MJ: Resource Types`, which a least-privilege author
+    // also lacks. Elevating the write and leaving the read behind fixes half a code path.
+    mockState.entityByName['MJ_BizApps_Forms: Form Distributions'] = { ID: 'entity-dist' };
+    await new MagicLinkInviteMinter().MintAnonymousInvite(params(), author);
+    expect(mockState.readUsers).toEqual([provisioner]);
+  });
+
+  it('records the AUTHOR on the row, not the principal that wrote it', async () => {
+    // `CreatedByUserID` is not an authorization field, and two things depend on it staying the
+    // person: it is the audit trail for who published the link, and core's redeem path fails
+    // CLOSED on it — `isInviterActive` refuses every outstanding invite of a deactivated inviter.
+    // Stamping the provisioning identity there would quietly retire that protection.
+    await new MagicLinkInviteMinter().MintAnonymousInvite(params(), author);
+    expect(mockState.lastSavedInvite!.CreatedByUserID).toBe('staff-1');
+  });
+
+  it('revokes as the provisioning user', async () => {
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, author);
+    expect(result).toMatchObject({ success: true, changed: true });
+    expect(mockState.entityUsers).toEqual([provisioner]);
+  });
+
+  it('re-bounds an expiry as the provisioning user', async () => {
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: new Date('2026-10-01T00:00:00.000Z'), maxLifetimeHours: undefined },
+      author,
+    );
+    expect(result).toMatchObject({ success: true, changed: true });
+    expect(mockState.entityUsers).toEqual([provisioner]);
+  });
+
+  it('probes a row it could not load as the provisioning user', async () => {
+    // The probe decides "gone" versus "unreadable", and the whole point of that distinction is to
+    // avoid unlinking a live credential. Run as an author with no Read, it can only ever answer
+    // "unreadable" — which is the safe direction, but it is safe by accident and never succeeds.
+    mockState.loadSucceeds = false;
+    await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, author);
+    expect(mockState.readUsers).toEqual([provisioner]);
+  });
+
+  it("falls back to core's new-user-creation context user when magicLink names none", async () => {
+    mockState.contextUserForProvisioning = undefined;
+    mockState.contextUserForNewUserCreation = provisioner.Name;
+    await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, author);
+    expect(mockState.entityUsers).toEqual([provisioner]);
+  });
+
+  it('falls back to an Owner when the configured name does not resolve', async () => {
+    // Core logs and continues here rather than failing, because a typo in one config key must not
+    // take magic links out of service. Same choice, same order — the alternative is Forms and core
+    // disagreeing about who owns the table they share.
+    mockState.contextUserForProvisioning = 'nobody@example.invalid';
+    await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, author);
+    expect(mockState.entityUsers).toEqual([owner]);
+  });
+
+  it('falls back to the CALLER when no provisioning identity resolves at all', async () => {
+    // The fail-safe direction is toward LESS privilege, so the last resort is the caller's own
+    // rights: on a host whose authors are Developers that is exactly today's behaviour, and on a
+    // least-privilege host it fails softly as it did before. Never worse than not having this.
+    //
+    // Deliberately the opposite conclusion from `automation/service-principal.ts`, which refuses
+    // to fall back at all — and for the same reason. There the fallback would be the SYSTEM user,
+    // so falling back widens; here it is the caller, so falling back narrows.
+    mockState.cachedUsers = [];
+    mockState.contextUserForProvisioning = 'nobody@example.invalid';
+    await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, author);
+    expect(mockState.entityUsers).toEqual([author]);
   });
 });

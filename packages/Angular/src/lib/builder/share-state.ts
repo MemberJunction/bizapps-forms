@@ -209,8 +209,14 @@ export function credentialMayStillRedeem(
  * The static `paused` copy asserts the credential was withdrawn. That is the usual case and
  * it is not a safe thing to assert, because the withdrawal is FAIL-SOFT on the server:
  * `FormDistributionEntityServer.Save()` logs a revoke that failed and still returns true, so
- * a green save and a still-redeemable token are the same outcome from the client's side. On a
- * host that does not grant Update on `MJ: Magic Link Invites`, it is the only outcome.
+ * a green save and a still-redeemable token are the same outcome from the client's side.
+ *
+ * That used to be the GUARANTEED outcome for a whole class of deployment: the write ran as
+ * whoever saved the distribution, and a host whose form authors are not Developers grants them
+ * nothing on `MJ: Magic Link Invites` (bizapps-forms#114). It no longer does — the credential is
+ * written under the host's provisioning identity — so what remains here is an ordinary failure: a
+ * database error, an invite repointed at another link, a host with no provisioning identity at
+ * all. Rarer, still real, and still indistinguishable from success at this end.
  *
  * The record carries as much of the answer as it can, and carries it because the server wants it
  * to: a failed revoke leaves the credential LINKED so the next save retries, and the pair is

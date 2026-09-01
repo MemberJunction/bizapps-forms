@@ -159,6 +159,13 @@ that FIRST and use the list below only for what a browser adds (the badge, the s
 The rows here exist because the server assertions used to have no home at all: every unit suite
 mocks the minter, so nothing checked that a revoked token actually stops redeeming.
 
+Run `pnpm run smoke:credentials:least-privilege` too. Every assertion in the suite above runs as the
+system user, which holds Developer — so it proves revocation works WHEN PERMITTED and nothing about
+which principals permit it. That gap was a live defect (#114): the credential write lands on a core
+entity no Forms seed grants, so on a host whose authors are not Developers, pausing a link returned
+green and left the token redeeming. The second suite seeds exactly that author and repeats the
+operations as them, with a System control beside each one.
+
 - [ ] Turn *Open to responses* OFF → the row's `MagicLinkInviteID` and `PublicLinkToken` are both
       NULL, and the invite is `Revoked`
 - [ ] `POST /magic-link/redeem` with the OLD raw token → refused, `errorCode: "revoked"`
