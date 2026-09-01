@@ -50,6 +50,9 @@ import { buildPublishedDefinition } from './snapshot-builder';
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { allQuestions, endScreensOf, welcomeScreenOf } from './builder-models';
 import { defaultEndingId } from './default-ending';
+import { resolveInlineEdit } from './inline-edit';
+import { QuestionTypePickerComponent } from './question-type-picker.component';
+import type { FormSection } from './section-groups';
 import {
   QUESTION_PALETTE_GROUPS,
   questionTypeMeta,
@@ -165,6 +168,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     ResponsesTabComponent,
     SaveAsTemplateDialogComponent,
     RuleBadgeComponent,
+    QuestionTypePickerComponent,
   ],
   providers: [
     BuilderStateService,
@@ -534,6 +538,103 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.cdr.markForCheck();
   }
 
+  // -- inserting between two questions (the gutter +) -----------------------
+
+  /**
+   * The seam whose popover is open — a page and the index the new question would take — or null.
+   *
+   * An INDEX and not a neighbouring question id, because the seam at the end of a section has no
+   * question below it and every scheme that keyed on a neighbour needed a special case for it.
+   * The window between opening the popover and picking a type is a single click with nothing
+   * else clickable in it, so the index cannot go stale underneath itself.
+   */
+  protected pickerSeam: { pageId: string; index: number } | null = null;
+
+  protected isPickerOpen(page: PageNode, index: number): boolean {
+    return this.pickerSeam?.pageId === page.entity.ID && this.pickerSeam.index === index;
+  }
+
+  protected openTypePicker(page: PageNode, index: number): void {
+    this.pickerSeam = { pageId: page.entity.ID, index };
+    this.cdr.markForCheck();
+  }
+
+  protected closeTypePicker(): void {
+    this.pickerSeam = null;
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Put a new question at the seam the author clicked.
+   *
+   * REUSES BOTH EXISTING WRITE PATHS rather than adding a third: `state.addQuestion` creates it
+   * (appending, which is all it knows how to do), the array splice puts it where the author
+   * asked, and `state.persistQuestionOrder` — the same call the drag path makes — renumbers the
+   * page. Nothing here writes `DisplayOrder` itself.
+   *
+   * WHY THE DAMAGE DIFF IS HERE. `reorderQuestion` says it is the only path that can invert a
+   * pair of surviving questions, and that if insert-at-index ever shipped "that proof lapses and
+   * the diff has to wrap the new write too". The proof does not actually lapse — an insert
+   * preserves every existing pair's relative order, and the new question is born with no rule and
+   * referenced by none — but the same file also learned that reasoning about rule damage in prose
+   * is how two surfaces come to disagree about one rule. So the insert runs the diff, and
+   * `insert-question.spec.ts` asserts it comes back empty. If some future change makes it
+   * non-empty, the author is told in the same band a costly drag uses, rather than not at all.
+   */
+  protected async insertQuestionAt(type: FormQuestionType): Promise<void> {
+    const seam = this.pickerSeam;
+    const page = seam ? this.pages.find((p) => p.entity.ID === seam.pageId) : undefined;
+    this.closeTypePicker();
+    if (!this.tree || !page || !seam || this.busy) {
+      return;
+    }
+
+    this.busy = true;
+    try {
+      const before = this.ruleEntries;
+      const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type));
+      if (!node) {
+        return;
+      }
+      // Clamped, not trusted: the seam index was read when the popover opened.
+      page.questions.splice(Math.min(seam.index, page.questions.length), 0, node);
+      if (!(await this.state.persistQuestionOrder(page))) {
+        LogError(
+          `Insert of a ${type} question on page ${page.entity.ID} was not fully persisted; ` +
+            'DisplayOrder may not match the order on screen.',
+        );
+      }
+      this.noteAnyDamage(before, node.entity.ID, node.entity.Prompt, page);
+      this.selection = questionSelection(node.entity.ID);
+      this.markDirty();
+    } finally {
+      this.busy = false;
+      this.cdr.markForCheck();
+    }
+  }
+
+  /**
+   * Raise the same band a costly drag raises, if this write cost anything.
+   *
+   * `wasBefore` is null because an insert's Undo is a delete, not a move, and offering "Undo" on
+   * a band that would delete a question the author just created is a worse affordance than the
+   * trash button already on the card.
+   */
+  private noteAnyDamage(before: readonly RuleEntry[], id: string, label: string, page: PageNode): void {
+    const broken = newlyBrokenRules(before, this.ruleEntries);
+    if (broken.length === 0) {
+      return;
+    }
+    const labels = this.itemLabels;
+    this.reorderNotice = {
+      text: reorderNoticeText({ id, label }, broken, (other) => labels.get(other) ?? 'another question'),
+      pageId: page.entity.ID,
+      questionId: id,
+      wasBefore: null,
+      damage: damageKeys(broken),
+    };
+  }
+
   /** Add to the page holding the selected question, else the last page. */
   private targetPageForNewQuestion(): PageNode | undefined {
     if (!this.tree || this.tree.pages.length === 0) {
@@ -703,6 +804,30 @@ export class FormBuilderComponent extends BaseFormComponent {
    */
   private sourcesUpTo(horizon: number): ConditionalSourceQuestion[] {
     return conditionSourcesOf(this.questionsInFlowOrder.slice(0, horizon + 1));
+  }
+
+  /**
+   * The form's sections, as the rule pickers need them: what to call each one, and what it owns.
+   *
+   * Derived HERE and handed down, because the builder is the only thing that has the form. Each
+   * editor deriving its own would be three chances to disagree about a section's name or its
+   * contents, and the pickers are read side by side.
+   *
+   * The label falls back the same way the canvas does, so a section with no title is called the
+   * same thing in the menu as it is on screen.
+   *
+   * NOT named `sections`: `BaseFormComponent` already declares a property by that name, and an
+   * accessor may not override a property (TS2611). Only the Angular compile catches that.
+   */
+  protected get formSections(): FormSection[] {
+    if (!this.tree) {
+      return [];
+    }
+    return this.tree.pages.map((page, index) => ({
+      id: page.entity.ID,
+      label: page.entity.Title || `Page ${index + 1}`,
+      questionIds: page.questions.map((q) => q.entity.ID),
+    }));
   }
 
   /** Every question on the form, in page-then-display order — what both source lists read. */
@@ -1412,8 +1537,30 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.markDirty();
   }
 
-  protected async setName(name: string): Promise<void> {
-    this.record.Name = name;
+  /** Escape abandons the edit: the box goes back to the saved name and gives up focus. */
+  protected cancelNameEdit(input: HTMLInputElement): void {
+    input.value = this.record.Name;
+    input.blur();
+  }
+
+  /**
+   * Commit — or refuse — one edit of the form's name.
+   *
+   * The decision is `resolveInlineEdit`, and it is the ONLY guard: a second emptiness check here
+   * would be free to disagree with it, and then Escape and blur would mean different things.
+   *
+   * The box is assigned unconditionally because `[value]="record.Name"` only rewrites the DOM
+   * when the bound expression CHANGES. A refused edit leaves `record.Name` exactly as it was, so
+   * Angular writes nothing, and without this line an emptied box would sit there empty over a
+   * form that still has a name — which is how the original defect looked from the author's side.
+   */
+  protected async setName(input: HTMLInputElement, typed: string): Promise<void> {
+    const outcome = resolveInlineEdit(typed, this.record.Name);
+    input.value = outcome.value;
+    if (outcome.kind !== 'commit') {
+      return;
+    }
+    this.record.Name = outcome.value;
     await this.state.save(this.record);
     this.markDirty();
   }

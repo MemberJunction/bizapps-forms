@@ -32,6 +32,7 @@ import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
 import { parseConditionalRule, serializeConditionalRule } from './json-fields';
+import type { FormSection } from './section-groups';
 
 const SCREEN_EDITOR_CSS = /* css */ `
 :host { display: block; }
@@ -220,6 +221,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
 
           <div class="se-section">
             <mjf-rules-panel
+              [sections]="sections"
               [subjectId]="s.ID"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
@@ -235,6 +237,13 @@ const SCREEN_EDITOR_CSS = /* css */ `
   `,
 })
 export class ScreenEditorComponent {
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
   @Input()
   public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
     if (value?.ID !== this.current?.ID) {

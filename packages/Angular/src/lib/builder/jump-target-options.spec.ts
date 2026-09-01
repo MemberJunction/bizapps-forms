@@ -66,7 +66,11 @@ describe('jumpTargetOptions', () => {
 
   describe('edge', () => {
     it('groups for rendering and skips empty groups', () => {
-      expect(groupedJumpTargets(jumpTargetOptions([], [], ENDINGS)).map((g) => g.group)).toEqual([
+      // Grouping now takes the form's sections, so it can nest each section's questions under it
+      // rather than listing every question flat — see `section-groups.spec.ts` for that. The
+      // assertion here is unchanged and still the one worth making: a group nothing landed in is
+      // not rendered, so an empty `Endings` optgroup never appears above `Finish`.
+      expect(groupedJumpTargets(jumpTargetOptions([], [], ENDINGS), []).map((g) => g.group)).toEqual([
         'Endings',
         'Finish',
       ]);

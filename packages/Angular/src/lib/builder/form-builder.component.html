@@ -1,11 +1,22 @@
 <div class="fb">
   <!-- Topbar -->
   <header class="fb-top">
+    <!-- Edited in place, so every way OUT of the box has to mean something. Selecting the whole
+         value on focus is the cue that this is ONE value being replaced rather than a text field
+         to put a caret in — the same thing MJ's whiteboard rename, the theme-studio rename and
+         `OnFKFocus` in base-forms all do.
+
+         Escape restores the saved name and blurs; blur fires `change`; so the abandon path and
+         the commit path meet in `setName` and cannot form two opinions about an empty box. See
+         `inline-edit.ts` for what that one opinion is. -->
     <input
       #nameInput
       class="fb-name"
       [value]="record.Name"
-      (change)="setName(nameInput.value)"
+      (focus)="nameInput.select()"
+      (keydown.escape)="cancelNameEdit(nameInput)"
+      (keydown.enter)="nameInput.blur()"
+      (change)="setName(nameInput, nameInput.value)"
       aria-label="Form name"
     />
 
@@ -301,7 +312,14 @@
 
           <!-- Screens bracket the questions on the canvas exactly as they bracket the intake at
                runtime, so the author reads the whole flow top to bottom. They are styled as a
-               distinct card, not as question rows, because they are not questions. -->
+               distinct card, not as question rows, because they are not questions.
+
+               THE ZONE, not the card, carries the rule below it — the twin of the one above the
+               endings, and the pair is what makes those three zones legible as three. It wraps
+               both arms deliberately: the boundary is the FORM's, so a form with no welcome
+               screen still starts somewhere, and the frame must not blink out the moment an
+               author deletes the screen. -->
+          <div class="fb-opening">
           @if (welcomeScreen; as ws) {
             <article
               class="fb-screen"
@@ -330,6 +348,7 @@
               Add a welcome screen
             </button>
           }
+          </div>
 
           <!-- Read once, indexed per item. A getter called per question would walk every rule
                on the form once per question, and the form long enough to need this is the one
@@ -430,6 +449,9 @@
                   <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
                   <span class="fb-q-label">{{ node.entity.Prompt }}</span>
                 </div>
+                <!-- The card is now a COLUMN: its row, and an add-content footer that appears once
+                     the question is selected. -->
+                <div class="fb-q-row">
                 <button
                   type="button"
                   class="fb-q-handle"
@@ -486,6 +508,38 @@
                     aria-label="Delete question"
                   ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
                 </div>
+                </div>
+
+                <!-- ADD CONTENT, attached under the question it acts on and offered only while
+                     that question is selected.
+
+                     Selection rather than hover is what makes this work on a touch screen: you
+                     already tap a question to edit it, and a hover-revealed control simply does
+                     not exist on a tablet. The gutter + this replaced needed a media query to
+                     force itself visible below a breakpoint; that special case is gone rather
+                     than relocated.
+
+                     $index + 1 because a bar UNDER a card can only mean "after this one". -->
+                @if (node.entity.ID === selectedQuestionId) {
+                  <div class="fb-q-add">
+                    <button
+                      type="button"
+                      class="fb-screen-add fb-q-add-btn"
+                      [disabled]="busy"
+                      [attr.aria-label]="'Add content after ' + node.entity.Prompt"
+                      [attr.aria-expanded]="isPickerOpen(page, $index + 1)"
+                      (click)="$event.stopPropagation(); openTypePicker(page, $index + 1)"
+                    >
+                      <i class="fa-solid fa-plus" aria-hidden="true"></i> Add content
+                    </button>
+                  </div>
+                }
+                @if (isPickerOpen(page, $index + 1)) {
+                  <mjf-question-type-picker
+                    (Picked)="insertQuestionAt($event)"
+                    (Dismissed)="closeTypePicker()"
+                  />
+                }
               </article>
             }
             </div>
@@ -571,6 +625,7 @@
       <aside class="fb-pane fb-pane--right" aria-label="Properties">
         @if (selectedScreen; as screen) {
           <mjf-screen-editor
+            [sections]="formSections"
             [screen]="screen"
             [conditionalSources]="endingConditionalSources"
             [formSources]="formSources"
@@ -579,6 +634,7 @@
           />
         } @else if (selectedPage; as page) {
           <mjf-page-editor
+            [sections]="formSections"
             [page]="page"
             [pageNumber]="selectedPageIndex + 1"
             [conditionalSources]="pageConditionalSources"
@@ -592,6 +648,7 @@
           />
         } @else {
           <mjf-question-editor
+            [sections]="formSections"
             [node]="selectedNode"
             [selectedId]="selectedNode?.entity?.ID ?? ''"
             [formId]="record.ID"
