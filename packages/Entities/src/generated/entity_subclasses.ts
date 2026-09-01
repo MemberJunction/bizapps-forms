@@ -380,7 +380,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Field Name: CaptchaRequired
         * * Display Name: Captcha Required
         * * SQL Data Type: bit
-        * * Default Value: 1
+        * * Default Value: 0
         * * Description: Whether a CAPTCHA (Cloudflare Turnstile) challenge is required for submissions via this distribution`),
     IsActive: z.boolean().describe(`
         * * Field Name: IsActive
@@ -2344,7 +2344,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
     * * Field Name: CaptchaRequired
     * * Display Name: Captcha Required
     * * SQL Data Type: bit
-    * * Default Value: 1
+    * * Default Value: 0
     * * Description: Whether a CAPTCHA (Cloudflare Turnstile) challenge is required for submissions via this distribution
     */
     get CaptchaRequired(): boolean {
