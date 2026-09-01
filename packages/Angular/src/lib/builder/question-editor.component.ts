@@ -39,6 +39,7 @@ import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
 import { optionLetter } from '../shared/option-letter';
+import type { FormSection } from './section-groups';
 import {
   parseConditionalRule,
   parseQuestionSettings,
@@ -163,6 +164,13 @@ const QUESTION_EDITOR_CSS = /* css */ `
   styles: [FORMS_UI_CSS, FORMS_VIZ_CSS, QUESTION_EDITOR_CSS],
 })
 export class QuestionEditorComponent {
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
   @Input() node: QuestionNode | null = null;
   /**
    * The form being edited. A question only knows its page, not its form, so the id is threaded

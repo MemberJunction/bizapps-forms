@@ -31,6 +31,7 @@ import {
 import type { JumpTargetOption } from './jump-target-options';
 import { describeCondition } from './rules-panel-model';
 import { storedTargetLabel } from './jump-target-options';
+import type { FormSection } from './section-groups';
 
 const RULES_PANEL_CSS = /* css */ `
 .rp { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); }
@@ -105,6 +106,13 @@ const RULES_PANEL_CSS = /* css */ `
 })
 export class RulesPanelComponent {
   /** Identifies the item being edited; a change closes any open dialog. */
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
   @Input()
   set subjectId(value: string | null) {
     if (value !== this._subjectId) {

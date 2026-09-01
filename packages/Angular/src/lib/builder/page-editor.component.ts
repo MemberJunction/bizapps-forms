@@ -7,6 +7,7 @@ import type { JumpTargetOption } from './jump-target-options';
 import type { ConditionalSourceQuestion } from './condition-sources';
 import { parseConditionalRule, serializeConditionalRule } from './json-fields';
 import type { PageNode } from './builder-models';
+import type { FormSection } from './section-groups';
 
 const PAGE_EDITOR_CSS = /* css */ `
 :host { display: block; }
@@ -41,6 +42,7 @@ const PAGE_EDITOR_CSS = /* css */ `
         <div>
           @if (conditionalSources.length > 0 || jumpConditionSources.length > 0) {
             <mjf-rules-panel
+              [sections]="sections"
               [subjectId]="p.entity.ID"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
@@ -65,6 +67,13 @@ const PAGE_EDITOR_CSS = /* css */ `
   `,
 })
 export class PageEditorComponent {
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
   @Input() page: PageNode | null = null;
   /** 1-based position of the page, for the "Page N" fallback name. */
   @Input() pageNumber = 1;

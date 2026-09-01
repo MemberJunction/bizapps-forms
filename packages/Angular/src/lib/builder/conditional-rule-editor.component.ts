@@ -7,6 +7,7 @@ import type {
   ConditionalOperator,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
+import { groupedConditionSources, type FormSection, type SectionGroup } from './section-groups';
 import {
   OPERATOR_CHOICES,
   canAddCondition as groupHasRoom,
@@ -158,6 +159,26 @@ const CONDITIONAL_EDITOR_CSS = /* css */ `
 })
 export class ConditionalRuleEditorComponent {
   /** Questions that may be referenced (typically those preceding the current one). */
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
+
+  /**
+   * The questions this rule may read, under the section that owns each one.
+   *
+   * The picker used to be a flat list of every readable question on the form, headings and all
+   * absent — so on a form with more than one section the names were the only thing left to tell
+   * them apart. Grouping is presentation only: these are the same source objects, and the
+   * `<option>` values a stored rule matches on are untouched. See `section-groups.ts`.
+   */
+  protected get groupedSources(): SectionGroup<ConditionalSourceQuestion>[] {
+    return groupedConditionSources(this.sources, this.sections);
+  }
+
   @Input() sources: ConditionalSourceQuestion[] = [];
 
   /**

@@ -10,6 +10,7 @@
  * rule that silently never fires.
  */
 import type { JumpTarget } from '@mj-biz-apps/forms-entities';
+import { sectionHeading, type FormSection } from './section-groups';
 
 /** The heading a target sits under in the picker. */
 export type JumpTargetGroup = 'Questions' | 'Sections' | 'Endings' | 'Finish';
@@ -99,14 +100,67 @@ export function jumpTargetOptions(
   return options;
 }
 
-/** The options grouped for rendering, skipping any group the caller supplied nothing for. */
+/**
+ * The options grouped for rendering: one group per section, then Endings, then Finish.
+ *
+ * WHAT THIS REPLACED, and why. The groups used to be the four fixed ones `jumpTargetOptions`
+ * tags its output with — every question on the form in one flat `Questions` list, and then
+ * `Sections` beside it. On a form with more than one section that list is unreadable: the names
+ * are all that is left, and nothing says which question sits where. Worse, putting the two lists
+ * side by side asserts that questions and sections are peers, when a section contains questions.
+ *
+ * A SECTION'S OWN TARGET LEADS ITS GROUP, relabelled "Start of <section>". Jumping to a section
+ * IS arriving at the top of the questions listed under it, and letting position say so is what
+ * removes the separate list. The row is renamed only for DISPLAY — a copy, carrying the same
+ * `value` and the same `target`, because that value is what a stored rule matches on. The bare
+ * section name would otherwise repeat the heading directly above it.
+ *
+ * PRESENTATION ONLY. `jumpTargetOptions` above is untouched, and so is every option's `value`
+ * and `target`; this only decides what headings they appear under. The forward-only filtering
+ * that decides which options exist happened before this was called.
+ *
+ * NOTHING IS EVER DROPPED. An option the sections cannot place still gets a group, because a
+ * picker that silently loses a destination leaves an author unable to write a rule the engine
+ * would run — the failure would look like the target "not existing", which it does.
+ */
 export function groupedJumpTargets(
   options: ReadonlyArray<JumpTargetOption>,
-): Array<{ group: JumpTargetGroup; options: JumpTargetOption[] }> {
-  const order: JumpTargetGroup[] = ['Questions', 'Sections', 'Endings', 'Finish'];
-  return order
-    .map((group) => ({ group, options: options.filter((o) => o.group === group) }))
-    .filter((g) => g.options.length > 0);
+  sections: ReadonlyArray<FormSection>,
+): Array<{ group: string; options: JumpTargetOption[] }> {
+  const groups: Array<{ group: string; options: JumpTargetOption[] }> = [];
+  const placed = new Set<JumpTargetOption>();
+
+  for (const section of sections) {
+    const lead = options
+      .filter((o) => o.target.kind === 'page' && o.target.id === section.id)
+      .map((o) => ({ ...o, label: `Start of ${section.label}` }));
+    const owned = options.filter(
+      (o) => o.target.kind === 'question' && section.questionIds.includes(o.target.id),
+    );
+    if (lead.length === 0 && owned.length === 0) {
+      continue;
+    }
+    // The lead is a COPY, so mark the original placed by matching value rather than identity.
+    options
+      .filter((o) => lead.some((l) => l.value === o.value) || owned.includes(o))
+      .forEach((o) => placed.add(o));
+    groups.push({ group: sectionHeading(section.label, owned.length), options: [...lead, ...owned] });
+  }
+
+  const strays = options.filter(
+    (o) => !placed.has(o) && o.group !== 'Endings' && o.group !== 'Finish',
+  );
+  if (strays.length > 0) {
+    groups.push({ group: 'Questions', options: [...strays] });
+  }
+
+  for (const trailing of ['Endings', 'Finish'] satisfies JumpTargetGroup[]) {
+    const inGroup = options.filter((o) => o.group === trailing);
+    if (inGroup.length > 0) {
+      groups.push({ group: trailing, options: inGroup });
+    }
+  }
+  return groups;
 }
 
 /**

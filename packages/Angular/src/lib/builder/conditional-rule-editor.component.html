@@ -37,12 +37,23 @@
             (change)="setQuestion($index, questionSelect.value)"
             aria-label="Question"
           >
+            <!-- GROUPED BY SECTION, because a section contains its questions and a flat list of
+                 every readable question on the form says otherwise — leaving the names as the
+                 only clue to where each one lives. The heading counts what this group actually
+                 offers, not the section's size: the list is filtered to questions before this
+                 one, so the section's own total would be a number the list contradicts. -->
             <!-- [selected] as well as the select's [value]: Angular writes that value BEFORE
                  these options exist, so it does not stick, and the browser then selects the
                  first option on its own. Without this a rule reading question 7 rendered as
-                 question 1. The [value] above stays as the intent; this is what makes it true. -->
-            @for (src of sources; track src.id) {
-              <option [value]="src.id" [selected]="src.id === questionSelectValue(cond)">{{ src.prompt }}</option>
+                 question 1. The [value] above stays as the intent; this is what makes it true.
+                 Moving the options into optgroups does not change that — it is the OPTIONS
+                 arriving late that breaks the binding, wherever they sit. -->
+            @for (group of groupedSources; track group.group) {
+              <optgroup [label]="group.group">
+                @for (src of group.options; track src.id) {
+                  <option [value]="src.id" [selected]="src.id === questionSelectValue(cond)">{{ src.prompt }}</option>
+                }
+              </optgroup>
             }
             @if (staleQuestion(cond); as gone) {
               <!-- Reached only when the stored id matches no source, so it IS the selection.

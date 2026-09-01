@@ -434,7 +434,30 @@ const LAYOUT_CSS = /* css */ `
 .fb-page-desc:focus { outline: none; border-color: var(--mj-brand-primary); background: var(--mj-bg-surface); }
 .fb-page-desc::placeholder { color: var(--mj-text-muted); }
 
-.fb-endings { margin-top: var(--mjf-stack); padding-top: var(--mjf-stack); border-top: 1px solid var(--mjf-rule); }
+/* THE MATCHED PAIR OF RULES THAT BRACKET THE QUESTION REGION.
+   The screens sit OUTSIDE the frame and the questions inside it, which is what makes the canvas
+   read as three zones rather than as one long list with a stray line near the bottom. The rule
+   above the endings has always been here; its twin below the opening had not, so the canvas
+   said where the questions stopped and never where they started.
+
+   Declared together because two rules only read as a pair while they are IDENTICAL — a heavier
+   weight or a different token on one turns the frame back into a stray line unless the other
+   follows, and nothing about a border declaration three hundred lines from its twin makes that
+   obvious to whoever changes it. The common half is therefore stated once, and
+   canvas-zones.wiring.spec.ts compares the two against each other rather than against
+   literals, so a deliberate change to both keeps passing and a change to one does not. */
+.fb-opening,
+.fb-endings { border: 0 solid var(--mjf-rule); }
+.fb-opening { margin-bottom: var(--mjf-stack); padding-bottom: var(--mjf-stack); border-bottom-width: 1px; }
+.fb-endings { margin-top: var(--mjf-stack); padding-top: var(--mjf-stack); border-top-width: 1px; }
+
+/* The add-button carries a bottom margin from before the canvas had a gap. Inside the opening
+   it would push the rule down in the no-welcome-screen state only, putting the boundary 8px
+   lower on a form with no welcome screen than on one with — which contradicts the claim the pair
+   is making, that the boundary belongs to the form rather than to the card. Scoped rather than
+   removed outright: the same button is the "Add a section" and "Add a conditional ending"
+   affordance, and their spacing is not this change's business. */
+.fb-opening .fb-screen-add { margin-bottom: 0; }
 
 /* An ending no respondent can reach is an authoring mistake, not a variant, so it is marked
    rather than merely labelled. */
@@ -506,8 +529,23 @@ const LAYOUT_CSS = /* css */ `
 /* One question. Previously this was ~120px tall for a one-line question, because the
    three actions were stacked in a fixed column down the right edge. They are a row
    now, revealed on hover, so the card is as tall as its content. */
+/* THE ARTICLE IS A SLOT, not the card. It holds the question and, once selected, the control
+   for adding after it — with air between them, because a bar sharing the question's bordered
+   box reads as part of the question rather than as something that follows it.
+
+   The visible card is .fb-q-row. The article keeps the class hooks (.is-selected, :hover,
+   cdkDrag) so the drop list still has exactly one child per question and every existing
+   selector keeps its meaning; it just paints nothing itself. */
 .fb-q {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+.fb-q-row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -515,12 +553,21 @@ const LAYOUT_CSS = /* css */ `
   border-radius: var(--mjf-radius);
   border: 1px solid var(--mj-border-subtle);
   background: var(--mj-bg-surface);
-  cursor: pointer;
   transition: border-color var(--mjf-ease), box-shadow var(--mjf-ease);
 }
-.fb-q:hover { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
-.fb-q:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
-.fb-q.is-selected { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
+/* ADD CONTENT — its own control below the question, not a row inside it. It wears the same
+   dashed treatment as "Add a section" and "Add a welcome screen" (.fb-screen-add), so it reads
+   as the same KIND of thing those are: an offer to add something here, rather than one more of
+   the question's settings. Centred, because it spans the card rather than starting a list. */
+.fb-q-add-btn { justify-content: center; margin-bottom: 0; }
+
+/* Hidden mid-drag. The placeholder and the preview are clones of the article, so a visible bar
+   would be towed around with the card and the gap it leaves behind would be reserved for one. */
+.fb-q-list.cdk-drop-list-dragging .fb-q-add { display: none; }
+
+.fb-q:hover .fb-q-row { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
+.fb-q:focus-visible .fb-q-row { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+.fb-q.is-selected .fb-q-row { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
 
 /* Drag handle — pointer/touch reorder (arrows remain the keyboard fallback). */
 .fb-q-handle {
@@ -546,7 +593,7 @@ const LAYOUT_CSS = /* css */ `
 
 /* CDK drag-drop visual states — token-only so dark mode stays intact. */
 .fb-q-list.cdk-drop-list-dragging .fb-q:not(.cdk-drag-placeholder) { transition: transform var(--mjf-ease); }
-.cdk-drag-preview.fb-q { box-shadow: var(--mj-shadow-lg); border-color: var(--mj-brand-primary); }
+.cdk-drag-preview.fb-q .fb-q-row { box-shadow: var(--mj-shadow-lg); border-color: var(--mj-brand-primary); }
 .fb-q-drag-preview {
   display: flex;
   align-items: center;
@@ -559,6 +606,10 @@ const LAYOUT_CSS = /* css */ `
   box-shadow: var(--mj-shadow-lg);
 }
 .cdk-drag-placeholder { opacity: 0.4; border-style: dashed !important; border-color: var(--mj-brand-primary) !important; background: var(--mj-bg-surface-sunken) !important; }
+/* A question's placeholder paints on its ROW, since the article itself no longer has a surface.
+   The generic rule above still serves the other reorderable lists (options, automation steps). */
+.fb-q.cdk-drag-placeholder { background: transparent !important; border: none !important; }
+.fb-q.cdk-drag-placeholder .fb-q-row { border-style: dashed !important; border-color: var(--mj-brand-primary) !important; background: var(--mj-bg-surface-sunken) !important; }
 .cdk-drag-animating { transition: transform var(--mjf-ease); }
 
 /* The number sits in its own gutter so every question label starts on the same

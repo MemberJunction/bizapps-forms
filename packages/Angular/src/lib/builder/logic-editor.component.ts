@@ -20,6 +20,7 @@ import { CommonModule } from '@angular/common';
 import type { ConditionalGroup } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS } from '../shared';
 import { ConditionalRuleEditorComponent } from './conditional-rule-editor.component';
+import type { FormSection } from './section-groups';
 import {
   defaultConditionSource,
   newCondition,
@@ -186,6 +187,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
         </div>
         @if (showsConditionally) {
           <mjf-conditional-rule-editor
+            [sections]="sections"
             [group]="draft.show"
             [sources]="sources"
             [formSources]="formSources"
@@ -233,6 +235,7 @@ const LOGIC_EDITOR_CSS = /* css */ `
               </div>
 
               <mjf-conditional-rule-editor
+                [sections]="sections"
                 [group]="rule.when"
                 [sources]="jumpSources"
                 [formSources]="formSources"
@@ -324,6 +327,13 @@ const LOGIC_EDITOR_CSS = /* css */ `
   `,
 })
 export class LogicEditorComponent {
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
   @Input() draft: LogicDraft = emptyLogicDraft();
   /** Sources the SHOW gate may read — earlier questions only. */
   @Input() sources: ConditionalSourceQuestion[] = [];
@@ -374,8 +384,8 @@ export class LogicEditorComponent {
     return canAddJumpRule(this.draft);
   }
 
-  protected get groupedTargets(): Array<{ group: JumpTargetGroup; options: JumpTargetOption[] }> {
-    return groupedJumpTargets(this.targets);
+  protected get groupedTargets(): Array<{ group: string; options: JumpTargetOption[] }> {
+    return groupedJumpTargets(this.targets, this.sections);
   }
 
   /**
