@@ -26,8 +26,18 @@ export interface RespondentHostPageOptions {
    * `registerMjFormElement()`). The element is registered by this script tag.
    */
   widgetBundleUrl: string;
-  /** Optional page title shown in the browser tab before the form name loads. */
+  /**
+   * The form's name. It is the tab title AND the `og:title` a link unfurler (Slack, Teams, iMessage)
+   * shows on the preview card — nothing client-side ever updates it, so what is baked in here is
+   * what a respondent sees before deciding to trust the link. Defaults to a generic "Form".
+   */
   pageTitle?: string;
+  /**
+   * The form's description, for `og:description` / `<meta name="description">` — the second line of
+   * the unfurl card. Omitted (no tags at all) when the form has none: a title-only card renders
+   * fine everywhere, whereas an invented subtitle would be the "generic card" defect in new clothes.
+   */
+  pageDescription?: string;
   /**
    * Distribution slug from the route path (`/f/:slug`), baked in as the default. The page
    * still also reads a `?slug=` query param, so this may be empty for direct `?slug=` use.
@@ -53,7 +63,16 @@ export interface RespondentHostPageOptions {
  * string, so it is trivially unit-testable.
  */
 export function renderRespondentHostPage(options: RespondentHostPageOptions): string {
-  const title = escapeHtml(options.pageTitle ?? 'Form');
+  const pageTitle = options.pageTitle ?? 'Form';
+  const title = escapeHtml(pageTitle);
+  // The name and description are AUTHOR-controlled text landing in attributes, so they go through
+  // escapeAttr like every other per-request value on this page.
+  const ogTitle = escapeAttr(pageTitle);
+  const description = options.pageDescription ? escapeAttr(options.pageDescription) : '';
+  const descriptionMeta = description
+    ? `\n  <meta name="description" content="${description}" />` +
+      `\n  <meta property="og:description" content="${description}" />`
+    : '';
   // The slug (and graphql url) reach the boot script via HTML-escaped data-* attributes,
   // NOT by interpolation into the inline <script>. The slug comes from the URL path
   // (attacker-controlled); routing it through escapeAttr — and reading it with
@@ -77,6 +96,7 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex" />
   <title>${title}</title>
+  <meta property="og:title" content="${ogTitle}" />${descriptionMeta}
   <style>${PAGE_CSS}</style>
 </head>
 <body>
