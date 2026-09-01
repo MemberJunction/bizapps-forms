@@ -117,26 +117,37 @@ export async function runProvisioning(
     return { result: 'skipped-no-user' };
   }
 
+  if (decision.revoke && decision.mint) {
+    // Reissue: revoke, then let the mint's single save write the new pair. No unlink save in
+    // between — that save was the concurrency window; see revokeInvite.
+    const revoked = await revokeInvite(ctx, minter, contextUser);
+    if (revoked !== 'revoked') {
+      return { result: revoked, inviteId: ctx.magicLinkInviteId ?? undefined };
+    }
+    return issueCredential(ctx, config, minter, contextUser, persistCredential, decision.reason, {
+      clearOnMintFailure: true,
+    });
+  }
   if (decision.revoke) {
-    // Two failures, deliberately told apart. `revoke-failed` means the credential MAY STILL BE
-    // REDEEMABLE and the retry must be the revocation; `unlink-failed` means it is dead and the
-    // record is merely still advertising it, where the retry is clearing two columns. Collapsing
-    // them told every caller, log reader and test the more alarming of the two regardless, and it
-    // is the reissue path's answer to "did the leaked token stop working?".
+    // Failures, deliberately told apart. `revoke-failed` means the credential MAY STILL BE
+    // REDEEMABLE and the retry must be the revocation; `revoke-refused-not-ours` means no retry
+    // will help; `unlink-failed` means it is dead and the record is merely still advertising it,
+    // where the retry is clearing two columns. Collapsing them told every caller, log reader and
+    // test the more alarming one regardless.
     const withdrawn = await withdrawCredential(ctx, minter, contextUser, persistCredential);
     if (withdrawn !== 'withdrawn') {
       return { result: withdrawn, inviteId: ctx.magicLinkInviteId ?? undefined };
     }
-    if (!decision.mint) {
-      LogStatus(
-        `[FormDistribution] Revoked magic-link invite ${ctx.magicLinkInviteId} for distribution ` +
-          `${ctx.distributionId} (${decision.reason}); the link now holds no credential.`,
-      );
-      return { result: 'revoked', inviteId: ctx.magicLinkInviteId ?? undefined };
-    }
+    LogStatus(
+      `[FormDistribution] Revoked magic-link invite ${ctx.magicLinkInviteId} for distribution ` +
+        `${ctx.distributionId} (${decision.reason}); the link now holds no credential.`,
+    );
+    return { result: 'revoked', inviteId: ctx.magicLinkInviteId ?? undefined };
   }
 
-  return issueCredential(ctx, config, minter, contextUser, persistCredential, decision.reason);
+  return issueCredential(ctx, config, minter, contextUser, persistCredential, decision.reason, {
+    clearOnMintFailure: false,
+  });
 }
 
 /**
@@ -198,24 +209,19 @@ async function realignExpiry(
 }
 
 /**
- * Kill the linked invite and unlink it.
+ * Kill the linked invite. Reports which of three things happened; never touches the record.
  *
- * Reports which of three things happened, because two of them are opposites: `revoke-failed`
- * leaves a credential that MAY STILL REDEEM, while `unlink-failed` means it is dead and only the
- * record's copy of it is stale. Both leave the invite id in place so the next save retries.
- *
- * The order matters and is the whole point: revoke FIRST, unlink only on success.
- * Unlinking a credential we could not kill orphans a live invite that no distribution
- * references, so no later save can find it to try again and the builder shows a link
- * with nothing wrong with it. Leaving it linked instead means the next save of this
- * distribution retries, and the #90 application gates keep refusing the link meanwhile.
+ * Split from {@link withdrawCredential} so the reissue path can revoke WITHOUT the intermediate
+ * unlink save. That save was a concurrency window: between "cleared" and "written with the new
+ * pair", a concurrent load — a second builder tab, a public submission bumping `ResponseCount` —
+ * read "live link, no credential", decided `mint`, and left one of the two invites Active and
+ * unreferenced: the orphan bizapps-forms#104 exists to remove, produced by the act of rotating.
  */
-async function withdrawCredential(
+async function revokeInvite(
   ctx: ProvisionContext,
   minter: IAnonymousMagicLinkMinter,
   contextUser: UserInfo,
-  persistCredential: PersistCredential,
-): Promise<'withdrawn' | 'revoke-failed' | 'revoke-refused-not-ours' | 'unlink-failed'> {
+): Promise<'revoked' | 'revoke-failed' | 'revoke-refused-not-ours'> {
   const inviteId = ctx.magicLinkInviteId?.trim();
   if (!inviteId) {
     // Unreachable via decideProvisioning, which only asks for a revoke when one is
@@ -248,10 +254,31 @@ async function withdrawCredential(
     );
     return 'revoke-failed';
   }
+  return 'revoked';
+}
 
+/**
+ * Kill the linked invite and unlink it — the non-reissue path.
+ *
+ * The order matters and is the whole point: revoke FIRST, unlink only on success.
+ * Unlinking a credential we could not kill orphans a live invite that no distribution
+ * references, so no later save can find it to try again and the builder shows a link
+ * with nothing wrong with it. Leaving it linked instead means the next save of this
+ * distribution retries, and the #90 application gates keep refusing the link meanwhile.
+ */
+async function withdrawCredential(
+  ctx: ProvisionContext,
+  minter: IAnonymousMagicLinkMinter,
+  contextUser: UserInfo,
+  persistCredential: PersistCredential,
+): Promise<'withdrawn' | 'revoke-failed' | 'revoke-refused-not-ours' | 'unlink-failed'> {
+  const revoked = await revokeInvite(ctx, minter, contextUser);
+  if (revoked !== 'revoked') {
+    return revoked;
+  }
   if (!(await persistCredential(null))) {
     LogError(
-      `[FormDistribution] Revoked magic-link invite ${inviteId} but could not clear it from ` +
+      `[FormDistribution] Revoked magic-link invite ${ctx.magicLinkInviteId} but could not clear it from ` +
         `distribution ${ctx.distributionId}. The invite is dead; the distribution still points at it ` +
         `and will read as issued until the next save clears it.`,
     );
@@ -266,6 +293,10 @@ async function withdrawCredential(
  * @param reason the decision's own word for why. `reissue` is the one mint that follows
  *               a revocation in the same run, and so the one that invalidates a token
  *               somebody may be holding — worth saying in both the outcome and the log.
+ * @param clearOnMintFailure true on the reissue path, where the old invite is ALREADY revoked
+ *               before this runs: a dead credential must not stay linked, so a failed mint
+ *               then clears the pair. This is the only path that writes the intermediate
+ *               null, and only after the mint has failed — never before it.
  */
 async function issueCredential(
   ctx: ProvisionContext,
@@ -274,6 +305,7 @@ async function issueCredential(
   contextUser: UserInfo,
   persistCredential: PersistCredential,
   reason: ProvisioningReason,
+  { clearOnMintFailure }: { clearOnMintFailure: boolean },
 ): Promise<ProvisionOutcome> {
   const replacing = reason === 'reissue';
   const mint = await minter.MintAnonymousInvite(
@@ -315,13 +347,34 @@ async function issueCredential(
         `${mint.message ?? (mint.success ? 'the minter returned no raw token' : 'unknown error')}. ` +
         `The distribution holds no credential.`,
     );
+    if (clearOnMintFailure && !(await persistCredential(null))) {
+      LogError(
+        `[FormDistribution] Revoked magic-link invite ${ctx.magicLinkInviteId} but could not clear it from ` +
+          `distribution ${ctx.distributionId} after the replacement mint failed. The invite is dead; the ` +
+          `distribution still points at it until the next save clears it.`,
+      );
+      return { result: 'unlink-failed', inviteId: ctx.magicLinkInviteId ?? undefined };
+    }
     return { result: 'mint-failed' };
   }
 
   if (!(await persistCredential({ inviteId: mint.inviteId, rawToken: mint.rawToken }))) {
+    // A minted invite nothing references is a live orphan — the exact object bizapps-forms#104
+    // is about — and until this it was produced by any failed store and merely logged. Kill it
+    // on the way out: fail toward NO credential, never toward an unreachable one. Best-effort;
+    // if the revoke also fails the log names the id, which is then the only handle on it.
+    const cleanup = await minter.RevokeAnonymousInvite(
+      { inviteId: mint.inviteId, resourceId: ctx.distributionId },
+      contextUser,
+    );
     LogError(
       `[FormDistribution] Minted invite ${mint.inviteId} but failed to store it on distribution ` +
-        `${ctx.distributionId}. The invite exists but is not linked.`,
+        `${ctx.distributionId}. ${
+          cleanup.success
+            ? 'The invite has been revoked again, so nothing is left live.'
+            : `Revoking it again also failed (${cleanup.message ?? 'unknown error'}); it is now an ` +
+              `orphaned live invite and must be revoked by hand.`
+        }`,
     );
     return { result: 'store-failed', inviteId: mint.inviteId };
   }

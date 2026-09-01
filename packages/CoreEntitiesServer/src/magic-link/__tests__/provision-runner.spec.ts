@@ -160,10 +160,15 @@ describe('runProvisioning — minting', () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it('reports a store failure but keeps the invite id', async () => {
+  it('reports a store failure, keeps the invite id, and revokes the invite it could not store', async () => {
+    // A minted invite nothing references is a live orphan — the exact object #104 is about, and
+    // until this it was produced by any failed store and merely logged. Fail toward NO credential.
     const fake = fakeMinter();
     const outcome = await runProvisioning(ctx(), config, fake.minter, contextUser, async () => false);
     expect(outcome).toEqual({ result: 'store-failed', inviteId: 'invite-new' });
+    expect(fake.revokes).toEqual([
+      { credential: { inviteId: 'invite-new', resourceId: 'dist-1' }, user: contextUser },
+    ]);
   });
 
   it('skips when there is no context user', async () => {
@@ -249,9 +254,13 @@ describe('runProvisioning — revoking', () => {
     // `revoke-failed` told the caller the leaked token might still redeem, which is the more
     // alarming of the two answers and the wrong one — and it is exactly the question the builder's
     // reissue flow asks. The retry differs too: this one owes two column writes, not a revocation.
+    //
+    // A PAUSE, not a reissue: the reissue path no longer performs an unlink save at all (it was the
+    // concurrency window), so the only place an unlink can fail is where a credential is being
+    // withdrawn without replacement.
     const fake = fakeMinter();
     const outcome = await runProvisioning(
-      livingCtx({ publicLinkToken: null }),
+      livingCtx({ status: 'Closed' }),
       config,
       fake.minter,
       contextUser,
@@ -423,8 +432,21 @@ describe('runProvisioning — reissuing', () => {
       { credential: { inviteId: OLD_INVITE, resourceId: 'dist-1' }, user: contextUser },
     ]);
     expect(fake.mints).toHaveLength(1);
-    // Cleared first, then written: the record never points at two credentials at once.
-    expect(persist.mock.calls).toEqual([[null], [{ inviteId: 'invite-new', rawToken: 'mj_ml_new' }]]);
+    // ONE save, carrying the new pair. There used to be two — clear, then write — and the
+    // moment between them read as "live link, no credential" to any concurrent load, which
+    // then minted a second invite and left the loser Active and unreferenced. The invariant
+    // "never points at two credentials" holds trivially here: the old pair is replaced by the
+    // new in a single write, and the old invite was revoked before that write.
+    expect(persist.mock.calls).toEqual([[{ inviteId: 'invite-new', rawToken: 'mj_ml_new' }]]);
+  });
+
+  it('never persists an intermediate "no credential" state on the reissue path', async () => {
+    // The concurrency window, stated as a property of the write sequence rather than by
+    // racing two instances: no persist call carries null unless the mint has failed.
+    const fake = fakeMinter();
+    const persist = vi.fn(async () => true);
+    await runProvisioning(livingCtx({ publicLinkToken: null }), config, fake.minter, contextUser, persist);
+    expect(persist.mock.calls.some(([value]) => value === null)).toBe(false);
   });
 
   it('reissues under the same distribution — the slug is never part of the credential', async () => {
