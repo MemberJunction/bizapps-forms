@@ -14,6 +14,7 @@
     "build:packages": "turbo --log-order=stream build --filter=\"@mj-biz-apps/forms-*\"",
     "test": "turbo --log-order=stream test",
     "test:packages": "turbo --log-order=stream test --filter=\"@mj-biz-apps/forms-*\"",
+    "typecheck": "turbo --log-order=stream typecheck --filter=\"@mj-biz-apps/forms-*\"",
     "build:widget": "pnpm --filter @mj-biz-apps/forms-ng run build:widget",
     "mj:migrate": "mj migrate --schema __mj_BizAppsForms --dir ./migrations",
     "mj:codegen": "mj codegen",
