@@ -166,6 +166,16 @@ export class FormQuestionComponent {
   });
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
+  /**
+   * The id of the question's `<label>`, which is what the grouped controls are named by.
+   *
+   * A native control is named by `<label for>` pointing at {@link inputId}, which it carries
+   * itself. A group of buttons (`role="radiogroup"` / `role="group"`) has no element carrying
+   * that id, so it names itself the other way round — `aria-labelledby` pointing at the label —
+   * and the reference has to land on the element holding the prompt text. Pointing it at
+   * `inputId()` instead left every grouped question unnamed to a screen reader (#117).
+   */
+  protected readonly labelId = computed(() => `${this.inputId()}-label`);
 
   /**
    * The A/B/C badge for the option at this position.
