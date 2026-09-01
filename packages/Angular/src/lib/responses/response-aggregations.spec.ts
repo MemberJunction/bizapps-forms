@@ -107,6 +107,16 @@ describe('renderAnswer / buildResponseDetail', () => {
     expect(detail.answers[0]).toMatchObject({ prompt: 'Prompt qc', displayValue: 'Red' });
   });
 
+  it('renders a Time answer as the clock the respondent entered, from the stored UTC instant', () => {
+    // Stored as the clock on the epoch date in UTC (#116). The reader has to give back `14:30`,
+    // not `1970-01-01T14:30:00.000Z` — the epoch date is an anchor, not part of the answer.
+    const time = q('qt', 'Time', 2);
+    expect(renderAnswer(time, answer('r1', 'qt', { DateValue: new Date('1970-01-01T14:30:00.000Z') }))).toBe('14:30');
+    // Over GraphQL the column arrives as a string; the same reading applies.
+    expect(renderAnswer(time, answer('r1', 'qt', { DateValue: '1970-01-01T09:05:00Z' as unknown as Date }))).toBe('09:05');
+    expect(renderAnswer(time, answer('r1', 'qt', { DateValue: null }))).toBe('');
+  });
+
   it('reports how many answers it could not label, so the loss is never silent', () => {
     const detail = buildResponseDetail(
       detailInput({

@@ -37,6 +37,15 @@ describe('toAnswerInputs', () => {
     ]);
   });
 
+  // Documents the contract rather than having driven a change: the widget already sent this.
+  // It is pinned because the wire format for a Time is now decided in `answer-date.ts`
+  // (forms-entities), and the server refuses anything else — so a future "helpful" conversion
+  // here (to an ISO instant, say) would make every Time answer unsubmittable again (#116).
+  it('sends a Time answer as the bare clock reading its control emits — the contract wire format', () => {
+    const answers = new Map<string, AnswerValue>([['when', '14:30']]);
+    expect(toAnswerInputs([q('when', 'Time')], answers)).toEqual([{ questionId: 'when', dateValue: '14:30' }]);
+  });
+
   it('skips unanswered and Statement questions', () => {
     const questions = [q('a', 'ShortText'), q('s', 'Statement'), q('b', 'ShortText')];
     const answers = new Map<string, AnswerValue>([['a', 'x'], ['s', 'ignored'], ['b', '']]);

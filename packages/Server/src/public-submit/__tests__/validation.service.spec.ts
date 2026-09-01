@@ -297,6 +297,74 @@ describe('validateSubmission — partial (autosave) saves', () => {
   });
 });
 
+/** One `Date` and one `Time` question, both optional, no rules — the all-types fixture's last page. */
+function temporalDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'When',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-date', type: 'Date', prompt: 'Which day', isRequired: false, displayOrder: 1, options: [] },
+          { id: 'q-time', type: 'Time', prompt: 'What time', isRequired: false, displayOrder: 2, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('validateSubmission — the date column, in every mode (#116)', () => {
+  // `<input type="time">` emits `14:30`. There was no Time format case, so the value passed
+  // validation untouched, persistence did `new Date('14:30')`, and the Invalid Date threw from
+  // inside Save() as an unattributed "Invalid time value". Every form carrying a Time question
+  // was unsubmittable the moment someone answered it.
+  it('accepts a Time answered as the control emits it, and keeps it for persistence', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: '14:30' }], 'complete');
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-time']);
+  });
+
+  it('rejects a Time the column cannot store, attributed to its question', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: '25:99' }], 'complete');
+    expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
+    expect(outcome.answers).toEqual([]);
+  });
+
+  // A draft was held to upper bounds only, on the theory that everything else describes a
+  // finished value a respondent is still typing towards. A date control emits nothing until the
+  // value is whole, so an unparseable date is never "still typing" — and DateValue is a
+  // DATETIMEOFFSET, which cannot hold the string as a draft any more than as a submission. On
+  // `next`, a draft `Date` + "garbage" reached Save() and came back as "Invalid time value".
+  it('rejects an unstorable Date on a DRAFT too, since the column will not hold it either way', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-date', dateValue: 'garbage' }], 'draft');
+    expect(outcome.errors).toEqual([{ questionId: 'q-date', message: 'Enter a valid date.' }]);
+  });
+
+  it('rejects an unstorable Time on a DRAFT', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: 'garbage' }], 'draft');
+    expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
+  });
+
+  it('still lets a DRAFT carry a whole date or time', () => {
+    const outcome = validateSubmission(
+      temporalDefinition(),
+      [
+        { questionId: 'q-date', dateValue: '2026-09-01' },
+        { questionId: 'q-time', dateValue: '09:05' },
+      ],
+      'draft',
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id).sort()).toEqual(['q-date', 'q-time']);
+  });
+});
+
 /** A definition where q-other is shown only when q-choice equals 'Other'. */
 function conditionalDefinition(): PublishedFormDefinition {
   return {

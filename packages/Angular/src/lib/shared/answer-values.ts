@@ -12,6 +12,7 @@
 import {
   analysisKindFor,
   answerColumnFor,
+  clockTimeOf,
   FORM_QUESTION_TYPES,
   type mjBizAppsFormsFormResponseAnswerEntityType,
   type mjBizAppsFormsFormResponseEntityType,
@@ -116,7 +117,14 @@ export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
   if (NUMERIC_TYPES.has(q.type)) {
     return a.NumericValue !== null && a.NumericValue !== undefined ? String(a.NumericValue) : '';
   }
-  if (q.type === 'Date' || q.type === 'Time') {
+  if (q.type === 'Time') {
+    // The stored instant is the clock on the epoch date in UTC (#116); the reader gives back the
+    // clock, because `1970-01-01T14:30:00.000Z` on a detail page or in a CSV says "1970", and
+    // the respondent said "half past two".
+    const d = toDate(a.DateValue);
+    return d ? clockTimeOf(d) : '';
+  }
+  if (q.type === 'Date') {
     const d = toDate(a.DateValue);
     return d ? d.toISOString() : '';
   }

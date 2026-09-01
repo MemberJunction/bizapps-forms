@@ -24,9 +24,8 @@
  */
 import { LogError } from '@memberjunction/core';
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import { quoteSqlString } from '@mj-biz-apps/forms-entities';
+import { dateAnswerInstant, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
-  FormAnswerInput,
   JSONValue,
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormResponseAnswerEntity,
@@ -491,7 +490,10 @@ async function saveAnswer(
   answer.NewRecord();
   answer.ResponseID = responseId;
   answer.QuestionID = validated.question.id;
-  applyAnswerValue(answer, validated.input);
+  const unstorable = applyAnswerValue(answer, validated);
+  if (unstorable) {
+    return { ok: false, message: unstorable };
+  }
 
   if (!(await answer.Save())) {
     return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
@@ -499,8 +501,26 @@ async function saveAnswer(
   return { ok: true };
 }
 
-/** Copy the populated typed value(s) from the input onto the answer entity. */
-function applyAnswerValue(answer: mjBizAppsFormsFormResponseAnswerEntity, input: FormAnswerInput): void {
+/**
+ * Copy the populated typed value(s) from the input onto the answer entity, or say why one of
+ * them cannot go on.
+ *
+ * The date column is the one that can refuse. `dateValue` is a GraphQL `String` and `DateValue`
+ * is a `DATETIMEOFFSET`, so the string is parsed here through the contract's
+ * {@link dateAnswerInstant} — the same parse validation accepted it with. This used to be a bare
+ * `new Date(input.dateValue)`, and `new Date('14:30')` (a `Time` answer, as its control emits
+ * it) is an Invalid Date that the provider's `toISOString()` turns into `RangeError: Invalid
+ * time value` from inside `Save()`, attributed to no question (#116).
+ *
+ * Validation already refuses an unstorable date on every mode. Checking again here is
+ * deliberate, not belt-and-braces: validation judges the column a question's TYPE routes to,
+ * and a caller can post `dateValue` on a question of any type — so this is the only guard on
+ * that path, and a bad value there gets a message naming the question instead of a throw.
+ */
+function applyAnswerValue(
+  answer: mjBizAppsFormsFormResponseAnswerEntity,
+  { question, input }: ValidatedAnswer,
+): string | undefined {
   if (input.textValue !== undefined) {
     answer.TextValue = input.textValue;
   }
@@ -508,7 +528,12 @@ function applyAnswerValue(answer: mjBizAppsFormsFormResponseAnswerEntity, input:
     answer.NumericValue = input.numericValue;
   }
   if (input.dateValue !== undefined) {
-    answer.DateValue = new Date(input.dateValue);
+    const instant = dateAnswerInstant(question.type, input.dateValue);
+    if (!instant) {
+      const kind = question.type === 'Time' ? 'time' : 'date';
+      return `Answer to "${question.prompt}" is not a valid ${kind}.`;
+    }
+    answer.DateValue = instant;
   }
   if (input.booleanValue !== undefined) {
     answer.BooleanValue = input.booleanValue;
@@ -609,7 +634,10 @@ async function rewriteAnswer(
   answer.BooleanValue = null;
   answer.JSONValue = null;
   answer.FileID = null;
-  applyAnswerValue(answer, validated.input);
+  const unstorable = applyAnswerValue(answer, validated);
+  if (unstorable) {
+    return { ok: false, message: unstorable };
+  }
   if (!(await answer.Save())) {
     return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
   }

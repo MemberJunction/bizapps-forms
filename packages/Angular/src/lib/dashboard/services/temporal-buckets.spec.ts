@@ -39,13 +39,17 @@ describe('Date questions group by month', () => {
 });
 
 describe('Time questions group into parts of the day', () => {
+  // A stored Time is the clock reading on the epoch date in UTC — `14:30` is
+  // `1970-01-01T14:30:00Z` — and the contract says the UTC fields ARE the answer. These fixtures
+  // therefore carry the `Z`, and the assertions hold in any timezone; a band read off the
+  // viewer's local clock would file a 14:30 answer under "Morning" in Chicago.
   it('bands the clock rather than counting distinct times', () => {
     // Per-minute buckets on a form with forty answers is a list of ones, which is why the
     // raw values were never analysable.
     const buckets = temporalBuckets('Time', [
-      on('2026-01-01T09:30:00'),
-      on('2026-01-01T10:15:00'),
-      on('2026-01-01T19:00:00'),
+      on('1970-01-01T09:30:00Z'),
+      on('1970-01-01T10:15:00Z'),
+      on('1970-01-01T19:00:00Z'),
     ]);
     expect(buckets.map((b) => [b.label, b.count])).toEqual([
       ['Morning (6am–12pm)', 2],
@@ -53,8 +57,15 @@ describe('Time questions group into parts of the day', () => {
     ]);
   });
 
+  it('reads the stored clock, not the viewer’s local one', () => {
+    // 14:30Z is an afternoon wherever the report is opened; 23:30Z is a night, not tomorrow's
+    // early morning. Any non-UTC viewer gets at least one of these wrong from local hours.
+    expect(temporalBuckets('Time', [on('1970-01-01T14:30:00Z')])[0].label).toMatch(/Afternoon/);
+    expect(temporalBuckets('Time', [on('1970-01-01T23:30:00Z')])[0].label).toMatch(/Night/);
+  });
+
   it('puts midnight in the early band, not past the end of the day', () => {
-    expect(temporalBuckets('Time', [on('2026-01-01T00:10:00')])[0].label).toMatch(/Early/);
+    expect(temporalBuckets('Time', [on('1970-01-01T00:10:00Z')])[0].label).toMatch(/Early/);
   });
 });
 

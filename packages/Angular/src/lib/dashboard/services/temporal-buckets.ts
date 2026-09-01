@@ -37,8 +37,16 @@ function monthOf(date: Date): { key: string; label: string } {
   return { key, label };
 }
 
+/**
+ * The part of the day a stored `Time` falls in.
+ *
+ * Reads the UTC hour, because that is what a stored Time IS: the contract (`answer-date.ts` in
+ * forms-entities) stores `14:30` as `1970-01-01T14:30:00Z`, the UTC fields being the answer.
+ * `getHours()` would give the viewer's local reading of that instant — 08:30 in Chicago — and
+ * file an afternoon under "Morning" for every viewer outside UTC.
+ */
 function bandOf(date: Date): { key: string; label: string } {
-  const hour = date.getHours();
+  const hour = date.getUTCHours();
   for (const [index, band] of TIME_BANDS.entries()) {
     if (hour < band.untilHour) return { key: String(index), label: band.label };
   }
