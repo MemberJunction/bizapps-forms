@@ -14,9 +14,16 @@
  * order, mis-mapping a context field. Every one of those is a defect the file's own comments
  * describe at length as load-bearing, and the comments were the only thing enforcing them.
  *
- * These match loosely — on the call and the ordering, not on formatting — so a reflow cannot red
+ * They match on the call and the ordering rather than on formatting, so a reflow does not red
  * them, and each guards a decision whose failure mode is silence. Same trade-off, and the same
  * reasoning, as `distribution-manager.spec.ts` in the Angular package.
+ *
+ * That tolerance is a PROPERTY OF THE ASSERTIONS, not a promise the header can make on their
+ * behalf. This file said "a reflow cannot red them" while the context-mapping check below used
+ * `toContain` on an exact `key: this.Column,` string — one extra space, or a dropped trailing
+ * comma, reds seven of them at once. A suite whose header misdescribes its own strictness sends
+ * the next reader hunting a real regression in what was only a Prettier run. Every match here is
+ * now whitespace-tolerant, which is what makes the sentence above true.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -145,7 +152,12 @@ describe('the provisioning context', () => {
       ['publicLinkToken', 'this.PublicLinkToken'],
       ['closeAt', 'this.CloseAt'],
     ]) {
-      expect(save, key).toContain(`${key}: ${column},`);
+      // Whitespace-tolerant, and the trailing comma optional: this asserts the MAPPING — which
+      // context key reads which column — which is the thing whose failure is silent. Layout is
+      // Prettier's business, and was never what this guard was about.
+      expect(save, key).toMatch(
+        new RegExp(`\\b${key}\\s*:\\s*${column.replace('.', '\\.')}\\s*[,}]`),
+      );
     }
   });
 

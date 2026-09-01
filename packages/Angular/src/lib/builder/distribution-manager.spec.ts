@@ -32,10 +32,9 @@ const template = withoutComments(source('distribution-manager.component.html'));
  * component's prose names the server methods (`FormDistributionEntityServer.Save()`) whose
  * absence some of them check for — an unstripped read makes the doc comment fail the test.
  */
-const component = source('distribution-manager.component.ts').replace(
-  /\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
-  '',
-);
+const stripComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+
+const component = stripComments(source('distribution-manager.component.ts'));
 
 describe('the Distribute template', () => {
   it('never decides what to show from the channel', () => {
@@ -145,8 +144,12 @@ describe('the Distribute component', () => {
     // Clearing the columns from here would leave the OLD invite Active and unreferenced —
     // the orphaned-credential defect. The server hook is the only thing that revokes.
     expect(component).toContain('service.reissueLink');
-    expect(component).not.toMatch(/PublicLinkToken\s*=/);
-    expect(component).not.toMatch(/MagicLinkInviteID\s*=/);
+    // `=[^=]`, not a bare `=`: this bans ASSIGNMENT, and the component is explicitly allowed to
+    // READ these columns (the Reissue block is gated on `link.PublicLinkToken`). A bare `=` also
+    // matches `==`/`===`, so a future `if (link.PublicLinkToken === null)` would red a test about
+    // writing. The sibling guard below already had this right; the two now agree.
+    expect(component).not.toMatch(/PublicLinkToken\s*=[^=]/);
+    expect(component).not.toMatch(/MagicLinkInviteID\s*=[^=]/);
   });
 
   it('re-reads the record after every write that changes the token', () => {
@@ -186,8 +189,12 @@ describe('the Distribute component', () => {
 });
 
 describe('the reissue request, where the builder must not do the server\'s job', () => {
-  const service = source('distribution.service.ts');
-  const component = source('distribution-manager.component.ts');
+  // Both comment-stripped, like the module-level bindings. Re-reading raw here (which this block
+  // used to do) passes only for as long as no docstring happens to contain `dist.PublicLinkToken =`
+  // — and these files discuss that exact assignment at length, so it was one comment away from
+  // reddening four tests for no behavioural reason.
+  const service = stripComments(source('distribution.service.ts'));
+  const component = stripComments(source('distribution-manager.component.ts'));
 
   it('clears ONLY the token — never the invite id, which is what tells the server what to revoke', () => {
     // This is the one security-relevant line in the change, and it was guarded by reading the

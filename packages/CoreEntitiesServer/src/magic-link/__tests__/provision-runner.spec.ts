@@ -274,11 +274,17 @@ describe('runProvisioning — revoking', () => {
     expect(outcome).toEqual({ result: 'revoke-failed', inviteId: OLD_INVITE });
   });
 
-  it('refuses to act on an invite scoped to a DIFFERENT distribution', async () => {
-    // The seam carries the owning resource with every write precisely so an implementation can
-    // refuse this. `MagicLinkInviteID` has no foreign key and rides the generated GraphQL input,
-    // and these writes run under the elevated system user on the public submit path — so an id
-    // pointing at another link's invite would otherwise revoke a credential that is not ours.
+  it('hands the minter the owning resource, so an implementation CAN refuse a foreign invite', async () => {
+    // Retitled deliberately. This used to be called "refuses to act on an invite scoped to a
+    // DIFFERENT distribution", which is a security property this test does not have: the fake
+    // minter never refuses anything, and deleting the whole ownership check from
+    // `MagicLinkInviteMinter.writeToInvite` leaves it green. A title that advertises a guarantee
+    // its assertions do not check is worse than no test — it is where someone stops looking.
+    //
+    // What it DOES guard is the seam: `resourceId` travels with every credential write, which is
+    // the precondition for refusing. The refusal itself is tested where it lives
+    // (`MagicLinkInviteMinter.spec.ts`, "the credential must belong to the link acting on it")
+    // and end-to-end in `apps/MJAPI/credential-lifecycle-smoke.mjs`.
     const fake = fakeMinter();
     await runProvisioning(livingCtx({ status: 'Closed' }), config, fake.minter, contextUser, async () => true);
     expect(fake.revokes[0].credential).toEqual({ inviteId: OLD_INVITE, resourceId: 'dist-1' });
