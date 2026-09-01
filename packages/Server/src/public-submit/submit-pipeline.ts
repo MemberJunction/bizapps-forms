@@ -291,11 +291,24 @@ export function resetSubmitInFlightForTests(): void {
 }
 
 /**
+ * What the respondent is told when a stage threw instead of returning a result. Authored, and
+ * deliberately says nothing about what happened: the exception's own words are for the log.
+ */
+export const SUBMIT_FAILED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
+
+/**
  * Run the full pipeline behind the process-wide in-flight cap.
  *
  * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
  * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
  * the widget), because holding the request would be the resource exhaustion this defends against.
+ *
+ * NEVER THROWS. Every gate returns a result, but a stage can still throw — a bug, a driver that
+ * throws where it should return false, `RangeError: Invalid time value` from a Date the validator
+ * could not parse (#116). An exception that escapes here reaches Apollo, which puts the exception's
+ * own words into `errors[].message`, and the widget renders that to the anonymous respondent — on a
+ * production host too, since nothing about it is a stack trace (#119). So the boundary is here: the
+ * exception goes to the log with the request it belonged to, and the respondent gets one sentence.
  */
 export async function runSubmitPipeline(
   ctx: PipelineContext,
@@ -306,6 +319,15 @@ export async function runSubmitPipeline(
   }
   try {
     return await runSubmitPipelineInner(ctx, submission);
+  } catch (err: unknown) {
+    // Slug and version identify the request; the answers are deliberately not logged (they are
+    // the respondent's data, and the failure is not about their content).
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    LogError(
+      `[Forms] submit for ${submission?.distributionSlug} (version ${submission?.formVersionId}, ` +
+        `partial=${submission?.partial === true}) threw: ${detail}`,
+    );
+    return fail(SUBMIT_FAILED_MESSAGE);
   } finally {
     submitInFlightLimiter().Exit();
   }

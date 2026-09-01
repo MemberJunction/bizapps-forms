@@ -19,8 +19,9 @@
  *
  * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)`
  * (never `new`), passing the anonymous `contextUser`. Every `Save()`/`Delete()` boolean is
- * checked; on failure we read `LatestResult.CompleteMessage` (per CLAUDE.md). The answer
- * typed columns mirror the `FormAnswerInput` transport exactly.
+ * checked; on failure `LatestResult.CompleteMessage` (per CLAUDE.md) goes to the server log and
+ * the caller gets {@link SAVE_FAILED_MESSAGE} — the diagnostic is for the operator, never for the
+ * respondent. The answer typed columns mirror the `FormAnswerInput` transport exactly.
  */
 import { LogError } from '@memberjunction/core';
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
@@ -128,9 +129,30 @@ interface SaveAnswerResult {
   message?: string;
 }
 
-/** Read a failed Save/Delete's detail message in the MJ-prescribed way. */
-function saveError(entity: BaseEntity, fallback: string): string {
-  return entity.LatestResult?.CompleteMessage ?? fallback;
+/**
+ * The one sentence a respondent is told when a row could not be written. Authored here, never
+ * derived from the failure: `LatestResult.CompleteMessage` is MJ's OPERATOR diagnostic, and the SQL
+ * provider fills it with the driver's error plus the entire T-SQL batch it ran — database name,
+ * schema, table, constraint, stored-procedure names, parameter values. That text used to be
+ * returned as the failure's `message`, which the pipeline hands to the widget verbatim, so an
+ * anonymous respondent read it off their screen (issue #119). It reaches the log instead.
+ */
+export const SAVE_FAILED_MESSAGE = 'Your response could not be saved. Please try again.';
+
+/** The two rows this module writes; both carry the `ID` the log line needs. */
+type ResponseOrAnswerEntity = mjBizAppsFormsFormResponseEntity | mjBizAppsFormsFormResponseAnswerEntity;
+
+/**
+ * Record a failed Save/Delete where the operator can read it, and return what the respondent may.
+ *
+ * `LogError`, not `LogStatus`: MJ silences `LogStatus` under `NODE_ENV=production`, so the
+ * pipeline's own `— REFUSED:` timing line is not there on a production host. This line is the one
+ * record that ties the provider's dump to the row and question it was about.
+ */
+function logSaveFailure(action: string, entityName: string, entity: ResponseOrAnswerEntity): string {
+  const detail = entity.LatestResult?.CompleteMessage ?? 'the provider reported no detail';
+  LogError(`[Forms] ${action} ${entityName} ${entity.ID} failed: ${detail}`);
+  return SAVE_FAILED_MESSAGE;
 }
 
 /**
@@ -381,7 +403,7 @@ async function createResponse(
   if (adoptedId && isDuplicateKeyError(response)) {
     return reconcileDuplicate(provider, inputs, adoptedId, contextUser);
   }
-  return { ok: false, message: saveError(response, 'Failed to save form response.') };
+  return { ok: false, message: logSaveFailure('creating', FORM_RESPONSE_ENTITY, response) };
 }
 
 /**
@@ -494,7 +516,10 @@ async function saveAnswer(
   applyAnswerValue(answer, validated.input);
 
   if (!(await answer.Save())) {
-    return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
+    return {
+      ok: false,
+      message: logSaveFailure(`inserting (question ${validated.question.id})`, FORM_RESPONSE_ANSWER_ENTITY, answer),
+    };
   }
   return { ok: true };
 }
@@ -558,7 +583,8 @@ async function reconcileAnswers(
     contextUser,
   );
   if (!existing.Success) {
-    return { ok: false, message: 'Failed to load existing answers for replacement.' };
+    LogError(`[Forms] reading the stored answers of response ${responseId} failed: ${existing.ErrorMessage}`);
+    return { ok: false, message: SAVE_FAILED_MESSAGE };
   }
 
   const stale = new Map<string, mjBizAppsFormsFormResponseAnswerEntity>();
@@ -584,7 +610,10 @@ async function reconcileAnswers(
   // answer cleared. Everything the respondent still has an answer for is already stored.
   for (const orphan of stale.values()) {
     if (!(await orphan.Delete())) {
-      return { ok: false, message: saveError(orphan, 'Failed to clear a prior answer.') };
+      return {
+        ok: false,
+        message: logSaveFailure(`deleting (question ${orphan.QuestionID})`, FORM_RESPONSE_ANSWER_ENTITY, orphan),
+      };
     }
   }
   return { ok: true };
@@ -611,7 +640,10 @@ async function rewriteAnswer(
   answer.FileID = null;
   applyAnswerValue(answer, validated.input);
   if (!(await answer.Save())) {
-    return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
+    return {
+      ok: false,
+      message: logSaveFailure(`rewriting (question ${validated.question.id})`, FORM_RESPONSE_ANSWER_ENTITY, answer),
+    };
   }
   return { ok: true };
 }
@@ -634,7 +666,7 @@ async function incrementResponseCount(
     // Non-fatal: the response is already saved. Surface for observability only.
     console.warn(
       `[forms] Failed to increment ResponseCount for distribution ${distributionId}: ` +
-        saveError(dist, 'unknown error'),
+        (dist.LatestResult?.CompleteMessage ?? 'unknown error'),
     );
   }
 }
@@ -727,7 +759,7 @@ export async function persistSubmission(
   if (saved.pendingSeal) {
     applyResponseOutcome(saved.entity, inputs);
     if (!(await saved.entity.Save())) {
-      return { ok: false, message: saveError(saved.entity, 'Failed to save form response.') };
+      return { ok: false, message: logSaveFailure('sealing', FORM_RESPONSE_ENTITY, saved.entity) };
     }
   }
 
