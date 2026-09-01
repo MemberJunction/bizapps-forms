@@ -158,22 +158,6 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
 };
 
 /**
- * The state of a share link at `now`.
- *
- * Order is deliberate, and it is "the thing the author can act on first" rather than the
- * order the server happens to check in: an explicit human decision (paused) outranks a
- * missing token, which outranks a calendar reason, which outranks the cap.
- *
- * Paused leads because of bizapps-forms#104: pausing a link now REVOKES its magic-link
- * credential and clears `PublicLinkToken`, so a paused link legitimately has no token.
- * The two used to be the other way round, on the reasoning that a link with no token is
- * broken however else it looks — true while a token was minted once and never withdrawn,
- * and wrong now, because it would badge every deliberately-paused link "Not ready" and
- * offer "Issue the link" as the cure for a switch the author had turned off themselves.
- * `pending` still leads the rest: it means the host could not mint, and telling someone
- * that link is merely "Scheduled" sends them to edit a date that is not the problem.
- */
-/**
  * Is this link open to responses — the thing the Distribute tab's switch is labelled with?
  *
  * ONE definition, exported, because there were three and two disagreed with the server.
@@ -228,12 +212,18 @@ export function credentialMayStillRedeem(
  * a green save and a still-redeemable token are the same outcome from the client's side. On a
  * host that does not grant Update on `MJ: Magic Link Invites`, it is the only outcome.
  *
- * The record carries the answer, and carries it precisely because the server wants it to: a
- * failed revoke leaves the credential LINKED so the next save retries, and the pair is cleared
- * together only after a revoke succeeds. So an empty `PublicLinkToken` on a paused link IS the
- * server reporting the credential dead, and a token still sitting there is the server reporting
- * that it is not — or, on a link not yet saved since the upgrade, that nothing has tried. Both
- * of those mean the same thing to an author, and it is not "withdrawn".
+ * The record carries as much of the answer as it can, and carries it because the server wants it
+ * to: a failed revoke leaves the credential LINKED so the next save retries, and the pair is
+ * cleared together only after a revoke succeeds. So an empty `PublicLinkToken` on a paused link
+ * IS the server reporting the credential dead.
+ *
+ * A token still sitting there is weaker evidence, and the wording has to respect that. It covers
+ * `revoke-failed` (the invite is untouched and the token really does still redeem), BUT ALSO
+ * `unlink-failed` (the revoke LANDED — the invite is `Revoked`, the token is dead — and only the
+ * record's copy is stale), and a link not yet saved since the upgrade, where nothing has tried.
+ * Those leave IDENTICAL columns and mean opposite things, so no sentence built on these facts may
+ * assert that the token still redeems. What they support is "its withdrawal is not confirmed",
+ * which is the claim worth making: it sends the author to look, and it is true in every case.
  *
  * This is the same rule the rest of the module follows: never assert something the facts do not
  * contain. Asserting withdrawal here would be the module's own failure mode, on the one flow
@@ -244,13 +234,29 @@ function pausedDetail(facts: ShareLinkFacts): string | null {
     return null;
   }
   return (
-    'Turned off. Anyone opening it is told the form is not taking responses. Its access token ' +
-    'has NOT been withdrawn yet, though — the server retries that on the next save of this ' +
-    'link, and until it succeeds the old web address can still be traded for a session. ' +
-    'Turning it back on issues a fresh token at the same web address.'
+    'Turned off. Anyone opening it is told the form is not taking responses. This link still ' +
+    'has an access token on record, though, so its withdrawal is not confirmed — treat the old ' +
+    'web address as possibly still working until it clears. The server retries on the next save ' +
+    'of this link. Turning it back on issues a fresh token at the same web address.'
   );
 }
 
+/**
+ * The state of a share link at `now`.
+ *
+ * Order is deliberate, and it is "the thing the author can act on first" rather than the
+ * order the server happens to check in: an explicit human decision (paused) outranks a
+ * missing token, which outranks a calendar reason, which outranks the cap.
+ *
+ * Paused leads because of bizapps-forms#104: pausing a link now REVOKES its magic-link
+ * credential and clears `PublicLinkToken`, so a paused link legitimately has no token.
+ * The two used to be the other way round, on the reasoning that a link with no token is
+ * broken however else it looks — true while a token was minted once and never withdrawn,
+ * and wrong now, because it would badge every deliberately-paused link "Not ready" and
+ * offer "Issue the link" as the cure for a switch the author had turned off themselves.
+ * `pending` still leads the rest: it means the host could not mint, and telling someone
+ * that link is merely "Scheduled" sends them to edit a date that is not the problem.
+ */
 export function shareState(facts: ShareLinkFacts, now: Date): ShareState {
   const kind = stateKind(facts, now);
   const state = { kind, ...STATES[kind] };

@@ -335,12 +335,18 @@
                  rather than under Delete: deleting changes the slug, which breaks every
                  poster and QR code already printed. This changes only the credential.
 
-                 Offered only where there is a token to replace. On a paused or never-issued
-                 link there is nothing to reissue, and pressing it would report that the old
-                 token was withdrawn and no new one arrived — false on both counts. Those
-                 links each already name their own remedy in the badge above.
+                 Offered only where there is a token to replace. A never-issued link has
+                 nothing to reissue, and pressing it would report that the old token was
+                 withdrawn and no new one arrived — false on both counts; that link already
+                 names its own remedy in the badge above.
 
-                 No aria-labelledby on these buttons: it REPLACES an accessible name rather
+                 A PAUSED link usually has no token either, so it usually does not get this
+                 button. "Usually" is exact: a pause whose revocation failed leaves the token
+                 on the record, and then the button does appear. That is the right outcome, not
+                 a leak in the guard — a token still sitting on a link somebody turned off is
+                 the one case where an author most wants to replace it. -->
+
+            <!-- No aria-labelledby on these buttons: it REPLACES an accessible name rather
                  than extending it, so "Reissue link" and "Replace it" would both announce as
                  "Access token" — two controls with one name, and the visible label missing
                  from it (WCAG 2.5.3). Their own text is the better name. -->

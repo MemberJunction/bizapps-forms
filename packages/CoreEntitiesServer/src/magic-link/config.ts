@@ -13,9 +13,14 @@
  *  - `FORMS_MAGICLINK_MAX_USES`   Default `maxUses` for the minted invite. Default
  *                                 1,000,000 — effectively a public URL. A distribution's
  *                                 own `MaxResponses` quota is enforced separately at submit.
- *  - `FORMS_MAGICLINK_EXPIRY_HOURS`  Fixed expiry (hours) applied to every minted link.
- *                                 Unset (default) = no fixed expiry; expiry is instead
- *                                 driven by the distribution's `CloseAt` when set.
+ *  - `FORMS_MAGICLINK_EXPIRY_HOURS`  A host-wide CEILING (hours) on how long a minted
+ *                                 credential may live, resolved from the instant it was
+ *                                 issued. It does NOT replace the link's own `CloseAt`:
+ *                                 `resolveExpiry` takes the EARLIER of the two, so whichever
+ *                                 bound comes first ends the credential. Unset (default) =
+ *                                 no host ceiling, and `CloseAt` alone bounds it. Setting
+ *                                 this used to win outright, which let a 30-day ceiling keep
+ *                                 a credential alive for a link that shut on Friday.
  *  - `FORMS_MAGICLINK_APPLICATION`   Application name the anonymous session is scoped to.
  *                                 Default `Forms` (the app WP-A seeds).
  *  - `FORMS_MAGICLINK_ROLE`       Restricted role the invite grants. Default
@@ -51,7 +56,8 @@ export interface MagicLinkProvisioningConfig {
   linkableChannels: ReadonlySet<DistributionChannelType>;
   /** Default `maxUses` for the minted invite. */
   defaultMaxUses: number;
-  /** Fixed expiry in hours, or `undefined` to use the distribution `CloseAt` (or none). */
+  /** Host-wide lifetime ceiling in hours, or `undefined` for none. Combined with the link's
+   *  `CloseAt` by taking the earlier of the two — never instead of it. */
   fixedExpiryHours: number | undefined;
   /** Application name the anonymous session is scoped to. */
   applicationName: string;

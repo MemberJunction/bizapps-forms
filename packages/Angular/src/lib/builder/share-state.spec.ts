@@ -386,3 +386,35 @@ describe('credentialMayStillRedeem', () => {
     }
   });
 });
+
+describe('the paused detail claims only what the record can prove', () => {
+  // The predicate this text is built on documents its own limit: credentialMayStillRedeem is
+  // "nothing here proves it was withdrawn", NOT "the token is definitely still redeemable".
+  // The sentence must not go further than the predicate.
+  //
+  // It matters because both server failure branches leave the SAME row. `revoke-failed` means
+  // the invite is untouched and the token really does still redeem; `unlink-failed` means the
+  // revoke LANDED — the invite is Revoked, the token is dead — and only the record's copy of it
+  // is stale. Identical columns, opposite truths. Asserting the first is wrong half the time,
+  // and wrong in the reassuring direction is the half that matters less: telling an author a
+  // dead token is live costs them a needless panic, where the reverse costs them a live leak.
+  const detailOf = (t: string | null) =>
+    shareState(link({ Status: 'Closed', PublicLinkToken: t }), NOW).detail;
+
+  it('does not assert the token is still redeemable', () => {
+    expect(detailOf('tok_abc')).not.toMatch(/can still be traded|is still redeemable/i);
+  });
+
+  it('does not assert the withdrawal has not happened', () => {
+    expect(detailOf('tok_abc')).not.toMatch(/has NOT been withdrawn|was not withdrawn/i);
+  });
+
+  it('still warns — hedging must not become silence', () => {
+    // The whole point is that the author is told. A detail that says nothing is as wrong as
+    // one that overclaims, just quieter.
+    const detail = detailOf('tok_abc');
+    expect(detail).toMatch(/withdraw/i);
+    expect(detail).toMatch(/may|might|not confirmed|treat/i);
+    expect(detail).not.toBe(detailOf(null));
+  });
+});

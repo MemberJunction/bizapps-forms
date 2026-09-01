@@ -221,7 +221,6 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
 
   // -------------------------------------------------------------------- state
 
-  /** The effective state of a link — what a respondent opening it right now would get. */
   /**
    * Whether the "Open to responses" switch should read ON for this link.
    *
@@ -233,6 +232,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     return isOpenToResponses(link);
   }
 
+  /** The effective state of a link — what a respondent opening it right now would get. */
   protected stateOf(link: mjBizAppsFormsFormDistributionEntity): ShareState {
     return shareState(link, new Date());
   }
@@ -327,6 +327,11 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    * Worth saying out loud rather than leaving to the badge: an author turning a link off is
    * usually doing it BECAUSE they want it to stop working, and "it is off" is what they will
    * read from the switch. Silence here is the same overclaim the badge used to make.
+   *
+   * It says "not confirmed" rather than "could not withdraw" because the record cannot tell the
+   * two failures apart — `revoke-failed` leaves the token live, `unlink-failed` means the revoke
+   * landed and only the record is stale, and both leave the same two columns. See
+   * {@link credentialMayStillRedeem}, whose docstring draws exactly this limit.
    */
   private warnIfStillRedeemable(linkId: string): void {
     const link = this.links.find((l) => l.ID === linkId);
@@ -334,9 +339,10 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     this.actionError =
-      'This link is turned off, but the server could not withdraw its access token, so the old ' +
-      'web address may still open the form. It will try again the next time this link is saved. ' +
-      'If it keeps failing, someone technical needs to look at the server log.';
+      'This link is turned off, but its access token is still on record, so the withdrawal is ' +
+      'not confirmed — treat the old web address as possibly still working. The server tries ' +
+      'again the next time this link is saved. If it keeps failing, someone technical needs to ' +
+      'look at the server log.';
     this.cdr.markForCheck();
   }
 
