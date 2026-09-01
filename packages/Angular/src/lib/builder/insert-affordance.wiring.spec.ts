@@ -129,3 +129,24 @@ describe('the insert reuses the existing write paths', () => {
     expect(insert).toMatch(/noteAnyDamage\(before/);
   });
 });
+
+describe('the type picker takes focus when it opens', () => {
+  const picker = (): string => read('question-type-picker.component.ts');
+
+  it('makes the dialog panel focusable and focuses it', () => {
+    // REGRESSION GUARD. The dialog's arrow-key and Enter handling is bound to the panel, and a
+    // keydown only reaches it by bubbling from whatever has focus. That used to be the search
+    // box; removing the search box left focus outside the modal entirely, so the arrow keys did
+    // nothing and focus stayed on the page behind the overlay — a keyboard user could tab around
+    // the canvas underneath a modal they could not reach.
+    const source = picker();
+    expect(source).toMatch(/class="qtp"[\s\S]{0,200}?tabindex="-1"/);
+    expect(source).toMatch(/ngAfterViewInit\(\)[\s\S]{0,200}?\.focus\(\)/);
+  });
+
+  it('does not paint a focus ring on the panel itself', () => {
+    // It is focused to receive keys, not because the author aimed at it; a ring around the whole
+    // dialog reads as a selection they made.
+    expect(picker()).toMatch(/\.qtp:focus[^{]*\{[^}]*outline:\s*none/);
+  });
+});

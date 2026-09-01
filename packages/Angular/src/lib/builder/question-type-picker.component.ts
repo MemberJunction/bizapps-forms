@@ -21,12 +21,16 @@
  * as help on a list you are scanning: twenty-five rows each ending in a grey sentence is a wall,
  * and the label is what an author is actually looking for. The hint survives as a `title`.
  *
- * The left rail holds the search and a short shortcut list — see `COMMON_TYPES`, which is a fixed
- * curated set and says so, because nothing here records what this author actually reaches for.
+ * NO SEARCH. Every type is visible at once, so a filter could only hide rows already in view,
+ * and it cost a mode, an empty state and a second list shape to keep. The left rail holds the
+ * shortcut list alone — see `COMMON_TYPES`, a fixed curated set that says so, because nothing
+ * here records what this author actually reaches for.
  *
- * The search box is the palette's own — `.mjf-input` with the magnifying glass absolutely
- * positioned over its left padding, the same markup as `.fb-palette-search` — so the two ways
- * into the catalog look like two views of one thing.
+ * THE HIGHLIGHT HAS ONE OWNER AT A TIME. The mouse highlights through CSS `:hover`, which cannot
+ * get stuck because it is not state; the keyboard highlights through an index. The mouse used to
+ * WRITE that index on `mouseenter`, and nothing cleared it — so a row stayed lit after the
+ * pointer left, and two rows could be lit at once. Entering the list now clears the index back to
+ * `NO_HIGHLIGHT` and leaves the pointer to `:hover`; the first arrow key takes it back.
  */
 import {
   AfterViewInit,
@@ -48,6 +52,7 @@ import { questionTypeColorClass } from './question-type-catalog';
 import {
   commonTypes,
   movedHighlight,
+  NO_HIGHLIGHT,
   pickerGroups,
   pickerTypes,
   type PickerGroup,
@@ -82,6 +87,10 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
   box-shadow: var(--mj-shadow-lg, 0 24px 48px rgba(0, 0, 0, 0.28));
   overflow: hidden;
 }
+
+/* Focused to receive keys, not because the author aimed at it — a ring around the whole dialog
+   would read as a selection they made. Every control inside keeps its own ring. */
+.qtp:focus { outline: none; }
 
 .qtp-head {
   flex: none;
@@ -124,23 +133,12 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
   gap: var(--mjf-stack);
   overflow-y: auto;
 }
-.qtp-search { position: relative; display: flex; align-items: center; }
-.qtp-search i {
-  position: absolute;
-  left: 10px;
-  font-size: var(--mjf-label);
-  color: var(--mj-text-muted);
-  pointer-events: none;
-}
-.qtp-search .mjf-input { width: 100%; padding-left: 30px; }
-
 .qtp-rail-list { display: flex; flex-direction: column; gap: 8px; }
 
 /* The grid: every group on screen at once. Columns rather than a fixed grid, so a group is never
    split across a boundary and the layout reflows on its own as the catalog grows. */
 .qtp-main { flex: 1 1 auto; min-width: 0; overflow-y: auto; }
 .qtp-columns { columns: 3; column-gap: var(--mjf-gap); }
-.qtp-columns--flat { columns: 1; }
 .qtp-group { break-inside: avoid; margin: 0 0 var(--mjf-gap); }
 
 .qtp-heading {
@@ -192,7 +190,6 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
   background: color-mix(in srgb, var(--mjf-viz-fill) 14%, transparent);
 }
 
-.qtp-empty { margin: 0; padding: var(--mjf-gap); font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 
 @media (max-width: 900px) {
   .qtp-body { flex-direction: column; overflow-y: auto; }
@@ -211,7 +208,18 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
   template: `
     <div class="qtp-backdrop" (click)="Dismissed.emit()"></div>
 
-    <div class="qtp" role="dialog" aria-modal="true" aria-label="Insert a question" (keydown)="onKeydown($event)">
+    <!-- tabindex + focus on open: the arrow keys and Enter are handled here, and a keydown only
+         reaches this element by bubbling from whatever holds focus. It also puts focus INSIDE the
+         modal, rather than leaving it on the canvas behind the overlay. -->
+    <div
+      #panel
+      class="qtp"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Insert a question"
+      tabindex="-1"
+      (keydown)="onKeydown($event)"
+    >
       <div class="qtp-head">
         <h2 class="qtp-title">Insert a question</h2>
         <button type="button" class="qtp-close" aria-label="Close" (click)="Dismissed.emit()">
@@ -221,22 +229,6 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
 
       <div class="qtp-body">
         <div class="qtp-rail">
-          <div class="qtp-search">
-            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-            <input
-              #search
-              type="search"
-              class="mjf-input"
-              placeholder="Search question types"
-              aria-label="Search question types"
-              [value]="query"
-              (input)="setQuery(search.value)"
-            />
-          </div>
-
-          <!-- Hidden while searching: a fixed shortcut list beside a filtered result set invites
-               the reading that it was filtered too. -->
-          @if (query.trim().length === 0) {
             <div class="qtp-rail-list">
               <p class="qtp-heading">Common</p>
               @for (meta of common; track meta.type) {
@@ -253,11 +245,12 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
                 </button>
               }
             </div>
-          }
         </div>
 
         <div class="qtp-main">
-          <div class="qtp-columns" [class.qtp-columns--flat]="query.trim().length > 0" role="listbox" aria-label="Question types">
+          <!-- Entering the list hands the highlight to the pointer: the index goes back to
+               NO_HIGHLIGHT and :hover takes over, so nothing stays lit once the pointer leaves. -->
+          <div class="qtp-columns" role="listbox" aria-label="Question types" (mouseenter)="releaseHighlight()">
             @for (group of groups; track group.heading) {
               <div class="qtp-group">
                 <p class="qtp-heading">{{ group.heading }}</p>
@@ -269,7 +262,6 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
                     [class.is-highlighted]="indexOf(meta.type) === highlighted"
                     [attr.aria-selected]="indexOf(meta.type) === highlighted"
                     [title]="meta.hint"
-                    (mouseenter)="highlighted = indexOf(meta.type)"
                     (mousedown)="$event.preventDefault(); pick(meta.type)"
                   >
                     <span [class]="'qtp-tile ' + colorClassFor(meta.type)">
@@ -281,9 +273,6 @@ const QUESTION_TYPE_PICKER_CSS = /* css */ `
               </div>
             }
           </div>
-          @if (groups.length === 0) {
-            <p class="qtp-empty">No question type matches “{{ query }}”.</p>
-          }
         </div>
       </div>
     </div>
@@ -296,10 +285,9 @@ export class QuestionTypePickerComponent implements AfterViewInit {
   /** Escape, the close button, or the backdrop. The caller closes; nothing here decides that. */
   @Output() Dismissed = new EventEmitter<void>();
 
-  @ViewChild('search') private searchBox?: ElementRef<HTMLInputElement>;
+  @ViewChild('panel') private panel?: ElementRef<HTMLElement>;
 
-  protected query = '';
-  protected highlighted = 0;
+  protected highlighted = NO_HIGHLIGHT;
 
   private readonly cdr = inject(ChangeDetectorRef);
 
@@ -307,9 +295,7 @@ export class QuestionTypePickerComponent implements AfterViewInit {
   protected readonly colorClassFor = questionTypeColorClass;
 
   ngAfterViewInit(): void {
-    // Focused on open, so the dialog is usable without a second click — and so there is no
-    // separate "search" button to press before typing does anything.
-    this.searchBox?.nativeElement.focus();
+    this.panel?.nativeElement.focus();
   }
 
   /** Escape closes, which is what anyone expects of a modal — matching the image picker. */
@@ -322,20 +308,20 @@ export class QuestionTypePickerComponent implements AfterViewInit {
   protected readonly common = commonTypes();
 
   protected get groups(): PickerGroup[] {
-    return pickerGroups(this.query);
+    return pickerGroups();
+  }
+
+  /** Hand the highlight back to the pointer — see the note on NO_HIGHLIGHT. */
+  protected releaseHighlight(): void {
+    if (this.highlighted !== NO_HIGHLIGHT) {
+      this.highlighted = NO_HIGHLIGHT;
+      this.cdr.markForCheck();
+    }
   }
 
   /** Position of a type in the flattened list — what the highlight and the arrow keys index. */
   protected indexOf(type: FormQuestionType): number {
     return pickerTypes(this.groups).findIndex((meta) => meta.type === type);
-  }
-
-  protected setQuery(value: string): void {
-    this.query = value;
-    // Back to the top on every keystroke: the highlight is an index, and the list under it just
-    // changed, so keeping the number would move the highlight to an unrelated row.
-    this.highlighted = 0;
-    this.cdr.markForCheck();
   }
 
   protected onKeydown(event: KeyboardEvent): void {

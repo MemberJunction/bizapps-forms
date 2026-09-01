@@ -17,38 +17,18 @@ import {
   QUESTION_PALETTE_GROUPS,
   questionTypeMeta,
   questionTypesInGroup,
-  searchQuestionTypes,
   type QuestionPaletteGroup,
   type QuestionTypeMeta,
 } from './question-type-catalog';
 
-/** One rendered block of the popover: a heading, and the types under it. */
+/** One rendered block of the dialog: a heading, and the types under it. */
 export interface PickerGroup {
-  /** The palette group's name, or {@link SEARCH_HEADING} once the list is a ranked one. */
-  readonly heading: QuestionPaletteGroup | typeof SEARCH_HEADING;
+  readonly heading: QuestionPaletteGroup;
   readonly types: readonly QuestionTypeMeta[];
 }
 
-/** The single heading a filtered list sits under. */
-export const SEARCH_HEADING = 'Matches';
-
-/**
- * The popover's contents for the current query.
- *
- * SEARCH FLATTENS. Once the author is typing, ranking beats structure and the headings are noise
- * between them and the two rows that matched — so a query collapses the seven groups into one
- * list, in `searchQuestionTypes`' own order (which matches label, hint AND type name, so "pick
- * one" finds Multiple choice through its hint).
- *
- * A query matching nothing returns NO groups, rather than falling back to the whole catalog. The
- * fallback reads as a search that silently did not run, and the author then picks off a list they
- * believe was filtered.
- */
-export function pickerGroups(query: string): PickerGroup[] {
-  if (query.trim().length > 0) {
-    const matches = searchQuestionTypes(query);
-    return matches.length > 0 ? [{ heading: SEARCH_HEADING, types: matches }] : [];
-  }
+/** The dialog's contents: the whole catalog, under the palette's own headings. */
+export function pickerGroups(): PickerGroup[] {
   return QUESTION_PALETTE_GROUPS.map((heading) => ({ heading, types: questionTypesInGroup(heading) })).filter(
     (group) => group.types.length > 0,
   );
@@ -65,16 +45,34 @@ export function pickerTypes(groups: readonly PickerGroup[]): QuestionTypeMeta[] 
 }
 
 /**
+ * "No row is highlighted" — the resting state, and what the list holds whenever the pointer is
+ * inside it.
+ *
+ * The mouse owns the highlight through CSS `:hover`, which cannot get stuck because it is not
+ * state. The keyboard owns it through this index. Letting both paint at once put two lit rows on
+ * screen, and letting the mouse WRITE this index left a row lit after the pointer had gone —
+ * which is the bug this constant exists to make unrepresentable.
+ */
+export const NO_HIGHLIGHT = -1;
+
+/**
  * Where the highlight lands after an arrow key.
  *
  * Wraps, so a held arrow never dead-ends against either end of a twenty-five row list.
  *
- * An EMPTY list highlights nothing — `-1`, not `0`. Zero would mark a row that is not on screen
- * (the failed-search state has none), and Enter would then commit whatever later filled the slot.
+ * FROM {@link NO_HIGHLIGHT} the first press lands at an END of the list — top for Down, bottom
+ * for Up — rather than wherever the modulo of -1 happens to fall, which is neither end and looks
+ * like the list moved on its own.
+ *
+ * An empty list highlights nothing at all: a marked row that is not on screen would let Enter
+ * commit whatever later filled the slot.
  */
 export function movedHighlight(current: number, delta: number, count: number): number {
   if (count <= 0) {
-    return -1;
+    return NO_HIGHLIGHT;
+  }
+  if (current === NO_HIGHLIGHT) {
+    return delta > 0 ? 0 : count - 1;
   }
   return (((current + delta) % count) + count) % count;
 }

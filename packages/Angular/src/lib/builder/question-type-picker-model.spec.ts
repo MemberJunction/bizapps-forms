@@ -14,61 +14,38 @@
  * An author reaches for "a choice question", not "something beginning with M". Reusing the
  * palette's groups also means the two surfaces teach one map of the catalog instead of two.
  *
- * SEARCH FLATTENS, deliberately: once you are typing, ranking beats structure, and the headings
- * become noise between you and the two things that matched.
+ * THERE IS NO SEARCH. All twenty-five types are on screen at once in three columns, so a filter
+ * would only ever hide things that are already visible — and it cost a mode, an empty state and
+ * a second list shape to maintain.
  */
 import { describe, expect, it } from 'vitest';
 import {
   COMMON_TYPES,
   commonTypes,
   movedHighlight,
+  NO_HIGHLIGHT,
   pickerGroups,
   pickerTypes,
-  SEARCH_HEADING,
 } from './question-type-picker-model';
 import { QUESTION_PALETTE_GROUPS } from './question-type-catalog';
 
 describe('pickerGroups', () => {
   it('shows the palette’s own groups, in the palette’s own order, when nothing is typed', () => {
-    expect(pickerGroups('').map((g) => g.heading)).toEqual([...QUESTION_PALETTE_GROUPS]);
+    expect(pickerGroups().map((g) => g.heading)).toEqual([...QUESTION_PALETTE_GROUPS]);
   });
 
   it('keeps a group’s types together', () => {
-    const choice = pickerGroups('').find((g) => g.heading === 'Choice');
+    const choice = pickerGroups().find((g) => g.heading === 'Choice');
     expect(choice?.types.map((t) => t.label)).toContain('Multiple choice');
     expect(choice?.types.map((t) => t.label)).toContain('Checkboxes');
     expect(choice?.types.map((t) => t.label)).toContain('Dropdown');
   });
 
-  it('flattens to one list once the author starts typing', () => {
-    // One group, not seven: the headings are noise between a query and the rows that matched.
-    // The list is WIDER than the labels that match — "email" also finds Contact info, whose hint
-    // is "Name, email, phone and company in one block". That is the hint search doing its job,
-    // not a leak: an author typing "email" may well want the block that collects one.
-    const groups = pickerGroups('email');
-    expect(groups).toHaveLength(1);
-    expect(groups[0].heading).toBe(SEARCH_HEADING);
-    expect(groups[0].types.map((t) => t.label)).toContain('Email');
-  });
-
-  it('searches the hint as well as the name, so a description finds the type', () => {
-    // `searchQuestionTypes` already matches label, hint and type name. "pick one" is the hint on
-    // Multiple choice and appears in no label — the case that proves the hint is searched.
-    const labels = pickerGroups('pick one').flatMap((g) => g.types.map((t) => t.label));
-    expect(labels).toContain('Multiple choice');
-  });
-
-  it('shows nothing rather than everything when the query matches no type', () => {
-    // Falling back to the full catalog on a failed search is the worst arm: it looks like the
-    // search silently did not run, and the author picks the wrong type off a list they think
-    // was filtered.
-    expect(pickerGroups('zzzz')).toEqual([]);
-  });
 });
 
 describe('pickerTypes', () => {
   it('reads the groups in render order, which is what the arrow keys walk', () => {
-    const groups = pickerGroups('');
+    const groups = pickerGroups();
     expect(pickerTypes(groups)).toEqual(groups.flatMap((g) => g.types));
   });
 });
@@ -87,9 +64,19 @@ describe('movedHighlight', () => {
   });
 
   it('has nothing to highlight in an empty list', () => {
-    // The failed-search state. Returning 0 would highlight a row that is not on screen, and
-    // Enter would then pick whatever later filled that slot.
-    expect(movedHighlight(0, 1, 0)).toBe(-1);
+    expect(movedHighlight(0, 1, 0)).toBe(NO_HIGHLIGHT);
+  });
+
+  it('starts at the top when arrowing down from nothing highlighted', () => {
+    // NO_HIGHLIGHT is the resting state whenever the pointer is in the list — the mouse owns the
+    // highlight then, through :hover, and two rows lit at once reads as a bug. The first arrow
+    // key takes it back, and it has to land somewhere sensible rather than at the modulo's answer.
+    expect(movedHighlight(NO_HIGHLIGHT, 1, 5)).toBe(0);
+  });
+
+  it('starts at the bottom when arrowing up from nothing highlighted', () => {
+    // Plain modulo would give 3 here, which is neither end of the list.
+    expect(movedHighlight(NO_HIGHLIGHT, -1, 5)).toBe(4);
   });
 });
 
@@ -104,7 +91,7 @@ describe('commonTypes', () => {
   it('offers only types the full catalog also offers', () => {
     // The rail is a shortcut INTO the grid, not a second catalog. A type reachable only from the
     // rail would be invisible to anyone who searched for it first.
-    const everything = pickerTypes(pickerGroups('')).map((meta) => meta.type);
+    const everything = pickerTypes(pickerGroups()).map((meta) => meta.type);
     for (const type of commonTypes()) {
       expect(everything).toContain(type.type);
     }
