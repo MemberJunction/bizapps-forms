@@ -325,6 +325,18 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
   });
 
+  it.each(['Consumed', 'Expired'] as const)(
+    'leaves a %s invite exactly as it ended — a terminal status is already unredeemable',
+    async (status) => {
+      // The migration refuses to overwrite these ("would claim an operator action that never
+      // happened") and `SetAnonymousInviteExpiry` refuses too. This method was the odd one out.
+      mockState.loadedStatus = status;
+      const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
+      expect(result).toMatchObject({ success: true, changed: false });
+      expect(mockState.lastSavedInvite).toBeUndefined();
+    },
+  );
+
   it('is idempotent on an already-revoked invite, and writes nothing', async () => {
     mockState.loadedStatus = 'Revoked';
     const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
@@ -410,6 +422,20 @@ describe('MagicLinkInviteMinter.SetAnonymousInviteExpiry', () => {
     const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(CRED, { closeAt: null, maxLifetimeHours: undefined }, contextUser);
     expect(result.changed).toBe(true);
     expect((mockState.lastSavedInvite!.ExpiresAt as Date).toISOString()).toBe(NO_EXPIRY.toISOString());
+  });
+
+  it('treats a stored expiry that arrives as an ISO string as the same instant, not as "different"', async () => {
+    // `asInstant` two functions up handles "a value the store may hand back as a Date or as a
+    // string". `sameInstant` did not, so a string would never compare equal, the row would be
+    // rewritten on every save, and the expiry would "walk forward forever" in a new guise. The
+    // cast models the store's behaviour the production code documents: the type lies here.
+    mockState.loadedExpiresAt = '2026-10-01T00:00:00.000Z' as unknown as Date;
+    const result = await new MagicLinkInviteMinter().SetAnonymousInviteExpiry(
+      CRED,
+      { closeAt: new Date('2026-10-01T00:00:00.000Z'), maxLifetimeHours: undefined },
+      contextUser,
+    );
+    expect(result).toMatchObject({ success: true, changed: false });
   });
 
   it('writes nothing when the expiry already matches', async () => {
@@ -541,6 +567,15 @@ describe('MagicLinkInviteMinter — the credential must belong to the link actin
     );
     expect(result.success).toBe(false);
     expect(mockState.lastSavedInvite).toBeUndefined();
+  });
+
+  it('marks an ownership refusal as REFUSED, so the caller can tell it from a failure a retry will fix', async () => {
+    // `success: false` alone reads as "try again on the next save". A foreign or NULL ResourceID
+    // is refused on EVERY save, and a caller that cannot tell the two apart logs a permanent
+    // condition as a transient one.
+    mockState.loadedResourceID = 'someone-elses-distribution';
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
+    expect(result).toMatchObject({ success: false, changed: false, refused: true });
   });
 
   it('reports the refusal as a FAILURE, never as a postcondition that holds', async () => {

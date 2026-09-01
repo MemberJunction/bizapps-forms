@@ -10,6 +10,8 @@
  *                                 anonymous link minted. Default `PublicLink,Embed,QR`
  *                                 (NOT `Email` — email distributions are individually
  *                                 addressed, not anonymous public links).
+ *                                 An unrecognised token is REFUSED (thrown), never ignored —
+ *                                 see `channelsFromEnv` for why that changed.
  *  - `FORMS_MAGICLINK_MAX_USES`   Default `maxUses` for the minted invite. Default
  *                                 1,000,000 — effectively a public URL. A distribution's
  *                                 own `MaxResponses` quota is enforced separately at submit.
@@ -109,17 +111,36 @@ function optionalPositiveNumberFromEnv(key: string): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-/** Parse the channel allow-list; unknown tokens are ignored; empty falls back to defaults. */
+/**
+ * Parse the channel allow-list. An unrecognised token is REFUSED, not ignored.
+ *
+ * Ignoring was correct while this set was a mint gate — an unknown token meant "mint nothing new
+ * for it". `decideProvisioning` reads it as a state function now, so a channel absent from the
+ * set is a channel whose live links are unwarranted, and the next save of each revokes its
+ * credential. A lowercase `embed` would take every embedded form on the host dark, silently, on
+ * the next respondent submission. Throwing is fail-safe: the save-path caller evaluates this
+ * inside its `try`, so a malformed list leaves every credential untouched and logs on each save;
+ * the boot-time caller reports it through the respondent readiness line.
+ */
 function channelsFromEnv(key: string): ReadonlySet<DistributionChannelType> {
   const raw = process.env[key];
   if (raw === undefined || raw.trim() === '') {
     return new Set(DEFAULT_CHANNELS);
   }
-  const valid = new Set<DistributionChannelType>(ALL_CHANNELS);
-  const parsed = raw
+  const valid = new Set<string>(ALL_CHANNELS);
+  const tokens = raw
     .split(',')
     .map((s) => s.trim())
-    .filter((s): s is DistributionChannelType => valid.has(s as DistributionChannelType));
+    .filter((s) => s.length > 0);
+  const unknown = tokens.filter((t) => !valid.has(t));
+  if (unknown.length > 0) {
+    throw new Error(
+      `${key} contains ${unknown.map((t) => `'${t}'`).join(', ')}, which is not a distribution channel. ` +
+        `Valid values (case-sensitive): ${ALL_CHANNELS.join(', ')}. Refusing to provision until this is ` +
+        `fixed, because a narrowed list REVOKES the credentials of every live link outside it.`,
+    );
+  }
+  const parsed = tokens.filter((t): t is DistributionChannelType => valid.has(t));
   return parsed.length > 0 ? new Set(parsed) : new Set(DEFAULT_CHANNELS);
 }
 

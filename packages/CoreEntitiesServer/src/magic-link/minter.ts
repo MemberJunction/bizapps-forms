@@ -92,6 +92,12 @@ export interface InviteWriteResult {
   changed: boolean;
   /** Human-readable reason for a failure, or a note on a no-op success. */
   message?: string;
+  /**
+   * True when the implementation DECLINED rather than failed: the invite is not scoped to the
+   * resource it was asked on behalf of. Retrying cannot change that answer, so a caller that
+   * retries on failure must not treat this as one — it is the row that is wrong, not the moment.
+   */
+  refused?: true;
 }
 
 /**

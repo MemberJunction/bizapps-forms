@@ -419,3 +419,16 @@ describe('the paused detail claims only what the record can prove', () => {
     expect(detail).not.toBe(detailOf(null));
   });
 });
+
+describe('a link that was never turned on is not told to turn itself back on', () => {
+  it('gives a Draft link its own detail, with no claim about a withdrawal', () => {
+    // `Draft` is the column's own default, so an Action or an import lands here. The static
+    // paused copy says "while it is off" and "turning it back on" about a link that was never
+    // on, and reads as if something was withdrawn. Nothing was.
+    const draft = shareState(link({ Status: 'Draft', IsActive: true, PublicLinkToken: null }), NOW);
+    expect(draft.kind).toBe('paused');
+    expect(draft.detail).toMatch(/not been turned on/i);
+    expect(draft.detail).not.toMatch(/back on/);
+    expect(draft.detail).not.toMatch(/withdraw/i);
+  });
+});

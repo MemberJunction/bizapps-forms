@@ -1276,6 +1276,15 @@ const EXTENDED_PROPERTY_PROCS = /\b(?:sp_addextendedproperty|sp_updateextendedpr
 const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\s+(?:AS\s+)?((?:N?VARCHAR|VARBINARY)\s*\(\s*MAX\s*\)|XML\b)/gi;
 
 /**
+ * A DECLARE statement's body — the only place a MAX-typed VARIABLE can be introduced. Scoping the
+ * per-variable scan to these is what stops a stored-procedure PARAMETER (`CREATE PROCEDURE … @Value
+ * NVARCHAR(MAX)`) being collected and then matched against a call's `@value` argument, which would
+ * flag every extended-property write in that file. A body ends at `;`, a blank line, or `GO`, and a
+ * single DECLARE may introduce several variables (`DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX)`).
+ */
+const DECLARE_STATEMENT = /\bDECLARE\b([\s\S]*?)(?=;|\n\s*\n|^\s*GO\s*$|$(?![\s\S]))/gim;
+
+/**
  * The MAX-typed variables handed to an extended-property procedure in `sql`.
  *
  * Two passes: collect every MAX-typed declaration, then read each extended-property CALL'S OWN
@@ -1295,8 +1304,10 @@ const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\s+(?:AS\s+)?((?:N?VARCHAR|VARBIN
  */
 export function findMaxTypedExtendedPropertyValues(sql) {
     const maxTyped = new Map();
-    for (const m of sql.matchAll(MAX_TYPED_DECLARATION)) {
-        maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\s+/g, ''));
+    for (const decl of sql.matchAll(DECLARE_STATEMENT)) {
+        for (const m of decl[1].matchAll(MAX_TYPED_DECLARATION)) {
+            maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\s+/g, ''));
+        }
     }
     if (maxTyped.size === 0) {
         return [];
@@ -1308,8 +1319,9 @@ export function findMaxTypedExtendedPropertyValues(sql) {
         const args = sql.slice(from, terminator < 0 ? sql.length : from + terminator);
         for (const ref of args.matchAll(/@[A-Za-z0-9_]+/g)) {
             const declaredType = maxTyped.get(ref[0].toLowerCase());
-            // A parameter NAME is also an `@identifier`; only a declared MAX variable can be the
-            // argument, and `@value` itself is never declared, so name/value cannot be confused.
+            // A parameter NAME is also an `@identifier`. Only a variable inside a DECLARE statement
+            // is collected above, so a stored-procedure parameter that happens to be named `@Value`
+            // in the same file is not mistaken for the call's `@value` argument.
             if (!declaredType) continue;
             hits.push({
                 variable: ref[0],

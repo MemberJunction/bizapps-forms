@@ -52,6 +52,8 @@ export interface ProvisionOutcome {
     | 'expiry-updated'
     | 'expiry-update-failed'
     | 'revoke-failed'
+    /** The minter refused: the invite is not scoped to this distribution. Will NOT self-heal. */
+    | 'revoke-refused-not-ours'
     | 'unlink-failed'
     | 'skipped-no-minter'
     | 'skipped-no-user'
@@ -140,11 +142,20 @@ export async function runProvisioning(
 /**
  * Keep a credential we are not replacing bounded by the link it belongs to.
  *
- * Runs on every save of a live, credentialled distribution — the common case — so it
- * has to be cheap and silent when nothing moved, which is what the minter's
- * `{ changed: false }` reports. Missing minter or user is not an error here: there is
- * nothing to correct that a later save cannot correct, and this path must never turn
- * an ordinary rename into a logged failure.
+ * Runs on every save of a live, credentialled distribution — which includes every public
+ * submission, since submitting bumps `ResponseCount`. Each run LOADS THE INVITE ROW: one
+ * core-entity read per save, on the anonymous hot path, and it is the price of the expiry
+ * staying in step. It cannot be skipped on "nothing to re-bound" without reading the row,
+ * because the distribution does not record the credential's expiry: when `CloseAt` was just
+ * cleared the stored value is the OLD date, not the sentinel, and when a previous re-bound
+ * failed this save is its retry. A review proposed skipping when `closeAt` is null and no
+ * ceiling is set; that reintroduces the "Remove the expiry" defect (a link badged Live whose
+ * token core refuses) and breaks the retry. So the read stays, and this says what it costs.
+ *
+ * Silent when nothing moved, which is what the minter's `{ changed: false }` reports after
+ * the read. Missing minter or user is not an error here: there is nothing to correct that a
+ * later save cannot correct, and this path must never turn an ordinary rename into a logged
+ * failure.
  */
 async function realignExpiry(
   ctx: ProvisionContext,
@@ -204,7 +215,7 @@ async function withdrawCredential(
   minter: IAnonymousMagicLinkMinter,
   contextUser: UserInfo,
   persistCredential: PersistCredential,
-): Promise<'withdrawn' | 'revoke-failed' | 'unlink-failed'> {
+): Promise<'withdrawn' | 'revoke-failed' | 'revoke-refused-not-ours' | 'unlink-failed'> {
   const inviteId = ctx.magicLinkInviteId?.trim();
   if (!inviteId) {
     // Unreachable via decideProvisioning, which only asks for a revoke when one is
@@ -221,6 +232,15 @@ async function withdrawCredential(
     contextUser,
   );
   if (!revoked.success) {
+    if (revoked.refused) {
+      LogError(
+        `[FormDistribution] Refused to revoke magic-link invite ${inviteId} for distribution ` +
+          `${ctx.distributionId}: ${revoked.message ?? 'not scoped to this distribution'}. This will NOT ` +
+          `self-heal on a later save — the invite's ResourceID does not name this distribution. Its ` +
+          `token may still redeem. Reissue the link, or correct the row by hand.`,
+      );
+      return 'revoke-refused-not-ours';
+    }
     LogError(
       `[FormDistribution] Could not revoke magic-link invite ${inviteId} for distribution ` +
         `${ctx.distributionId}: ${revoked.message ?? 'unknown error'}. The credential is left LINKED ` +

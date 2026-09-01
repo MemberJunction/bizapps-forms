@@ -86,10 +86,16 @@ const NO_EXPIRY_SENTINEL = new Date('9999-12-31T00:00:00.000Z');
  */
 const EPOCH = new Date(0);
 
-/** Whether two instants are the same, treating an unparseable stored value as "different". */
-function sameInstant(a: Date | null | undefined, b: Date): boolean {
-  const left = a instanceof Date ? a.getTime() : Number.NaN;
-  return Number.isFinite(left) && left === b.getTime();
+/**
+ * Whether two instants are the same, treating an unparseable stored value as "different".
+ *
+ * Reads the stored side through {@link asInstant}, for the same reason that function exists: the
+ * store may hand `ExpiresAt` back as a string, and a comparison that only accepts a `Date` would
+ * never settle — rewriting the row on every save, the "walks forward forever" failure in a new guise.
+ */
+function sameInstant(a: Date | string | null | undefined, b: Date): boolean {
+  const left = asInstant(a);
+  return left !== null && left.getTime() === b.getTime();
 }
 
 /**
@@ -151,8 +157,8 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * magic links off is a moment when live credentials should stop being live, and
    * the write is a plain entity save that needs nothing from the magic-link runtime.
    *
-   * The postcondition is "this invite cannot be redeemed", so an invite that is
-   * already `Revoked`, or whose row has genuinely been deleted, is a success that
+   * The postcondition is "this invite cannot be redeemed", so an invite in any
+   * terminal status, or whose row has genuinely been deleted, is a success that
    * writes nothing. Reporting failure there would wedge the distribution: its hook
    * refuses to unlink a credential it could not kill, and would retry forever.
    */
@@ -161,8 +167,12 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     contextUser: UserInfo,
   ): Promise<InviteWriteResult> {
     return this.writeToInvite(credential, contextUser, 'revoke', (invite) => {
-      if (invite.Status === 'Revoked') {
-        return { verdict: 'settled', message: `Invite ${invite.ID} was already revoked.` };
+      if (invite.Status !== 'Active') {
+        // Any status other than Active is already unredeemable — `evaluateInvite` refuses all of
+        // them — so the postcondition holds and nothing is written. Overwriting a `Consumed` or
+        // `Expired` row with `Revoked` would claim an operator action that never happened, which
+        // is the rule the backfill migration and `SetAnonymousInviteExpiry` already follow.
+        return { verdict: 'settled', message: `Invite ${invite.ID} is ${invite.Status}; already unredeemable.` };
       }
       // Status alone, deliberately: it is the first thing `evaluateInvite` checks and
       // the consume UPDATE's `Status='Active'` guard already excludes it, so also
@@ -330,7 +340,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
           `Invite ${id} is scoped to resource ${String(invite.ResourceID)}, not ${credential.resourceId}; ` +
           `refusing to ${verb} it.`;
         LogError(`[MagicLinkInviteMinter] ${message}`);
-        return { success: false, changed: false, message };
+        return { success: false, changed: false, refused: true, message };
       }
 
       const outcome = change(invite);

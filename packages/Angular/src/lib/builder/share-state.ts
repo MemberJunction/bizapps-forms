@@ -236,6 +236,11 @@ export function credentialMayStillRedeem(
  * whose entire purpose is stopping a link being redeemed.
  */
 function pausedDetail(facts: ShareLinkFacts): string | null {
+  if (facts.Status === 'Draft' && !facts.PublicLinkToken) {
+    // Never on, nothing withdrawn: the column's default, where an Action or an import lands. The
+    // static paused copy says "while it is off" and "turning it back on", which is false here.
+    return 'This link has not been turned on yet. Turn it on to issue its web address.';
+  }
   if (!credentialMayStillRedeem(facts)) {
     return null;
   }

@@ -1528,6 +1528,42 @@ check(
     'the whole statement can be lowercase and still be the same broken migration',
 );
 
+check(
+    'case 76: a stored-procedure PARAMETER typed NVARCHAR(MAX) is not a declared variable, so a call in the same file is not blamed',
+    findMaxTypedExtendedPropertyValues(
+        "CREATE PROCEDURE [x].[spThing] @Value NVARCHAR(MAX) AS BEGIN SELECT 1 END;\n" +
+            "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'a literal', @level0type = N'SCHEMA';\n",
+    ).length === 0,
+    'only a DECLARE introduces a variable; a parameter named @Value must not be matched to the call\'s @value',
+);
+
+check(
+    'case 77: a blank line ends an unterminated extended-property call, so a missing semicolon cannot swallow the rest of the file',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC sp_addextendedproperty @name = N'MS_Description', @value = N'literal'\n\nSELECT @d;\n",
+    ).length === 0,
+    'the @d two lines below the call belongs to the SELECT, not to the argument list',
+);
+
+// 78. CHECK 6 reads migrations-teardown too. A teardown that cannot execute is as fatal as an
+//     install that cannot, and the scan lists the directory by name — one edit drops it silently.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-teardown', 'V001__Teardown.sql'),
+            "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC sp_dropextendedproperty @name = N'MS_Description';\nEXEC sp_updateextendedproperty @name = N'MS_Description', @value = @d;\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 78: a MAX-typed extended-property value in a TEARDOWN script is gated, not only in an install migration',
+            violations.some((v) => v.includes('migrations-teardown') && /sql_variant|MAX/i.test(v)),
+            JSON.stringify(violations),
+        );
+    },
+);
+
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);
     process.exit(1);

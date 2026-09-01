@@ -96,6 +96,15 @@ const MUTANTS = [
     ['sqlvariant/proc-restriction', 'only the extended-property procedures are gated, so an ordinary procedure taking a MAX argument is not blamed',
         `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty)\\b/gi;`,
         `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty|spSomethingElse)\\b/gi;`],
+    ['sqlvariant/declare-only', 'only a variable inside a DECLARE statement is a MAX-typed candidate, so a procedure parameter named @Value cannot be mistaken for the call\'s argument',
+        `    for (const decl of sql.matchAll(DECLARE_STATEMENT)) {\n        for (const m of decl[1].matchAll(MAX_TYPED_DECLARATION)) {\n            maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\\s+/g, ''));\n        }\n    }`,
+        `    for (const m of sql.matchAll(MAX_TYPED_DECLARATION)) {\n        maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\\s+/g, ''));\n    }`],
+    ['sqlvariant/blank-line-terminates', 'a blank line ends an unterminated call, so a missing semicolon cannot swallow the rest of the file into one argument list',
+        `const terminator = sql.slice(from).search(/;|\\n\\s*\\n|^\\s*GO\\s*$/m);`,
+        `const terminator = sql.slice(from).search(/;|^\\s*GO\\s*$/m);`],
+    ['sqlvariant/teardown-scanned', 'migrations-teardown is scanned by CHECK 6 too — a teardown that cannot execute is as fatal as an install that cannot',
+        `for (const dirName of [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown']) {`,
+        `for (const dirName of [...SHIPPED_MIGRATION_DIRS]) {`],
 
     // --- the masking layer: the gate's worst bug history, every entry a former silent pass -------
     ['mask/code-units', 'the mask is built from UTF-16 code units, so an astral character cannot slide it out of alignment with the source',

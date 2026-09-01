@@ -274,6 +274,18 @@ describe('runProvisioning — revoking', () => {
     expect(outcome).toEqual({ result: 'revoke-failed', inviteId: OLD_INVITE });
   });
 
+  it('reports an ownership refusal as its own outcome, because a retry will never fix it', async () => {
+    // `revoke-failed` means "try again on the next save". A NULL or foreign `ResourceID` — the
+    // population the backfill migration deliberately leaves alone — is refused on EVERY save,
+    // and a log that reads like a transient failure sends an operator waiting for a retry
+    // that will never land. The token stays on the record and stays redeemable meanwhile.
+    const fake = fakeMinter(undefined, { success: false, changed: false, refused: true, message: 'not ours' });
+    const persist = vi.fn(async () => true);
+    const outcome = await runProvisioning(livingCtx({ status: 'Closed' }), config, fake.minter, contextUser, persist);
+    expect(outcome).toEqual({ result: 'revoke-refused-not-ours', inviteId: OLD_INVITE });
+    expect(persist).not.toHaveBeenCalled();
+  });
+
   it('hands the minter the owning resource, so an implementation CAN refuse a foreign invite', async () => {
     // Retitled deliberately. This used to be called "refuses to act on an invite scoped to a
     // DIFFERENT distribution", which is a security property this test does not have: the fake
