@@ -84,12 +84,70 @@ export const MUTANTS = [
   },
   {
     name: 'hook/delete-before-revoke',
-    behaviour: 'Delete() runs super.Delete FIRST and revokes only after it succeeds',
+    behaviour: 'inside the transaction, Delete() runs super.Delete FIRST — a refused delete then commits no revoke',
     file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
-    // A real, compiling reorder: revoke first, then delete. The behavioural spec's events log then
-    // reads ['revoke', 'delete', 'revoke'], which toEqual(['delete', 'revoke']) rejects.
-    find: '    if (!(await super.Delete(options))) {\n      return false;\n    }\n    if (!inviteId) {\n      return true;\n    }\n\n    const minter = MagicLinkMinterRegistry.Instance.Minter;',
-    replace: '    const minter = MagicLinkMinterRegistry.Instance.Minter;\n    if (inviteId && minter && contextUser) {\n      await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser);\n    }\n    if (!(await super.Delete(options))) {\n      return false;\n    }\n    if (!inviteId) {\n      return true;\n    }',
+    // A real, compiling reorder: revoke first, then delete. A refused delete then returns false and
+    // the transaction COMMITS the revoke — a live link's credential dead over a bounced delete.
+    find: "        if (!(await super.Delete(options))) {\n          return false;\n        }\n        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);",
+    replace: "        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);\n        if (!(await super.Delete(options))) {\n          return false;\n        }",
+    suite: 'packages/CoreEntitiesServer',
+  },
+  {
+    name: 'hook/delete-revoke-outside-transaction',
+    behaviour: "the revoke is created on the row's own provider, so it joins the delete's transaction",
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: "        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);",
+    replace: "        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser);",
+    suite: 'packages/CoreEntitiesServer',
+  },
+  {
+    name: 'hook/delete-revoke-failure-swallowed',
+    behaviour: 'a failed revoke rolls the delete back and refuses it, rather than committing an orphan',
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: "        if (!revoked.success) {\n          throw new Error(revoked.message ?? 'unknown error');\n        }",
+    replace: "        if (!revoked.success) {\n          LogError(revoked.message ?? 'unknown error');\n        }",
+    suite: 'packages/CoreEntitiesServer',
+  },
+  // --- FormDistributionEntityServer: a save carries the STORED pair, and writers take turns ------
+  {
+    name: 'hook/adopt-neutralised',
+    behaviour: 'an update re-reads the credential pair from the store, so a stale instance cannot revert a rotation',
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: "  private async adoptStoredCredential(): Promise<void> {\n    if (this.credentialWriteInFlight || !this.IsSaved) {",
+    replace: "  private async adoptStoredCredential(): Promise<void> {\n    if (true) { return; }\n    if (this.credentialWriteInFlight || !this.IsSaved) {",
+    suite: 'packages/CoreEntitiesServer',
+  },
+  {
+    name: 'hook/adopt-drops-clear',
+    behaviour: 'adopting the stored pair keeps a token this client CLEARED — the reissue request survives',
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: '    this.PublicLinkToken = clearRequested ? null : stored.PublicLinkToken;',
+    replace: '    this.PublicLinkToken = stored.PublicLinkToken;',
+    suite: 'packages/CoreEntitiesServer',
+  },
+  {
+    name: 'hook/turns-not-taken',
+    behaviour: 'two saves of one row are serialised, so a save mid-rotation cannot mint a second replacement',
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: '    return takeTurn(this.ID, () => this.saveAndProvision(options));',
+    replace: '    return this.saveAndProvision(options);',
+    suite: 'packages/CoreEntitiesServer',
+  },
+  // --- FormDistributionEntityServer: the context is built from the columns of the same meaning --
+  {
+    name: 'hook/ctx-isactive-mismapped',
+    behaviour: "the decision reads the row's IsActive, not a constant",
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: '          isActive: this.IsActive,',
+    replace: '          isActive: true,',
+    suite: 'packages/CoreEntitiesServer',
+  },
+  {
+    name: 'hook/ctx-closeat-dropped',
+    behaviour: "the mint is bounded by the row's CloseAt",
+    file: 'packages/CoreEntitiesServer/src/magic-link/FormDistributionEntityServer.ts',
+    find: '          closeAt: this.CloseAt,',
+    replace: '          closeAt: null,',
     suite: 'packages/CoreEntitiesServer',
   },
   // --- provision-runner: the reissue is one save ----------------------------------------------

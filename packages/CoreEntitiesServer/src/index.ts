@@ -23,6 +23,7 @@ export {
   type IAnonymousMagicLinkMinter,
   type MintAnonymousInviteParams,
   type MintAnonymousInviteResult,
+  type InviteWriteHost,
   type InviteWriteResult,
   type InviteExpiryBounds,
   type AnonymousCredentialRef,

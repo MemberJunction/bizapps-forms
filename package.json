@@ -46,6 +46,7 @@
     "smoke:file-links": "node smoke/file-links-path.mjs",
     "smoke:resume-arc": "node smoke/resume-arc-path.mjs",
     "smoke:metadata": "node smoke/metadata-integrity-path.mjs",
+    "smoke:backfill": "node smoke/backfill-path.mjs",
     "smoke:credentials": "cd apps/MJAPI && node credential-lifecycle-smoke.mjs",
     "smoke:credentials:least-privilege": "cd apps/MJAPI && node least-privilege-credential-smoke.mjs"
   },

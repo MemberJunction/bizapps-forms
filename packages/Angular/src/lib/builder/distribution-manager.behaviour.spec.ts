@@ -11,24 +11,35 @@ import '@angular/compiler';
 import { ChangeDetectorRef, Injector, runInInjectionContext } from '@angular/core';
 import { DomSanitizer } from '@angular/platform-browser';
 import { describe, it, expect } from 'vitest';
-import type { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
+import type {
+  mjBizAppsFormsFormDistributionEntity,
+  mjBizAppsFormsFormDistributionEntityType,
+} from '@mj-biz-apps/forms-entities';
 import { DistributionManagerComponent } from './distribution-manager.component';
 import { DistributionService, type MutationOutcome } from './distribution.service';
 
-/** The part of a link the component reads. */
-interface LinkShape {
-  ID: string;
-  Name: string;
-  Slug: string;
-  Status: 'Draft' | 'Active' | 'Paused' | 'Closed';
-  IsActive: boolean;
-  PublicLinkToken: string | null;
-  MagicLinkInviteID: string | null;
-  OpenAt: Date | null;
-  CloseAt: Date | null;
-  MaxResponses: number | null;
-  ResponseCount: number;
-}
+/**
+ * The part of a link the component reads.
+ *
+ * PICKED from the generated entity type, never re-declared. A hand-copied version of this carried a
+ * `'Paused'` status the column's CHECK constraint does not allow — an impossible state the tests
+ * could have been written against — and would have kept compiling after CodeGen widened or
+ * narrowed the real union.
+ */
+type LinkShape = Pick<
+  mjBizAppsFormsFormDistributionEntityType,
+  | 'ID'
+  | 'Name'
+  | 'Slug'
+  | 'Status'
+  | 'IsActive'
+  | 'PublicLinkToken'
+  | 'MagicLinkInviteID'
+  | 'OpenAt'
+  | 'CloseAt'
+  | 'MaxResponses'
+  | 'ResponseCount'
+>;
 
 function link(overrides: Partial<LinkShape> = {}): mjBizAppsFormsFormDistributionEntity {
   const base: LinkShape = {

@@ -64,6 +64,9 @@ npm run smoke:binding                             # entity binding: create / mer
 npm run smoke:automation                          # WHETHER and IN WHAT ORDER an automation runs
 npm run smoke:provenance                          # a file id cannot be claimed across sessions
 npm run smoke:file-links                          # uploads attach to the response AND the bound record
+npm run smoke:credentials                         # a revoked token no longer redeems; a delete is one transaction
+npm run smoke:credentials:least-privilege         # the same, performed by an author with no rights on core's invite table
+npm run smoke:backfill                            # the credential backfill migration, run verbatim and rolled back
 npm run lint:generated                            # CodeGen scope gate
 npm run lint:ui                                   # design-token gate
 ```

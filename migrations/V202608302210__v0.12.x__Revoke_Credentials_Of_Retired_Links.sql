@@ -55,10 +55,17 @@ GO
 --    token behind would leave `/f/:slug` handing a dead token to the redeem endpoint, and
 --    leave the builder badging a link that has no working credential as though it had one.
 --
---    Matched on the invite's status AND step 1's own distribution predicate. The status match
---    alone is what makes the re-run correct — after step 1 has run, its rows are exactly the
---    ones this half still owes if it failed the first time — but it is not sufficient on its
---    own, because step 1 is not the only thing that writes `Revoked`.
+--    Matched on the invite being in ANY terminal status AND step 1's own distribution predicate.
+--    `Revoked` is what step 1 writes, so after it has run its rows are exactly the ones this
+--    half still owes if it failed the first time — which is what makes the re-run correct. But
+--    `Revoked` alone is not the population: an invite ends `Consumed` on its last permitted use
+--    (`Expired` is core's for the same idea), and a paused link holding one of those has both
+--    columns and no working credential. Left that way, REOPENING it reads as `current` — both
+--    halves present, link live — and nothing ever re-mints: a permanently dead link the builder
+--    badges as Live. `smoke/backfill-path.mjs` holds that case; it is the one that was missed.
+--
+--    The status match is also not sufficient on its own, because step 1 is not the only thing
+--    that writes `Revoked`.
 --
 --    `Revoked` is the status MJ core documents as "the primary revocation mechanism", and
 --    before this release it was the ONLY way to kill a leaked Forms link without deleting the
@@ -74,7 +81,7 @@ SET d.MagicLinkInviteID = NULL,
     d.PublicLinkToken = NULL
 FROM [${flyway:defaultSchema}].[FormDistribution] d
 INNER JOIN [${mjSchema}].[MagicLinkInvite] i ON i.ID = d.MagicLinkInviteID
-WHERE i.Status = 'Revoked'
+WHERE i.Status <> 'Active'
   AND i.ResourceID = CAST(d.ID AS nvarchar(50))
   AND (d.Status <> 'Active' OR d.IsActive = 0);
 GO

@@ -40,6 +40,7 @@ import type {
   AnonymousCredentialRef,
   IAnonymousMagicLinkMinter,
   InviteExpiryBounds,
+  InviteWriteHost,
   InviteWriteResult,
   MintAnonymousInviteParams,
   MintAnonymousInviteResult,
@@ -161,12 +162,17 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * terminal status, or whose row has genuinely been deleted, is a success that
    * writes nothing. Reporting failure there would wedge the distribution: its hook
    * refuses to unlink a credential it could not kill, and would retry forever.
+   *
+   * Given a `host`, the invite row is created on it so the write lands inside whatever
+   * transaction the caller holds open there — the delete of a distribution and this revoke are
+   * one unit of work. See `InviteWriteHost`.
    */
   public async RevokeAnonymousInvite(
     credential: AnonymousCredentialRef,
     contextUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<InviteWriteResult> {
-    return this.writeToInvite(credential, contextUser, 'revoke', (invite) => {
+    return this.writeToInvite(credential, contextUser, 'revoke', host, (invite) => {
       if (invite.Status !== 'Active') {
         // Any status other than Active is already unredeemable — `evaluateInvite` refuses all of
         // them — so the postcondition holds and nothing is written. Overwriting a `Consumed` or
@@ -195,7 +201,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     bounds: InviteExpiryBounds,
     contextUser: UserInfo,
   ): Promise<InviteWriteResult> {
-    return this.writeToInvite(credential, contextUser, 'set the expiry of', (invite) => {
+    return this.writeToInvite(credential, contextUser, 'set the expiry of', undefined, (invite) => {
       if (invite.Status !== 'Active') {
         return { verdict: 'settled', message: `Invite ${invite.ID} is ${invite.Status}; expiry left as it was.` };
       }
@@ -307,11 +313,16 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
    * success unlinks a credential that is still live — the orphan this whole design
    * exists to prevent. So the ambiguous case is resolved by asking whether the row is
    * there, and anything short of a confident "no" is reported as a failure to retry.
+   *
+   * `host` is where the entity is CREATED, which decides which provider — and so which open
+   * transaction, if any — its `Load` and `Save` run through. Absent, `new Metadata()` reaches the
+   * process-wide provider, which is right for every write that is a unit of work by itself.
    */
   private async writeToInvite(
     credential: AnonymousCredentialRef,
     contextUser: UserInfo,
     verb: string,
+    host: InviteWriteHost | undefined,
     change: (invite: MJMagicLinkInviteEntity) => InviteChangeVerdict,
   ): Promise<InviteWriteResult> {
     const id = credential?.inviteId?.trim();
@@ -323,8 +334,7 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
       // Inside the try: the contract on this method is that it never throws, and resolving the
       // principal reads process state that a caller cannot vet.
       const writer = this.resolveWriter(contextUser);
-      const md = new Metadata();
-      const invite = await md.GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
+      const invite = await (host ?? new Metadata()).GetEntityObject<MJMagicLinkInviteEntity>(INVITE_ENTITY, writer);
       if (!(await invite.Load(id))) {
         return await this.reportUnloadableInvite(id, writer, verb);
       }

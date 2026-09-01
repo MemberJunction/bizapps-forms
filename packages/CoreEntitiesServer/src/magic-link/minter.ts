@@ -25,7 +25,7 @@
  * but not withdraw it is the defect bizapps-forms#104 was filed about.
  */
 import { BaseSingleton } from '@memberjunction/global';
-import type { UserInfo } from '@memberjunction/core';
+import type { IMetadataProvider, UserInfo } from '@memberjunction/core';
 
 /** What the hook asks the minter to provision. Generic over any resource. */
 export interface MintAnonymousInviteParams {
@@ -120,6 +120,20 @@ export interface AnonymousCredentialRef {
 }
 
 /**
+ * Where an invite write is created when the caller has a transaction open.
+ *
+ * A server-side entity writes through ITS provider — per request on MJAPI — and that provider is
+ * where an `EntityTransactionScope` lives. An implementation that reaches its invite row through
+ * `new Metadata()` instead writes through the process-wide provider, on another connection, and no
+ * transaction the caller opened can include it. So a caller that needs the invite write to commit
+ * or roll back WITH its own — the delete of a distribution and the revocation of its credential
+ * are one unit of work — hands over the provider to create the row on, and the implementation MUST
+ * create it there. Exactly the `GetEntityObject` half of `IMetadataProvider`, which every server
+ * provider implements; nothing narrower exists in core to name it by.
+ */
+export type InviteWriteHost = Pick<IMetadataProvider, 'GetEntityObject'>;
+
+/**
  * The bounds a credential's life must stay inside.
  *
  * The RULE rather than a resolved instant, and that distinction is load-bearing. `closeAt`
@@ -182,10 +196,14 @@ export interface IAnonymousMagicLinkMinter {
    *
    * @param credential  the invite to withdraw, and the resource it must belong to
    * @param contextUser the internal staff user whose save triggered the revocation
+   * @param host        where to create the invite row when the write must join the caller's
+   *                    open transaction — see {@link InviteWriteHost}. Absent, the
+   *                    implementation writes through its own provider, outside any transaction.
    */
   RevokeAnonymousInvite(
     credential: AnonymousCredentialRef,
     contextUser: UserInfo,
+    host?: InviteWriteHost,
   ): Promise<InviteWriteResult>;
 
   /**

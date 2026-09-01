@@ -30,16 +30,22 @@
  */
 import 'dotenv/config';
 // Must precede the server imports below — see smoke-harness-env.mjs for why a plain statement cannot do this.
-import { PORT, BASE } from './smoke-harness-env.mjs';
-import { createMJServer } from '@memberjunction/server-bootstrap';
-import { RESOLVER_PATHS } from '@mj-biz-apps/forms-server';
-import '@memberjunction/server-bootstrap/mj-class-registrations';
-import { Metadata, RunView } from '@memberjunction/core';
+import { BASE } from './smoke-harness-env.mjs';
+import { Metadata } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { sql, requireDbEnv } from '../../smoke/lib/sqlcmd.mjs';
-
-const DIST_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
-const INVITE_ENTITY = 'MJ: Magic Link Invites';
+import {
+  DIST_ENTITY,
+  INVITE_ENTITY,
+  anyFormId,
+  assertions,
+  bootAndRun,
+  deleteDistributions,
+  loadDistribution,
+  newLiveLink,
+  readInvite,
+  redeem,
+} from './credential-smoke-lib.mjs';
 
 /**
  * Fixed ids for the seeded principal, so a crashed run is repaired by the next one rather than
@@ -52,24 +58,6 @@ const IDS = {
   membership: '114C0DE0-0000-4114-9000-000000000004',
 };
 const AUTHOR_NAME = 'repro114.least.privilege.author@example.invalid';
-
-let passed = 0;
-let failed = 0;
-const failures = [];
-
-const check = (name, ok, detail = '') => {
-  if (ok) {
-    passed++;
-    console.log(`  ok    ${name}`);
-  } else {
-    failed++;
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
-    console.error(`  FAIL  ${name}${detail ? `\n          ${detail}` : ''}`);
-  }
-};
-const eq = (name, actual, expected) =>
-  check(name, String(actual) === String(expected), `expected ${expected}, got ${actual}`);
-const section = (m) => console.log(`\n--- ${m} ---`);
 
 /**
  * Remove the seeded principal. Runs before the seed as well as after the assertions, so a run that
@@ -122,74 +110,7 @@ function seed() {
   `);
 }
 
-/** Read an invite straight out of the database as System, whatever the author can or cannot see. */
-async function readInvite(systemUser, id) {
-  if (!id) return null;
-  const r = await new RunView().RunView(
-    { EntityName: INVITE_ENTITY, ExtraFilter: `ID='${id}'`, ResultType: 'simple' },
-    systemUser,
-  );
-  if (!r.Success) throw new Error(`invite read failed: ${r.ErrorMessage}`);
-  return r.Results?.[0] ?? null;
-}
-
-async function load(user, id) {
-  const d = await new Metadata().GetEntityObject(DIST_ENTITY, user);
-  if (!(await d.Load(id))) throw new Error(`could not load distribution ${id} as ${user.Name}`);
-  return d;
-}
-
-/**
- * Ask core to redeem a raw token, exactly as `/f/:slug` does.
- *
- * A refusal is the interesting outcome, so a non-2xx body is parsed rather than thrown on — "it
- * failed somehow" would let a 500 masquerade as a successful revocation.
- */
-async function redeem(rawToken) {
-  const res = await fetch(`${BASE}/magic-link/redeem?format=json`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: rawToken }),
-  });
-  let body = {};
-  try {
-    body = await res.json();
-  } catch {
-    body = {};
-  }
-  return {
-    ok: res.ok && !!(body.token || body.accessToken || body.jwt),
-    status: res.status,
-    errorCode: body.errorCode ?? body.error ?? null,
-  };
-}
-
-async function anyFormId(user) {
-  const r = await new RunView().RunView(
-    { EntityName: 'MJ_BizApps_Forms: Forms', ResultType: 'simple', Fields: ['ID'], MaxRows: 1 },
-    user,
-  );
-  if (!r.Success || !r.Results?.length) {
-    throw new Error(`no Form rows to test against: ${r.ErrorMessage ?? 'empty'}`);
-  }
-  return r.Results[0].ID;
-}
-
-/** A live public link, created by `creator`, returned with the credential it was issued. */
-async function newLiveLink(creator, formId, label) {
-  const d = await new Metadata().GetEntityObject(DIST_ENTITY, creator);
-  d.NewRecord();
-  d.FormID = formId;
-  d.Name = `repro114 ${label}`;
-  d.Slug = `repro114-${label}-${Date.now().toString(36)}`;
-  d.ChannelType = 'PublicLink';
-  d.Status = 'Active';
-  d.IsActive = true;
-  d.ResponseCount = 0;
-  d.CaptchaRequired = false;
-  if (!(await d.Save())) throw new Error(`create failed: ${d.LatestResult?.CompleteMessage}`);
-  return d;
-}
+const { check, eq, section, summary } = assertions();
 
 async function run() {
   const system = UserCache.Instance.GetSystemUser();
@@ -219,30 +140,30 @@ async function run() {
 
     // ───────────────────────────────────────── control: the same close, performed by System ─────
     section('control — System closes a link and the credential dies with it');
-    const controlLink = await newLiveLink(system, formId, 'control');
+    const controlLink = await newLiveLink(system, formId, 'repro114', 'control');
     created.push(controlLink.ID);
     const controlInvite = controlLink.MagicLinkInviteID;
     const controlToken = controlLink.PublicLinkToken;
     check('the new link was issued a credential', !!controlInvite && !!controlToken);
-    check('and that token redeems', (await redeem(controlToken)).ok);
+    check('and that token redeems', (await redeem(BASE, controlToken)).ok);
 
-    const controlPaused = await load(system, controlLink.ID);
+    const controlPaused = await loadDistribution(system, controlLink.ID);
     controlPaused.IsActive = false;
     check('System can save the pause', await controlPaused.Save());
     eq('the invite is Revoked', (await readInvite(system, controlInvite))?.Status, 'Revoked');
-    const controlRedeem = await redeem(controlToken);
+    const controlRedeem = await redeem(BASE, controlToken);
     check('and the token no longer redeems', !controlRedeem.ok, `status ${controlRedeem.status}`);
     eq('core refuses it as revoked', controlRedeem.errorCode, 'revoked');
 
     // ───────────────────────────── the defect: the identical close, performed by the author ─────
     section('bizapps-forms#114 — the same close, performed by a least-privilege author');
-    const link = await newLiveLink(system, formId, 'author');
+    const link = await newLiveLink(system, formId, 'repro114', 'author');
     created.push(link.ID);
     const inviteId = link.MagicLinkInviteID;
     const token = link.PublicLinkToken;
-    check('the link starts out with a credential that redeems', !!token && (await redeem(token)).ok);
+    check('the link starts out with a credential that redeems', !!token && (await redeem(BASE, token)).ok);
 
-    const paused = await load(author, link.ID);
+    const paused = await loadDistribution(author, link.ID);
     paused.IsActive = false;
     check('the author can save the pause — they own this link', await paused.Save());
 
@@ -251,7 +172,7 @@ async function run() {
       (await readInvite(system, inviteId))?.Status,
       'Revoked',
     );
-    const authorRedeem = await redeem(token);
+    const authorRedeem = await redeem(BASE, token);
     check(
       'THE HEADLINE — the paused link\'s token no longer redeems',
       !authorRedeem.ok,
@@ -261,59 +182,24 @@ async function run() {
 
     // ────────────────────────────────── the other half: can a least-privilege author publish? ───
     section('and the author can publish a link in the first place');
-    const minted = await newLiveLink(author, formId, 'minted-by-author');
+    const minted = await newLiveLink(author, formId, 'repro114', 'minted-by-author');
     created.push(minted.ID);
     check('the link they created holds a credential', !!minted.MagicLinkInviteID && !!minted.PublicLinkToken);
     check(
       'which redeems, so the form is actually reachable',
-      minted.PublicLinkToken ? (await redeem(minted.PublicLinkToken)).ok : false,
+      minted.PublicLinkToken ? (await redeem(BASE, minted.PublicLinkToken)).ok : false,
     );
   } finally {
-    for (const id of created) {
-      try {
-        const d = await new Metadata().GetEntityObject(DIST_ENTITY, system);
-        if (await d.Load(id)) await d.Delete();
-      } catch (e) {
-        console.error(`  cleanup: could not delete ${id}: ${e instanceof Error ? e.message : e}`);
-      }
-    }
+    await deleteDistributions(system, created);
   }
-
-  console.log(`\n${passed} passed, ${failed} failed`);
-  if (failed) {
-    console.error('\nFailures:');
-    failures.forEach((f) => console.error(`  - ${f}`));
-  }
-  return failed === 0;
+  return summary();
 }
 
 requireDbEnv('../apps/MJAPI/least-privilege-credential-smoke.mjs');
 seed();
-
-createMJServer({
-  resolverPaths: RESOLVER_PATHS,
-  afterStart: async () => {
-    let ok = false;
-    try {
-      ok = await run();
-    } catch (e) {
-      console.error('\nSMOKE THREW:', e);
-    } finally {
-      try {
-        unseed();
-        console.log('seeded principal removed');
-      } catch (e) {
-        console.error(`  cleanup: could not remove the seeded principal: ${e instanceof Error ? e.message : e}`);
-      }
-    }
-    process.exit(ok ? 0 : 1);
-  },
-}).catch((e) => {
-  console.error(e);
-  try {
+bootAndRun(run, {
+  cleanup: () => {
     unseed();
-  } catch {
-    /* the boot failure is the interesting error; a cleanup failure here would mask it */
-  }
-  process.exit(1);
+    console.log('seeded principal removed');
+  },
 });

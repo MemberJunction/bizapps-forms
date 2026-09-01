@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
 import type { MJMagicLinkInviteEntity } from '@memberjunction/core-entities';
+import type { InviteWriteHost } from '@mj-biz-apps/forms-core-entities-server';
 
 /** The distribution every invite in these tests is scoped to. */
 const RESOURCE = 'dist-1';
@@ -170,6 +171,7 @@ vi.mock('@memberjunction/core', async () => {
 
 // Import AFTER mocks are registered.
 const { MagicLinkInviteMinter } = await import('../MagicLinkInviteMinter.js');
+const { Metadata } = await import('@memberjunction/core');
 
 const contextUser = { ID: 'staff-1', Name: 'Staff' } as unknown as UserInfo;
 
@@ -312,6 +314,22 @@ describe('MagicLinkInviteMinter.RevokeAnonymousInvite', () => {
     const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser);
     expect(result.success).toBe(true);
     expect(mockState.loadedIds).toEqual(['invite-7']);
+    expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
+  });
+
+  it('creates the invite entity on the host it is handed, so the write joins that provider\'s transaction', async () => {
+    // A delete of a distribution revokes its credential inside the row's own transaction. That
+    // only holds if the invite row is created on the SAME provider; `new Metadata()` would reach
+    // the process-wide one, on another connection, outside any scope the caller opened.
+    const md = new Metadata();
+    const host: InviteWriteHost = { GetEntityObject: md.GetEntityObject.bind(md) };
+    const viaHost = vi.spyOn(host, 'GetEntityObject');
+
+    const result = await new MagicLinkInviteMinter().RevokeAnonymousInvite(CRED, contextUser, host);
+
+    expect(result.success).toBe(true);
+    expect(viaHost).toHaveBeenCalledTimes(1);
+    expect(viaHost.mock.calls[0][0]).toBe('MJ: Magic Link Invites');
     expect(mockState.lastSavedInvite!.Status).toBe('Revoked');
   });
 

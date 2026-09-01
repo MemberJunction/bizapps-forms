@@ -15,17 +15,111 @@
  * through the `MagicLinkMinterRegistry` seam (see minter.ts); when no host minter is
  * registered (host has not enabled core `magicLink`), the hook logs a clear warning
  * and leaves the record alone WITHOUT failing the save. The orchestration lives in
- * `runProvisioning` (provision-runner.ts) so it is unit-testable without a DB; this
- * class is the thin BaseEntity adapter.
+ * `runProvisioning` (provision-runner.ts) so it is unit-testable without a DB.
+ *
+ * What this class owns itself is everything about the ROW rather than the decision: the credential
+ * columns are server-owned ({@link refuseClientCredentialWrites}), a save carries the pair the store
+ * holds rather than the one this instance loaded ({@link adoptStoredCredential}), two writers of one
+ * row take turns ({@link Save}), and a delete withdraws the credential in the same transaction
+ * ({@link Delete}). Each exists because a concrete interleaving produced either an orphaned live
+ * invite or a dead link badged Live; the docstring on each names it.
  *
  * See FORMS_BUILD_PLAN §4 item 4.
  */
-import { BaseEntity, LogError, type EntityDeleteOptions, type EntitySaveOptions } from '@memberjunction/core';
+import {
+  BaseEntity,
+  BaseEntityResult,
+  LogError,
+  RunInEntityTransaction,
+  RunView,
+  type EntityDeleteOptions,
+  type EntitySaveOptions,
+  type IEntityDataProvider,
+  type IRunViewProvider,
+  type UserInfo,
+} from '@memberjunction/core';
 import { RegisterClass } from '@memberjunction/global';
-import { mjBizAppsFormsFormDistributionEntity } from '@mj-biz-apps/forms-entities';
+import {
+  mjBizAppsFormsFormDistributionEntity,
+  quoteSqlString,
+  type mjBizAppsFormsFormDistributionEntityType,
+} from '@mj-biz-apps/forms-entities';
 import { getMagicLinkProvisioningConfig } from './config.js';
-import { MagicLinkMinterRegistry } from './minter.js';
+import { MagicLinkMinterRegistry, type IAnonymousMagicLinkMinter, type InviteWriteHost } from './minter.js';
 import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type MintedLink } from './provision-runner.js';
+
+/** The credential pair as the store holds it right now. */
+type StoredCredential = Pick<mjBizAppsFormsFormDistributionEntityType, 'MagicLinkInviteID' | 'PublicLinkToken'>;
+
+/**
+ * Saves in flight, per distribution, so two writers of one row take turns — see {@link Save}.
+ *
+ * Keyed by the row id, holding a promise that settles when the last save to claim that id has
+ * finished. A claimant chains onto whatever is there and replaces it; the entry is removed when
+ * the claimant that put it there is done, so an idle row costs nothing. In-process only: MJAPI is
+ * one process, and the public submit path — the concurrent writer that matters — runs inside it.
+ */
+const savesInFlight = new Map<string, Promise<void>>();
+
+/**
+ * Run `work` after every earlier claim on `id` has settled, and hold the id until it is done.
+ *
+ * The wait is bounded by the previous save's own completion, which MJ bounds with its database
+ * timeouts; there is deliberately no timeout of its own, because giving up waiting would let the
+ * race back in silently. A failed predecessor does not block a successor — the chain waits on
+ * settlement, not success.
+ */
+async function takeTurn<T>(id: string, work: () => Promise<T>): Promise<T> {
+  const key = id.trim().toUpperCase();
+  const previous = savesInFlight.get(key) ?? Promise.resolve();
+  const turn = previous.then(work);
+  const settled = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  savesInFlight.set(key, settled);
+  try {
+    return await turn;
+  } finally {
+    if (savesInFlight.get(key) === settled) {
+      savesInFlight.delete(key);
+    }
+  }
+}
+
+/** Whether this provider also runs views — the half of it a fresh read of the store goes through. */
+function runsViews(provider: IEntityDataProvider): provider is IEntityDataProvider & IRunViewProvider {
+  return 'RunView' in provider && typeof provider.RunView === 'function';
+}
+
+/**
+ * A provider that can hold a delete and a credential write in one transaction: it opens scopes,
+ * and it creates the entity the write goes through, so that write lands inside the scope.
+ */
+type TransactionalHost = Pick<IEntityDataProvider, 'SupportsEntityTransactions' | 'BeginEntityTransaction'> &
+  InviteWriteHost;
+
+/**
+ * Whether this provider also carries the metadata half — `GetEntityObject` — that creates the
+ * entity a credential write goes through. `ProviderToUse` is typed as the entity-data half only;
+ * every server provider implements both on one object, which is what this checks at runtime.
+ */
+function createsEntities(provider: IEntityDataProvider): provider is IEntityDataProvider & InviteWriteHost {
+  return 'GetEntityObject' in provider && typeof provider.GetEntityObject === 'function';
+}
+
+/**
+ * The row's own provider, when it can host the delete and the revoke as one unit of work.
+ *
+ * `undefined` means the two writes cannot share a transaction here — a client-side provider, or
+ * one with no transaction support — and the caller falls back to the non-atomic order.
+ */
+function transactionalHost(provider: IEntityDataProvider | undefined): TransactionalHost | undefined {
+  if (!provider || provider.SupportsEntityTransactions !== true || !provider.BeginEntityTransaction) {
+    return undefined;
+  }
+  return createsEntities(provider) ? provider : undefined;
+}
 
 @RegisterClass(BaseEntity, DISTRIBUTION_ENTITY_NAME)
 export class FormDistributionEntityServer extends mjBizAppsFormsFormDistributionEntity {
@@ -49,9 +143,26 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * Post-save rather than pre-save because the decision has to be about the state
    * that actually landed. A revocation driven by values that then failed to save
    * would kill a live link's credential over a write that never happened.
+   *
+   * Two writers of one row TAKE TURNS ({@link takeTurn}). A reissue persists its request —
+   * invite linked, token cleared — with the first save and services it with the second, and in
+   * between that state reads as "work owed" to any other save of the same row: a public
+   * submission bumping `ResponseCount` in that window revoked the already-revoked invite, minted
+   * a second replacement, and left whichever invite lost the last write Active and unreferenced —
+   * the orphan bizapps-forms#104 exists to remove, produced by the act of rotating. Serialised,
+   * the second writer runs after the rotation has landed, and {@link adoptStoredCredential} then
+   * hands it the new pair. The hook's own re-entrant save runs inside the turn already held.
    */
   public override async Save(options?: EntitySaveOptions): Promise<boolean> {
+    if (this.credentialWriteInFlight || !this.IsSaved) {
+      return this.saveAndProvision(options);
+    }
+    return takeTurn(this.ID, () => this.saveAndProvision(options));
+  }
+
+  private async saveAndProvision(options?: EntitySaveOptions): Promise<boolean> {
     this.refuseClientCredentialWrites();
+    await this.adoptStoredCredential();
     const saved = await super.Save(options);
     if (!saved || this.credentialWriteInFlight) {
       return saved;
@@ -154,7 +265,61 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
   }
 
   /**
-   * Deletes the distribution, then withdraws the credential it was holding.
+   * Make this save carry the credential pair THE STORE holds, not the one this instance loaded.
+   *
+   * MJ writes every column on an update, dirty or not. So an instance loaded before a rotation and
+   * saved after it — a server-side writer holding the row across other work — put the OLD pair
+   * back: a revoked invite beside its dead token, which `decideProvisioning` reads as `current` and
+   * never re-mints, and which the builder badges Live. A permanently dead link, produced by a
+   * rename. {@link refuseClientCredentialWrites} cannot see this: it acts on DIRTY fields, and a
+   * stale copy's credential columns are clean. So the pair is re-read from the store on every
+   * update and carried through, with one exception — a token this client cleared stays cleared,
+   * because that is the reissue request and the whole point of the save.
+   *
+   * One read per update of a distribution, which includes every public submission. Through this
+   * row's own provider, so it sees whatever transaction that provider holds open, and past the
+   * server's cache, because the write that made the loaded copy stale may have come from another
+   * process this cache never heard about.
+   *
+   * A read that fails leaves the loaded values in place and says so: refusing the save would turn a
+   * narrow race into a failed submission, and the loaded values are what every save wrote before
+   * this existed.
+   */
+  private async adoptStoredCredential(): Promise<void> {
+    if (this.credentialWriteInFlight || !this.IsSaved) {
+      return;
+    }
+    const token = this.GetFieldByName('PublicLinkToken');
+    const clearRequested = Boolean(token?.Dirty) && !this.PublicLinkToken;
+
+    const provider = this.ProviderToUse;
+    const rv = provider && runsViews(provider) ? new RunView(provider) : new RunView();
+    const read = await rv.RunView<StoredCredential>(
+      {
+        EntityName: DISTRIBUTION_ENTITY_NAME,
+        ExtraFilter: `ID=${quoteSqlString(this.ID)}`,
+        Fields: ['MagicLinkInviteID', 'PublicLinkToken'],
+        ResultType: 'simple',
+        MaxRows: 1,
+        BypassCache: true,
+      },
+      this.ContextCurrentUser,
+    );
+    const stored = read.Success ? read.Results?.[0] : undefined;
+    if (!stored) {
+      LogError(
+        `[FormDistributionEntityServer] Could not read the stored credential of distribution ${this.ID} ` +
+          `before saving it (${read.Success ? 'no row' : read.ErrorMessage ?? 'unknown error'}); saving the ` +
+          `loaded values instead.`,
+      );
+      return;
+    }
+    this.MagicLinkInviteID = stored.MagicLinkInviteID;
+    this.PublicLinkToken = clearRequested ? null : stored.PublicLinkToken;
+  }
+
+  /**
+   * Deletes the distribution and withdraws the credential it was holding — as ONE unit of work.
    *
    * Without this the invariant survives every state change and not the one that ends
    * the record: a deleted distribution took its only reference to a still-`Active`
@@ -162,52 +327,92 @@ export class FormDistributionEntityServer extends mjBizAppsFormsFormDistribution
    * reach. Deleting and recreating was also the pre-#104 recourse for a leaked link,
    * so it is the very path most likely to be used on a credential someone wants dead.
    *
-   * Order is deliberate: delete FIRST, revoke after it succeeds. The alternative kills
-   * a live link's credential whenever the delete is then refused — and refusal is the
-   * common case here, since `FormUpload.DistributionID` is a required FK, so any link
-   * that has taken an upload cannot be deleted at all. A revoke that fails after a
-   * successful delete leaves an orphaned invite, which is why the log names its id: it
-   * is the only remaining handle on it.
+   * The two writes share a transaction (`RunInEntityTransaction`, the primitive MJ core ships for
+   * exactly this), so neither outcome the old ordering had to choose between can happen: a
+   * refused delete cannot leave a live link's credential dead, because the revoke is rolled back
+   * with it — and refusal is the common case here, since `FormUpload.DistributionID` is a required
+   * FK; and a failed revoke cannot leave an orphaned invite whose only handle is a log line, because
+   * the delete is rolled back instead and REFUSED, with the reason on `LatestResult`. The row then
+   * still points at its invite, so the next attempt, or a pause, retries from a consistent state.
+   *
+   * Delete first inside the transaction, deliberately: a refused delete then returns without a
+   * revoke having been issued at all, rather than relying on the rollback to undo one.
+   *
+   * The revoke joins the transaction only because the minter is handed THIS row's provider to
+   * create the invite entity on (see `InviteWriteHost`); a minter left to `new Metadata()` writes
+   * through the process-wide provider, on another connection, outside any scope opened here.
+   * Where the provider cannot transact at all, this degrades to the old order — delete, then a
+   * best-effort revoke whose failure names the orphan — since a delete that has landed cannot be
+   * reported as refused.
    */
   public override async Delete(options?: EntityDeleteOptions): Promise<boolean> {
     const inviteId = this.MagicLinkInviteID?.trim();
+    if (!inviteId) {
+      return super.Delete(options);
+    }
     const contextUser = this.ContextCurrentUser;
-    const distributionId = this.ID;
+    const minter = MagicLinkMinterRegistry.Instance.Minter;
+    const host = transactionalHost(this.ProviderToUse);
+    if (!minter || !contextUser || !host) {
+      if (!(await super.Delete(options))) {
+        return false;
+      }
+      await this.withdrawAfterDelete(inviteId, minter, contextUser);
+      return true;
+    }
 
-    if (!(await super.Delete(options))) {
+    const distributionId = this.ID;
+    try {
+      return await RunInEntityTransaction(host, async () => {
+        if (!(await super.Delete(options))) {
+          return false;
+        }
+        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);
+        if (!revoked.success) {
+          throw new Error(revoked.message ?? 'unknown error');
+        }
+        return true;
+      });
+    } catch (e) {
+      // Rolled back: the row and its credential are exactly as they were. Refuse, and say why, on
+      // the same surface a refused delete already reports through.
+      const message =
+        `Could not delete distribution ${distributionId}: withdrawing its magic-link invite ${inviteId} ` +
+        `failed (${e instanceof Error ? e.message : String(e)}), so the delete was rolled back. The link ` +
+        `and its credential are unchanged; try again, or pause the link instead.`;
+      LogError(`[FormDistributionEntityServer] ${message}`);
+      this.RegisterResultHistoryEntry(new BaseEntityResult(false, message, 'delete'));
       return false;
     }
-    if (!inviteId) {
-      return true;
-    }
+  }
 
-    const minter = MagicLinkMinterRegistry.Instance.Minter;
-    if (!minter || !contextUser) {
+  /**
+   * The non-atomic tail: the row is already gone, so all that is left is to try the revoke and,
+   * if that fails, name the invite — after the delete that id is the only handle on it.
+   */
+  private async withdrawAfterDelete(
+    inviteId: string,
+    minter: IAnonymousMagicLinkMinter | undefined,
+    contextUser: UserInfo | undefined,
+  ): Promise<void> {
+    const distributionId = this.ID;
+    const orphaned = (why: string): void =>
       LogError(
         `[FormDistributionEntityServer] Deleted distribution ${distributionId} but could not revoke ` +
-          `its magic-link invite ${inviteId}: ${minter ? 'no context user' : 'no minter registered'}. ` +
-          `That invite is now orphaned and must be revoked by hand.`,
+          `its magic-link invite ${inviteId}: ${why}. That invite is now orphaned and must be revoked by hand.`,
       );
-      return true;
+    if (!minter || !contextUser) {
+      orphaned(minter ? 'no context user' : 'no minter registered');
+      return;
     }
-
     try {
       const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser);
       if (!revoked.success) {
-        LogError(
-          `[FormDistributionEntityServer] Deleted distribution ${distributionId} but failed to revoke ` +
-            `its magic-link invite ${inviteId}: ${revoked.message ?? 'unknown error'}. That invite is ` +
-            `now orphaned and must be revoked by hand.`,
-        );
+        orphaned(revoked.message ?? 'unknown error');
       }
     } catch (e) {
-      LogError(
-        `[FormDistributionEntityServer] Revoking invite ${inviteId} after deleting distribution ` +
-          `${distributionId} threw: ${e instanceof Error ? e.message : String(e)}. That invite is now ` +
-          `orphaned and must be revoked by hand.`,
-      );
+      orphaned(`the revoke threw: ${e instanceof Error ? e.message : String(e)}`);
     }
-    return true;
   }
 
   /**

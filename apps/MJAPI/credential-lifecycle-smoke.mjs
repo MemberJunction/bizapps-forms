@@ -40,103 +40,20 @@
  */
 import 'dotenv/config';
 // Must precede the server imports below — see smoke-harness-env.mjs for why a plain statement cannot do this.
-import { PORT, BASE } from './smoke-harness-env.mjs';
-import { createMJServer } from '@memberjunction/server-bootstrap';
-import { RESOLVER_PATHS } from '@mj-biz-apps/forms-server';
-import '@memberjunction/server-bootstrap/mj-class-registrations';
-import { Metadata, RunView } from '@memberjunction/core';
+import { BASE } from './smoke-harness-env.mjs';
 import { UserCache } from '@memberjunction/generic-database-provider';
+import {
+  anyFormId,
+  assertions,
+  bootAndRun,
+  deleteDistributions,
+  loadDistribution,
+  newLiveLink,
+  readInvite,
+  redeem,
+} from './credential-smoke-lib.mjs';
 
-const DIST_ENTITY = 'MJ_BizApps_Forms: Form Distributions';
-const INVITE_ENTITY = 'MJ: Magic Link Invites';
-
-let passed = 0;
-let failed = 0;
-const failures = [];
-
-const check = (name, ok, detail = '') => {
-  if (ok) {
-    passed++;
-    console.log(`  ok    ${name}`);
-  } else {
-    failed++;
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
-    console.error(`  FAIL  ${name}${detail ? `\n          ${detail}` : ''}`);
-  }
-};
-const eq = (name, actual, expected) =>
-  check(name, String(actual) === String(expected), `expected ${expected}, got ${actual}`);
-const section = (m) => console.log(`\n--- ${m} ---`);
-
-/** Read an invite straight out of the database, bypassing any in-memory entity state. */
-async function readInvite(user, id) {
-  if (!id) return null;
-  const r = await new RunView().RunView(
-    { EntityName: INVITE_ENTITY, ExtraFilter: `ID='${id}'`, ResultType: 'simple' },
-    user,
-  );
-  if (!r.Success) throw new Error(`invite read failed: ${r.ErrorMessage}`);
-  return r.Results?.[0] ?? null;
-}
-
-async function reload(user, id) {
-  const d = await new Metadata().GetEntityObject(DIST_ENTITY, user);
-  if (!(await d.Load(id))) throw new Error(`could not reload distribution ${id}`);
-  return d;
-}
-
-/**
- * Ask core to redeem a raw token, exactly as `/f/:slug` does.
- *
- * Returns `{ ok, errorCode }`. A refusal is the interesting outcome for most of this file, so the
- * non-2xx body is parsed rather than thrown on — "it failed somehow" would let a 500 masquerade
- * as a successful revocation, which is the one mistake that would make this whole script lie.
- */
-async function redeem(rawToken) {
-  const res = await fetch(`${BASE}/magic-link/redeem?format=json`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: rawToken }),
-  });
-  let body = {};
-  try {
-    body = await res.json();
-  } catch {
-    body = {};
-  }
-  return {
-    ok: res.ok && !!(body.token || body.accessToken || body.jwt),
-    status: res.status,
-    errorCode: body.errorCode ?? body.error ?? null,
-  };
-}
-
-/** A form to hang test distributions off — whatever this database happens to carry. */
-async function anyFormId(user) {
-  const r = await new RunView().RunView(
-    { EntityName: 'MJ_BizApps_Forms: Forms', ResultType: 'simple', Fields: ['ID'], MaxRows: 1 },
-    user,
-  );
-  if (!r.Success || !r.Results?.length) {
-    throw new Error(`no Form rows to test against: ${r.ErrorMessage ?? 'empty'}`);
-  }
-  return r.Results[0].ID;
-}
-
-async function newLiveLink(user, formId, label) {
-  const d = await new Metadata().GetEntityObject(DIST_ENTITY, user);
-  d.NewRecord();
-  d.FormID = formId;
-  d.Name = `smoke104 ${label}`;
-  d.Slug = `smoke104-${label}-${Date.now().toString(36)}`;
-  d.ChannelType = 'PublicLink';
-  d.Status = 'Active';
-  d.IsActive = true;
-  d.ResponseCount = 0;
-  d.CaptchaRequired = false;
-  if (!(await d.Save())) throw new Error(`create failed: ${d.LatestResult?.CompleteMessage}`);
-  return d;
-}
+const { check, eq, section, summary } = assertions();
 
 async function run() {
   const user = UserCache.Instance.GetSystemUser();
@@ -148,11 +65,11 @@ async function run() {
   try {
     // ─────────────────────────────────────────────── a live link holds one live credential
     section('a new live public link is issued a credential that redeems');
-    const dist = await newLiveLink(user, formId, 'main');
+    const dist = await newLiveLink(user, formId, 'smoke104', 'main');
     created.push(dist.ID);
     const slug = dist.Slug;
 
-    let d = await reload(user, dist.ID);
+    let d = await loadDistribution(user, dist.ID);
     const token1 = d.PublicLinkToken;
     const invite1 = d.MagicLinkInviteID;
     check('a raw token was written', !!token1);
@@ -160,7 +77,7 @@ async function run() {
     eq('the invite is scoped to this distribution', (await readInvite(user, invite1))?.ResourceID, dist.ID);
     eq('the invite is Active', (await readInvite(user, invite1))?.Status, 'Active');
 
-    const r1 = await redeem(token1);
+    const r1 = await redeem(BASE, token1);
     check('the freshly minted token redeems', r1.ok, `status ${r1.status}, code ${r1.errorCode}`);
 
     const page = await fetch(`${BASE}/f/${slug}`);
@@ -170,33 +87,33 @@ async function run() {
 
     // ───────────────────────────────────────────── THE HEADLINE: pausing kills the credential
     section('pausing the link revokes the credential — the claim #104 is about');
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     d.IsActive = false;
     if (!(await d.Save())) throw new Error(`pause failed: ${d.LatestResult?.CompleteMessage}`);
 
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     eq('the invite id is cleared from the record', d.MagicLinkInviteID, 'null');
     eq('the raw token is cleared from the record', d.PublicLinkToken, 'null');
     eq('the invite row is Revoked', (await readInvite(user, invite1))?.Status, 'Revoked');
 
     // The whole point. Everything above could hold with a token that still redeemed.
-    const r2 = await redeem(token1);
+    const r2 = await redeem(BASE, token1);
     check('the old token NO LONGER REDEEMS', !r2.ok, `it still redeemed: status ${r2.status}`);
     eq('and core refuses it as revoked', r2.errorCode, 'revoked');
 
     // ──────────────────────────────────────────────── reopening issues a fresh one, same URL
     section('reopening issues a NEW credential at the SAME web address');
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     d.IsActive = true;
     d.Status = 'Active';
     if (!(await d.Save())) throw new Error(`reopen failed: ${d.LatestResult?.CompleteMessage}`);
 
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     const token2 = d.PublicLinkToken;
     check('a new token was issued', !!token2 && token2 !== token1);
     eq('the slug is unchanged', d.Slug, slug);
-    check('the new token redeems', (await redeem(token2)).ok);
-    check('the old token is still dead', !(await redeem(token1)).ok);
+    check('the new token redeems', (await redeem(BASE, token2)).ok);
+    check('the old token is still dead', !(await redeem(BASE, token1)).ok);
 
     // ───────────────────────────────────────────────────── reissue rotates without moving
     section('clearing the token is a reissue request — rotate, keep the URL');
@@ -204,76 +121,49 @@ async function run() {
     d.PublicLinkToken = null;
     if (!(await d.Save())) throw new Error(`reissue failed: ${d.LatestResult?.CompleteMessage}`);
 
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     const token3 = d.PublicLinkToken;
     check('a third token was issued', !!token3 && token3 !== token2);
     check('pointing at a different invite', d.MagicLinkInviteID && d.MagicLinkInviteID !== invite2);
     eq('the slug STILL has not moved', d.Slug, slug);
     eq('the replaced invite is Revoked', (await readInvite(user, invite2))?.Status, 'Revoked');
-    check('the replaced token no longer redeems', !(await redeem(token2)).ok);
-    check('the new token does', (await redeem(token3)).ok);
+    check('the replaced token no longer redeems', !(await redeem(BASE, token2)).ok);
+    check('the new token does', (await redeem(BASE, token3)).ok);
 
     // ───────────────────────────────────── a client cannot install or steal a credential
     section('the credential columns are server-owned');
-    const other = await newLiveLink(user, formId, 'other');
+    const other = await newLiveLink(user, formId, 'smoke104', 'other');
     created.push(other.ID);
-    const otherInvite = (await reload(user, other.ID)).MagicLinkInviteID;
+    const otherInvite = (await loadDistribution(user, other.ID)).MagicLinkInviteID;
 
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     d.MagicLinkInviteID = otherInvite; // a stale tab, an import, or a hand-written mutation
     await d.Save();
-    d = await reload(user, dist.ID);
+    d = await loadDistribution(user, dist.ID);
     check('a client write of MagicLinkInviteID is refused', d.MagicLinkInviteID !== otherInvite);
     eq("and the other link's invite is untouched", (await readInvite(user, otherInvite))?.Status, 'Active');
-    check("the other link's token still redeems", (await reload(user, other.ID)).PublicLinkToken
-      ? (await redeem((await reload(user, other.ID)).PublicLinkToken)).ok
+    check("the other link's token still redeems", (await loadDistribution(user, other.ID)).PublicLinkToken
+      ? (await redeem(BASE, (await loadDistribution(user, other.ID)).PublicLinkToken)).ok
       : false);
 
     // ───────────────────────────────────────────────────────── deleting takes it with it
     section('deleting a link withdraws its credential too');
-    const doomed = await newLiveLink(user, formId, 'doomed');
-    const doomedInvite = (await reload(user, doomed.ID)).MagicLinkInviteID;
-    const doomedToken = (await reload(user, doomed.ID)).PublicLinkToken;
-    check('the doomed link redeems before deletion', (await redeem(doomedToken)).ok);
+    const doomed = await newLiveLink(user, formId, 'smoke104', 'doomed');
+    const doomedInvite = (await loadDistribution(user, doomed.ID)).MagicLinkInviteID;
+    const doomedToken = (await loadDistribution(user, doomed.ID)).PublicLinkToken;
+    check('the doomed link redeems before deletion', (await redeem(BASE, doomedToken)).ok);
 
-    const dd = await reload(user, doomed.ID);
+    const dd = await loadDistribution(user, doomed.ID);
     if (!(await dd.Delete())) {
       created.push(doomed.ID);
       throw new Error(`delete failed: ${dd.LatestResult?.CompleteMessage}`);
     }
     eq('its invite is Revoked after the delete', (await readInvite(user, doomedInvite))?.Status, 'Revoked');
-    check('and its token no longer redeems', !(await redeem(doomedToken)).ok);
+    check('and its token no longer redeems', !(await redeem(BASE, doomedToken)).ok);
   } finally {
-    for (const id of created) {
-      try {
-        const d = await new Metadata().GetEntityObject(DIST_ENTITY, user);
-        if (await d.Load(id)) await d.Delete();
-      } catch (e) {
-        console.error(`  cleanup: could not delete ${id}: ${e instanceof Error ? e.message : e}`);
-      }
-    }
+    await deleteDistributions(user, created);
   }
-
-  console.log(`\n${passed} passed, ${failed} failed`);
-  if (failed) {
-    console.error('\nFailures:');
-    failures.forEach((f) => console.error(`  - ${f}`));
-  }
-  return failed === 0;
+  return summary();
 }
 
-createMJServer({
-  resolverPaths: RESOLVER_PATHS,
-  afterStart: async () => {
-    let ok = false;
-    try {
-      ok = await run();
-    } catch (e) {
-      console.error('\nSMOKE THREW:', e);
-    }
-    process.exit(ok ? 0 : 1);
-  },
-}).catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+bootAndRun(run);
