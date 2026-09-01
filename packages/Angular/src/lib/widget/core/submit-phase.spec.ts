@@ -14,6 +14,12 @@ describe('shouldIgnoreSubmit (double-submit guard)', () => {
       expect(shouldIgnoreSubmit(p)).toBe(false);
     }
   });
+
+  it('ignores a submit once the session has expired — nothing sent with that token can succeed', () => {
+    // bizapps-forms#123: the session JWT has lapsed and MJ issues no refresh tokens, so a submit
+    // from here is not a retry, it is a guaranteed 401. The phase is terminal, like `done`.
+    expect(shouldIgnoreSubmit('expired')).toBe(true);
+  });
 });
 
 describe('outcomeForResult (done-transition)', () => {

@@ -93,6 +93,12 @@ describe('shownScreenFor', () => {
     expect(shownScreenFor('submitting', undefined)).toEqual({ kind: 'questions' });
   });
 
+  it('reports the questions once the session has expired, which stay on screen under the notice', () => {
+    // Like `submitting`: the expiry notice is an overlay over the still-mounted form, not a
+    // surface of its own — a host strip that blanked on expiry would misreport where the widget is.
+    expect(shownScreenFor('expired', undefined)).toEqual({ kind: 'questions' });
+  });
+
   it('reports the resolved ending once done', () => {
     expect(shownScreenFor('done', screen({ id: 'e2' }))).toEqual({ kind: 'ending', screenId: 'e2' });
   });

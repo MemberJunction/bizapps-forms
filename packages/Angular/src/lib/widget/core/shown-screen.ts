@@ -91,7 +91,8 @@ export function resolveShownScreen(
  * is rather than where it was last told to go.
  *
  * `submitting` reports the questions because that is what stays on screen through a submit —
- * a strip that blanked for the duration would flicker on every send.
+ * a strip that blanked for the duration would flicker on every send. `expired` reports them for
+ * the same reason: the expiry notice is an overlay, and the form is still there beneath it.
  */
 export function shownScreenFor(
   phase: WidgetPhase,
@@ -102,6 +103,7 @@ export function shownScreenFor(
       return { kind: 'welcome' };
     case 'ready':
     case 'submitting':
+    case 'expired':
       return { kind: 'questions' };
     case 'done':
       return ending ? { kind: 'ending', screenId: ending.id } : { kind: 'ending' };
