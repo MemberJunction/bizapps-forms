@@ -8,11 +8,13 @@
  * it needs arrives via DI (the API service) and `@Input` (the distribution slug).
  */
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   ElementRef,
   inject,
+  Injector,
   input,
   OnDestroy,
   OnInit,
@@ -34,7 +36,7 @@ import {
   type PublishedFormScreen,
 } from '@mj-biz-apps/forms-entities';
 
-import { FORMS_API_SERVICE } from './api/forms-api.interface';
+import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interface';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
@@ -88,6 +90,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly api = inject(FORMS_API_SERVICE);
   private readonly config = inject(FORMS_API_CONFIG);
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+  private readonly injector = inject(Injector);
   /** Provided above, so this is the store every question component in THIS widget injects. */
   private readonly uploads = inject(FormUploadStore);
   private readonly startedAt = new Date().toISOString();
@@ -213,9 +216,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     isConfigGap(this.definition(), this.siteKey),
   );
 
-  /** Whether the final submit is allowed given the current captcha state. */
-  protected readonly submitAllowed = computed(() =>
-    canSubmit(this.definition(), this.siteKey, this.turnstileToken()),
+  /**
+   * Whether the final submit is allowed: the captcha state permits it AND the session is alive.
+   *
+   * Fed to the children as `submitDisabled`, which is what makes an expired session withdraw
+   * the Submit control and the "You can submit now." line without this component reaching into
+   * either renderer. Before the phase was folded in, a form whose every request could only ever
+   * be refused went on announcing that it was ready to send.
+   */
+  protected readonly submitAllowed = computed(
+    () => this.phase() !== 'expired' && canSubmit(this.definition(), this.siteKey, this.turnstileToken()),
   );
 
   /**
@@ -292,6 +302,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingEarly = false;
       this.phase.set(initialPhaseFor(def));
     } catch (err) {
+      // A load can meet an expired session too — the error page's "Try again" re-fetches with
+      // the same token, and after eight hours that is a 401 with a retry button that loops.
+      if (this.endSessionIfExpired(err)) {
+        return;
+      }
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
     }
   }
@@ -595,6 +610,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     } catch (err) {
       this.logSubmitTiming(startedAt, false);
       this.result.set(null);
+      // Not a failure to retry from: the session is over, and `ready` would put the respondent
+      // back in front of a Submit that can only ever be refused again.
+      if (this.endSessionIfExpired(err)) {
+        return;
+      }
       this.phase.set('ready');
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
@@ -765,10 +785,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.phase() !== 'ready') {
       return this.responseTarget();
     }
-    const res = await this.api.submitResponse(
-      this.buildSubmission(def, rt, true),
-      this.responseTarget(),
-    );
+    let res: FormSubmissionResult;
+    try {
+      res = await this.api.submitResponse(this.buildSubmission(def, rt, true), this.responseTarget());
+    } catch (err) {
+      // The autosave is the request most likely to DISCOVER an expiry: it fires on every edit,
+      // long before the respondent reaches Submit. Left to the controller alone the failure is
+      // swallowed by design, and the respondent goes on typing into a form that is saving nothing
+      // and will refuse the final send. Still rethrown, so the controller records the failure.
+      this.endSessionIfExpired(err);
+      throw err;
+    }
     if (res.success && res.responseId) {
       this.responseId = res.responseId;
     }
@@ -839,6 +866,45 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   protected retry(): void {
     void this.load();
+  }
+
+  /**
+   * End the fill if `err` says the anonymous session has expired. True when it did.
+   *
+   * The ONE place the widget decides what an expired session means, reached from every request
+   * that can discover one — submit, autosave, load — so whichever happens to see the 401 first,
+   * the outcome is the same. The session JWT is dead and MJ issues no refresh tokens, so this is
+   * terminal: the autosave is disposed outright (a disposed controller never re-arms, and its
+   * next flush would otherwise report "Progress saved" for a save the phase guard skipped), the
+   * phase withdraws submit and makes the form inert, and focus moves into the notice — with the
+   * shell inert it would otherwise fall to <body>, leaving a keyboard or screen-reader user an
+   * announcement and nowhere to go.
+   */
+  private endSessionIfExpired(err: unknown): boolean {
+    if (!(err instanceof SessionExpiredError)) {
+      return false;
+    }
+    this.autosave?.dispose();
+    this.phase.set('expired');
+    afterNextRender(
+      () => this.hostRef.nativeElement.querySelector<HTMLElement>('.mjf-expired__action')?.focus(),
+      { injector: this.injector },
+    );
+    return true;
+  }
+
+  /**
+   * The one recovery from an expired session: a new page.
+   *
+   * `GET /f/:slug` mints a fresh anonymous session on every fetch, so the host page IS the
+   * re-mint — nothing in the widget can obtain a token, and nothing should: the operator's
+   * session TTL is a bound, not an inconvenience to route around. A reload rather than {@link load}
+   * because `load` would re-fetch with the same dead token and land straight back here.
+   */
+  protected startAgain(): void {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   }
 
   private fail(message: string): void {

@@ -1,4 +1,45 @@
-<div class="mjf-shell">
+<!--
+  The expired-session notice, OUTSIDE the shell.
+
+  Once the anonymous session JWT has lapsed every request this widget can make is a certain 401,
+  and MJ issues no refresh tokens — so the form underneath is made `inert` (below) and this is the
+  only live thing on the page. It has to sit outside the inert subtree or it would be inert too.
+
+  An overlay, not a phase branch, for the reason the sending scrim is one: the form stays mounted
+  beneath it, dimmed, so the page reads as "this page, stopped" rather than "everything vanished".
+  An `alertdialog` because it interrupts and needs a response; focus is moved onto its action by
+  the component when it appears, since the inert shell would otherwise drop focus on <body>.
+-->
+@if (phase() === 'expired') {
+  <div
+    class="mjf-expired"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="mjf-expired-title"
+    aria-describedby="mjf-expired-desc"
+  >
+    <div class="mjf-expired__card">
+      <h2 id="mjf-expired-title" class="mjf-expired__title">Your session has timed out</h2>
+      <p id="mjf-expired-desc" class="mjf-expired__msg">
+        For security, a form can only stay open for a limited time. Nothing you entered has been
+        submitted, and you will need to enter your answers again.
+      </p>
+      <!-- The dialog's only tabbable element, so Tab and Shift+Tab stay on it: the form beneath
+           is inert and the next stop would be <body>, which reads as the notice having gone. -->
+      <button
+        type="button"
+        class="mjf-retry mjf-expired__action"
+        (click)="startAgain()"
+        (keydown.tab)="$event.preventDefault()"
+        (keydown.shift.tab)="$event.preventDefault()"
+      >
+        Start again
+      </button>
+    </div>
+  </div>
+}
+
+<div class="mjf-shell" [attr.inert]="phase() === 'expired' ? '' : null">
   <!--
     The form's logo, above every phase.
     A logo is the form's IDENTITY, not decoration on one screen, so it stays put while the

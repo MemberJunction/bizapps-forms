@@ -48,6 +48,24 @@ export interface IFormsApiService {
 }
 
 /**
+ * The one failure an {@link IFormsApiService} reports by TYPE rather than by message: the
+ * anonymous session this widget was minted with has expired.
+ *
+ * Part of the seam, not of the GraphQL transport, because the widget has to react to it — and it
+ * reacts differently from every other failure. A network blip or a refused submission returns the
+ * respondent to the form to try again; an expired session cannot be retried at all. The token is
+ * dead, MJ issues no refresh tokens, and the only way to a new one is a new page. A string cannot
+ * carry that distinction to the component without the component parsing server copy, which is
+ * what left it showing `HTTP 401` to a member of the public (bizapps-forms#123).
+ */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('The anonymous session has expired; a new page is needed to mint a new one.');
+    this.name = 'SessionExpiredError';
+  }
+}
+
+/**
  * DI token for the active {@link IFormsApiService}. The element bootstrap binds either
  * the real GraphQL service or the mock to this token; components inject the token, not
  * a concrete class, so the real/mock swap is a one-line provider change.
