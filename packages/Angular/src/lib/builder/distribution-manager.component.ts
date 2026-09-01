@@ -334,6 +334,12 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    * {@link credentialMayStillRedeem}, whose docstring draws exactly this limit.
    */
   private warnIfStillRedeemable(linkId: string): void {
+    if (this.actionError !== null) {
+      // The write itself failed and `run()` recorded why. A diagnosis about the token would
+      // OVERWRITE that reason with a guess — "magic links are not switched on" over a slug
+      // conflict — and send the author to audit config that is correct. The real error wins.
+      return;
+    }
     const link = this.links.find((l) => l.ID === linkId);
     if (!link || !credentialMayStillRedeem(link)) {
       return;
@@ -393,6 +399,12 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    * the warning would then be written under a record it says nothing about.
    */
   private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {
+    if (this.actionError !== null) {
+      // The write itself failed and `run()` recorded why. A diagnosis about the token would
+      // OVERWRITE that reason with a guess — "magic links are not switched on" over a slug
+      // conflict — and send the author to audit config that is correct. The real error wins.
+      return;
+    }
     const link = this.links.find((l) => l.ID === linkId);
     if (!link || link.PublicLinkToken) {
       return;

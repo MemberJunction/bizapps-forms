@@ -5,19 +5,20 @@ import { describe, expect, it } from 'vitest';
 /**
  * Structural guards for the Distribute tab.
  *
- * These read source text rather than exercising the component: it cannot be instantiated
- * in the vitest node env (no Angular JIT), and what is being guarded is not behaviour a
- * DOM-free component test would reach anyway — it is a set of design decisions that a
- * later edit could quietly undo while every other test stayed green.
+ * These read source text rather than exercising the component. That was originally
+ * justified as "it cannot be instantiated in the vitest node env" — which is false:
+ * `distribution-manager.behaviour.spec.ts` constructs it with `runInInjectionContext`, and
+ * `distribution.service.behaviour.spec.ts` constructs the service bare. What this file still
+ * has that no class test reaches is the TEMPLATE, and a few cheap "the call still exists"
+ * checks on the TypeScript.
  *
- * Source-text assertions are weak evidence and worth only what their subject is worth.
- * Each one here guards a decision whose failure mode has already happened, or would be
- * silent: gating an artifact on `ChannelType` is the defect this redesign exists to
- * remove; showing a raw `Status` is what let a link at its response cap advertise itself
- * as "Active"; and skipping the re-read after a credential write puts a revoked token on
- * screen. They match loosely — on the call or the attribute, not on formatting — so a
- * reflow cannot red them. The real behaviour lives in `share-state.spec.ts`, which tests
- * the logic.
+ * Source-text assertions are weak evidence and worth only what their subject is worth. They
+ * assert PRESENCE, not behaviour: mutation testing showed five decisions guarded here survive
+ * with this file fully green — both halves of "open", the forced save, the reissue clearing
+ * only the token, the reload after a credential write, and the paused fix branch. Each of
+ * those five is now tested behaviourally in the two `*.behaviour.spec.ts` siblings, and the
+ * titles below say what each assertion actually establishes. The real logic lives in
+ * `share-state.spec.ts`.
  */
 const here = __dirname;
 const source = (file: string): string => readFileSync(join(here, file), 'utf8');
@@ -43,7 +44,7 @@ describe('the Distribute template', () => {
     expect(template).not.toMatch(/ChannelType/);
   });
 
-  it('offers all three ways to share, for every link', () => {
+  it('offers all three ways to share', () => {
     for (const view of ["view = 'link'", "view = 'qr'", "view = 'embed'"]) {
       expect(template).toContain(view);
     }
@@ -98,24 +99,21 @@ describe('the Distribute component', () => {
     expect(component).toContain('autoShareName');
   });
 
-  it('handles every state kind in the fix switch', () => {
-    // A missing branch is a button that renders and then does nothing when pressed.
+  it('names every state kind in the fix switch (what each branch DOES is tested behaviourally)', () => {
     for (const kind of ['pending', 'paused', 'ended', 'scheduled', 'full', 'live']) {
       expect(component, `applyFix has no branch for ${kind}`).toContain(`case '${kind}':`);
     }
   });
 
-  it('forces the save when asking the server to issue a link', () => {
+  it('mentions IgnoreDirtyState in the service (whether it is PASSED is tested behaviourally)', () => {
     // Save() skips a clean record entirely, and the records needing a link are usually
     // already Active — so without this the button is a no-op exactly when it matters.
     expect(source('distribution.service.ts')).toContain('IgnoreDirtyState = true');
   });
 
-  it('puts the record back when a save is refused', () => {
+  it('mentions Revert in the service (tested behaviourally in distribution.service.behaviour.spec.ts)', () => {
     // The database bounced a too-large limit and the box kept displaying it, because the
     // rejected value stays on the in-memory record that the template renders from.
-    // Cannot be reached from the node env (the service constructs a Metadata provider at
-    // field-initialiser time), so this guards the call and the browser check covers the rest.
     expect(source('distribution.service.ts')).toContain('dist.Revert()');
   });
 
@@ -229,7 +227,7 @@ describe('the reissue request, where the builder must not do the server\'s job',
     expect(helper.slice(0, helper.indexOf('\n  }'))).toMatch(/confirmingReissue\s*=\s*false/);
   });
 
-  it('re-reads the record QUIETLY after a credential write, so the pane is not unmounted', () => {
+  it('passes quiet=true to the reload (that a reload HAPPENS is tested behaviourally)', () => {
     const helper = component.slice(component.indexOf('private async runCredentialWrite('));
     expect(helper.slice(0, helper.indexOf('\n  }'))).toMatch(/this\.reload\(true\)/);
   });
