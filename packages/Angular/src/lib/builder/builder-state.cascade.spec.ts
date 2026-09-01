@@ -53,9 +53,20 @@ class FakeRow {
     public readonly label: string,
     private readonly writes: string[],
     public readonly refuses = false,
+    /**
+     * Refuses BEFORE enlisting, which is a different failure from `refuses` and the one the fake
+     * originally could not express. Core runs `CheckPermissions` and `Validate()` ahead of the
+     * provider call and returns false from its own catch, so the row never reaches
+     * `AddTransaction` — the commit that follows cannot know it was meant to include this row, and
+     * a group left holding nothing at all still reports success.
+     */
+    public readonly refusesBeforeEnlist = false,
   ) {}
 
   public async Delete(): Promise<boolean> {
+    if (this.refusesBeforeEnlist) {
+      return false;
+    }
     if (this.TransactionGroup) {
       this.TransactionGroup.Enlist(this.label, this);
       return true;
@@ -68,6 +79,9 @@ class FakeRow {
   }
 
   public async Save(): Promise<boolean> {
+    if (this.refusesBeforeEnlist) {
+      return false;
+    }
     if (this.TransactionGroup) {
       this.TransactionGroup.Enlist(`${this.label}@${this.DisplayOrder}`, this);
       return true;
@@ -109,6 +123,13 @@ class FakeTransactionGroup {
   }
 
   public async Submit(): Promise<boolean> {
+    if (this.enlisted.length === 0) {
+      // Core's own behaviour, and a trap: "nothing was queued" reports the same `true` as "all of
+      // it committed" (`transactionGroup.js`: "there are no transactions to submit, so we just
+      // return true"). A caller that reads only this boolean cannot tell a clean commit from a
+      // reorder in which every single row was refused before it ever enlisted.
+      return true;
+    }
     if (this.enlisted.some((item) => item.row.refuses)) {
       return false; // the server rolled the whole thing back; nothing is written
     }
@@ -311,5 +332,92 @@ describe('reordering is one transaction (issue #103)', () => {
 
     expect(ok).toBe(true);
     expect(writes).toEqual(['COMMIT opt0@0,opt1@1']);
+  });
+});
+
+describe('a committed transaction releases the rows it borrowed', () => {
+  it('still writes a field edit made after a reorder commits', async () => {
+    // The regression this file exists to prevent, arriving by the opposite route. `TransactionGroup`
+    // is a property on the entity, and the entities here are the ones the builder keeps in its tree
+    // for the whole session. Leave the group attached and MJ queues every later `Save()` onto a
+    // group nobody will ever submit again — returning true, writing nothing, reporting nothing.
+    const writes = stubTransactionGroup();
+    const first = new FakeRow('first', writes);
+    const second = new FakeRow('second', writes);
+    first.DisplayOrder = 1;
+    second.DisplayOrder = 0;
+    const page = asPageNode(new FakeRow('page', writes), [
+      asQuestionNode(first),
+      asQuestionNode(second),
+    ]);
+    const service = new BuilderStateService();
+
+    expect(await service.persistQuestionOrder(page)).toBe(true);
+    writes.length = 0;
+
+    // The author now retypes the prompt on a question that happened to move.
+    expect(await service.save(first as unknown as mjBizAppsFormsFormQuestionEntity)).toBe(true);
+
+    expect(writes).toEqual(['SAVE first@0']);
+  });
+});
+
+describe('a row that refuses before it enlists is still a refusal', () => {
+  it('reports a reorder as refused when a row never reached the transaction', async () => {
+    // The subtler half of issue #103. `Save()` runs validation and permission checks BEFORE the
+    // provider call, so a refused row returns false WITHOUT queueing anything. The commit then
+    // succeeds over the rows that did queue and the reorder reports success — leaving two
+    // questions sharing a DisplayOrder, which is the divergence this whole file exists to end.
+    const writes = stubTransactionGroup();
+    const first = new FakeRow('first', writes);
+    const second = new FakeRow('second', writes, false, true); // refuses before enlisting
+    first.DisplayOrder = 1;
+    second.DisplayOrder = 0;
+    const page = asPageNode(new FakeRow('page', writes), [
+      asQuestionNode(first),
+      asQuestionNode(second),
+    ]);
+    const service = new BuilderStateService();
+
+    expect(await service.persistQuestionOrder(page)).toBe(false);
+
+    expect(writes).toEqual([]); // the partial commit never happened
+    expect([first.DisplayOrder, second.DisplayOrder]).toEqual([1, 0]); // put back
+    expect(service.lastFailure()).toMatch(/^Could not reorder question\./);
+  });
+
+  it('does not report success for a transaction that ended up empty', async () => {
+    // Every row refused before enlisting, so the group holds nothing — and core returns true for
+    // an empty queue. Reading only that boolean turns "nothing was written" into "all done".
+    const writes = stubTransactionGroup();
+    const only = new FakeRow('only', writes, false, true);
+    only.DisplayOrder = 3;
+    const page = asPageNode(new FakeRow('page', writes), [asQuestionNode(only)]);
+
+    const service = new BuilderStateService();
+
+    expect(await service.persistQuestionOrder(page)).toBe(false);
+    expect(writes).toEqual([]);
+    expect(only.DisplayOrder).toBe(3);
+  });
+
+  it('hands the rows back even when the enlist loop stops early', async () => {
+    // The abandoned-group path: rows 1..k-1 are already enlisted when row k refuses. Releasing
+    // only on the happy path would leave those rows bound to a group nobody will ever submit, so
+    // the author's next edit to any of them would vanish — a page they were told they could not
+    // delete quietly becoming read-only.
+    const writes = stubTransactionGroup();
+    const survivor = new FakeRow('survivor', writes);
+    const blocked = new FakeRow('blocked', writes, false, true);
+    const node = asQuestionNode(new FakeRow('question', writes), [survivor, blocked]);
+    const service = new BuilderStateService();
+
+    expect(await service.deleteQuestion(node)).toBe(false);
+
+    expect(survivor.TransactionGroup).toBeNull();
+    expect(blocked.TransactionGroup).toBeNull();
+    writes.length = 0;
+    expect(await service.save(survivor as unknown as mjBizAppsFormsFormQuestionEntity)).toBe(true);
+    expect(writes).toEqual(['SAVE survivor@0']);
   });
 });

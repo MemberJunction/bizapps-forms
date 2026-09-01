@@ -1289,7 +1289,16 @@ export class FormBuilderComponent extends BaseFormComponent {
     const option = node.options[optionIndex];
     if (option && (await this.state.deleteOption(option))) {
       node.options.splice(optionIndex, 1);
-      await this.state.persistOptionOrder(node);
+      // Deliberately not rolled back, and deliberately not silent. The delete already committed, so
+      // there is nothing to put back — only the renumber of the survivors refused. The service has
+      // already restored their in-memory `DisplayOrder` and raised the failure band; this says
+      // which operation it belonged to, because the band alone cannot.
+      if (!(await this.state.persistOptionOrder(node))) {
+        LogError(
+          `Option removed from question ${node.entity.ID}, but renumbering the remaining options ` +
+            'was refused; their stored DisplayOrder still has a gap.',
+        );
+      }
       this.markDirty();
     }
   }
@@ -1299,7 +1308,14 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     page.questions = page.questions.filter((q) => q !== node);
-    await this.state.persistQuestionOrder(page);
+    // Same shape as {@link onRemoveOption}: the question is gone for good, so a refused renumber is
+    // reported rather than reverted.
+    if (!(await this.state.persistQuestionOrder(page))) {
+      LogError(
+        `Question deleted from page ${page.entity.ID}, but renumbering the remaining questions ` +
+          'was refused; their stored DisplayOrder still has a gap.',
+      );
+    }
     this.selection = clearIfQuestion(this.selection, node.entity.ID);
     this.markDirty();
   }

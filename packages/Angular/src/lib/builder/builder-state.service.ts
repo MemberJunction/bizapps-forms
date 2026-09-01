@@ -56,8 +56,29 @@ type DeletableEntity =
 /** A row whose position among its siblings is stored as `DisplayOrder`. */
 type SequencedEntity = mjBizAppsFormsFormQuestionEntity | mjBizAppsFormsFormQuestionOptionEntity;
 
-/** Whether a transaction group committed, and the reason it did not. */
-type CommitOutcome = { Committed: boolean; Detail: string | null };
+/**
+ * A row whose enlistment can be undone.
+ *
+ * MJ publishes the setter as non-nullable, but core initialises the backing field to `null` and
+ * `null` is the only value that means "not enlisted" — so this states the property's real type
+ * rather than casting at each release site.
+ */
+type ReleasableRow = { TransactionGroup: TransactionGroupBase | null };
+
+/**
+ * Whether a transaction group committed, the reason it did not, and which row said so.
+ *
+ * `RefusedBy` is set only when a row refused BEFORE it was enlisted — a validation or permission
+ * failure, which `Save()`/`Delete()` report by returning false without queueing anything. That row
+ * is the one worth naming, because the commit itself never saw it.
+ */
+type SubmitOutcome = { Committed: boolean; Detail: string | null };
+type CommitOutcome = SubmitOutcome & { RefusedBy: DeletableEntity | null };
+
+/** The message an unknown thrown value carries, for a log line that has to say something. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
@@ -655,9 +676,13 @@ export class BuilderStateService {
    * work at an entity graph instead. Its four objections are all about SAVES — no primary key after
    * the parent, no read-your-writes, `Save()` returning true early, no dependency graph — and a
    * delete needs none of them: no key is minted, nothing is read back, and the ordering is a flat
-   * deepest-first list this method builds itself. The third objection does bite, which is why
-   * failure here is read from `Submit()` and the notification stream, never from `Delete()`'s
-   * return value.
+   * deepest-first list this method builds itself.
+   *
+   * The third objection bites in a narrower way than it first appears. `Delete()`'s `true` under a
+   * group means "queued", not "written", so the commit is what decides — but its `false` still
+   * means something, and something the commit can never tell you: the row was refused by validation
+   * or permissions BEFORE the provider saw it, so it is not in the group at all. Both are read,
+   * for different reasons, in {@link commitAsOneTransaction}.
    *
    * The cost is the message. A refused group reports "Transaction failed to commit" against every
    * row rather than the specific constraint — the provider asks the server for `ErrorMessages` and
@@ -666,33 +691,63 @@ export class BuilderStateService {
    * the product should never have been able to reach.
    */
   private async deleteAsOneTransaction(rows: DeletableEntity[], action: string): Promise<boolean> {
-    const group = await this.md.CreateTransactionGroup();
-    for (const row of rows) {
-      row.TransactionGroup = group;
-      // `IsGraphNodeDelete` means "this is one node of a plan somebody already built", and here
-      // that somebody is this method. Without it, a row whose owned collection happens to be
-      // loaded takes BaseEntity's own graph path — which never reaches the provider's
-      // transaction-group deferral, silently undoing everything above.
-      //
-      // On a newer core this should become `SkipRelatedCollections: true`, which says the same
-      // thing without borrowing the graph executor's private vocabulary; MJ's transactions guide
-      // names the save-path equivalent of this flag an anti-pattern for exactly that reason. That
-      // option does not exist at our pin (6.1.0-edge.2) — check for it on the next MJ upgrade.
-      if (!(await row.Delete({ IsGraphNodeDelete: true }))) {
-        this.reportFailure(action, row);
-        return false;
-      }
-    }
-
-    const outcome = await this.submitGroup(group);
+    const outcome = await this.commitAsOneTransaction(rows, (row) => row.Delete());
     if (outcome.Committed) {
       return true;
     }
-    // Reported against the row the author acted on — the last one, since the list is deepest-first.
-    // Every row in a refused group carries the same generic message, so there is no better one to
-    // pick, and naming an option the author never touched would only confuse.
-    this.reportFailure(action, rows[rows.length - 1], outcome.Detail);
+    // A pre-enlist refusal names its own row. Otherwise the commit refused as a whole, and the row
+    // the author acted on is the last one, since the list is deepest-first: every row in a refused
+    // group carries the same generic message, so naming an option they never touched would confuse.
+    this.reportFailure(action, outcome.RefusedBy ?? rows[rows.length - 1], outcome.Detail);
     return false;
+  }
+
+  /**
+   * Enlist every row in one transaction group, submit it, and ALWAYS hand the rows back.
+   *
+   * The release is why this is a helper rather than two loops. `TransactionGroup` is a property on
+   * the entity, not a scope MJ unwinds: core assigns it in exactly one setter and never clears it,
+   * and `AddTransaction` has no status check. So a row still holding a group that has already
+   * committed will, on its next `Save()`, queue onto that dead group and return `true` — writing
+   * nothing, reporting nothing. These rows are the ones the builder keeps in its tree for the whole
+   * session, so leaving one attached silently turns off saving for that question until reload.
+   * That is the mid-edit data loss `SAVE_DEBOUNCE_MS` and the save chain exist to prevent, arriving
+   * from the other direction, and it is why the release runs in a `finally` — the throw path and
+   * the refusal path strand rows just as thoroughly as the happy path.
+   *
+   * The enlist callback's boolean is NOT the write's outcome — under a group the provider returns
+   * true for merely queueing. It is the pre-flight: `Save()`/`Delete()` run validation and
+   * permission checks BEFORE the provider call and return false without enlisting when either
+   * fails. Ignoring that false is how a group ends up committing a subset, or committing nothing at
+   * all — `Submit()` returns true for an empty queue — while the caller reports success.
+   */
+  private async commitAsOneTransaction(
+    rows: readonly DeletableEntity[],
+    enlist: (row: DeletableEntity) => Promise<boolean>,
+  ): Promise<CommitOutcome> {
+    const group = await this.md.CreateTransactionGroup();
+    const enlisted: ReleasableRow[] = [];
+    let reached: DeletableEntity | null = null;
+    try {
+      for (const row of rows) {
+        row.TransactionGroup = group;
+        enlisted.push(row);
+        reached = row;
+        if (!(await enlist(row))) {
+          return { Committed: false, Detail: null, RefusedBy: row };
+        }
+      }
+      return { ...(await this.submitGroup(group)), RefusedBy: null };
+    } catch (error) {
+      // Save() throws rather than returns on a few paths — a failed pre-save hook, and the
+      // composite-save guard core raises when a loaded collection meets a transaction group. Turned
+      // into an ordinary refusal so the caller runs its rollback instead of unwinding past it.
+      return { Committed: false, Detail: describeError(error), RefusedBy: reached };
+    } finally {
+      for (const row of enlisted) {
+        row.TransactionGroup = null;
+      }
+    }
   }
 
   /**
@@ -707,7 +762,7 @@ export class BuilderStateService {
    *
    * The subscription is released in a `finally` so a throwing submit cannot leak it.
    */
-  private async submitGroup(group: TransactionGroupBase): Promise<CommitOutcome> {
+  private async submitGroup(group: TransactionGroupBase): Promise<SubmitOutcome> {
     let detail: string | null = null;
     const notifications = group.TransactionNotifications$.subscribe((status) => {
       if (!status.success && status.error) {
@@ -758,9 +813,11 @@ export class BuilderStateService {
    * rows with no structural relationship to each other, which is precisely what MJ's guide says a
    * group is for; the parent is not written at all.
    *
-   * The in-memory values are restored on refusal. Without that the builder keeps rendering the new
-   * order — the tree it draws from is not put back either — so the author is looking at an
-   * arrangement the database never accepted and has no reason to doubt it.
+   * The in-memory `DisplayOrder` values are restored on refusal, so the entities agree with the
+   * database again. That is only half of what the author sees: the canvas renders the ARRAY, not
+   * `DisplayOrder`, so putting the array back is the caller's job — `reorderQuestion` does it, and
+   * the two delete paths deliberately do not, because by then the row they removed is gone for
+   * good and there is nothing to put back.
    */
   private async persistSequence(rows: SequencedEntity[], action: string): Promise<boolean> {
     const moved = rows
@@ -773,22 +830,18 @@ export class BuilderStateService {
     for (const row of moved) {
       row.entity.DisplayOrder = row.position;
     }
-    const group = await this.md.CreateTransactionGroup();
-    for (const row of moved) {
-      row.entity.TransactionGroup = group;
-      // Not checked: under a group `Save()` returns true before anything is written. The commit
-      // is the only place that knows, which is why the outcome is read from `submitGroup`.
-      await row.entity.Save();
-    }
 
-    const outcome = await this.submitGroup(group);
+    const outcome = await this.commitAsOneTransaction(
+      moved.map((row) => row.entity),
+      (row) => row.Save(),
+    );
     if (outcome.Committed) {
       return true;
     }
     for (const row of moved) {
       row.entity.DisplayOrder = row.previous;
     }
-    this.reportFailure(action, moved[0].entity, outcome.Detail);
+    this.reportFailure(action, outcome.RefusedBy ?? moved[0].entity, outcome.Detail);
     return false;
   }
 
