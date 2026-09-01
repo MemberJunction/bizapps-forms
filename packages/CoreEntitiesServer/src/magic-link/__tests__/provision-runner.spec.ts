@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
-import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type ProvisionContext } from '../provision-runner.js';
+import { runProvisioning, DISTRIBUTION_ENTITY_NAME, type PersistCredential, type ProvisionContext } from '../provision-runner.js';
 import type { MagicLinkProvisioningConfig } from '../config.js';
 import type {
   AnonymousCredentialRef,
@@ -444,7 +444,7 @@ describe('runProvisioning — reissuing', () => {
     // The concurrency window, stated as a property of the write sequence rather than by
     // racing two instances: no persist call carries null unless the mint has failed.
     const fake = fakeMinter();
-    const persist = vi.fn(async () => true);
+    const persist = vi.fn<PersistCredential>(async () => true);
     await runProvisioning(livingCtx({ publicLinkToken: null }), config, fake.minter, contextUser, persist);
     expect(persist.mock.calls.some(([value]) => value === null)).toBe(false);
   });

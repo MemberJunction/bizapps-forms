@@ -103,8 +103,15 @@ const { MagicLinkMinterRegistry } = await import('../minter.js');
 /** The subclass under test, seen through the fake base's controls. */
 type Subject = InstanceType<typeof FormDistributionEntityServer> & FakeBaseShape;
 
+/**
+ * Under the mock above the base constructs with no arguments; the TYPE still carries the real
+ * generated constructor, `(Entity: EntityInfo, Provider?)`. This is the one place the two are
+ * reconciled, and it says exactly what the mock does rather than inventing an EntityInfo.
+ */
+const ConstructSubject = FormDistributionEntityServer as unknown as new () => Subject;
+
 function subject(): Subject {
-  return new FormDistributionEntityServer() as unknown as Subject;
+  return new ConstructSubject();
 }
 
 /** A minter that records the order it is called in on the same `events` log as the base. */
