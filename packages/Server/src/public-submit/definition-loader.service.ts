@@ -78,6 +78,18 @@ async function loadDistribution(
 }
 
 /**
+ * The `ExtraFilter` that means "a Published version of this form".
+ *
+ * Exported because the respondent-host door refuses a link whose form has none (bizapps-forms#118)
+ * with an existence read of its own — it needs a yes/no, not the snapshot — and the two gates must
+ * mean the same thing by "published". Sharing the filter is what guarantees that: a version this
+ * gate would serve is one the door would admit, and vice versa.
+ */
+export function publishedVersionFilter(formId: string): string {
+  return `FormID=${quoteSqlString(formId)} AND Status='Published'`;
+}
+
+/**
  * Load the single Published version for a form, or `undefined`.
  *
  * "Single" is now true of the data: publishing retires the incumbent in the same transaction and
@@ -96,7 +108,7 @@ async function loadPublishedVersion(
   const result = await provider.RunView<mjBizAppsFormsFormVersionEntityType>(
     {
       EntityName: FORM_VERSION_ENTITY,
-      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Published'`,
+      ExtraFilter: publishedVersionFilter(formId),
       OrderBy: 'VersionNumber DESC',
       ResultType: 'simple',
     },

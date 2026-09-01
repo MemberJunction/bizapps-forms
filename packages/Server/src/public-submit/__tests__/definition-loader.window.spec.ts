@@ -12,6 +12,7 @@ import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/cor
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
 import {
+  publishedVersionFilter,
   resolvePublishedDefinition,
   type DefinitionRunViewProvider,
 } from '../definition-loader.service';
@@ -42,11 +43,16 @@ function distribution(
 /**
  * Returns the distribution row for the first read and nothing thereafter, so a test that
  * reaches the version read fails on `no-published-version` rather than passing by accident.
+ * Every read's params are kept so a test can look at what the version read asked for.
  */
-function providerFor(dist: mjBizAppsFormsFormDistributionEntityType): DefinitionRunViewProvider {
+function providerFor(
+  dist: mjBizAppsFormsFormDistributionEntityType,
+  seen: RunViewParams[] = [],
+): DefinitionRunViewProvider {
   let calls = 0;
   return {
-    async RunView<T = unknown>(_params: RunViewParams): Promise<RunViewResult<T>> {
+    async RunView<T = unknown>(params: RunViewParams): Promise<RunViewResult<T>> {
+      seen.push(params);
       const rows = calls === 0 ? [dist] : [];
       calls += 1;
       return {
@@ -123,5 +129,21 @@ describe('resolvePublishedDefinition — the distribution window', () => {
     );
     expect(out.failure).not.toBe('distribution-closed');
     expect(out.failure).toBe('no-published-version');
+  });
+});
+
+describe('resolvePublishedDefinition — the published version', () => {
+  // The door refuses a link whose form has no published version (bizapps-forms#118) with an
+  // existence read built from the same filter. This pins that the gate really asks with that
+  // filter, so "published" cannot mean one thing at the door and another here.
+  it('asks for the version with the exported publishedVersionFilter', async () => {
+    const seen: RunViewParams[] = [];
+    await resolvePublishedDefinition(providerFor(distribution(), seen), 'customer-survey', ANON_USER);
+    expect(seen).toHaveLength(2);
+    expect(seen[1].ExtraFilter).toBe(publishedVersionFilter('form-1'));
+  });
+
+  it('publishedVersionFilter names the form and the Published status', () => {
+    expect(publishedVersionFilter('form-1')).toBe(`FormID='form-1' AND Status='Published'`);
   });
 });
