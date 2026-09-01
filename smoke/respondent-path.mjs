@@ -67,8 +67,13 @@ async function main() {
 
   // 3. The widget bundle must actually be served, not 404. Without it the page renders
   //    an empty shell — which looks like a styling problem, not a missing build step.
-  const widget = await fetch(`${BASE}/forms/widget/mj-form.js`);
+  //    And served COMPRESSED (#121): `fetch` offers gzip like a browser does, and a 1.2 MB
+  //    bundle with no Content-Encoding is the whole first-load cost on a phone. A route
+  //    registered ahead of MJAPI's compression middleware fails this while still answering 200.
+  const widget = await fetch(`${BASE}/forms/widget/mj-form.js`, { headers: { 'Accept-Encoding': 'gzip' } });
   check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:packages"`);
+  const encoding = widget.headers.get('content-encoding');
+  check(encoding === 'gzip', 'widget bundle is served compressed', `Content-Encoding: ${encoding ?? '(none)'}`);
 
   // 4. The published definition must load for that anonymous session.
   const published = await gql(token,

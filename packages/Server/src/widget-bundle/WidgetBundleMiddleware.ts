@@ -2,10 +2,7 @@
  * Serves the built `<mj-form>` custom-element bundle as an unauthenticated route on MJAPI (DG-5).
  *
  * Registered via `@RegisterClass(BaseServerMiddleware, 'mj:formsWidgetBundle')` so MJ server
- * bootstrap discovers it through ClassFactory — no core fork, no Explorer shell. Mirrors
- * {@link RespondentHostMiddleware}: it adds a route through {@link ConfigureExpressApp}, and
- * carries the same SEAM NOTE — `BaseServerExtension` DOES exist as of MJ 5.51.0, and moving
- * both routes onto it is a separate, behaviour-preserving change.
+ * bootstrap discovers it through ClassFactory — no core fork, no Explorer shell.
  *
  * The respondent host page references this bundle via `<script src="/forms/widget/mj-form.js">`.
  * Without it, `customElements.whenDefined('mj-form')` never resolves and every public form fails
@@ -14,8 +11,19 @@
  * The route runs BEFORE auth (it is just a static JS asset) so an anonymous respondent loads it
  * without a login. If the bundle file cannot be located (e.g. the package was never built), the
  * route returns 404 with a clear log line — it never crashes boot.
+ *
+ * ── Why the routes are PRE-AUTH MIDDLEWARE and not `ConfigureExpressApp` routes (#121) ─────────
+ * Both hooks run before auth; they differ in where the route lands in Express's stack. `serve()`
+ * calls `ConfigureExpressApp` while it is still collecting middleware contributions, BEFORE it
+ * mounts its own `compression()` — so an `app.get` registered there finishes its response before
+ * compression ever wraps it, and the 1.2 MB bundle went out uncompressed to every first-time
+ * respondent who had offered gzip and brotli. `GetPreAuthMiddleware` is documented by the base
+ * class as running "after compression but before OAuth/REST/GraphQL routes", which is exactly
+ * the slot a public static asset wants. Same negotiation, threshold and level as everything else
+ * MJAPI serves; nothing compression-specific lives here. The Upload/Download/Asset routes in
+ * this package contribute handlers the same way.
  */
-import type { Application, Request, Response } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
 import { LogStatus, LogError } from '@memberjunction/core';
@@ -32,8 +40,26 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
     return getWidgetBundleConfig().enabled;
   }
 
-  public override ConfigureExpressApp(app: Application): void {
+  public override GetPreAuthMiddleware(): RequestHandler[] {
     const cfg = getWidgetBundleConfig();
+
+    if (cfg.bundlePath) {
+      LogStatus(`[Forms] Widget bundle served at ${WIDGET_BUNDLE_ROUTE} (from ${cfg.bundlePath})`);
+    } else {
+      LogStatus(
+        `[Forms] Widget bundle route ${WIDGET_BUNDLE_ROUTE} registered, but no bundle found yet ` +
+          `(will 404 until "npm run build" runs or FORMS_WIDGET_BUNDLE_PATH is set).`,
+      );
+    }
+    if (!cfg.sourcemapEnabled) {
+      // Visible on a dev host where the gate was switched off by hand. MJ core drops every
+      // `LogStatus` under NODE_ENV=production, so on the host where the gate is on by default
+      // the 404 body below is what carries the reason instead.
+      LogStatus(
+        `[Forms] Widget sourcemap withheld at ${WIDGET_SOURCEMAP_ROUTE} (answers 404). ` +
+          `Set FORMS_WIDGET_SOURCEMAP_ENABLED=true to serve it on this host.`,
+      );
+    }
 
     // Both routes are registered unconditionally, so the route table does not depend on whether
     // the artifact existed at boot, and a missing file answers 404 rather than falling through to
@@ -44,49 +70,52 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
     // A bundle built after MJAPI starts therefore needs a server restart, not just a page reload
     // — the `resolvePath` indirection below exists to share one handler between two assets, not
     // to re-probe the filesystem.
-    this.serveStaticAsset(app, {
-      route: WIDGET_BUNDLE_ROUTE,
-      contentType: 'text/javascript',
-      resolvePath: () => getWidgetBundleConfig().bundlePath,
-      label: 'widget bundle',
-      missingMessage: 'Form widget bundle not found.',
-      // Only the bundle is worth a log line: a missing bundle means every public form is broken,
-      // whereas a missing sourcemap means devtools is slightly less useful.
-      logWhenMissing:
-        `[Forms] Widget bundle not found for ${WIDGET_BUNDLE_ROUTE}. Run ` +
-        `"npm run build" in @mj-biz-apps/forms-ng, or set FORMS_WIDGET_BUNDLE_PATH.`,
-    });
-
-    // The bundle is minified and carries `//# sourceMappingURL=mj-form.js.map`, so the browser
-    // asks for this on every devtools session. Unserved, it fell through to the authenticated
-    // routes and answered 401 — a reference the build emits and the server refuses.
-    this.serveStaticAsset(app, {
-      route: WIDGET_SOURCEMAP_ROUTE,
-      contentType: 'application/json',
-      resolvePath: () => getWidgetBundleConfig().sourcemapPath,
-      label: 'widget sourcemap',
-      missingMessage: 'Form widget sourcemap not found.',
-    });
-
-    if (cfg.bundlePath) {
-      LogStatus(`[Forms] Widget bundle served at ${WIDGET_BUNDLE_ROUTE} (from ${cfg.bundlePath})`);
-    } else {
-      LogStatus(
-        `[Forms] Widget bundle route ${WIDGET_BUNDLE_ROUTE} registered, but no bundle found yet ` +
-          `(will 404 until "npm run build" runs or FORMS_WIDGET_BUNDLE_PATH is set).`,
-      );
-    }
+    return [
+      this.serveStaticAsset({
+        route: WIDGET_BUNDLE_ROUTE,
+        contentType: 'text/javascript',
+        resolvePath: () => getWidgetBundleConfig().bundlePath,
+        label: 'widget bundle',
+        missingMessage: 'Form widget bundle not found.',
+        // Only the bundle is worth a log line: a missing bundle means every public form is broken,
+        // whereas a missing sourcemap means devtools is slightly less useful.
+        logWhenMissing:
+          `[Forms] Widget bundle not found for ${WIDGET_BUNDLE_ROUTE}. Run ` +
+          `"npm run build" in @mj-biz-apps/forms-ng, or set FORMS_WIDGET_BUNDLE_PATH.`,
+      }),
+      // The bundle is minified and carries `//# sourceMappingURL=mj-form.js.map`, so the browser
+      // asks for this on every devtools session. Unserved, it fell through to the authenticated
+      // routes and answered 401 — a reference the build emits and the server refuses.
+      this.serveStaticAsset({
+        route: WIDGET_SOURCEMAP_ROUTE,
+        contentType: 'application/json',
+        resolvePath: () => getWidgetBundleConfig().sourcemapPath,
+        label: 'widget sourcemap',
+        // Two reasons share the 404; the body tells them apart, because "not found" sends an
+        // operator hunting for a build artefact that is right there on a production host.
+        missingMessage: cfg.sourcemapEnabled
+          ? 'Form widget sourcemap not found.'
+          : 'Form widget sourcemap is not served on this host (FORMS_WIDGET_SOURCEMAP_ENABLED).',
+      }),
+    ];
   }
 
   /**
-   * Register one unauthenticated static-file route.
+   * One unauthenticated static-file route, as a handler that claims exactly its own path.
+   *
+   * GET and HEAD, like the `app.get` this replaced (Express routes HEAD to GET handlers, and
+   * `sendFile` answers HEAD with headers only). Anything else passes through untouched.
    *
    * The bundle and its sourcemap differ only in which config property they read, their content
    * type, and whether a missing file deserves a log — so they share this rather than carrying two
    * copies of the same send-with-fallbacks dance.
    */
-  private serveStaticAsset(app: Application, asset: StaticAsset): void {
-    app.get(asset.route, (_req: Request, res: Response) => {
+  private serveStaticAsset(asset: StaticAsset): RequestHandler {
+    return (req: Request, res: Response, next: NextFunction): void => {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || req.path !== asset.route) {
+        next();
+        return;
+      }
       const filePath = asset.resolvePath();
       if (!filePath) {
         if (asset.logWhenMissing) {
@@ -132,7 +161,7 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
             res.status(500).type('text/plain').send(`Failed to load form ${asset.label}.`);
           }
         });
-    });
+    };
   }
 }
 

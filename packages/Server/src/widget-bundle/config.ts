@@ -45,7 +45,20 @@ export interface WidgetBundleConfig {
   /** Absolute path to the built bundle, or `undefined` if it could not be located. */
   bundlePath: string | undefined;
   /**
-   * Absolute path to the bundle's sourcemap, or `undefined` when the build emitted none.
+   * Whether the sourcemap route serves the map at all (#121).
+   *
+   * The route is public and unauthenticated, so on a production host it would hand the widget's
+   * full annotated source (8.5 MB) to anyone who opens devtools on a form. Default: ON unless
+   * `NODE_ENV=production` — the switch this host already uses for the same class of decision
+   * (Apollo stack traces). `FORMS_WIDGET_SOURCEMAP_ENABLED=true|false` overrides the default in
+   * either direction. When off, the route stays registered and answers 404, never the 401 that
+   * an unserved path falls through to.
+   */
+  sourcemapEnabled: boolean;
+  /**
+   * Absolute path to the file the sourcemap route serves, or `undefined` when there is nothing to
+   * serve — either the build emitted no map, or serving is withheld (see `sourcemapEnabled`).
+   * Either way the route's answer is the same 404, which is why one property carries both.
    *
    * Resolved BY CONVENTION as `<bundle>.map` — the bundle is not opened and its
    * `sourceMappingURL` comment is not parsed. That matches what esbuild emits for the config in
@@ -63,12 +76,36 @@ export function getWidgetBundleConfig(): WidgetBundleConfig {
     return cached;
   }
   const bundlePath = resolveBundlePath();
+  const sourcemapEnabled = resolveSourcemapEnabled();
   cached = Object.freeze({
     enabled: process.env.FORMS_WIDGET_BUNDLE_ENABLED?.trim() !== 'false',
     bundlePath,
-    sourcemapPath: resolveSourcemapPath(bundlePath),
+    sourcemapEnabled,
+    sourcemapPath: sourcemapEnabled ? resolveSourcemapPath(bundlePath) : undefined,
   });
   return cached;
+}
+
+/**
+ * `FORMS_WIDGET_SOURCEMAP_ENABLED` decides when set to exactly `true` or `false`; otherwise the
+ * environment decides (served everywhere but production). Any other value is REJECTED AND LOGGED
+ * rather than read as one of the answers — an operator who typed `yes` in production would
+ * otherwise find the map withheld with nothing saying why.
+ */
+function resolveSourcemapEnabled(): boolean {
+  const byDefault = process.env.NODE_ENV !== 'production';
+  const explicit = process.env.FORMS_WIDGET_SOURCEMAP_ENABLED?.trim();
+  if (explicit === undefined || explicit === '') {
+    return byDefault;
+  }
+  if (explicit === 'true' || explicit === 'false') {
+    return explicit === 'true';
+  }
+  LogError(
+    `[Forms] FORMS_WIDGET_SOURCEMAP_ENABLED must be "true" or "false"; ignoring "${explicit}" ` +
+      `and applying the default (${byDefault ? 'served' : 'withheld, NODE_ENV=production'}).`,
+  );
+  return byDefault;
 }
 
 /** The map esbuild writes beside the bundle; `undefined` when built without sourcemaps. */
