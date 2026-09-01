@@ -173,18 +173,38 @@ export function runMutant(entry, { repoRoot = REPO_ROOT, run = runSuite } = {}) 
   }
 }
 
-/** Run a package's vitest suite and read its summary line. Absence of a summary is a crash. */
+/** ANSI SGR escapes — vitest colours its summary wherever it thinks it has a terminal. */
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+/**
+ * Read vitest's `Tests  N failed | M passed` line out of a run's combined output. Anything
+ * without one is a CRASH — never a kill.
+ *
+ * Colour is stripped first. The first CI run of this gate reported BASELINE FAILED on a green
+ * suite: GitHub Actions enables colour, so the summary arrived as
+ * `\x1b[2m Tests \x1b[22m\x1b[1m\x1b[32m73 passed…` and a plain-text regex could not see it, while
+ * a local `spawnSync` has no TTY and never showed the problem. The gate failed loud rather than
+ * passing false — the designed direction — but a gate that cannot run in CI protects nothing.
+ */
+export function parseSuiteSummary(out) {
+  const plain = out.replace(ANSI, '');
+  const summary = plain.match(/Tests\s+(?:(\d+) failed \| )?(\d+) passed/);
+  if (!summary) return { crashed: true, detail: plain.slice(-400) };
+  return { crashed: false, failed: Number(summary[1] ?? 0), passed: Number(summary[2]) };
+}
+
+/** Run a package's vitest suite and read its summary line. */
 function runSuite(cwd) {
   const res = spawnSync('npx', ['vitest', 'run', '--reporter=default'], {
     cwd,
     encoding: 'utf-8',
     timeout: SUITE_TIMEOUT_MS,
-    env: { ...process.env, CI: '1' },
+    // NO_COLOR asks vitest not to colour at all; the parser strips colour anyway. Both, because
+    // the failure mode is a gate that silently cannot run.
+    env: { ...process.env, CI: '1', NO_COLOR: '1', FORCE_COLOR: '0' },
   });
-  const out = `${res.stdout ?? ''}\n${res.stderr ?? ''}`;
-  const summary = out.match(/Tests\s+(?:(\d+) failed \| )?(\d+) passed/);
-  if (!summary) return { crashed: true, detail: res.error?.message ?? out.slice(-400) };
-  return { crashed: false, failed: Number(summary[1] ?? 0), passed: Number(summary[2]) };
+  if (res.error) return { crashed: true, detail: res.error.message };
+  return parseSuiteSummary(`${res.stdout ?? ''}\n${res.stderr ?? ''}`);
 }
 
 function main() {

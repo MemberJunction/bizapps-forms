@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { runMutant, MUTANTS } from './check-guard-mutants.mjs';
+import { runMutant, parseSuiteSummary, MUTANTS } from './check-guard-mutants.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -63,4 +63,21 @@ test('every manifest entry names a file that exists and a find that matches exac
     assert.equal(src.split(m.find).length - 1, 1, `${m.name}: find must match exactly once`);
     assert.notEqual(m.find, m.replace, `${m.name}: replace must differ from find`);
   }
+});
+
+test('reads a vitest summary that GitHub Actions has coloured — ANSI escapes between the words', () => {
+  // CI enables colour; a local spawnSync has no TTY and never does. The first CI run of this gate
+  // reported BASELINE FAILED on a green suite because the plain-text regex could not see through
+  // `\x1b[2m Tests \x1b[22m\x1b[1m\x1b[32m73 passed\x1b[39m`. Loud and wrong beats silent and wrong,
+  // but a gate that cannot run in CI protects nothing.
+  const coloured = '\x1b[2m Tests \x1b[22m\x1b[1m\x1b[32m73 passed\x1b[39m\x1b[22m\x1b[90m (73)\x1b[39m\n';
+  assert.deepEqual(parseSuiteSummary(coloured), { crashed: false, failed: 0, passed: 73 });
+  const colouredFail = '\x1b[2m Tests \x1b[22m\x1b[1m\x1b[31m2 failed\x1b[39m\x1b[22m\x1b[2m | \x1b[22m\x1b[1m\x1b[32m71 passed\x1b[39m\x1b[22m\x1b[90m (73)\x1b[39m\n';
+  assert.deepEqual(parseSuiteSummary(colouredFail), { crashed: false, failed: 2, passed: 71 });
+});
+
+test('reads a plain vitest summary, and calls anything without one a crash', () => {
+  assert.deepEqual(parseSuiteSummary('      Tests  13 passed (13)\n'), { crashed: false, failed: 0, passed: 13 });
+  assert.deepEqual(parseSuiteSummary('      Tests  1 failed | 12 passed (13)\n'), { crashed: false, failed: 1, passed: 12 });
+  assert.equal(parseSuiteSummary('Error: Cannot find module').crashed, true);
 });
