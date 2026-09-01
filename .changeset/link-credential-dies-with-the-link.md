@@ -1,5 +1,6 @@
 ---
 "@mj-biz-apps/forms-core-entities-server": minor
+"@mj-biz-apps/forms-entities": minor
 "@mj-biz-apps/forms-server": minor
 "@mj-biz-apps/forms-ng": minor
 ---
@@ -30,7 +31,9 @@ In the builder, `Paused` now outranks `Not ready` in the share-state cascade, be
 
 **Version bump is `minor` because this ships two migrations**, neither of which changes the schema.
 
-`V202608302200` is documentation only. It corrects `FormDistribution.PublicLinkToken`'s column description, which asserted the exact behaviour being replaced ("Written once after a successful mint and left unchanged thereafter") and is the one place a non-builder writer would look to learn that clearing it now means "reissue".
+`V202608302200` is documentation only, and `@mj-biz-apps/forms-entities` is in the bump list for it: the corrected description reaches TypeScript through CodeGen, so both `entity_subclasses.ts` and the GraphQL `@Field` description in `generated.ts` change with it. Without that bump the migration would fix the database while the published packages went on telling an integrator that clearing `PublicLinkToken` means nothing — the two-copies-out-of-step condition this migration exists to end, one layer up.
+
+`V202608302200` corrects what the database says. It corrects `FormDistribution.PublicLinkToken`'s column description, which asserted the exact behaviour being replaced ("Written once after a successful mint and left unchanged thereafter") and is the one place a non-builder writer would look to learn that clearing it now means "reissue".
 
 `V202608302210` retires the credentials minted before a link could lose one, in three guarded, idempotent `UPDATE`s. The lifecycle hook restores the invariant on every *save*, and nobody saves a link they closed last month — so without this, every already-paused and never-published link on an existing install keeps a redeemable invite until something happens to touch its row. `Active` invites whose distribution is not open for responses go to `Revoked`; those distributions have both credential columns cleared; and a live link whose closing date is already set has its invite's expiry pulled back to it. Invites already `Consumed` or `Expired` are left alone, because overwriting how they ended would claim an operator action that never happened — and the clearing step is restricted to links that are not open for responses, because a LIVE link pointing at a revoked invite is an operator's deliberate kill (core calls that status "the primary revocation mechanism", and before this release it was the only way to stop a leaked Forms link without losing its slug). Clearing those columns would have revived it: the hook reads a live link holding no credential as "mint one".
 
