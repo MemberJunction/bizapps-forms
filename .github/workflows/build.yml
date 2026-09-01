@@ -88,6 +88,14 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Product-code mutation gate. Seventeen guards this repo's comments call load-bearing could
+      # be deleted with the suite green — every one in a source-text spec. This runs each package
+      # suite under one neutralising edit per declared guard and fails if any stays green. After
+      # `Run tests` because it needs the baseline green, and after the build because the packages
+      # import each other's dist. Its own spec runs first and also checks every anchor still matches.
+      - name: Guard-mutation gate
+        run: npm run lint:guard-mutants:test && npm run lint:guard-mutants
+
       # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
       # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a
       # failure whose whole character is that the run still looks like it passed.
