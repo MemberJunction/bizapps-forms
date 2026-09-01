@@ -29,6 +29,7 @@
     "smoke:respondent": "node smoke/respondent-path.mjs",
     "smoke:ownership": "node smoke/session-ownership-path.mjs",
     "smoke:scope": "node smoke/respondent-scope-path.mjs",
+    "smoke:errors": "node smoke/respondent-errors-path.mjs",
     "install:deps": "pnpm install",
     "setup": "echo 'Please run: pnpm run mj:migrate && pnpm run mj:codegen && pnpm run build'",
     "change": "changeset",
