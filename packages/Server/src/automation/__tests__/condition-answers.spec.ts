@@ -114,3 +114,40 @@ describe('buildConditionAnswers — a Date answer is unchanged', () => {
     expect(evaluateConditionalRule(rule, answers)).toBe(true);
   });
 });
+
+describe('a Time answer that did not come from the date column', () => {
+  // `collapseAnswer`'s precedence is TextValue → NumericValue → DateValue, and exactly-one-populated
+  // is an invariant rather than a database constraint — so a Time question's row CAN arrive holding
+  // free text. Converting on "does this string parse as a date" rather than "did this come from the
+  // date column" hands that text to V8's very lenient parser: `new Date('2026')` is valid, and the
+  // answer silently became `00:00`, which an author's `equals: "00:00"` rule would then match.
+  // A stored Time is always the full ISO instant `canonicalizeDate` produces, so that is the shape
+  // to require.
+  const textRow = (text: string) => ({
+    QuestionID: TIME_Q.toUpperCase(),
+    TextValue: text,
+    NumericValue: null,
+    DateValue: null,
+    BooleanValue: null,
+    JSONValue: null,
+    FileID: null,
+  });
+
+  it('does not invent a clock from date-ish free text', () => {
+    for (const text of ['2026', 'Dec 25', '2026-09-01', 'March']) {
+      const map = buildConditionAnswers(definition(), new CanonicalAnswers([textRow(text)]));
+      expect(map.get(TIME_Q), text).toBe(text);
+    }
+  });
+
+  it('does not let free text satisfy a clock rule it never meant', () => {
+    const rule = { show: { all: [{ questionId: TIME_Q, op: 'equals' as const, value: '00:00' }] } };
+    const answers = buildConditionAnswers(definition(), new CanonicalAnswers([textRow('2026')]));
+    expect(evaluateConditionalRule(rule, answers)).toBe(false);
+  });
+
+  it('still reads a real stored Time, which is always a full ISO instant', () => {
+    const map = answersFor([timeAnswer1430()]);
+    expect(map.get(TIME_Q)).toBe('14:30');
+  });
+});

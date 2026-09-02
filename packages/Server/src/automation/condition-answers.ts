@@ -47,6 +47,19 @@ export function buildConditionAnswers(
 }
 
 /**
+ * The exact spelling `canonicalizeDate` produces for a stored date-column value.
+ *
+ * The conversion below keys on "did this come from the date column", and this is how that is
+ * known: `collapseAnswer` renders a `DateValue` through `toISOString()`, so a real stored Time is
+ * always this shape. Testing "does the string parse as a date" instead would reach V8's very
+ * lenient parser — `new Date('2026')` and `new Date('Dec 25')` are both valid — and a Time
+ * question's row carrying FREE TEXT (which `collapseAnswer` prefers over `DateValue`, and which
+ * the exactly-one-populated rule only discourages rather than forbids) would be silently rewritten
+ * to `00:00`, a value an author's `equals` rule could then match.
+ */
+const CANONICAL_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/**
  * The value a rule about THIS question should be compared against.
  *
  * The second scale trap, and the same failure the module header describes: a map whose values do
@@ -73,12 +86,10 @@ function conditionValueFor(
   value: ReturnType<CanonicalAnswers['Get']>,
 ): AnswerValue {
   const answer = toAnswerValue(value);
-  if (question.type !== 'Time' || typeof answer !== 'string') {
+  if (question.type !== 'Time' || typeof answer !== 'string' || !CANONICAL_INSTANT.test(answer)) {
     return answer;
   }
   const instant = new Date(answer);
-  // A value that is not an instant is passed through untouched: it is either already a clock, or
-  // text the column could not parse, and inventing a reading from it would be worse than either.
   return Number.isNaN(instant.getTime()) ? answer : clockTimeOf(instant);
 }
 

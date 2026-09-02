@@ -108,9 +108,18 @@ export function calendarDateOf(instant: Date): string {
  * A stored date-column answer read back as the text the respondent gave — the inverse of
  * {@link dateAnswerInstant}, and the one reader every consumer of a stored `DateValue` should use.
  *
- * `Time` gives back its clock, everything else its calendar day, mirroring the write side exactly:
- * `dateAnswerText(type, dateAnswerInstant(type, wire)) === wire` for every value the wire accepts.
- * That round trip is the point, and it is what three separate consumers need:
+ * `Time` gives back its clock, everything else its calendar day, mirroring the write side.
+ *
+ * The round trip is exact for the CANONICAL spellings — every value
+ * `<input type="time">` and `<input type="date">` emit — and normalising for the rest:
+ * surrounding whitespace is dropped, and `14:30:00` comes back as `14:30`, because a zero seconds
+ * group is noise rather than answer. It is deliberately NOT lossy beyond that: a `Date` wire value
+ * may be "any string `Date.parse` reads as an instant" (see the module comment), so a non-widget
+ * client can store `2026-09-01T15:00:00Z` on a Date question, and returning the calendar day alone
+ * would discard information that is in the column — on the detail page and in the CSV export
+ * alike. Such an answer reads back as `2026-09-01 15:00`.
+ *
+ * That round trip is what three separate consumers need:
  *
  *   - **Display.** `renderAnswer` shows a respondent what they entered. Before this existed, the
  *     `Time` half had been given `clockTimeOf` and the `Date` half still printed the raw instant,
@@ -126,5 +135,13 @@ export function calendarDateOf(instant: Date): string {
  * routed to it: only `Time` is a clock.
  */
 export function dateAnswerText(type: FormQuestionType, instant: Date): string {
-  return type === 'Time' ? clockTimeOf(instant) : calendarDateOf(instant);
+  if (type === 'Time') {
+    return clockTimeOf(instant);
+  }
+  const day = calendarDateOf(instant);
+  const clock = clockTimeOf(instant);
+  // `00:00` is the only reading a `<input type="date">` answer ever has, so the common case is a
+  // bare calendar day. Anything else was stored with a time by a non-widget client and keeping it
+  // is the difference between reading the column and truncating it.
+  return clock === '00:00' ? day : `${day} ${clock}`;
 }

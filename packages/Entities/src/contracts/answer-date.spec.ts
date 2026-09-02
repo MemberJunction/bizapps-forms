@@ -151,3 +151,33 @@ describe('dateAnswerText — the inverse of dateAnswerInstant', () => {
     }
   });
 });
+
+describe('dateAnswerText — what it normalises, and what it must not silently drop', () => {
+  // The doc used to promise the identity held "for every value the wire accepts". It does not,
+  // and one of the three exceptions loses data rather than merely tidying it.
+  it('normalises the spellings that mean the same instant', () => {
+    // Whitespace and a zero seconds group are noise, not answer: `14:30:00` and `14:30` are the
+    // same clock, and the canonical spelling is the shorter one.
+    expect(dateAnswerText('Time', dateAnswerInstant('Time', ' 14:30 ') as Date)).toBe('14:30');
+    expect(dateAnswerText('Time', dateAnswerInstant('Time', '14:30:00') as Date)).toBe('14:30');
+  });
+
+  it('keeps the time a Date answer was stored with, rather than truncating it away', () => {
+    // The module comment permits a `Date` wire value to be "any string `Date.parse` reads as an
+    // instant", so a non-widget client can store `2026-09-01T15:00:00Z` on a Date question. The
+    // calendar day alone would silently discard information that IS in the column — and this is
+    // the reader the detail page and the CSV export both go through.
+    const stored = dateAnswerInstant('Date', '2026-09-01T15:00:00Z') as Date;
+    expect(dateAnswerText('Date', stored)).toBe('2026-09-01 15:00');
+  });
+
+  it('shows a plain calendar day when there is no time to keep', () => {
+    // The overwhelmingly common case: `<input type="date">` stores UTC midnight.
+    expect(dateAnswerText('Date', dateAnswerInstant('Date', '2026-09-01') as Date)).toBe('2026-09-01');
+  });
+
+  it('keeps seconds on a Date answer that carries them', () => {
+    const stored = dateAnswerInstant('Date', '2026-09-01T15:00:30Z') as Date;
+    expect(dateAnswerText('Date', stored)).toBe('2026-09-01 15:00:30');
+  });
+});
