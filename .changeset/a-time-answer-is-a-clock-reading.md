@@ -1,8 +1,8 @@
 ---
-"@mj-biz-apps/forms-entities": patch
-"@mj-biz-apps/forms-server": patch
-"@mj-biz-apps/forms-actions": patch
-"@mj-biz-apps/forms-ng": patch
+"@mj-biz-apps/forms-entities": minor
+"@mj-biz-apps/forms-server": minor
+"@mj-biz-apps/forms-actions": minor
+"@mj-biz-apps/forms-ng": minor
 ---
 
 A `Time` question no longer makes the whole form unsubmittable, and the `date` column now reads back as what the respondent entered.
@@ -33,3 +33,5 @@ Nothing here is localised, deliberately: a stored `Date` is UTC midnight, so a l
 The smoke fixture's Time answer was an ISO instant, which the new format refuses; it now sends a clock reading, so the suites that submit a response keep working against forms carrying a Time question.
 
 No migration and no schema change: the storage shape of a value that could never be stored is not a change to any existing row.
+
+`minor` rather than `patch`, on three counts, and matching what sibling changesets use for the same kinds of change: the refused ISO instant is a documented behaviour break for a non-widget API client; `forms-entities` gains public exports (`calendarDateOf`, `dateAnswerText`); and `forms-actions` adds a **required** `dateText` member to the exported `AnswerWithType`, plus `TargetFields` replaces the bare name set `BindingTargetGateway.describeEntity` returned, which any external implementer of that gateway must follow.
