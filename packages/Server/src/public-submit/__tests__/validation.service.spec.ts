@@ -316,6 +316,8 @@ function temporalDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
