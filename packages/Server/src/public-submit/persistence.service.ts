@@ -24,9 +24,8 @@
  */
 import { LogError } from '@memberjunction/core';
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import { quoteSqlString } from '@mj-biz-apps/forms-entities';
+import { dateAnswerInstant, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
-  FormAnswerInput,
   JSONValue,
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormResponseAnswerEntity,
@@ -491,7 +490,10 @@ async function saveAnswer(
   answer.NewRecord();
   answer.ResponseID = responseId;
   answer.QuestionID = validated.question.id;
-  applyAnswerValue(answer, validated.input);
+  const unstorable = applyAnswerValue(answer, validated);
+  if (unstorable) {
+    return { ok: false, message: unstorable };
+  }
 
   if (!(await answer.Save())) {
     return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
@@ -499,24 +501,67 @@ async function saveAnswer(
   return { ok: true };
 }
 
-/** Copy the populated typed value(s) from the input onto the answer entity. */
-function applyAnswerValue(answer: mjBizAppsFormsFormResponseAnswerEntity, input: FormAnswerInput): void {
-  if (input.textValue !== undefined) {
+/**
+ * Copy the populated typed value(s) from the input onto the answer entity, or say why one of
+ * them cannot go on.
+ *
+ * The date column is the one that can refuse. `dateValue` is a GraphQL `String` and `DateValue`
+ * is a `DATETIMEOFFSET`, so the string is parsed here through the contract's
+ * {@link dateAnswerInstant} — the same parse validation accepted it with. This used to be a bare
+ * `new Date(input.dateValue)`, and `new Date('14:30')` (a `Time` answer, as its control emits
+ * it) is an Invalid Date that the provider's `toISOString()` turns into `RangeError: Invalid
+ * time value` from inside `Save()`, attributed to no question (#116).
+ *
+ * EVERY branch tests `!= null`, not `!== undefined`, because absent and null mean the same thing
+ * here — "this answer does not use this column" — and the transport really does deliver both.
+ * Measured against the running API: a field OMITTED from the mutation arrives as `undefined`, and
+ * a field a client sends explicitly as `null` arrives as `null`. (A comment elsewhere in this
+ * package claims omission is coerced to null; it is not, and the two behave differently.) Only an
+ * explicit null was ever a problem, and it was a problem twice:
+ *
+ *   - `dateValue` PARSES before assigning, so a null reached `text.trim()` and threw `TypeError`
+ *     out of the anonymous public mutation as an INTERNAL_SERVER_ERROR.
+ *   - `jsonValue` STRINGIFIES before assigning, and `JSON.stringify(null)` is the four-character
+ *     string `'null'` — not SQL NULL. `collapseAnswer` then reads that row as an ANSWERED question
+ *     whose value is null, which no reader can distinguish from a real answer. Quieter than the
+ *     crash and worse to diagnose.
+ *
+ * The other four assign the transport value straight through, where writing a null would be
+ * harmless — but they test the same way regardless, because a rule that holds for four of six
+ * columns is a rule the next reader has to check rather than know. `parseJsonValue` in
+ * `input-mapping.ts` carries the same `== null` guard for the same reason, added after
+ * `null.trim()` first shipped.
+ *
+ * Validation already refuses an unstorable date on every mode. Checking again here is
+ * deliberate, not belt-and-braces: validation judges the column a question's TYPE routes to,
+ * and a caller can post `dateValue` on a question of any type — so this is the only guard on
+ * that path, and a bad value there gets a message naming the question instead of a throw.
+ */
+function applyAnswerValue(
+  answer: mjBizAppsFormsFormResponseAnswerEntity,
+  { question, input }: ValidatedAnswer,
+): string | undefined {
+  if (input.textValue != null) {
     answer.TextValue = input.textValue;
   }
-  if (input.numericValue !== undefined) {
+  if (input.numericValue != null) {
     answer.NumericValue = input.numericValue;
   }
-  if (input.dateValue !== undefined) {
-    answer.DateValue = new Date(input.dateValue);
+  if (input.dateValue != null) {
+    const instant = dateAnswerInstant(question.type, input.dateValue);
+    if (!instant) {
+      const kind = question.type === 'Time' ? 'time' : 'date';
+      return `Answer to "${question.prompt}" is not a valid ${kind}.`;
+    }
+    answer.DateValue = instant;
   }
-  if (input.booleanValue !== undefined) {
+  if (input.booleanValue != null) {
     answer.BooleanValue = input.booleanValue;
   }
-  if (input.jsonValue !== undefined) {
+  if (input.jsonValue != null) {
     answer.JSONValue = JSON.stringify(input.jsonValue);
   }
-  if (input.fileId !== undefined) {
+  if (input.fileId != null) {
     answer.FileID = input.fileId;
   }
 }
@@ -609,7 +654,10 @@ async function rewriteAnswer(
   answer.BooleanValue = null;
   answer.JSONValue = null;
   answer.FileID = null;
-  applyAnswerValue(answer, validated.input);
+  const unstorable = applyAnswerValue(answer, validated);
+  if (unstorable) {
+    return { ok: false, message: unstorable };
+  }
   if (!(await answer.Save())) {
     return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
   }
