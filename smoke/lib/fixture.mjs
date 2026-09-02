@@ -258,8 +258,14 @@ export function answerFor(question, { email, name } = {}) {
     case 'YesNo':
       return { booleanValue: true };
     case 'Date':
-    case 'Time':
       return { dateValue: new Date(0).toISOString() };
+    // A Time answer is a bare clock reading, NOT an instant — the wire format `<input type="time">`
+    // emits and the only one the server accepts (#116, `contracts/answer-date.ts`). This shared the
+    // `Date` case until the format was pinned, sending an ISO instant that every Time question now
+    // refuses with "Enter a valid time.", which would have failed every smoke that submits a
+    // response against a form carrying one.
+    case 'Time':
+      return { dateValue: '09:30' };
     case 'MultiChoice':
       return optionValue ? { jsonValue: JSON.stringify([optionValue]) } : null;
     case 'SingleChoice':
