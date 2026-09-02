@@ -512,6 +512,26 @@ async function saveAnswer(
  * it) is an Invalid Date that the provider's `toISOString()` turns into `RangeError: Invalid
  * time value` from inside `Save()`, attributed to no question (#116).
  *
+ * EVERY branch tests `!= null`, not `!== undefined`, because absent and null mean the same thing
+ * here — "this answer does not use this column" — and the transport really does deliver both.
+ * Measured against the running API: a field OMITTED from the mutation arrives as `undefined`, and
+ * a field a client sends explicitly as `null` arrives as `null`. (A comment elsewhere in this
+ * package claims omission is coerced to null; it is not, and the two behave differently.) Only an
+ * explicit null was ever a problem, and it was a problem twice:
+ *
+ *   - `dateValue` PARSES before assigning, so a null reached `text.trim()` and threw `TypeError`
+ *     out of the anonymous public mutation as an INTERNAL_SERVER_ERROR.
+ *   - `jsonValue` STRINGIFIES before assigning, and `JSON.stringify(null)` is the four-character
+ *     string `'null'` — not SQL NULL. `collapseAnswer` then reads that row as an ANSWERED question
+ *     whose value is null, which no reader can distinguish from a real answer. Quieter than the
+ *     crash and worse to diagnose.
+ *
+ * The other four assign the transport value straight through, where writing a null would be
+ * harmless — but they test the same way regardless, because a rule that holds for four of six
+ * columns is a rule the next reader has to check rather than know. `parseJsonValue` in
+ * `input-mapping.ts` carries the same `== null` guard for the same reason, added after
+ * `null.trim()` first shipped.
+ *
  * Validation already refuses an unstorable date on every mode. Checking again here is
  * deliberate, not belt-and-braces: validation judges the column a question's TYPE routes to,
  * and a caller can post `dateValue` on a question of any type — so this is the only guard on
@@ -521,21 +541,12 @@ function applyAnswerValue(
   answer: mjBizAppsFormsFormResponseAnswerEntity,
   { question, input }: ValidatedAnswer,
 ): string | undefined {
-  if (input.textValue !== undefined) {
+  if (input.textValue != null) {
     answer.TextValue = input.textValue;
   }
-  if (input.numericValue !== undefined) {
+  if (input.numericValue != null) {
     answer.NumericValue = input.numericValue;
   }
-  // `!= null`, not `!== undefined`, and this is the ONE branch that needs the difference. The
-  // others assign the transport value straight through, where a `null` is simply "no value" and
-  // writing it is harmless. This branch PARSES first, and a caller reaches it holding `null`:
-  // GraphQL sends every typed column an answer does not use, so a ShortText answer arrives as
-  // `{ textValue: 'hi', dateValue: null, … }`. Under `!== undefined` that entered here and
-  // `dateAnswerInstant(type, null)` did `null.trim()` — `TypeError`, surfaced to an anonymous
-  // respondent as INTERNAL_SERVER_ERROR on the public write path, for every non-date answer.
-  // The sibling column already learned this: `parseJsonValue` carries a `raw == null` guard, added
-  // after the same crash shipped for `jsonValue` ("null.trim() 500ed every submit").
   if (input.dateValue != null) {
     const instant = dateAnswerInstant(question.type, input.dateValue);
     if (!instant) {
@@ -544,13 +555,13 @@ function applyAnswerValue(
     }
     answer.DateValue = instant;
   }
-  if (input.booleanValue !== undefined) {
+  if (input.booleanValue != null) {
     answer.BooleanValue = input.booleanValue;
   }
-  if (input.jsonValue !== undefined) {
+  if (input.jsonValue != null) {
     answer.JSONValue = JSON.stringify(input.jsonValue);
   }
-  if (input.fileId !== undefined) {
+  if (input.fileId != null) {
     answer.FileID = input.fileId;
   }
 }

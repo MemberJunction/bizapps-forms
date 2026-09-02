@@ -234,3 +234,35 @@ describe('an answer whose dateValue arrives as null (the shape the resolver real
     expect((storedDateValues(fake)[0] as Date).toISOString()).toBe('1970-01-01T14:30:00.000Z');
   });
 });
+
+describe('every typed column treats an explicit null as "not supplied"', () => {
+  // With the transport types widened to admit the `null` they really carry, `!== undefined` is no
+  // longer merely redundant on the other branches — it is wrong. The date column was fixed first
+  // because it CRASHED; `jsonValue` corrupts instead, which is quieter: `JSON.stringify(null)` is
+  // the four-character string `'null'`, and `collapseAnswer` then reads that row as an ANSWERED
+  // question holding null. Absent and null mean the same thing to every reader, so every branch
+  // now tests the same way.
+  it('does not turn a null jsonValue into the four-character string "null"', async () => {
+    const fake = provider();
+    const result = await persistSubmission(
+      fake.provider,
+      wireInputs(SHORT_TEXT_QUESTION, { textValue: 'hello' }),
+      makeContextUser(),
+    );
+
+    expect(result.ok).toBe(true);
+    const [saved] = savedAnswers(fake);
+    expect(saved.TextValue).toBe('hello');
+    expect(saved.JSONValue ?? null).toBeNull();
+  });
+
+  it('leaves every unused typed column unwritten', async () => {
+    const fake = provider();
+    await persistSubmission(fake.provider, wireInputs(SHORT_TEXT_QUESTION, { textValue: 'x' }), makeContextUser());
+    const [saved] = savedAnswers(fake);
+
+    for (const column of ['NumericValue', 'DateValue', 'BooleanValue', 'JSONValue', 'FileID'] as const) {
+      expect(saved[column] ?? null, column).toBeNull();
+    }
+  });
+});
