@@ -9,6 +9,7 @@ import {
   validateImage,
   type AssetReadContext,
   type AssetReadStorage,
+  type AssetRunViewProvider,
   type AssetUploadContext,
   type StoredAssetRecord,
 } from '../asset.service';
@@ -31,14 +32,22 @@ function metadataWith(permissions: { CanUpdate: boolean } | undefined) {
   };
 }
 
-/** RunView returning one form row (or none). */
-function runViewWith(rows: Array<{ ID: string }>, success = true) {
-  return {
-    RunView: vi.fn(
-      async <T,>(_p: RunViewParams, _u?: UserInfo): Promise<RunViewResult<T>> =>
-        ({ Success: success, Results: rows as unknown as T[], ErrorMessage: success ? '' : 'boom' }) as RunViewResult<T>,
-    ),
+/**
+ * RunView returning one form row (or none), counting its calls.
+ *
+ * Not a `vi.fn`: `Mock<…>` instantiates the generic once, so a mocked `RunView<T>` does not satisfy
+ * `AssetRunViewProvider`'s generic signature. A plain generic function plus a counter does, and
+ * the one assertion that cared about calls reads the counter.
+ */
+function runViewWith(rows: Array<{ ID: string }>, success = true): AssetRunViewProvider & { calls: number } {
+  const provider = {
+    calls: 0,
+    async RunView<T = unknown>(_p: RunViewParams, _u?: UserInfo): Promise<RunViewResult<T>> {
+      provider.calls++;
+      return { Success: success, Results: rows as unknown as T[], ErrorMessage: success ? '' : 'boom' } as RunViewResult<T>;
+    },
   };
+  return provider;
 }
 
 function uploadContext(overrides: Partial<AssetUploadContext> = {}): AssetUploadContext {
@@ -134,7 +143,7 @@ describe('runAssetUpload', () => {
     const ctx = uploadContext();
     expect((await runAssetUpload(ctx, { file: png(), formId: undefined })).failure?.status).toBe(400);
     expect((await runAssetUpload(ctx, { file: png(), formId: 'not-a-guid' })).failure?.status).toBe(400);
-    expect(ctx.runViewProvider.RunView).not.toHaveBeenCalled();
+    expect((ctx.runViewProvider as AssetRunViewProvider & { calls: number }).calls).toBe(0);
   });
 
   it('404s a form the caller cannot see', async () => {

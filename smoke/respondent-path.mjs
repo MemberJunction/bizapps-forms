@@ -25,8 +25,9 @@
  */
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const SLUG = resolveSlug('respondent-path.mjs');
 
 let failures = 0;

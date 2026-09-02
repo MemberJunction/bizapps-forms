@@ -23,6 +23,7 @@ import {
     findPermissionCalls,
     countPermissionProcedureMentions,
     findIdOnlyGuardedInserts,
+    findMaxTypedExtendedPropertyValues,
     RESPONDENT_GUARDED_GRANTS,
 } from './check-distribution-seed.mjs';
 
@@ -1335,6 +1336,233 @@ for (const name of ['V1__Unstamped.sql', 'V2026_08__Unstamped.sql']) {
         ),
     );
 }
+
+// ------------------------------------------------------------------------------------------------
+// CHECK 6 — an extended-property value is never a MAX-typed variable (cases 58-64)
+//
+// Found by running V202608302200 rather than reading it: `sp_addextendedproperty` /
+// `sp_updateextendedproperty` declare `@value` as `sql_variant`, and `sql_variant` cannot hold ANY
+// of the MAX types. The batch dies with `Operand type clash: nvarchar(max) is incompatible with
+// sql_variant` and takes the release's whole migration run with it. Every other gate here was blind
+// to it because every other gate reads shipped SQL for what it MEANS; this one asks whether it can
+// run at all. It stayed invisible for the usual reason — the migration had never been applied.
+// ------------------------------------------------------------------------------------------------
+
+withMigration(
+    'V202608302200__v0.12.x__Broken.sql',
+    "DECLARE @d NVARCHAR(MAX) = N'text';\n" +
+        "EXEC sp_addextendedproperty @name = N'MS_Description', @value = @d,\n" +
+        "    @level0type = N'SCHEMA', @level0name = N'${flyway:defaultSchema}';\n",
+    (violations) =>
+        check(
+            'case 58: an NVARCHAR(MAX) variable passed as @value is GATED',
+            violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302201__v0.12.x__BrokenVarchar.sql',
+    "DECLARE @d VARCHAR(MAX) = 'text';\n" +
+        "EXEC sp_updateextendedproperty @name = N'MS_Description', @value = @d;\n",
+    (violations) =>
+        check(
+            'case 59: VARCHAR(MAX) is gated too — the restriction is the MAX type, not the N prefix',
+            violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302202__v0.12.x__Bounded.sql',
+    "DECLARE @d NVARCHAR(4000) = N'text';\n" +
+        "EXEC sp_addextendedproperty @name = N'MS_Description', @value = @d;\n",
+    (violations) =>
+        check(
+            'case 60: a bounded NVARCHAR(4000) variable is fine — the fix must not itself be gated',
+            !violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302203__v0.12.x__Literal.sql',
+    "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'text';\n",
+    (violations) =>
+        check(
+            'case 61: a string LITERAL is fine — which is why every earlier migration escaped this',
+            !violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+withMigration(
+    'V202608302204__v0.12.x__MaxElsewhere.sql',
+    "DECLARE @big NVARCHAR(MAX) = N'a very long body';\n" +
+        "UPDATE [${mjSchema}].[EntityField] SET Description = @big WHERE ID = '00000000-0000-0000-0000-000000000001';\n",
+    (violations) =>
+        check(
+            'case 62: a MAX variable NOT handed to an extended property is fine — nvarchar(max) is legal everywhere else',
+            !violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+check(
+    'case 63: the finder reports the variable and the line, not just that something is wrong',
+    (() => {
+        const hits = findMaxTypedExtendedPropertyValues(
+            "DECLARE @x NVARCHAR(MAX) = N'v';\nEXEC sp_addextendedproperty @value = @x;\n",
+        );
+        return hits.length === 1 && hits[0].variable === '@x' && hits[0].line === 2 && hits[0].declaredType === 'NVARCHAR(MAX)';
+    })(),
+    JSON.stringify(findMaxTypedExtendedPropertyValues("DECLARE @x NVARCHAR(MAX) = N'v';\nEXEC sp_addextendedproperty @value = @x;\n")),
+);
+
+check(
+    'case 64: the real V202608302200 in this repo passes — the defect it was written for is fixed',
+    !runChecks(REPO_ROOT).some((v) => v.includes('sql_variant')),
+    JSON.stringify(runChecks(REPO_ROOT).filter((v) => v.includes('sql_variant'))),
+);
+
+// Two holes the first cut of CHECK 6 had, both found by review rather than by the suite: every
+// case above spells `EXEC` in capitals and declares exactly one variable, so neither could be
+// seen. The corpus is genuinely mixed-case — `migrations/*.sql` already carries lowercase
+// `execute` — and a multi-variable DECLARE is ordinary T-SQL. A gate whose premise is "a
+// migration that cannot execute never ships" cannot be case-sensitive about the keyword.
+
+withMigration(
+    'V202608302205__v0.12.x__LowercaseExec.sql',
+    "DECLARE @d NVARCHAR(MAX) = N'text';\n" + 'exec sp_addextendedproperty @value = @d;\n',
+    (violations) =>
+        check(
+            'case 65: a LOWERCASE exec is gated — the keyword is case-insensitive to SQL Server, so it must be here',
+            violations.some((v) => v.includes('sql_variant')),
+            JSON.stringify(violations),
+        ),
+);
+
+check(
+    'case 66: a MAX variable declared second in a DECLARE list is still seen',
+    findMaxTypedExtendedPropertyValues(
+        'DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX);\nEXEC sp_addextendedproperty @value = @d;\n',
+    ).some((h) => h.variable === '@d'),
+    JSON.stringify(
+        findMaxTypedExtendedPropertyValues(
+            'DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX);\nEXEC sp_addextendedproperty @value = @d;\n',
+        ),
+    ),
+);
+
+check(
+    'case 67: a bounded variable in a DECLARE list beside a MAX one is not itself blamed',
+    (() => {
+        const hits = findMaxTypedExtendedPropertyValues(
+            'DECLARE @a NVARCHAR(100), @d NVARCHAR(MAX);\nEXEC sp_addextendedproperty @value = @a;\n',
+        );
+        return hits.length === 0;
+    })(),
+    'a bounded variable must not be reported',
+);
+
+// Four more shapes the second cut still let through, all in the "let it through" direction —
+// the wrong one for a gate whose premise is that a migration which cannot execute never ships.
+// The walk-back to the nearest preceding `EXEC` was the root of the worst of them: it was a bare
+// substring search, so a named parameter carrying a table whose name CONTAINS "exec"
+// (`ActionExecutionLog` — a table this repo's migrations already write to) captured the walk-back
+// and hid the call. Reading the CALL'S OWN argument list instead removes the walk-back entirely,
+// and picks up positional arguments for free.
+
+const BROKEN_SHAPES = [
+    [
+        'case 68: `AS` in the DECLARE is legal T-SQL and must not hide the type',
+        "DECLARE @d AS NVARCHAR(MAX) = N'x';\nEXEC sp_addextendedproperty @value = @d;\n",
+    ],
+    [
+        'case 69: a POSITIONAL @value argument is gated — the parameter need not be named',
+        "DECLARE @d NVARCHAR(MAX) = N'x';\n" +
+            "EXEC sp_addextendedproperty N'MS_Description', @d, N'SCHEMA', N'dbo';\n",
+    ],
+    [
+        'case 70: VARBINARY(MAX) is gated — sql_variant rejects every MAX type, not just the string ones',
+        "DECLARE @d VARBINARY(MAX);\nEXEC sp_addextendedproperty @value = @d;\n",
+    ],
+    [
+        'case 71: XML is gated — sql_variant rejects it too, and it carries no (MAX) to spot',
+        "DECLARE @d XML;\nEXEC sp_addextendedproperty @value = @d;\n",
+    ],
+    [
+        'case 72: an earlier named argument containing the letters "exec" does not hide the call',
+        "DECLARE @d NVARCHAR(MAX) = N'x';\n" +
+            "EXEC sp_addextendedproperty @name = N'MS_Description',\n" +
+            "    @level1type = N'TABLE', @level1name = N'ActionExecutionLog',\n" +
+            '    @value = @d;\n',
+    ],
+];
+
+for (const [name, sql] of BROKEN_SHAPES) {
+    check(name, findMaxTypedExtendedPropertyValues(sql).length > 0, JSON.stringify(findMaxTypedExtendedPropertyValues(sql)));
+}
+
+check(
+    'case 73: a MAX variable used by a DIFFERENT procedure in the same file is not blamed',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC __mj.spSomethingElse @value = @d;\n",
+    ).length === 0,
+    'only extended-property procedures have the sql_variant parameter',
+);
+
+check(
+    'case 74: a bounded variable in an extended-property call is still fine after the rewrite',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(4000) = N'x';\nEXEC sp_addextendedproperty @value = @d;\n",
+    ).length === 0,
+    'the fix must not gate itself',
+);
+
+check(
+    'case 75: a lowercase `nvarchar(max)` declaration is gated — T-SQL type names are case-insensitive too',
+    findMaxTypedExtendedPropertyValues(
+        "declare @d nvarchar(max) = N'x';\nexec sp_addextendedproperty @value = @d;\n",
+    ).length > 0,
+    'the whole statement can be lowercase and still be the same broken migration',
+);
+
+check(
+    'case 76: a stored-procedure PARAMETER typed NVARCHAR(MAX) is not a declared variable, so a call in the same file is not blamed',
+    findMaxTypedExtendedPropertyValues(
+        "CREATE PROCEDURE [x].[spThing] @Value NVARCHAR(MAX) AS BEGIN SELECT 1 END;\n" +
+            "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'a literal', @level0type = N'SCHEMA';\n",
+    ).length === 0,
+    'only a DECLARE introduces a variable; a parameter named @Value must not be matched to the call\'s @value',
+);
+
+check(
+    'case 77: a blank line ends an unterminated extended-property call, so a missing semicolon cannot swallow the rest of the file',
+    findMaxTypedExtendedPropertyValues(
+        "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC sp_addextendedproperty @name = N'MS_Description', @value = N'literal'\n\nSELECT @d;\n",
+    ).length === 0,
+    'the @d two lines below the call belongs to the SELECT, not to the argument list',
+);
+
+// 78. CHECK 6 reads migrations-teardown too. A teardown that cannot execute is as fatal as an
+//     install that cannot, and the scan lists the directory by name — one edit drops it silently.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'migrations-teardown'), { recursive: true });
+        writeFileSync(
+            join(root, 'migrations-teardown', 'V001__Teardown.sql'),
+            "DECLARE @d NVARCHAR(MAX) = N'x';\nEXEC sp_dropextendedproperty @name = N'MS_Description';\nEXEC sp_updateextendedproperty @name = N'MS_Description', @value = @d;\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 78: a MAX-typed extended-property value in a TEARDOWN script is gated, not only in an install migration',
+            violations.some((v) => v.includes('migrations-teardown') && /sql_variant|MAX/i.test(v)),
+            JSON.stringify(violations),
+        );
+    },
+);
 
 if (failures > 0) {
     console.error(`\n${failures} gate self-test(s) failed.`);

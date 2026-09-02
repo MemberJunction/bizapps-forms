@@ -39,7 +39,9 @@ export const RESPONDENT_ROLE = 'Form Respondent';
  * rather than one vague "check your config".
  *
  * @param magicLink the host's core `magicLink` config
- * @param roleName  the role THIS app's minter grants — pass the value the minter uses
+ * @param resolveRoleName  yields the role THIS app's minter grants — a thunk, because
+ *                         resolving the minter's config can throw, and that throw is a readiness
+ *                         failure this check reports rather than an error the caller propagates
  *                  (`FORMS_MAGICLINK_ROLE`) so the check cannot drift from what is actually
  *                  minted. Defaults to {@link RESPONDENT_ROLE}.
  *
@@ -54,8 +56,19 @@ export const RESPONDENT_ROLE = 'Form Respondent';
  */
 export function checkRespondentReadiness(
   magicLink: HostMagicLinkConfig | undefined,
-  roleName: string = RESPONDENT_ROLE,
+  resolveRoleName: () => string = () => RESPONDENT_ROLE,
 ): RespondentReadiness {
+  // Resolved HERE, under this check's own guard, rather than by the caller: the provisioning
+  // config refuses a malformed channel list by throwing, and the boot-time caller is the one
+  // place that must not propagate a throw — it would take down all of MJAPI, which also serves
+  // Caliber and ATS, over a Forms env-var typo. "Is the respondent path ready?" includes "can
+  // its config be read at all?", so this is where that answer belongs.
+  let roleName: string;
+  try {
+    roleName = resolveRoleName();
+  } catch (e) {
+    return { ready: false, reason: e instanceof Error ? e.message : String(e) };
+  }
   if (!magicLink || magicLink.enabled !== true) {
     return {
       ready: false,

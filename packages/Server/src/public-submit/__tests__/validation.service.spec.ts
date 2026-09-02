@@ -11,6 +11,8 @@ function multiChoiceRequiredDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -50,6 +52,8 @@ describe('validateSubmission — FileUpload answered via fileId', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p1',
@@ -108,6 +112,8 @@ function typedQuestionsWithoutRulesDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -180,6 +186,8 @@ function partialSaveDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -210,6 +218,8 @@ function cappedDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -374,6 +384,8 @@ function conditionalDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -433,6 +445,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -472,6 +486,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -514,6 +530,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -549,6 +567,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -585,6 +605,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -621,6 +643,8 @@ describe('validateSubmission — what each mode waives', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p1',

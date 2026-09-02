@@ -104,7 +104,7 @@ function contextFor(
       elevatedUser: makeContextUser(),
       sessionId: 'sess-ko',
       clientIpHash,
-      fireHooks: async () => {},
+      fireHooks: async () => [],
     },
     saved: () => fake.saved,
   };
@@ -190,7 +190,7 @@ describe('retrying a submission that was already disqualified', () => {
         contextUser: makeContextUser(),
         elevatedUser: makeContextUser(),
         sessionId: 'sess-ko',
-        fireHooks: async () => {},
+        fireHooks: async () => [],
       } satisfies PipelineContext,
       saved: () => fake.saved,
     };
@@ -317,7 +317,7 @@ describe('a knockout is still a row, and the row ceiling still applies', () => {
         contextUser: makeContextUser(),
         elevatedUser: makeContextUser(),
         sessionId: '',
-        fireHooks: async () => {},
+        fireHooks: async () => [],
       } satisfies PipelineContext,
       saved: () => fake.saved,
     };
