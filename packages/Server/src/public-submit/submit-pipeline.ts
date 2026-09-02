@@ -293,11 +293,24 @@ export function resetSubmitInFlightForTests(): void {
 }
 
 /**
+ * What the respondent is told when a stage threw instead of returning a result. Authored, and
+ * deliberately says nothing about what happened: the exception's own words are for the log.
+ */
+export const SUBMIT_FAILED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
+
+/**
  * Run the full pipeline behind the process-wide in-flight cap.
  *
  * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
  * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
  * the widget), because holding the request would be the resource exhaustion this defends against.
+ *
+ * NEVER THROWS. Every gate returns a result, but a stage can still throw — a bug, a driver that
+ * throws where it should return false, `RangeError: Invalid time value` from a Date the validator
+ * could not parse (#116). An exception that escapes here reaches Apollo, which puts the exception's
+ * own words into `errors[].message`, and the widget renders that to the anonymous respondent — on a
+ * production host too, since nothing about it is a stack trace (#119). So the boundary is here: the
+ * exception goes to the log with the request it belonged to, and the respondent gets one sentence.
  */
 export async function runSubmitPipeline(
   ctx: PipelineContext,
@@ -308,6 +321,15 @@ export async function runSubmitPipeline(
   }
   try {
     return await runSubmitPipelineInner(ctx, submission);
+  } catch (err: unknown) {
+    // Slug and version identify the request; the answers are deliberately not logged (they are
+    // the respondent's data, and the failure is not about their content).
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    LogError(
+      `[Forms] submit for ${submission.distributionSlug} (version ${submission.formVersionId}, ` +
+        `partial=${submission.partial === true}) threw: ${detail}`,
+    );
+    return fail(SUBMIT_FAILED_MESSAGE);
   } finally {
     submitInFlightLimiter().Exit();
   }
@@ -320,8 +342,14 @@ async function runSubmitPipelineInner(
 ): Promise<FormSubmissionResult> {
   // Timed end to end. "The submit is slow" is a report nobody can act on across eleven
   // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
-  // trip or a dedupe query can each outweigh the write. `report` is called on EVERY exit,
-  // including refusals, because a slow rejection is still a slow request.
+  // trip or a dedupe query can each outweigh the write. `report` is called on every exit OF THIS
+  // FUNCTION, including refusals, because a slow rejection is still a slow request.
+  //
+  // The one exit it does not cover is an exception, which unwinds past it to `runSubmitPipeline`'s
+  // catch. That exit emits the `… threw:` line instead, which carries the exception and its stack —
+  // strictly more useful than a timing breakdown for a stage that did not finish. Said here because
+  // this comment used to claim EVERY exit, and an operator who greps for a `[Forms] submit` line to
+  // pair with a failure would otherwise conclude the request never arrived.
   const timer = createStageTimer();
   const report = <T extends FormSubmissionResult>(result: T): T => {
     LogStatus(`[Forms] submit ${formatTimings(timer.finish())}${refusalSuffix(result)}`);

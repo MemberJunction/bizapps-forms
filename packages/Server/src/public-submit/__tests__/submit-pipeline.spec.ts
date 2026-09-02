@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
-import { runSubmitPipeline, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';
+import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';
 import { FormsRateLimiter } from '../rate-limit.service';
 import { resetPublicSubmitConfigForTests } from '../config';
 import type { HookFireResult } from '../on-submit-hooks.service';
@@ -438,3 +438,40 @@ describe('runSubmitPipeline', () => {
   });
 });
 
+
+/**
+ * The pipeline's contract is a RESULT, never a throw. Its own comments have said so since the shape
+ * guard was written ("never a throw that would yield a blank screen"), and every gate honours it —
+ * but an exception from a stage (a bug, a driver throwing instead of returning false, #116's
+ * `RangeError: Invalid time value` from a Date it could not parse) escaped to Apollo, which put the
+ * exception's own words in `errors[].message` for the widget to render to the respondent (#119).
+ */
+describe('runSubmitPipeline never throws', () => {
+  it('turns an exception from a stage into the authored failure and logs the exception with context', async () => {
+    const logged: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx } = makeContext(respondentPermissions());
+      // The definition load is the first stage that touches the provider; make it blow up the way
+      // an unexpected bug does — with an Error the pipeline has no branch for.
+      const throwing = Object.create(ctx.provider, {
+        RunView: { value: async () => { throw new RangeError('Invalid time value'); } },
+      }) as PipelineContext['provider'];
+
+      const result = await runSubmitPipeline({ ...ctx, provider: throwing }, validSubmission());
+
+      expect(result.success).toBe(false);
+      expect(result.errors?.[0].message).toBe(SUBMIT_FAILED_MESSAGE);
+      expect(JSON.stringify(result)).not.toContain('Invalid time value');
+
+      const line = logged.find((l) => l.includes('Invalid time value'));
+      expect(line, 'the exception must reach the server log').toBeDefined();
+      expect(line).toContain('public-1');
+      expect(line).toContain('ver-1');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

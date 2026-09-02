@@ -60,6 +60,7 @@ So a green `npm test` is necessary and **not sufficient** for anything touching 
 ```bash
 npm run smoke:binding:seed                        # seeds the binding fixtures the next two need
 npm run smoke:respondent -- <distribution-slug>   # drives the real public surface end to end
+npm run smoke:errors -- <distribution-slug>       # what the public surface must never TELL a respondent (#119)
 npm run smoke:binding                             # entity binding: create / merge / match / ledger
 npm run smoke:automation                          # WHETHER and IN WHAT ORDER an automation runs
 npm run smoke:provenance                          # a file id cannot be claimed across sessions
