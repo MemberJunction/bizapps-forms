@@ -21,8 +21,9 @@ import {
   FormSubmissionResultType,
   PublishedFormType,
 } from './graphql-types';
-import { runSubmitPipeline, type PipelineSubmission } from './submit-pipeline';
+import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } from './submit-pipeline';
 import { toAnswerInputs } from './input-mapping';
+import { respondentSafe } from './respondent-safe';
 import { currentRequestIdentity } from '../http/request-identity';
 
 @Resolver()
@@ -30,29 +31,36 @@ export class PublicFormResolver extends ResolverBase {
   /**
    * Load a published form by its public distribution slug. Read-only; runs under
    * the anonymous read scope.
+   *
+   * Wrapped in {@link respondentSafe}: this method has no other boundary, so a throw anywhere in it
+   * would reach Apollo and be rendered to the respondent as the exception's own words (#119). `null`
+   * is already this field's answer for "no form to show", so a failure is indistinguishable from a
+   * closed link to the caller and fully described in the log.
    */
   @Query(() => PublishedFormType, { nullable: true })
   async PublishedForm(
     @Arg('distributionSlug', () => String) distributionSlug: string,
     @Ctx() { providers, userPayload }: AppContext,
   ): Promise<PublishedFormType | null> {
-    const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
-    const contextUser = this.requireUser(userPayload);
+    return respondentSafe(`PublishedForm(${distributionSlug})`, null, async () => {
+      const provider = GetReadOnlyProvider(providers, { allowFallbackToReadWrite: true });
+      const contextUser = this.requireUser(userPayload);
 
-    const loaded = await resolvePublishedDefinition(provider, distributionSlug, contextUser);
-    if (!loaded.ok || !loaded.value) {
-      return null;
-    }
-    const { definition } = loaded.value;
-    return Object.assign(new PublishedFormType(), {
-      formId: definition.formId,
-      formVersionId: definition.formVersionId,
-      name: definition.name,
-      description: definition.description,
-      renderMode: definition.renderMode,
-      settingsJSON: JSON.stringify(definition.settings),
-      styleTokensJSON: JSON.stringify(definition.styleTokens),
-      definitionJSON: JSON.stringify(definition),
+      const loaded = await resolvePublishedDefinition(provider, distributionSlug, contextUser);
+      if (!loaded.ok || !loaded.value) {
+        return null;
+      }
+      const { definition } = loaded.value;
+      return Object.assign(new PublishedFormType(), {
+        formId: definition.formId,
+        formVersionId: definition.formVersionId,
+        name: definition.name,
+        description: definition.description,
+        renderMode: definition.renderMode,
+        settingsJSON: JSON.stringify(definition.settings),
+        styleTokensJSON: JSON.stringify(definition.styleTokens),
+        definitionJSON: JSON.stringify(definition),
+      });
     });
   }
 
@@ -60,11 +68,31 @@ export class PublicFormResolver extends ResolverBase {
    * Submit (or partial-save) a response through the hardening pipeline (Turnstile,
    * rate-limit, quota, dedupe, re-validation, Save, on-submit hooks). Runs under
    * the anonymous CanCreate-on-responses scope.
+   *
+   * Wrapped in {@link respondentSafe} even though `runSubmitPipeline` never throws: the pipeline's
+   * boundary starts where the pipeline does, and everything this method does before entering it —
+   * resolving the provider, the context user, the answer mapping, the system user, the request
+   * identity — and `toResultType` after it, sit outside that boundary. An exception there reaches
+   * Apollo and is rendered to the respondent verbatim (#119). The fallback is the pipeline's own
+   * authored sentence, mapped through the same `toResultType` as every other outcome, so the widget
+   * sees one shape whatever happened.
    */
   @Mutation(() => FormSubmissionResultType)
   async SubmitFormResponse(
     @Arg('input', () => FormSubmissionInputType) input: FormSubmissionInputType,
     @Ctx() { providers, userPayload }: AppContext,
+  ): Promise<FormSubmissionResultType> {
+    const failed = toResultType({ success: false, errors: [{ message: SUBMIT_FAILED_MESSAGE }] });
+    return respondentSafe(`SubmitFormResponse(${input.distributionSlug})`, failed, async () =>
+      this.submitResponse(input, providers, userPayload),
+    );
+  }
+
+  /** The submit body, with no boundary of its own — {@link SubmitFormResponse} owns that. */
+  private async submitResponse(
+    input: FormSubmissionInputType,
+    providers: AppContext['providers'],
+    userPayload: AppContext['userPayload'],
   ): Promise<FormSubmissionResultType> {
     const provider = GetReadWriteProvider(providers);
     const contextUser = this.requireUser(userPayload);
