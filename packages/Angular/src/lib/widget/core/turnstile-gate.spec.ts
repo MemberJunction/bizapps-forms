@@ -19,6 +19,8 @@ function def(captcha: boolean): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: captcha },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [],
   };
 }

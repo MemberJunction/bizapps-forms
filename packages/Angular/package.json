@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "ngc && node scripts/build-widget.mjs",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "build:widget": "node scripts/build-widget.mjs",
     "test": "vitest run"
   },

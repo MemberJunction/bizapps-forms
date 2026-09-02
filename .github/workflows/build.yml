@@ -77,6 +77,13 @@ jobs:
       - name: Build all packages
         run: pnpm run build:packages
 
+      # Specs were excluded from tsc in every package and Vitest does not type-check, so nothing in
+      # this repo had ever compiled a test file. Seventy errors accumulated, including a call to a
+      # signature that had been replaced — which passed, for the wrong reason. After the build
+      # because specs import sibling packages' dist types.
+      - name: Typecheck (including specs)
+        run: npm run typecheck
+
       # Same gate publish.yml runs, pulled forward so a PR that breaks the widget bundle fails
       # here rather than silently shipping a form that never renders.
       - name: Validate the forms-ng widget bundle will ship
@@ -87,6 +94,14 @@ jobs:
       # dependsOn ^build.
       - name: Run tests
         run: npm test
+
+      # Product-code mutation gate. Seventeen guards this repo's comments call load-bearing could
+      # be deleted with the suite green — every one in a source-text spec. This runs each package
+      # suite under one neutralising edit per declared guard and fails if any stays green. After
+      # `Run tests` because it needs the baseline green, and after the build because the packages
+      # import each other's dist. Its own spec runs first and also checks every anchor still matches.
+      - name: Guard-mutation gate
+        run: npm run lint:guard-mutants:test && npm run lint:guard-mutants
 
       # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
       # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a
@@ -99,3 +114,9 @@ jobs:
       # session, which is sqlcmd's default and nothing else's, so the break lands only here.
       - name: Smoke sqlcmd session-option tests
         run: node smoke/lib/sqlcmd.spec.mjs
+
+      # Stdlib-only. Every smoke script asks one helper which server it is testing; one script had
+      # drifted to a hardcoded default and would have reported another checkout's behaviour as the
+      # branch's. Also covers the in-process smokes' claim on their own port and public URL.
+      - name: Smoke target resolution tests
+        run: node smoke/lib/target.spec.mjs

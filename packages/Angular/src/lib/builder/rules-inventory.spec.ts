@@ -754,7 +754,7 @@ describe('endingReachFor', () => {
  * being ahead of it after a drag reads perfectly and does nothing at all.
  */
 describe('a Go to rule reports what it passes over', () => {
-  const goTo = (target: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['target'] : never): ConditionalRule => ({
+  const goTo = (target: NonNullable<ConditionalRule['jump']>[number]['target']): ConditionalRule => ({
     jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'vip' }] }, target }],
   });
 
@@ -852,7 +852,7 @@ describe('a Go to rule reports what it passes over', () => {
  * the old one — "always, this rule applies to everyone" — was wrong about the dangerous one.
  */
 describe('a rule with no conditions', () => {
-  const noConditions = (target: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['target'] : never): ConditionalRule => ({
+  const noConditions = (target: NonNullable<ConditionalRule['jump']>[number]['target']): ConditionalRule => ({
     jump: [{ when: { all: [] }, target }],
   });
 
