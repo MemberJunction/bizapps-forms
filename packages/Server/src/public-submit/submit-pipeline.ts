@@ -33,6 +33,8 @@ import {
   type FieldError,
   type mjBizAppsFormsFormResponseEntityType,
   type PublishedFormScreen,
+  type FormQuestionType,
+  type PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
@@ -1074,6 +1076,7 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
           formVersionId: resolved.version.ID,
           distributionId: resolved.distribution.ID,
           answers: context.canonicalAnswers,
+          questionTypes: questionTypesOf(resolved.definition),
           principal,
           allowedEntities: allowedBindingEntities(),
         }),
@@ -1082,4 +1085,18 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
   }
+}
+/**
+ * Every question's type, keyed by id, for consumers that must write an answer onward in a shape
+ * the destination can hold. `CanonicalAnswers` carries values without types by design; entity
+ * binding needs both to decide whether a `Time` is an instant or a clock at its target column.
+ */
+function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<string, FormQuestionType> {
+  const types = new Map<string, FormQuestionType>();
+  for (const page of definition.pages) {
+    for (const question of page.questions) {
+      types.set(question.id, question.type);
+    }
+  }
+  return types;
 }
