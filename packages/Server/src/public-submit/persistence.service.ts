@@ -141,6 +141,40 @@ export const SAVE_FAILED_MESSAGE = 'Your response could not be saved. Please try
 /** The two rows this module writes; both carry the `ID` the log line needs. */
 type ResponseOrAnswerEntity = mjBizAppsFormsFormResponseEntity | mjBizAppsFormsFormResponseAnswerEntity;
 
+/** What the log says when the provider reported nothing usable. One constant, two readers. */
+const NO_PROVIDER_DETAIL = 'the provider reported no detail';
+
+/**
+ * The provider's diagnostic without the statement it echoes back — and so without the answers.
+ *
+ * `SQLServerDataProvider` builds `CompleteMessage` as
+ * `Error executing SQL\n    Error: <driver>\n    Query: <the whole T-SQL batch>\n    Parameters: <JSON>`,
+ * and the batch carries the answer values inlined (`SET @TextValue_… = N'…'`). Moving that string
+ * verbatim from the wire to the log would fix one disclosure and open another: on a forms product an
+ * answer can be a diagnosis, a salary or a national identifier, and a host's error log has a
+ * different audience, retention and export path from its database.
+ *
+ * {@link runSubmitPipeline}'s catch already made this call the other way — it logs the slug and
+ * version and deliberately not the answers. This is the same decision, made the same way, one
+ * module over.
+ *
+ * The driver's error line is what an operator debugs from: it names the constraint, the table and
+ * the database. The echoed statement adds nothing they cannot get from the schema, and it is the
+ * only part carrying the payload. A diagnostic with no `Query:` section — MJ's own validation and
+ * not-null failures — is returned untouched, and a truncation is never allowed to empty the line,
+ * because a logged failure that says nothing is worse than a noisy one.
+ */
+export function withoutQueryEcho(completeMessage: string): string {
+  const trimmed = completeMessage.replace(/\n\s*Query:[\s\S]*$/, '').trim();
+  if (trimmed !== '') {
+    return trimmed;
+  }
+  // Nothing survived the truncation, or there was nothing to begin with. Say so rather than
+  // returning the empty string: a log line that reads `… failed: ` tells an operator the save broke
+  // and nothing else, and looks like a bug in the logging rather than a provider that said nothing.
+  return completeMessage.trim() === '' ? NO_PROVIDER_DETAIL : completeMessage.trim();
+}
+
 /**
  * Record a failed Save/Delete where the operator can read it, and return what the respondent may.
  *
@@ -149,8 +183,8 @@ type ResponseOrAnswerEntity = mjBizAppsFormsFormResponseEntity | mjBizAppsFormsF
  * record that ties the provider's dump to the row and question it was about.
  */
 function logSaveFailure(action: string, entityName: string, entity: ResponseOrAnswerEntity): string {
-  const detail = entity.LatestResult?.CompleteMessage ?? 'the provider reported no detail';
-  LogError(`[Forms] ${action} ${entityName} ${entity.ID} failed: ${detail}`);
+  const raw = entity.LatestResult?.CompleteMessage ?? NO_PROVIDER_DETAIL;
+  LogError(`[Forms] ${action} ${entityName} ${entity.ID} failed: ${withoutQueryEcho(raw)}`);
   return SAVE_FAILED_MESSAGE;
 }
 

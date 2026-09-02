@@ -13,7 +13,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { persistSubmission, SAVE_FAILED_MESSAGE, type PersistenceInputs } from '../persistence.service';
+import { persistSubmission, SAVE_FAILED_MESSAGE, withoutQueryEcho, type PersistenceInputs } from '../persistence.service';
 import { makeContextUser, makeDefinition, makeFakeProvider, respondentPermissions } from './fakes';
 
 const RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
@@ -72,5 +72,77 @@ describe('a failed save never hands the respondent the driver diagnostic', () =>
     const line = logged.find((l) => l.includes(DRIVER_DETAIL));
     expect(line, 'the detail the respondent no longer sees must reach the log').toBeDefined();
     expect(line).toContain(ANSWER_ENTITY);
+  });
+});
+
+/**
+ * The log gets the operator's diagnostic — and NOT the respondent's answers.
+ *
+ * `SQLServerDataProvider` builds `CompleteMessage` as
+ * `Error executing SQL\n    Error: <driver>\n    Query: <the whole T-SQL batch>\n    Parameters: <JSON>`,
+ * and the batch has the answer values inlined (`SET @TextValue_… = N'…'`). Moving that string
+ * verbatim from the wire to the log fixes the disclosure and creates a different one: on a forms
+ * product an answer can be a diagnosis, a salary or a national identifier, and the host's error log
+ * has a different audience, retention and export path from its database.
+ *
+ * The pipeline's own catch already made this call the other way — "the answers are deliberately not
+ * logged (they are the respondent's data, and the failure is not about their content)". This makes
+ * persistence agree with it. The driver's error line is what an operator debugs from; the echoed
+ * statement is noise that happens to carry the payload.
+ */
+describe('withoutQueryEcho', () => {
+  const DRIVER_DUMP = [
+    'Error executing SQL',
+    '    Error: The INSERT statement conflicted with the FOREIGN KEY constraint "FK_FormResponseAnswer_Question". The conflict occurred in database "MJ_ATS_Dev", table "__mj_BizAppsForms.FormQuestion", column \'ID\'.',
+    '    Query: ',
+    '                    DECLARE @ID_741ffd3b UNIQUEIDENTIFIER,',
+    '        @TextValue_741ffd3b NVARCHAR(MAX)',
+    "                    SET @TextValue_741ffd3b = N'my diagnosis is hypertension'",
+    '                    EXEC [__mj_BizAppsForms].spCreateFormResponseAnswer @ID=@ID_741ffd3b;',
+    '    Parameters: None',
+  ].join('\n');
+
+  it('keeps the driver error line, which is what an operator debugs from', () => {
+    const detail = withoutQueryEcho(DRIVER_DUMP);
+
+    expect(detail).toContain('Error executing SQL');
+    expect(detail).toContain('FK_FormResponseAnswer_Question');
+    expect(detail).toContain('MJ_ATS_Dev');
+  });
+
+  it('drops the echoed statement, and with it the respondent answer inlined in it', () => {
+    const detail = withoutQueryEcho(DRIVER_DUMP);
+
+    expect(detail).not.toContain('my diagnosis is hypertension');
+    expect(detail).not.toContain('DECLARE @');
+    expect(detail).not.toContain('spCreateFormResponseAnswer');
+    expect(detail).not.toContain('Parameters:');
+  });
+
+  it('leaves a diagnostic that carries no echoed statement exactly as it was', () => {
+    // MJ's own not-null and validation failures come through `CompleteMessage` too, and they are
+    // short, answer-free, and the most useful thing in the log when they happen.
+    const validation = 'Field Email is required and cannot be null';
+
+    expect(withoutQueryEcho(validation)).toBe(validation);
+  });
+
+  it('never returns an empty diagnostic, whatever it is handed', () => {
+    // A truncation that can erase the whole line would turn a logged failure into a silent one.
+    expect(withoutQueryEcho('')).not.toBe('');
+    expect(withoutQueryEcho('    Query: SELECT 1')).not.toBe('');
+  });
+});
+
+describe('the logged line carries the diagnostic but not the answers', () => {
+  it('does not write the echoed statement to the log', async () => {
+    const fake = makeFakeProvider({ createPermissions: respondentPermissions(), failSaveFor: ANSWER_ENTITY });
+
+    await persistSubmission(fake.provider, inputs(), makeContextUser());
+
+    const line = logged.find((l) => l.includes('[Forms] inserting'));
+    expect(line, 'the failure must still be logged').toBeDefined();
+    expect(line).not.toContain('DECLARE @');
+    expect(line).not.toContain('Parameters:');
   });
 });
