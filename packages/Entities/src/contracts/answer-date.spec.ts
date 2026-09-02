@@ -7,7 +7,7 @@
  * Time question. These pin the contract both sides now parse through.
  */
 import { describe, expect, it } from 'vitest';
-import { clockTimeOf, dateAnswerInstant, parseClockTime } from './answer-date';
+import { calendarDateOf, clockTimeOf, dateAnswerInstant, dateAnswerText, parseClockTime } from './answer-date';
 
 describe('parseClockTime', () => {
   it('reads what <input type="time"> emits', () => {
@@ -92,5 +92,62 @@ describe('clockTimeOf — reading a stored Time back', () => {
   it('reads the UTC clock, never the viewer’s local one', () => {
     // The stored instant is 14:30Z. In America/Chicago (this machine) local hours would be 08.
     expect(clockTimeOf(new Date('1970-01-01T14:30:00.000Z'))).toBe('14:30');
+  });
+});
+
+describe('calendarDateOf — reading a stored Date back', () => {
+  it('gives the calendar day the respondent picked', () => {
+    expect(calendarDateOf(new Date('2026-09-01T00:00:00Z'))).toBe('2026-09-01');
+  });
+
+  it('reads UTC fields, so the day does not shift for a viewer west of UTC', () => {
+    // The stored instant IS UTC midnight. `toLocaleDateString()` on it renders the PREVIOUS day
+    // anywhere west of Greenwich — the same skew `bandOf` was fixed for, and the reason this
+    // reader exists rather than a locale formatter.
+    const stored = new Date('2026-09-01T00:00:00Z');
+    expect(calendarDateOf(stored)).toBe('2026-09-01');
+    expect(calendarDateOf(new Date('2026-01-01T00:00:00Z'))).toBe('2026-01-01');
+  });
+
+  it('pads single-digit months and days, so the value sorts as text', () => {
+    expect(calendarDateOf(new Date('2026-03-07T00:00:00Z'))).toBe('2026-03-07');
+  });
+});
+
+describe('dateAnswerText — the inverse of dateAnswerInstant', () => {
+  it('reads a Time back as its clock', () => {
+    expect(dateAnswerText('Time', new Date(Date.UTC(1970, 0, 1, 14, 30)))).toBe('14:30');
+  });
+
+  it('reads a Date back as its calendar day', () => {
+    expect(dateAnswerText('Date', new Date('2026-09-01T00:00:00Z'))).toBe('2026-09-01');
+  });
+
+  it('reads every other type that can land in the column as a calendar day', () => {
+    // A caller can post `dateValue` on a question of any type; only `Time` is a clock.
+    expect(dateAnswerText('ShortText', new Date('2026-09-01T00:00:00Z'))).toBe('2026-09-01');
+  });
+
+  // The property that matters: what a respondent gave, stored, and read back is what they gave.
+  // This is what a future cross-session resume depends on — putting the text back into
+  // `<input type="time">` or `<input type="date">`, which silently blank anything else.
+  it('round-trips every shape the wire accepts', () => {
+    const cases: [Parameters<typeof dateAnswerText>[0], string][] = [
+      ['Time', '14:30'],
+      ['Time', '00:00'],
+      ['Time', '23:59'],
+      ['Time', '14:30:15'],
+      ['Date', '2026-09-01'],
+      ['Date', '1970-01-01'],
+      ['Date', '2026-03-07'],
+    ];
+    for (const [type, wire] of cases) {
+      const stored = dateAnswerInstant(type, wire);
+      expect(stored, `${type} ${wire} should be storable`).toBeInstanceOf(Date);
+      expect(dateAnswerText(type, stored as Date), `${type} ${wire}`).toBe(wire);
+      // ...and the text feeds straight back in to the same instant.
+      expect((dateAnswerInstant(type, dateAnswerText(type, stored as Date)) as Date).toISOString())
+        .toBe((stored as Date).toISOString());
+    }
   });
 });

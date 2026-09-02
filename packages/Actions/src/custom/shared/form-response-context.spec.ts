@@ -113,6 +113,38 @@ describe('loadFormResponseContext', () => {
       expect(ctx?.answers[0].questionType).toBe('Date');
     });
 
+    it('reads a Time answer back as the clock, so an action never renders "1970"', async () => {
+      // A Time is STORED as the clock on the epoch date (#116), so the raw `dateValue` an action
+      // receives is `1970-01-01T14:30:00.000Z`. Any date formatter turns that into "Jan 1, 1970"
+      // in a confirmation email. `dateText` is the respondent's own reading, alongside the raw
+      // instant rather than replacing it — an action doing date arithmetic still wants the Date.
+      state.answers = [answerRow({ QuestionID: 'q-time', DateValue: new Date('1970-01-01T14:30:00.000Z') })];
+      state.questions = [{ ID: 'q-time', QuestionType: 'Time', Prompt: 'What time suits you' }];
+
+      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+
+      expect(ctx?.answers[0].dateText).toBe('14:30');
+      expect(ctx?.answers[0].dateValue).toEqual(new Date('1970-01-01T14:30:00.000Z'));
+    });
+
+    it('reads a Date answer back as the calendar day', async () => {
+      state.answers = [answerRow({ QuestionID: 'q-date', DateValue: new Date('2026-08-07T00:00:00Z') })];
+      state.questions = [{ ID: 'q-date', QuestionType: 'Date', Prompt: 'Start date' }];
+
+      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+
+      expect(ctx?.answers[0].dateText).toBe('2026-08-07');
+    });
+
+    it('leaves dateText null when the answer populates another column', async () => {
+      state.answers = [answerRow({ QuestionID: 'q-text', TextValue: 'hello' })];
+      state.questions = [{ ID: 'q-text', QuestionType: 'ShortText', Prompt: 'Name' }];
+
+      const ctx = await loadFormResponseContext('resp-1', fakeUser);
+
+      expect(ctx?.answers[0].dateText).toBeNull();
+    });
+
     it('projects a File answer', async () => {
       state.answers = [answerRow({ QuestionID: 'q-file', FileID: 'file-guid-1' })];
       state.questions = [{ ID: 'q-file', QuestionType: 'FileUpload', Prompt: 'Resume' }];

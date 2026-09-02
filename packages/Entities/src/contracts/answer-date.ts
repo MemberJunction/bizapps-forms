@@ -77,13 +77,54 @@ export function dateAnswerInstant(type: FormQuestionType, text: string): Date | 
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
+/** Zero-pad to the two digits every field of both formats uses. */
+const two = (n: number): string => String(n).padStart(2, '0');
+
 /**
  * The clock reading a stored `Time` instant represents: `14:30`, or `14:30:15` when the answer
  * carried seconds. Reads the UTC fields — see the module comment for why local is wrong.
  */
 export function clockTimeOf(instant: Date): string {
-  const two = (n: number): string => String(n).padStart(2, '0');
   const base = `${two(instant.getUTCHours())}:${two(instant.getUTCMinutes())}`;
   const seconds = instant.getUTCSeconds();
   return seconds === 0 ? base : `${base}:${two(seconds)}`;
+}
+
+/**
+ * The calendar day a stored `Date` instant represents: `2026-09-01`.
+ *
+ * Reads the UTC fields for the same reason {@link clockTimeOf} does, and here the consequence is
+ * sharper: the stored instant IS UTC midnight, so a locale formatter renders the PREVIOUS DAY for
+ * every viewer west of Greenwich. `toLocaleDateString()` on `2026-09-01T00:00:00Z` in Chicago is
+ * "8/31/2026". That is the same skew `bandOf` was fixed for, and it is why this returns the plain
+ * ISO calendar date rather than a prettier localised one — a date answer carries no zone, so there
+ * is no zone in which to localise it. It also sorts as text and parses in a spreadsheet.
+ */
+export function calendarDateOf(instant: Date): string {
+  return `${instant.getUTCFullYear()}-${two(instant.getUTCMonth() + 1)}-${two(instant.getUTCDate())}`;
+}
+
+/**
+ * A stored date-column answer read back as the text the respondent gave — the inverse of
+ * {@link dateAnswerInstant}, and the one reader every consumer of a stored `DateValue` should use.
+ *
+ * `Time` gives back its clock, everything else its calendar day, mirroring the write side exactly:
+ * `dateAnswerText(type, dateAnswerInstant(type, wire)) === wire` for every value the wire accepts.
+ * That round trip is the point, and it is what three separate consumers need:
+ *
+ *   - **Display.** `renderAnswer` shows a respondent what they entered. Before this existed, the
+ *     `Time` half had been given `clockTimeOf` and the `Date` half still printed the raw instant,
+ *     so one column rendered two ways.
+ *   - **Handing the value onward.** An on-submit Action or AI Agent that formats an answer needs
+ *     the respondent's reading, not a 1970 timestamp.
+ *   - **Putting it back in the control.** `<input type="time">` and `<input type="date">` accept
+ *     exactly these two formats and silently blank anything else — so when cross-session resume
+ *     lands, this is the read that hydrates a saved answer. Nothing does that yet; the round-trip
+ *     spec exists so that whoever writes it cannot get it wrong.
+ *
+ * Takes the whole type, like `dateAnswerInstant`, because the column does not care which question
+ * routed to it: only `Time` is a clock.
+ */
+export function dateAnswerText(type: FormQuestionType, instant: Date): string {
+  return type === 'Time' ? clockTimeOf(instant) : calendarDateOf(instant);
 }

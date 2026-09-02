@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { dateAnswerInstant, dateAnswerText } from '@mj-biz-apps/forms-entities';
 import type { AnswerValue, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 import { toAnswerInputs } from './answer-value';
 
@@ -51,6 +52,44 @@ describe('toAnswerInputs', () => {
     const answers = new Map<string, AnswerValue>([['a', 'x'], ['s', 'ignored'], ['b', '']]);
     expect(toAnswerInputs(questions, answers)).toEqual([{ questionId: 'a', textValue: 'x' }]);
   });
+});
+
+/**
+ * Control → wire → stored → text → control.
+ *
+ * Cross-session resume does not exist yet (`autosave-controller.ts`: "cross-session resume is
+ * Phase 2"), so nothing reads a stored answer back into a control today. When it lands, the value
+ * put back has to be one the control accepts: `<input type="time">` and `<input type="date">`
+ * silently blank anything else, so hydrating from the raw stored instant would wipe the answer with
+ * no error. This closes the loop now, on the real widget encoder, so whoever writes that path finds
+ * the guarantee already proven rather than having to know it.
+ */
+describe('a date-column answer survives the whole round trip, for the resume path that is coming', () => {
+  const cases: [PublishedFormQuestion['type'], string][] = [
+    ['Time', '14:30'],
+    ['Time', '09:05'],
+    ['Time', '00:00'],
+    ['Time', '23:59'],
+    ['Date', '2026-09-01'],
+    ['Date', '2026-03-07'],
+  ];
+
+  for (const [type, entered] of cases) {
+    it(`${type} "${entered}" comes back as itself`, () => {
+      const answers = new Map<string, AnswerValue>([['q', entered]]);
+
+      // What the control emits is what the widget puts on the wire, untouched.
+      const [wire] = toAnswerInputs([q('q', type)], answers);
+      expect(wire.dateValue).toBe(entered);
+
+      // What the server stores from that wire value...
+      const stored = dateAnswerInstant(type, wire.dateValue as string);
+      expect(stored).toBeInstanceOf(Date);
+
+      // ...reads back as exactly what the respondent typed, which is a value the control accepts.
+      expect(dateAnswerText(type, stored as Date)).toBe(entered);
+    });
+  }
 });
 
 describe('toAnswerInputs — the types added with element parity', () => {
