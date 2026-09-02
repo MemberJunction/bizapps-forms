@@ -12,7 +12,7 @@
  * assertion is on the value that would have gone to the database.
  */
 import { describe, expect, it } from 'vitest';
-import type { PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import type { FormAnswerInput, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { persistSubmission, type PersistenceInputs } from '../persistence.service';
 import { makeContextUser, makeFakeProvider, respondentPermissions, type FakeProvider } from './fakes';
@@ -49,12 +49,59 @@ function inputs(question: PublishedFormQuestion, dateValue: string): Persistence
   };
 }
 
+/**
+ * An answer as it ACTUALLY arrives from the resolver: every typed column the answer does not use
+ * is present and `null`, not absent. `input-mapping.spec.ts` models the same shape, and its own
+ * regression title records what happens when a mapper forgets it — "null.trim() 500ed every
+ * submit", for `jsonValue`. The fixtures above spell answers as `{ questionId, dateValue }`, a
+ * shape no caller produces, which is why nothing here caught the same bug for `dateValue`.
+ */
+function wireInputs(
+  question: PublishedFormQuestion,
+  populated: Partial<Record<'textValue' | 'numericValue' | 'dateValue' | 'booleanValue', unknown>>,
+): PersistenceInputs {
+  return {
+    formId: 'form-1',
+    formVersionId: 'ver-1',
+    distributionId: 'dist-1',
+    complete: true,
+    sessionId: 'session-1',
+    sourceMetadata: {},
+    answers: [
+      {
+        question,
+        input: {
+          questionId: question.id,
+          textValue: null,
+          numericValue: null,
+          dateValue: null,
+          booleanValue: null,
+          jsonValue: null,
+          fileId: null,
+          ...populated,
+        } as FormAnswerInput,
+      },
+    ],
+  };
+}
+
+const SHORT_TEXT_QUESTION: PublishedFormQuestion = {
+  id: 'q-text',
+  type: 'ShortText',
+  prompt: 'Your name',
+  isRequired: false,
+  displayOrder: 3,
+  options: [],
+};
+
 function provider(): FakeProvider {
   return makeFakeProvider({ createPermissions: respondentPermissions() });
 }
 
-const storedDateValues = (fake: FakeProvider): unknown[] =>
-  fake.saved.filter((r) => r.entityName === ANSWER_ENTITY).map((r) => r.values.DateValue);
+const savedAnswers = (fake: FakeProvider): Record<string, unknown>[] =>
+  fake.saved.filter((r) => r.entityName === ANSWER_ENTITY).map((r) => r.values as Record<string, unknown>);
+
+const storedDateValues = (fake: FakeProvider): unknown[] => savedAnswers(fake).map((v) => v.DateValue);
 
 describe('a Time answer', () => {
   describe('happy', () => {
@@ -136,5 +183,54 @@ describe('a Date answer', () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain('Which day');
     expect(storedDateValues(fake)).toEqual([]);
+  });
+});
+
+describe('an answer whose dateValue arrives as null (the shape the resolver really sends)', () => {
+  // `applyAnswerValue` gated the date column on `!== undefined`, and `null !== undefined`. So an
+  // answer that populates a DIFFERENT column — every text, numeric, boolean and choice answer —
+  // carried `dateValue: null` into `dateAnswerInstant`, which does `text.trim()`. The result was
+  // `TypeError: Cannot read properties of null (reading 'trim')`, surfaced to an anonymous
+  // respondent as INTERNAL_SERVER_ERROR on the public write path. Before this PR the same line
+  // was `new Date(input.dateValue)`, and `new Date(null)` is the epoch — wrong, but not a crash.
+  //
+  // The sibling column already learned this: `parseJsonValue` carries a `raw == null` guard, and
+  // `input-mapping.spec.ts` titles its test "regression: null.trim() 500ed every submit".
+  it('does not throw, and writes no date, for a ShortText answer', async () => {
+    const fake = provider();
+    const result = await persistSubmission(
+      fake.provider,
+      wireInputs(SHORT_TEXT_QUESTION, { textValue: 'hello world' }),
+      makeContextUser(),
+    );
+
+    expect(result.ok).toBe(true);
+    // The answer row WAS saved (so the assertion is not vacuous) and carries the text...
+    expect(savedAnswers(fake)).toHaveLength(1);
+    expect(savedAnswers(fake)[0].TextValue).toBe('hello world');
+    // ...while the date column was never written at all. Not written and written-as-null are the
+    // same row: a new record defaults to null, and `rewriteAnswer` nulls every column first.
+    expect(storedDateValues(fake)[0] ?? null).toBeNull();
+  });
+
+  it('does not throw for a Date question whose answer was cleared', async () => {
+    const fake = provider();
+    const result = await persistSubmission(fake.provider, wireInputs(DATE_QUESTION, {}), makeContextUser());
+
+    expect(result.ok).toBe(true);
+    expect(savedAnswers(fake)).toHaveLength(1);
+    expect(storedDateValues(fake)[0] ?? null).toBeNull();
+  });
+
+  it('still stores a real clock when dateValue IS populated in that same shape', async () => {
+    const fake = provider();
+    const result = await persistSubmission(
+      fake.provider,
+      wireInputs(TIME_QUESTION, { dateValue: '14:30' }),
+      makeContextUser(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((storedDateValues(fake)[0] as Date).toISOString()).toBe('1970-01-01T14:30:00.000Z');
   });
 });

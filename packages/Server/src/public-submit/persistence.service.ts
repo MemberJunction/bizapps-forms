@@ -527,7 +527,16 @@ function applyAnswerValue(
   if (input.numericValue !== undefined) {
     answer.NumericValue = input.numericValue;
   }
-  if (input.dateValue !== undefined) {
+  // `!= null`, not `!== undefined`, and this is the ONE branch that needs the difference. The
+  // others assign the transport value straight through, where a `null` is simply "no value" and
+  // writing it is harmless. This branch PARSES first, and a caller reaches it holding `null`:
+  // GraphQL sends every typed column an answer does not use, so a ShortText answer arrives as
+  // `{ textValue: 'hi', dateValue: null, … }`. Under `!== undefined` that entered here and
+  // `dateAnswerInstant(type, null)` did `null.trim()` — `TypeError`, surfaced to an anonymous
+  // respondent as INTERNAL_SERVER_ERROR on the public write path, for every non-date answer.
+  // The sibling column already learned this: `parseJsonValue` carries a `raw == null` guard, added
+  // after the same crash shipped for `jsonValue` ("null.trim() 500ed every submit").
+  if (input.dateValue != null) {
     const instant = dateAnswerInstant(question.type, input.dateValue);
     if (!instant) {
       const kind = question.type === 'Time' ? 'time' : 'date';
