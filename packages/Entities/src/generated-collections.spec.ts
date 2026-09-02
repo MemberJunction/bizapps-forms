@@ -103,6 +103,48 @@ describe('FormPage.Questions', () => {
   });
 });
 
+/**
+ * One field's declaration line out of a generated zod schema.
+ *
+ * Read from the schema rather than the DDL because the schema is what the shipped package carries
+ * — a caller in another repo has these types and not `migrations/`.
+ */
+function schemaField(schema: string, field: string): string {
+  const start = GENERATED.indexOf(`export const ${schema} = z.object({`);
+  if (start === -1) {
+    throw new Error(`No generated schema ${schema} — has CodeGen's naming changed?`);
+  }
+  const line = new RegExp(`^\\s+${field}: (.*)$`, 'm').exec(GENERATED.slice(start));
+  if (!line) {
+    throw new Error(`No field ${field} on ${schema}.`);
+  }
+  return line[1];
+}
+
+describe('FormPage.Questions is safe to read and a TRAP to Create() through', () => {
+  it('keys on PageID while FormID is required, so a created child cannot be saved', () => {
+    // The hazard this collection ships with, pinned so the first caller to adopt it meets it here
+    // rather than at a save refusal they have to reverse-engineer.
+    //
+    // `RelatedRecordCollection.Create()` calls `NewRecord()` and then `Add()`, and the only column
+    // `Add` writes is the JOIN FIELD (core's `stampParentKey` sets `RelatedEntityJoinField` and
+    // nothing else). So a question created through `page.Questions` gets `PageID` and NOT
+    // `FormID` — which is NOT NULL, is not derived by any hook on either tier, and is not
+    // reachable from the page through the collection. Every write path in the builder sets it by
+    // hand (`addQuestion` uses `tree.form.ID`), which is why nothing has hit this yet.
+    //
+    // READING the collection is unaffected: the join is correct, and every loaded row already has
+    // its FormID from the database.
+    expect(declarationFor('mjBizAppsFormsFormPageEntity', 'Questions')).toContain(
+      "RelatedEntityJoinField: 'PageID'",
+    );
+    expect(schemaField('mjBizAppsFormsFormQuestionSchema', 'FormID')).not.toContain('.nullable()');
+    // The other half of the trap: PageID is NULLABLE, so a question can belong to a form and no
+    // page. The collection is a partial view of the form's questions, not all of them.
+    expect(schemaField('mjBizAppsFormsFormQuestionSchema', 'PageID')).toContain('.nullable()');
+  });
+});
+
 describe('FormQuestion.Options', () => {
   it('joins on QuestionID and owns its children', () => {
     const options = declarationFor('mjBizAppsFormsFormQuestionEntity', 'Options');

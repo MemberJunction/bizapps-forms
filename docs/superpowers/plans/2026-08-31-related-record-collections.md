@@ -1,10 +1,26 @@
 # RelatedRecordCollection for the Forms builder — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> ## ⚠️ RETROSPECTIVE — do not execute
+>
+> **This shipped, and it did not ship the way this plan says.** Kept because the reasoning is the
+> valuable part: it records what was measured against the installed core, and why the framework-native
+> route was ruled out. It is not a set of steps for anyone to follow, and the checkboxes below are
+> history rather than work.
+>
+> Two things this document still asserts that the merged code does **not** do:
+>
+> 1. **The builder does not route structural operations through `RelatedRecordCollection`.** It plans
+>    the row order itself and commits through a `TransactionGroup` — see `deleteAndResequence` and
+>    `persistSequence` in `builder-state.service.ts`. The collections are declared and are used by
+>    nobody yet; see `## What shipped instead`.
+> 2. **No delete passes `IsGraphNodeDelete`.** An earlier revision enlisted each row with it; that was
+>    removed before merge. At `Load: 'explicit'` no collection is loaded during a builder delete, so
+>    the flag bought nothing, while it also bypassed the concurrent-delete debounce. Core documents it
+>    as "set only by the graph executor, and only on the root node", which the builder is not.
 
 **Goal:** Make the builder's structural operations — delete a question, delete a page, reorder — atomic, by routing them through MJ core's `RelatedRecordCollection` instead of hand-rolled per-row `Save()`/`Delete()` loops.
 
-**Architecture:** Declare three collections (`Pages`, `Questions`, `Options`) as `EntityRelationship` **metadata**, and let CodeGen emit the typed `DeclareRelatedRecords(...)` onto the generated subclasses — the route MJ prescribes and uses itself. `loadTree` keeps its existing three `RunView`s and *hands* the results to the collections via `SetLoadedItems()` — no new queries, no N+1. Delete and reorder then run through the collection and persist as one transaction. **Field editing is deliberately untouched** and keeps its debounced per-entity autosave.
+**Architecture (as planned — see the retrospective above for what shipped):** Declare three collections (`Pages`, `Questions`, `Options`) as `EntityRelationship` **metadata**, and let CodeGen emit the typed `DeclareRelatedRecords(...)` onto the generated subclasses — the route MJ prescribes and uses itself. `loadTree` keeps its existing three `RunView`s and *hands* the results to the collections via `SetLoadedItems()`. Delete and reorder then run through the collection and persist as one transaction. **This last step is the part that did not survive contact with the installed provider**: a delete graph is not atomic from a browser, so the builder commits through a `TransactionGroup` instead and the collections remain unconsumed. **Field editing is deliberately untouched** and keeps its debounced per-entity autosave.
 
 **Tech Stack:** TypeScript, Angular 21, `@memberjunction/core` 6.1.0-edge.2 (`RelatedRecordCollection`, `EntitySavePlan`, `TransactionGroup`), Vitest.
 
@@ -59,9 +75,10 @@ immediately, group untouched.
 ### What shipped instead
 
 All three structural operations commit through **one `TransactionGroup`**, with the row order planned
-here rather than by the graph executor. Each row is deleted with `IsGraphNodeDelete: true` so it takes
-the single-node path and reaches the provider's deferral regardless of whether its collection happens
-to be loaded.
+here rather than by the graph executor. Each row is enlisted with a plain `Delete()`. An earlier
+revision passed `IsGraphNodeDelete: true` to force the single-node path; it was removed before merge,
+because at `Load: 'explicit'` a builder delete never has a collection loaded for the flag to bypass —
+so it changed nothing except to skip the debounce that coalesces a concurrent delete of the same row.
 
 MJ's `TRANSACTIONS_AND_BATCHING_GUIDE.md` calls a transaction group "NOT a composite-save engine" and
 sends parent/child work to an entity graph. Its four objections are all about **saves** — no primary

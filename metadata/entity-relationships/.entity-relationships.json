@@ -42,7 +42,16 @@
     "_comments": [
       "Joined on PageID, not FormID. FormQuestion carries BOTH keys, and MJ metadata has a",
       "'Forms -> Form Questions' relationship on FormID as well — declaring the collection there",
-      "would put every question in the form on every page."
+      "would put every question in the form on every page.",
+      "",
+      "READ-SAFE, CREATE-UNSAFE, and the asymmetry is worth knowing before adopting this. A",
+      "collection's Create()/Add() stamps the JOIN FIELD and nothing else (core's stampParentKey",
+      "writes RelatedEntityJoinField only), so a question created through page.Questions gets",
+      "PageID and NOT FormID -- which is NOT NULL, and no hook on either tier derives it. The",
+      "caller must set FormID itself, the way addQuestion does from tree.form.ID. Note also that",
+      "PageID is NULLABLE: a question can belong to a form and to no page, so this collection is a",
+      "partial view of the form's questions rather than all of them. Pinned by",
+      "packages/Entities/src/generated-collections.spec.ts."
     ],
     "fields": {
       "RelatedRecordCollection": {
