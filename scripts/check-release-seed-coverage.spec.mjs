@@ -68,6 +68,40 @@ function seed(...ids) {
 
 console.log('release seed coverage:');
 
+// 0. A record keyed by @lookup instead of a literal UUID. `metadata/entity-relationships/` is the
+//    first of these: CodeGen re-mints an EntityRelationship row with a NEW id on every rebuild-db,
+//    so the record resolves its key by entity name and there is no UUID to hardcode. The walk
+//    collected UUIDs only, so these records were not merely unverifiable — they were INVISIBLE,
+//    counted nowhere and named in no output, while the run reported a clean pass. Being unable to
+//    verify something by id is fine; saying nothing about it is what is not.
+withFixture(
+    (root) => {
+        mkdirSync(join(root, 'metadata', 'entity-relationships'), { recursive: true });
+        writeFileSync(
+            join(root, 'metadata', 'entity-relationships', '.entity-relationships.json'),
+            JSON.stringify(
+                [{ fields: { RelatedRecordCollection: { Name: 'Questions' } }, primaryKey: { ID: '@lookup:MJ: Entity Relationships.EntityID=@lookup:MJ: Entities.Name=Some: Parent&RelatedEntityID=@lookup:MJ: Entities.Name=Some: Child' } }],
+                null,
+                2,
+            ),
+        );
+        writeFileSync(join(root, 'metadata', '.things.json'), records(COVERED));
+        writeFileSync(join(root, 'migrations', 'V1__Seed.sql'), seed(COVERED));
+    },
+    ({ problems, lookupKeyed }) => {
+        check(
+            'reports a lookup-keyed record rather than skipping it',
+            lookupKeyed.length === 1 && lookupKeyed[0].file.includes('entity-relationships'),
+            JSON.stringify(lookupKeyed),
+        );
+        check(
+            'does not FAIL on one — a lookup key is legitimate, only unverifiable by id',
+            problems.length === 0,
+            JSON.stringify(problems),
+        );
+    },
+);
+
 // 1. The defect this exists for, and the exact shape that reached bizapps-sales: a record declared
 //    under metadata/ that no shipped migration names. CHECK 1 passed on this whenever the manifest
 //    had been regenerated; here it must not.

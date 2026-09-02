@@ -178,7 +178,18 @@ describe('flushPendingSaves cannot hang the caller forever', () => {
       // a bound on the number of passes rather than a reproduction of a real hang. The cap exists
       // because publish AWAITS this method, and a loop whose exit depends on input it does not
       // control should not be the thing standing between an author and their form.
-      expect(entity.saves).toBeLessThanOrEqual(201); // the initial save, plus one per pumped tick
+      //
+      // Two sources of saves, and the bound has to name both: one per pumped tick, plus one per
+      // drain pass, because the drain now walks the TIMER map on every pass rather than once
+      // before the loop. That change is the point — a timer armed after a single up-front drain
+      // was invisible to it, so the flush reported "nothing pending" with an edit still pending.
+      // 50 is `MAX_FLUSH_PASSES` in the service, written out rather than imported: exporting a
+      // private cap so a test can read it would make the cap part of the module's interface.
+      expect(entity.saves).toBeLessThanOrEqual(1 + 200 + 50);
+      // The half of this test's name that it never actually checked. Giving up silently is the
+      // failure mode that matters here: the caller is about to publish, and a flush that came
+      // back quiet is the only thing telling it the database matches what it is about to share.
+      expect(service.lastFailure()).toMatch(/still being saved/i);
     } finally {
       vi.useRealTimers();
     }

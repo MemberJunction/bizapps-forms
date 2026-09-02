@@ -43,6 +43,36 @@ const reorderMethod = (): string => {
   return source.slice(start, end);
 };
 
+/** Just the insert-at-seam path, so a guard about it cannot be satisfied by the drag path. */
+const insertMethod = (): string => {
+  const source = builder();
+  const start = source.indexOf('protected async insertQuestionAt(');
+  const end = source.indexOf('private noteAnyDamage(', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+};
+
+/**
+ * The body of the `if (!(await this.state.persistQuestionOrder(page)))` branch, brace-matched.
+ *
+ * A text-position comparison cannot tell "inside the branch" from "after the branch", and the two
+ * mean opposite things here: one reverts a refused drag, the other reverts every drag. Counting
+ * braces is crude, but it is the difference between a guard and a decoration.
+ */
+const refusalBranchOf = (method: string): string => {
+  const guard = method.indexOf('if (!(await this.state.persistQuestionOrder(page)))');
+  expect(guard).toBeGreaterThan(-1);
+  const open = method.indexOf('{', guard);
+  expect(open).toBeGreaterThan(-1);
+  let depth = 0;
+  for (let i = open; i < method.length; i++) {
+    if (method[i] === '{') depth++;
+    else if (method[i] === '}' && --depth === 0) return method.slice(open + 1, i);
+  }
+  throw new Error('reorderQuestion: the refusal branch never closes — did the method change shape?');
+};
+
 describe('the Rules tab is gone, not hidden', () => {
   it('leaves no tab to open', () => {
     // A tab left in the union but unreachable in the template is a state the component can still
@@ -184,9 +214,24 @@ describe('a reorder that breaks a rule says so at the drag', () => {
   });
 
   it('checks that the new order was actually written', () => {
-    // `persistQuestionOrder` writes one question at a time and returns false when a write is
-    // refused halfway — a third state matching neither the order before the move nor after it.
+    // `persistQuestionOrder` commits as one transaction and returns false when the database
+    // refused it (issue #103). The stored order is then untouched — but this handler has already
+    // moved `page.questions`, so the return value is the only thing that knows they disagree.
     expect(builder()).toMatch(/if \(!\(await this\.state\.persistQuestionOrder\(page\)\)\)/);
+  });
+
+  it('puts the canvas back when the reorder is refused', () => {
+    // WAS: the array stayed moved and the notice stayed standing, so the author was looking at an
+    // arrangement the database had rejected — with a band about consequences of a move that never
+    // happened. The transaction rolls the database and the entities back; nothing rolled back the
+    // two pieces of state the author can actually SEE.
+    // The revert must be INSIDE the refusal branch — reverting unconditionally would undo every
+    // successful drag on the page. `indexOf(revert) > indexOf(guard)` does NOT establish that: it
+    // is satisfied by a revert moved out of the `if` and below it, which is precisely the broken
+    // variant. So take the branch's own body by matching its braces, and assert against that.
+    const body = refusalBranchOf(reorderMethod());
+    expect(body).toMatch(/moveItemInArray\(page\.questions, to, from\)/);
+    expect(body).toMatch(/this\.reorderNotice = previousNotice/);
   });
 
   it('is its own band, not the failure band, and carries an Undo that outlives the tick', () => {
@@ -289,5 +334,18 @@ describe('a publish refusal is retracted when its rules are fixed', () => {
     const method = retireStaleRefusal();
     expect(method).toMatch(/refusedRules/);
     expect(method).toMatch(/statusMessage = ''/);
+  });
+});
+
+describe('a refused insert leaves the canvas showing where the question actually is', () => {
+  it('puts the new question back at the tail, which is where the database has it', () => {
+    // `addQuestion` commits the row at the END of the page — `DisplayOrder = questions.length` —
+    // and the splice that moves it to the seam is only in memory until the renumber commits.
+    // When that renumber refuses, the row IS at the tail and the canvas was showing it mid-page,
+    // under a band about a question that is not where it appears. The drag path already reverts
+    // its array on refusal; this is the same obligation for the other write that moves a question.
+    const branch = refusalBranchOf(insertMethod());
+    expect(branch).toContain('page.questions.splice(');
+    expect(branch).toContain('page.questions.push(node)');
   });
 });

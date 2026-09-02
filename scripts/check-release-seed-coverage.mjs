@@ -98,15 +98,25 @@ function collectRecordFiles(dir, acc = []) {
  * Recursive rather than array-of-records because `@parent` nesting puts child records inside a
  * `relatedEntities` block, and a child that ships nowhere is as invisible to a host as a root one.
  */
-function collectIds(node, acc) {
+function collectIds(node, acc, lookups) {
     if (Array.isArray(node)) {
-        for (const item of node) collectIds(item, acc);
+        for (const item of node) collectIds(item, acc, lookups);
         return;
     }
     if (!node || typeof node !== 'object') return;
     const pk = node.primaryKey;
-    if (pk && typeof pk.ID === 'string' && UUID.test(pk.ID.trim())) acc.push(pk.ID.trim());
-    for (const value of Object.values(node)) collectIds(value, acc);
+    if (pk && typeof pk.ID === 'string') {
+        const id = pk.ID.trim();
+        if (UUID.test(id)) acc.push(id);
+        // A key resolved by @lookup instead of a literal UUID. There is no id to search the SQL
+        // for — the target row is re-minted with a new one on every rebuild-db, which is WHY the
+        // record is keyed by name — so this can never be verified the way a UUID is. It is
+        // collected anyway, because the alternative is what this script used to do: drop it on the
+        // floor and report a clean pass over a record it never looked at. `metadata/
+        // entity-relationships/` is the first directory in this repo built entirely out of them.
+        else if (id.startsWith('@lookup:')) lookups.push(id);
+    }
+    for (const value of Object.values(node)) collectIds(value, acc, lookups);
 }
 
 /** The shipped SQL as one lower-cased haystack, or `null` when there is none to read. */
@@ -145,6 +155,7 @@ export function findSeedCoverageGaps(repoRoot = REPO_ROOT) {
 
     let filesRead = 0;
     let idsChecked = 0;
+    const lookupKeyed = [];
     for (const file of collectRecordFiles(metadataDir)) {
         const shown = relative(repoRoot, file).split(sep).join('/');
         let parsed;
@@ -161,7 +172,9 @@ export function findSeedCoverageGaps(repoRoot = REPO_ROOT) {
         }
         filesRead++;
         const ids = [];
-        collectIds(parsed, ids);
+        const lookups = [];
+        collectIds(parsed, ids, lookups);
+        for (const key of new Set(lookups)) lookupKeyed.push({ file: shown, key });
         const unique = [...new Set(ids)];
         idsChecked += unique.length;
         const unseen = unique.filter((id) => !sql.includes(id.toLowerCase()));
@@ -184,7 +197,7 @@ export function findSeedCoverageGaps(repoRoot = REPO_ROOT) {
      * name. Appended rather than returned early, so any parse failures that explain it are reported
      * alongside instead of being thrown away.
      */
-    if (idsChecked === 0) {
+    if (idsChecked === 0 && lookupKeyed.length === 0) {
         problems.push(
             `measured NOTHING: ${filesRead} readable record file(s) under metadata/ declared no primaryKey UUID. ` +
                 'Either the metadata layout changed under this script or the walk is broken. A check that examined ' +
@@ -192,11 +205,24 @@ export function findSeedCoverageGaps(repoRoot = REPO_ROOT) {
         );
     }
 
-    return { problems, filesRead, idsChecked };
+    return { problems, filesRead, idsChecked, lookupKeyed };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('check-release-seed-coverage.mjs')) {
-    const { problems, filesRead, idsChecked } = findSeedCoverageGaps();
+    const { problems, filesRead, idsChecked, lookupKeyed } = findSeedCoverageGaps();
+
+    // Printed on BOTH paths, before the verdict. These records are the ones this script structurally
+    // cannot vouch for, so the build engineer has to confirm them against the generated seed by
+    // hand — and a list that only appeared on failure would be missing from every run that passed,
+    // which is every run where they are the only thing left to check.
+    if (lookupKeyed.length > 0) {
+        console.error(
+            `\n⚠️  ${lookupKeyed.length} record(s) are keyed by @lookup, not by a literal UUID, and CANNOT be ` +
+                'verified by id — confirm each appears in the generated seed:\n',
+        );
+        for (const { file, key } of lookupKeyed) console.error(`  • ${file}\n      ${key}`);
+        console.error('');
+    }
 
     if (problems.length > 0) {
         console.error('\n❌ Release seed coverage failed — metadata declared here reaches no host:\n');
@@ -210,6 +236,6 @@ if (process.argv[1] && process.argv[1].endsWith('check-release-seed-coverage.mjs
 
     console.log(
         `✅ Release seed coverage passed — all ${idsChecked} primaryKey UUIDs across ${filesRead} metadata record ` +
-            'file(s) appear in migrations/.',
+            `file(s) appear in migrations/${lookupKeyed.length > 0 ? `, and ${lookupKeyed.length} lookup-keyed record(s) are listed above for manual confirmation` : ''}.`,
     );
 }

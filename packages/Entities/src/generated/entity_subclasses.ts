@@ -2789,6 +2789,27 @@ export class mjBizAppsFormsFormEntityBindingEntity extends BaseEntity<mjBizAppsF
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Pages')
 export class mjBizAppsFormsFormPageEntity extends BaseEntity<mjBizAppsFormsFormPageEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Questions
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Form Pages record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Form Pages → MJ_BizApps_Forms: Form Questions' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Questions = this.DeclareRelatedRecords<mjBizAppsFormsFormQuestionEntity>({
+      Name: 'Questions',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Questions',
+        RelatedEntityJoinField: 'PageID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Form Pages record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Pages record.
@@ -3105,6 +3126,27 @@ export class mjBizAppsFormsFormQuestionOptionEntity extends BaseEntity<mjBizApps
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Form Questions')
 export class mjBizAppsFormsFormQuestionEntity extends BaseEntity<mjBizAppsFormsFormQuestionEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Question Options
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Form Questions record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Form Questions → MJ_BizApps_Forms: Form Question Options' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Options = this.DeclareRelatedRecords<mjBizAppsFormsFormQuestionOptionEntity>({
+      Name: 'Options',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Question Options',
+        RelatedEntityJoinField: 'QuestionID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Form Questions record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Form Questions record.
@@ -4564,6 +4606,27 @@ export class mjBizAppsFormsFormVersionEntity extends BaseEntity<mjBizAppsFormsFo
  */
 @RegisterClass(BaseEntity, 'MJ_BizApps_Forms: Forms')
 export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntityType> {
+
+  /**
+  * Related records: MJ_BizApps_Forms: Form Pages
+  *
+  * Loads, validates and persists as one unit with this MJ_BizApps_Forms: Forms record — see
+  * guides/TRANSACTIONS_AND_BATCHING_GUIDE.md. Declared by the RelatedRecordCollection metadata on
+  * the 'MJ_BizApps_Forms: Forms → MJ_BizApps_Forms: Form Pages' relationship; edit that row, not this file.
+  *
+  */
+  public readonly Pages = this.DeclareRelatedRecords<mjBizAppsFormsFormPageEntity>({
+      Name: 'Pages',
+        RelatedEntity: 'MJ_BizApps_Forms: Form Pages',
+        RelatedEntityJoinField: 'FormID',
+        OrderBy: 'DisplayOrder ASC',
+        Load: 'explicit',
+        OnRemove: 'delete',
+        Source: 'database',
+        ReadOnly: false,
+        Sequence: { Field: 'DisplayOrder', From: 0 },
+  });
+
     /**
     * Loads the MJ_BizApps_Forms: Forms record from the database
     * @param ID: string - primary key value to load the MJ_BizApps_Forms: Forms record.

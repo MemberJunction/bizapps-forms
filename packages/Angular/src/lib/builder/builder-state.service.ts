@@ -3,6 +3,7 @@ import {
   Metadata,
   RunView,
   LogError,
+  type TransactionGroupBase,
   type UserInfo,
 } from '@memberjunction/core';
 import type {
@@ -40,6 +41,50 @@ type SaveableEntity =
   | mjBizAppsFormsFormQuestionEntity
   | mjBizAppsFormsFormQuestionOptionEntity
   | mjBizAppsFormsFormScreenEntity;
+
+/**
+ * A row a structural change deletes or renumbers.
+ *
+ * Narrower than {@link SaveableEntity} on purpose: these three are the tree the cascade walks, and
+ * a Form or a Screen appearing in a structural plan would mean the caller built the wrong list.
+ * One type rather than the two this used to carry — a page is renumbered by exactly the same rule
+ * as a question, and a separate `StructuralEntity` that excluded pages is what let `deletePage`
+ * ship without renumbering anything.
+ */
+type StructuralEntity =
+  | mjBizAppsFormsFormPageEntity
+  | mjBizAppsFormsFormQuestionEntity
+  | mjBizAppsFormsFormQuestionOptionEntity;
+
+/** One row's worth of work inside a structural transaction. */
+type StructuralWork = { Op: 'delete' | 'save'; Row: StructuralEntity };
+
+/** A row that has been renumbered in memory, and the number to put back if the commit refuses. */
+type SequencedMove = { entity: StructuralEntity; position: number; previous: number };
+
+/**
+ * A row whose enlistment can be undone.
+ *
+ * MJ publishes the setter as non-nullable, but core initialises the backing field to `null` and
+ * `null` is the only value that means "not enlisted" — so this states the property's real type
+ * rather than casting at each release site.
+ */
+type ReleasableRow = { TransactionGroup: TransactionGroupBase | null };
+
+/**
+ * Whether a transaction group committed, the reason it did not, and which row said so.
+ *
+ * `RefusedBy` is set only when a row refused BEFORE it was enlisted — a validation or permission
+ * failure, which `Save()`/`Delete()` report by returning false without queueing anything. That row
+ * is the one worth naming, because the commit itself never saw it.
+ */
+type SubmitOutcome = { Committed: boolean; Detail: string | null };
+type CommitOutcome = SubmitOutcome & { RefusedBy: StructuralEntity | null };
+
+/** The message an unknown thrown value carries, for a log line that has to say something. */
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 import type { FormTree, PageNode, QuestionNode } from './builder-models';
 import { defaultEndingChanges, defaultEndingId, vacantDefaultEnding } from './default-ending';
@@ -497,6 +542,16 @@ export class BuilderStateService {
       entity,
       setTimeout(() => {
         this.saveTimers.delete(entity);
+        if (this.structuralChangesInFlight > 0) {
+          // A structural transaction is holding rows right now, and saving into it is not a
+          // conflict the database resolves — it is a write that DISAPPEARS. The row still carries
+          // the group, so `Save()` enlists onto it and returns true; if the commit has already
+          // gone out, nobody will submit that group again. Core cannot catch this for us:
+          // `AddTransaction` is a bare push with no status check. Re-arming is the whole fix —
+          // structural changes are finite, so the edit lands one debounce after the last one ends.
+          this.saveDebounced(entity);
+          return;
+        }
         void this.chainSave(entity);
       }, SAVE_DEBOUNCE_MS),
     );
@@ -510,24 +565,29 @@ export class BuilderStateService {
    * changes is whether the database agrees with it afterwards.
    */
   public async flushPendingSaves(): Promise<void> {
-    for (const [entity, timer] of [...this.saveTimers]) {
-      clearTimeout(timer);
-      this.saveTimers.delete(entity);
-      void this.chainSave(entity);
-    }
-    // Loop rather than one `Promise.all`: awaiting a chain can let a queued save start, and the
-    // caller asked for "nothing pending", not "nothing pending a moment ago".
+    // Draining the timers is INSIDE the loop, not a step ahead of it. An edit typed while an
+    // earlier save is in flight arms a fresh timer, and a drain that ran once had already walked
+    // past the map by then — so this returned "nothing pending" with something pending, which is
+    // exactly the window a structural change then opened its transaction in.
     //
-    // Capped, because the exit condition depends on something this method does not control:
-    // edits arriving during the drain re-arm the debounce and put a new chain in the map. A
-    // steady enough stream keeps it non-empty indefinitely, and since publish AWAITS this, an
-    // uncapped loop would hang Publish with no error and no way out but a reload. No path in the
-    // builder saves on save today, so the cap is a backstop rather than a fix for a live hang —
-    // but "no caller does this yet" is not something a loop should rely on.
-    for (let pass = 0; pass < MAX_FLUSH_PASSES && this.saveChains.size > 0; pass++) {
+    // Capped, because the exit condition depends on something this method does not control: a
+    // steady enough stream of edits keeps both maps non-empty indefinitely, and since publish
+    // AWAITS this, an uncapped loop would hang Publish with no error and no way out but a reload.
+    for (
+      let pass = 0;
+      pass < MAX_FLUSH_PASSES && (this.saveTimers.size > 0 || this.saveChains.size > 0);
+      pass++
+    ) {
+      for (const [entity, timer] of [...this.saveTimers]) {
+        clearTimeout(timer);
+        this.saveTimers.delete(entity);
+        void this.chainSave(entity);
+      }
+      // Awaiting a chain can let a queued save start, and the caller asked for "nothing pending",
+      // not "nothing pending a moment ago" — hence the re-check rather than one `Promise.all`.
       await Promise.all([...this.saveChains.values()]);
     }
-    if (this.saveChains.size > 0) {
+    if (this.saveTimers.size > 0 || this.saveChains.size > 0) {
       // Surfaced, never swallowed: the caller is about to publish, and it has to be able to say
       // that what it publishes may not match what is stored.
       this._lastFailure.set(
@@ -564,6 +624,15 @@ export class BuilderStateService {
    * because they all funnel through the same two checked helpers, and a second place to publish
    * from is a second place to forget.
    */
+  /**
+   * How many structural transactions are open right now.
+   *
+   * A counter rather than a flag because it is read by a timer that fires on its own schedule: a
+   * boolean cleared by an inner operation would tell an outer one's rows they were free. Nothing
+   * nests these today, and that is the point — the guard should not depend on it staying so.
+   */
+  private structuralChangesInFlight = 0;
+
   private readonly _lastFailure = signal<string | null>(null);
   public readonly lastFailure = this._lastFailure.asReadonly();
 
@@ -577,55 +646,279 @@ export class BuilderStateService {
     return this.saveChecked(entity, 'save');
   }
 
-  /** Delete a page and all its questions/options (cascade handled in order). */
-  public async deletePage(page: PageNode): Promise<boolean> {
-    for (const q of [...page.questions]) {
-      if (!(await this.deleteQuestion(q))) {
-        return false;
-      }
+  /**
+   * Delete a page with everything under it, as one transaction.
+   *
+   * The list is built deepest-first — every option, then its question, then the page — because a
+   * foreign key points at each row from the ones that must go before it.
+   */
+  public async deletePage(page: PageNode, siblings: readonly PageNode[]): Promise<boolean> {
+    if (!(await this.beginStructuralChange())) {
+      return false;
     }
-    return this.deleteChecked(page.entity, 'delete page');
+    const rows: StructuralEntity[] = [];
+    for (const question of page.questions) {
+      rows.push(...question.options, question.entity);
+    }
+    rows.push(page.entity);
+    return this.deleteAndResequence(
+      rows,
+      siblings.filter((p) => p !== page).map((p) => p.entity),
+      'delete page',
+    );
   }
 
-  /** Delete a question and all its options. */
-  public async deleteQuestion(node: QuestionNode): Promise<boolean> {
-    for (const opt of [...node.options]) {
-      if (!(await this.deleteChecked(opt, 'delete option'))) {
-        return false;
-      }
+  /** Delete a question and all its options, as one transaction. */
+  public async deleteQuestion(node: QuestionNode, siblings: readonly QuestionNode[]): Promise<boolean> {
+    if (!(await this.beginStructuralChange())) {
+      return false;
     }
-    return this.deleteChecked(node.entity, 'delete question');
+    return this.deleteAndResequence(
+      [...node.options, node.entity],
+      siblings.filter((q) => q !== node).map((q) => q.entity),
+      'delete question',
+    );
   }
 
-  /** Delete a single option. */
-  public async deleteOption(option: mjBizAppsFormsFormQuestionOptionEntity): Promise<boolean> {
-    return this.deleteChecked(option, 'delete option');
+  /**
+   * Drain anything the debounce is still holding, and report whether it is safe to restructure.
+   *
+   * A field edit sits on a 400ms timer. Restructuring the tree while one is pending races it: the
+   * pending save may target a row this transaction is about to delete, and whichever lands second
+   * fails, reporting against a record the author has already moved on from.
+   *
+   * Compared against the failure signal's value BEFORE the flush, not against null. A refusal the
+   * author has not yet dismissed is still sitting on that signal, and treating it as a reason to
+   * refuse every later delete would make the builder progressively unusable after one unrelated
+   * foreign-key error.
+   */
+  private async beginStructuralChange(): Promise<boolean> {
+    const before = this._lastFailure();
+    await this.flushPendingSaves();
+    return this._lastFailure() === before;
+  }
+
+  /**
+   * Delete rows as ONE database transaction, in the order given.
+   *
+   * A `TransactionGroup` rather than `entity.Delete()`, and the difference is the whole of issue
+   * #103. Declaring the children as an owned `RelatedRecordCollection` and letting `Delete()`
+   * cascade looks like the framework-native answer, but core says otherwise in its own doc comment
+   * on `deleteGraph`: a delete graph has no remote counterpart, so on a client provider "the nodes
+   * execute in order over ordinary mutations. That is not atomic — a failure partway leaves earlier
+   * deletions committed." That is the defect, relocated. `GraphQLTransactionGroup` bundles every
+   * enlisted mutation into one `ExecuteTransactionGroup` call the server runs inside a real
+   * database transaction, so a refusal rolls back all of it.
+   *
+   * MJ's own guide calls a transaction group "NOT a composite-save engine" and points parent/child
+   * work at an entity graph instead. Its four objections are all about SAVES — no primary key after
+   * the parent, no read-your-writes, `Save()` returning true early, no dependency graph — and a
+   * delete needs none of them: no key is minted, nothing is read back, and the ordering is a flat
+   * deepest-first list this method builds itself.
+   *
+   * The third objection bites in a narrower way than it first appears. `Delete()`'s `true` under a
+   * group means "queued", not "written", so the commit is what decides — but its `false` still
+   * means something, and something the commit can never tell you: the row was refused by validation
+   * or permissions BEFORE the provider saw it, so it is not in the group at all. Both are read,
+   * for different reasons, in {@link commitAsOneTransaction}.
+   *
+   * The cost is the message. A refused group reports "Transaction failed to commit" against every
+   * row rather than the specific constraint — the provider asks the server for `ErrorMessages` and
+   * then discards them — so the detail survives only on the throw path, where the notification
+   * carries it. Worth it: a wrong-but-specific message about a half-deleted page describes a state
+   * the product should never have been able to reach.
+   */
+  private async deleteAndResequence(
+    doomed: readonly StructuralEntity[],
+    survivors: readonly StructuralEntity[],
+    action: string,
+  ): Promise<boolean> {
+    // Renumbered BEFORE the commit so the new values ride the same transaction as the delete. Two
+    // transactions is what this used to be, and the second one refusing left the row deleted for
+    // good with a gap in the numbering its siblings kept — which the next Add then collided with,
+    // because every `add*` takes `array.length` as the new `DisplayOrder`.
+    const moved = this.renumber(survivors);
+    const outcome = await this.commitAsOneTransaction([
+      ...doomed.map((Row) => ({ Op: 'delete' as const, Row })),
+      ...moved.map((row) => ({ Op: 'save' as const, Row: row.entity })),
+    ]);
+    if (outcome.Committed) {
+      return true;
+    }
+    this.restoreOrder(moved);
+    // A pre-enlist refusal names its own row. Otherwise the commit refused as a whole, and the row
+    // the author acted on is the last one, since the list is deepest-first: every row in a refused
+    // group carries the same generic message, so naming an option they never touched would confuse.
+    this.reportFailure(action, outcome.RefusedBy ?? doomed[doomed.length - 1], outcome.Detail);
+    return false;
+  }
+
+  /**
+   * Enlist every row in one transaction group, submit it, and ALWAYS hand the rows back.
+   *
+   * The release is why this is a helper rather than two loops. `TransactionGroup` is a property on
+   * the entity, not a scope MJ unwinds: core assigns it in exactly one setter and never clears it,
+   * and `AddTransaction` has no status check. So a row still holding a group that has already
+   * committed will, on its next `Save()`, queue onto that dead group and return `true` — writing
+   * nothing, reporting nothing. These rows are the ones the builder keeps in its tree for the whole
+   * session, so leaving one attached silently turns off saving for that question until reload.
+   * That is the mid-edit data loss `SAVE_DEBOUNCE_MS` and the save chain exist to prevent, arriving
+   * from the other direction, and it is why the release runs in a `finally` — the throw path and
+   * the refusal path strand rows just as thoroughly as the happy path.
+   *
+   * The enlist callback's boolean is NOT the write's outcome — under a group the provider returns
+   * true for merely queueing. It is the pre-flight: `Save()`/`Delete()` run validation and
+   * permission checks BEFORE the provider call and return false without enlisting when either
+   * fails. Ignoring that false is how a group ends up committing a subset, or committing nothing at
+   * all — `Submit()` returns true for an empty queue — while the caller reports success.
+   */
+  private async commitAsOneTransaction(work: readonly StructuralWork[]): Promise<CommitOutcome> {
+    const group = await this.md.CreateTransactionGroup();
+    const enlisted: ReleasableRow[] = [];
+    let reached: StructuralEntity | null = null;
+    this.structuralChangesInFlight++;
+    try {
+      for (const item of work) {
+        item.Row.TransactionGroup = group;
+        enlisted.push(item.Row);
+        reached = item.Row;
+        const enlisted_ok = item.Op === 'delete' ? await item.Row.Delete() : await item.Row.Save();
+        if (!enlisted_ok) {
+          return { Committed: false, Detail: null, RefusedBy: item.Row };
+        }
+      }
+      return { ...(await this.submitGroup(group)), RefusedBy: null };
+    } catch (error) {
+      // Save() throws rather than returns on a few paths — a failed pre-save hook, and the
+      // composite-save guard core raises when a loaded collection meets a transaction group. Turned
+      // into an ordinary refusal so the caller runs its rollback instead of unwinding past it.
+      return { Committed: false, Detail: describeError(error), RefusedBy: reached };
+    } finally {
+      for (const row of enlisted) {
+        row.TransactionGroup = null;
+      }
+      // After the release, never before: a debounce that fires the instant this drops has to find
+      // the rows already handed back, or it saves into a group that is on its way out.
+      this.structuralChangesInFlight--;
+    }
+  }
+
+  /**
+   * Submit a transaction group, and recover the reason when it refuses.
+   *
+   * The reason needs recovering because nothing else carries it: a refused group stamps the same
+   * generic "Transaction failed to commit" on every enlisted record, and the server's
+   * `ErrorMessages` are asked for by the provider's mutation and then dropped on the floor. The
+   * notification stream is what is left, and it carries a real error on the throw path — a dropped
+   * connection, a rejected mutation. On an ordinary refusal it stays quiet and the caller falls
+   * back to the record's own `LatestResult`.
+   *
+   * The subscription is released in a `finally` so a throwing submit cannot leak it.
+   */
+  private async submitGroup(group: TransactionGroupBase): Promise<SubmitOutcome> {
+    let detail: string | null = null;
+    const notifications = group.TransactionNotifications$.subscribe((status) => {
+      if (!status.success && status.error) {
+        detail = status.error instanceof Error ? status.error.message : String(status.error);
+      }
+    });
+    try {
+      const committed = await group.Submit();
+      return { Committed: committed, Detail: committed ? null : detail };
+    } finally {
+      notifications.unsubscribe();
+    }
+  }
+
+  /**
+   * Delete one option and renumber the ones that remain, as a single transaction.
+   *
+   * The renumber belongs in here rather than in a follow-up call for the same reason it does for a
+   * page: `addOption` takes `options.length` as the new `DisplayOrder`, so an option removed from
+   * the middle leaves a number the next Add collides with. A separate second write could refuse on
+   * its own, and there is no undoing the delete by then.
+   */
+  public async deleteOption(
+    option: mjBizAppsFormsFormQuestionOptionEntity,
+    siblings: readonly mjBizAppsFormsFormQuestionOptionEntity[],
+  ): Promise<boolean> {
+    if (!(await this.beginStructuralChange())) {
+      return false;
+    }
+    return this.deleteAndResequence(
+      [option],
+      siblings.filter((o) => o !== option),
+      'delete option',
+    );
   }
 
   /** Renumber + persist DisplayOrder on a page's questions to match array order. */
   public async persistQuestionOrder(page: PageNode): Promise<boolean> {
-    let ok = true;
-    for (let i = 0; i < page.questions.length; i++) {
-      const q = page.questions[i].entity;
-      if (q.DisplayOrder !== i) {
-        q.DisplayOrder = i;
-        ok = (await this.saveChecked(q, 'reorder question')) && ok;
-      }
+    if (!(await this.beginStructuralChange())) {
+      return false;
     }
-    return ok;
+    return this.persistSequence(
+      page.questions.map((q) => q.entity),
+      'reorder question',
+    );
   }
 
-  /** Renumber + persist DisplayOrder on a question's options to match array order. */
-  public async persistOptionOrder(node: QuestionNode): Promise<boolean> {
-    let ok = true;
-    for (let i = 0; i < node.options.length; i++) {
-      const opt = node.options[i];
-      if (opt.DisplayOrder !== i) {
-        opt.DisplayOrder = i;
-        ok = (await this.saveChecked(opt, 'reorder option')) && ok;
-      }
+  /**
+   * Renumber rows to match their array order and persist the move as one transaction.
+   *
+   * Only rows that actually moved are written — `DisplayOrder` is compared against the position
+   * before anything is assigned — which is the one virtue the row-at-a-time loop this replaces
+   * had. What it lacked was rollback: a refusal halfway left `DisplayOrder` matching neither the
+   * old order nor the new one, in the database AND in memory, with no way back.
+   *
+   * A transaction group is the right mechanism here rather than a borrowed one. These are sibling
+   * rows with no structural relationship to each other, which is precisely what MJ's guide says a
+   * group is for; the parent is not written at all.
+   *
+   * The in-memory `DisplayOrder` values are restored on refusal, so the entities agree with the
+   * database again. That is only half of what the author sees: the canvas renders the ARRAY, not
+   * `DisplayOrder`, so putting the array back is the caller's job — `reorderQuestion` does it, and
+   * the two delete paths deliberately do not, because by then the row they removed is gone for
+   * good and there is nothing to put back.
+   */
+  private async persistSequence(rows: StructuralEntity[], action: string): Promise<boolean> {
+    const moved = this.renumber(rows);
+    if (moved.length === 0) {
+      return true; // a drag that ended where it started: no rows to write, no round trip to make
     }
-    return ok;
+    const outcome = await this.commitAsOneTransaction(
+      moved.map((row) => ({ Op: 'save' as const, Row: row.entity })),
+    );
+    if (outcome.Committed) {
+      return true;
+    }
+    this.restoreOrder(moved);
+    this.reportFailure(action, outcome.RefusedBy ?? moved[0].entity, outcome.Detail);
+    return false;
+  }
+
+  /**
+   * Give every row the `DisplayOrder` its array position implies, and report which ones changed.
+   *
+   * Only the rows that actually moved come back, so a reorder writes two rows rather than all of
+   * them. Reading `previous` before assigning is what makes the move undoable in memory — the
+   * caller restores it when the commit refuses, so the entities agree with the database again.
+   */
+  private renumber(rows: readonly StructuralEntity[]): SequencedMove[] {
+    const moved = rows
+      .map((entity, position) => ({ entity, position, previous: entity.DisplayOrder }))
+      .filter((row) => row.previous !== row.position);
+    for (const row of moved) {
+      row.entity.DisplayOrder = row.position;
+    }
+    return moved;
+  }
+
+  /** Put back the numbers a refused commit never stored. */
+  private restoreOrder(moved: readonly SequencedMove[]): void {
+    for (const row of moved) {
+      row.entity.DisplayOrder = row.previous;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -663,9 +956,17 @@ export class BuilderStateService {
    * typed was simply gone. The reason is included verbatim rather than softened: this surface is
    * for people who build forms, and "conflicted with a FOREIGN KEY constraint" is the difference
    * between fixing it and filing a bug.
+   *
+   * @param detail - An explicit reason, for the one caller that has a better one than the entity
+   *                 does: a transaction group attaches only a generic message to its rows, while
+   *                 the real error arrives on the group's notification stream.
    */
-  private reportFailure(action: string, entity: Parameters<BuilderStateService['save']>[0]): void {
-    const reason = entity.LatestResult?.CompleteMessage ?? 'unknown error';
+  private reportFailure(
+    action: string,
+    entity: Parameters<BuilderStateService['save']>[0],
+    detail?: string | null,
+  ): void {
+    const reason = detail ?? entity.LatestResult?.CompleteMessage ?? 'unknown error';
     LogError(`Forms builder failed to ${action}: ${reason}`);
     this._lastFailure.set(`Could not ${action}. ${reason}`);
   }

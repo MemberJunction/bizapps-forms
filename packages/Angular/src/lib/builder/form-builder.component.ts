@@ -599,9 +599,19 @@ export class FormBuilderComponent extends BaseFormComponent {
       // Clamped, not trusted: the seam index was read when the popover opened.
       page.questions.splice(Math.min(seam.index, page.questions.length), 0, node);
       if (!(await this.state.persistQuestionOrder(page))) {
+        // The question EXISTS — `addQuestion` committed it at the end of the page — and only the
+        // move to the seam was refused. So the canvas is put where the database actually is,
+        // rather than left showing the arrangement the author asked for and did not get. The
+        // service has already restored every sibling's `DisplayOrder` and raised the band; this
+        // is the half it cannot do, because the canvas renders the ARRAY, not `DisplayOrder`.
+        const inserted = page.questions.indexOf(node);
+        if (inserted > -1) {
+          page.questions.splice(inserted, 1);
+        }
+        page.questions.push(node);
         LogError(
-          `Insert of a ${type} question on page ${page.entity.ID} was not fully persisted; ` +
-            'DisplayOrder may not match the order on screen.',
+          `Insert of a ${type} question on page ${page.entity.ID} was refused at the requested ` +
+            'position; it is saved at the end of the page and the canvas now shows it there.',
         );
       }
       this.noteAnyDamage(before, node.entity.ID, node.entity.Prompt, page);
@@ -720,7 +730,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     this.busy = true;
-    if (await this.state.deletePage(page)) {
+    if (await this.state.deletePage(page, this.tree.pages)) {
       this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
       this.selection = clearIfPage(this.selection, page.entity.ID);
       for (const q of page.questions) {
@@ -1287,19 +1297,19 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected async onRemoveOption(event: { node: QuestionNode; optionIndex: number }): Promise<void> {
     const { node, optionIndex } = event;
     const option = node.options[optionIndex];
-    if (option && (await this.state.deleteOption(option))) {
+    // The survivors go in with the delete: one transaction covers both, so there is no longer a
+    // second write that can refuse on its own and leave a gap the next Add Option collides with.
+    if (option && (await this.state.deleteOption(option, node.options))) {
       node.options.splice(optionIndex, 1);
-      await this.state.persistOptionOrder(node);
       this.markDirty();
     }
   }
 
   protected async deleteQuestion(page: PageNode, node: QuestionNode): Promise<void> {
-    if (this.busy || !(await this.state.deleteQuestion(node))) {
+    if (this.busy || !(await this.state.deleteQuestion(node, page.questions))) {
       return;
     }
     page.questions = page.questions.filter((q) => q !== node);
-    await this.state.persistQuestionOrder(page);
     this.selection = clearIfQuestion(this.selection, node.entity.ID);
     this.markDirty();
   }
@@ -1357,6 +1367,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     // Read BEFORE the array moves — it is the question this one used to sit in front of, which is
     // what Undo puts it back before. `null` when it was last on the page.
     const wasBefore = page.questions[from + 1]?.entity.ID ?? null;
+    const previousNotice = this.reorderNotice;
     const before = this.ruleEntries;
     moveItemInArray(page.questions, from, to);
 
@@ -1393,15 +1404,22 @@ export class FormBuilderComponent extends BaseFormComponent {
     // can throw, and a stuck `busy` freezes every guarded handler on the screen at once.
     this.busy = true;
     try {
-      // Checked rather than discarded: this writes one question at a time and can fail halfway,
-      // leaving `DisplayOrder` matching neither the order before this move nor the one after.
-      // `state.lastFailure()` owns SAYING so to the author — the band above this one is for a
-      // refused write — and the notice below it stays true either way, because it is about what
-      // is on screen. Logged as well so a partial write is not invisible once that band is gone.
+      // Checked, and now acted on: the reorder is one transaction (issue #103), so a refusal means
+      // the stored order is EXACTLY what it was and the entities have had their `DisplayOrder` put
+      // back. The two things the author can see have to follow, or the canvas shows an arrangement
+      // the database rejected and the band below describes consequences of a move that never
+      // happened.
+      //
+      // `to, from` rather than `from, to`: `moveItemInArray` splices out and then in, so moving the
+      // same element back is its exact inverse — the property `undoReorderMove` relies on too.
+      // The notice is RESTORED, not cleared: a band standing from an earlier costly move is still
+      // true, and nulling it here would take away an Undo the author had not finished with.
       if (!(await this.state.persistQuestionOrder(page))) {
+        moveItemInArray(page.questions, to, from);
+        this.reorderNotice = previousNotice;
         LogError(
-          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was not fully persisted; ` +
-            'DisplayOrder may match neither the previous nor the new order.',
+          `Reorder of "${moved.entity.Prompt}" on page ${page.entity.ID} was refused and rolled ` +
+            'back; the canvas has been put back to the stored order.',
         );
       }
     } finally {

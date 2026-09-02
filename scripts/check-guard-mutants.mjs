@@ -209,6 +209,39 @@ export const MUTANTS = [
     replace: "  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {\n    if (false) {",
     suite: 'packages/Angular',
   },
+  // --- BuilderStateService: a structural transaction must not eat an author's edit -----------
+  {
+    name: 'builder/group-never-released',
+    behaviour: 'every row is handed back its TransactionGroup slot on EVERY exit path',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '      for (const row of enlisted) {\n        row.TransactionGroup = null;\n      }',
+    replace: '      /* rows keep the spent group */',
+    suite: 'packages/Angular',
+  },
+  {
+    name: 'builder/enlist-refusal-ignored',
+    behaviour: 'a row that refuses BEFORE enlisting fails the whole change, instead of committing a subset',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '        if (!enlisted_ok) {\n          return { Committed: false, Detail: null, RefusedBy: item.Row };\n        }',
+    replace: '        void enlisted_ok;',
+    suite: 'packages/Angular',
+  },
+  {
+    name: 'builder/debounce-fires-into-open-transaction',
+    behaviour: 'a debounced autosave that comes due mid-transaction re-arms rather than enlisting onto a group nobody will submit',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '        if (this.structuralChangesInFlight > 0) {',
+    replace: '        if (false) {',
+    suite: 'packages/Angular',
+  },
+  {
+    name: 'builder/delete-skips-the-renumber',
+    behaviour: 'a delete carries the survivors\' new DisplayOrder in its own transaction, so the next Add cannot collide',
+    file: 'packages/Angular/src/lib/builder/builder-state.service.ts',
+    find: '    const moved = this.renumber(survivors);',
+    replace: '    const moved = this.renumber([]);',
+    suite: 'packages/Angular',
+  },
 ];
 
 /** Apply `entry` to its file, run its suite, restore. Returns one of the four verdicts. */
