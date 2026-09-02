@@ -40,7 +40,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sessionIdFor } from './lib/session.mjs';
-import { resolveSlug } from './lib/fixture.mjs';
+import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
 
 const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
 const SLUG = resolveSlug('respondent-errors-path.mjs');
@@ -150,9 +150,16 @@ async function main() {
   }
   pass('anonymous session redeemed from the public host page');
 
-  const published = JSON.parse((await post(token,
+  // Scanned like every other response, not merely parsed. This is the one SUCCESSFUL body the suite
+  // sees, so it is the only thing that can support the header's claim to check "error or not" — and
+  // it is the largest body on the public surface, carrying the whole published definition.
+  const publishedRes = await post(token,
     { query: 'query P($slug: String!) { PublishedForm(distributionSlug: $slug) { definitionJSON } }', variables: { slug: SLUG } },
-  )).text);
+  );
+  const publishedLeaks = leaksIn(publishedRes.text);
+  check(publishedLeaks.length === 0, 'the successful PublishedForm response says nothing about the host',
+    publishedLeaks.length ? `leaked ${publishedLeaks.join(', ')}` : '');
+  const published = JSON.parse(publishedRes.text);
   const definition = JSON.parse(published.data?.PublishedForm?.definitionJSON ?? '{}');
   const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
   check(questions.length > 0 && typeof definition.formVersionId === 'string',
@@ -166,9 +173,17 @@ async function main() {
   // A query that does not parse at all.
   await probe(token, 'an unparseable query (parse error)',
     { query: '{ PublishedForm(' });
-  // A request that resolves to an error inside a resolver (a field the session may not read).
+  // A request that resolves to an error INSIDE a resolver — the only probe here that reaches one,
+  // and so the only one that can carry MJ resolver frames rather than graphql-js validation frames.
+  //
+  // It must be a field that EXISTS and is REFUSED. `mjBizAppsFormsFormVersions` (plural) was neither:
+  // CodeGen emits no list root, so graphql-js rejected it at validation exactly like the malformed
+  // query two probes up, and this check never once exercised a resolver. Nor is any read refused
+  // outright — the anonymous session legitimately reads its OWN distribution and version, which is
+  // how the widget loads the form. `Form Responses` is the entity the respondent may CREATE but not
+  // READ, so reading one is refused by the authorization layer, inside the resolver, with a `path`.
   await probe(token, 'a resolver error (out-of-scope read)',
-    { query: '{ mjBizAppsFormsFormVersions { ID } }' });
+    { query: `{ mjBizAppsFormsFormResponse(ID: "${randomUUID()}") { ID Status } }` });
   // Apollo and Express answer these before any plugin runs — see CORE_RESIDUAL.
   await probe(token, 'a body that is not JSON (bad request)', '{not json', { coreResidual: true });
   await probe(token, 'a body with no query (bad request)', {}, { coreResidual: true });
@@ -186,6 +201,20 @@ async function main() {
 
   // …and a save the database refuses must not quote the database.
   if (GHOST_QUESTION_ID) {
+    // EVERY REQUIRED QUESTION IS ANSWERED, not just the ghost. Validation runs before persistence,
+    // so on a form with an unanswered required question the pipeline refuses at the validation
+    // stage, no INSERT is attempted, and `FK_FormResponseAnswer_Question` is never violated. The
+    // leak scan below would then pass while exercising nothing — the check exists to prove the
+    // driver's words cannot reach a respondent, and there would be no driver in it. That is not
+    // hypothetical: `resolveSlug` deliberately discovers a form with an Email question, and Email
+    // questions are commonly required.
+    // `buildAnswers` is the shared synthesiser every other smoke uses: it picks the right typed
+    // column per question type and throws a legible error for a required question it cannot answer
+    // (a Doodle, a FileUpload) rather than submitting something the server will reject.
+    const requiredAnswers = buildAnswers(
+      questions.filter((q) => q.isRequired && q.id !== GHOST_QUESTION_ID),
+      { email: `errors-smoke-${Date.now()}@example.com`, name: 'Errors Smoke' },
+    );
     await probe(token, 'a submit whose answer row the database refuses (FK violation)', {
       query: SUBMIT,
       variables: {
@@ -193,7 +222,7 @@ async function main() {
           distributionSlug: SLUG,
           formVersionId: definition.formVersionId,
           responseId: randomUUID(),
-          answers: [{ questionId: GHOST_QUESTION_ID, textValue: 'ghost' }],
+          answers: [...requiredAnswers, { questionId: GHOST_QUESTION_ID, textValue: 'ghost' }],
         },
       },
     }, { extra: (res) => {
@@ -201,9 +230,25 @@ async function main() {
       const result = body.data?.SubmitFormResponse;
       check(result && result.success === false, 'the refused save reports success:false, not a GraphQL error',
         res.text.slice(0, 200));
+      // EQUALITY, not a loose match. `/could not be saved|try again/` also matches three OTHER
+      // authored refusals that never reach persistence — the rate limiter's "Too many submissions.
+      // Please wait N seconds and try again.", the in-flight cap's "The form is receiving a lot of
+      // traffic right now. Please try again in a moment.", and the pipeline's own
+      // SUBMIT_FAILED_MESSAGE, which would mean a stage THREW. This is the 7th request of the run,
+      // so the rate limiter is not hypothetical, and each of those passing here would report a
+      // different bug as a success. Kept as a literal because a .mjs smoke cannot import the
+      // TypeScript constant; it is asserted against `SAVE_FAILED_MESSAGE` in
+      // `persistence-failure-message.spec.ts`, which fails if the two ever drift.
+      const SAVE_FAILED = 'Your response could not be saved. Please try again.';
       const message = result?.errors?.[0]?.message ?? '';
-      check(/could not be saved|try again/i.test(message), 'the refused save shows the authored sentence',
-        `got: ${message || res.text.slice(0, 200)}`);
+      check(message === SAVE_FAILED, 'the refused save shows the authored sentence',
+        `got: ${message || res.text.slice(0, 200)}\n          ` +
+          'Anything other than that exact sentence means persistence was never reached and the FK ' +
+          'was never violated, so this check proved nothing. A "required"/"valid" message means ' +
+          `validation refused first (${requiredAnswers.length} required question(s) were answered ` +
+          'here); "Too many submissions" or "receiving a lot of traffic" means a ceiling refused ' +
+          'first — rerun outside the window; "Something went wrong while submitting" means a stage ' +
+          'threw, which is its own bug.');
     } });
   } else {
     skip('a submit whose answer row the database refuses (FK violation)',
