@@ -326,8 +326,8 @@ export async function runSubmitPipeline(
     // the respondent's data, and the failure is not about their content).
     const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
     LogError(
-      `[Forms] submit for ${submission?.distributionSlug} (version ${submission?.formVersionId}, ` +
-        `partial=${submission?.partial === true}) threw: ${detail}`,
+      `[Forms] submit for ${submission.distributionSlug} (version ${submission.formVersionId}, ` +
+        `partial=${submission.partial === true}) threw: ${detail}`,
     );
     return fail(SUBMIT_FAILED_MESSAGE);
   } finally {
@@ -342,8 +342,14 @@ async function runSubmitPipelineInner(
 ): Promise<FormSubmissionResult> {
   // Timed end to end. "The submit is slow" is a report nobody can act on across eleven
   // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
-  // trip or a dedupe query can each outweigh the write. `report` is called on EVERY exit,
-  // including refusals, because a slow rejection is still a slow request.
+  // trip or a dedupe query can each outweigh the write. `report` is called on every exit OF THIS
+  // FUNCTION, including refusals, because a slow rejection is still a slow request.
+  //
+  // The one exit it does not cover is an exception, which unwinds past it to `runSubmitPipeline`'s
+  // catch. That exit emits the `… threw:` line instead, which carries the exception and its stack —
+  // strictly more useful than a timing breakdown for a stage that did not finish. Said here because
+  // this comment used to claim EVERY exit, and an operator who greps for a `[Forms] submit` line to
+  // pair with a failure would otherwise conclude the request never arrived.
   const timer = createStageTimer();
   const report = <T extends FormSubmissionResult>(result: T): T => {
     LogStatus(`[Forms] submit ${formatTimings(timer.finish())}${refusalSuffix(result)}`);

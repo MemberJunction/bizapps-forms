@@ -19,11 +19,24 @@
  * developer who needs the stack of a thrown resolver error has the server log, where the resolver
  * that threw is expected to have written it; the wire is not a log.
  *
- * WHAT IT CANNOT REACH: `willSendResponse` runs after `formatErrors` for parse, validation and
- * execution errors — the cases that carry resolver and graphql-js frames. Apollo answers a
- * malformed HTTP request (unparseable JSON body, a CSRF-prevention refusal) before the request
- * pipeline starts, so no plugin sees those; they carry only Apollo's own frames and no request
- * ever reached a resolver. `NODE_ENV=production` remains the correct production setting.
+ * WHAT IT CANNOT REACH. `willSendResponse` runs after `formatErrors` for parse, validation and
+ * execution errors — the cases that carry resolver and graphql-js frames. Three responses are built
+ * before the request pipeline exists, so no plugin, this one included, is ever invoked for them:
+ *
+ *   1. A malformed HTTP request — an unparseable JSON body, a body with no operation, a
+ *      CSRF-prevention refusal. Apollo answers from `executeHTTPGraphQLRequest`, or Express's
+ *      `body-parser` throws before Apollo sees it at all.
+ *   2. A CONTEXT-CREATION failure. `ApolloServer.errorResponse` formats it with
+ *      `includeStacktraceInErrorResponses` and returns directly, invoking no plugin. This one is
+ *      NOT merely "Apollo's own frames": MJ's context function opens per-request providers, so a
+ *      pool exhaustion or an unreachable database surfaces as
+ *      `Context creation failed: <driver message>` plus a stack — the driver's words and MJ's
+ *      paths, which is the leak class #119 is about, arriving by a door no plugin guards.
+ *
+ * All three are clean when `NODE_ENV` is `production`, because Apollo then omits the stack itself.
+ * So `NODE_ENV=production` remains the correct production setting, and it is the ONLY thing
+ * covering these three; only `includeStacktraceInErrorResponses` on MJ core's `buildApolloServer`
+ * would make them safe regardless.
  */
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
