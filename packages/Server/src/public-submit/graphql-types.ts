@@ -57,28 +57,37 @@ export class ClientMetaInput {
   userAgent?: string;
 }
 
+/**
+ * One answer as it arrives on the wire.
+ *
+ * Every typed field is `| null` because `nullable: true` means a client may send an explicit
+ * `null`, and TypeGraphQL passes that through as `null` rather than dropping it. Typing them as
+ * merely optional told the compiler a value could not arrive that demonstrably does, which is how
+ * a `null.trim()` reached the anonymous public write path twice — once through `jsonValue` and
+ * again through `dateValue`. See `FormAnswerInput`.
+ */
 @InputType({ description: 'One answer in a submission (exactly one typed value, or jsonValue).' })
 export class FormAnswerInputType {
   @Field(() => ID)
   questionId!: string;
 
   @Field({ nullable: true })
-  textValue?: string;
+  textValue?: string | null;
 
   @Field(() => Float, { nullable: true })
-  numericValue?: number;
+  numericValue?: number | null;
 
   @Field({ nullable: true })
-  dateValue?: string;
+  dateValue?: string | null;
 
   @Field(() => Boolean, { nullable: true })
-  booleanValue?: boolean;
+  booleanValue?: boolean | null;
 
   @Field({ nullable: true, description: 'JSON string for multi/complex answers.' })
-  jsonValue?: string;
+  jsonValue?: string | null;
 
   @Field(() => ID, { nullable: true })
-  fileId?: string;
+  fileId?: string | null;
 }
 
 @InputType({ description: 'Payload posted to SubmitFormResponse.' })

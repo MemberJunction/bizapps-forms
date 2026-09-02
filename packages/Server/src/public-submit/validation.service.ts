@@ -17,13 +17,14 @@
  *  4. Refuse a `complete` submission that left nothing to persist and raised no other error
  *     (#124) — it would otherwise be sealed `Complete` and counted against both quotas.
  *
- * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`).
- * It is a draft, and the widget autosaves on a debounce with no validity gate, so a half-typed
- * value is the normal case rather than an error — but "not finished" and "already too big" are
- * different claims. A value under `minLength`, an incomplete email or a value that does not yet
- * match a `pattern` are all states a respondent passes THROUGH; a value past `maxLength` is not
- * on its way anywhere. Exempting the ceilings too meant an author's `maxLength` bought nothing
- * on the autosave path.
+ * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`) —
+ * plus the one thing the row cannot physically hold, see {@link validateDraft}. It is a draft,
+ * and the widget autosaves on a debounce with no validity gate, so a half-typed value is the
+ * normal case rather than an error — but "not finished" and "already too big" are different
+ * claims. A value under `minLength`, an incomplete email or a value that does not yet match a
+ * `pattern` are all states a respondent passes THROUGH; a value past `maxLength` is not on its
+ * way anywhere. Exempting the ceilings too meant an author's `maxLength` bought nothing on the
+ * autosave path.
  *
  * Note what this does NOT do: a question with no `validationRule` at all — the common case — is
  * still capped only by MJAPI's 50mb GraphQL body limit, on the draft path and the complete path
@@ -39,6 +40,7 @@
  * Returns the set of visible answers to persist plus any field errors. Pure — no I/O.
  */
 import {
+  answerColumnFor,
   isAnswerableQuestionType,
   isAnswerSupplied,
   isRequiredSatisfied,
@@ -319,7 +321,7 @@ function validateValue(
 ): string | undefined {
   const rule = question.validationRule;
   if (mode === 'draft') {
-    return rule ? validateUpperBounds(value, rule) : undefined;
+    return validateDraft(question, value, rule);
   }
   // The whole question, not just its type: an option-based answer cannot be checked against
   // options it was never given. See `AnswerFormatQuestion`.
@@ -337,6 +339,34 @@ function validateValue(
     }
   }
   return validateNumericRange(value, rule);
+}
+
+/**
+ * What a DRAFT is held to: the ceilings, plus anything the row cannot physically hold.
+ *
+ * The second clause is scoped to the `date` column, and only to it, because it is the one typed
+ * column whose transport is wider than its storage: `dateValue` is a GraphQL `String`,
+ * `DateValue` is a `DATETIMEOFFSET`. The text, numeric, boolean and JSON columns store what the
+ * transport already typed, and a file id is vouched for by the upload ledger before persistence
+ * sees it — so the date column is the only place a draft can carry a value the row will choke
+ * on. An unparseable date is also never a value "still being typed": `<input type="date">` and
+ * `<input type="time">` emit nothing until the value is whole, so holding a draft to it costs no
+ * respondent any progress. Before this, a draft `Date` or `Time` carrying such a value reached
+ * `Save()` and came back as the bare `RangeError` message "Invalid time value", attributed to no
+ * question (#116).
+ */
+function validateDraft(
+  question: PublishedFormQuestion,
+  value: AnswerValue,
+  rule: ValidationRule | undefined,
+): string | undefined {
+  if (answerColumnFor(question.type) === 'date') {
+    const unstorable = validateAnswerFormat(question, value);
+    if (unstorable) {
+      return unstorable;
+    }
+  }
+  return rule ? validateUpperBounds(value, rule) : undefined;
 }
 
 /**

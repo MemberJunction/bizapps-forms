@@ -121,6 +121,8 @@ function makeFakeEntity(
   const record = new Proxy(
     {
       ID: `id-${entityName}-${saved.length + 1}`,
+      // Only answer rows carry one; the loader below sets it when the fixture supplies it.
+      QuestionID: undefined as string | undefined,
       LatestResult: { CompleteMessage: 'forced save failure' },
       NewRecord: () => {
         isNew = true;

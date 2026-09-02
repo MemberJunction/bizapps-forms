@@ -14,6 +14,7 @@ import {
   mjBizAppsFormsFormResponseAnswerEntity,
   mjBizAppsFormsFormQuestionEntity,
   mjBizAppsFormsFormEntity,
+  dateAnswerText,
   quoteSqlString,
   type FormQuestionType,
 } from '@mj-biz-apps/forms-entities';
@@ -33,6 +34,10 @@ const ENTITY = {
  * invisible to every on-submit hook — a response could contain a resume and an appointment date
  * and a hook reading this shape would see neither, with nothing to indicate they had been
  * dropped rather than left unanswered.
+ *
+ * `dateText` is the one derived member: the date column stores an instant whose reading depends on
+ * the question's type, so a faithful projection of the COLUMN is not a faithful projection of the
+ * ANSWER. See its comment.
  */
 export interface AnswerWithType {
   answerId: string;
@@ -42,6 +47,17 @@ export interface AnswerWithType {
   textValue: string | null;
   numericValue: number | null;
   dateValue: Date | null;
+  /**
+   * The date-column answer as the RESPONDENT gave it — `14:30` for a Time, `2026-08-07` for a
+   * Date — or `null` when the answer populates another column.
+   *
+   * Beside `dateValue` rather than replacing it, because the two answer different questions. An
+   * action doing date arithmetic or writing a datetime field wants the instant; an action putting
+   * the answer in front of a human wants this. Without it every consumer had to know that a Time
+   * is stored as the clock on the epoch date (#116) and re-derive the reading, and the failure was
+   * silent and plausible: a confirmation email saying "your appointment is at 1 Jan 1970".
+   */
+  dateText: string | null;
   booleanValue: boolean | null;
   jsonValue: string | null;
   fileId: string | null;
@@ -128,14 +144,16 @@ function toAnswerWithType(
   answer: mjBizAppsFormsFormResponseAnswerEntity,
   question: mjBizAppsFormsFormQuestionEntity | undefined,
 ): AnswerWithType {
+  const questionType = question?.QuestionType ?? 'ShortText';
   return {
     answerId: answer.ID,
     questionId: answer.QuestionID,
-    questionType: question?.QuestionType ?? 'ShortText',
+    questionType,
     prompt: question?.Prompt ?? '',
     textValue: answer.TextValue,
     numericValue: answer.NumericValue,
     dateValue: answer.DateValue,
+    dateText: answer.DateValue ? dateAnswerText(questionType, answer.DateValue) : null,
     booleanValue: answer.BooleanValue,
     jsonValue: answer.JSONValue,
     fileId: answer.FileID,
