@@ -34,11 +34,25 @@ describe('getMagicLinkProvisioningConfig', () => {
     expect(c.roleName).toBe('Form Respondent');
   });
 
-  it('honors a custom channel allow-list and ignores unknown tokens', () => {
-    process.env.FORMS_MAGICLINK_CHANNELS = 'PublicLink, bogus ,QR';
+  it('honors a custom channel allow-list', () => {
+    process.env.FORMS_MAGICLINK_CHANNELS = 'PublicLink, QR';
     resetMagicLinkProvisioningConfigForTests();
     const c = getMagicLinkProvisioningConfig();
     expect([...c.linkableChannels].sort()).toEqual(['PublicLink', 'QR']);
+  });
+
+  it('REFUSES an unrecognised channel token, naming it, rather than silently dropping it', () => {
+    // This used to be tolerated ("ignores unknown tokens"), and that was correct while the list
+    // was a mint GATE: an ignored token meant "mint nothing new for it". `decideProvisioning` is
+    // a state function now, so a channel missing from the set means every live link of that
+    // channel is unwarranted, and the next save of each — typically a respondent submitting —
+    // revokes its credential. `embed` for `Embed` would take every embedded form on the host
+    // dark with no error anywhere. Refusing is fail-safe by construction: the one save-path
+    // caller evaluates this inside a try, so a throw leaves every credential exactly as it was.
+    process.env.FORMS_MAGICLINK_CHANNELS = 'PublicLink, embed ,QR';
+    resetMagicLinkProvisioningConfigForTests();
+    expect(() => getMagicLinkProvisioningConfig()).toThrow(/'embed'/);
+    expect(() => getMagicLinkProvisioningConfig()).toThrow(/Email, Embed, PublicLink, QR/);
   });
 
   it('honors custom maxUses, fixed expiry, application and role', () => {

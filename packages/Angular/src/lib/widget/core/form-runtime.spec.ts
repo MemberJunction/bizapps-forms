@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 import { resolveVisibleQuestions } from '@mj-biz-apps/forms-entities';
 import { FormRuntime } from './form-runtime';
 
@@ -12,6 +12,8 @@ function makeDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -105,6 +107,8 @@ function phoneDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p',
@@ -606,6 +610,8 @@ function jumpDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',

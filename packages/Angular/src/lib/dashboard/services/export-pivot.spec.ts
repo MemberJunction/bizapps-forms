@@ -2,6 +2,18 @@ import { describe, it, expect } from 'vitest';
 import { buildExportColumns, buildExportMatrix } from './export-pivot';
 import { q, answer } from '../../shared/testing/entity-row-fixtures';
 import type { ResponseListRow } from '../../responses/response-models';
+import type { ExportDataRow } from '@memberjunction/export-engine';
+
+/**
+ * A cell of the matrix by column key. `ExportDataRow` is `Record<string, unknown> | unknown[]` —
+ * the engine also accepts positional rows — and these tests only ever build keyed ones, so the
+ * array arm is asserted away rather than cast away.
+ */
+function cell(row: ExportDataRow | undefined, key: string): unknown {
+  expect(row).toBeDefined();
+  expect(Array.isArray(row)).toBe(false);
+  return row && !Array.isArray(row) ? row[key] : undefined;
+}
 
 function row(responseId: string): ResponseListRow {
   return {
@@ -46,7 +58,7 @@ describe('buildExportMatrix', () => {
 
   it('leaves the cell blank for a question a response never answered', () => {
     const matrix = buildExportMatrix([row('r1')], [q('q-text', 'LongText')], []);
-    expect(matrix[0]['q-text']).toBe('');
+    expect(cell(matrix[0], 'q-text')).toBe('');
   });
 
   it('exports a file answer as its file id — a joinable key, and the only evidence in the sheet', () => {
@@ -57,7 +69,7 @@ describe('buildExportMatrix', () => {
     );
     // renderAnswer blanks a file answer for the UI (a bare GUID means nothing on screen),
     // but the sheet has no FormUpload join and the id is how an analyst rejoins MJ: Files.
-    expect(matrix[0]['q-file']).toBe('file-77');
+    expect(cell(matrix[0], 'q-file')).toBe('file-77');
   });
 
   it('carries no AI score or rationale into the sheet, even when the rows hold them', () => {

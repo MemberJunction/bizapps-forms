@@ -14,6 +14,7 @@
     "build:packages": "turbo --log-order=stream build --filter=\"@mj-biz-apps/forms-*\"",
     "test": "turbo --log-order=stream test",
     "test:packages": "turbo --log-order=stream test --filter=\"@mj-biz-apps/forms-*\"",
+    "typecheck": "turbo --log-order=stream typecheck --filter=\"@mj-biz-apps/forms-*\"",
     "build:widget": "pnpm --filter @mj-biz-apps/forms-ng run build:widget",
     "mj:migrate": "mj migrate --schema __mj_BizAppsForms --dir ./migrations",
     "mj:codegen": "mj codegen",
@@ -22,6 +23,8 @@
     "lint:generated": "node scripts/check-generated-schema-scope.mjs",
     "lint:distribution": "node scripts/check-distribution-seed.mjs",
     "lint:distribution:mutants": "node scripts/check-distribution-seed.mutants.mjs",
+    "lint:guard-mutants": "node scripts/check-guard-mutants.mjs",
+    "lint:guard-mutants:test": "node --test scripts/check-guard-mutants.spec.mjs",
     "lint:codegen-compat": "node scripts/check-generated-api-compat.mjs",
     "lint:migrations": "node scripts/check-migration-order.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs",
@@ -42,7 +45,10 @@
     "smoke:provenance": "node smoke/upload-provenance-path.mjs",
     "smoke:file-links": "node smoke/file-links-path.mjs",
     "smoke:resume-arc": "node smoke/resume-arc-path.mjs",
-    "smoke:metadata": "node smoke/metadata-integrity-path.mjs"
+    "smoke:metadata": "node smoke/metadata-integrity-path.mjs",
+    "smoke:backfill": "node smoke/backfill-path.mjs",
+    "smoke:credentials": "cd apps/MJAPI && node credential-lifecycle-smoke.mjs",
+    "smoke:credentials:least-privilege": "cd apps/MJAPI && node least-privilege-credential-smoke.mjs"
   },
   "repository": {
     "type": "git",
