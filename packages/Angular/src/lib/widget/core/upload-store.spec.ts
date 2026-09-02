@@ -23,6 +23,7 @@ function uploadForm(): PublishedFormDefinition {
     renderMode: 'OneQuestion',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
     pages: [{ id: 'p1', displayOrder: 1, questions: [fileQuestion('q-resume', 1), fileQuestion('q-transcript', 2)] }],
     endScreens: [],
   };

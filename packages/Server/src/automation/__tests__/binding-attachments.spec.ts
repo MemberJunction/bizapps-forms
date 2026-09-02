@@ -136,6 +136,9 @@ function context(withFile = true) {
     answers: new CanonicalAnswers(withFile ? [{ QuestionID: 'q-file', FileID: FILE_A }] : []),
     principal: { Name: 'Forms Automation Service' } as unknown as UserInfo,
     allowedEntities: null,
+    // Empty rather than absent: these fixtures assert attachment behaviour, not answer shaping,
+    // and an empty map is the "caller cannot say" case the executor is explicitly safe for.
+    questionTypes: new Map(),
   };
 }
 

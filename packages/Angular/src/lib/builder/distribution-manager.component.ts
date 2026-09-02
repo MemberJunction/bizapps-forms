@@ -22,7 +22,13 @@ import { fromLocalInputValue, toLocalInputValue } from './local-datetime';
 import { resolveApiOrigin } from '../shared/mj-api-origin';
 import { textToQrSvg } from './qr-code';
 import { readResponseLimit } from './response-limit';
-import { autoShareName, shareState, type ShareState } from './share-state';
+import {
+  autoShareName,
+  credentialMayStillRedeem,
+  isOpenToResponses,
+  shareState,
+  type ShareState,
+} from './share-state';
 
 /** The three renderings of one link. Not three kinds of link — see the class comment. */
 type ShareView = 'link' | 'qr' | 'embed';
@@ -92,6 +98,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   protected renaming = false;
   protected nameDraft = '';
   protected confirmingDelete = false;
+  protected confirmingReissue = false;
 
   /**
    * Focus and pre-select the rename box the moment it exists.
@@ -122,8 +129,18 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
 
   // ------------------------------------------------------------------ loading
 
-  protected async reload(): Promise<void> {
-    this.loading = true;
+  /**
+   * Re-read the links.
+   *
+   * `quiet` re-reads WITHOUT raising `loading`, which the template turns into a full-pane
+   * "Loading share links…" that unmounts the two-pane shell. Right for the first load and wrong
+   * after a credential write: those happen on the Settings switch below the fold, so blanking the
+   * pane threw the author's scroll position away and dropped keyboard focus to `<body>` — on every
+   * pause and every reopen — leaving the switch they had just pressed unreachable without tabbing
+   * from the top of the document. The data still refreshes; only the announcement is suppressed.
+   */
+  protected async reload(quiet = false): Promise<void> {
+    this.loading = !quiet;
     this.loadError = null;
     this.cdr.markForCheck();
 
@@ -138,9 +155,25 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     this.qrCache.clear();
     // Keep the author where they were across a reload; fall back to the newest link.
     if (!this.links.some((l) => l.ID === this.selectedId)) {
-      this.selectedId = this.links[0]?.ID ?? null;
+      this.selectLink(this.links[0]?.ID ?? null);
     }
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Move the selection, dropping every confirmation armed against the link being left.
+   *
+   * The one place `selectedId` is assigned, because a confirmation is armed against a RECORD and
+   * the flags holding it are not. `select()` cleared them; creating a link, deleting one, and a
+   * reload whose selected row is gone all reassigned `selectedId` without doing so — so an armed
+   * "Replace it" survived onto whatever was selected next, and one click then rotated the token
+   * of a link the author never armed. Making assignment and reset the same act is what stops the
+   * next new path reintroducing it.
+   */
+  private selectLink(id: string | null): void {
+    this.selectedId = id;
+    this.confirmingDelete = false;
+    this.confirmingReissue = false;
   }
 
   protected get selected(): mjBizAppsFormsFormDistributionEntity | null {
@@ -148,9 +181,8 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   }
 
   protected select(link: mjBizAppsFormsFormDistributionEntity): void {
-    this.selectedId = link.ID;
+    this.selectLink(link.ID);
     this.cancelRename();
-    this.confirmingDelete = false;
     this.actionError = null;
   }
 
@@ -182,12 +214,23 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     await this.reload();
-    this.selectedId = created.ID;
+    this.selectLink(created.ID);
     this.view = 'link';
     this.cdr.markForCheck();
   }
 
   // -------------------------------------------------------------------- state
+
+  /**
+   * Whether the "Open to responses" switch should read ON for this link.
+   *
+   * Delegates to the one exported predicate rather than restating it, because the template
+   * used to test `Status === 'Active'` here and that is only half of what "open" means — see
+   * {@link isOpenToResponses} for what the half-answer did to the control.
+   */
+  protected isOpen(link: mjBizAppsFormsFormDistributionEntity): boolean {
+    return isOpenToResponses(link);
+  }
 
   /** The effective state of a link — what a respondent opening it right now would get. */
   protected stateOf(link: mjBizAppsFormsFormDistributionEntity): ShareState {
@@ -218,9 +261,9 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
    *
    * One handler rather than five buttons: the state already decides which remedy is on
    * offer, so the alternative is five conditionals in the template each duplicating that
-   * decision. The `pending` branch reloads because issuing a link only asks the server to
-   * try — the token, if one is minted, is written by a second server-side save that this
-   * client's copy of the record knows nothing about.
+   * decision. `pending` and `paused` both go through {@link runCredentialWrite}, because
+   * both ask the server to mint a token and that is written by a second server-side save
+   * this client's copy of the record knows nothing about.
    */
   protected async applyFix(): Promise<void> {
     const link = this.selected;
@@ -230,16 +273,15 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     const kind = this.stateOf(link).kind;
     switch (kind) {
       case 'pending':
-        await this.run(() => this.service.issueLink(link));
-        await this.reload();
-        if (!this.selected?.PublicLinkToken) {
-          this.actionError =
-            'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.';
-          this.cdr.markForCheck();
-        }
+        await this.runCredentialWrite(() => this.service.issueLink(link));
+        this.warnIfStillUnissued(link.ID, 'issue');
         return;
       case 'paused':
-        await this.run(() => this.service.open(link));
+        // Warns for the same reason `pending` does: reopening asks the server to mint, and the
+        // hook is fail-soft, so "turned it back on and got no web address" is a real outcome the
+        // author would otherwise have to notice from the badge alone.
+        await this.runCredentialWrite(() => this.service.open(link));
+        this.warnIfStillUnissued(link.ID, 'issue');
         return;
       case 'ended':
         await this.run(() => this.service.setSchedule(link, link.OpenAt, null));
@@ -262,8 +304,125 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
     if (!link || this.busy) {
       return;
     }
-    const reopening = link.Status !== 'Active';
-    await this.run(() => (reopening ? this.service.open(link) : this.service.close(link)));
+    const reopening = !this.isOpen(link);
+    await this.runCredentialWrite(() =>
+      reopening ? this.service.open(link) : this.service.close(link),
+    );
+    if (reopening) {
+      this.warnIfStillUnissued(link.ID, 'issue');
+    } else {
+      this.warnIfStillRedeemable(link.ID);
+    }
+  }
+
+  /**
+   * Say so when turning a link OFF did not actually take its access token away.
+   *
+   * The mirror of {@link warnIfStillUnissued}, and a separate method because the evidence is
+   * the opposite: that one fires on an EMPTY token, this one on a token still present. Both
+   * exist for the same reason — `FormDistributionEntityServer.Save()` logs a failed revoke and
+   * still returns true, so the service reports a green save either way and the reloaded record
+   * is the only place the difference shows.
+   *
+   * Worth saying out loud rather than leaving to the badge: an author turning a link off is
+   * usually doing it BECAUSE they want it to stop working, and "it is off" is what they will
+   * read from the switch. Silence here is the same overclaim the badge used to make.
+   *
+   * It says "not confirmed" rather than "could not withdraw" because the record cannot tell the
+   * two failures apart — `revoke-failed` leaves the token live, `unlink-failed` means the revoke
+   * landed and only the record is stale, and both leave the same two columns. See
+   * {@link credentialMayStillRedeem}, whose docstring draws exactly this limit.
+   */
+  private warnIfStillRedeemable(linkId: string): void {
+    if (this.actionError !== null) {
+      // The write itself failed and `run()` recorded why. A diagnosis about the token would
+      // OVERWRITE that reason with a guess — "magic links are not switched on" over a slug
+      // conflict — and send the author to audit config that is correct. The real error wins.
+      return;
+    }
+    const link = this.links.find((l) => l.ID === linkId);
+    if (!link || !credentialMayStillRedeem(link)) {
+      return;
+    }
+    this.actionError =
+      'This link is turned off, but its access token is still on record, so the withdrawal is ' +
+      'not confirmed — treat the old web address as possibly still working. The server tries ' +
+      'again the next time this link is saved. If it keeps failing, someone technical needs to ' +
+      'look at the server log.';
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Ask the server for a new access token, keeping the web address.
+   *
+   * Two clicks, because it cannot be undone: the previous token stops being redeemable the
+   * instant this lands, so anyone holding it (a scraped `PublicLinkToken`, a copied redeem URL)
+   * can no longer trade it for a session.
+   *
+   * It does NOT end sessions already granted. Revocation stops new redemptions; a respondent who
+   * had already opened the link holds a JWT that stays valid until its own `exp` — core ships no
+   * session revocation for magic-link tokens to hook into. The control's copy says so rather than
+   * promising an instant cutoff the product cannot deliver.
+   *
+   * What it also does NOT break is the shared link itself — `/f/:slug` looks the
+   * token up at request time, so posters, QR codes and embeds carry on working. That is
+   * the whole reason this exists instead of "delete it and make another".
+   */
+  protected async confirmReissue(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    this.confirmingReissue = false;
+    await this.runCredentialWrite(() => this.service.reissueLink(link));
+    this.warnIfStillUnissued(link.ID, 'reissue');
+  }
+
+  /**
+   * Say so when a write that was supposed to produce a token did not — and be exact about which
+   * of the two failures it was, because for a reissue they are opposites.
+   *
+   * The service reports whether the SAVE succeeded; the hook that mints is deliberately
+   * fail-soft, so a green save and a link with no web address are the same outcome from here.
+   * The reloaded record carries the evidence, in the pair of columns the server writes together:
+   *
+   *  - a token          → nothing went wrong.
+   *  - no token, no invite → the old credential WAS withdrawn; only the replacement failed.
+   *  - no token, invite still linked → the revoke did NOT land. The server leaves it linked
+   *    precisely so the next save retries, and that is the state where the leaked token an
+   *    author just tried to kill is still redeemable. Saying "the old token was withdrawn"
+   *    here — which is what a single message did — is the inverse of the truth, on the one
+   *    flow whose entire purpose is killing a leaked credential.
+   *
+   * Takes the link's ID rather than reading `this.selected`, because the rail stays clickable
+   * through the two round-trips: the author can select a different link before this runs, and
+   * the warning would then be written under a record it says nothing about.
+   */
+  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {
+    if (this.actionError !== null) {
+      // The write itself failed and `run()` recorded why. A diagnosis about the token would
+      // OVERWRITE that reason with a guess — "magic links are not switched on" over a slug
+      // conflict — and send the author to audit config that is correct. The real error wins.
+      return;
+    }
+    const link = this.links.find((l) => l.ID === linkId);
+    if (!link || link.PublicLinkToken) {
+      return;
+    }
+    if (link.MagicLinkInviteID) {
+      this.actionError =
+        'The server could not withdraw this link\'s old access token, so it may still work. ' +
+        'This link has no working web address in the meantime. Try again, and if it keeps ' +
+        'failing someone technical needs to look at the server log.';
+    } else if (wrote === 'reissue') {
+      this.actionError =
+        'The old token was withdrawn, but the server did not issue a new one, so this link is ' +
+        'not working. Use "Issue the link" to try again.';
+    } else {
+      this.actionError =
+        'The server did not hand out a web address for this link. Public links are not switched on for this server — someone technical needs to enable magic links before any share link here will work.';
+    }
+    this.cdr.markForCheck();
   }
 
   /**
@@ -324,6 +483,21 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       this.busy = false;
       this.cdr.markForCheck();
     }
+  }
+
+  /**
+   * Run one write that changes this link's access token, then re-read the record.
+   *
+   * The reload is not optional here, and is what separates these writes from the others.
+   * Pausing, reopening, issuing and reissuing all make the server's lifecycle hook write
+   * `MagicLinkInviteID` / `PublicLinkToken` in a SECOND save that this client's copy of
+   * the record never sees. Skipping the re-read leaves the screen rendering a token that
+   * has been revoked, or none where one was just minted — which the badge reads as "Not
+   * ready" on a link that is live.
+   */
+  private async runCredentialWrite(write: () => Promise<MutationOutcome>): Promise<void> {
+    await this.run(write);
+    await this.reload(true);
   }
 
   // -------------------------------------------------------------------- rename
@@ -388,7 +562,7 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
       return;
     }
     this.links = this.links.filter((l) => l.ID !== link.ID);
-    this.selectedId = this.links[0]?.ID ?? null;
+    this.selectLink(this.links[0]?.ID ?? null);
     this.cdr.markForCheck();
   }
 

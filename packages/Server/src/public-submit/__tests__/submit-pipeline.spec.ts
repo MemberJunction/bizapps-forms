@@ -149,6 +149,7 @@ describe('runSubmitPipeline', () => {
     const ctx: PipelineContext = {
       provider: fake.provider,
       contextUser: makeContextUser(),
+      elevatedUser: makeContextUser(),
       sessionId: 'sess-q',
     };
 

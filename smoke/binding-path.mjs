@@ -20,8 +20,9 @@
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 // The automation `seed-binding-smoke.mjs` creates, and the form it is wired to — NOT whichever
 // form sorts first. Two of the assertions below hold only on a form whose sole automation is this
 // binding: "all five submissions ran their automation" counts runs (a form with five automations

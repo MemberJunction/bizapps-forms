@@ -20,17 +20,28 @@ export interface ClientMeta {
  * One answer in a submission. Exactly one (or, for complex answers, `jsonValue`)
  * of the typed value fields is expected per question, matching the
  * `FormResponseAnswer` typed-column layout.
+ *
+ * Every typed field is `| null`, not merely optional, because the transport really does deliver
+ * `null` and a type that denies it makes the defence against it look like dead code. A GraphQL
+ * client may send an explicit `null` for any `nullable: true` field, and a mapper that assumes
+ * otherwise crashes: `parseJsonValue` carries a `raw == null` guard added after `null.trim()`
+ * 500ed every submit for `jsonValue`, and the same crash reached the anonymous public write path
+ * again through `dateValue`. With the field typed as it actually arrives, the compiler is the
+ * thing that finds the next one instead of a respondent.
+ *
+ * Absent and null are still the same thing to every reader — "this answer does not use this
+ * column" — which is why `answerValueOf` and `applyAnswerValue` both test `!= null`.
  */
 export interface FormAnswerInput {
   questionId: string;
-  textValue?: string;
-  numericValue?: number;
-  dateValue?: string;
-  booleanValue?: boolean;
+  textValue?: string | null;
+  numericValue?: number | null;
+  dateValue?: string | null;
+  booleanValue?: boolean | null;
   /** Structured value for multi/complex answers (e.g. MultiChoice selections). */
-  jsonValue?: JSONValue;
+  jsonValue?: JSONValue | null;
   /** `MJ: Files` id for FileUpload answers. */
-  fileId?: string;
+  fileId?: string | null;
 }
 
 /** The payload posted to the S1 `SubmitFormResponse` mutation. */
