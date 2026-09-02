@@ -770,3 +770,52 @@ describe('a rule whose source is answered after it runs', () => {
     expect(warnings.join('\n')).toContain('visibility did not settle');
   });
 });
+
+/**
+ * Issue #124's client half. The server refuses a final submit that would store nothing on a form
+ * that asked something; the widget has to know the same thing, or the respondent learns it only
+ * after a round trip — while every OTHER validation rule in this widget blocks or annotates
+ * inline. The predicate has to match the server's exactly, including its exemption for a form
+ * that asked nothing at all.
+ */
+describe('FormRuntime.wouldSubmitNothing (#124)', () => {
+  function formOf(questions: PublishedFormQuestion[]): PublishedFormDefinition {
+    return { ...makeDefinition(), pages: [{ id: 'p1', displayOrder: 1, questions }] };
+  }
+  const optional = (id: string): PublishedFormQuestion =>
+    ({ id, type: 'ShortText', prompt: id, isRequired: false, displayOrder: 1, options: [] });
+
+  it('is true when the form asked something and nothing has been filled in', () => {
+    const rt = new FormRuntime(formOf([optional('q-a')]));
+    expect(rt.wouldSubmitNothing()).toBe(true);
+  });
+
+  it('is false once any question carries a real answer', () => {
+    const rt = new FormRuntime(formOf([optional('q-a')]));
+    rt.setValue('q-a', 'Ada');
+    expect(rt.wouldSubmitNothing()).toBe(false);
+  });
+
+  it('is true for a whitespace-only answer, which the payload builder drops', () => {
+    const rt = new FormRuntime(formOf([optional('q-a')]));
+    rt.setValue('q-a', '   ');
+    expect(rt.wouldSubmitNothing()).toBe(true);
+  });
+
+  it('is FALSE on an acknowledgement form, which asked nothing and is completable', () => {
+    const rt = new FormRuntime(formOf([
+      { id: 'q-note', type: 'Statement', prompt: 'I have read it.', isRequired: false, displayOrder: 1, options: [] },
+    ]));
+    expect(rt.wouldSubmitNothing()).toBe(false);
+  });
+
+  it('is FALSE when every answerable question is hidden on this path', () => {
+    const rt = new FormRuntime(formOf([
+      {
+        id: 'q-branch', type: 'ShortText', prompt: 'Branch', isRequired: false, displayOrder: 1, options: [],
+        conditionalRule: { show: { all: [{ questionId: 'q-absent', op: 'equals', value: 'yes' }] } },
+      },
+    ]));
+    expect(rt.wouldSubmitNothing()).toBe(false);
+  });
+});

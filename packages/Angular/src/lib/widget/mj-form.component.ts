@@ -24,6 +24,7 @@ import {
   endingMessage,
   endingRedirectUrl,
   endsWithoutSubmit,
+  NOTHING_TO_SUBMIT_MESSAGE,
   resolveFormOutcome,
   SCREENED_OUT_MESSAGE,
   type FormOutcome,
@@ -97,6 +98,27 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   protected readonly phase = signal<WidgetPhase>('loading');
   protected readonly errorText = signal<string>('');
+
+  /**
+   * The banner the respondent actually sees.
+   *
+   * `errorText` holds the last refusal, and nearly all of them must persist until the next attempt
+   * — a captcha failure or a server error is still true while the respondent looks at it, and the
+   * widget has no way to know otherwise. The #124 message is the exception: it says the submit
+   * would store nothing, and the widget can see the moment that stops being so. Left alone it sat
+   * on screen next to "You can submit now." the instant the respondent typed a character, with the
+   * widget asserting both halves of a contradiction it was in a position to resolve.
+   *
+   * Scoped to that one sentence on purpose. Clearing the banner on any answer change would also
+   * wipe a server error the respondent has not addressed.
+   */
+  protected readonly bannerText = computed(() => {
+    const text = this.errorText();
+    if (text === NOTHING_TO_SUBMIT_MESSAGE && this.runtime()?.wouldSubmitNothing() === false) {
+      return '';
+    }
+    return text;
+  });
   protected readonly definition = signal<PublishedFormDefinition | null>(null);
   protected readonly runtime = signal<FormRuntime | null>(null);
   protected readonly result = signal<FormSubmissionResult | null>(null);
@@ -575,6 +597,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // Captcha gate: when required, block final submit until the challenge is solved.
     if (!this.submitAllowed()) {
       this.errorText.set(this.captchaBlockedMessage());
+      return;
+    }
+    // Nothing-to-submit gate (#124). The server refuses a completion that would store nothing on a
+    // form that DID ask something, so sending one costs the respondent a round trip to be told what
+    // the widget already knows — and every other validation rule here answers inline. Same sentence
+    // as the server's, from the shared contract, so the two cannot drift into disagreeing about one
+    // rule. Deliberately BEFORE the phase flip below: this is a refusal to start, not a failed
+    // submit, so the form must stay exactly where it was.
+    if (rt.wouldSubmitNothing()) {
+      this.errorText.set(NOTHING_TO_SUBMIT_MESSAGE);
       return;
     }
     // Flip to 'submitting' FIRST: this both drives the button's disabled state (no second
