@@ -710,6 +710,8 @@ describe('validateSubmission — answers that match no question (#124)', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p1',
@@ -718,6 +720,48 @@ describe('validateSubmission — answers that match no question (#124)', () => {
             { id: 'q-first', type: 'ShortText', prompt: 'First name', isRequired: false, displayOrder: 1, options: [] },
             { id: 'q-colour', type: 'ShortText', prompt: 'Colour', isRequired: false, displayOrder: 2, options: [] },
             { id: 'q-note', type: 'Statement', prompt: 'Display only', isRequired: false, displayOrder: 3, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  /**
+   * A form that asks NOTHING: display-only copy and a Submit button. Reading a policy and
+   * acknowledging it is a real form, and it is completable — the response records that someone
+   * arrived and pressed the button, which is the whole point of it.
+   */
+  function acknowledgementForm(): PublishedFormDefinition {
+    const def = optionalForm();
+    return {
+      ...def,
+      name: 'Acknowledgement',
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-note', type: 'Statement', prompt: 'I have read the policy.', isRequired: false, displayOrder: 1, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  /** Answerable questions exist, but this respondent's path renders none of them. */
+  function allHiddenForm(): PublishedFormDefinition {
+    const def = optionalForm();
+    return {
+      ...def,
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            {
+              id: 'q-branch', type: 'ShortText', prompt: 'Branch only', isRequired: false, displayOrder: 1, options: [],
+              conditionalRule: { show: { all: [{ questionId: 'q-absent', op: 'equals', value: 'yes' }] } },
+            },
           ],
         },
       ],
@@ -795,5 +839,67 @@ describe('validateSubmission — answers that match no question (#124)', () => {
       const outcome = validateSubmission(conditionalDefinition(), [], 'complete');
       expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-choice']);
     });
+  });
+
+  /**
+   * "Nothing to submit" has to mean the respondent DECLINED to answer, not that the form never
+   * asked. The two are only the same on a form with something answerable on it, and refusing the
+   * other case tells a respondent to answer a question that is not on their screen.
+   *
+   * The widget already draws this distinction — `FormRuntime.hasAnswerableQuestions` exists for
+   * exactly these two shapes, and its comment names them: "A form of pure Statement copy — or one
+   * whose every question is currently hidden by a show rule".
+   */
+  describe('a form that asked the respondent nothing', () => {
+    it('completes an acknowledgement form, which has only display-only copy to show', () => {
+      const outcome = validateSubmission(acknowledgementForm(), [], 'complete');
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers).toEqual([]);
+    });
+
+    it('completes when every answerable question is hidden on this respondent\'s path', () => {
+      const outcome = validateSubmission(allHiddenForm(), [], 'complete');
+      expect(outcome.errors).toEqual([]);
+    });
+
+    it('still refuses a blank submission when the form DID ask something', () => {
+      expect(validateSubmission(optionalForm(), [], 'complete').errors.map((e) => e.message))
+        .toEqual(['Please answer at least one question before submitting.']);
+    });
+  });
+
+  describe('one error per unknown question, not per answer', () => {
+    it('reports a repeated unknown id once', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [{ questionId: 'q-ghost', textValue: 'a' }, { questionId: 'q-ghost', textValue: 'b' }],
+        'complete',
+      );
+      // The widget joins every message with a space into one banner, so a duplicated entry is a
+      // sentence the respondent reads twice.
+      expect(outcome.errors).toHaveLength(1);
+      expect(outcome.errors[0].questionId).toBe('q-ghost');
+    });
+
+    it('still reports each DISTINCT unknown id', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [{ questionId: 'q-ghost', textValue: 'a' }, { questionId: 'q-phantom', textValue: 'b' }],
+        'complete',
+      );
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-ghost', 'q-phantom']);
+    });
+  });
+
+  /**
+   * The exemption for `screened-out` is right, but not for the reason the code used to give. A
+   * knockout is a terminal JUMP whose `when` group is evaluated against the RAW answer map, while
+   * `visible` comes from the rendered walk — so a jump reading a HIDDEN question fires while that
+   * answer is dropped, and the response carries nothing. Measured live: a Disqualified row with 0
+   * answers, identically on this branch and on `next`.
+   */
+  it('seals a screened-out submission that carries no visible answer at all', () => {
+    const outcome = validateSubmission(optionalForm(), [], 'screened-out');
+    expect(outcome.errors).toEqual([]);
   });
 });

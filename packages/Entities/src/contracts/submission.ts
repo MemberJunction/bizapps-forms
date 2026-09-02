@@ -66,6 +66,19 @@ export interface FieldError {
   message: string;
 }
 
+/**
+ * What a respondent is told when their final submit would store nothing (#124).
+ *
+ * Lives in the contract, not in the validator that raises it, because BOTH sides say it: the
+ * server refuses the submission with this sentence, and the widget refuses to send one in the
+ * first place so the respondent is answered without a round trip. Two string literals in two
+ * packages would drift, and the drift would be invisible — the widget's banner and the server's
+ * refusal would simply disagree about the same rule. Importing one constant makes them the same
+ * sentence by construction, which is the same reason `isAnswerSupplied` and `validateAnswerFormat`
+ * are shared rather than reimplemented per side.
+ */
+export const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question before submitting.';
+
 /** The result returned by the S1 `SubmitFormResponse` mutation. */
 export interface FormSubmissionResult {
   success: boolean;

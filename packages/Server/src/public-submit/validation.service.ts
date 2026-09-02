@@ -14,8 +14,9 @@
  *  3. For each visible question: enforce `isRequired`, then the format implied by the
  *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
  *     `ValidationRule` (length / numeric bounds / regex pattern).
- *  4. Refuse a `complete` submission that left nothing to persist and raised no other error
- *     (#124) — it would otherwise be sealed `Complete` and counted against both quotas.
+ *  4. Refuse a `complete` submission that left nothing to persist and raised no other error, ON A
+ *     FORM THAT ASKED SOMETHING (#124) — it would otherwise be sealed `Complete` and counted
+ *     against both quotas. A form that asks nothing is completable, and always was.
  *
  * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`) —
  * plus the one thing the row cannot physically hold, see {@link validateDraft}. It is a draft,
@@ -44,6 +45,7 @@ import {
   isAnswerableQuestionType,
   isAnswerSupplied,
   isRequiredSatisfied,
+  NOTHING_TO_SUBMIT_MESSAGE,
   resolveRenderedQuestions,
   coerceAnswerToNumber,
   matchesValidationPattern,
@@ -158,10 +160,15 @@ function asksForEverything(mode: ValidationMode): boolean {
   return mode === 'complete';
 }
 
-/** What a respondent is told when their final submit would store nothing (#124). */
-const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question before submitting.';
-
-/** What an answer naming a question this form does not have is told (#124). */
+/**
+ * What an answer naming a question this form does not have is told (#124).
+ *
+ * Local, unlike `NOTHING_TO_SUBMIT_MESSAGE` which lives in the shared contract, and the asymmetry
+ * is deliberate: the widget mirrors the nothing-to-submit rule, so both sides say that sentence and
+ * a second literal would drift. Nothing mirrors this one — `buildAnswerInputs` emits ids straight
+ * off the definition, so the widget cannot produce an unknown id and never raises this. Only the
+ * server says it, so only the server needs it.
+ */
 const UNKNOWN_QUESTION_MESSAGE = 'That answer does not belong to any question on this form.';
 
 /**
@@ -198,7 +205,8 @@ export function validateSubmission(
   // ends the form mid-page — a second pass over that page's list puts every one of them back.
   // The widget renders this same walk, so a question it never showed can no longer be required
   // here (plan invariant 2, which held for pages and silently did not hold for questions).
-  for (const question of resolveRenderedQuestions(definition.pages, answerMap)) {
+  const rendered = resolveRenderedQuestions(definition.pages, answerMap);
+  for (const question of rendered) {
     collectVisibleQuestion(question, answerMap, inputByQuestion, mode, errors, visible);
   }
 
@@ -206,11 +214,28 @@ export function validateSubmission(
   // `Complete` row: both quotas count those — the distribution's `ResponseCount` and the form's
   // `COUNT(Status='Complete')` — so an empty one spends a slot a real respondent needed (#124).
   // Refused here, before anything is written, rather than written-and-not-counted, because the
-  // form-level count would still see the row. Only on a real completion: a draft with nothing
-  // typed yet is the normal autosave case, and a screened-out submission always carries the
-  // answer that screened it. Only when nothing else is wrong: a required-field error already
-  // says what is missing, more precisely than this can.
-  if (asksForEverything(mode) && errors.length === 0 && visible.length === 0) {
+  // form-level count would still see the row.
+  //
+  // Three conditions, and each excludes a submission that is legitimately empty:
+  //
+  //  - `asksForEverything` — a draft with nothing typed yet is the normal autosave case. A
+  //    `screened-out` submission is exempt too, but NOT because it "carries the answer that
+  //    screened it": a knockout is a terminal jump whose `when` group reads the RAW answer map,
+  //    so a jump reading a HIDDEN question fires while that answer is dropped, and the response
+  //    carries nothing (measured: a `Disqualified` row with 0 answers). The real reason is that
+  //    its row records the SCREENING, not answers — "stores nothing" is not a reason to refuse it,
+  //    and refusing would throw away the one fact it exists to record.
+  //  - `errors.length === 0` — a required-field error already says what is missing, more
+  //    precisely than this can.
+  //  - `askedAnything` — the respondent must have had something to answer. Without this the
+  //    check fires on a form that asked nothing at all: an acknowledgement form of pure
+  //    `Statement` copy, or one whose every answerable question is hidden on this path. `visible`
+  //    is then empty for EVERY possible respondent, so the form becomes unsubmittable by anyone
+  //    and the message tells them to answer a question that is not on their screen. The widget
+  //    has drawn this same distinction all along — `FormRuntime.hasAnswerableQuestions` names
+  //    both shapes — and this is the server spelling the same predicate over the same walk.
+  const askedAnything = rendered.some((question) => isAnswerableQuestionType(question.type));
+  if (asksForEverything(mode) && errors.length === 0 && visible.length === 0 && askedAnything) {
     errors.push({ message: NOTHING_TO_SUBMIT_MESSAGE });
   }
   return { errors, answers: visible, answerMap };
@@ -228,11 +253,15 @@ function knownQuestionIds(definition: PublishedFormDefinition): Set<string> {
 }
 
 /**
- * Append one error per answer whose question id is in no page of the definition.
+ * Append one error per unknown QUESTION ID — not per answer naming one.
  *
  * Matched EXACTLY — the same key {@link validateSubmission}'s `inputByQuestion` lookup uses — so
  * "known" means "would be matched", and an id that would silently miss the lookup cannot
  * masquerade as known here.
+ *
+ * De-duplicated because the finding is a property of the id, and because the widget renders these
+ * by joining every message into one banner (`mj-form.component.ts`): two answers carrying the same
+ * unknown id used to print the same sentence to the respondent twice.
  */
 function collectUnknownAnswers(
   definition: PublishedFormDefinition,
@@ -240,8 +269,10 @@ function collectUnknownAnswers(
   errors: FieldError[],
 ): void {
   const known = knownQuestionIds(definition);
+  const reported = new Set<string>();
   for (const answer of answers) {
-    if (!known.has(answer.questionId)) {
+    if (!known.has(answer.questionId) && !reported.has(answer.questionId)) {
+      reported.add(answer.questionId);
       errors.push({ questionId: answer.questionId, message: UNKNOWN_QUESTION_MESSAGE });
     }
   }
