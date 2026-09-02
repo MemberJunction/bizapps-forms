@@ -234,6 +234,15 @@ export function validateSubmission(
   //    and the message tells them to answer a question that is not on their screen. The widget
   //    has drawn this same distinction all along — `FormRuntime.hasAnswerableQuestions` names
   //    both shapes — and this is the server spelling the same predicate over the same walk.
+  //
+  // The bound this buys is therefore "a form that asked something cannot be filled by submissions
+  // that answer nothing", NOT "no contentless row can ever be written". On a form that asks
+  // nothing, every response is contentless by construction — that IS the response — so there is
+  // no signal here to separate use from abuse, and refusing them would simply put the
+  // acknowledgement form back in the hole above. What bounds THAT form is the rate limiter and
+  // `partialCapExceeded`, which count rows rather than reading them. `rendered` is derived from
+  // the caller's own answers, so the same is true of a form whose every answerable question a
+  // crafted payload leaves hidden.
   const askedAnything = rendered.some((question) => isAnswerableQuestionType(question.type));
   if (asksForEverything(mode) && errors.length === 0 && visible.length === 0 && askedAnything) {
     errors.push({ message: NOTHING_TO_SUBMIT_MESSAGE });

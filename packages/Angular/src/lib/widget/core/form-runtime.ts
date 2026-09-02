@@ -359,8 +359,9 @@ export class FormRuntime {
    *
    * Both halves matter, and the second is the one that is easy to leave out: a form that asked
    * NOTHING — pure `Statement` copy, or one whose every answerable question is hidden on this path
-   * — is completable, and pressing Submit on it must go through. {@link hasAnswerableQuestions} is
-   * the same predicate the progress bar already suppresses itself on.
+   * — is completable, and pressing Submit on it must go through. That half CALLS
+   * {@link hasAnswerableQuestions} rather than re-spelling `length > 0`, so the progress bar's
+   * "is there anything here" and this one cannot drift into two answers.
    *
    * Judged with the contract's `isAnswerSupplied` — the server's own definition of a supplied
    * answer — and NOT with what the payload builder happens to send. The two disagree on exactly
@@ -370,13 +371,11 @@ export class FormRuntime {
    * Mirroring the payload would leave that submit going out to be refused — the one round trip
    * this method exists to prevent.
    */
-  public wouldSubmitNothing(): boolean {
-    const askable = this.visibleAnswerableQuestions();
-    if (askable.length === 0) {
-      return false;
-    }
-    return !askable.some((question) => isAnswerSupplied(this.valueFor(question.id)));
-  }
+  public readonly wouldSubmitNothing = computed(
+    () =>
+      this.hasAnswerableQuestions() &&
+      !this.visibleAnswerableQuestions().some((question) => isAnswerSupplied(this.valueFor(question.id))),
+  );
 
   private orderedPages(): PublishedFormPage[] {
     return [...this.definition.pages].sort((a, b) => a.displayOrder - b.displayOrder);

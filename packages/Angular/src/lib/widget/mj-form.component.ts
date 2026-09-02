@@ -8,11 +8,13 @@
  * it needs arrives via DI (the API service) and `@Input` (the distribution slug).
  */
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   ElementRef,
   inject,
+  Injector,
   input,
   OnDestroy,
   OnInit,
@@ -89,6 +91,8 @@ export class MjFormComponent implements OnInit, OnDestroy {
   private readonly api = inject(FORMS_API_SERVICE);
   private readonly config = inject(FORMS_API_CONFIG);
   private readonly hostRef: ElementRef<HTMLElement> = inject(ElementRef);
+  /** Needed to schedule work for after the next render from outside a construction context. */
+  private readonly injector = inject(Injector);
   /** Provided above, so this is the store every question component in THIS widget injects. */
   private readonly uploads = inject(FormUploadStore);
   private readonly startedAt = new Date().toISOString();
@@ -96,29 +100,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
   /** The mounted Turnstile challenge (present only when captcha is required + rendered). */
   private readonly turnstile = viewChild(TurnstileChallengeComponent);
 
+  /** The in-form banner element, so a refusal can move the respondent to it rather than only render it. */
+  private readonly banner = viewChild<ElementRef<HTMLElement>>('bannerError');
+
   protected readonly phase = signal<WidgetPhase>('loading');
   protected readonly errorText = signal<string>('');
-
-  /**
-   * The banner the respondent actually sees.
-   *
-   * `errorText` holds the last refusal, and nearly all of them must persist until the next attempt
-   * — a captcha failure or a server error is still true while the respondent looks at it, and the
-   * widget has no way to know otherwise. The #124 message is the exception: it says the submit
-   * would store nothing, and the widget can see the moment that stops being so. Left alone it sat
-   * on screen next to "You can submit now." the instant the respondent typed a character, with the
-   * widget asserting both halves of a contradiction it was in a position to resolve.
-   *
-   * Scoped to that one sentence on purpose. Clearing the banner on any answer change would also
-   * wipe a server error the respondent has not addressed.
-   */
-  protected readonly bannerText = computed(() => {
-    const text = this.errorText();
-    if (text === NOTHING_TO_SUBMIT_MESSAGE && this.runtime()?.wouldSubmitNothing() === false) {
-      return '';
-    }
-    return text;
-  });
   protected readonly definition = signal<PublishedFormDefinition | null>(null);
   protected readonly runtime = signal<FormRuntime | null>(null);
   protected readonly result = signal<FormSubmissionResult | null>(null);
@@ -374,8 +360,32 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.endingEarly) {
       return;
     }
+    // Also on a KEYSTROKE, not only on the commit below. The ready line is driven by the same
+    // signals and reappears the moment a character lands, so clearing only on blur left the two
+    // on screen together for as long as the respondent kept typing — the narrower version of the
+    // contradiction this exists to remove.
+    this.clearNothingToSubmitIfAnswered();
     this.autosave?.ping();
     void this.bankPassedSubmitPoints();
+  }
+
+  /**
+   * Drop the #124 refusal once the respondent has answered something.
+   *
+   * A ONE-WAY transition driven by their own action, deliberately, rather than a view-level
+   * suppression of the sentence. Suppressing it in the view would also blank the SERVER's copy of
+   * the same message whenever the two predicates disagree — the client settles visibility to a
+   * fixed point while the server makes a single pass, and `settledAnswers` says in so many words
+   * that the two can differ — and the server's refusal is the one that exists to catch what the
+   * client missed, so the respondent would be left with a failed submit and nothing on screen. It
+   * would also re-mount the `role="alert"` node every time the condition came back, re-announcing
+   * mid-edit with no submit attempt in between. Cleared once, it stays cleared until something
+   * raises it again.
+   */
+  private clearNothingToSubmitIfAnswered(): void {
+    if (this.errorText() === NOTHING_TO_SUBMIT_MESSAGE && this.runtime()?.wouldSubmitNothing() === false) {
+      this.errorText.set('');
+    }
   }
 
   /**
@@ -395,6 +405,7 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.endingEarly || this.phase() !== 'ready') {
       return;
     }
+    this.clearNothingToSubmitIfAnswered();
     const outcome = this.outcomeForAnswers();
     // Not every finished flow is the widget's to send. `endsWithoutSubmit` is where that line is
     // drawn and why: a screening is done TO the respondent, so it seals itself, and everything
@@ -594,19 +605,26 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.endingEarly) {
       return;
     }
-    // Captcha gate: when required, block final submit until the challenge is solved.
-    if (!this.submitAllowed()) {
-      this.errorText.set(this.captchaBlockedMessage());
-      return;
-    }
     // Nothing-to-submit gate (#124). The server refuses a completion that would store nothing on a
     // form that DID ask something, so sending one costs the respondent a round trip to be told what
     // the widget already knows — and every other validation rule here answers inline. Same sentence
-    // as the server's, from the shared contract, so the two cannot drift into disagreeing about one
-    // rule. Deliberately BEFORE the phase flip below: this is a refusal to start, not a failed
-    // submit, so the form must stay exactly where it was.
+    // as the server's, from the shared contract, so the two cannot drift into disagreeing about it.
+    //
+    // BEFORE the captcha gate, deliberately: this refusal costs the respondent nothing to act on,
+    // while a challenge costs them work. Ordered the other way, someone who answered nothing solves
+    // a captcha first and only then learns they had to answer a question — two rounds of their
+    // effort to deliver one fact the widget already had.
+    //
+    // BEFORE the phase flip below, also deliberately: this is a refusal to START, not a failed
+    // submit, so the form must stay exactly where it was rather than settling the autosave and
+    // rebuilding its children for a request that is never sent.
     if (rt.wouldSubmitNothing()) {
-      this.errorText.set(NOTHING_TO_SUBMIT_MESSAGE);
+      this.refuseWithNothingToSubmit();
+      return;
+    }
+    // Captcha gate: when required, block final submit until the challenge is solved.
+    if (!this.submitAllowed()) {
+      this.errorText.set(this.captchaBlockedMessage());
       return;
     }
     // Flip to 'submitting' FIRST: this both drives the button's disabled state (no second
@@ -671,6 +689,30 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // eslint-disable-next-line no-console -- diagnostic output is the entire purpose here
     console.info(
       `[mj-form] submit ${ok ? 'completed' : 'failed'} in ${ms}ms (client round trip; see the API log for the server-side stage breakdown)`,
+    );
+  }
+
+  /**
+   * Raise the #124 refusal and take the respondent to it.
+   *
+   * Rendering alone is not answering them: the banner is at the top of the shell and Submit is at
+   * the bottom of a scroll-mode form, so a press produced no visible change whatever for a sighted
+   * respondent looking at the button. Focus both moves the viewport and announces, which is what
+   * the widget's other blocked path (`onNext` -> `touchAll`) achieves by annotating the offending
+   * field — an option this refusal does not have, because no single field is at fault.
+   */
+  private refuseWithNothingToSubmit(): void {
+    this.errorText.set(NOTHING_TO_SUBMIT_MESSAGE);
+    this.focusBanner();
+  }
+
+  /** Put focus on the in-form banner, once it has rendered. */
+  private focusBanner(): void {
+    afterNextRender(
+      () => {
+        this.banner()?.nativeElement.focus();
+      },
+      { injector: this.injector },
     );
   }
 
