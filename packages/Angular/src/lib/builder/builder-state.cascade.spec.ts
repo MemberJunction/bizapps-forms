@@ -48,6 +48,8 @@ class FakeRow {
   public LatestResult = { CompleteMessage: 'The DELETE statement conflicted with a FK constraint.' };
   public DisplayOrder = 0;
   public TransactionGroup: FakeTransactionGroup | null = null;
+  /** Runs once, inside a save that is still in flight — "the author typed during the round trip". */
+  public duringSave?: () => void;
 
   constructor(
     public readonly label: string,
@@ -89,6 +91,14 @@ class FakeRow {
     if (this.refuses) {
       return false;
     }
+    if (this.duringSave) {
+      // A real save is a round trip, and the author keeps typing through it. Modelled as a hook
+      // rather than a sleep so the edit lands at a defined point instead of a hoped-for one.
+      const act = this.duringSave;
+      this.duringSave = undefined;
+      act();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     this.writes.push(`SAVE ${this.label}@${this.DisplayOrder}`);
     return true;
   }
@@ -116,13 +126,35 @@ class FakeTransactionGroup {
     subscribe: () => ({ unsubscribe: () => undefined }),
   };
 
-  constructor(private readonly writes: string[]) {}
+  private submitted = false;
 
+  constructor(
+    private readonly writes: string[],
+    private readonly submitDelayMs = 0,
+  ) {}
+
+  /**
+   * Enlisting onto a group that has already been submitted is SILENTLY LOST, and that is core's
+   * real behaviour, not a pessimistic fake: `TransactionGroupBase.AddTransaction` is a bare
+   * `push` onto `_pendingTransactions` with no status check, and the provider returns `true` for
+   * the enlist regardless. Nobody will submit that group again, so the write never happens and
+   * nothing reports it. Recorded as a `LOST` entry so a test can assert the absence.
+   */
   public Enlist(description: string, row: FakeRow): void {
+    if (this.submitted) {
+      this.writes.push(`LOST ${description}`);
+      return;
+    }
     this.enlisted.push({ description, row });
   }
 
   public async Submit(): Promise<boolean> {
+    this.submitted = true;
+    if (this.submitDelayMs > 0) {
+      // The round trip. A real `ExecuteTransactionGroup` is a network call, and the window it
+      // holds open is wide enough for a 400ms debounce to fire inside it.
+      await new Promise((resolve) => setTimeout(resolve, this.submitDelayMs));
+    }
     if (this.enlisted.length === 0) {
       // Core's own behaviour, and a trap: "nothing was queued" reports the same `true` as "all of
       // it committed" (`transactionGroup.js`: "there are no transactions to submit, so we just
@@ -142,10 +174,13 @@ class FakeTransactionGroup {
  * Hand the service a fake group instead of one from a provider it does not have in a unit test.
  * Returns the `writes` array the group and its rows share.
  */
-function stubTransactionGroup(): string[] {
+function stubTransactionGroup(submitDelayMs = 0): string[] {
   const writes: string[] = [];
   vi.spyOn(Metadata.prototype, 'CreateTransactionGroup').mockImplementation(
-    async () => new FakeTransactionGroup(writes) as unknown as Awaited<ReturnType<Metadata['CreateTransactionGroup']>>,
+    async () =>
+      new FakeTransactionGroup(writes, submitDelayMs) as unknown as Awaited<
+        ReturnType<Metadata['CreateTransactionGroup']>
+      >,
   );
   return writes;
 }
@@ -175,7 +210,7 @@ describe('deleting a page or a question is one transaction (issue #103)', () => 
       asQuestionNode(new FakeRow('q3', writes)),
     ]);
 
-    const ok = await new BuilderStateService().deletePage(page);
+    const ok = await new BuilderStateService().deletePage(page, [page]);
 
     expect(ok).toBe(false);
     expect(writes).toEqual([]); // nothing was written — that is the entire fix
@@ -191,7 +226,7 @@ describe('deleting a page or a question is one transaction (issue #103)', () => 
       new FakeRow('opt3', writes),
     ]);
 
-    const ok = await new BuilderStateService().deleteQuestion(node);
+    const ok = await new BuilderStateService().deleteQuestion(node, [node]);
 
     expect(ok).toBe(false);
     expect(writes).toEqual([]);
@@ -210,6 +245,7 @@ describe('deleting a page or a question is one transaction (issue #103)', () => 
 
     const ok = await new BuilderStateService().deletePage(
       asPageNode(new FakeRow('page', writes), questions),
+      [],
     );
 
     expect(ok).toBe(true);
@@ -227,6 +263,7 @@ describe('deleting a page or a question is one transaction (issue #103)', () => 
 
     await service.deletePage(
       asPageNode(new FakeRow('page', [], true), []),
+      [],
     );
 
     expect(service.lastFailure()).toMatch(/^Could not delete page\./);
@@ -243,7 +280,8 @@ describe('a structural change never rides along with a half-typed edit', () => {
     const typing = new FakeRow('typed-edit', writes);
 
     service.saveDebounced(typing as unknown as mjBizAppsFormsFormQuestionEntity);
-    await service.deleteQuestion(asQuestionNode(new FakeRow('deleted', writes)));
+    const doomed = asQuestionNode(new FakeRow('deleted', writes));
+    await service.deleteQuestion(doomed, [doomed]);
 
     // The pending edit is written as ITS OWN save, before the delete's transaction opens.
     expect(writes).toEqual(['SAVE typed-edit@0', 'COMMIT deleted']);
@@ -318,20 +356,26 @@ describe('reordering is one transaction (issue #103)', () => {
     expect(writes).toEqual([]);
   });
 
-  it('reorders a question\'s options the same way', async () => {
+  it("renumbers a question's options the same way, when one is removed", async () => {
+    // Options are never dragged in the builder — they are appended and removed — so the only
+    // thing that renumbers them is a removal, and it does it inside the delete's own transaction.
+    // WAS: a second write that could refuse by itself, leaving the option deleted and the
+    // survivors holding a gap that the next Add Option then collided with, because `addOption`
+    // takes `options.length` as the new DisplayOrder.
     const writes = stubTransactionGroup();
-    const options = [0, 1].map((n) => {
+    const options = [0, 1, 2].map((n) => {
       const row = new FakeRow(`opt${n}`, writes);
-      row.DisplayOrder = 1 - n;
+      row.DisplayOrder = n;
       return row;
     });
 
-    const ok = await new BuilderStateService().persistOptionOrder(
-      asQuestionNode(new FakeRow('question', writes), options),
+    const ok = await new BuilderStateService().deleteOption(
+      options[0] as unknown as mjBizAppsFormsFormQuestionOptionEntity,
+      options as unknown as mjBizAppsFormsFormQuestionOptionEntity[],
     );
 
     expect(ok).toBe(true);
-    expect(writes).toEqual(['COMMIT opt0@0,opt1@1']);
+    expect(writes).toEqual(['COMMIT opt0,opt1@0,opt2@1']);
   });
 });
 
@@ -412,12 +456,107 @@ describe('a row that refuses before it enlists is still a refusal', () => {
     const node = asQuestionNode(new FakeRow('question', writes), [survivor, blocked]);
     const service = new BuilderStateService();
 
-    expect(await service.deleteQuestion(node)).toBe(false);
+    expect(await service.deleteQuestion(node, [node])).toBe(false);
 
     expect(survivor.TransactionGroup).toBeNull();
     expect(blocked.TransactionGroup).toBeNull();
     writes.length = 0;
     expect(await service.save(survivor as unknown as mjBizAppsFormsFormQuestionEntity)).toBe(true);
     expect(writes).toEqual(['SAVE survivor@0']);
+  });
+});
+
+describe('an autosave cannot land inside an open structural transaction', () => {
+  it('does not let a debounce that fires mid-commit enlist onto the submitted group', async () => {
+    // THE RACE. `beginStructuralChange` drains what is pending BEFORE the group opens, which is
+    // the only window it ever covered. An edit typed AFTER that drain — while the commit is still
+    // in flight, which is a network round trip — sits on its own 400ms timer, fires while the row
+    // is still holding the group, and enlists onto a group nobody will submit again. Core's
+    // `AddTransaction` has no status check and the provider returns true for the enlist, so the
+    // author's edit is gone with nothing reported anywhere.
+    vi.useFakeTimers();
+    const writes = stubTransactionGroup(1000);
+    const service = new BuilderStateService();
+    const [q1, q2, q3] = [new FakeRow('q1', writes), new FakeRow('q2', writes), new FakeRow('q3', writes)];
+    q1.DisplayOrder = 0;
+    q2.DisplayOrder = 1;
+    q3.DisplayOrder = 2;
+    // Dragged to the front: q3 moves, and so do the two it displaces.
+    const page = asPageNode(new FakeRow('page', writes), [q3, q1, q2].map((r) => asQuestionNode(r)));
+
+    const reorder = service.persistQuestionOrder(page);
+    await vi.advanceTimersByTimeAsync(10); // the commit is now in flight
+    // the author goes back to a question and types
+    service.saveDebounced(q2 as unknown as mjBizAppsFormsFormQuestionEntity);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(await reorder).toBe(true);
+    expect(writes.filter((w) => w.startsWith('LOST'))).toEqual([]);
+  });
+
+  it('drains an edit that arrives WHILE the pre-transaction flush is running', async () => {
+    // The other end of the same window. `flushPendingSaves` drained the timer map exactly once and
+    // then awaited the chains; an edit landing during that await re-armed a timer the flush had
+    // already walked past, so `beginStructuralChange` returned "nothing pending" while something
+    // was. Draining has to be part of the loop's exit condition, not a step before it.
+    vi.useFakeTimers();
+    const writes = stubTransactionGroup();
+    const service = new BuilderStateService();
+    const slow = new FakeRow('slow', writes);
+    const late = new FakeRow('late', writes);
+    // The edit the author types while the first one is still being written.
+    slow.duringSave = () => service.saveDebounced(late as unknown as mjBizAppsFormsFormQuestionEntity);
+
+    service.saveDebounced(slow as unknown as mjBizAppsFormsFormQuestionEntity);
+    // Snapshotted AT the moment the flush resolves. Asserting against `writes` afterwards would
+    // pass on the bug, because advancing the clock fires the stranded timer either way — the
+    // question is whether the flush had drained it before it claimed to be done.
+    const flushed = service.flushPendingSaves().then(() => [...writes]);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(await flushed).toContain('SAVE late@0');
+  });
+});
+
+describe('a delete renumbers what it leaves behind, in the same transaction', () => {
+  it('closes the gap a deleted page leaves, so the next Add Section cannot collide', async () => {
+    // WAS: nothing renumbered pages at all. `addPage` takes `tree.pages.length` as the new
+    // DisplayOrder, so deleting a middle page and adding one produced TWO pages numbered 2 —
+    // immediately, every time, not only when something refused.
+    const writes = stubTransactionGroup();
+    const [p0, p1, p2] = [new FakeRow('p0', writes), new FakeRow('p1', writes), new FakeRow('p2', writes)];
+    p0.DisplayOrder = 0;
+    p1.DisplayOrder = 1;
+    p2.DisplayOrder = 2;
+    const pages = [p0, p1, p2].map((r) => asPageNode(r, []));
+
+    const ok = await new BuilderStateService().deletePage(pages[1], pages);
+
+    expect(ok).toBe(true);
+    expect([p0.DisplayOrder, p2.DisplayOrder]).toEqual([0, 1]);
+    // One round trip, still: the delete and the renumber are the same unit of work, so a refused
+    // renumber cannot leave a page deleted.
+    expect(writes).toEqual(['COMMIT p1,p2@1']);
+  });
+
+  it('leaves the numbering alone when the delete is refused', async () => {
+    const writes = stubTransactionGroup();
+    const [p0, p1, p2] = [
+      new FakeRow('p0', writes),
+      new FakeRow('p1', writes, true), // refuses — an FK from a banked partial response
+      new FakeRow('p2', writes),
+    ];
+    p0.DisplayOrder = 0;
+    p1.DisplayOrder = 1;
+    p2.DisplayOrder = 2;
+    const pages = [p0, p1, p2].map((r) => asPageNode(r, []));
+
+    const ok = await new BuilderStateService().deletePage(pages[1], pages);
+
+    expect(ok).toBe(false);
+    expect(writes).toEqual([]);
+    // The in-memory values have to agree with the database again, or the next reorder computes
+    // its "did this row move" answer from a number the database never had.
+    expect([p0.DisplayOrder, p1.DisplayOrder, p2.DisplayOrder]).toEqual([0, 1, 2]);
   });
 });

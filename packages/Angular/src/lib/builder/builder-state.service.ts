@@ -43,18 +43,24 @@ type SaveableEntity =
   | mjBizAppsFormsFormScreenEntity;
 
 /**
- * Anything a structural change deletes.
+ * A row a structural change deletes or renumbers.
  *
  * Narrower than {@link SaveableEntity} on purpose: these three are the tree the cascade walks, and
- * a Form or a Screen appearing in a delete plan would mean the caller built the wrong list.
+ * a Form or a Screen appearing in a structural plan would mean the caller built the wrong list.
+ * One type rather than the two this used to carry — a page is renumbered by exactly the same rule
+ * as a question, and a separate `StructuralEntity` that excluded pages is what let `deletePage`
+ * ship without renumbering anything.
  */
-type DeletableEntity =
+type StructuralEntity =
   | mjBizAppsFormsFormPageEntity
   | mjBizAppsFormsFormQuestionEntity
   | mjBizAppsFormsFormQuestionOptionEntity;
 
-/** A row whose position among its siblings is stored as `DisplayOrder`. */
-type SequencedEntity = mjBizAppsFormsFormQuestionEntity | mjBizAppsFormsFormQuestionOptionEntity;
+/** One row's worth of work inside a structural transaction. */
+type StructuralWork = { Op: 'delete' | 'save'; Row: StructuralEntity };
+
+/** A row that has been renumbered in memory, and the number to put back if the commit refuses. */
+type SequencedMove = { entity: StructuralEntity; position: number; previous: number };
 
 /**
  * A row whose enlistment can be undone.
@@ -73,7 +79,7 @@ type ReleasableRow = { TransactionGroup: TransactionGroupBase | null };
  * is the one worth naming, because the commit itself never saw it.
  */
 type SubmitOutcome = { Committed: boolean; Detail: string | null };
-type CommitOutcome = SubmitOutcome & { RefusedBy: DeletableEntity | null };
+type CommitOutcome = SubmitOutcome & { RefusedBy: StructuralEntity | null };
 
 /** The message an unknown thrown value carries, for a log line that has to say something. */
 function describeError(error: unknown): string {
@@ -536,6 +542,16 @@ export class BuilderStateService {
       entity,
       setTimeout(() => {
         this.saveTimers.delete(entity);
+        if (this.structuralChangesInFlight > 0) {
+          // A structural transaction is holding rows right now, and saving into it is not a
+          // conflict the database resolves — it is a write that DISAPPEARS. The row still carries
+          // the group, so `Save()` enlists onto it and returns true; if the commit has already
+          // gone out, nobody will submit that group again. Core cannot catch this for us:
+          // `AddTransaction` is a bare push with no status check. Re-arming is the whole fix —
+          // structural changes are finite, so the edit lands one debounce after the last one ends.
+          this.saveDebounced(entity);
+          return;
+        }
         void this.chainSave(entity);
       }, SAVE_DEBOUNCE_MS),
     );
@@ -549,24 +565,29 @@ export class BuilderStateService {
    * changes is whether the database agrees with it afterwards.
    */
   public async flushPendingSaves(): Promise<void> {
-    for (const [entity, timer] of [...this.saveTimers]) {
-      clearTimeout(timer);
-      this.saveTimers.delete(entity);
-      void this.chainSave(entity);
-    }
-    // Loop rather than one `Promise.all`: awaiting a chain can let a queued save start, and the
-    // caller asked for "nothing pending", not "nothing pending a moment ago".
+    // Draining the timers is INSIDE the loop, not a step ahead of it. An edit typed while an
+    // earlier save is in flight arms a fresh timer, and a drain that ran once had already walked
+    // past the map by then — so this returned "nothing pending" with something pending, which is
+    // exactly the window a structural change then opened its transaction in.
     //
-    // Capped, because the exit condition depends on something this method does not control:
-    // edits arriving during the drain re-arm the debounce and put a new chain in the map. A
-    // steady enough stream keeps it non-empty indefinitely, and since publish AWAITS this, an
-    // uncapped loop would hang Publish with no error and no way out but a reload. No path in the
-    // builder saves on save today, so the cap is a backstop rather than a fix for a live hang —
-    // but "no caller does this yet" is not something a loop should rely on.
-    for (let pass = 0; pass < MAX_FLUSH_PASSES && this.saveChains.size > 0; pass++) {
+    // Capped, because the exit condition depends on something this method does not control: a
+    // steady enough stream of edits keeps both maps non-empty indefinitely, and since publish
+    // AWAITS this, an uncapped loop would hang Publish with no error and no way out but a reload.
+    for (
+      let pass = 0;
+      pass < MAX_FLUSH_PASSES && (this.saveTimers.size > 0 || this.saveChains.size > 0);
+      pass++
+    ) {
+      for (const [entity, timer] of [...this.saveTimers]) {
+        clearTimeout(timer);
+        this.saveTimers.delete(entity);
+        void this.chainSave(entity);
+      }
+      // Awaiting a chain can let a queued save start, and the caller asked for "nothing pending",
+      // not "nothing pending a moment ago" — hence the re-check rather than one `Promise.all`.
       await Promise.all([...this.saveChains.values()]);
     }
-    if (this.saveChains.size > 0) {
+    if (this.saveTimers.size > 0 || this.saveChains.size > 0) {
       // Surfaced, never swallowed: the caller is about to publish, and it has to be able to say
       // that what it publishes may not match what is stored.
       this._lastFailure.set(
@@ -603,6 +624,15 @@ export class BuilderStateService {
    * because they all funnel through the same two checked helpers, and a second place to publish
    * from is a second place to forget.
    */
+  /**
+   * How many structural transactions are open right now.
+   *
+   * A counter rather than a flag because it is read by a timer that fires on its own schedule: a
+   * boolean cleared by an inner operation would tell an outer one's rows they were free. Nothing
+   * nests these today, and that is the point — the guard should not depend on it staying so.
+   */
+  private structuralChangesInFlight = 0;
+
   private readonly _lastFailure = signal<string | null>(null);
   public readonly lastFailure = this._lastFailure.asReadonly();
 
@@ -622,24 +652,32 @@ export class BuilderStateService {
    * The list is built deepest-first — every option, then its question, then the page — because a
    * foreign key points at each row from the ones that must go before it.
    */
-  public async deletePage(page: PageNode): Promise<boolean> {
+  public async deletePage(page: PageNode, siblings: readonly PageNode[]): Promise<boolean> {
     if (!(await this.beginStructuralChange())) {
       return false;
     }
-    const rows: DeletableEntity[] = [];
+    const rows: StructuralEntity[] = [];
     for (const question of page.questions) {
       rows.push(...question.options, question.entity);
     }
     rows.push(page.entity);
-    return this.deleteAsOneTransaction(rows, 'delete page');
+    return this.deleteAndResequence(
+      rows,
+      siblings.filter((p) => p !== page).map((p) => p.entity),
+      'delete page',
+    );
   }
 
   /** Delete a question and all its options, as one transaction. */
-  public async deleteQuestion(node: QuestionNode): Promise<boolean> {
+  public async deleteQuestion(node: QuestionNode, siblings: readonly QuestionNode[]): Promise<boolean> {
     if (!(await this.beginStructuralChange())) {
       return false;
     }
-    return this.deleteAsOneTransaction([...node.options, node.entity], 'delete question');
+    return this.deleteAndResequence(
+      [...node.options, node.entity],
+      siblings.filter((q) => q !== node).map((q) => q.entity),
+      'delete question',
+    );
   }
 
   /**
@@ -690,15 +728,28 @@ export class BuilderStateService {
    * carries it. Worth it: a wrong-but-specific message about a half-deleted page describes a state
    * the product should never have been able to reach.
    */
-  private async deleteAsOneTransaction(rows: DeletableEntity[], action: string): Promise<boolean> {
-    const outcome = await this.commitAsOneTransaction(rows, (row) => row.Delete());
+  private async deleteAndResequence(
+    doomed: readonly StructuralEntity[],
+    survivors: readonly StructuralEntity[],
+    action: string,
+  ): Promise<boolean> {
+    // Renumbered BEFORE the commit so the new values ride the same transaction as the delete. Two
+    // transactions is what this used to be, and the second one refusing left the row deleted for
+    // good with a gap in the numbering its siblings kept — which the next Add then collided with,
+    // because every `add*` takes `array.length` as the new `DisplayOrder`.
+    const moved = this.renumber(survivors);
+    const outcome = await this.commitAsOneTransaction([
+      ...doomed.map((Row) => ({ Op: 'delete' as const, Row })),
+      ...moved.map((row) => ({ Op: 'save' as const, Row: row.entity })),
+    ]);
     if (outcome.Committed) {
       return true;
     }
+    this.restoreOrder(moved);
     // A pre-enlist refusal names its own row. Otherwise the commit refused as a whole, and the row
     // the author acted on is the last one, since the list is deepest-first: every row in a refused
     // group carries the same generic message, so naming an option they never touched would confuse.
-    this.reportFailure(action, outcome.RefusedBy ?? rows[rows.length - 1], outcome.Detail);
+    this.reportFailure(action, outcome.RefusedBy ?? doomed[doomed.length - 1], outcome.Detail);
     return false;
   }
 
@@ -721,20 +772,19 @@ export class BuilderStateService {
    * fails. Ignoring that false is how a group ends up committing a subset, or committing nothing at
    * all — `Submit()` returns true for an empty queue — while the caller reports success.
    */
-  private async commitAsOneTransaction(
-    rows: readonly DeletableEntity[],
-    enlist: (row: DeletableEntity) => Promise<boolean>,
-  ): Promise<CommitOutcome> {
+  private async commitAsOneTransaction(work: readonly StructuralWork[]): Promise<CommitOutcome> {
     const group = await this.md.CreateTransactionGroup();
     const enlisted: ReleasableRow[] = [];
-    let reached: DeletableEntity | null = null;
+    let reached: StructuralEntity | null = null;
+    this.structuralChangesInFlight++;
     try {
-      for (const row of rows) {
-        row.TransactionGroup = group;
-        enlisted.push(row);
-        reached = row;
-        if (!(await enlist(row))) {
-          return { Committed: false, Detail: null, RefusedBy: row };
+      for (const item of work) {
+        item.Row.TransactionGroup = group;
+        enlisted.push(item.Row);
+        reached = item.Row;
+        const enlisted_ok = item.Op === 'delete' ? await item.Row.Delete() : await item.Row.Save();
+        if (!enlisted_ok) {
+          return { Committed: false, Detail: null, RefusedBy: item.Row };
         }
       }
       return { ...(await this.submitGroup(group)), RefusedBy: null };
@@ -747,6 +797,9 @@ export class BuilderStateService {
       for (const row of enlisted) {
         row.TransactionGroup = null;
       }
+      // After the release, never before: a debounce that fires the instant this drops has to find
+      // the rows already handed back, or it saves into a group that is on its way out.
+      this.structuralChangesInFlight--;
     }
   }
 
@@ -777,9 +830,26 @@ export class BuilderStateService {
     }
   }
 
-  /** Delete a single option. */
-  public async deleteOption(option: mjBizAppsFormsFormQuestionOptionEntity): Promise<boolean> {
-    return this.deleteChecked(option, 'delete option');
+  /**
+   * Delete one option and renumber the ones that remain, as a single transaction.
+   *
+   * The renumber belongs in here rather than in a follow-up call for the same reason it does for a
+   * page: `addOption` takes `options.length` as the new `DisplayOrder`, so an option removed from
+   * the middle leaves a number the next Add collides with. A separate second write could refuse on
+   * its own, and there is no undoing the delete by then.
+   */
+  public async deleteOption(
+    option: mjBizAppsFormsFormQuestionOptionEntity,
+    siblings: readonly mjBizAppsFormsFormQuestionOptionEntity[],
+  ): Promise<boolean> {
+    if (!(await this.beginStructuralChange())) {
+      return false;
+    }
+    return this.deleteAndResequence(
+      [option],
+      siblings.filter((o) => o !== option),
+      'delete option',
+    );
   }
 
   /** Renumber + persist DisplayOrder on a page's questions to match array order. */
@@ -791,14 +861,6 @@ export class BuilderStateService {
       page.questions.map((q) => q.entity),
       'reorder question',
     );
-  }
-
-  /** Renumber + persist DisplayOrder on a question's options to match array order. */
-  public async persistOptionOrder(node: QuestionNode): Promise<boolean> {
-    if (!(await this.beginStructuralChange())) {
-      return false;
-    }
-    return this.persistSequence(node.options, 'reorder option');
   }
 
   /**
@@ -819,30 +881,44 @@ export class BuilderStateService {
    * the two delete paths deliberately do not, because by then the row they removed is gone for
    * good and there is nothing to put back.
    */
-  private async persistSequence(rows: SequencedEntity[], action: string): Promise<boolean> {
-    const moved = rows
-      .map((entity, position) => ({ entity, position, previous: entity.DisplayOrder }))
-      .filter((row) => row.previous !== row.position);
+  private async persistSequence(rows: StructuralEntity[], action: string): Promise<boolean> {
+    const moved = this.renumber(rows);
     if (moved.length === 0) {
       return true; // a drag that ended where it started: no rows to write, no round trip to make
     }
-
-    for (const row of moved) {
-      row.entity.DisplayOrder = row.position;
-    }
-
     const outcome = await this.commitAsOneTransaction(
-      moved.map((row) => row.entity),
-      (row) => row.Save(),
+      moved.map((row) => ({ Op: 'save' as const, Row: row.entity })),
     );
     if (outcome.Committed) {
       return true;
     }
+    this.restoreOrder(moved);
+    this.reportFailure(action, outcome.RefusedBy ?? moved[0].entity, outcome.Detail);
+    return false;
+  }
+
+  /**
+   * Give every row the `DisplayOrder` its array position implies, and report which ones changed.
+   *
+   * Only the rows that actually moved come back, so a reorder writes two rows rather than all of
+   * them. Reading `previous` before assigning is what makes the move undoable in memory — the
+   * caller restores it when the commit refuses, so the entities agree with the database again.
+   */
+  private renumber(rows: readonly StructuralEntity[]): SequencedMove[] {
+    const moved = rows
+      .map((entity, position) => ({ entity, position, previous: entity.DisplayOrder }))
+      .filter((row) => row.previous !== row.position);
+    for (const row of moved) {
+      row.entity.DisplayOrder = row.position;
+    }
+    return moved;
+  }
+
+  /** Put back the numbers a refused commit never stored. */
+  private restoreOrder(moved: readonly SequencedMove[]): void {
     for (const row of moved) {
       row.entity.DisplayOrder = row.previous;
     }
-    this.reportFailure(action, outcome.RefusedBy ?? moved[0].entity, outcome.Detail);
-    return false;
   }
 
   // -------------------------------------------------------------------------

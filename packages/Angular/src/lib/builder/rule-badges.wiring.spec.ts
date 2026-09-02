@@ -43,6 +43,16 @@ const reorderMethod = (): string => {
   return source.slice(start, end);
 };
 
+/** Just the insert-at-seam path, so a guard about it cannot be satisfied by the drag path. */
+const insertMethod = (): string => {
+  const source = builder();
+  const start = source.indexOf('protected async insertQuestionAt(');
+  const end = source.indexOf('private noteAnyDamage(', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+};
+
 /**
  * The body of the `if (!(await this.state.persistQuestionOrder(page)))` branch, brace-matched.
  *
@@ -324,5 +334,18 @@ describe('a publish refusal is retracted when its rules are fixed', () => {
     const method = retireStaleRefusal();
     expect(method).toMatch(/refusedRules/);
     expect(method).toMatch(/statusMessage = ''/);
+  });
+});
+
+describe('a refused insert leaves the canvas showing where the question actually is', () => {
+  it('puts the new question back at the tail, which is where the database has it', () => {
+    // `addQuestion` commits the row at the END of the page — `DisplayOrder = questions.length` —
+    // and the splice that moves it to the seam is only in memory until the renumber commits.
+    // When that renumber refuses, the row IS at the tail and the canvas was showing it mid-page,
+    // under a band about a question that is not where it appears. The drag path already reverts
+    // its array on refusal; this is the same obligation for the other write that moves a question.
+    const branch = refusalBranchOf(insertMethod());
+    expect(branch).toContain('page.questions.splice(');
+    expect(branch).toContain('page.questions.push(node)');
   });
 });

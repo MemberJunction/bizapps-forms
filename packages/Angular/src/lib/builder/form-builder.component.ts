@@ -599,9 +599,19 @@ export class FormBuilderComponent extends BaseFormComponent {
       // Clamped, not trusted: the seam index was read when the popover opened.
       page.questions.splice(Math.min(seam.index, page.questions.length), 0, node);
       if (!(await this.state.persistQuestionOrder(page))) {
+        // The question EXISTS — `addQuestion` committed it at the end of the page — and only the
+        // move to the seam was refused. So the canvas is put where the database actually is,
+        // rather than left showing the arrangement the author asked for and did not get. The
+        // service has already restored every sibling's `DisplayOrder` and raised the band; this
+        // is the half it cannot do, because the canvas renders the ARRAY, not `DisplayOrder`.
+        const inserted = page.questions.indexOf(node);
+        if (inserted > -1) {
+          page.questions.splice(inserted, 1);
+        }
+        page.questions.push(node);
         LogError(
-          `Insert of a ${type} question on page ${page.entity.ID} was not fully persisted; ` +
-            'DisplayOrder may not match the order on screen.',
+          `Insert of a ${type} question on page ${page.entity.ID} was refused at the requested ` +
+            'position; it is saved at the end of the page and the canvas now shows it there.',
         );
       }
       this.noteAnyDamage(before, node.entity.ID, node.entity.Prompt, page);
@@ -720,7 +730,7 @@ export class FormBuilderComponent extends BaseFormComponent {
       return;
     }
     this.busy = true;
-    if (await this.state.deletePage(page)) {
+    if (await this.state.deletePage(page, this.tree.pages)) {
       this.tree.pages = this.tree.pages.filter((p) => p.entity.ID !== page.entity.ID);
       this.selection = clearIfPage(this.selection, page.entity.ID);
       for (const q of page.questions) {
@@ -1287,35 +1297,19 @@ export class FormBuilderComponent extends BaseFormComponent {
   protected async onRemoveOption(event: { node: QuestionNode; optionIndex: number }): Promise<void> {
     const { node, optionIndex } = event;
     const option = node.options[optionIndex];
-    if (option && (await this.state.deleteOption(option))) {
+    // The survivors go in with the delete: one transaction covers both, so there is no longer a
+    // second write that can refuse on its own and leave a gap the next Add Option collides with.
+    if (option && (await this.state.deleteOption(option, node.options))) {
       node.options.splice(optionIndex, 1);
-      // Deliberately not rolled back, and deliberately not silent. The delete already committed, so
-      // there is nothing to put back — only the renumber of the survivors refused. The service has
-      // already restored their in-memory `DisplayOrder` and raised the failure band; this says
-      // which operation it belonged to, because the band alone cannot.
-      if (!(await this.state.persistOptionOrder(node))) {
-        LogError(
-          `Option removed from question ${node.entity.ID}, but renumbering the remaining options ` +
-            'was refused; their stored DisplayOrder still has a gap.',
-        );
-      }
       this.markDirty();
     }
   }
 
   protected async deleteQuestion(page: PageNode, node: QuestionNode): Promise<void> {
-    if (this.busy || !(await this.state.deleteQuestion(node))) {
+    if (this.busy || !(await this.state.deleteQuestion(node, page.questions))) {
       return;
     }
     page.questions = page.questions.filter((q) => q !== node);
-    // Same shape as {@link onRemoveOption}: the question is gone for good, so a refused renumber is
-    // reported rather than reverted.
-    if (!(await this.state.persistQuestionOrder(page))) {
-      LogError(
-        `Question deleted from page ${page.entity.ID}, but renumbering the remaining questions ` +
-          'was refused; their stored DisplayOrder still has a gap.',
-      );
-    }
     this.selection = clearIfQuestion(this.selection, node.entity.ID);
     this.markDirty();
   }

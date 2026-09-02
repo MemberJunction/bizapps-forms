@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { Metadata } from '@memberjunction/core';
 import { BuilderStateService } from './builder-state.service';
 import type {
   mjBizAppsFormsFormQuestionEntity,
@@ -36,6 +37,10 @@ function asOption(e: RefusingEntity): mjBizAppsFormsFormQuestionOptionEntity {
   return e as unknown as mjBizAppsFormsFormQuestionOptionEntity;
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('a mutation the database refuses', () => {
   it('is reported to the author, not only to the console', async () => {
     // THE DEFECT. Every failure was logged with `LogError` and nothing else, so an author saw a
@@ -57,8 +62,20 @@ describe('a mutation the database refuses', () => {
   });
 
   it('reports a refused DELETE too — the case an author sees as a dead button', async () => {
+    // Removing an option is a transaction now (it renumbers the survivors with it), so the
+    // service asks for a group before it asks the row to delete itself. A unit test has no
+    // provider behind `Metadata`, hence the stub — the row still refuses BEFORE it enlists, so
+    // nothing is ever submitted and the reported message is the row's own.
+    vi.spyOn(Metadata.prototype, 'CreateTransactionGroup').mockImplementation(
+      async () =>
+        ({
+          Submit: async () => true,
+          TransactionNotifications$: { subscribe: () => ({ unsubscribe: () => undefined }) },
+        }) as unknown as Awaited<ReturnType<Metadata['CreateTransactionGroup']>>,
+    );
     const service = new BuilderStateService();
-    await service.deleteOption(asOption(new RefusingEntity()));
+    const option = asOption(new RefusingEntity());
+    await service.deleteOption(option, [option]);
     expect(service.lastFailure()).toContain('Could not delete option');
   });
 
