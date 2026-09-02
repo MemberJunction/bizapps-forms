@@ -21,9 +21,18 @@ vi.mock('@memberjunction/server', () => ({
 import { StacktraceRedactionMiddleware } from '../StacktraceRedactionMiddleware';
 
 type Plugin = ReturnType<StacktraceRedactionMiddleware['GetApolloPlugins']>[number];
-type RequestContext = Parameters<NonNullable<Plugin['requestDidStart']>>[0];
-type Listener = NonNullable<Awaited<ReturnType<NonNullable<Plugin['requestDidStart']>>>>;
-type ResponseBody = RequestContext['response']['body'];
+// `Exclude<…, void>`, not `NonNullable<…>`. Apollo declares
+// `requestDidStart?(…): Promise<GraphQLRequestListener<TContext> | void>`, and since TypeScript 4.8
+// `NonNullable<T>` is `T & {}` — which removes `null` and `undefined` but NOT `void`, leaving a
+// `void & {}` member that has no `willSendResponse`. Vitest transpiles with esbuild and never
+// typechecks, so this compiled only under `tsc -p tsconfig.typecheck.json`, which CI runs.
+type Listener = Exclude<Awaited<ReturnType<NonNullable<Plugin['requestDidStart']>>>, void>;
+// The context `willSendResponse` receives is NARROWER than the one `requestDidStart` receives:
+// Apollo guarantees a completed `response` by that point, so the parameter is
+// `GraphQLRequestContextWillSendResponse`. Deriving the fake from `requestDidStart`'s parameter
+// instead produced the next type error underneath the one above.
+type WillSendContext = Parameters<NonNullable<Listener['willSendResponse']>>[0];
+type ResponseBody = WillSendContext['response']['body'];
 
 const STACK = [
   'GraphQLError: Cannot query field "message" on type "FormSubmissionResultType".',
@@ -34,7 +43,7 @@ const STACK = [
 /** Run one response through the plugin exactly as Apollo would, and hand back what it would send. */
 async function send(body: ResponseBody): Promise<ResponseBody> {
   const plugin = new StacktraceRedactionMiddleware().GetApolloPlugins()[0];
-  const requestContext = { response: { body } } as RequestContext;
+  const requestContext = { response: { body } } as WillSendContext;
   const listener = (await plugin.requestDidStart?.(requestContext)) as Listener;
   await listener.willSendResponse?.(requestContext);
   return requestContext.response.body;
