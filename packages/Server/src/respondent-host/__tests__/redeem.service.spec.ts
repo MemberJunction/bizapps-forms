@@ -271,6 +271,39 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('no-token');
   });
 
+  // Adversarial review of #131. The builder puts a missing credential AHEAD of every calendar or
+  // cap reason, and says why: "Telling someone their never-issued link is merely 'Scheduled' sends
+  // them to edit a date when the actual problem is that the host never minted a token"
+  // (`share-state.spec.ts`). The door had it last, so a tokenless scheduled link answered 503
+  // "It opens on <date>" with a `Retry-After` naming that instant — a machine-readable promise the
+  // same URL breaks the moment the date arrives, when it answers 409 instead.
+  it('reports no-token, not not-yet-open, for a scheduled link that was never issued one', async () => {
+    const provider = fakeProvider({
+      rows: [fakeDistribution({ PublicLinkToken: null, OpenAt: new Date(Date.now() + 7 * 24 * 3600_000) })],
+    }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(out.reason).toBe('no-token');
+    expect(out.opensAt).toBeUndefined();
+  });
+
+  // A link the author switched off is 'paused' to them whatever else is true of it, so the door
+  // keeps reporting closed first — the one place its order is meant to outrank a missing token.
+  it('still reports closed, not no-token, for a switched-off link that was never issued one', async () => {
+    const provider = fakeProvider({
+      rows: [fakeDistribution({ PublicLinkToken: null, Status: 'Closed' })],
+    }).provider;
+    const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(out.reason).toBe('distribution-closed');
+  });
+
+  // The version read costs a round trip; a link with no credential cannot be served whatever it
+  // says, so it must not pay for one.
+  it('does not read versions for a link that has no credential', async () => {
+    const { provider, calls } = fakeProvider({ rows: [fakeDistribution({ PublicLinkToken: null })] });
+    await redeemSlugToToken(deps({ provider }), 'customer-survey');
+    expect(calls.map((c) => c.EntityName)).toEqual([FORM_DISTRIBUTION_ENTITY]);
+  });
+
   it('redeems the token and returns the session JWT on success', async () => {
     const fetchImpl = fakeFetch({ success: true, token: 'redeemed-jwt' });
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');

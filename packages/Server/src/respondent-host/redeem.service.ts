@@ -107,11 +107,24 @@ function distributionRefusalReason(
   now: Date,
 ): RedeemFailureReason | undefined {
   const window = distributionWindowRefusal(dist, now);
-  if (window === 'not-yet-open') {
-    return 'distribution-not-yet-open';
-  }
+  // A link the author switched off is 'paused' to them whatever else is true of it, so that answer
+  // comes first — a human decision outranks a calendar one.
   if (window === 'closed') {
     return 'distribution-closed';
+  }
+  // Then a link the host never minted a credential for. This ordering is the builder's, and the
+  // reason is the builder's too: "Telling someone their never-issued link is merely 'Scheduled'
+  // sends them to edit a date when the actual problem is that the host never minted a token"
+  // (`share-state.ts` / `share-state.spec.ts`, which pin `pending` ahead of `scheduled` and `full`).
+  // Ranked last, the door answered a tokenless scheduled link with 503 "It opens on <date>" and a
+  // `Retry-After` naming that instant — a machine-readable promise it cannot keep, because the same
+  // URL answers 409 the moment the date arrives. It also spares that link the version read below,
+  // which could not help it either way.
+  if (!dist.PublicLinkToken) {
+    return 'no-token';
+  }
+  if (window === 'not-yet-open') {
+    return 'distribution-not-yet-open';
   }
   if (distributionQuotaExceeded(dist)) {
     return 'distribution-full';
@@ -228,7 +241,12 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   }
   const refusal = distributionRefusalReason(dist, new Date());
   if (refusal === 'distribution-not-yet-open') {
-    return { ok: false, reason: refusal, opensAt: new Date(dist.OpenAt) };
+    // `not-yet-open` is only ever returned from inside `distributionWindowRefusal`'s own
+    // `dist.OpenAt &&` guard, so the column is set — but that guard is in another module and this
+    // package compiles WITHOUT strictNullChecks (`tsconfig.server.json` sets no `strict`), so
+    // `new Date(null)` would type-check here and quietly become the epoch. Narrowed rather than
+    // assumed: without a date the view still refuses, it just does not name one.
+    return { ok: false, reason: refusal, opensAt: dist.OpenAt ? new Date(dist.OpenAt) : undefined };
   }
   if (refusal) {
     return { ok: false, reason: refusal };
@@ -243,10 +261,9 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!published) {
     return { ok: false, reason: 'form-unpublished' };
   }
+  // Non-empty: `distributionRefusalReason` already returned `no-token` for anything falsy, and a
+  // second guard here would be the same decision in two places.
   const rawToken = dist.PublicLinkToken;
-  if (!rawToken) {
-    return { ok: false, reason: 'no-token' };
-  }
 
   const result = await postRedeem(deps, rawToken);
   if (!result || !result.success || !result.token) {
