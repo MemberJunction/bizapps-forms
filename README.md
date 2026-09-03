@@ -2,11 +2,11 @@
 
 <br/>
 
-# 📋 &nbsp; MJ Forms
+# 📝 &nbsp; MJ Forms
 
 ### Forms, surveys &amp; intake — beautiful, free, and built on _your_ data.
 
-Anonymous public links · mobile-first · authored by a human **or** an AI agent.<br/>
+Anonymous public links · mobile-first · built in minutes.<br/>
 Every response lands as a **first-class record in your MemberJunction database** —
 not an export trapped in someone else's silo.
 
@@ -30,7 +30,7 @@ operational data the moment they land.
 - 🧩 &nbsp;**Responses are records, not exports.** A submission can _become_ a **Person**,
   an **Organization**, a **ContactMethod** — actionable in the same system that runs your
   CRM, committees and tasks. No CSV round-trip, no Zapier tax.
-- ⚡ &nbsp;**On-submit automation, free.** Send an email, create a Task, upsert a Person,
+- ⚙️ &nbsp;**On-submit automation, free.** Send an email, create a Task, upsert a Person,
   route to an agent, run an LLM judge over a free-text answer. What incumbents charge the
   most for, MemberJunction already has.
 - 🧬 &nbsp;**Promote responses to first-class entities.** A recurring instrument can be
@@ -43,10 +43,10 @@ operational data the moment they land.
 
 ---
 
-## 🎨 &nbsp;Build — by hand, or by agent
+## 🛠️ &nbsp;Build
 
-Describe the form you want in a sentence. An AI prompt drafts the whole thing — pages,
-questions, options, validation — and hands you a real draft to refine in the visual builder.
+Drag questions onto the canvas, set logic and validation inline, and preview at every screen
+size before you publish.
 
 **25 question types** — short &amp; long text · email · phone · website · number · yes/no ·
 single choice · multiple choice · dropdown · picture choice · rating · NPS · opinion scale ·
@@ -63,7 +63,7 @@ is what publishes.
 
 ---
 
-## 🚀 &nbsp;Publish — a link, an embed, a QR code
+## 🔗 &nbsp;Publish — a link, an embed, a QR code
 
 Public submissions ride **anonymous magic-link sessions** — `IdentityMode='anonymous'`, with
 authorization enforced server-side from the JWT's `mj_scopes` claims, **never DB roles**, so
@@ -73,8 +73,8 @@ there is no privilege accretion.
   with its own response quota, open/close window, live response count and captcha toggle.
 - The one deliberate exception to magic-link read-only convention is a restricted
   **"Form Respondent"** role with **CanCreate on response entities only**.
-- Public writes are hardened: Cloudflare Turnstile (per-form toggle), rate limit, quota,
-  dedupe, IP-hash and UA capture.
+- Public writes are hardened: rate limit, quota, dedupe, IP-hash and UA capture, with
+  Cloudflare Turnstile verification server-side.
 
 ---
 
@@ -92,23 +92,24 @@ code. No Explorer shell, nothing to log into.
 
 ## 📊 &nbsp;Report — the moment they land
 
-<img src="docs/images/03-analytics.png" alt="The Responses and Analytics dashboard: summary stats, a completion funnel and a per-question breakdown." width="100%">
+<p align="center">
+<img src="docs/images/03-analytics.png" alt="The Responses and Analytics dashboard: 19 of 27 responses completed, a where-people-stop funnel, an NPS breakdown, and per-question aggregates for a matrix, checkboxes, ranking and dropdown." width="556">
+</p>
 
 Summaries, a completion funnel, per-question breakdowns and export ship with the app — no
 separate BI step, because responses are already queryable MJ entities.
 
 Four hooks run on every submit: **upsert the respondent as a Person · send a confirmation
-email · create a follow-up Task · analyze written responses with an LLM judge.** The last
-writes a score and its rationale onto the answer itself:
-
-<img src="docs/images/04-response-ai-score.png" alt="A single response detail, showing a free-text answer with an AI-generated score and rationale." width="100%">
+email · create a follow-up Task · analyze written responses with an LLM judge.** The judge
+writes its score and rationale onto the answer record, where any RunView or Skip question can
+read it.
 
 > What runs after Submit, how to configure or decline each hook, and which record owns
 > respondent identity → **[docs/on-submit-automations.md](docs/on-submit-automations.md)**
 
 ---
 
-## 🚀 &nbsp;Quick start
+## ⚡ &nbsp;Quick start
 
 MJ Forms is an Open App: it installs **into** an existing MemberJunction database, alongside
 its two required siblings.
@@ -181,7 +182,7 @@ can be minted. Forms checks this at startup and logs
 
 ---
 
-## 🏗️ &nbsp;Architecture
+## 📐 &nbsp;Architecture
 
 Two surfaces, one definition:
 
@@ -240,6 +241,9 @@ bizapps-forms/
 
 ## 🗺️ &nbsp;What's next
 
+- **Author with AI** — draft a whole form from a one-sentence brief
+- **AI answer scores in the UI** — the LLM judge already writes them; nothing displays them yet
+- **Per-form captcha toggle** — Turnstile verifies server-side, but nothing switches it on
 - **Payment** question type
 - `FormGroup` + view projection and opt-in RSU materialization
 - Review/approve-before-publish routing via bizapps-tasks
@@ -248,7 +252,7 @@ bizapps-forms/
 
 ---
 
-## 📚 &nbsp;The plan is the source of truth
+## 📖 &nbsp;The plan is the source of truth
 
 Everything here is distilled from **[`plans/FORMS_BUILD_PLAN.md`](plans/FORMS_BUILD_PLAN.md)** —
 the durable build plan and business case, holding the full entity model, the
@@ -257,7 +261,7 @@ anonymous-submission design, the phasing and the decision gates.
 Contributing? Branching model, build commands and conventions are in
 **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-## 📄 &nbsp;License
+## ⚖️ &nbsp;License
 
 [Business Source License 1.1](LICENSE) © [MemberJunction](https://memberjunction.com).
 Source-available, and free for nonprofits.
