@@ -69,6 +69,23 @@ export interface RedeemOutcome {
   opensAt?: Date;
 }
 
+/**
+ * What the row alone decides: refuse with a reason, or proceed with the credential to redeem.
+ *
+ * Discriminated rather than "a reason, or undefined" so the ONE thing proceeding requires — a
+ * non-empty `PublicLinkToken` — is handed back by the function that checked it. The caller used to
+ * re-read `dist.PublicLinkToken` afterwards and rely on a comment to say it could not be null; the
+ * compiler proves it instead, and there is no second guard to fall out of step.
+ *
+ * The discriminant is a STRING, not the `ok: true | false` this file's other result types use.
+ * TypeScript narrows a boolean-literal discriminant only under `strictNullChecks`, which the BUILD
+ * config cannot have (it changes `emitDecoratorMetadata` output, and type-graphql reads that at
+ * runtime — see `tsconfig.typecheck.json`). A string discriminant narrows under both.
+ */
+type DistributionRowVerdict =
+  | { verdict: 'refuse'; reason: RedeemFailureReason; opensAt?: Date }
+  | { verdict: 'proceed'; rawToken: string };
+
 /** Injectable dependencies so the redeem flow is pure/unit-testable (no live server). */
 export interface RedeemDeps {
   /** The data provider used for the slug → distribution read (the system-user provider). */
@@ -82,8 +99,8 @@ export interface RedeemDeps {
 }
 
 /**
- * Why this link refuses to open right now, judged from the row in hand, or `undefined` when the
- * row alone gives no reason to (the published-version check, which costs a read, comes after).
+ * Judge the distribution row alone: refuse with a reason, or proceed with the credential to redeem.
+ * The published-version check, which costs a read, comes after.
  *
  * One decision, not a boolean plus a special case beside it: every reason a respondent must be
  * turned away BEFORE they type anything is settled here, and each carries its own message. That
@@ -102,15 +119,15 @@ export interface RedeemDeps {
  * holding the last slot at once. This only stops the form inviting work it already knows it cannot
  * accept; it does not decide the race.
  */
-function distributionRefusalReason(
+function judgeDistributionRow(
   dist: mjBizAppsFormsFormDistributionEntityType,
   now: Date,
-): RedeemFailureReason | undefined {
+): DistributionRowVerdict {
   const window = distributionWindowRefusal(dist, now);
   // A link the author switched off is 'paused' to them whatever else is true of it, so that answer
   // comes first — a human decision outranks a calendar one.
   if (window === 'closed') {
-    return 'distribution-closed';
+    return { verdict: 'refuse', reason: 'distribution-closed' };
   }
   // Then a link the host never minted a credential for. This ordering is the builder's, and the
   // reason is the builder's too: "Telling someone their never-issued link is merely 'Scheduled'
@@ -120,16 +137,25 @@ function distributionRefusalReason(
   // `Retry-After` naming that instant — a machine-readable promise it cannot keep, because the same
   // URL answers 409 the moment the date arrives. It also spares that link the version read below,
   // which could not help it either way.
-  if (!dist.PublicLinkToken) {
-    return 'no-token';
+  const rawToken = dist.PublicLinkToken;
+  if (!rawToken) {
+    return { verdict: 'refuse', reason: 'no-token' };
   }
   if (window === 'not-yet-open') {
-    return 'distribution-not-yet-open';
+    // Non-null by construction — `distributionWindowRefusal` only says 'not-yet-open' from inside
+    // its own `dist.OpenAt &&` guard — but narrowed here anyway, because that guard is in another
+    // module and `new Date(null)` is the EPOCH rather than an invalid date, which would announce
+    // "It opens on January 1, 1970". Without a date the view still refuses, it just names none.
+    return {
+      verdict: 'refuse',
+      reason: 'distribution-not-yet-open',
+      opensAt: dist.OpenAt ? new Date(dist.OpenAt) : undefined,
+    };
   }
   if (distributionQuotaExceeded(dist)) {
-    return 'distribution-full';
+    return { verdict: 'refuse', reason: 'distribution-full' };
   }
-  return undefined;
+  return { verdict: 'proceed', rawToken };
 }
 
 /** Load the distribution row for a slug, or `undefined` if the read fails / no row matches. */
@@ -239,17 +265,9 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!dist) {
     return { ok: false, reason: 'distribution-not-found' };
   }
-  const refusal = distributionRefusalReason(dist, new Date());
-  if (refusal === 'distribution-not-yet-open') {
-    // `not-yet-open` is only ever returned from inside `distributionWindowRefusal`'s own
-    // `dist.OpenAt &&` guard, so the column is set — but that guard is in another module and this
-    // package compiles WITHOUT strictNullChecks (`tsconfig.server.json` sets no `strict`), so
-    // `new Date(null)` would type-check here and quietly become the epoch. Narrowed rather than
-    // assumed: without a date the view still refuses, it just does not name one.
-    return { ok: false, reason: refusal, opensAt: dist.OpenAt ? new Date(dist.OpenAt) : undefined };
-  }
-  if (refusal) {
-    return { ok: false, reason: refusal };
+  const judged = judgeDistributionRow(dist, new Date());
+  if (judged.verdict === 'refuse') {
+    return { ok: false, reason: judged.reason, opensAt: judged.opensAt };
   }
   // Window and cap first, from the row already in hand; this one costs a read, so only a link
   // that is open and not full pays for it. When both apply, "opens on <date>" is what the holder
@@ -261,11 +279,7 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!published) {
     return { ok: false, reason: 'form-unpublished' };
   }
-  // Non-empty: `distributionRefusalReason` already returned `no-token` for anything falsy, and a
-  // second guard here would be the same decision in two places.
-  const rawToken = dist.PublicLinkToken;
-
-  const result = await postRedeem(deps, rawToken);
+  const result = await postRedeem(deps, judged.rawToken);
   if (!result || !result.success || !result.token) {
     return { ok: false, reason: 'redeem-failed' };
   }

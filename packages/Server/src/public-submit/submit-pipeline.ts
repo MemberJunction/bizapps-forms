@@ -575,7 +575,7 @@ async function runSubmitPipelineInner(
     },
     ctx.elevatedUser,
   );
-  if (!persisted.ok) {
+  if (persisted.outcome === 'failed') {
     return report(fail(persisted.message));
   }
 
