@@ -80,7 +80,7 @@ export const MUTANTS = [
     name: 'door/missing-credential-outranked-by-the-calendar',
     behaviour: 'a link with no PublicLinkToken is "not ready", ahead of any not-yet-open or full reason',
     file: 'packages/Server/src/respondent-host/redeem.service.ts',
-    find: "  const rawToken = dist.PublicLinkToken;\n  if (!rawToken) {\n    return { ok: false, reason: 'no-token' };\n  }",
+    find: "  const rawToken = dist.PublicLinkToken;\n  if (!rawToken) {\n    return { verdict: 'refuse', reason: 'no-token' };\n  }",
     replace: "  const rawToken = dist.PublicLinkToken ?? 'guard-neutralised';",
     suite: 'packages/Server',
   },
