@@ -687,7 +687,7 @@ native entities. This is the reporting differentiator no incumbent has.
   "displayName": "MJ Forms",
   "description": "Forms, surveys & intake for MemberJunction — anonymous-friendly, mobile-first, responses as first-class records.",
   "version": "0.1.0",
-  "license": "ISC",
+  "license": "BUSL-1.1",
   "icon": "fa-solid fa-list-check",
   "publisher": { "name": "MemberJunction", "url": "https://memberjunction.com" },
   "repository": "https://github.com/MemberJunction/bizapps-forms",
