@@ -81,18 +81,19 @@ export interface PersistenceInputs {
  * this package compiles without `strictNullChecks`, where discriminated-union
  * narrowing via `!result.ok` does not work — a flat shape keeps field access safe.
  */
-export interface PersistenceResult {
-  ok: boolean;
-  responseId?: string;
-  status?: mjBizAppsFormsFormResponseEntity['Status'];
-  message?: string;
-  /**
-   * True when this submission was an idempotent no-op against a row a CONCURRENT request had
-   * already Completed (duplicate-key recovery hit a terminal row). The caller must NOT re-fire
-   * on-submit hooks — the winning request already did — so double-firing is avoided on the race.
-   */
-  deduped?: boolean;
-}
+export type PersistenceResult =
+  | { outcome: 'failed'; message: string }
+  | {
+      outcome: 'saved';
+      responseId: string;
+      status: mjBizAppsFormsFormResponseEntity['Status'];
+      /**
+       * True when this submission was an idempotent no-op against a row a CONCURRENT request had
+       * already Completed (duplicate-key recovery hit a terminal row). The caller must NOT re-fire
+       * on-submit hooks — the winning request already did — so double-firing is avoided on the race.
+       */
+      deduped?: boolean;
+    };
 
 /** Internal result of saving the parent response row. */
 interface SaveResponseResult {
@@ -816,14 +817,14 @@ export async function persistSubmission(
     ? await updateResponse(provider, inputs, inputs.existingResponseId as string, contextUser)
     : await createResponse(provider, inputs, contextUser);
   if (!saved.ok || !saved.entity) {
-    return { ok: false, message: saved.message };
+    return { outcome: 'failed', message: saved.message ?? SAVE_FAILED_MESSAGE };
   }
   const responseId = saved.entity.ID;
 
   // A concurrent request already Completed this row (duplicate-key recovery): it is terminal, so
   // its answers and count are already recorded — return the existing id/status untouched.
   if (saved.skipAnswers) {
-    return { ok: true, responseId, status: saved.entity.Status, deduped: true };
+    return { outcome: 'saved', responseId, status: saved.entity.Status, deduped: true };
   }
 
   // One pass for both paths. A fresh CREATE has nothing stored, so this inserts; an upsert or a
@@ -832,7 +833,7 @@ export async function persistSubmission(
   // until every incoming answer is safely written.
   const written = await reconcileAnswers(provider, responseId, inputs.answers, contextUser);
   if (!written.ok) {
-    return { ok: false, message: written.message };
+    return { outcome: 'failed', message: written.message ?? SAVE_FAILED_MESSAGE };
   }
 
   // SEALED LAST. Until this line the row is a draft: whatever went wrong above, it never claimed
@@ -841,7 +842,7 @@ export async function persistSubmission(
   if (saved.pendingSeal) {
     applyResponseOutcome(saved.entity, inputs);
     if (!(await saved.entity.Save())) {
-      return { ok: false, message: logSaveFailure('sealing', FORM_RESPONSE_ENTITY, saved.entity) };
+      return { outcome: 'failed', message: logSaveFailure('sealing', FORM_RESPONSE_ENTITY, saved.entity) };
     }
   }
 
@@ -856,5 +857,5 @@ export async function persistSubmission(
   if (saved.countable) {
     await incrementResponseCount(provider, inputs.distributionId, contextUser);
   }
-  return { ok: true, responseId, status: statusFor(inputs) };
+  return { outcome: 'saved', responseId, status: statusFor(inputs) };
 }

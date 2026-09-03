@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import type { FormAnswerInput, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
 
 import { persistSubmission, type PersistenceInputs } from '../persistence.service';
-import { makeContextUser, makeFakeProvider, respondentPermissions, type FakeProvider } from './fakes';
+import { expectPersistFailure, makeContextUser, makeFakeProvider, respondentPermissions, type FakeProvider } from './fakes';
 
 const ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
 
@@ -109,7 +109,7 @@ describe('a Time answer', () => {
       const fake = provider();
       const result = await persistSubmission(fake.provider, inputs(TIME_QUESTION, '14:30'), makeContextUser());
 
-      expect(result.ok).toBe(true);
+      expect(result.outcome).toBe('saved');
       const [stored] = storedDateValues(fake);
       expect(stored).toBeInstanceOf(Date);
       expect((stored as Date).toISOString()).toBe('1970-01-01T14:30:00.000Z');
@@ -122,9 +122,10 @@ describe('a Time answer', () => {
       // the last thing before the driver, and a caller can put `dateValue` on a question whose
       // type validation never looks at that column for.
       const fake = provider();
-      const result = await persistSubmission(fake.provider, inputs(TIME_QUESTION, 'garbage'), makeContextUser());
+      const result = expectPersistFailure(
+        await persistSubmission(fake.provider, inputs(TIME_QUESTION, 'garbage'), makeContextUser()),
+      );
 
-      expect(result.ok).toBe(false);
       expect(result.message).toContain('What time suits you');
       expect(result.message).not.toContain('Invalid time value');
       expect(storedDateValues(fake)).toEqual([]);
@@ -153,15 +154,14 @@ describe('a Time answer re-saved over a stored row (the autosave path)', () => {
     const fake = withStoredRow();
     const result = await persistSubmission(fake.provider, resave('09:05'), makeContextUser());
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     expect((storedDateValues(fake)[0] as Date).toISOString()).toBe('1970-01-01T09:05:00.000Z');
   });
 
   it('refuses an unstorable value by name instead of writing an Invalid Date over the row', async () => {
     const fake = withStoredRow();
-    const result = await persistSubmission(fake.provider, resave('garbage'), makeContextUser());
+    const result = expectPersistFailure(await persistSubmission(fake.provider, resave('garbage'), makeContextUser()));
 
-    expect(result.ok).toBe(false);
     expect(result.message).toContain('What time suits you');
     expect(storedDateValues(fake)).toEqual([]);
   });
@@ -172,15 +172,16 @@ describe('a Date answer', () => {
     const fake = provider();
     const result = await persistSubmission(fake.provider, inputs(DATE_QUESTION, '2026-09-01'), makeContextUser());
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     expect((storedDateValues(fake)[0] as Date).toISOString()).toBe('2026-09-01T00:00:00.000Z');
   });
 
   it('is refused, naming the question, rather than stored as an Invalid Date', async () => {
     const fake = provider();
-    const result = await persistSubmission(fake.provider, inputs(DATE_QUESTION, 'not-a-date'), makeContextUser());
+    const result = expectPersistFailure(
+      await persistSubmission(fake.provider, inputs(DATE_QUESTION, 'not-a-date'), makeContextUser()),
+    );
 
-    expect(result.ok).toBe(false);
     expect(result.message).toContain('Which day');
     expect(storedDateValues(fake)).toEqual([]);
   });
@@ -204,7 +205,7 @@ describe('an answer whose dateValue arrives as null (the shape the resolver real
       makeContextUser(),
     );
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     // The answer row WAS saved (so the assertion is not vacuous) and carries the text...
     expect(savedAnswers(fake)).toHaveLength(1);
     expect(savedAnswers(fake)[0].TextValue).toBe('hello world');
@@ -217,7 +218,7 @@ describe('an answer whose dateValue arrives as null (the shape the resolver real
     const fake = provider();
     const result = await persistSubmission(fake.provider, wireInputs(DATE_QUESTION, {}), makeContextUser());
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     expect(savedAnswers(fake)).toHaveLength(1);
     expect(storedDateValues(fake)[0] ?? null).toBeNull();
   });
@@ -230,7 +231,7 @@ describe('an answer whose dateValue arrives as null (the shape the resolver real
       makeContextUser(),
     );
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     expect((storedDateValues(fake)[0] as Date).toISOString()).toBe('1970-01-01T14:30:00.000Z');
   });
 });
@@ -250,7 +251,7 @@ describe('every typed column treats an explicit null as "not supplied"', () => {
       makeContextUser(),
     );
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     const [saved] = savedAnswers(fake);
     expect(saved.TextValue).toBe('hello');
     expect(saved.JSONValue ?? null).toBeNull();

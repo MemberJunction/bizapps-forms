@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { persistSubmission, SAVE_FAILED_MESSAGE, withoutQueryEcho, type PersistenceInputs } from '../persistence.service';
-import { makeContextUser, makeDefinition, makeFakeProvider, respondentPermissions } from './fakes';
+import { expectPersistFailure, makeContextUser, makeDefinition, makeFakeProvider, respondentPermissions } from './fakes';
 
 const RESPONSE_ENTITY = 'MJ_BizApps_Forms: Form Responses';
 const ANSWER_ENTITY = 'MJ_BizApps_Forms: Form Response Answers';
@@ -57,9 +57,8 @@ describe('a failed save never hands the respondent the driver diagnostic', () =>
   ])('returns the authored message when saving %s fails', async (_what, entityName) => {
     const fake = makeFakeProvider({ createPermissions: respondentPermissions(), failSaveFor: entityName });
 
-    const result = await persistSubmission(fake.provider, inputs(), makeContextUser());
+    const result = expectPersistFailure(await persistSubmission(fake.provider, inputs(), makeContextUser()));
 
-    expect(result.ok).toBe(false);
     expect(result.message).toBe(SAVE_FAILED_MESSAGE);
     expect(result.message).not.toContain(DRIVER_DETAIL);
   });

@@ -15,11 +15,19 @@
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
 /**
- * Whether the link is outside its accepting window right now — switched off, not yet opened for
- * responses, closed, not yet open, or past its closing date.
+ * Why the link is outside its window: it has not opened yet, or it is closed for good (switched
+ * off, not Active, or past its closing date). Only the first is a state the holder can wait out.
+ */
+export type DistributionWindowRefusal = 'not-yet-open' | 'closed';
+
+/**
+ * Why the link is outside its accepting window right now, or `undefined` when it is inside it.
  *
- * Phrased as the refusal rather than as "is open" because both callers act on the negative, and
- * a predicate its callers must invert is one `!` away from being read backwards.
+ * The reason exists for the door: "opens next Monday" and "no longer accepting responses" are
+ * opposite statements to the person holding the link, and the door used to make the second one
+ * for both (bizapps-forms#118). The submit gate only needs the boolean below, which is DERIVED
+ * from this — one rule, two views of it — so the two gates cannot disagree about whether a link
+ * is open, and the door never carries its own spelling of `OpenAt > now`.
  *
  * `Status !== 'Active'` rather than `Status === 'Closed'`: only an Active link is taking
  * responses, and that is what the other two surfaces already say — the magic-link minter refuses
@@ -37,19 +45,34 @@ import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/form
  * hook is deliberately fail-soft, so a revoke the host refused (no Update on `MJ: Magic Link
  * Invites`, say) leaves a live credential behind and logs it. In both cases THIS is what refuses the
  * submission. Two independent layers was the point of #81/#90 and it still is.
+ *
+ * A switched-off or non-Active link is `'closed'` even when its `OpenAt` is in the future: the
+ * author has taken it out of service, and "opens later" would promise something that is not so.
+ */
+export function distributionWindowRefusal(
+  dist: mjBizAppsFormsFormDistributionEntityType,
+  now: Date,
+): DistributionWindowRefusal | undefined {
+  if (!dist.IsActive || dist.Status !== 'Active') {
+    return 'closed';
+  }
+  if (dist.CloseAt && new Date(dist.CloseAt) < now) {
+    return 'closed';
+  }
+  if (dist.OpenAt && new Date(dist.OpenAt) > now) {
+    return 'not-yet-open';
+  }
+  return undefined;
+}
+
+/**
+ * Whether the link is outside its accepting window right now — the boolean the submit gate acts
+ * on. Phrased as the refusal rather than as "is open" because both callers act on the negative,
+ * and a predicate its callers must invert is one `!` away from being read backwards.
  */
 export function distributionWindowClosed(
   dist: mjBizAppsFormsFormDistributionEntityType,
   now: Date,
 ): boolean {
-  if (!dist.IsActive || dist.Status !== 'Active') {
-    return true;
-  }
-  if (dist.OpenAt && new Date(dist.OpenAt) > now) {
-    return true;
-  }
-  if (dist.CloseAt && new Date(dist.CloseAt) < now) {
-    return true;
-  }
-  return false;
+  return distributionWindowRefusal(dist, now) !== undefined;
 }

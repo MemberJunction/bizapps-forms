@@ -96,14 +96,41 @@ export async function redeem(base, rawToken) {
 
 /** A form to hang test distributions off — whatever this database happens to carry. */
 export async function anyFormId(user) {
+  // A PUBLISHED form, and deliberately not just any form.
+  //
+  // The callers open `/f/:slug` on the link they build from this and assert 200. Since
+  // bizapps-forms#118 the door refuses a form with no Published version outright (409, "hasn't been
+  // published yet"), so "this form is published" became a PRECONDITION of that assertion rather
+  // than an incidental property. The previous read was `TOP 1` over `Forms` with no filter and no
+  // ORDER BY: SQL Server guarantees no order for that, unpublished forms exist in the dev database,
+  // and the day it returned one the credential smoke would have failed on line 85 with a 409 that
+  // has nothing to do with credentials. `smoke/lib/fixture.mjs` filters the same way, for the same
+  // reason.
+  //
+  // Read through Form Versions rather than a subquery on Forms: an `ExtraFilter` carrying
+  // `EXISTS (SELECT … FROM __mj_BizAppsForms.FormVersion …)` would hardcode the schema name, which
+  // this codebase declines to do. `OrderBy` makes two runs on one database pick the same form.
   const r = await new RunView().RunView(
-    { EntityName: 'MJ_BizApps_Forms: Forms', ResultType: 'simple', Fields: ['ID'], MaxRows: 1 },
+    {
+      EntityName: 'MJ_BizApps_Forms: Form Versions',
+      ExtraFilter: `Status='Published'`,
+      Fields: ['FormID'],
+      OrderBy: 'FormID',
+      ResultType: 'simple',
+      MaxRows: 1,
+    },
     user,
   );
-  if (!r.Success || !r.Results?.length) {
-    throw new Error(`no Form rows to test against: ${r.ErrorMessage ?? 'empty'}`);
+  if (!r.Success) {
+    throw new Error(`could not read Form Versions: ${r.ErrorMessage ?? 'unknown error'}`);
   }
-  return r.Results[0].ID;
+  if (!r.Results?.length) {
+    throw new Error(
+      'no PUBLISHED form exists in this database, so the credential smokes have nothing to build a ' +
+        'working public link on. Publish one in the builder and re-run.',
+    );
+  }
+  return r.Results[0].FormID;
 }
 
 /**

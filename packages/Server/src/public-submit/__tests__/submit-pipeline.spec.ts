@@ -8,6 +8,7 @@ import type { UserInfo } from '@memberjunction/core';
 import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';
 import { FormsRateLimiter } from '../rate-limit.service';
 import { resetPublicSubmitConfigForTests } from '../config';
+import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import type { HookFireResult } from '../on-submit-hooks.service';
 import {
   makeContextUser,
@@ -362,7 +363,7 @@ describe('runSubmitPipeline', () => {
     const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
     const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-respondent' });
 
-    const autosaves = [];
+    const autosaves: FormSubmissionResult[] = [];
     for (let i = 0; i < 4; i++) {
       autosaves.push(await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] })));
     }

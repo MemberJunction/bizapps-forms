@@ -4,6 +4,7 @@
   // file, and seventy errors accumulated. Extends the real config and drops only the spec globs from
   // `exclude`; that omission IS the gate.
   "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": true },
+  // See `packages/Server/tsconfig.typecheck.json` for why this flag is in the no-emit gate.
+  "compilerOptions": { "noEmit": true, "strictNullChecks": true },
   "exclude": ["node_modules", "dist"]
 }

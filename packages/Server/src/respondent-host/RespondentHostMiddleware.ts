@@ -52,10 +52,10 @@ import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
 
 import { getRespondentHostConfig } from './config.js';
-import { renderRespondentHostPage, renderRespondentHostErrorPage } from './host-page.js';
+import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
 import { checkRespondentReadiness } from './host-readiness.js';
-import { redeemFailureToView, type RedeemErrorView } from './error-view.js';
+import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
@@ -117,7 +117,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     );
 
     if (!outcome.ok) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed'));
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome.opensAt));
       return;
     }
 
@@ -141,11 +141,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     if (res.headersSent) {
       return;
     }
-    res
-      .status(view.status)
-      .type('html')
-      .set('Cache-Control', 'no-store')
-      .send(renderRespondentHostErrorPage({ message: view.message }));
+    // What the response IS — status, headers, page — is decided by `respondentErrorResponse`, which
+    // is pure and asserted whole in `middleware-error-view.spec.ts`. This method only applies it.
+    const { status, headers, html } = respondentErrorResponse(view);
+    res.status(status).type('html').set(headers).send(html);
   }
 
   /** The MJ-canonical server-side system user for pre-auth DB reads (see header). */

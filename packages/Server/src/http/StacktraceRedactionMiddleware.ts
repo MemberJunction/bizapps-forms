@@ -46,9 +46,18 @@ import { BaseServerMiddleware } from '@memberjunction/server';
  * `@apollo/server` dependency — it tracks whatever Apollo major `@memberjunction/server` builds on.
  */
 type MJApolloPlugin = ReturnType<BaseServerMiddleware['GetApolloPlugins']>[number];
-type GraphQLRequestContext = Parameters<NonNullable<MJApolloPlugin['requestDidStart']>>[0];
+/**
+ * The context as it exists in `willSendResponse` — which is the ONLY hook this plugin uses, and
+ * the only one where a response body is guaranteed to exist. Derived from `requestDidStart`'s
+ * parameter instead, the body was optional and its `kind` union did not discriminate, so the code
+ * below read `singleResult` off a value the compiler could not prove was there. Nothing failed,
+ * because the package had `strictNullChecks` off; taking the type from the hook that actually runs
+ * is what makes the narrowing real.
+ */
+type RequestListener = Exclude<Awaited<ReturnType<NonNullable<MJApolloPlugin['requestDidStart']>>>, void>;
+type WillSendResponseContext = Parameters<NonNullable<RequestListener['willSendResponse']>>[0];
 type FormattedError = NonNullable<
-  Extract<GraphQLRequestContext['response']['body'], { kind: 'single' }>['singleResult']['errors']
+  Extract<WillSendResponseContext['response']['body'], { kind: 'single' }>['singleResult']['errors']
 >[number];
 
 /** The same error without `extensions.stacktrace`; the identical object when there was none. */
@@ -66,7 +75,7 @@ function withoutStacktrace(error: FormattedError): FormattedError {
  * left alone: MJ does not serve them, and rewriting a shape this code has not seen is how a guard
  * turns into a crash.
  */
-function redactStacktraces(requestContext: GraphQLRequestContext): void {
+function redactStacktraces(requestContext: WillSendResponseContext): void {
   const body = requestContext.response.body;
   if (body.kind !== 'single' || !body.singleResult.errors) {
     return;

@@ -4,6 +4,18 @@
   // file, and seventy errors accumulated. Extends the real config and drops only the spec globs from
   // `exclude`; that omission IS the gate.
   "extends": "./tsconfig.json",
-  "compilerOptions": { "noEmit": true },
+  // `strictNullChecks` lives HERE, in the no-emit gate, and deliberately NOT in the build config
+  // it extends. Both were tried. In the build config the flag is correct and the whole workspace
+  // compiles, type-checks and passes 2952 tests — and MJAPI then dies at startup with
+  // `NoExplicitTypeError: Unable to infer GraphQL type ... for 'StartedAt' of
+  // CreatemjBizAppsFormsFormAutomationRunInput`. The reason is `emitDecoratorMetadata`: a CodeGen
+  // field declared `StartedAt?: Date | null` is `Date` to the metadata emitter with the flag off
+  // and `Object` with it on, and type-graphql reads that emitted type at runtime to build the
+  // schema. `src/generated/**` is CodeGen output nobody may hand-edit, so the emit must not change.
+  // Checking without emitting has neither problem: this gate catches the nullability bugs (it was
+  // added after `new Date(dist.OpenAt)` on a `Date | null` column silently produced the EPOCH and
+  // announced "It opens on January 1, 1970" — bizapps-forms#118), while `tsc` keeps emitting the
+  // metadata type-graphql needs.
+  "compilerOptions": { "noEmit": true, "strictNullChecks": true },
   "exclude": ["node_modules", "dist"]
 }

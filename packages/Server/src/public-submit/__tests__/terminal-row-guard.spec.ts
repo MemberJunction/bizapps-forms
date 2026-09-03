@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { mjBizAppsFormsFormResponseEntityType } from '@mj-biz-apps/forms-entities';
 import { persistSubmission } from '../persistence.service';
-import { makeContextUser, makeFakeProvider, respondentPermissions } from './fakes';
+import { expectPersistSuccess, makeContextUser, makeFakeProvider, respondentPermissions } from './fakes';
 
 /**
  * A SEALED ROW IS SEALED ON EVERY PATH INTO PERSISTENCE.
@@ -48,9 +48,8 @@ describe('updateResponse never writes over a sealed row', () => {
     it('leaves a Disqualified row Disqualified', async () => {
       const { fake, responseId } = contextFor('Disqualified');
 
-      const result = await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser());
+      const result = expectPersistSuccess(await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser()));
 
-      expect(result.ok).toBe(true);
       expect(result.status).toBe('Disqualified');
       expect(result.deduped).toBe(true);
     });
@@ -58,7 +57,7 @@ describe('updateResponse never writes over a sealed row', () => {
     it('leaves a Complete row Complete', async () => {
       const { fake, responseId } = contextFor('Complete');
 
-      const result = await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser());
+      const result = expectPersistSuccess(await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser()));
 
       expect(result.status).toBe('Complete');
       expect(result.deduped).toBe(true);
@@ -77,9 +76,8 @@ describe('updateResponse never writes over a sealed row', () => {
     it('still promotes a Partial row', async () => {
       const { fake, responseId } = contextFor('Partial');
 
-      const result = await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser());
+      const result = expectPersistSuccess(await persistSubmission(fake.provider, inputsFor(responseId), makeContextUser()));
 
-      expect(result.ok).toBe(true);
       expect(result.status).toBe('Complete');
     });
   });
