@@ -406,6 +406,42 @@ describe('runSubmitPipeline', () => {
     delete process.env.FORMS_COMPLETION_MAX;
   });
 
+  // THE SAME REASONING, APPLIED TO THE GATE THAT WAS ALREADY HERE — and this is the half that was
+  // missed. MJ hands the pipeline a BLANK `sessionId` for any client that omits `x-session-id`
+  // (curl, a bespoke integration, and this repo's own smoke scripts until `smoke/lib/session.mjs`
+  // was written), so every one of those callers hashes to the same key. The per-session gate is
+  // the tightest of the four at 5/min, so they do not merely share a bucket, they share the
+  // TIGHTEST one: a single script pushes it over and the next unrelated caller is refused with
+  // "Too many submissions" — a message about someone else's traffic. That is exactly the shared
+  // kill switch the ceiling above is keyed per-caller to avoid, and a gate that cannot tell two
+  // callers apart has no business refusing either of them.
+  it('does not let one header-less caller throttle another, and still bounds them by address', async () => {
+    process.env.FORMS_RATELIMIT_MAX = '1';
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-script' });
+
+    // Blank, and from an address that DID resolve: the routine shape of a scripted client.
+    ctx.sessionId = '';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    const overCeiling = await runSubmitPipeline(ctx, validSubmission());
+
+    // A different header-less caller, on their own address, arriving after the first has spent
+    // everything the shared bucket had.
+    ctx.clientIpHash = 'ip-other-script';
+    const bystander = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(bystander.success).toBe(true);
+    // Dropping that gate must not leave them unbounded: their ADDRESS still bounds them, which is
+    // the identity they cannot rotate. Without this line the test would pass on no gates at all.
+    expect(overCeiling.success).toBe(false);
+    expect(overCeiling.errors?.[0].message).toMatch(/too many/i);
+  });
+
   // Turnstile ran BEFORE the rate limit, so a request the limiter was about to refuse had already
   // spent an outbound Cloudflare round trip — and, worse, a Turnstile token is single-use (see
   // the partial-save test above), so the refusal consumed the respondent's token. Their retry

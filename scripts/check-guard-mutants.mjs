@@ -209,6 +209,23 @@ export const MUTANTS = [
     replace: "  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {\n    if (false) {",
     suite: 'packages/Angular',
   },
+  // --- submit-pipeline: a bucket needs a caller, and a knockout row needs its screen ----------
+  {
+    name: 'pipeline/session-gate-charged-to-blank-callers',
+    behaviour: 'the per-session gate is charged only where a session identifies someone, so every header-less caller does not share the tightest bucket',
+    file: 'packages/Server/src/public-submit/submit-pipeline.ts',
+    find: '  if (sessionIdentity(ctx.sessionId) || !identity) {',
+    replace: '  if (true) {',
+    suite: 'packages/Server',
+  },
+  {
+    name: 'pipeline/disqualifying-screen-not-recorded',
+    behaviour: 'a Disqualified row records WHICH screen screened the respondent out, which on the zero-answer path is its whole content',
+    file: 'packages/Server/src/public-submit/submit-pipeline.ts',
+    find: '        disqualifiedByScreenId: disqualifiedBy?.id,',
+    replace: '        disqualifiedByScreenId: undefined,',
+    suite: 'packages/Server',
+  },
 ];
 
 /** Apply `entry` to its file, run its suite, restore. Returns one of the four verdicts. */

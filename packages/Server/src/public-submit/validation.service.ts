@@ -224,7 +224,10 @@ export function validateSubmission(
   //    so a jump reading a HIDDEN question fires while that answer is dropped, and the response
   //    carries nothing (measured: a `Disqualified` row with 0 answers). The real reason is that
   //    its row records the SCREENING, not answers — "stores nothing" is not a reason to refuse it,
-  //    and refusing would throw away the one fact it exists to record.
+  //    and refusing would throw away the one fact it exists to record. That fact is WRITTEN DOWN
+  //    rather than implied: the disqualifying screen's id goes to
+  //    `SourceMetadata.disqualifiedByScreenId`, because `Status = 'Disqualified'` alone cannot say
+  //    which knockout fired on a form carrying several, and on this path it is the whole row.
   //  - `errors.length === 0` — a required-field error already says what is missing, more
   //    precisely than this can.
   //  - `askedAnything` — the respondent must have had something to answer. Without this the

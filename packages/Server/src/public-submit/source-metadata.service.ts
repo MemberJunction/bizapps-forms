@@ -70,6 +70,23 @@ export interface SourceMetadataInputs {
    * UUID — unguessable — so possessing it is proof of ownership when no session exists).
    */
   clientResponseId?: string;
+  /**
+   * The ending screen that screened this respondent out, when one did.
+   *
+   * Recorded because a `Disqualified` row can be EMPTY. A knockout's `when` group is evaluated
+   * against the RAW answer map while the answers that get stored are the rendered ones, so a jump
+   * fires on an answer to a question the walk hid and that answer is dropped on the way to
+   * persistence — measured: a `Disqualified` row with 0 answers. `validateSubmission` lets that
+   * row through deliberately, on the stated grounds that it records the SCREENING rather than
+   * answers; `Status` alone does not, on a form carrying more than one knockout screen. Without
+   * this the row cannot say what screened them, which is the only question anyone reading a
+   * disqualification record has.
+   *
+   * In the blob rather than a column because that is what this blob is for — a fact about one
+   * submission with nowhere else to live, exactly like `clientResponseId` above. A column would
+   * be the better home the day these are queried in bulk, and that day is a migration.
+   */
+  disqualifiedByScreenId?: string;
 }
 
 /**
@@ -105,6 +122,24 @@ export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'd
 export function abuseIdentity(clientIpHash: string | undefined): string | undefined {
   const ipHash = clientIpHash?.trim();
   return ipHash ? `ip:${ipHash}` : undefined;
+}
+
+/**
+ * The session a per-session gate may key on, or `undefined` when the caller named nobody.
+ *
+ * The distinction {@link abuseIdentity} draws for the ceilings, applied to the gate that predates
+ * them. MJ populates `sessionId` from the `x-session-id` header and leaves it BLANK for every
+ * client that omits one, so all of those callers hash to a single key — and that key belongs to
+ * the TIGHTEST of the four buckets. Sharing it does not throttle abuse: it lets any one of those
+ * callers spend the budget and refuse the form for all the others, with a message about traffic
+ * that was never theirs. That is the failure `abuseIdentity` exists to decline to create, and the
+ * one this gate had been quietly creating all along.
+ *
+ * Returned RAW rather than trimmed, so a caller who sends a real id keeps the exact bucket they
+ * had before this predicate existed and the only behaviour that changes is the blank one.
+ */
+export function sessionIdentity(sessionId: string): string | undefined {
+  return sessionId.trim() ? sessionId : undefined;
 }
 
 let warnedAboutDegradedKeying = false;
@@ -179,6 +214,10 @@ export function buildSourceMetadata(inputs: SourceMetadataInputs): JSONObject {
   const clientResponseId = inputs.clientResponseId?.trim();
   if (clientResponseId) {
     meta.clientResponseId = clientResponseId;
+  }
+  const disqualifiedByScreenId = inputs.disqualifiedByScreenId?.trim();
+  if (disqualifiedByScreenId) {
+    meta.disqualifiedByScreenId = disqualifiedByScreenId;
   }
   const ua = inputs.clientMeta?.userAgent?.trim();
   if (ua) {

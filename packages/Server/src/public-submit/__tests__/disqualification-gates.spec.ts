@@ -538,3 +538,128 @@ describe('knockouts get their own throttle, not a free pass', () => {
     expect((await submit(ctx, 'No')).success).toBe(false);
   });
 });
+
+/**
+ * A knockout whose `when` group reads a question the walk did NOT render.
+ *
+ * `resolveFlow` evaluates a jump's condition against the RAW answer map, while the answers that
+ * get STORED are the rendered ones — so a jump hanging off a rendered question fires on an answer
+ * to a question the walk hid, and that answer is then dropped. What lands is a `Disqualified` row
+ * carrying nothing at all.
+ *
+ * `gate` renders and carries the jump; `prior` never renders (its show group asks `gate` for a
+ * value nothing sends) but is answered, which is the whole shape.
+ */
+function hiddenKnockoutDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'form-1',
+    formVersionId: 'ver-1',
+    name: 'Screener',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false, confirmationMessage: 'Default thanks.' },
+    styleTokens: { cssVariables: {} },
+    pages: [
+      {
+        id: 'page-1',
+        displayOrder: 1,
+        questions: [
+          {
+            id: 'gate',
+            type: 'ShortText',
+            prompt: 'Anything you would like to add?',
+            isRequired: false,
+            displayOrder: 1,
+            options: [],
+            conditionalRule: {
+              jump: [
+                {
+                  when: { all: [{ questionId: 'prior', op: 'equals', value: 'No' }] },
+                  target: { kind: 'ending', id: 'end-ko' },
+                },
+              ],
+            },
+          },
+          {
+            id: 'prior',
+            type: 'ShortText',
+            prompt: 'Are you 18 or older?',
+            isRequired: false,
+            displayOrder: 2,
+            options: [],
+            conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'never-sent' }] } },
+          },
+        ],
+      },
+    ],
+    automations: [],
+    endScreens: [
+      {
+        id: 'end-ko',
+        screenType: 'Ending',
+        title: 'Not eligible',
+        displayOrder: 1,
+        isDisqualification: true,
+      },
+      { id: 'end-ok', screenType: 'Ending', title: 'Thanks', displayOrder: 2, isDefault: true },
+    ],
+  };
+}
+
+/**
+ * WHAT A CONTENTLESS DISQUALIFICATION IS ALLOWED TO LEAVE BEHIND (#124 follow-up).
+ *
+ * `validateSubmission` deliberately exempts `screened-out` from the nothing-to-submit rule, and
+ * the stated reason is that such a row "records the SCREENING, not answers" — refusing it would
+ * throw away the one fact it exists to record. That justification only holds if the row actually
+ * carries that fact. `Status = 'Disqualified'` says a knockout fired SOMEWHERE on a form that may
+ * have several screens, so on the zero-answer path it is the entire content of the row: nothing
+ * in it can answer "screened out by what?".
+ *
+ * Recorded in `SourceMetadata` rather than a column of its own on purpose — see the field's note
+ * in `source-metadata.service.ts`.
+ */
+describe('a knockout that stores no answers', () => {
+  function submitAnswering(ctx: PipelineContext, questionId: string, textValue: string) {
+    return runSubmitPipeline(ctx, {
+      distributionSlug: 'slug-1',
+      formVersionId: 'ver-1',
+      answers: [{ questionId, textValue }],
+    });
+  }
+
+  function metadataOf(saved: ReturnType<typeof makeFakeProvider>['saved']): Record<string, unknown> {
+    const response = saved.find((row) => row.entityName.includes('Form Responses'));
+    return JSON.parse(String(response?.values.SourceMetadata)) as Record<string, unknown>;
+  }
+
+  // The premise the rest of this describe rests on. Without it the two tests below could pass
+  // against a row that quietly stored the hidden answer, which is a different thing entirely.
+  it('really does write a row with no answers at all', async () => {
+    const { ctx, saved } = contextFor(hiddenKnockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+    const result = await submitAnswering(ctx, 'prior', 'No');
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('Disqualified');
+    expect(saved().filter((row) => row.entityName.includes('Form Response Answers'))).toHaveLength(0);
+  });
+
+  it('records which screen screened them, so the row is still readable as evidence', async () => {
+    const { ctx, saved } = contextFor(hiddenKnockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+    await submitAnswering(ctx, 'prior', 'No');
+
+    expect(metadataOf(saved()).disqualifiedByScreenId).toBe('end-ko');
+  });
+
+  // The mirror. A screen id on a row nobody screened out would be a worse lie than the silence
+  // it replaced, so the field has to be absent exactly when the flow disqualified nobody.
+  it('says nothing about a screen when the respondent was not screened out', async () => {
+    const { ctx, saved } = contextFor(hiddenKnockoutDefinition(), { maxResponses: null, responseCount: 0 });
+
+    const result = await submitAnswering(ctx, 'gate', 'Nothing to add');
+
+    expect(result.status).toBe('Complete');
+    expect(metadataOf(saved())).not.toHaveProperty('disqualifiedByScreenId');
+  });
+});
