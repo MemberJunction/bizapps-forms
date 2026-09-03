@@ -21,8 +21,9 @@ import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-a
 import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
 import { sessionIdFor } from './lib/session.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
 // The form this suite is wired to, NOT whichever form sorts first. Every scenario below rewrites
 // the authored row above, republishes THAT form's snapshot from THAT form's authored rows, and

@@ -49,6 +49,22 @@ anonymous respondent path does not run there at all. Port the seed and this file
 if that is ever taken on; shipping the hardening without the seed would repair nothing, and shipping
 the seed without the hardening would import the vulnerability #39 closed.
 
+**The chain has not been extended past `v0.8.x`.** The table above names the first five files with
+no twin; every `v0.10.x`–`v0.12.x` migration since is in the same position and for the same reason,
+and a few of them are schema changes (`Rules_And_Branching`, `Form_Templates`, the one-published-
+version index) that a PostgreSQL install would need before the seed question even arises. Two more
+arrived with the credential lifecycle (bizapps-forms#104, PR #109), and belong on the list rather
+than left to be inferred:
+
+| SQL Server migration | why there is no PostgreSQL twin |
+|---|---|
+| `V202608302200__…Link_Credential_Lifecycle` | rewrites two column descriptions (`sp_updateextendedproperty` + `__mj.EntityField`) whose `EntityField` rows the seed-less PostgreSQL chain never created; the `COMMENT ON COLUMN` half is trivial to port, the metadata half needs the seed |
+| `V202608302210__…Revoke_Credentials_Of_Retired_Links` | repairs `__mj.MagicLinkInvite` rows minted by the respondent path, which has never run on PostgreSQL, so there is nothing to repair. Idempotent and data-only; port it verbatim (three UPDATEs, `CAST(d."ID" AS text)` for the ownership join) the day the path runs there |
+
+Porting the chain is a piece of work in its own right — a converter run plus the hand-fixes the
+"Converter gaps" section lists, then the seed — and is tracked as such rather than done one
+migration at a time in unrelated PRs.
+
 ## Prerequisite
 
 `FormResponse.RespondentPersonID` hard-FKs `__mj_BizAppsCommon.Person(ID)`, so

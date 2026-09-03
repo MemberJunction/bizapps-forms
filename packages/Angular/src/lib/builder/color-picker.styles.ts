@@ -170,9 +170,12 @@ export const COLOR_PICKER_STYLES = /* css */ `
 }
 .cp-warn i { margin-top: 0.125rem; color: var(--mj-status-warning); }
 
+/* Three columns, because each ROW of PRESET_SWATCHES is one complete theme — page background,
+   font colour, accent. A five-column grid would wrap those triples across rows and turn three
+   coherent themes back into nine loose colours. */
 .cp-presets {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.375rem;
 }
 .cp-preset {

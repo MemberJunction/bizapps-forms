@@ -119,7 +119,9 @@ export {
 } from './distribution.service';
 export {
   autoShareName,
+  credentialMayStillRedeem,
   formReach,
+  isOpenToResponses,
   shareState,
   type FormReach,
   type FormReachKind,

@@ -96,7 +96,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // that renames the role gets a readiness verdict about the role it will actually mint.
     const readiness = checkRespondentReadiness(
       configInfo.magicLink,
-      getMagicLinkProvisioningConfig().roleName,
+      () => getMagicLinkProvisioningConfig().roleName,
     );
     if (readiness.ready === false) {
       LogError(`[Forms] Anonymous respondent path is NOT ready: ${readiness.reason}`);

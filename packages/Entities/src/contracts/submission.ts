@@ -20,17 +20,28 @@ export interface ClientMeta {
  * One answer in a submission. Exactly one (or, for complex answers, `jsonValue`)
  * of the typed value fields is expected per question, matching the
  * `FormResponseAnswer` typed-column layout.
+ *
+ * Every typed field is `| null`, not merely optional, because the transport really does deliver
+ * `null` and a type that denies it makes the defence against it look like dead code. A GraphQL
+ * client may send an explicit `null` for any `nullable: true` field, and a mapper that assumes
+ * otherwise crashes: `parseJsonValue` carries a `raw == null` guard added after `null.trim()`
+ * 500ed every submit for `jsonValue`, and the same crash reached the anonymous public write path
+ * again through `dateValue`. With the field typed as it actually arrives, the compiler is the
+ * thing that finds the next one instead of a respondent.
+ *
+ * Absent and null are still the same thing to every reader — "this answer does not use this
+ * column" — which is why `answerValueOf` and `applyAnswerValue` both test `!= null`.
  */
 export interface FormAnswerInput {
   questionId: string;
-  textValue?: string;
-  numericValue?: number;
-  dateValue?: string;
-  booleanValue?: boolean;
+  textValue?: string | null;
+  numericValue?: number | null;
+  dateValue?: string | null;
+  booleanValue?: boolean | null;
   /** Structured value for multi/complex answers (e.g. MultiChoice selections). */
-  jsonValue?: JSONValue;
+  jsonValue?: JSONValue | null;
   /** `MJ: Files` id for FileUpload answers. */
-  fileId?: string;
+  fileId?: string | null;
 }
 
 /** The payload posted to the S1 `SubmitFormResponse` mutation. */
@@ -54,6 +65,19 @@ export interface FieldError {
   questionId?: string;
   message: string;
 }
+
+/**
+ * What a respondent is told when their final submit would store nothing (#124).
+ *
+ * Lives in the contract, not in the validator that raises it, because BOTH sides say it: the
+ * server refuses the submission with this sentence, and the widget refuses to send one in the
+ * first place so the respondent is answered without a round trip. Two string literals in two
+ * packages would drift, and the drift would be invisible — the widget's banner and the server's
+ * refusal would simply disagree about the same rule. Importing one constant makes them the same
+ * sentence by construction, which is the same reason `isAnswerSupplied` and `validateAnswerFormat`
+ * are shared rather than reimplemented per side.
+ */
+export const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question before submitting.';
 
 /** The result returned by the S1 `SubmitFormResponse` mutation. */
 export interface FormSubmissionResult {

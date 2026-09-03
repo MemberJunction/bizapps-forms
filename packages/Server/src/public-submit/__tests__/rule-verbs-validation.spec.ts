@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  ConditionalGroup,
+  ConditionalRule,
   PublishedFormDefinition,
   PublishedFormPage,
   PublishedFormQuestion,
 } from '@mj-biz-apps/forms-entities';
+
+/**
+ * A rule as a PRE-simplification snapshot serialised it. `require` was removed from
+ * `ConditionalRule` (RULES_SIMPLIFICATION_PLAN Phase 1); snapshots published before that still
+ * carry it, and the cases below are about the server ignoring it. The type says so explicitly
+ * rather than smuggling the field through an untyped literal.
+ */
+type LegacyConditionalRule = ConditionalRule & { require: ConditionalGroup };
 import { parsePublishedDefinition } from '../snapshot-parser';
 import { validateSubmission } from '../validation.service';
 
@@ -33,7 +43,7 @@ function definition(pages: PublishedFormPage[]): PublishedFormDefinition {
     name: 'Rule verbs fixture',
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
-    styleTokens: {},
+    styleTokens: { cssVariables: {} },
     pages,
     automations: [],
     endScreens: [],
@@ -62,7 +72,7 @@ describe('requiredness on the server, after the require verb was removed (C1)', 
               conditionalRule: {
                 ...extraRule,
                 require: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] },
-              },
+              } satisfies LegacyConditionalRule as ConditionalRule,
             },
           ],
         },

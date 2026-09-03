@@ -1,26 +1,31 @@
 /**
- * Dependency-inversion seam for magic-link invite minting.
+ * Dependency-inversion seam for the lifecycle of a distribution's anonymous
+ * magic-link credential — minting it, and revoking it again.
  *
  * WHY a seam (and not a direct call into MJ core's `MagicLinkService`):
  *  - `@memberjunction/server` does NOT re-export `MagicLinkService`, and its
  *    package `exports` map only exposes `.`, so the class cannot be imported
  *    from this package (deep imports throw `ERR_PACKAGE_PATH_NOT_EXPORTED`).
+ *    Re-checked on the current `6.1.0-edge` pin — still true.
  *  - Even where reachable, `@memberjunction/server` is heavy (Apollo, the whole
  *    GraphQL stack, AI/action bundles) and validates DB config at import time —
  *    pulling it into this lightweight entity-subclass package would be wrong.
- *  - On the pinned MJ 5.43.0, `MagicLinkService.CreateInvite` cannot set the
- *    `IdentityMode='anonymous'` / `Kind='resource-share'` / resource-scope fields
- *    a Forms distribution link requires anyway.
+ *  - `MagicLinkService.CreateInvite` cannot set the `IdentityMode='anonymous'` /
+ *    `Kind='resource-share'` / resource-scope fields a Forms distribution link
+ *    requires anyway, and MJ ships no revoke method at all (see the revoke side
+ *    of the contract below).
  *
- * So this package (the entity-lifecycle layer) defines a minimal minting
- * CONTRACT and a registry; `@mj-biz-apps/forms-server` (which already depends on
- * `@memberjunction/server`) registers a concrete minter at bootstrap. The hook
- * calls whatever is registered, and gates gracefully when nothing is — which is
- * exactly the "host has not enabled magicLink" case. Any host could register a
- * different minting backend without touching this package.
+ * So this package (the entity-lifecycle layer) defines a minimal CONTRACT and a
+ * registry; `@mj-biz-apps/forms-server` (which already depends on
+ * `@memberjunction/server`) registers a concrete implementation at bootstrap. The
+ * hook calls whatever is registered, and gates gracefully when nothing is — which
+ * is exactly the "host has not enabled magicLink" case. Any host could register a
+ * different backend without touching this package, and gets both halves of the
+ * lifecycle by implementing one interface: a backend that can issue a credential
+ * but not withdraw it is the defect bizapps-forms#104 was filed about.
  */
 import { BaseSingleton } from '@memberjunction/global';
-import type { UserInfo } from '@memberjunction/core';
+import type { IMetadataProvider, UserInfo } from '@memberjunction/core';
 
 /** What the hook asks the minter to provision. Generic over any resource. */
 export interface MintAnonymousInviteParams {
@@ -51,6 +56,13 @@ export interface MintAnonymousInviteResult {
    * public redeem URL. A public form link is low-secrecy by design (the URL is meant
    * to be shared), so persisting the raw token on the distribution is intentional —
    * the raw token is NOT stored on the invite row.
+   *
+   * REQUIRED on a successful mint. It is optional in the type only because the
+   * failure shape shares it; a `success:true` result without one is treated as a
+   * mint FAILURE by the runner. Two reasons: `/f/:slug` reads `PublicLinkToken` to
+   * redeem, so a tokenless invite is a dead link however healthy the row looks; and
+   * "linked invite, no token" is the reissue signal, so the hook must never be able
+   * to produce that state itself.
    */
   rawToken?: string;
   /**
@@ -64,8 +76,97 @@ export interface MintAnonymousInviteResult {
 }
 
 /**
- * The contract a host registers to provision anonymous magic-link invites.
- * Implemented in `@mj-biz-apps/forms-server` over MJ core's magic-link tables.
+ * Outcome of a write against an existing invite (revocation, or a change of expiry).
+ *
+ * One shape for both because both answer the same two questions and would otherwise
+ * be the same three fields written twice. `success` is about the POSTCONDITION, not
+ * about whether a row moved: an invite that was already revoked, or whose expiry is
+ * already correct, is `{ success: true, changed: false }`. That distinction matters
+ * to the caller — it refuses to unlink a credential it could not kill, so reporting
+ * failure for an invite that is already dead would wedge the distribution forever.
+ */
+export interface InviteWriteResult {
+  /** True when the invite now holds the requested state, whether or not this call changed it. */
+  success: boolean;
+  /** True only when a row was actually written. Diagnostic; drives the "nothing to do" log. */
+  changed: boolean;
+  /** Human-readable reason for a failure, or a note on a no-op success. */
+  message?: string;
+  /**
+   * True when the implementation DECLINED rather than failed: the invite is not scoped to the
+   * resource it was asked on behalf of. Retrying cannot change that answer, so a caller that
+   * retries on failure must not treat this as one — it is the row that is wrong, not the moment.
+   */
+  refused?: true;
+}
+
+/**
+ * WHICH credential, and what it must belong to.
+ *
+ * The resource travels with the invite id on every write, because the id alone is not a
+ * capability anyone should act on. `FormDistribution.MagicLinkInviteID` carries no foreign key
+ * and rides the generated GraphQL update input, so the value reaching a revoke or a re-bound is
+ * whatever some writer put in the column — and these writes run under an elevated user on the
+ * public submit path. Pairing the two lets the implementation check the invite's own
+ * `ResourceID`, which the mint already wrote, and refuse to touch a credential that belongs to a
+ * different link. Without it, pointing one distribution at another's invite is enough to kill
+ * that link's credential on the next save of yours.
+ */
+export interface AnonymousCredentialRef {
+  /** The `MJ: Magic Link Invites` row to act on (`FormDistribution.MagicLinkInviteID`). */
+  inviteId: string;
+  /** The resource this invite must be scoped to — the distribution's primary key. */
+  resourceId: string;
+}
+
+/**
+ * Where an invite write is created when the caller has a transaction open.
+ *
+ * A server-side entity writes through ITS provider — per request on MJAPI — and that provider is
+ * where an `EntityTransactionScope` lives. An implementation that reaches its invite row through
+ * `new Metadata()` instead writes through the process-wide provider, on another connection, and no
+ * transaction the caller opened can include it. So a caller that needs the invite write to commit
+ * or roll back WITH its own — the delete of a distribution and the revocation of its credential
+ * are one unit of work — hands over the provider to create the row on, and the implementation MUST
+ * create it there. Exactly the `GetEntityObject` half of `IMetadataProvider`, which every server
+ * provider implements; nothing narrower exists in core to name it by.
+ */
+export type InviteWriteHost = Pick<IMetadataProvider, 'GetEntityObject'>;
+
+/**
+ * The bounds a credential's life must stay inside.
+ *
+ * The RULE rather than a resolved instant, and that distinction is load-bearing. `closeAt`
+ * is a fixed date, but `maxLifetimeHours` is a DURATION, and a duration is only an instant
+ * once you say what it runs from: the moment the credential was ISSUED. That instant is a
+ * fact about the invite row, so only the implementation holding that row can resolve it.
+ * A caller that resolved the ceiling itself would have to anchor it to the wall clock, and
+ * since this is asked after EVERY save of a live link the answer would differ every time —
+ * rewriting the row on every save and walking the expiry forward forever, so a ceiling a
+ * host configured in order to bound the credential would never bound anything. Handing over
+ * the rule instead of the answer is what makes that unrepresentable.
+ */
+export interface InviteExpiryBounds {
+  /** The link's own closing date, or `null` when it has none. */
+  closeAt: Date | null;
+  /** Host-wide ceiling on a credential's life, in hours FROM ISSUE; `undefined` for none. */
+  maxLifetimeHours: number | undefined;
+}
+
+/**
+ * The contract a host registers to manage the life of an anonymous magic-link
+ * credential: issue it, re-bound it, withdraw it. Implemented in
+ * `@mj-biz-apps/forms-server` over MJ core's magic-link tables. All three belong to
+ * one implementation on purpose: whatever backend issues a credential is the only
+ * thing that knows how to change or kill it.
+ *
+ * The `contextUser` every method takes is WHO ASKED — the staff user whose save triggered this —
+ * and not necessarily the identity the implementation performs the write under. The credential is
+ * the application's own record rather than the caller's, and the caller's authority has already
+ * been spent proving they may write the distribution it belongs to; requiring a second permission
+ * on the backend's storage would make the feature work only for whichever roles a host happens to
+ * have granted there. The shipped implementation elevates for exactly that reason
+ * (bizapps-forms#114); callers must not read `contextUser` as a promise about rights.
  */
 export interface IAnonymousMagicLinkMinter {
   /**
@@ -80,6 +181,62 @@ export interface IAnonymousMagicLinkMinter {
     params: MintAnonymousInviteParams,
     creatingUser: UserInfo,
   ): Promise<MintAnonymousInviteResult>;
+
+  /**
+   * Makes a previously minted invite permanently unredeemable.
+   *
+   * There is no `skipped` here, and that asymmetry is deliberate. Minting is
+   * gated on the host having magic links switched on; revoking must work
+   * regardless, because "the host turned magic links off" is precisely a moment
+   * when live credentials should stop being live. Implementations MUST NOT throw:
+   * a failure is reported so the caller can leave the credential LINKED and retry
+   * on the next save, rather than orphaning a live invite nothing points at.
+   *
+   * Implementations MUST refuse an invite that is not scoped to `credential.resourceId`.
+   *
+   * @param credential  the invite to withdraw, and the resource it must belong to
+   * @param contextUser the internal staff user whose save triggered the revocation
+   * @param host        where to create the invite row when the write must join the caller's
+   *                    open transaction — see {@link InviteWriteHost}. Absent, the
+   *                    implementation writes through its own provider, outside any transaction.
+   */
+  RevokeAnonymousInvite(
+    credential: AnonymousCredentialRef,
+    contextUser: UserInfo,
+    host?: InviteWriteHost,
+  ): Promise<InviteWriteResult>;
+
+  /**
+   * Re-bounds a live invite's hard expiry to whatever `bounds` now imply — the earlier of
+   * the link's closing date and the host lifetime ceiling, or no bound at all when neither
+   * applies.
+   *
+   * This exists because the expiry is the ONE part of the credential that has to
+   * survive nobody saving anything: revocation happens on a distribution's save, and
+   * a link whose closing date passes at midnight is not saved by anyone. Baking the
+   * date into the invite is what makes it die on time — and that is exactly why it
+   * must be kept in step afterwards. An author who moves a closing date, or clears
+   * one, is otherwise left with a credential expiring on the old date while the
+   * builder reports the link as live.
+   *
+   * Implementations MUST be idempotent and MUST NOT throw: an invite already inside
+   * `bounds` is `{ success: true, changed: false }`, and a caller runs this after every save
+   * of a distribution that keeps its credential. That idempotence is exactly why
+   * {@link InviteExpiryBounds} is the rule rather than an instant — see the note there.
+   *
+   * Implementations MUST refuse an invite that is not scoped to `credential.resourceId`.
+   *
+   * @param credential  the invite to re-bound, and the resource it must belong to
+   * @param bounds      how long this credential may now live; `{ closeAt: null,
+   *                    maxLifetimeHours: undefined }` means "no bound", which the
+   *                    implementation renders however its store expresses that
+   * @param contextUser the internal staff user whose save triggered the change
+   */
+  SetAnonymousInviteExpiry(
+    credential: AnonymousCredentialRef,
+    bounds: InviteExpiryBounds,
+    contextUser: UserInfo,
+  ): Promise<InviteWriteResult>;
 }
 
 /**

@@ -34,8 +34,17 @@ export type DistributionWindowRefusal = 'not-yet-open' | 'closed';
  * to mint for anything else (`provisioning-decision.ts`) and the builder badges it "Paused".
  * `Draft` is this column's DEFAULT, so testing for `Closed` alone let a Draft link open in full
  * while its author was being told "Turned off. Anyone opening it is told the form is not taking
- * responses." The minter is not the backstop it looks like: it never UN-mints, so a link that was
- * Active once and is later set back to Draft still carries a working token.
+ * responses."
+ *
+ * This gate does NOT lean on the credential, and that has survived a change in what the credential
+ * does. It used to be that the minter never un-minted, so a link set back to `Draft` kept a working
+ * token and this was the only thing stopping it — bizapps-forms#104 changed that: the lifecycle hook
+ * now revokes on the way out, and a paused link normally holds no credential at all. The gate is
+ * still load-bearing anyway, for two reasons that outlive the fix. Revocation rides `Save()`, so a
+ * raw SQL `UPDATE` that closes a link revokes nothing until something next saves that row; and the
+ * hook is deliberately fail-soft, so a revoke the host refused (no Update on `MJ: Magic Link
+ * Invites`, say) leaves a live credential behind and logs it. In both cases THIS is what refuses the
+ * submission. Two independent layers was the point of #81/#90 and it still is.
  *
  * A switched-off or non-Active link is `'closed'` even when its `OpenAt` is in the future: the
  * author has taken it out of service, and "opens later" would promise something that is not so.
