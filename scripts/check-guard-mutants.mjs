@@ -41,6 +41,39 @@ const SUITE_TIMEOUT_MS = 180_000;
  * has to tell someone who has never read the source.
  */
 export const MUTANTS = [
+  // --- respondent-host door: the refusals that happen BEFORE a credential is minted ----------
+  {
+    name: 'door/version-read-failure-reported-as-unpublished',
+    behaviour: 'a FAILED published-version read is 502 redeem-failed, never 409 "not published yet"',
+    file: 'packages/Server/src/respondent-host/redeem.service.ts',
+    find: '  if (published === undefined) {\n    return { ok: false, reason: \'redeem-failed\' };\n  }',
+    replace: '  if (false) {\n    return { ok: false, reason: \'redeem-failed\' };\n  }',
+    suite: 'packages/Server',
+  },
+  {
+    name: 'door/missing-credential-outranked-by-the-calendar',
+    behaviour: 'a link with no PublicLinkToken is "not ready", ahead of any not-yet-open or full reason',
+    file: 'packages/Server/src/respondent-host/redeem.service.ts',
+    find: "  if (!dist.PublicLinkToken) {\n    return 'no-token';\n  }",
+    replace: "  if (false) {\n    return 'no-token';\n  }",
+    suite: 'packages/Server',
+  },
+  {
+    name: 'door/opening-time-not-checked-for-being-future',
+    behaviour: 'an opening time that is not ahead of the reader is not named, and sets no Retry-After',
+    file: 'packages/Server/src/respondent-host/error-view.ts',
+    find: '  const knowsWhen = opensAt !== undefined && !Number.isNaN(opensAt.getTime()) && opensAt > now;',
+    replace: '  const knowsWhen = opensAt !== undefined && !Number.isNaN(opensAt.getTime());',
+    suite: 'packages/Server',
+  },
+  {
+    name: 'door/retry-after-dropped',
+    behaviour: 'a temporary refusal puts Retry-After on the wire, so a monitor records "later" not "gone"',
+    file: 'packages/Server/src/respondent-host/error-view.ts',
+    find: "  if (view.retryAfter) {",
+    replace: "  if (false) {",
+    suite: 'packages/Server',
+  },
   // --- FormDistributionEntityServer: the credential columns are server-owned -----------------
   {
     name: 'hook/client-write-guard-neutralised',
