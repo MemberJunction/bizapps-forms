@@ -82,8 +82,16 @@ async function loadDistribution(
  *
  * Exported because the respondent-host door refuses a link whose form has none (bizapps-forms#118)
  * with an existence read of its own — it needs a yes/no, not the snapshot — and the two gates must
- * mean the same thing by "published". Sharing the filter is what guarantees that: a version this
- * gate would serve is one the door would admit, and vice versa.
+ * mean the same thing by "published". Sharing the filter is what guarantees that.
+ *
+ * It guarantees agreement about PUBLISHED, and deliberately not about SERVABLE. This gate does one
+ * more thing the door's ID-only read cannot: {@link parsePublishedDefinition} on the row's
+ * `DefinitionSnapshot`, which still fails as `invalid-snapshot` below. A Published version whose
+ * snapshot does not parse therefore still reaches the door's admitted path and dead-ends in the
+ * widget — the same symptom #118 fixed for the missing-version case, from a different cause. Making
+ * the door see it would mean reading and parsing the whole snapshot on every open of every link,
+ * which is the cost this narrow read exists to avoid; it is a separate change with a separate
+ * trade-off, not an oversight in this filter.
  */
 export function publishedVersionFilter(formId: string): string {
   return `FormID=${quoteSqlString(formId)} AND Status='Published'`;
