@@ -16,7 +16,7 @@ not an export trapped in someone else's silo.
 
 <br/>
 
-<img src="docs/images/01-hero-builder.png" alt="The MJ Forms visual builder: a question palette on the left, the form canvas in the middle with a question selected, and its settings on the right." width="100%">
+<img src="docs/images/01-build-and-preview.gif" alt="Adding a question in the MJ Forms builder, then previewing the same form at desktop, tablet and phone sizes and submitting it." width="100%">
 
 </div>
 
@@ -48,8 +48,6 @@ operational data the moment they land.
 Describe the form you want in a sentence. An AI prompt drafts the whole thing — pages,
 questions, options, validation — and hands you a real draft to refine in the visual builder.
 
-<img src="docs/images/02-agent-authoring.gif" alt="Typing a one-sentence brief into Author with AI, and the generated form appearing in the builder." width="100%">
-
 **25 question types** — short &amp; long text · email · phone · website · number · yes/no ·
 single choice · multiple choice · dropdown · picture choice · rating · NPS · opinion scale ·
 ranking · matrix · checkbox · legal · date · time · address · contact info · file upload ·
@@ -61,13 +59,11 @@ alignment of titles and questions — with a live preview beside it. There is no
 to wade through: every control writes a `--mjf-*` token the widget honours, so what you see
 is what publishes.
 
-<img src="docs/images/03-theming.gif" alt="Editing a form's brand colour, corner radius and font in the Design tab, with the live preview updating alongside." width="100%">
+<img src="docs/images/02-theming.gif" alt="Changing a form's background, text and button colours in the Design tab, with the live preview updating alongside." width="100%">
 
 ---
 
 ## 🚀 &nbsp;Publish — a link, an embed, a QR code
-
-<img src="docs/images/05-distribute.png" alt="The Distribute tab showing a public link, a QR code, a response quota and an open/close window." width="100%">
 
 Public submissions ride **anonymous magic-link sessions** — `IdentityMode='anonymous'`, with
 authorization enforced server-side from the JWT's `mj_scopes` claims, **never DB roles**, so
@@ -88,8 +84,6 @@ Two render modes from one definition — classic scroll, or one-question-at-a-ti
 WCAG AA, with the right keyboard for every field. Preview at **desktop, tablet and phone**
 before you publish.
 
-<img src="docs/images/04-responsive-preview.gif" alt="The same form previewed at desktop, tablet and phone widths." width="100%">
-
 The respondent surface is an Angular **custom element** — `<mj-form slug="…">` — published as
 a standalone bundle. Embed it with a `<script>` tag, an iframe, a popup, a full page or a QR
 code. No Explorer shell, nothing to log into.
@@ -98,7 +92,7 @@ code. No Explorer shell, nothing to log into.
 
 ## 📊 &nbsp;Report — the moment they land
 
-<img src="docs/images/06-analytics.png" alt="The Responses and Analytics dashboard: summary stats, a completion funnel and a per-question breakdown." width="100%">
+<img src="docs/images/03-analytics.png" alt="The Responses and Analytics dashboard: summary stats, a completion funnel and a per-question breakdown." width="100%">
 
 Summaries, a completion funnel, per-question breakdowns and export ship with the app — no
 separate BI step, because responses are already queryable MJ entities.
@@ -107,7 +101,7 @@ Four hooks run on every submit: **upsert the respondent as a Person · send a co
 email · create a follow-up Task · analyze written responses with an LLM judge.** The last
 writes a score and its rationale onto the answer itself:
 
-<img src="docs/images/07-response-ai-score.png" alt="A single response detail, showing a free-text answer with an AI-generated score and rationale." width="100%">
+<img src="docs/images/04-response-ai-score.png" alt="A single response detail, showing a free-text answer with an AI-generated score and rationale." width="100%">
 
 > What runs after Submit, how to configure or decline each hook, and which record owns
 > respondent identity → **[docs/on-submit-automations.md](docs/on-submit-automations.md)**
