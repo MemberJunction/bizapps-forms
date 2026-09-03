@@ -6,6 +6,7 @@
  * zod runtime validators FROM HERE. Do not fork these definitions.
  */
 export * from './json-value';
+export * from './link-precedence';
 export * from './conditional-rule';
 export * from './rule-verbs';
 export * from './scoring';

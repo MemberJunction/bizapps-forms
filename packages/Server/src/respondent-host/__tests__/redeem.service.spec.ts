@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
+import {
+  LINK_PRECEDENCE_CASES,
+  type LinkPrecedenceFacts,
+  type RelativeInstant,
+} from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 import { publishedVersionFilter } from '../../public-submit/definition-loader.service';
 import {
@@ -347,4 +352,54 @@ describe('redeemSlugToToken', () => {
     expect(out.ok).toBe(false);
     expect(out.reason).toBe('redeem-failed');
   });
+});
+
+/**
+ * The door's half of the shared refusal-precedence table (`contracts/link-precedence.ts`).
+ *
+ * The builder's half is asserted by `share-state.precedence.spec.ts` against the SAME cases, so a
+ * change to either surface's ordering fails one of the two suites and names the case. This exists
+ * because a review of #118 claimed the two agreed after checking one pair of states — see the
+ * table's own header.
+ */
+describe('the door follows the shared refusal precedence', () => {
+  const NOW = new Date('2026-06-15T12:00:00Z');
+  const PAST = new Date('2026-01-01T00:00:00Z');
+  const FUTURE = new Date('2027-01-01T00:00:00Z');
+  const instant = (r: RelativeInstant): Date | null => (r === 'past' ? PAST : r === 'future' ? FUTURE : null);
+
+  const distributionFor = (facts: LinkPrecedenceFacts): mjBizAppsFormsFormDistributionEntityType =>
+    fakeDistribution({
+      Status: facts.Status,
+      IsActive: facts.IsActive,
+      PublicLinkToken: facts.PublicLinkToken,
+      OpenAt: instant(facts.OpenAt),
+      CloseAt: instant(facts.CloseAt),
+      MaxResponses: facts.MaxResponses,
+      ResponseCount: facts.ResponseCount,
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  for (const testCase of LINK_PRECEDENCE_CASES) {
+    it(testCase.name, async () => {
+      const provider = fakeProvider({ rows: [distributionFor(testCase.facts)] }).provider;
+      const out = await redeemSlugToToken(deps({ provider }), 'customer-survey');
+
+      if (testCase.respondentReason === null) {
+        // The row raises no objection; the door goes on to the published-version check and, with a
+        // published form and a working stub redeem, admits the link.
+        expect(out.ok).toBe(true);
+        return;
+      }
+      expect(out.ok).toBe(false);
+      expect(out.reason).toBe(testCase.respondentReason);
+    });
+  }
 });
