@@ -58,7 +58,10 @@ async function main() {
 
   // 1. The public host page must render for an anonymous visitor with no session.
   const pageRes = await fetch(`${BASE}/f/${SLUG}`);
-  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`, `got ${pageRes.status} — 409 means the distribution has no PublicLinkToken (host magicLink not enabled?)`);
+  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`,
+    `got ${pageRes.status} — 409 means either no PublicLinkToken (host magicLink not enabled?) or, ` +
+      'since bizapps-forms#118, that the form has no Published version; 503 means the link has an ' +
+      'OpenAt in the future. The page body says which.');
   const html = await pageRes.text();
 
   // 2. The page must carry a redeemed anonymous session token.

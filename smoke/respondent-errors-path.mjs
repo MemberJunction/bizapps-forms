@@ -140,7 +140,11 @@ async function main() {
   // A real redeemed session, exactly as a respondent gets one. Everything below rides this token.
   const pageRes = await fetch(`${BASE}/f/${SLUG}`);
   if (pageRes.status !== 200) {
-    console.error(`\nSMOKE ERROR: GET /f/${SLUG} returned ${pageRes.status}. 409 means the distribution has no PublicLinkToken.`);
+    console.error(
+      `\nSMOKE ERROR: GET /f/${SLUG} returned ${pageRes.status}. 409 means either that the ` +
+        'distribution has no PublicLinkToken, or that its form has no Published version ' +
+        '(bizapps-forms#118 made the door refuse that too) — the page body says which.',
+    );
     process.exit(1);
   }
   const token = (await pageRes.text()).match(/data-token="([^"]+)"/)?.[1];
