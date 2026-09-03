@@ -41,6 +41,32 @@ const SUITE_TIMEOUT_MS = 180_000;
  * has to tell someone who has never read the source.
  */
 export const MUTANTS = [
+  // --- public-submit: the ONE ownership rule on the anonymous write path --------------------
+  {
+    name: 'scope/ownership-gate-neutralised',
+    behaviour: 'a caller may only act on a response their own session owns, or an unowned one',
+    file: 'packages/Server/src/public-submit/persistence.service.ts',
+    find: "  const owner = foldSessionId(response.AnonymousSessionID);\n  return owner === '' || owner === foldSessionId(callerSessionId);",
+    replace: "  const owner = foldSessionId(response.AnonymousSessionID);\n  void owner;\n  return true;",
+    suite: 'packages/Server',
+  },
+  {
+    name: 'scope/absent-credential-more-permissive-than-a-wrong-one',
+    behaviour: 'a MISSING session header is refused exactly as a forged one is — never treated as a match',
+    file: 'packages/Server/src/public-submit/persistence.service.ts',
+    find: "  return owner === '' || owner === foldSessionId(callerSessionId);",
+    replace: "  return owner === '' || foldSessionId(callerSessionId) === '' || owner === foldSessionId(callerSessionId);",
+    suite: 'packages/Server',
+  },
+  // --- public-submit: a half-understood snapshot is never served to a respondent ------------
+  {
+    name: 'snapshot/malformed-question-dropped-instead-of-failing',
+    behaviour: 'one malformed QUESTION fails the whole snapshot rather than silently vanishing from the form',
+    file: 'packages/Server/src/public-submit/snapshot-parser.ts',
+    find: '    if (!q) {\n      return undefined;\n    }',
+    replace: '    if (!q) {\n      continue;\n    }',
+    suite: 'packages/Server',
+  },
   // --- respondent-host door: the refusals that happen BEFORE a credential is minted ----------
   {
     name: 'door/version-read-failure-reported-as-unpublished',
@@ -54,8 +80,8 @@ export const MUTANTS = [
     name: 'door/missing-credential-outranked-by-the-calendar',
     behaviour: 'a link with no PublicLinkToken is "not ready", ahead of any not-yet-open or full reason',
     file: 'packages/Server/src/respondent-host/redeem.service.ts',
-    find: "  if (!dist.PublicLinkToken) {\n    return 'no-token';\n  }",
-    replace: "  if (false) {\n    return 'no-token';\n  }",
+    find: "  const rawToken = dist.PublicLinkToken;\n  if (!rawToken) {\n    return { ok: false, reason: 'no-token' };\n  }",
+    replace: "  const rawToken = dist.PublicLinkToken ?? 'guard-neutralised';",
     suite: 'packages/Server',
   },
   {
@@ -326,15 +352,33 @@ function main() {
     console.log(`baseline ${suite}: ${baseline.passed} passing`);
   }
   let bad = 0;
+  let stale = 0;
   for (const entry of MUTANTS) {
     const { verdict, detail } = runMutant(entry);
     const ok = verdict === 'KILLED';
     if (!ok) bad++;
+    if (verdict === 'NOT APPLIED') stale++;
     console.log(`${ok ? '✓' : '✗'} ${entry.name.padEnd(44)} ${verdict.padEnd(12)} ${detail}`);
     if (!ok) console.log(`      lost: ${entry.behaviour}`);
   }
   if (bad > 0) {
-    console.error(`\n❌ ${bad} guard(s) can be neutralised with the suite green. Write the behavioural test each entry names.`);
+    // The two failures want OPPOSITE fixes, and reporting only one sends the reader the wrong way.
+    // SURVIVED means the guard has no behavioural test — write one. NOT APPLIED means a refactor
+    // moved the code the anchor points at, so the mutant proved nothing; the guard itself may be
+    // perfectly well tested. A refactor produces the second and never the first, which is exactly
+    // when someone is least expecting this gate to be the thing that failed.
+    if (stale > 0) {
+      console.error(
+        `\n❌ ${stale} mutant(s) NOT APPLIED — the anchor no longer matches the source. Re-point ` +
+          "`find` at the guard's current text; an unapplied mutant proves nothing.",
+      );
+    }
+    if (bad > stale) {
+      console.error(
+        `\n❌ ${bad - stale} guard(s) can be neutralised with the suite green. ` +
+          'Write the behavioural test each entry names.',
+      );
+    }
     process.exit(1);
   }
   console.log(`\n✅ Guard-mutation check passed — all ${MUTANTS.length} load-bearing guards are killed by their package suite.`);
