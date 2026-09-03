@@ -14,18 +14,33 @@ export interface Hsv {
 }
 
 /**
- * The palette offered under the picker.
+ * The palette offered under the picker: three complete themes, one per row.
  *
  * Curated, not generated. Most authors want "a good colour", not a colour space to explore, and
- * one click beats a two-axis drag every time — so the fast path is a small set that already
- * works on both light and dark page backgrounds. Ten is deliberate: enough to find something,
- * few enough to take in at a glance without choosing becoming the task.
+ * one click beats a two-axis drag every time.
+ *
+ * What changed, and why it matters: the previous ten were ten UNRELATED brights, which quietly
+ * asked the author to be a colour designer. A form is themed by exactly two decisions —
+ * `--mjf-page-bg` and `--mjf-page-ink`, from which the card, every border, muted text, the
+ * progress track and the selected-answer tint are all `color-mix`ed (see `mj-form.component.css`)
+ * — plus an accent. So the palette is now three ROWS of exactly those three roles:
+ *
+ *   page background · font colour · accent
+ *
+ * Picking down a row yields a form that already coheres; picking across rows is still allowed
+ * and is how someone builds their own. Nine, laid out three to a line, mirrors the three-column
+ * grid the picker draws, so each row reads as one theme rather than as loose colours.
+ *
+ * The rows are the light-warm, warm and dark ends of the seeded `FormStyle` set (Editorial, Warm
+ * and Midnight), so a hand-picked form lands somewhere the product's own designers already went.
  */
-// ui-gate: allow-literal-color(3) — a palette IS a list of colours; there is no token to use
-// here, and laid out five to a line it mirrors the five-column grid the picker draws.
+// ui-gate: allow-literal-color(4) — a palette IS a list of colours; there is no token to use
+// here, and one line per theme is what makes the three roles legible at a glance. Four, not
+// three: the declaration plus one line per theme row.
 export const PRESET_SWATCHES: readonly string[] = [
-  '#7ba428', '#3fc4b0', '#f4c430', '#f4681f', '#3b9ae1',
-  '#e0559a', '#3d1a3d', '#0f5c4a', '#1b7fa8', '#152a63',
+  '#faf8f4', '#1a1815', '#1f5d4c',
+  '#f6ede0', '#41372e', '#d8744a',
+  '#0d1117', '#e6e9ef', '#3b82f6',
 ];
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
