@@ -61,6 +61,7 @@ import {
   completionCeilingKey,
   knockoutCeilingKey,
   rateLimitKey,
+  sessionIdentity,
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
@@ -564,6 +565,9 @@ async function runSubmitPipelineInner(
         distributionId: resolved.distribution.ID,
         clientMeta: submission.clientMeta,
         clientResponseId: submission.clientResponseId,
+        // The screen, not merely the fact. On the zero-answer knockout path this is the row's
+        // entire content — see the field's note in `source-metadata.service.ts`.
+        disqualifiedByScreenId: disqualifiedBy?.id,
       }),
       answers: validation.answers,
       existingResponseId: existingPartial.response?.ID,
@@ -685,7 +689,9 @@ function disqualificationFields(
  *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
  *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
  *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
- *       behaviour, worthless as a ceiling — and treating it as one was the defect.
+ *       behaviour, worthless as a ceiling — and treating it as one was the defect. Charged only
+ *       when the caller actually named a session: blank is not one caller, it is every
+ *       header-less caller at once (see `sessionIdentity`).
  *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
  *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
  *       ADDRESSES, which is the only currency a public endpoint can charge.
@@ -704,14 +710,21 @@ function rateLimitGatesFor(
   knockout: boolean,
 ): RateLimitGate[] {
   const config = getPublicSubmitConfig();
-  const gates: RateLimitGate[] = [
-    { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
-  ];
   const identity = abuseIdentity(ctx.clientIpHash);
+  const gates: RateLimitGate[] = [];
+  // (a) is a per-CALLER gate, so it is charged only where it has a caller. A blank session is
+  // every header-less client at once, and this is the tightest bucket of the four — so charging
+  // them together refuses each of them for the others' traffic rather than for abuse, which is
+  // the shared kill switch `abuseIdentity` refuses to build for the ceilings. The exception is
+  // the case where nothing else can be keyed either: with no address, this coarse
+  // per-distribution circuit breaker is the only bound there is, and one is better than none.
+  // `warnOnceIfAbuseKeyingDegraded` has already announced that mode.
+  if (sessionIdentity(ctx.sessionId) || !identity) {
+    gates.push({ key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax });
+  }
   if (!identity) {
-    // No resolved IP, so (b) and (c) have nothing to key on. They are omitted rather than keyed
-    // on something weaker — see `abuseIdentity`. Gate (a) is untouched, so this is exactly the
-    // behaviour that shipped before the ceilings existed, and the warning above has said so.
+    // No resolved IP, so (b), (c) and (d) have nothing to key on. They are omitted rather than
+    // keyed on something weaker — see `abuseIdentity`.
     return gates;
   }
   gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
