@@ -18,6 +18,9 @@ name: CodeGen Append Gate
 # commit that motivated it. See #160.
 
 on:
+  # A manual run exercises the spec and CHECK 1 only. CHECK 2 needs a base/head pair, which a
+  # manual dispatch does not provide -- both CHECK 2 steps below are gated on github.event_name
+  # and simply do not run here.
   workflow_dispatch:
   # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
   # land a tracked capture without the gate ever running.
@@ -25,6 +28,11 @@ on:
     branches: [next, main]
     paths:
       - 'migrations/**'
+      # CHECK 1 is whole-tree on purpose (it's the only scope that catches a23b598), so the
+      # trigger has to be whole-tree too. The output folder is set by mj.config.cjs's
+      # SQLOutput.folderPath, not fixed at './migrations/codegen/' -- a capture committed
+      # anywhere else must still start this workflow.
+      - '**/CodeGen_Run_*.sql'
       - 'scripts/check-codegen-append.mjs'
       # The gate's own spec. `npm test` is Vitest and never runs a plain-Node .mjs spec, so without
       # this entry a PR that weakened a case would run neither step.
@@ -34,6 +42,11 @@ on:
     branches: [next, main]
     paths:
       - 'migrations/**'
+      # CHECK 1 is whole-tree on purpose (it's the only scope that catches a23b598), so the
+      # trigger has to be whole-tree too. The output folder is set by mj.config.cjs's
+      # SQLOutput.folderPath, not fixed at './migrations/codegen/' -- a capture committed
+      # anywhere else must still start this workflow.
+      - '**/CodeGen_Run_*.sql'
       - 'scripts/check-codegen-append.mjs'
       - 'scripts/check-codegen-append.spec.mjs'
       - '.github/workflows/codegen-append-gate.yml'
