@@ -259,6 +259,39 @@ describe('assessRespondentReadiness', () => {
     expect(assessRespondentReadiness(readyHost)).toEqual([]);
   });
 
+  // The boundary boot actually crosses. `checkRespondentReadiness` owns the try, and has its own
+  // test for it — but the middleware never calls that function directly, it calls THIS one, so
+  // resolving the role name eagerly here would put the throw back on the boot path with the suite
+  // still green. That is not hypothetical: it is what the merge of #131 into this branch produced,
+  // and the type error that exposed it was a lucky accident of the aggregator being new. A throw
+  // out of here takes down all of MJAPI, which also serves Caliber and ATS, over a Forms env-var typo.
+  it('reports a provisioning config that cannot be resolved, instead of throwing out of boot', () => {
+    const boom = () => {
+      throw new Error("FORMS_MAGICLINK_CHANNELS contains 'embed', which is not a distribution channel.");
+    };
+
+    const reasons = assessRespondentReadiness({ ...readyHost, resolveRoleName: boom });
+
+    expect(reasons).toContainEqual(expect.stringContaining("'embed'"));
+  });
+
+  // An unreadable role config must not HIDE the other verdicts. Resolving it outside the guard
+  // aborts the whole assessment, so the operator would fix one env-var typo, restart, and only then
+  // learn about the other two problems — the fix-restart-read loop this aggregator exists to end.
+  it('still reports the other reasons when the role config cannot be resolved', () => {
+    const reasons = assessRespondentReadiness({
+      ...readyHost,
+      resolveRoleName: () => { throw new Error('FORMS_MAGICLINK_CHANNELS is malformed'); },
+      magicLink: { enabled: true, grantableRoleNames: [RESPONDENT_ROLE] },  // no provisioning user
+      turnstile: { secretConfigured: true, siteKeyConfigured: false },      // half-configured
+    });
+
+    expect(reasons).toHaveLength(3);
+    expect(reasons.join('\n')).toContain('FORMS_MAGICLINK_CHANNELS is malformed');
+    expect(reasons.join('\n')).toContain('contextUserForProvisioning');
+    expect(reasons.join('\n')).toContain('FORMS_TURNSTILE_SITE_KEY');
+  });
+
   // One reason per defect, all at once. Reporting only the first would send the operator through
   // a fix-restart-read loop as long as the number of things wrong.
   it('reports every unready condition, not just the first', () => {
