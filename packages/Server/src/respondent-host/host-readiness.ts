@@ -253,10 +253,21 @@ export function checkProvisioningUserReadiness(
   userExists: (name: string) => boolean,
   systemUserName?: string,
 ): RespondentReadiness {
-  // `typeof` rather than a truthiness check for the same reason as the role check above: host
-  // config parsed from JSON hands us `null` for a blanked value, which the type does not admit.
+  // Mirrors core's `contextUserForProvisioning || userHandling?.contextUserForNewUserCreation`
+  // (MagicLinkService.resolveProvisioningContextUser) as exactly as a typed function can.
+  //
+  // `typeof` rather than a bare truthiness check for the same reason as the role check above: host
+  // config parsed from JSON hands us `null` for a blanked value, which the type does not admit —
+  // and `||` rejects `null` and `''` too, so the guard agrees with core on both.
+  //
+  // What it must NOT do is trim. A whitespace-only value is truthy, so core TAKES it, misses in
+  // `UserByName`, and falls back to an arbitrary Owner while logging on every redeem. Trimming it
+  // away here would skip to the other setting and report the host ready — disagreeing with core in
+  // precisely the direction that hides the defect this check exists to surface. Unlike the ROLE
+  // check above, where trimming is right because core's own `isRoleGrantable` normalizes, nothing
+  // normalizes here.
   const configured = (value: unknown): string | undefined =>
-    typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+    typeof value === 'string' && value.length > 0 ? value : undefined;
   const candidate =
     configured(magicLink?.contextUserForProvisioning) ??
     configured(userHandling?.contextUserForNewUserCreation);

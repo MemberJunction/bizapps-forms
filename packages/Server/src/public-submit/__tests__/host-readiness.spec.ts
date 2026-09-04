@@ -236,6 +236,23 @@ describe('checkProvisioningUserReadiness', () => {
     expect(result.ready === false && result.reason).toContain("'System'");
   });
 
+  // Core selects the candidate with plain `||` (MagicLinkService.resolveProvisioningContextUser),
+  // so a whitespace-only value is TRUTHY there: core takes it, misses in UserByName, logs
+  // "not found; falling back to an Owner" and provisions under an arbitrary Owner on every redeem.
+  // Trimming it away here would fall through to the other setting and call the host ready, which is
+  // the one thing this check must never do — the whole file's claim is that it cannot disagree with
+  // the call core will actually make. `null` is still unset, because `||` rejects that too.
+  it('agrees with core on a whitespace-only provisioning user, which core takes and fails to resolve', () => {
+    const result = checkProvisioningUserReadiness(
+      { contextUserForProvisioning: '   ' },
+      { contextUserForNewUserCreation: 'System' },
+      exists,
+    );
+
+    expect(result.ready).toBe(false);
+    expect(result.ready === false && result.reason).toContain('matches no user');
+  });
+
   // Host config is parsed from JSON, where blanking a value writes `null`, not `undefined`.
   it('treats null settings as unset instead of throwing on them', () => {
     const fromJson = JSON.parse('{"contextUserForProvisioning":null}') as HostMagicLinkConfig;
