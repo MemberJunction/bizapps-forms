@@ -26,6 +26,7 @@
     "lint:guard-mutants": "node scripts/check-guard-mutants.mjs",
     "lint:guard-mutants:test": "node --test scripts/check-guard-mutants.spec.mjs",
     "lint:codegen-compat": "node scripts/check-generated-api-compat.mjs",
+    "lint:codegen-compat:test": "node --test scripts/check-generated-api-compat.spec.mjs",
     "lint:migrations": "node scripts/check-migration-order.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs",
     "check:seed-cadence": "node scripts/check-release-seed-cadence.mjs",

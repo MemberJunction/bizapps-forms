@@ -156,8 +156,8 @@ npm run smoke:respondent -- <distribution-slug>
 
 ## 🔌 &nbsp;Install into a host app
 
-`mj app install` handles schema, migrations and package wiring from `mj-app.json`. One thing
-it cannot wire for you, because it lives in the host's own server config:
+`mj app install` handles schema, migrations and package wiring from `mj-app.json`. Two things
+it cannot wire for you, because they live in the host's own server config:
 
 ```js
 // <host>/apps/MJAPI/mj.config.cjs
@@ -166,14 +166,29 @@ module.exports = {
     enabled: true,
     restrictedRoleName: 'Form Respondent',   // created by Forms' seed migration
     grantableRoleNames: ['Form Respondent'],
+    // The user whose context provisions each anonymous respondent. Core matches this against
+    // User.NAME (not Email, whatever its own comment says); the MJ system user is the natural
+    // choice. Unset, core's default is a placeholder that resolves to nobody, so every link open
+    // logs an error and provisions under whichever account happens to be an Owner.
+    contextUserForProvisioning: 'System',
     explorerUrl: process.env.MJ_EXPLORER_BASE_URL,
   },
 };
 ```
 
-Without it forms still publish, but every public link answers **409** — no anonymous session
-can be minted. Forms checks this at startup and logs
-`[Forms] Anonymous respondent path is NOT ready: …` naming the exact setting.
+```bash
+# <host>/apps/MJAPI/.env — only if any form or link on this host requires a captcha.
+# Both or neither: the widget renders the challenge with the site key, the server verifies
+# it with the secret, and one without the other fails at whichever end is missing.
+FORMS_TURNSTILE_SITE_KEY=...
+FORMS_TURNSTILE_SECRET=...
+```
+
+Without `magicLink` forms still publish, but every public link answers **409** — no anonymous
+session can be minted. Forms checks all of this at startup — `magicLink` and the role, the
+provisioning user, and Turnstile on a host where a form or link requires a captcha — and logs one
+`[Forms] Anonymous respondent path is NOT ready: …` line per problem, naming the exact setting.
+A clean boot prints none of them.
 
 | Host requirement | Why |
 |---|---|
@@ -181,6 +196,8 @@ can be minted. Forms checks this at startup and logs
 | **`bizapps-common` + `bizapps-tasks`** installed | Hard dependencies; the on-submit hooks write a Person and a Task across schema boundaries |
 | **Their entity subclasses registered** | The hooks call `GetEntityObject` for both siblings; unregistered, MJ returns a bare `BaseEntity` and every assignment is silently lost |
 | **`magicLink` configured** | As above — the anonymous respondent path depends on it entirely |
+| **`magicLink.contextUserForProvisioning` set** | The Name of a real user; otherwise provisioning is attributed to an arbitrary Owner and every link open logs an error |
+| **Turnstile keys, if captcha is used** | `FORMS_TURNSTILE_SITE_KEY` + `FORMS_TURNSTILE_SECRET`, both or neither. Captcha is opt-in per form and per link (`CaptchaRequired` defaults to off); a captcha-required submit on a keyless host is refused as a server misconfiguration |
 
 ---
 
