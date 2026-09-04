@@ -50,11 +50,28 @@ const PUBLISHED_FORMS_REQUIRING_CAPTCHA: RunViewParams = {
   ResultType: 'simple',
 };
 
-/** Read what on this host requires a captcha. See the file header for why this never throws. */
+/**
+ * Read what on this host requires a captcha. See the file header for why this never throws.
+ *
+ * `contextUser` is typed as possibly absent on purpose. `UserCache.GetSystemUser()` is declared
+ * `(): UserInfo`, but core's own comment on it says it returns undefined when the cache has not
+ * been refreshed or the system-user row is missing — the type is an `as UserInfo` assertion, and
+ * the middleware already disbelieves it elsewhere (`this.systemUser()?.Name`). Taking the declared
+ * type at face value here would send `undefined` into an unscoped read at boot; refusing is the
+ * same fail-closed shape as every other outcome in this file, and costs the operator one line.
+ */
 export async function readCaptchaDemand(
   provider: CaptchaDemandProvider,
-  contextUser: UserInfo,
+  contextUser: UserInfo | undefined,
 ): Promise<CaptchaDemandRead> {
+  if (contextUser === undefined) {
+    return {
+      ok: false,
+      error:
+        'captcha-demand read skipped: this host has no resolvable system user, so the read would ' +
+        'run without one. Check that the MJ user cache loaded and the system user row exists.',
+    };
+  }
   const reads = [ACTIVE_LINKS_REQUIRING_CAPTCHA, PUBLISHED_FORMS_REQUIRING_CAPTCHA];
   let results: RunViewResult<{ ID: string }>[];
   try {

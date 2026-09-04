@@ -85,6 +85,22 @@ describe('readCaptchaDemand', () => {
     expect(read.ok === false && read.error).toContain('login failed');
   });
 
+  // `UserCache.GetSystemUser()` is DECLARED `(): UserInfo` but its own doc comment says it returns
+  // undefined when the cache has not been refreshed or the row is absent — the type is an
+  // `as UserInfo` assertion over a value core admits may not be there. The middleware disbelieves
+  // that type three lines below, writing `this.systemUser()?.Name`. So this probe must not accept
+  // the assertion either: no context user means the read cannot be trusted to be scoped, and a
+  // verdict is not invented from a read that should not have run.
+  it('refuses to read at all when there is no context user, instead of trusting the type', async () => {
+    const { provider, calls } = fakeProvider({ rowsFor: () => [{ ID: 'd1' }] });
+
+    const read = await readCaptchaDemand(provider, undefined);
+
+    expect(read.ok).toBe(false);
+    expect(read.ok === false && read.error).toMatch(/system user/i);
+    expect(calls, 'no query should be issued without a context user').toHaveLength(0);
+  });
+
   // This runs inside server boot. A thrown error here would be a boot failure for every app the
   // host serves, over a read whose only purpose is a warning line.
   it('turns a throwing provider into a failure result instead of propagating', async () => {
