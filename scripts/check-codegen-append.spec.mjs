@@ -7,12 +7,13 @@
  *
  * Node stdlib only, run with `node --test`, matching scripts/check-migration-order.spec.mjs.
  */
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 import {
   findAppSchemaDDL,
@@ -23,6 +24,9 @@ import {
   stripSqlComments,
   trackedCaptureFiles,
   changedMigrations,
+  addedMigrations,
+  readAt,
+  OUTPUT_SHIPPED_LATER,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -276,4 +280,123 @@ test('changedMigrations lists only top-level migration SQL', () => {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
   // A commit against itself changes nothing; the point is the shape, not the contents.
   assert.deepEqual(changedMigrations(head, head, REPO_ROOT), []);
+});
+
+// ── Fix round 2: the gate's primary path, end to end ─────────────────────────────────────────
+// Issue #160's definition of done: "a spec that watches it fail." Until now the spec watched the
+// CLASSIFIER fail; the real git-diff -> readAt -> classify -> violation -> exit 1 wiring in
+// main() was never driven. Built from real history rather than mocked git, and pinned to this
+// migration's own add-commit (never HEAD) -- a HEAD-ending range would pull in unrelated
+// migrations and drift these expectations every time the branch grows.
+const CAPTCHA_MIGRATION = 'migrations/V202609011500__v0.12.x__Captcha_Opt_In_By_Default.sql';
+const CAPTCHA_ADD = execFileSync('git',
+  ['log', '--diff-filter=A', '--format=%H', '--', CAPTCHA_MIGRATION],
+  { cwd: REPO_ROOT, encoding: 'utf8' }).trim().split('\n').pop();
+const CAPTCHA_BEFORE = execFileSync('git', ['rev-parse', `${CAPTCHA_ADD}^`],
+  { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+
+test('FIRES end-to-end: the real CLI exits 1 on a genuine CHECK 2 violation from history', () => {
+  assert.throws(
+    () => execFileSync('node',
+      ['scripts/check-codegen-append.mjs', CAPTCHA_BEFORE, CAPTCHA_ADD],
+      { cwd: REPO_ROOT, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      const stderr = String(err.stderr);
+      assert.match(stderr, /V202609011500__v0\.12\.x__Captcha_Opt_In_By_Default\.sql/);
+      assert.match(stderr, /ships no CodeGen output/);
+      return true;
+    }
+  );
+});
+
+test('addedMigrations reports the migration at its own add-commit', () => {
+  assert.deepEqual(addedMigrations(CAPTCHA_BEFORE, CAPTCHA_ADD, REPO_ROOT), [CAPTCHA_MIGRATION]);
+});
+
+test('readAt returns file contents at a sha, and null when the path does not exist there', () => {
+  const sql = readAt(CAPTCHA_ADD, CAPTCHA_MIGRATION, REPO_ROOT);
+  assert.match(sql, /ALTER TABLE/i);
+  assert.equal(readAt(CAPTCHA_ADD, 'migrations/Does_Not_Exist.sql', REPO_ROOT), null);
+});
+
+// ── Fix round 2: the OUTPUT_SHIPPED_LATER guard branches ─────────────────────────────────────
+// Both guards live inside main(), not in a pure export, so reaching them means running the real
+// CLI. Neither failure mode ("the named remedy doesn't exist" / "the named remedy regressed")
+// exists anywhere in this repo's real history -- they are exactly the failures the guards exist
+// to prevent, so real history has none to reproduce. This builds a throwaway git repo under the
+// OS temp dir to manufacture them: created and torn down per run, nothing written to this
+// repository or under migrations/.
+let fixture;
+
+before(() => {
+  const dir = mkdtempSync(join(tmpdir(), 'codegen-gate-fixture-'));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '--quiet');
+  git('config', 'user.email', 'fixture@test.local');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'commit.gpgsign', 'false');
+  mkdirSync(join(dir, 'migrations'));
+  writeFileSync(join(dir, 'README.md'), 'throwaway fixture repo for the OUTPUT_SHIPPED_LATER guards\n');
+  git('add', '.');
+  git('commit', '-m', 'root');
+  const root = git('rev-parse', 'HEAD').trim();
+
+  // Named to match a real OUTPUT_SHIPPED_LATER key: DDL that ships no output of its own.
+  const flagged = 'V202608182100__v0.11.x__Element_Parity_And_Screens.sql';
+  writeFileSync(join(dir, 'migrations', flagged),
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD FixtureCol BIT NOT NULL DEFAULT 0;\n');
+  git('add', '.');
+  git('commit', '-m', 'add flagged migration; its remedy does not exist yet');
+  const missingRemedySha = git('rev-parse', 'HEAD').trim();
+
+  // The map's remedy for `flagged` -- present at this commit, but carrying no CodeGen output.
+  const remedy = 'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql';
+  writeFileSync(join(dir, 'migrations', remedy), '-- a placeholder that ships nothing\nSELECT 1;\n');
+  git('add', '.');
+  git('commit', '-m', 'add the named remedy, but it ships no CodeGen output');
+  const regressedRemedySha = git('rev-parse', 'HEAD').trim();
+
+  fixture = { dir, root, missingRemedySha, regressedRemedySha };
+});
+
+after(() => {
+  if (fixture) rmSync(fixture.dir, { recursive: true, force: true });
+});
+
+test('FIRES: OUTPUT_SHIPPED_LATER names a remedy that does not exist at head', () => {
+  assert.throws(
+    () => execFileSync('node',
+      [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), fixture.root, fixture.missingRemedySha],
+      { cwd: fixture.dir, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /does not exist at/);
+      return true;
+    }
+  );
+});
+
+test('FIRES: OUTPUT_SHIPPED_LATER names a remedy that carries no CodeGen output', () => {
+  assert.throws(
+    () => execFileSync('node',
+      [join(REPO_ROOT, 'scripts/check-codegen-append.mjs'), fixture.root, fixture.regressedRemedySha],
+      { cwd: fixture.dir, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr), /exemption no longer holds/);
+      return true;
+    }
+  );
+});
+
+test('OUTPUT_SHIPPED_LATER only names remedies that are real and still carry CodeGen output', () => {
+  const tracked = new Set(execFileSync('git', ['ls-files', 'migrations/*.sql'],
+    { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean));
+  for (const [flaggedName, remedyName] of OUTPUT_SHIPPED_LATER) {
+    const remedyPath = `migrations/${remedyName}`;
+    assert.ok(tracked.has(remedyPath), `${remedyName}: named as ${flaggedName}'s remedy but is not tracked`);
+    assert.equal(carriesCodeGenOutput(read(remedyPath)), true,
+      `${remedyName}: named as ${flaggedName}'s remedy but carries no CodeGen output`);
+  }
 });

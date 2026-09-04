@@ -263,6 +263,17 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
     }
   }
 
+  // This branch depends on `isNew` for more than its own correctness: several merged migrations
+  // legitimately ship CodeGen output with no banner (some predate the banner convention and are
+  // caught only by carriesCodeGenOutput's structural detection; V202608191300/V202608191400 are
+  // OUTPUT_SHIPPED_LATER remedies written before the banner existed; V202608301200 hand-writes
+  // EntityFieldValue rows with no banner). History here is append-only (migrations/README.md:70),
+  // so none of them can be retrofitted -- `isNew` is what keeps this rule from re-flagging them.
+  // That only holds while the caller's BASE sits at or after those commits: true for a PR's
+  // merge-base and for a push range, since both start somewhere already on the branch, but NOT
+  // true for an arbitrary wide range (e.g. "everything since the banner convention began"), which
+  // would relight all of them as if newly added. Whoever changes what base/head this script is
+  // invoked with must preserve that invariant, or this fires on merged history it cannot fix.
   if (isNew && generated && !hasBanner(sql)) {
     violations.push(
       `${relPath}: ships CodeGen output with no "-- CodeGen output (appended)" banner. In a file this ` +
@@ -310,7 +321,7 @@ export function addedMigrations(baseSha, headSha, cwd) {
 }
 
 /** File contents at `sha`, or null when the path does not exist there. */
-function readAt(sha, relPath, cwd) {
+export function readAt(sha, relPath, cwd) {
   try {
     return execFileSync('git', ['show', `${sha}:${relPath}`], {
       cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT,
