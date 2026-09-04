@@ -1,0 +1,73 @@
+name: CodeGen Append Gate
+
+# MJ Forms is an Open App: `mj app install` writes __mj_BizAppsForms into the host's excludeSchemas,
+# so the host's CodeGen never runs against our schema and `migrations/` is the only channel we have.
+# A migration that changes the schema and stops has, on every host, added a column that is not in the
+# API — no EntityField row, a stale base view, stale CRUD procedures. It is invisible locally,
+# because `mj codegen` logs and executes in one call and the authoring database is already current.
+#
+# Two checks, two scopes, on purpose:
+#   1. No CodeGen_Run_*.sql is TRACKED — whole-tree. The tree is at zero, so this can never be
+#      permanently red, and whole-tree is the only scope that catches a23b598 (14 run files
+#      committed, no top-level migration touched).
+#   2. A changed migration with app-schema DDL ships its CodeGen output — diff-scoped, because nine
+#      merged migrations predate the rule and history is append-only (migrations/README.md:70).
+#
+# NOT wired into changes.yml: that workflow's has_migrations step greps '^migrations/[^/]+\.sql$'
+# and deliberately excludes migrations/codegen/, so a gate behind it would not have run on the very
+# commit that motivated it. See #160.
+
+on:
+  workflow_dispatch:
+  # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
+  # land a tracked capture without the gate ever running.
+  push:
+    branches: [next, main]
+    paths:
+      - 'migrations/**'
+      - 'scripts/check-codegen-append.mjs'
+      # The gate's own spec. `npm test` is Vitest and never runs a plain-Node .mjs spec, so without
+      # this entry a PR that weakened a case would run neither step.
+      - 'scripts/check-codegen-append.spec.mjs'
+      - '.github/workflows/codegen-append-gate.yml'
+  pull_request:
+    branches: [next, main]
+    paths:
+      - 'migrations/**'
+      - 'scripts/check-codegen-append.mjs'
+      - 'scripts/check-codegen-append.spec.mjs'
+      - '.github/workflows/codegen-append-gate.yml'
+
+jobs:
+  codegen-append-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # CHECK 2 diffs against the PR base, which shallow history does not contain.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The spec runs FIRST. A gate nobody has watched fail is indistinguishable from one that
+      # returns pass, and this order means a weakened gate fails before it gets to report clean.
+      - name: Check the gate itself still fires
+        run: npm run lint:codegen-append:test
+
+      # No `npm ci`: the gate is Node stdlib only, deliberately, so a dependency problem can never
+      # be the reason nobody finds out a migration shipped without its CodeGen output.
+      - name: No CodeGen capture file is tracked (whole tree)
+        run: npm run lint:codegen-append
+
+      - name: Changed migrations ship their CodeGen output
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-codegen-append.mjs "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+
+      # On a push, the range is the push itself. `github.event.before` is all-zeroes for a new
+      # branch, in which case there is nothing to diff and CHECK 1 above has already run.
+      - name: Changed migrations ship their CodeGen output (push)
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: node scripts/check-codegen-append.mjs "${{ github.event.before }}" "${{ github.sha }}"

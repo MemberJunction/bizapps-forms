@@ -28,6 +28,8 @@
     "lint:codegen-compat": "node scripts/check-generated-api-compat.mjs",
     "lint:codegen-compat:test": "node --test scripts/check-generated-api-compat.spec.mjs",
     "lint:migrations": "node scripts/check-migration-order.mjs",
+    "lint:codegen-append": "node scripts/check-codegen-append.mjs",
+    "lint:codegen-append:test": "node --test scripts/check-codegen-append.spec.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs",
     "check:seed-cadence": "node scripts/check-release-seed-cadence.mjs",
     "smoke:respondent": "node smoke/respondent-path.mjs",
