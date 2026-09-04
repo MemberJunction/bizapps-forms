@@ -24,6 +24,7 @@ export * from './entity-binding';
 export * from './entity-binding-merge';
 export * from './legacy-automations';
 export * from './submission';
+export * from './resume';
 export * from './starter-templates';
 export * from './schemas';
 export * from './sql-literal';

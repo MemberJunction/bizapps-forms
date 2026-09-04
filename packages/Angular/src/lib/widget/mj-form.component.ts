@@ -35,6 +35,7 @@ import {
   type FormStyleTokens,
   type PublishedFormDefinition,
   type PublishedFormScreen,
+  type ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities';
 
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
@@ -46,7 +47,8 @@ import { AutosaveController, type AutosaveStatus } from './core/autosave-control
 import { generateClientResponseId } from './core/client-id';
 import { FormUploadStore } from './core/upload-store';
 import { passedSubmitPoints } from './core/partial-submit-point';
-import { initialPhaseFor, outcomeForResult, shouldIgnoreSubmit } from './core/submit-phase';
+import { initialPhaseFor, outcomeForResult, resumedPhaseFor, shouldIgnoreSubmit } from './core/submit-phase';
+import { prefillFromResume } from './core/resume-prefill';
 import { resolveShownScreen, shownScreenFor, type ShownScreen } from './core/shown-screen';
 import {
   canRenderChallenge,
@@ -111,6 +113,34 @@ export class MjFormComponent implements OnInit, OnDestroy {
 
   /** Subtle, non-blocking autosave indicator. */
   protected readonly autosaveStatus = signal<AutosaveStatus>('idle');
+
+  /**
+   * True when this widget mounted onto a draft the server handed back (#138).
+   *
+   * Gates the start-over control, which must NOT appear in an ordinary first sitting: "Not you?
+   * Start over" only makes sense to somebody who was shown answers they may not have written.
+   */
+  protected readonly resumed = signal<boolean>(false);
+
+  /**
+   * Question ids whose stored answer could not be put back — the question is gone from this
+   * version, or its type changed under the draft.
+   *
+   * Surfaced rather than swallowed because the failure is otherwise invisible in the worst way: a
+   * stored value its control silently rejects leaves the field blank, and a value in the wrong
+   * column fails server-side validation on EVERY autosave from then on. Autosave is fail-soft, so
+   * the respondent types on and nothing is ever saved again — with nothing on screen saying so.
+   */
+  protected readonly resumeDropped = signal<readonly string[]>([]);
+
+  /**
+   * One line from the page when it could not reopen a draft it thought existed.
+   *
+   * An INPUT rather than something the widget discovers, because the widget knows nothing about
+   * cookies or host routes — the boot script does the reopening and reports the outcome here. Empty
+   * for an embed, which never calls those routes at all.
+   */
+  public readonly resumeNotice = input<string>('', { alias: 'resume-notice' });
 
   /**
    * The ending screen this response resolved to, set once at submit time.
@@ -261,6 +291,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
    * with the rest of the per-fill state.
    */
   private endingEarly = false;
+  /**
+   * Whether this fill has already announced its first acknowledged partial save.
+   *
+   * ONCE per fill: `mjf-partial-saved` is what makes the page mint a device invite, and minting one
+   * per autosave would leave a row (plus an audit row) every few seconds of typing.
+   */
+  private partialAnnounced = false;
 
   public async ngOnInit(): Promise<void> {
     await this.load();
@@ -277,12 +314,18 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // server echo so a retry never upserts a previously-abandoned row.
     this.clientResponseId = generateClientResponseId();
     this.responseId = undefined;
+    this.resumed.set(false);
+    this.resumeDropped.set([]);
+    this.partialAnnounced = false;
     try {
-      const def = this.definitionInput() ?? (await this.api.loadPublishedForm(this.distributionSlug()));
-      if (!def) {
+      const loaded = this.definitionInput()
+        ? { definition: this.definitionInput() as PublishedFormDefinition }
+        : await this.api.loadPublishedForm(this.distributionSlug());
+      if (!loaded) {
         this.fail('This form is not available.');
         return;
       }
+      const def = loaded.definition;
       applyStyleTokens(this.hostRef.nativeElement, def.styleTokens);
       this.definition.set(def);
       const runtime = new FormRuntime(def);
@@ -298,10 +341,51 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.logoBroken.set(false);
       this.bankedSubmitPoints = new Set<string>();
       this.endingEarly = false;
-      this.phase.set(initialPhaseFor(def));
+      this.phase.set(this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def));
     } catch (err) {
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
     }
+  }
+
+  /**
+   * Take over a draft the server says this session owns, and return the phase it opens in — or
+   * `undefined` when there is nothing to resume, which is every first sitting.
+   *
+   * THE ADOPTION IS THE LOAD-BEARING LINE. Making the row's own id this widget's
+   * `clientResponseId` is what routes every later save onto that row, and it is also what keeps the
+   * upload ledger's provenance proof matching: the first sitting's files were tagged with this id.
+   *
+   * SEALED IS DECIDED HERE, at mount, and it cannot be decided anywhere else — `savePartial`
+   * ignores the result's status and the pipeline answers a partial against a sealed row with
+   * `success: true`, so a respondent allowed to start typing would type into a row that will never
+   * take another answer. Reaching `done` also makes `shouldIgnoreSubmit` true, so the sealed screen
+   * cannot issue a submit at all.
+   */
+  private adoptResume(
+    resume: ResumeSnapshot | undefined,
+    definition: PublishedFormDefinition,
+    runtime: FormRuntime,
+  ): WidgetPhase | undefined {
+    if (!resume) {
+      return undefined;
+    }
+    this.clientResponseId = resume.responseId;
+    this.responseId = resume.responseId;
+    this.resumed.set(true);
+    const prefill = prefillFromResume(runtime, definition, resume);
+    this.resumeDropped.set(prefill.dropped);
+    const phase = resumedPhaseFor(resume.status);
+    if (phase === 'done') {
+      // The confirmation path reads the RESULT, so a resumed sealed row hands it the same shape a
+      // submit would have — which is how a `Disqualified` draft gets the screened-out copy rather
+      // than a thank-you it never earned.
+      this.result.set({ success: true, responseId: resume.responseId, status: resume.status });
+    } else {
+      // Its answers are already on the server. Saying `saved` rather than `idle` stops the
+      // indicator claiming unsaved work the moment the respondent touches anything.
+      this.autosaveStatus.set('saved');
+    }
+    return phase;
   }
 
   /**
@@ -728,6 +812,13 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
     const outcome = outcomeForResult(res);
     this.phase.set(outcome.phase);
+    if (outcome.phase === 'done') {
+      // The draft is sealed: tell the page so it can drop the device pointer. Reopening the public
+      // link on this browser afterwards must show a FRESH form — the response is finished, and a
+      // multi-use link is meant to be fillable again. The sealed answers stay reachable only
+      // through a link the respondent was sent.
+      this.emitHostEvent('mjf-submitted', { responseId: res.responseId });
+    }
     if (!res.success) {
       const message = (res.errors ?? []).map((e) => e.message).join(' ').trim();
       if (message) {
@@ -845,8 +936,54 @@ export class MjFormComponent implements OnInit, OnDestroy {
     );
     if (res.success && res.responseId) {
       this.responseId = res.responseId;
+      this.announceFirstPartial(res.responseId);
     }
     return this.responseTarget();
+  }
+
+  /**
+   * Tell the page there is now a draft worth remembering — once, on the first ACKNOWLEDGED save.
+   *
+   * Acknowledged, not attempted: the page turns this into a magic-link invite scoped to the
+   * response, and a row that failed to save has no id to scope one to.
+   *
+   * IT CARRIES BOTH CORRELATORS, and that is not incidental. The page's `/remember` route has to
+   * run the ownership rule before it mints a bearer token for this draft, and the only proof of
+   * ownership a first sitting has is the `x-session-id` header — which lives inside the API service
+   * and is invisible to the boot script. Sending the response id alone would have the page minting
+   * a credential on a bare row id, which is the header-replay weakness this whole feature exists to
+   * close.
+   *
+   * `composed: true` so it crosses the shadow boundary; a page that is not listening (an embed)
+   * simply receives nothing, which is why embeds need no conditional code in the widget.
+   */
+  private announceFirstPartial(responseId: string): void {
+    if (this.partialAnnounced) {
+      return;
+    }
+    this.partialAnnounced = true;
+    this.emitHostEvent('mjf-partial-saved', { responseId, sessionId: this.api.sessionCorrelator() });
+  }
+
+  /**
+   * "Not you? Start over" — the control a shared device needs.
+   *
+   * The widget only ANNOUNCES it. The page clears the device pointer and reloads, and the reload is
+   * the point: under a response-scoped session the pipeline would update the scoped row rather than
+   * create a new one, so a genuine start-over needs a fresh distribution session, which only a
+   * fresh page load can mint. The old draft is left exactly as it was.
+   */
+  protected startOver(): void {
+    this.emitHostEvent('mjf-start-over', {});
+  }
+
+  /** Dispatch one host event, or nothing at all outside a browser. */
+  private emitHostEvent(name: string, detail: Record<string, unknown>): void {
+    const host = this.hostRef.nativeElement;
+    if (typeof CustomEvent === 'undefined' || !host?.dispatchEvent) {
+      return;
+    }
+    host.dispatchEvent(new CustomEvent(name, { detail, bubbles: true, composed: true }));
   }
 
   /**

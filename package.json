@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n❌ Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\"",
+    "prebuild": "node -e \"try { require.resolve('turbo') } catch (e) { console.error('\\n\u274c Dependencies not installed. Run: pnpm install\\n'); process.exit(1); }\"",
     "build": "pnpm run build:stream",
     "build:stream": "turbo --log-order=stream build --filter=\"@mj-biz-apps/*\"",
     "build:generated": "turbo --log-order=stream build --filter=\"@mj-biz-apps/forms-entities\" --filter=\"@mj-biz-apps/forms-actions\"",
@@ -46,6 +46,7 @@
     "smoke:provenance": "node smoke/upload-provenance-path.mjs",
     "smoke:file-links": "node smoke/file-links-path.mjs",
     "smoke:resume-arc": "node smoke/resume-arc-path.mjs",
+    "smoke:device-resume": "node smoke/device-resume-path.mjs",
     "smoke:metadata": "node smoke/metadata-integrity-path.mjs",
     "smoke:backfill": "node smoke/backfill-path.mjs",
     "smoke:credentials": "cd apps/MJAPI && node credential-lifecycle-smoke.mjs",

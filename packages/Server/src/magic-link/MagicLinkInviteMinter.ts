@@ -448,6 +448,11 @@ export class MagicLinkInviteMinter implements IAnonymousMagicLinkMinter {
     if (resourceTypeId) {
       invite.ResourceTypeID = resourceTypeId;
     }
+    // Delivery address, when there was one. See `MintAnonymousInviteParams.email`: this does not
+    // change the identity mode, and leaving it null is what marks an invite as device-held.
+    if (params.email) {
+      invite.Email = params.email;
+    }
     invite.MaxUses = params.maxUses;
     invite.UseCount = 0;
     invite.ExpiresAt = expiresAt;

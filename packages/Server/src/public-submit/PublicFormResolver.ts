@@ -15,6 +15,8 @@ import type { UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import type { FieldError, FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition } from './definition-loader.service';
+import { loadResumeSnapshot } from './resume-snapshot.service';
+import { scopeNamesDistribution } from './scope-response.service';
 import {
   FieldErrorType,
   FormSubmissionInputType,
@@ -51,6 +53,14 @@ export class PublicFormResolver extends ResolverBase {
         return null;
       }
       const { definition } = loaded.value;
+      // A resume session and a public-link session reach this resolver identically; the only
+      // difference is what their scope claim names. Only a claim that is NOT this distribution can
+      // name a response, so an ordinary public link pays for no read here at all.
+      const scope = contextUser.MagicLinkScope?.ResourceID;
+      const resume =
+        scope && !scopeNamesDistribution(scope, loaded.value.distribution.ID)
+          ? await loadResumeSnapshot(provider, scope, contextUser)
+          : undefined;
       return Object.assign(new PublishedFormType(), {
         formId: definition.formId,
         formVersionId: definition.formVersionId,
@@ -60,6 +70,7 @@ export class PublicFormResolver extends ResolverBase {
         settingsJSON: JSON.stringify(definition.settings),
         styleTokensJSON: JSON.stringify(definition.styleTokens),
         definitionJSON: JSON.stringify(definition),
+        resumeJSON: resume ? JSON.stringify(resume) : undefined,
       });
     });
   }
@@ -123,6 +134,10 @@ export class PublicFormResolver extends ResolverBase {
         contextUser,
         elevatedUser,
         sessionId: userPayload.sessionId,
+        // The VERIFIED half of the caller's identity. `MagicLinkScope` is populated by MJ core's
+        // `buildMagicLinkSessionUser` from the session's `mj_scopes` claim, so unlike the session
+        // header beside it, a browser cannot choose what it says.
+        scopeResourceId: contextUser.MagicLinkScope?.ResourceID,
         clientIpHash: currentRequestIdentity()?.ipHash,
       },
       submission,

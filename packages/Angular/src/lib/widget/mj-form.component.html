@@ -18,6 +18,37 @@
     </div>
   }
 
+  <!--
+    Two things a RESUMED respondent has to be told, above every phase because both are about the
+    session rather than about a screen.
+
+    The notice is the page's, not the widget's: only the page knows whether reopening a saved draft
+    was attempted and failed. It is one neutral line for every reason, on purpose — "expired",
+    "revoked" and "no such draft" must not be tellable apart, or the message becomes a way to ask
+    whether somebody has a draft.
+
+    Start over is rendered ONLY in a resumed session. In a first sitting there is nothing to start
+    over from, and offering it would invite a respondent to discard work they did write.
+  -->
+  @if (resumeNotice()) {
+    <p class="mjf-resume-notice" role="status">
+      <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ resumeNotice() }}
+    </p>
+  }
+  @if (resumed() && phase() === 'ready') {
+    <p class="mjf-resume-bar">
+      <span class="mjf-resume-bar__text">We've brought back the answers you saved earlier.</span>
+      <button type="button" class="mjf-resume-bar__action" (click)="startOver()">Not you? Start over</button>
+    </p>
+  }
+  @if (resumeDropped().length > 0) {
+    <p class="mjf-resume-notice mjf-resume-notice--warn" role="status">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      This form has changed since you saved. {{ resumeDropped().length }} of your answers need
+      answering again.
+    </p>
+  }
+
   @switch (phase()) {
     @case ('loading') {
       <div class="mjf-state" role="status" aria-live="polite">
