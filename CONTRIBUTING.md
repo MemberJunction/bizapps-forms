@@ -45,6 +45,10 @@ Running the app locally — and why there is no Explorer here — is
 
 ## CodeGen
 
+> Running it, what it mutates, `--skipfiles` vs `--skipdb`, and the ordering trap on a fresh
+> database: **[docs/database-operations.md](docs/database-operations.md)**.
+
+
 Generated code lives in `packages/*/src/generated/`. **Never hand-edit it.** Run
 `npm run mj:codegen` after any schema change, and write TypeScript against generated types
 **only after** CodeGen has run.
@@ -52,6 +56,11 @@ Generated code lives in `packages/*/src/generated/`. **Never hand-edit it.** Run
 ---
 
 ## Migrations
+
+> Which `mj migrate` targets core vs this app's schema — and why the bare form is dangerous:
+> **[docs/database-operations.md](docs/database-operations.md)**. Authoring rules are in
+> **[migrations/README.md](migrations/README.md)**.
+
 
 - Highest `migrations/` version folder; filename `VYYYYMMDDHHMM__v<ver>__<Description>.sql`.
 - Hardcoded UUIDs. New tables in schema `__mj_BizAppsForms`.
