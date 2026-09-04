@@ -5,7 +5,7 @@
  *
  * ── WHY THIS IS NOT A STYLE RULE ────────────────────────────────────────────────────────────────
  * MJ Forms is an Open App. `mj app install` writes `__mj_BizAppsForms` into the host's
- * `excludeSchemas` (MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980), so the
+ * `excludeSchemas` (MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980-1983), so the
  * host's CodeGen never runs against our schema. `migrations/` is the only channel we have: if a
  * table, a base view, an spCreate/spUpdate/spDelete, an EntityField row or a column description is
  * not in a migration, it does not exist on the host. Locally everything works, because `mj codegen`
@@ -26,9 +26,10 @@
  * migration at all.
  *
  * CHECK 2 (DDL ↔ output) is DIFF-SCOPED, for the reason bizapps-caliber documents: nine merged
- * migrations predate the rule and cannot be repaired in place (migrations/README.md:70 — history is
- * append-only), so a whole-tree version would be permanently red and would get turned off. The diff
- * is also the only thing the PR's author can act on.
+ * migrations predate the rule and cannot be repaired in place — history is append-only
+ * (migrations/README.md, "Add a NEW seed migration; never edit an existing one") — so a whole-tree
+ * version would be permanently red and would get turned off. The diff is also the only thing the
+ * PR's author can act on.
  *
  * Node stdlib only, deliberately: a dependency problem must never be the reason nobody finds out.
  */
@@ -192,8 +193,9 @@ export function findCodeGenNoneReason(sql) {
  * Does this migration honour the DDL ↔ CodeGen-output contract?
  *
  * Returns violation strings (empty = clean). `isNew` is true for a file the diff ADDS: the banner is
- * required of new migrations only, because history cannot be retrofitted (migrations/README.md:70).
- * Every message names the fix — a gate that only says "no" costs a round trip to find out why.
+ * required of new migrations only, because history cannot be retrofitted (migrations/README.md,
+ * "Add a NEW seed migration; never edit an existing one"). Every message names the fix — a gate
+ * that only says "no" costs a round trip to find out why.
  */
 export function classifyMigration(relPath, sql, { isNew = false } = {}) {
   const violations = [];
@@ -267,8 +269,9 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
   // legitimately ship CodeGen output with no banner (some predate the banner convention and are
   // caught only by carriesCodeGenOutput's structural detection; V202608191300/V202608191400 are
   // OUTPUT_SHIPPED_LATER remedies written before the banner existed; V202608301200 hand-writes
-  // EntityFieldValue rows with no banner). History here is append-only (migrations/README.md:70),
-  // so none of them can be retrofitted -- `isNew` is what keeps this rule from re-flagging them.
+  // EntityFieldValue rows with no banner). History here is append-only (migrations/README.md,
+  // "Add a NEW seed migration; never edit an existing one"), so none of them can be retrofitted --
+  // `isNew` is what keeps this rule from re-flagging them.
   // That only holds while the caller's BASE sits at or after those commits: true for a PR's
   // merge-base and for a push range, since both start somewhere already on the branch, but NOT
   // true for an arbitrary wide range (e.g. "everything since the banner convention began"), which

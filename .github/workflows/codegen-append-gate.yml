@@ -11,7 +11,8 @@ name: CodeGen Append Gate
 #      permanently red, and whole-tree is the only scope that catches a23b598 (14 run files
 #      committed, no top-level migration touched).
 #   2. A changed migration with app-schema DDL ships its CodeGen output — diff-scoped, because nine
-#      merged migrations predate the rule and history is append-only (migrations/README.md:70).
+#      merged migrations predate the rule and history is append-only
+#      (migrations/README.md, "Add a NEW seed migration; never edit an existing one").
 #
 # NOT wired into changes.yml: that workflow's has_migrations step greps '^migrations/[^/]+\.sql$'
 # and deliberately excludes migrations/codegen/, so a gate behind it would not have run on the very

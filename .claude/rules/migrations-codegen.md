@@ -62,6 +62,10 @@ remove the banner.
 
 ## Order, for a new column
 
+[`docs/database-operations.md`](../../docs/database-operations.md) §2 is the authority on this
+workflow — the commands below are reproduced here only because this rule is where the decision gets
+made; if the two ever disagree, the doc wins.
+
 ```bash
 npm run mj:migrate            # 1. schema
 npx mj codegen --skipfiles    # 2. DB side only — creates the EntityField row, rebuilds views and
@@ -81,7 +85,7 @@ run file, nothing is wrong.
 ## Why this is mandatory rather than tidy
 
 MJ Forms is an **Open App**. `mj app install` writes `__mj_BizAppsForms` into the host's
-`excludeSchemas` (`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980`), so the
+`excludeSchemas` (`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980-1983`), so the
 host's CodeGen never runs against our schema. `MJ/plans/open-app-spec.md:387`: *"app migrations must
 be self-contained because CodeGen does not run on app schemas at install time."*
 
@@ -115,10 +119,11 @@ Neither is true on a host or a clean checkout. If you write instructions, say wh
 
 ## Never edit a merged migration to add a banner
 
-`migrations/README.md:70` — history is append-only, and the one earned exception (2026-08-13, #39)
-required that the file *could not apply at all*. Six merged migrations carry CodeGen output with no
-banner (`B202606281200`, `V202608072330`, `V202608081200`, `V202608191300`, `V202608191400`,
-`V202608301200`) — that is history, not a defect to repair; the gate detects them structurally
+`migrations/README.md`, "Add a NEW seed migration; never edit an existing one" — history is
+append-only, and the one earned exception (2026-08-13, #39) required that the file *could not apply
+at all*. Six merged migrations carry CodeGen output with no banner (`B202606281200`,
+`V202608072330`, `V202608081200`, `V202608191300`, `V202608191400`, `V202608301200`) — that is
+history, not a defect to repair; the gate detects them structurally
 instead of by banner. If a merged migration is genuinely missing its output, ship a **new**
 migration — `V202608191300` and `V202608191400` are what that looks like.
 

@@ -102,7 +102,8 @@ test('FIRES: a NEW migration ships CodeGen output with no banner', () => {
 });
 
 test('does NOT fire on the same file when it is merely modified', () => {
-  // History cannot be retrofitted (migrations/README.md:70), so the banner rule is for new files.
+  // History cannot be retrofitted (migrations/README.md, "Add a NEW seed migration; never edit an
+  // existing one"), so the banner rule is for new files.
   assert.deepEqual(classifyMigration('migrations/V1__x.sql',
     'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: false }), []);
