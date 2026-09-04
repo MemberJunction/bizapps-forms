@@ -20,6 +20,7 @@ import {
   hasBanner,
   findCodeGenNoneReason,
   classifyMigration,
+  stripSqlComments,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -139,4 +140,87 @@ test('the four banner-bearing migrations are recognised as shipping output', () 
 test('the description-only migration is clean because it writes EntityField.Description too', () => {
   const f = 'migrations/V202608302200__v0.12.x__Link_Credential_Lifecycle.sql';
   assert.deepEqual(classifyMigration(f, read(f)), []);
+});
+
+// ── Fix round 1: real correctness gaps found in review ───────────────────────────────────────
+// Each of these reproduces a bug the reviewer found in the first cut of the classifier. The
+// calibration test above is unaffected -- none of the 31 real migrations depended on any of them.
+
+test('bare UPDATE of EntityField is a hand-patch, not CodeGen output', () => {
+  assert.equal(
+    carriesCodeGenOutput("UPDATE [${mjSchema}].[EntityField] SET Sequence = 5 WHERE Name = 'X';"),
+    false
+  );
+});
+
+test('INSERT INTO EntityField counts as CodeGen output (new field rows)', () => {
+  assert.equal(
+    carriesCodeGenOutput("INSERT INTO [${mjSchema}].[EntityField] (ID, Name) VALUES ('x', 'y');"),
+    true
+  );
+});
+
+test('FIRES: an unrelated bare EntityField UPDATE does not excuse DDL that ships no output', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    "ALTER TABLE [${flyway:defaultSchema}].[Form] ADD NewCol BIT NOT NULL DEFAULT 0;\n" +
+    "UPDATE [${mjSchema}].[EntityField] SET Sequence = 5 WHERE Name = 'Unrelated';");
+  assert.equal(v.length, 1);
+  assert.match(v[0], /ships no CodeGen output/);
+});
+
+test('FIRES: a description obligation is not satisfied by the word "Description" merely appearing nearby', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    "EXEC sp_updateextendedproperty @name = N'MS_Description', @value = N'new text';\n" +
+    "UPDATE [${mjSchema}].[EntityField] SET Sequence = 5 WHERE Description IS NOT NULL;");
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityField\.Description/);
+});
+
+test('FIRES: @codegen-none excuses only the tables it names, not every DDL statement in the file', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    '-- @codegen-none: the first one is a CHECK on an int\n' +
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_a CHECK (N > 0);\n' +
+    'ALTER TABLE [${flyway:defaultSchema}].[FormPage] ADD RealNewCol NVARCHAR(50);');
+  assert.equal(v.length, 1);
+  assert.match(v[0], /FormPage/);
+});
+
+test('does NOT fire when @codegen-none names every table its DDL touches', () => {
+  assert.deepEqual(classifyMigration('migrations/V1__x.sql',
+    '-- @codegen-none: Form and FormPage only get a CHECK constraint, no metadata to generate\n' +
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_a CHECK (N > 0);\n' +
+    'ALTER TABLE [${flyway:defaultSchema}].[FormPage] ADD CONSTRAINT CK_b CHECK (N > 0);'), []);
+});
+
+test('FIRES: DDL against the literal schema name is not invisible', () => {
+  assert.deepEqual(
+    findAppSchemaDDL('CREATE TABLE [__mj_BizAppsForms].[Thing] (ID UNIQUEIDENTIFIER);'),
+    ['CREATE TABLE Thing']
+  );
+  const v = classifyMigration('migrations/V1__x.sql',
+    'CREATE TABLE [__mj_BizAppsForms].[Thing] (ID UNIQUEIDENTIFIER);');
+  assert.equal(v.length, 1);
+  assert.match(v[0], /ships no CodeGen output/);
+});
+
+test('FIRES: the banner is present but nothing generated follows it', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\n-- CodeGen output (appended)\n',
+    { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /nothing generated follows|empty section/);
+});
+
+test('sp_addextendedproperty counts as touching an extended property, same as sp_updateextendedproperty', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    "EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'new text';");
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityField\.Description/);
+});
+
+test('stripSqlComments removes line and block comments but keeps code', () => {
+  assert.equal(
+    stripSqlComments('SELECT 1; -- a comment\n/* block\ncomment */SELECT 2;'),
+    'SELECT 1; \nSELECT 2;'
+  );
 });

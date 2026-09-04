@@ -76,7 +76,15 @@ export function stripSqlComments(sql) {
   return sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '');
 }
 
-const APP_SCHEMA = String.raw`\[?\$\{flyway:defaultSchema\}\]?`;
+/**
+ * This app's schema, literally (CLAUDE.md's "Database schema" line, `mj.config.cjs`).
+ * `${flyway:defaultSchema}` is the placeholder every migration should use, but a DDL statement
+ * written against the literal name is still real DDL against our schema -- it must not be
+ * invisible to this gate just because it skipped the convention. Several pre-convention
+ * migrations (B202606281200 and others) do exactly this for their original CREATE TABLEs.
+ */
+const APP_SCHEMA_LITERAL = '__mj_BizAppsForms';
+const APP_SCHEMA = String.raw`(?:\[?\$\{flyway:defaultSchema\}\]?|\[?${APP_SCHEMA_LITERAL}\]?)`;
 const DDL_PATTERNS = [
   ['CREATE TABLE', new RegExp(String.raw`\bCREATE\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?(\w+)\]?`, 'gi')],
   ['ALTER TABLE',  new RegExp(String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?(\w+)\]?`, 'gi')],
@@ -109,14 +117,18 @@ export function touchesExtendedProperty(sql) {
 }
 
 /**
- * Does it also write `__mj.EntityField.Description`?
+ * Does it also write `__mj.EntityField.Description` -- an actual SET of the column, not just the
+ * word "Description" occurring somewhere nearby?
  *
  * The established Forms pattern (V202608302200) writes BOTH: CodeGen copies the description into the
  * generated entity class, Explorer's field UI reads the EntityField row, and a migration that
- * updates only one leaves the two surfaces publishing different sentences.
+ * updates only one leaves the two surfaces publishing different sentences. Requiring an actual SET
+ * (not mere proximity) matters because a WHERE clause or an unrelated column can carry the word
+ * "Description" without the UPDATE ever assigning it -- `[^;]` bounds the search to the one UPDATE
+ * statement so a later, unrelated SET can't be credited to this one.
  */
 export function writesEntityFieldDescription(sql) {
-  return /UPDATE\s+(?:\[?\$\{mjSchema\}\]?\s*\.\s*)?\[?EntityField\]?\b[\s\S]{0,600}?\bDescription\b/i
+  return /UPDATE\s+(?:\[?\$\{mjSchema\}\]?\s*\.\s*)?\[?EntityField\]?\b[^;]{0,300}?\bSET\b[^;]{0,300}?\[?Description\]?\s*=/i
     .test(stripSqlComments(sql));
 }
 
@@ -126,12 +138,33 @@ export function hasBanner(sql) {
 }
 
 /**
+ * True when the banner is present but nothing substantive follows it -- a file that READS as
+ * having shipped its output while shipping none. Blank lines and further comments don't count as
+ * content; only code does.
+ */
+export function bannerHasNoContentBeneath(sql) {
+  const m = sql.match(BANNER_PATTERN);
+  if (!m) return false;
+  const restOfBannerLine = sql.indexOf('\n', m.index + m[0].length);
+  const after = restOfBannerLine === -1 ? '' : sql.slice(restOfBannerLine + 1);
+  return stripSqlComments(after).trim().length === 0;
+}
+
+/**
  * Does the file carry CodeGen's SQL — under the banner, or structurally?
  *
  * Structural detection exists because history predates the banner: five merged migrations carry
  * generated CRUD without one, and they ship correct output. Hand-authored equivalents count too —
  * V202608301200 writes the `__mj.EntityFieldValue` rows CodeGen derives from a CHECK constraint by
  * hand, and documents exactly why (it had no database to regenerate from).
+ *
+ * A bare `UPDATE ... EntityField` does NOT count. CodeGen's actual EntityField output is an INSERT
+ * (a new field row) -- an UPDATE of EntityField is a hand-patch to an existing row (a Sequence
+ * tweak, a description edit) and proves nothing about whether THIS migration's DDL got its
+ * metadata. Without this distinction, one unrelated EntityField UPDATE anywhere in the file excuses
+ * every DDL statement in it -- the exact V202608182100 failure this gate exists to catch.
+ * EntityFieldValue is different: CodeGen's value-list sync inserts new rows AND updates existing
+ * ones, so both verbs count there (V202608301200 depends on the UPDATE case).
  */
 export function carriesCodeGenOutput(sql) {
   if (hasBanner(sql)) return true;
@@ -139,7 +172,8 @@ export function carriesCodeGenOutput(sql) {
   return (
     /CREATE\s+(?:OR\s+ALTER\s+)?PROCEDURE\s+\S*\[?sp(?:Create|Update|Delete)\w+/i.test(code) ||
     /CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+\S*\[?vw\w+/i.test(code) ||
-    /(?:INSERT\s+INTO|UPDATE)\s+\S*\[?EntityField(?:Value)?\]?/i.test(code)
+    /INSERT\s+INTO\s+\S*\[?EntityField(?:Value)?\]?/i.test(code) ||
+    /(?:INSERT\s+INTO|UPDATE)\s+\S*\[?EntityFieldValue\]?/i.test(code)
   );
 }
 
@@ -165,6 +199,16 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
   const violations = [];
   const ddl = findAppSchemaDDL(sql);
   const generated = carriesCodeGenOutput(sql);
+
+  // A banner that claims output but ships none is worse than no banner: it reads as satisfied.
+  if (hasBanner(sql) && bannerHasNoContentBeneath(sql)) {
+    violations.push(
+      `${relPath}: carries the "-- CodeGen output (appended)" banner, but nothing generated ` +
+        `follows it -- an empty section satisfies no host. Append CodeGen's actual output below ` +
+        `the banner, or remove the banner if this migration truly ships none.`
+    );
+    return violations;
+  }
 
   // A description-only migration: no schema change, just text. Its obligation is the second write.
   if (!ddl.length && touchesExtendedProperty(sql) && !generated) {
@@ -202,6 +246,20 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
           `new table always produces at least the __mj.Entity registration and its EntityField rows. ` +
           `Append the output instead.`
       );
+    } else {
+      // One `@codegen-none` must not excuse every DDL statement in the file — only the tables it
+      // actually names. Otherwise a second, genuinely-unexcused ALTER inherits an old reason it
+      // never earned.
+      const ddlTables = [...new Set(ddl.map((d) => d.split(' ').pop()))];
+      const unnamed = ddlTables.filter((t) => !new RegExp(`\\b${t}\\b`).test(reason));
+      if (unnamed.length) {
+        violations.push(
+          `${relPath}: ${CODEGEN_NONE_MARKER} does not name ${unnamed.join(', ')}, so it does not ` +
+            `excuse ${unnamed.length > 1 ? 'those tables' : 'that table'} — name every table this ` +
+            `migration's DDL touches in the reason, or a later ALTER on the same file silently ` +
+            `inherits an excuse it never earned.`
+        );
+      }
     }
   }
 
