@@ -47,24 +47,28 @@ const FILES_CITING_README_HEADING = [
   '.github/workflows/codegen-append-gate.yml',
   'scripts/check-codegen-append.mjs',
   'scripts/check-codegen-append.spec.mjs',
+  'plans/CODEGEN_CONVENTION_GATE_PLAN.md',
 ];
 
-test('the README heading these files cite by quote, not line number, still exists and is cited exactly 6 times', () => {
+test('the README heading these files cite by quote, not line number, still exists and is cited exactly 7 times', () => {
   assert.ok(
     read('migrations/README.md').includes(CITED_PHRASE),
     `migrations/README.md no longer contains "${CITED_PHRASE}" -- every citation of it (the rule, ` +
-      `the workflow, and this gate's own source and spec) is now stale`
+      `the workflow, this gate's own source and spec, and the plan) is now stale`
   );
   const total = FILES_CITING_README_HEADING.reduce(
     (sum, f) => sum + countOccurrences(read(f), CITED_PHRASE), 0
   );
-  // 7, not 6: this test's own CITED_PHRASE constant, three lines up, necessarily repeats the
-  // citation text in order to search for it -- that is a search key, not a seventh citation. The
-  // six real citations are the rule (1), the workflow (1), this gate's source (3), and this
-  // spec's own round-2 fix at the "does NOT fire on the same file" test above (1).
-  assert.equal(total, 7,
-    `expected "${CITED_PHRASE}" to appear 7 times across ${FILES_CITING_README_HEADING.join(', ')} ` +
-      `(the six real citations plus this test's own comparison literal), found ${total} -- a ` +
+  // 8, not 7: this test's own CITED_PHRASE constant, three lines up, necessarily repeats the
+  // citation text in order to search for it -- that is a search key, not an eighth citation. The
+  // seven real citations are the rule (1), the workflow (1), this gate's source (3), this spec's
+  // own round-2 fix at the "does NOT fire on the same file" test above (1), and the plan's
+  // "Watched it fail" writeup (1) -- the plan's own line-number citations elsewhere (its earlier
+  // task drafts, superseded by later tasks in the same plan) are historical record, not live
+  // references, and are deliberately not counted here.
+  assert.equal(total, 8,
+    `expected "${CITED_PHRASE}" to appear 8 times across ${FILES_CITING_README_HEADING.join(', ')} ` +
+      `(the seven real citations plus this test's own comparison literal), found ${total} -- a ` +
       `citation was reworded, or one got split across a line-wrap again`);
 });
 
@@ -266,6 +270,71 @@ test('stripSqlComments removes line and block comments but keeps code', () => {
     stripSqlComments('SELECT 1; -- a comment\n/* block\ncomment */SELECT 2;'),
     'SELECT 1; \nSELECT 2;'
   );
+});
+
+// ── Fix round 3: the banner was trusted on sight, so naming it disabled the gate ─────────────
+// `hasBanner` used to be enough, on its own, to make `carriesCodeGenOutput` return true -- so a
+// comment that merely MENTIONS the banner phrase (exactly what an author would naturally write to
+// say "no output needed") turned CHECK 2 off for the whole file. These reproduce that bypass.
+
+test('FIRES: a comment mentioning the banner phrase, with prose instead of output beneath it, does not satisfy CHECK 2', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    '-- CodeGen output (appended): none needed, this is just a lookup table.\n' +
+      'CREATE TABLE [${flyway:defaultSchema}].[Sneaky] (ID UNIQUEIDENTIFIER NOT NULL, Name NVARCHAR(50));',
+    { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /nothing generated follows|empty section/);
+});
+
+test('FIRES: a real banner followed by one unrelated statement does not satisfy CHECK 2', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    'CREATE TABLE [${flyway:defaultSchema}].[Sneaky] (ID UNIQUEIDENTIFIER NOT NULL);\n' +
+      '-- CodeGen output (appended)\n' +
+      'SELECT 1;',
+    { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /nothing generated follows|empty section/);
+});
+
+test('a block comment mentioning the banner phrase is not a banner at all -- structural detection still catches the bare CREATE TABLE', () => {
+  // Documents a discrepancy in the review that motivated this fix: it claimed this /* ... */ form
+  // also bypassed the gate. It does not -- BANNER_PATTERN requires the `--` line-comment prefix, so
+  // a block comment never matches `hasBanner` in the first place and falls straight into the
+  // no-banner structural check, which correctly has nothing to find.
+  const sql = '/* CodeGen output (appended): none needed, this is just a lookup table. */\n' +
+    'CREATE TABLE [${flyway:defaultSchema}].[Sneaky] (ID UNIQUEIDENTIFIER NOT NULL, Name NVARCHAR(50));';
+  assert.equal(hasBanner(sql), false);
+  const v = classifyMigration('migrations/V1__x.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /ships no CodeGen output/);
+});
+
+test('a real banner followed by real generated output still passes', () => {
+  assert.deepEqual(classifyMigration('migrations/V1__x.sql',
+    'CREATE TABLE [${flyway:defaultSchema}].[Thing] (ID UNIQUEIDENTIFIER NOT NULL);\n' +
+      '-- CodeGen output (appended)\n' +
+      "INSERT INTO [${mjSchema}].[EntityField] (ID, Name) VALUES (NEWID(), N'Thing');",
+    { isNew: true }), []);
+});
+
+test('FIRES: an unrelated CodeGen-shaped INSERT does not excuse a description-only migration from writing EntityField.Description', () => {
+  // The `!generated` guard used to short-circuit this branch: an incidental, unrelated
+  // `INSERT INTO EntityField` elsewhere in the file made `generated` true and skipped the
+  // description obligation entirely, even though this migration ships no schema change of its own.
+  const v = classifyMigration('migrations/V1__x.sql',
+    "EXEC sp_updateextendedproperty @name = N'MS_Description', @value = N'new';\n" +
+      "INSERT INTO [${mjSchema}].[EntityField] (ID, Name) VALUES (NEWID(), N'Unrelated');");
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityField\.Description/);
+});
+
+test('FIRES: @codegen-none on a DROP TABLE is always false, same as CREATE TABLE', () => {
+  // A dropped table's entity metadata needs removing just as a new table's needs creating -- both
+  // are always-false claims.
+  const v = classifyMigration('migrations/V1__x.sql',
+    '-- @codegen-none: Sneaky is going away entirely\nDROP TABLE [${flyway:defaultSchema}].[Sneaky];');
+  assert.equal(v.length, 1);
+  assert.match(v[0], /always false/);
 });
 
 // ── The CLI ──────────────────────────────────────────────────────────────────────────────────

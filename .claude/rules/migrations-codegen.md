@@ -40,13 +40,15 @@ When you make that call deliberately on a migration that *does* carry DDL, say s
 accepts one on a `CREATE TABLE` — a new table always produces at least its `__mj.Entity`
 registration and `EntityField` rows.
 
-**The reason must name every table the DDL touches.** One `@codegen-none` does not excuse the whole
-file — only the tables it actually names — so a later `ALTER` on a second table in the same
-migration can't silently inherit an old excuse it never earned. Correct:
+**The reason must name every table the DDL touches, and must be on ONE line.** One `@codegen-none`
+does not excuse the whole file — only the tables it actually names — so a later `ALTER` on a second
+table in the same migration can't silently inherit an old excuse it never earned. And it must not
+wrap onto a second comment line: `findCodeGenNoneReason` reads only up to the next newline, so
+anything past a line-wrap is invisible to the gate — including a table name you meant to name.
+Correct:
 
 ```sql
--- @codegen-none: FormQuestion, FormAnswer — both ALTERs only widen an existing NVARCHAR column;
--- no field is added, removed, or retyped, so CodeGen has nothing new to register.
+-- @codegen-none: FormQuestion, FormAnswer — both ALTERs only widen an existing NVARCHAR column, so CodeGen has nothing new to register.
 ALTER TABLE [${flyway:defaultSchema}].[FormQuestion] ALTER COLUMN [HelpText] NVARCHAR(1000) NULL;
 ALTER TABLE [${flyway:defaultSchema}].[FormAnswer] ALTER COLUMN [RawValue] NVARCHAR(1000) NULL;
 ```

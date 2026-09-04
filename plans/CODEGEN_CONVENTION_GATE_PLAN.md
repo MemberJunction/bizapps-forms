@@ -1305,8 +1305,8 @@ and `V202609011500`, which is correct by design.
 | same, with `-- @codegen-none: nothing to generate` | 1 (always false on a CREATE TABLE) |
 | same, with output under the banner | 0 |
 
-No migration was edited: `migrations/README.md:70` makes history append-only, and the classifier
-recognises the five merged migrations that carry output without a banner structurally instead.
+No migration was edited: `migrations/README.md, "Add a NEW seed migration; never edit an existing one"` makes history append-only, and the classifier recognises the six merged migrations that carry
+output without a banner structurally instead.
 
 Plan: `plans/CODEGEN_CONVENTION_GATE_PLAN.md`.
 BODY
@@ -1357,9 +1357,10 @@ append ergonomic, whereas Tasks 1–6 make it *correct and enforced*. Land the g
 whether the manual paste is actually the friction — `migrations/V202608252340:79-105` (the 20-line
 comment on id-keyed→natural-key hardening) is the evidence to weigh. File as a follow-up issue.
 
-**Retrofitting banners into the five merged migrations that carry output without one**
-(`B202606281200`, `V202608072330`, `V202608081200`, `V202608191300`, `V202608191400`). History is
-append-only. The classifier recognises their output structurally, so they are clean without an edit.
+**Retrofitting banners into the six merged migrations that carry output without one**
+(`B202606281200`, `V202608072330`, `V202608081200`, `V202608191300`, `V202608191400`,
+`V202608301200`). History is append-only. The classifier recognises their output structurally, so
+they are clean without an edit.
 
 **Whether `B202606281200` "needs a banner at all"** (#160's verify-before-you-build item). Answered
 by not needing an answer: it is merged, it cannot be edited, and the classifier reads its 36 CRUD

@@ -139,25 +139,8 @@ export function hasBanner(sql) {
 }
 
 /**
- * True when the banner is present but nothing substantive follows it -- a file that READS as
- * having shipped its output while shipping none. Blank lines and further comments don't count as
- * content; only code does.
- */
-export function bannerHasNoContentBeneath(sql) {
-  const m = sql.match(BANNER_PATTERN);
-  if (!m) return false;
-  const restOfBannerLine = sql.indexOf('\n', m.index + m[0].length);
-  const after = restOfBannerLine === -1 ? '' : sql.slice(restOfBannerLine + 1);
-  return stripSqlComments(after).trim().length === 0;
-}
-
-/**
- * Does the file carry CodeGen's SQL — under the banner, or structurally?
- *
- * Structural detection exists because history predates the banner: five merged migrations carry
- * generated CRUD without one, and they ship correct output. Hand-authored equivalents count too —
- * V202608301200 writes the `__mj.EntityFieldValue` rows CodeGen derives from a CHECK constraint by
- * hand, and documents exactly why (it had no database to regenerate from).
+ * The structural CodeGen shapes: spCreate/spUpdate/spDelete procedures, `vw` views, an
+ * `EntityField`/`EntityFieldValue` INSERT, or an `EntityFieldValue` UPDATE.
  *
  * A bare `UPDATE ... EntityField` does NOT count. CodeGen's actual EntityField output is an INSERT
  * (a new field row) -- an UPDATE of EntityField is a hand-patch to an existing row (a Sequence
@@ -167,8 +150,7 @@ export function bannerHasNoContentBeneath(sql) {
  * EntityFieldValue is different: CodeGen's value-list sync inserts new rows AND updates existing
  * ones, so both verbs count there (V202608301200 depends on the UPDATE case).
  */
-export function carriesCodeGenOutput(sql) {
-  if (hasBanner(sql)) return true;
+function hasGeneratedShape(sql) {
   const code = stripSqlComments(sql);
   return (
     /CREATE\s+(?:OR\s+ALTER\s+)?PROCEDURE\s+\S*\[?sp(?:Create|Update|Delete)\w+/i.test(code) ||
@@ -176,6 +158,30 @@ export function carriesCodeGenOutput(sql) {
     /INSERT\s+INTO\s+\S*\[?EntityField(?:Value)?\]?/i.test(code) ||
     /(?:INSERT\s+INTO|UPDATE)\s+\S*\[?EntityFieldValue\]?/i.test(code)
   );
+}
+
+/**
+ * Does the file carry CodeGen's SQL — under the banner, or structurally?
+ *
+ * The banner is a claim, not proof — it must be verified against what actually follows it, or a
+ * comment that merely MENTIONS the banner phrase (exactly the sentence an author would naturally
+ * write to say "no output needed here") reads as a satisfied obligation. So a banner's presence
+ * only narrows WHERE to look: the structural patterns run against the slice of the file after the
+ * banner's own line, and a banner followed by prose, nothing, or one unrelated statement does not
+ * count, same as if there were no banner and no generated content anywhere.
+ *
+ * With no banner, the structural patterns run against the whole file. That path exists because
+ * history predates the banner: six merged migrations carry generated CRUD without one, and they
+ * ship correct output. Hand-authored equivalents count too — V202608301200 writes the
+ * `__mj.EntityFieldValue` rows CodeGen derives from a CHECK constraint by hand, and documents
+ * exactly why (it had no database to regenerate from).
+ */
+export function carriesCodeGenOutput(sql) {
+  const m = sql.match(BANNER_PATTERN);
+  if (!m) return hasGeneratedShape(sql);
+  const restOfBannerLine = sql.indexOf('\n', m.index + m[0].length);
+  const after = restOfBannerLine === -1 ? '' : sql.slice(restOfBannerLine + 1);
+  return hasGeneratedShape(after);
 }
 
 /**
@@ -203,7 +209,9 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
   const generated = carriesCodeGenOutput(sql);
 
   // A banner that claims output but ships none is worse than no banner: it reads as satisfied.
-  if (hasBanner(sql) && bannerHasNoContentBeneath(sql)) {
+  // `generated` already checks the content AFTER the banner line (carriesCodeGenOutput), so this
+  // is just "banner present, and that verification came back empty."
+  if (hasBanner(sql) && !generated) {
     violations.push(
       `${relPath}: carries the "-- CodeGen output (appended)" banner, but nothing generated ` +
         `follows it -- an empty section satisfies no host. Append CodeGen's actual output below ` +
@@ -212,8 +220,13 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
     return violations;
   }
 
-  // A description-only migration: no schema change, just text. Its obligation is the second write.
-  if (!ddl.length && touchesExtendedProperty(sql) && !generated) {
+  // The description obligation stands on its own, independent of whatever else the file contains.
+  // It used to be gated on `!generated` too, which meant an unrelated, incidentally CodeGen-shaped
+  // statement anywhere in a description-only file (no DDL of its own) silently satisfied a
+  // requirement it has nothing to do with. `!ddl.length` stays: a migration that DOES change
+  // schema gets its column's Description from CodeGen's own generated INSERT, not a hand-written
+  // UPDATE -- that obligation is `generated` itself, checked below.
+  if (!ddl.length && touchesExtendedProperty(sql)) {
     if (!writesEntityFieldDescription(sql)) {
       violations.push(
         `${relPath}: changes a column description via sp_addextendedproperty but never writes ` +
@@ -242,11 +255,12 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
         `${relPath}: ${CODEGEN_NONE_MARKER} carries no reason. The marker exists to make the claim ` +
           `reviewable — state what about this DDL yields no CodeGen output.`
       );
-    } else if (ddl.some((d) => d.startsWith('CREATE TABLE'))) {
+    } else if (ddl.some((d) => d.startsWith('CREATE TABLE') || d.startsWith('DROP TABLE'))) {
       violations.push(
-        `${relPath}: ${CODEGEN_NONE_MARKER} on a migration that CREATEs a table is always false — a ` +
-          `new table always produces at least the __mj.Entity registration and its EntityField rows. ` +
-          `Append the output instead.`
+        `${relPath}: ${CODEGEN_NONE_MARKER} on a migration that CREATEs or DROPs a table is always ` +
+          `false — a new table always produces at least the __mj.Entity registration and its ` +
+          `EntityField rows, and a dropped table needs that same metadata removed. Append the ` +
+          `output instead.`
       );
     } else {
       // One `@codegen-none` must not excuse every DDL statement in the file — only the tables it
