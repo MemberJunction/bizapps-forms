@@ -248,22 +248,24 @@ Two artifacts leave the dev database only if something writes them into `migrati
 - **generated schema SQL** — CodeGen output, whenever the schema changes *or* an MJ upgrade moves
   a CodeGen SQL template.
 
-`migrations/codegen/` is `.gitignore`d here (a deliberate Phase 1 decision — the raw run files are
-an intermediate), and the repo's convention is to **append** CodeGen's SQL beneath the hand-DDL in
-the feature migration, marked `-- CodeGen output (appended) — regenerated; do not hand-edit below
-this line.` (`V202606301305`, `V202608211000`, `V202608211600`, `V202608252340`). `bizapps-tasks` tracks `migrations/codegen/*.sql`
-directly. That is **not** an equally valid alternative and this document should never have implied
-it was: nothing applies a tracked run file. Skyway globs `**/*.sql` recursively and *does* read it,
-then fails its `V…__`/`B…__`/`R__` filename parse and swallows the error into an optional warning —
-so a committed run file reads as "the CodeGen output shipped" while shipping nothing, and MJ has no
-code that reads one back. For an Open App that is fatal rather than untidy: `mj app install` adds
-our schema to the host's `excludeSchemas`
-(`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980`), so the host's CodeGen never
-runs against `__mj_BizAppsForms` and **if it is not in the migration it does not exist on the host**.
-The single convention is MJ's (`MJ/guides/MIGRATION_CODEGEN_WORKFLOW_GUIDE.md` steps 4–5,
-`MJ/migrations/CLAUDE.md:172-179`): append below the banner, then delete the standalone file.
-Step 6.1/6.2 exist because that append was an unenforced manual step; it is enforced now by
-`npm run lint:codegen-append` and `.claude/rules/migrations-codegen.md`.
+`migrations/codegen/` is `.gitignore`d here (a deliberate Phase 1 decision — the raw run files
+are an intermediate), and the repo's convention is to **append** CodeGen's SQL beneath the
+hand-DDL in the feature migration, marked `-- CodeGen output (appended) — regenerated; do not
+hand-edit below this line.` (`V202606301305`, `V202608211000`, `V202608211600`,
+`V202608252340`). `bizapps-tasks` tracks `migrations/codegen/*.sql` directly. That is **not**
+an equally valid alternative and this document should never have implied it was: nothing applies
+a tracked run file. Skyway globs `**/*.sql` recursively and *does* read it, then fails its
+`V…__`/`B…__`/`R__` filename parse and swallows the error into an optional warning — so a
+committed run file reads as "the CodeGen output shipped" while shipping nothing, and MJ has no
+code that reads one back. For an Open App that is fatal rather than untidy: `mj app install`
+adds our schema to the host's `excludeSchemas`
+(`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980`), so the host's CodeGen
+never runs against `__mj_BizAppsForms` and **if it is not in the migration it does not exist on
+the host**. The single convention is MJ's (`MJ/guides/MIGRATION_CODEGEN_WORKFLOW_GUIDE.md`
+steps 4–5, `MJ/migrations/CLAUDE.md:172-179`): append below the banner, then delete the
+standalone file. No step in this plan ever enforced that append: Step 6's checks cover metadata
+drift (6.1, since retired by #105) and unsupported placeholder tokens (6.2). The gap is closed
+now by `npm run lint:codegen-append` and `.claude/rules/migrations-codegen.md`.
 
 ---
 
