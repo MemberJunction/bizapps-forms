@@ -328,13 +328,72 @@ test('FIRES: an unrelated CodeGen-shaped INSERT does not excuse a description-on
   assert.match(v[0], /EntityField\.Description/);
 });
 
-test('FIRES: @codegen-none on a DROP TABLE is always false, same as CREATE TABLE', () => {
-  // A dropped table's entity metadata needs removing just as a new table's needs creating -- both
-  // are always-false claims.
+// ── Fix round 4: three early returns that skipped the checks below them ─────────────────────
+// Round 3 introduced three regressions, all one shape: a branch either fired on a file with no
+// real obligation, or returned before a later, independently-applicable check could run.
+
+test('R1 FIRES today (regression): a comment mentioning the banner phrase blocks a migration with NO obligation at all', () => {
+  // CREATE INDEX is deliberately not app-schema DDL (findAppSchemaDDL only matches CREATE/ALTER/
+  // DROP TABLE) and there's no extended-property change either -- this file has no obligation to
+  // ship anything, yet the banner-phrase mention alone was enough to fail it.
   const v = classifyMigration('migrations/V1__x.sql',
-    '-- @codegen-none: Sneaky is going away entirely\nDROP TABLE [${flyway:defaultSchema}].[Sneaky];');
+    '-- No `-- CodeGen output (appended)` needed here, index only.\n' +
+      'CREATE INDEX IX_a ON [${flyway:defaultSchema}].[Form] (X);',
+    { isNew: true });
+  assert.deepEqual(v, []);
+});
+
+test('R2 FIRES today (regression): a description migration that also ships real generated SQL with no banner must still be caught', () => {
+  // Before round 3's fix for finding 4, this branch was gated on `!generated` and skipped
+  // entirely -- masking the description bug it was fixing behind a *different* unconditional
+  // `return` that skipped the isNew/banner check below it once the branch was entered at all.
+  const v = classifyMigration('migrations/V1__x.sql',
+    "EXEC sp_updateextendedproperty @name=N'MS_Description', @value=N'x';\n" +
+      "UPDATE [${mjSchema}].[EntityField] SET [Description]=N'x';\n" +
+      'CREATE PROCEDURE [${flyway:defaultSchema}].[spCreateForm] AS SELECT 1;',
+    { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /ships CodeGen output with no/);
+});
+
+test('does NOT fire: @codegen-none naming the table is the correct, and only, way to explain a DROP TABLE', () => {
+  // Corrected from round 3: CodeGen emits SQL for tables that EXIST. A dropped table has no
+  // generated output to ship -- the metadata removal is necessarily hand-written -- so
+  // `@codegen-none` is exactly right here, same as any other DDL that produces no output.
+  assert.deepEqual(classifyMigration('migrations/V1__x.sql',
+    '-- @codegen-none: Sneaky is going away entirely\nDROP TABLE [${flyway:defaultSchema}].[Sneaky];'), []);
+});
+
+test('FIRES: @codegen-none on a DROP TABLE with no reason still needs one, same as any other DDL', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    '-- @codegen-none:\nDROP TABLE [${flyway:defaultSchema}].[Sneaky];');
+  assert.equal(v.length, 1);
+  assert.match(v[0], /carries no reason/);
+});
+
+test('a bare DROP TABLE with no marker and no output still asks for one, same as before', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    'DROP TABLE [${flyway:defaultSchema}].[Sneaky];');
+  assert.equal(v.length, 1);
+  assert.match(v[0], /ships no CodeGen output/);
+});
+
+test('FIRES: @codegen-none on a CREATE TABLE is still always false -- the revert only removed DROP TABLE', () => {
+  const v = classifyMigration('migrations/V1__x.sql',
+    '-- @codegen-none: nothing to generate\nCREATE TABLE [${flyway:defaultSchema}].[Thing] (ID UNIQUEIDENTIFIER);');
   assert.equal(v.length, 1);
   assert.match(v[0], /always false/);
+  assert.doesNotMatch(v[0], /DROP/);
+});
+
+test('does NOT fire: CREATE INDEX alone is not app-schema DDL and carries no obligation', () => {
+  assert.deepEqual(classifyMigration('migrations/V1__x.sql',
+    'CREATE INDEX IX_a ON [${flyway:defaultSchema}].[Form] (X);'), []);
+});
+
+test('does NOT fire: a core-schema-only INSERT carries no Forms obligation', () => {
+  assert.deepEqual(classifyMigration('migrations/V1__x.sql',
+    "INSERT INTO [${mjSchema}].[Role] (ID, Name) VALUES (NEWID(), N'x');"), []);
 });
 
 // ── The CLI ──────────────────────────────────────────────────────────────────────────────────

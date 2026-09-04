@@ -210,8 +210,14 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
 
   // A banner that claims output but ships none is worse than no banner: it reads as satisfied.
   // `generated` already checks the content AFTER the banner line (carriesCodeGenOutput), so this
-  // is just "banner present, and that verification came back empty."
-  if (hasBanner(sql) && !generated) {
+  // is just "banner present, and that verification came back empty" -- but only for a file that
+  // has an obligation to begin with. A migration with neither app-schema DDL nor an extended
+  // property change (a bare CREATE INDEX, say) has nothing for a banner to be lying about, and a
+  // comment that merely MENTIONS the banner phrase to say "not needed here" must not fail it --
+  // that is finding 1's bypass in reverse, and just as much the sentence an author naturally
+  // writes.
+  const hasObligation = ddl.length > 0 || touchesExtendedProperty(sql);
+  if (hasBanner(sql) && !generated && hasObligation) {
     violations.push(
       `${relPath}: carries the "-- CodeGen output (appended)" banner, but nothing generated ` +
         `follows it -- an empty section satisfies no host. Append CodeGen's actual output below ` +
@@ -226,16 +232,20 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
   // requirement it has nothing to do with. `!ddl.length` stays: a migration that DOES change
   // schema gets its column's Description from CodeGen's own generated INSERT, not a hand-written
   // UPDATE -- that obligation is `generated` itself, checked below.
-  if (!ddl.length && touchesExtendedProperty(sql)) {
-    if (!writesEntityFieldDescription(sql)) {
-      violations.push(
-        `${relPath}: changes a column description via sp_addextendedproperty but never writes ` +
-          `__mj.EntityField.Description. CodeGen copies the description into the generated entity ` +
-          `class and Explorer reads the EntityField row, so the two surfaces will publish different ` +
-          `sentences. Write both — see V202608302200 for the shape.`
-      );
-    }
-    return violations;
+  //
+  // No `return` here, deliberately: this branch's job is ONLY the description obligation. A
+  // description-only file can still independently be a NEW migration shipping real generated SQL
+  // with no banner (a hand-authored CodeGen-shaped statement alongside the extended-property
+  // change) -- the `isNew && generated && !hasBanner` check below is a separate, independently
+  // applicable rule, and returning unconditionally from here swallowed it even when this branch
+  // found nothing wrong of its own.
+  if (!ddl.length && touchesExtendedProperty(sql) && !writesEntityFieldDescription(sql)) {
+    violations.push(
+      `${relPath}: changes a column description via sp_addextendedproperty but never writes ` +
+        `__mj.EntityField.Description. CodeGen copies the description into the generated entity ` +
+        `class and Explorer reads the EntityField row, so the two surfaces will publish different ` +
+        `sentences. Write both — see V202608302200 for the shape.`
+    );
   }
 
   if (ddl.length && !generated) {
@@ -255,13 +265,17 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
         `${relPath}: ${CODEGEN_NONE_MARKER} carries no reason. The marker exists to make the claim ` +
           `reviewable — state what about this DDL yields no CodeGen output.`
       );
-    } else if (ddl.some((d) => d.startsWith('CREATE TABLE') || d.startsWith('DROP TABLE'))) {
+    } else if (ddl.some((d) => d.startsWith('CREATE TABLE'))) {
       violations.push(
-        `${relPath}: ${CODEGEN_NONE_MARKER} on a migration that CREATEs or DROPs a table is always ` +
-          `false — a new table always produces at least the __mj.Entity registration and its ` +
-          `EntityField rows, and a dropped table needs that same metadata removed. Append the ` +
-          `output instead.`
+        `${relPath}: ${CODEGEN_NONE_MARKER} on a migration that CREATEs a table is always false — a ` +
+          `new table always produces at least the __mj.Entity registration and its EntityField rows. ` +
+          `Append the output instead.`
       );
+      // Deliberately NOT extended to DROP TABLE (reverted -- an earlier pass here got this wrong,
+      // and a review caught it before it shipped past the branch). CodeGen emits SQL for tables
+      // that EXIST; a dropped table has nothing left for CodeGen to (re)generate, so the metadata
+      // removal is necessarily hand-written -- @codegen-none naming the table is exactly the right
+      // escape hatch for a DROP, not an always-false claim.
     } else {
       // One `@codegen-none` must not excuse every DDL statement in the file — only the tables it
       // actually names. Otherwise a second, genuinely-unexcused ALTER inherits an old reason it
