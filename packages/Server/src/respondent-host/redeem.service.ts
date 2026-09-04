@@ -215,11 +215,26 @@ async function hasPublishedVersion(
 }
 
 /**
+ * Redeem ANY raw magic-link token through core, not just a distribution's public one.
+ *
+ * Exported because the resume routes redeem a token whose resource is a FormResponse rather than a
+ * distribution — the same endpoint, the same POST, the same JSON contract, and deliberately the
+ * same function: a second spelling of this call is a second place for the `format=json` / POST-only
+ * details to drift, and the failure that produces is a 405 nobody attributes to a redeem.
+ */
+export async function redeemRawToken(
+  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
+  rawToken: string,
+): Promise<RedeemMagicLinkJsonResult | undefined> {
+  return postRedeem(deps, rawToken);
+}
+
+/**
  * POST the raw token to core's redeem endpoint with `format=json` and return the parsed result.
  * Returns `undefined` on any transport/parse failure so the caller can fail-safe to an error page.
  */
 async function postRedeem(
-  deps: RedeemDeps,
+  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
   rawToken: string,
 ): Promise<RedeemMagicLinkJsonResult | undefined> {
   // Core reads `format` from the query string only; the body carries `{ token }` as JSON.

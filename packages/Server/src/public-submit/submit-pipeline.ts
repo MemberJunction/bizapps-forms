@@ -38,7 +38,7 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
-import { persistSubmission, responseIsOurs } from './persistence.service';
+import { FOREIGN_RESPONSE_MESSAGE, persistSubmission, responseIsOurs } from './persistence.service';
 import { distributionQuotaExceeded, formQuotaExceeded } from './quota.service';
 import { FormsRateLimiter, rateLimitedMessage, type RateLimitGate } from './rate-limit.service';
 import {
@@ -46,10 +46,13 @@ import {
   findResumableResponseById,
   findOwnedResponseById,
   findResponseById,
+  findScopedResponse,
   findSessionResponse,
 } from './response-lookup.service';
 import { InFlightLimiter } from '../http/in-flight-limiter';
 import { checkRespondentScope } from './scope-check.service';
+import { resolveScopedResponseId } from './scope-response.service';
+import { revokeResponseInvites } from '../magic-link/resume-invites.service';
 import {
   RESUMABLE_RESPONSE_STATUSES,
   TERMINAL_RESPONSE_STATUSES,
@@ -143,6 +146,20 @@ export interface PipelineContext {
    * something weaker — see `rateLimitGatesFor`.
    */
   clientIpHash?: string;
+  /**
+   * The `mj_scopes[0].resourceId` claim of the caller's verified magic-link session, copied from
+   * `UserInfo.MagicLinkScope.ResourceID`.
+   *
+   * UNLIKE `sessionId` beside it, the caller did not choose this: the server minted it into the JWT
+   * when it redeemed an invite. That is the whole difference #138 turns on — a header can be
+   * replayed, a signed claim cannot — and it is why this, and never the header, is what lets a
+   * second sitting write to the first sitting's row.
+   *
+   * It is UNTYPED: the same field carries a distribution id for a public link and a FormResponse id
+   * for a resume link (and, once #137 lands, a recipient id). `resolveScopedResponseId` is the one
+   * place that decides which.
+   */
+  scopeResourceId?: string;
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /**
@@ -153,6 +170,13 @@ export interface PipelineContext {
   fireHooks?: (
     ctx: { responseId: string; formId: string; formVersionId: string; distributionId: string },
   ) => Promise<HookFireResult[]>;
+  /**
+   * Injectable invite revocation for tests; defaults to the real magic-link path.
+   *
+   * Injected the same way `fireHooks` is, and for the same reason: it runs after the row is
+   * written, touches core's tables, and a pipeline test has to be able to observe it without one.
+   */
+  revokeInvites?: (args: { responseId: string; deviceOnly: boolean }) => Promise<void>;
 }
 
 /** Convenience for a single-error failure result. */
@@ -458,6 +482,37 @@ async function runSubmitPipelineInner(
   //    rate ceiling, dedupe and the quota) exist to police COMPLETIONS, which a knockout is not.
   const disqualifiedBy = complete ? knockout : undefined;
 
+  // 5b. WHOSE session this is, settled ONCE (#138). Everything downstream reads this one value:
+  //     dedupe's ownership question, the row this save updates, and the write gate. Deriving it
+  //     more than once would be more than one place for a later change to disagree.
+  //
+  //     Costs nothing on the public path — see `scopeNamesDistribution`, which settles a public
+  //     link by comparing the claim to the distribution already in hand.
+  const scoped = await resolveScopedResponseId(
+    ctx.provider,
+    { scopeResourceId: ctx.scopeResourceId, distributionId: resolved.distribution.ID },
+    ctx.elevatedUser,
+  );
+  const scopedResponseId = scoped.responseId;
+
+  // 5c. A scoped session naming SOMEBODY ELSE'S response id.
+  //
+  //     The hint is ignored for row selection below (the scope wins), so without this the request
+  //     would quietly write to the caller's OWN row and answer success — which is not what a caller
+  //     who named a different row asked for, and reads to them as that row having been updated.
+  //     Refused with the one sentence every ownership failure gets, so it cannot be told apart from
+  //     the others.
+  //
+  //     No real client reaches it: a resumed widget adopts the row id from `resumeJSON` on every
+  //     load, including a retry, so the two always agree.
+  if (
+    scopedResponseId &&
+    submission.clientResponseId &&
+    submission.clientResponseId.trim().toLowerCase() !== scopedResponseId.trim().toLowerCase()
+  ) {
+    return report(fail(FOREIGN_RESPONSE_MESSAGE));
+  }
+
   // 6. Dedupe (Task 1) — only on a completion. If this session (or this client response id)
   //    already reached a TERMINAL status for this form, short-circuit rather than writing a
   //    second row. Terminal is `Complete` OR `Disqualified`: both mean nothing more is coming,
@@ -465,7 +520,7 @@ async function runSubmitPipelineInner(
   //    gate below and be refused on an attempt that had already succeeded.
   //    FAIL-CLOSED: a lookup-query error rejects the resubmit (never silently duplicates).
   if (complete) {
-    const dedupe = await checkDuplicate(ctx, resolved, submission, disqualifiedBy);
+    const dedupe = await checkDuplicate(ctx, resolved, submission, disqualifiedBy, scopedResponseId);
     if (dedupe) {
       return report(dedupe);
     }
@@ -515,7 +570,7 @@ async function runSubmitPipelineInner(
   //    Cross-session / link-based RESUME is Phase 2 — we key strictly on the current
   //    AnonymousSessionID and never adopt another session's row. We DO return the responseId
   //    so a same-session widget can continue editing its partial.
-  const existingPartial = await resolveExistingPartial(ctx, resolved, submission);
+  const existingPartial = await resolveExistingPartial(ctx, resolved, submission, scopedResponseId);
 
   timer.mark('find-partial');
 
@@ -571,6 +626,7 @@ async function runSubmitPipelineInner(
       }),
       answers: validation.answers,
       existingResponseId: existingPartial.response?.ID,
+      scopedResponseId,
       clientResponseId: submission.clientResponseId,
     },
     ctx.elevatedUser,
@@ -615,6 +671,24 @@ async function runSubmitPipelineInner(
         (err: unknown) => LogError(`[Forms] detached hooks threw for ${persisted.responseId}: ${String(err)}`),
       );
     }
+  }
+
+  // 11b. DECISION 3, as the review flipped it: a sealed response's resume links die with it.
+  //
+  //      As originally designed the emailed invite stayed Active and opened the sealed answers
+  //      read-only for the rest of its 30 days — so forwarding that mail was disclosure. And
+  //      "refusing tells the respondent nothing" turned out not to be true: once the links are
+  //      revoked, a later open can say the response was submitted, and when.
+  //
+  //      Every terminal status, not just a completion: a `Disqualified` row is sealed too, nothing
+  //      more is coming for it, and a bearer to a screened-out respondent's answers is no better
+  //      than a bearer to anyone else's. Skipped on `deduped`, because the request that actually
+  //      sealed the row already did this.
+  //
+  //      Detached and best-effort, like the hooks above: the response is already written, and
+  //      nothing the respondent is shown depends on it.
+  if (isTerminalResponseStatus(persisted.status) && !persisted.deduped) {
+    void revokeSealedResponseInvites(ctx, persisted.responseId);
   }
 
   timer.mark('hooks');
@@ -765,7 +839,30 @@ async function resolveExistingPartial(
   ctx: PipelineContext,
   resolved: ResolvedDefinition,
   submission: PipelineSubmission,
+  scopedResponseId: string | undefined,
 ): Promise<{ response?: { ID: string } }> {
+  // 0. THE SCOPED ROW WINS, and it wins EXPLICITLY (#138).
+  //
+  //    Without this branch a resumed save missed all three lookups below — every one of them pins
+  //    `FormVersionID`, and the owner column still names the first sitting — fell through to CREATE
+  //    at the row's own id, collided on the primary key, and was rescued by `reconcileDuplicate`.
+  //    That recovery works, and relying on it would have been a mistake twice over: it decides
+  //    whether a failure was a collision by running a REGEX over the driver's error text, and it
+  //    issues a failed INSERT on every single autosave.
+  //
+  //    It also silently broke the draft ceiling. `partialCapExceeded` below runs whenever no
+  //    existing partial was resolved, so a resumed autosave — which adds no row — was counted as a
+  //    new draft and refused outright on a saturated form.
+  //
+  //    No version filter here, deliberately: see `findScopedResponse`.
+  if (scopedResponseId) {
+    const scopedRow = await findScopedResponse(ctx.provider, { responseId: scopedResponseId }, ctx.elevatedUser);
+    if (scopedRow.ok && scopedRow.response) {
+      return { response: scopedRow.response };
+    }
+    // The scope named a row that is gone or already sealed. Fall through rather than refuse: the
+    // respondent still gets to submit, and the write gate still decides what they may touch.
+  }
   if (submission.clientResponseId) {
     // 1a. Session present: adopt the client id only if the row is owned by THIS session.
     const owned = await findOwnedResponseById(
@@ -837,6 +934,7 @@ async function checkDuplicate(
   resolved: ResolvedDefinition,
   submission: PipelineSubmission,
   disqualifiedBy: PublishedFormScreen | undefined,
+  scopedResponseId: string | undefined,
 ): Promise<FormSubmissionResult | undefined> {
   // First, an idempotent repeat of THIS client's final submit: the same client response id
   // already promoted to Complete. Keyed on the id (+ SourceMetadata proof), so it works even
@@ -867,7 +965,7 @@ async function checkDuplicate(
     // minted together, so an id is only ever presented alongside the session that created it.
     if (
       byId.response &&
-      responseIsOurs(byId.response, ctx.sessionId) &&
+      responseIsOurs(byId.response, { sessionId: ctx.sessionId, scopedResponseId }) &&
       isTerminalResponseStatus(byId.response.Status)
     ) {
       return recognisedRepeat(resolved, byId.response, submission, disqualifiedBy);
@@ -1140,4 +1238,23 @@ function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<strin
     }
   }
   return types;
+}
+
+/**
+ * Retire every live invite that could reopen a response we have just sealed.
+ *
+ * Wrapped whole and never awaited by the caller: a submission that is already persisted must not
+ * fail, or slow down, because a credential could not be retired. The failure goes to the log with
+ * the response id — never with a token.
+ */
+async function revokeSealedResponseInvites(ctx: PipelineContext, responseId: string): Promise<void> {
+  try {
+    if (ctx.revokeInvites) {
+      await ctx.revokeInvites({ responseId, deviceOnly: false });
+      return;
+    }
+    await revokeResponseInvites(responseId, { deviceOnly: false }, ctx.elevatedUser);
+  } catch (err) {
+    LogError(`[Forms] could not retire the resume links of sealed response ${responseId}: ${String(err)}`);
+  }
 }

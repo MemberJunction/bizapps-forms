@@ -14,9 +14,10 @@ import type {
   PublishedFormDefinition,
   FormSubmissionInput,
   FormSubmissionResult,
+  ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities';
 
-import type { IFormsApiService } from './forms-api.interface';
+import type { IFormsApiService, PublishedFormLoad } from './forms-api.interface';
 import { FORMS_API_CONFIG } from './forms-api.config';
 import { generateClientResponseId } from '../core/client-id';
 import { toInputType } from './submission-mapping';
@@ -34,6 +35,8 @@ interface GraphQLEnvelope<TData> {
  */
 interface PublishedFormType {
   definitionJSON: string;
+  /** Present only for a session whose scope names a Form Response — see `PublishedFormLoad`. */
+  resumeJSON?: string | null;
 }
 
 /** Result wrapper for the `PublishedForm` query. */
@@ -50,6 +53,7 @@ const PUBLISHED_FORM_QUERY = `
   query PublishedForm($distributionSlug: String!) {
     PublishedForm(distributionSlug: $distributionSlug) {
       definitionJSON
+      resumeJSON
     }
   }
 `;
@@ -90,9 +94,11 @@ export class FormsGraphQLApiService implements IFormsApiService {
    */
   private readonly sessionId = generateClientResponseId();
 
-  public async loadPublishedForm(
-    distributionSlug: string,
-  ): Promise<PublishedFormDefinition | null> {
+  public sessionCorrelator(): string {
+    return this.sessionId;
+  }
+
+  public async loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null> {
     const data = await this.execute<PublishedFormQueryData>(PUBLISHED_FORM_QUERY, {
       distributionSlug,
     });
@@ -101,7 +107,10 @@ export class FormsGraphQLApiService implements IFormsApiService {
     }
     // The full nested pages/questions/options graph is delivered as a JSON string in
     // `definitionJSON`; parse it into the contract's PublishedFormDefinition.
-    return JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition;
+    return {
+      definition: JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition,
+      resume: parseResume(data.PublishedForm.resumeJSON),
+    };
   }
 
   public async submitResponse(
@@ -146,5 +155,24 @@ export class FormsGraphQLApiService implements IFormsApiService {
       throw new Error('Forms API returned no data');
     }
     return envelope.data;
+  }
+}
+
+/**
+ * Read the resume snapshot back, or nothing.
+ *
+ * Guarded rather than trusted: this is the one field on the read path whose absence is ORDINARY
+ * (every first sitting), so a parse failure must be indistinguishable from absence — a respondent
+ * whose draft cannot be understood gets a blank form, not an error page. The alternative, letting
+ * the throw escape, would take down `load()` for the commonest case in the product.
+ */
+function parseResume(json: string | null | undefined): ResumeSnapshot | undefined {
+  if (!json) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(json) as ResumeSnapshot;
+  } catch {
+    return undefined;
   }
 }

@@ -41,6 +41,16 @@ export interface MintAnonymousInviteParams {
   maxUses: number;
   /** Hard expiry; `null`/`undefined` means the minter applies its own default (typically none / very long). */
   expiresAt?: Date | null;
+  /**
+   * The address this invite's link was sent to, when it was sent anywhere.
+   *
+   * Delivery address and re-send key ONLY — never identity. `MagicLinkInvite.Email` is nullable and
+   * an anonymous invite leaves it null, which is what keeps a DEVICE invite (whose token is held in
+   * a cookie and mailed nowhere) out of the "re-send my expired link" match, since that match pairs
+   * an address with a resource. Setting it does not make the invite email-mode: `IdentityMode` stays
+   * `anonymous`, so no `__mj.User` is provisioned and no role is accreted.
+   */
+  email?: string | null;
 }
 
 /** Outcome of a mint attempt. `skipped` is the graceful-gate signal (NOT an error). */

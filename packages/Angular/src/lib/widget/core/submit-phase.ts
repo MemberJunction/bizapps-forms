@@ -56,3 +56,20 @@ export function outcomeForResult(result: FormSubmissionResult): SubmitOutcome {
   }
   return { phase: 'done', redirect: Boolean(result.redirectUrl) };
 }
+
+/**
+ * The phase a RESUMED draft opens in, from the status the server reported for it.
+ *
+ * A sealed row goes straight to `done` — the confirmation phase — and that is the whole of "decide
+ * sealed at MOUNT". It matters because the widget cannot learn it later: `savePartial` ignores the
+ * result's status, and the pipeline answers a partial against a sealed row with `success: true`, so
+ * a respondent who was allowed to start typing would type into a row that will never accept another
+ * answer. Reaching `done` also makes `shouldIgnoreSubmit` true, so no submit can be issued from
+ * that screen at all.
+ *
+ * `Partial` is the only resumable status, and it opens where a fresh load would — never on the
+ * welcome screen, because somebody who is coming BACK has already been welcomed.
+ */
+export function resumedPhaseFor(status: FormSubmissionResult['status']): WidgetPhase {
+  return status === 'Partial' ? 'ready' : 'done';
+}

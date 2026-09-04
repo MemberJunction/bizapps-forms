@@ -14,16 +14,25 @@ import type {
   FormSubmissionResult,
 } from '@mj-biz-apps/forms-entities';
 
-import type { IFormsApiService } from './forms-api.interface';
+import type { IFormsApiService, PublishedFormLoad } from './forms-api.interface';
+import { generateClientResponseId } from '../core/client-id';
 import { buildMockForm } from './mock-form.data';
 
 @Injectable()
 export class FormsMockApiService implements IFormsApiService {
-  public async loadPublishedForm(
-    distributionSlug: string,
-  ): Promise<PublishedFormDefinition | null> {
+  /** Stable for the life of the mock, mirroring the real service's per-instance correlator. */
+  private readonly sessionId = generateClientResponseId();
+
+  public sessionCorrelator(): string {
+    return this.sessionId;
+  }
+
+  public async loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null> {
     await this.simulateLatency();
-    return buildMockForm(distributionSlug);
+    // Never a resume: the mock stands in for a standalone embed/preview with no server, and
+    // resuming requires a magic-link session scoped to a stored response — which is exactly what
+    // a mock cannot have. A demo that "resumed" would be fiction.
+    return { definition: buildMockForm(distributionSlug) };
   }
 
   public async submitResponse(
