@@ -17,7 +17,10 @@ exists only because someone ran `mj sync push` on their laptop exists only on th
 | `../migrations-teardown/V001__…` | hand-written; retires the seed's core-schema rows on `mj app remove` | the seed gains or loses a root record |
 
 `migrations/codegen/` is gitignored: CodeGen's raw run files are an intermediate, and its SQL is
-appended into the feature migration instead.
+appended into the feature migration instead — under a `-- CodeGen output (appended)` banner, after
+which the run file is deleted. This is the **only** convention here; `npm run lint:codegen-append`
+enforces both halves, and [`.claude/rules/migrations-codegen.md`](../.claude/rules/migrations-codegen.md)
+carries the decision tree, the ordering rule and the reasons.
 
 ## Order is a correctness property — `npm run lint:migrations`
 
