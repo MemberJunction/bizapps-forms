@@ -63,11 +63,13 @@ remove the banner.
 ## Order, for a new column
 
 [`docs/database-operations.md`](../../docs/database-operations.md) §2 is the authority on this
-workflow — the commands below are reproduced here only because this rule is where the decision gets
-made; if the two ever disagree, the doc wins.
+workflow and the reasons behind it — the commands below are reproduced here only because this rule
+is where the decision gets made. Where a command differs between the two, use the safe app-schema
+form (`pnpm run mj:migrate`, per §1's table) — never a bare `mj migrate`, which targets core's `__mj`
+schema instead of this app's (§1 explains why).
 
 ```bash
-npm run mj:migrate            # 1. schema
+pnpm run mj:migrate           # 1. schema
 npx mj codegen --skipfiles    # 2. DB side only — creates the EntityField row, rebuilds views and
                               #    procs, and emits the run file you are about to append
 npx mj sync push --dir metadata --ci   # 3. now @lookup:MJ: Entity Fields resolves

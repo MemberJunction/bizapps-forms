@@ -128,7 +128,7 @@ that existed before it started**. If a run dies, re-run it to completion before 
 ### Order matters on a database that has never seen CodeGen
 
 ```bash
-mj migrate                       # 1. schema
+pnpm run mj:migrate              # 1. schema — __mj_BizAppsForms (bare `mj migrate` targets __mj instead; see §1)
 mj codegen --skipfiles           # 2. DB SIDE ONLY  ← the step that bites
 mj sync push --dir metadata --ci # 3. seed metadata; @lookup refs now resolve
 mj codegen --skipdb              # 4. FILES ONLY, from complete metadata

@@ -31,6 +31,42 @@ import {
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(join(REPO_ROOT, rel), 'utf8');
+const countOccurrences = (haystack, needle) => haystack.split(needle).length - 1;
+
+// ── The durable citation these files quote, instead of a line number ────────────────────────────
+// Six places (the rule, the workflow, this gate, and this spec) used to cite
+// `migrations/README.md:70` for the append-only-history rule. That line number went stale the
+// first time this same branch edited the README above it -- a citation nobody re-checks is no
+// better than the line number it replaced. The fix was to quote the heading text instead, because
+// a quoted phrase survives edits above it and is greppable. But quoting only helps if something
+// enforces it: reword the heading, or split the quoted phrase across a line-wrap again, and all
+// six citations go stale with nothing red. This test is that enforcement.
+const CITED_PHRASE = 'Add a NEW seed migration; never edit an existing one';
+const FILES_CITING_README_HEADING = [
+  '.claude/rules/migrations-codegen.md',
+  '.github/workflows/codegen-append-gate.yml',
+  'scripts/check-codegen-append.mjs',
+  'scripts/check-codegen-append.spec.mjs',
+];
+
+test('the README heading these files cite by quote, not line number, still exists and is cited exactly 6 times', () => {
+  assert.ok(
+    read('migrations/README.md').includes(CITED_PHRASE),
+    `migrations/README.md no longer contains "${CITED_PHRASE}" -- every citation of it (the rule, ` +
+      `the workflow, and this gate's own source and spec) is now stale`
+  );
+  const total = FILES_CITING_README_HEADING.reduce(
+    (sum, f) => sum + countOccurrences(read(f), CITED_PHRASE), 0
+  );
+  // 7, not 6: this test's own CITED_PHRASE constant, three lines up, necessarily repeats the
+  // citation text in order to search for it -- that is a search key, not a seventh citation. The
+  // six real citations are the rule (1), the workflow (1), this gate's source (3), and this
+  // spec's own round-2 fix at the "does NOT fire on the same file" test above (1).
+  assert.equal(total, 7,
+    `expected "${CITED_PHRASE}" to appear 7 times across ${FILES_CITING_README_HEADING.join(', ')} ` +
+      `(the six real citations plus this test's own comparison literal), found ${total} -- a ` +
+      `citation was reworded, or one got split across a line-wrap again`);
+});
 
 // ── The classifier's own vocabulary ──────────────────────────────────────────────────────────
 test('DDL detection is scoped to our own schema placeholder', () => {
