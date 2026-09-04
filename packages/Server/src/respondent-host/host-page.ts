@@ -100,6 +100,12 @@ export interface RespondentHostErrorOptions {
   message: string;
   /** Optional page title shown in the browser tab. */
   pageTitle?: string;
+  /**
+   * `'notice'` for a refusal that is not a failure — a form awaiting publication, or one that opens
+   * on a date. Those are painted in the page's ordinary ink and announced politely; only a real
+   * failure gets error red and an assertive `role="alert"`. Default `'error'`.
+   */
+  tone?: 'error' | 'notice';
 }
 
 /**
@@ -109,6 +115,11 @@ export interface RespondentHostErrorOptions {
 export function renderRespondentHostErrorPage(options: RespondentHostErrorOptions): string {
   const title = escapeHtml(options.pageTitle ?? 'Form unavailable');
   const message = escapeHtml(options.message);
+  const isNotice = options.tone === 'notice';
+  const cls = isNotice ? 'mjf-host__notice' : 'mjf-host__error';
+  // `alert` interrupts a screen reader for something wrong; `status` announces politely at the next
+  // opportunity, which is what "it opens on Thursday" is.
+  const role = isNotice ? 'status' : 'alert';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -120,7 +131,7 @@ export function renderRespondentHostErrorPage(options: RespondentHostErrorOption
 </head>
 <body>
   <main class="mjf-host">
-    <p class="mjf-host__error" role="alert">${message}</p>
+    <p class="${cls}" role="${role}">${message}</p>
   </main>
 </body>
 </html>`;
@@ -153,7 +164,8 @@ body {
   min-height: 100vh;
 }
 .mjf-host__loading,
-.mjf-host__error {
+.mjf-host__error,
+.mjf-host__notice {
   max-width: 44rem;
   margin: 0 auto;
   padding: clamp(1.5rem, 5vw, 3rem) clamp(1rem, 4vw, 2rem);
@@ -162,6 +174,9 @@ body {
 }
 .mjf-host__error {
   color: var(--mj-error, #b3261e);
+}
+.mjf-host__notice {
+  color: var(--mj-text, #1a1a1a);
 }
 mj-form {
   display: block;

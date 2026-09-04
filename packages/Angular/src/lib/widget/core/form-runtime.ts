@@ -349,6 +349,34 @@ export class FormRuntime {
     return toAnswerInputs(this.visibleAnswerableQuestions(), this.answers());
   }
 
+  /**
+   * Would a final submit right now store nothing, on a form that asked for something? (#124)
+   *
+   * The client half of the server's step 4. The server refuses such a submission, so without this
+   * the respondent presses Submit, waits for a round trip, and gets a banner — while every other
+   * validation rule in this widget blocks or annotates inline. Asked here rather than reimplemented
+   * in the component so the two facts come from the same place the payload does.
+   *
+   * Both halves matter, and the second is the one that is easy to leave out: a form that asked
+   * NOTHING — pure `Statement` copy, or one whose every answerable question is hidden on this path
+   * — is completable, and pressing Submit on it must go through. That half CALLS
+   * {@link hasAnswerableQuestions} rather than re-spelling `length > 0`, so the progress bar's
+   * "is there anything here" and this one cannot drift into two answers.
+   *
+   * Judged with the contract's `isAnswerSupplied` — the server's own definition of a supplied
+   * answer — and NOT with what the payload builder happens to send. The two disagree on exactly
+   * one case, and it is a case a respondent reaches by accident: `isSubmittable` (answer-value.ts)
+   * rejects only the empty string, so a whitespace-only answer IS transmitted, while
+   * `isAnswerSupplied` trims and calls it unanswered, so the server stores nothing and refuses.
+   * Mirroring the payload would leave that submit going out to be refused — the one round trip
+   * this method exists to prevent.
+   */
+  public readonly wouldSubmitNothing = computed(
+    () =>
+      this.hasAnswerableQuestions() &&
+      !this.visibleAnswerableQuestions().some((question) => isAnswerSupplied(this.valueFor(question.id))),
+  );
+
   private orderedPages(): PublishedFormPage[] {
     return [...this.definition.pages].sort((a, b) => a.displayOrder - b.displayOrder);
   }

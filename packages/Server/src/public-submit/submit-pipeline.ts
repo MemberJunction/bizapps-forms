@@ -33,6 +33,8 @@ import {
   type FieldError,
   type mjBizAppsFormsFormResponseEntityType,
   type PublishedFormScreen,
+  type FormQuestionType,
+  type PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
@@ -59,6 +61,7 @@ import {
   completionCeilingKey,
   knockoutCeilingKey,
   rateLimitKey,
+  sessionIdentity,
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
@@ -299,11 +302,24 @@ export function resetSubmitInFlightForTests(): void {
 }
 
 /**
+ * What the respondent is told when a stage threw instead of returning a result. Authored, and
+ * deliberately says nothing about what happened: the exception's own words are for the log.
+ */
+export const SUBMIT_FAILED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
+
+/**
  * Run the full pipeline behind the process-wide in-flight cap.
  *
  * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
  * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
  * the widget), because holding the request would be the resource exhaustion this defends against.
+ *
+ * NEVER THROWS. Every gate returns a result, but a stage can still throw — a bug, a driver that
+ * throws where it should return false, `RangeError: Invalid time value` from a Date the validator
+ * could not parse (#116). An exception that escapes here reaches Apollo, which puts the exception's
+ * own words into `errors[].message`, and the widget renders that to the anonymous respondent — on a
+ * production host too, since nothing about it is a stack trace (#119). So the boundary is here: the
+ * exception goes to the log with the request it belonged to, and the respondent gets one sentence.
  */
 export async function runSubmitPipeline(
   ctx: PipelineContext,
@@ -314,6 +330,15 @@ export async function runSubmitPipeline(
   }
   try {
     return await runSubmitPipelineInner(ctx, submission);
+  } catch (err: unknown) {
+    // Slug and version identify the request; the answers are deliberately not logged (they are
+    // the respondent's data, and the failure is not about their content).
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    LogError(
+      `[Forms] submit for ${submission.distributionSlug} (version ${submission.formVersionId}, ` +
+        `partial=${submission.partial === true}) threw: ${detail}`,
+    );
+    return fail(SUBMIT_FAILED_MESSAGE);
   } finally {
     submitInFlightLimiter().Exit();
   }
@@ -326,8 +351,14 @@ async function runSubmitPipelineInner(
 ): Promise<FormSubmissionResult> {
   // Timed end to end. "The submit is slow" is a report nobody can act on across eleven
   // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
-  // trip or a dedupe query can each outweigh the write. `report` is called on EVERY exit,
-  // including refusals, because a slow rejection is still a slow request.
+  // trip or a dedupe query can each outweigh the write. `report` is called on every exit OF THIS
+  // FUNCTION, including refusals, because a slow rejection is still a slow request.
+  //
+  // The one exit it does not cover is an exception, which unwinds past it to `runSubmitPipeline`'s
+  // catch. That exit emits the `… threw:` line instead, which carries the exception and its stack —
+  // strictly more useful than a timing breakdown for a stage that did not finish. Said here because
+  // this comment used to claim EVERY exit, and an operator who greps for a `[Forms] submit` line to
+  // pair with a failure would otherwise conclude the request never arrived.
   const timer = createStageTimer();
   const report = <T extends FormSubmissionResult>(result: T): T => {
     LogStatus(`[Forms] submit ${formatTimings(timer.finish())}${refusalSuffix(result)}`);
@@ -556,6 +587,9 @@ async function runSubmitPipelineInner(
         distributionId: resolved.distribution.ID,
         clientMeta: submission.clientMeta,
         clientResponseId: submission.clientResponseId,
+        // The screen, not merely the fact. On the zero-answer knockout path this is the row's
+        // entire content — see the field's note in `source-metadata.service.ts`.
+        disqualifiedByScreenId: disqualifiedBy?.id,
       }),
       answers: validation.answers,
       existingResponseId: existingPartial.response?.ID,
@@ -563,7 +597,7 @@ async function runSubmitPipelineInner(
     },
     ctx.elevatedUser,
   );
-  if (!persisted.ok) {
+  if (persisted.outcome === 'failed') {
     return report(fail(persisted.message));
   }
 
@@ -677,7 +711,9 @@ function disqualificationFields(
  *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
  *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
  *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
- *       behaviour, worthless as a ceiling — and treating it as one was the defect.
+ *       behaviour, worthless as a ceiling — and treating it as one was the defect. Charged only
+ *       when the caller actually named a session: blank is not one caller, it is every
+ *       header-less caller at once (see `sessionIdentity`).
  *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
  *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
  *       ADDRESSES, which is the only currency a public endpoint can charge.
@@ -696,14 +732,21 @@ function rateLimitGatesFor(
   knockout: boolean,
 ): RateLimitGate[] {
   const config = getPublicSubmitConfig();
-  const gates: RateLimitGate[] = [
-    { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
-  ];
   const identity = abuseIdentity(ctx.clientIpHash);
+  const gates: RateLimitGate[] = [];
+  // (a) is a per-CALLER gate, so it is charged only where it has a caller. A blank session is
+  // every header-less client at once, and this is the tightest bucket of the four — so charging
+  // them together refuses each of them for the others' traffic rather than for abuse, which is
+  // the shared kill switch `abuseIdentity` refuses to build for the ceilings. The exception is
+  // the case where nothing else can be keyed either: with no address, this coarse
+  // per-distribution circuit breaker is the only bound there is, and one is better than none.
+  // `warnOnceIfAbuseKeyingDegraded` has already announced that mode.
+  if (sessionIdentity(ctx.sessionId) || !identity) {
+    gates.push({ key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax });
+  }
   if (!identity) {
-    // No resolved IP, so (b) and (c) have nothing to key on. They are omitted rather than keyed
-    // on something weaker — see `abuseIdentity`. Gate (a) is untouched, so this is exactly the
-    // behaviour that shipped before the ceilings existed, and the warning above has said so.
+    // No resolved IP, so (b), (c) and (d) have nothing to key on. They are omitted rather than
+    // keyed on something weaker — see `abuseIdentity`.
     return gates;
   }
   gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
@@ -1096,6 +1139,7 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
           formVersionId: resolved.version.ID,
           distributionId: resolved.distribution.ID,
           answers: context.canonicalAnswers,
+          questionTypes: questionTypesOf(resolved.definition),
           principal,
           allowedEntities: allowedBindingEntities(),
         }),
@@ -1104,4 +1148,18 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
   }
+}
+/**
+ * Every question's type, keyed by id, for consumers that must write an answer onward in a shape
+ * the destination can hold. `CanonicalAnswers` carries values without types by design; entity
+ * binding needs both to decide whether a `Time` is an instant or a clock at its target column.
+ */
+function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<string, FormQuestionType> {
+  const types = new Map<string, FormQuestionType>();
+  for (const page of definition.pages) {
+    for (const question of page.questions) {
+      types.set(question.id, question.type);
+    }
+  }
+  return types;
 }

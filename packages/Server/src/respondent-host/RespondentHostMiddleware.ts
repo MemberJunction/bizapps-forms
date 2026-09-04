@@ -53,11 +53,11 @@ import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities
 
 import { getRespondentHostConfig } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
-import { renderRespondentHostPage, renderRespondentHostErrorPage } from './host-page.js';
+import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
 import { assessRespondentReadiness } from './host-readiness.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
-import { redeemFailureToView, type RedeemErrorView } from './error-view.js';
+import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
@@ -103,10 +103,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    *
    * The checks are pure; this gathers their inputs from the host. Pass the role the MINTER grants,
    * not a constant: both read FORMS_MAGICLINK_ROLE, so a host that renames the role gets a verdict
-   * about the role it will actually mint. `userExists` is core's own `UserByName` — the lookup
-   * core's provisioning performs — so the verdict cannot disagree with it. The captcha-demand read
-   * is the one database read on this path; it answers with a result, and a failed read is logged
-   * here and leaves the Turnstile verdict to config alone rather than guessing at data.
+   * about the role it will actually mint — and pass it as a thunk, because resolving the minter's
+   * config can throw, and boot is the one place that must not propagate one: it would take down all
+   * of MJAPI, which also serves Caliber and ATS, over a Forms env-var typo. `userExists` is core's
+   * own `UserByName` — the lookup core's provisioning performs — so the verdict cannot disagree
+   * with it. The captcha-demand read is the one database read on this path; it answers with a
+   * result, and a failed read is logged here and leaves the Turnstile verdict to config alone
+   * rather than guessing at data.
    */
   private async reportReadiness(): Promise<void> {
     const demand = await readCaptchaDemand(this.systemProvider(), this.systemUser());
@@ -115,7 +118,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     }
     const reasons = assessRespondentReadiness({
       magicLink: configInfo.magicLink,
-      roleName: getMagicLinkProvisioningConfig().roleName,
+      resolveRoleName: () => getMagicLinkProvisioningConfig().roleName,
       userHandling: configInfo.userHandling,
       userExists: (name) => UserCache.Instance.UserByName(name) !== undefined,
       systemUserName: this.systemUser()?.Name,
@@ -144,7 +147,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     );
 
     if (!outcome.ok) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed'));
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome.opensAt));
       return;
     }
 
@@ -168,11 +171,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     if (res.headersSent) {
       return;
     }
-    res
-      .status(view.status)
-      .type('html')
-      .set('Cache-Control', 'no-store')
-      .send(renderRespondentHostErrorPage({ message: view.message }));
+    // What the response IS — status, headers, page — is decided by `respondentErrorResponse`, which
+    // is pure and asserted whole in `middleware-error-view.spec.ts`. This method only applies it.
+    const { status, headers, html } = respondentErrorResponse(view);
+    res.status(status).type('html').set(headers).send(html);
   }
 
   /** The MJ-canonical server-side system user for pre-auth DB reads (see header). */

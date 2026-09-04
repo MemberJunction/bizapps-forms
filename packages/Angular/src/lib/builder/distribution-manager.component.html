@@ -252,8 +252,9 @@
               <span class="dm-setting-text">
                 <span class="dm-setting-label" id="dm-open-label">Open to responses</span>
                 <span class="dm-setting-hint">
-                  Turn off to stop taking responses. The link keeps working, so anything already
-                  printed still works when you turn it back on.
+                  Turn off to stop taking responses and withdraw this link's access token. The web
+                  address never changes, so anything already printed works again the moment you
+                  turn it back on.
                 </span>
               </span>
               <span class="dm-setting-control">
@@ -261,8 +262,8 @@
                   type="button"
                   class="mjf-switch"
                   role="switch"
-                  [class.is-on]="link.Status === 'Active'"
-                  [attr.aria-checked]="link.Status === 'Active'"
+                  [class.is-on]="isOpen(link)"
+                  [attr.aria-checked]="isOpen(link)"
                   aria-labelledby="dm-open-label"
                   [disabled]="busy"
                   (click)="toggleOpen()"
@@ -329,6 +330,72 @@
                 />
               </span>
             </div>
+
+            <!-- Reissue. The honest recourse for a leaked token, and the reason it is here
+                 rather than under Delete: deleting changes the slug, which breaks every
+                 poster and QR code already printed. This changes only the credential.
+
+                 Offered only where there is a token to replace. A never-issued link has
+                 nothing to reissue, and pressing it would report that the old token was
+                 withdrawn and no new one arrived — false on both counts; that link already
+                 names its own remedy in the badge above.
+
+                 A PAUSED link usually has no token either, so it usually does not get this
+                 button. "Usually" is exact: a pause whose revocation failed leaves the token
+                 on the record, and then the button does appear. That is the right outcome, not
+                 a leak in the guard — a token still sitting on a link somebody turned off is
+                 the one case where an author most wants to replace it. -->
+
+            <!-- No aria-labelledby on these buttons: it REPLACES an accessible name rather
+                 than extending it, so "Reissue link" and "Replace it" would both announce as
+                 "Access token" — two controls with one name, and the visible label missing
+                 from it (WCAG 2.5.3). Their own text is the better name. -->
+            @if (link.PublicLinkToken) {
+              <div class="dm-setting">
+                <span class="dm-setting-text">
+                  <span class="dm-setting-label">Access token</span>
+                  <span class="dm-setting-hint">
+                    If this link's token has been shared somewhere it should not have been,
+                    replace it. The web address stays the same, so printed links and QR codes
+                    keep working.
+                  </span>
+                </span>
+                <span class="dm-setting-control dm-setting-control--stack">
+                  @if (confirmingReissue) {
+                    <!-- Confirm LEFT, cancel RIGHT, per the house rule. -->
+                    <button
+                      type="button"
+                      class="mjf-btn mjf-btn--danger"
+                      [disabled]="busy"
+                      (click)="confirmReissue()"
+                    >
+                      <i class="fa-solid fa-key" aria-hidden="true"></i> Replace it
+                    </button>
+                    <button
+                      type="button"
+                      class="mjf-btn mjf-btn--quiet"
+                      [disabled]="busy"
+                      (click)="confirmingReissue = false"
+                    >
+                      Keep it
+                    </button>
+                    <span class="dm-setting-hint">
+                      The old token stops being handed out immediately. Anyone who already opened the
+                      link keeps their session until it expires on its own.
+                    </span>
+                  } @else {
+                    <button
+                      type="button"
+                      class="mjf-btn mjf-btn--quiet mjf-btn--sm"
+                      [disabled]="busy"
+                      (click)="confirmingReissue = true"
+                    >
+                      <i class="fa-solid fa-key" aria-hidden="true"></i> Reissue link
+                    </button>
+                  }
+                </span>
+              </div>
+            }
 
             <div class="dm-danger">
               @if (canDelete) {

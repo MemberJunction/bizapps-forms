@@ -5,6 +5,8 @@
  * decisions cannot be bypassed.
  *
  * Pipeline:
+ *  0. Refuse any answer whose question id is in NO page of the definition — malformed input
+ *     in every mode (#124). A hidden or display-only question is a KNOWN id and is not this.
  *  1. Build `Map<questionId, AnswerValue>` from the raw answer inputs.
  *  2. Evaluate page + question `ConditionalRule` with the shared
  *     {@link evaluateConditionalRule}; questions that resolve hidden are DROPPED
@@ -12,14 +14,18 @@
  *  3. For each visible question: enforce `isRequired`, then the format implied by the
  *     question's TYPE (shared {@link validateAnswerFormat}), then the author's
  *     `ValidationRule` (length / numeric bounds / regex pattern).
+ *  4. Refuse a `complete` submission that left nothing to persist and raised no other error, ON A
+ *     FORM THAT ASKED SOMETHING (#124) — it would otherwise be sealed `Complete` and counted
+ *     against both quotas. A form that asks nothing is completable, and always was.
  *
- * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`).
- * It is a draft, and the widget autosaves on a debounce with no validity gate, so a half-typed
- * value is the normal case rather than an error — but "not finished" and "already too big" are
- * different claims. A value under `minLength`, an incomplete email or a value that does not yet
- * match a `pattern` are all states a respondent passes THROUGH; a value past `maxLength` is not
- * on its way anywhere. Exempting the ceilings too meant an author's `maxLength` bought nothing
- * on the autosave path.
+ * A `draft` (autosave) submission is held to step 3's UPPER BOUNDS only (`maxLength`, `max`) —
+ * plus the one thing the row cannot physically hold, see {@link validateDraft}. It is a draft,
+ * and the widget autosaves on a debounce with no validity gate, so a half-typed value is the
+ * normal case rather than an error — but "not finished" and "already too big" are different
+ * claims. A value under `minLength`, an incomplete email or a value that does not yet match a
+ * `pattern` are all states a respondent passes THROUGH; a value past `maxLength` is not on its
+ * way anywhere. Exempting the ceilings too meant an author's `maxLength` bought nothing on the
+ * autosave path.
  *
  * Note what this does NOT do: a question with no `validationRule` at all — the common case — is
  * still capped only by MJAPI's 50mb GraphQL body limit, on the draft path and the complete path
@@ -35,9 +41,11 @@
  * Returns the set of visible answers to persist plus any field errors. Pure — no I/O.
  */
 import {
+  answerColumnFor,
   isAnswerableQuestionType,
   isAnswerSupplied,
   isRequiredSatisfied,
+  NOTHING_TO_SUBMIT_MESSAGE,
   resolveRenderedQuestions,
   coerceAnswerToNumber,
   matchesValidationPattern,
@@ -153,6 +161,17 @@ function asksForEverything(mode: ValidationMode): boolean {
 }
 
 /**
+ * What an answer naming a question this form does not have is told (#124).
+ *
+ * Local, unlike `NOTHING_TO_SUBMIT_MESSAGE` which lives in the shared contract, and the asymmetry
+ * is deliberate: the widget mirrors the nothing-to-submit rule, so both sides say that sentence and
+ * a second literal would drift. Nothing mirrors this one — `buildAnswerInputs` emits ids straight
+ * off the definition, so the widget cannot produce an unknown id and never raises this. Only the
+ * server says it, so only the server needs it.
+ */
+const UNKNOWN_QUESTION_MESSAGE = 'That answer does not belong to any question on this form.';
+
+/**
  * Run full server-side validation. See {@link ValidationMode} for what each mode waives.
  */
 export function validateSubmission(
@@ -165,6 +184,19 @@ export function validateSubmission(
   const errors: FieldError[] = [];
   const visible: ValidatedAnswer[] = [];
 
+  // An answer naming a question this version does not have is malformed input, in every mode —
+  // the same class of defect as the shape guard's "missing its question id", detectable only
+  // once the definition is loaded. It used to fall straight through the walk below, which visits
+  // the definition's questions and looks the inputs up: an input nothing looks up was neither
+  // an error nor an answer, so a submission matching NOTHING sailed on to be sealed `Complete`
+  // and counted against the quota (#124). Refused whole rather than trimmed: within a pinned
+  // version the question set is fixed, so only a client bug or a crafted request sends one, and
+  // keeping the rest silently is exactly the "vanished without trace" that made the bug invisible.
+  // Only ids in NO page are unknown. A question hidden by a rule or a display-only type is a
+  // known id, and its answer is still dropped silently below — deliberately, since a widget
+  // legitimately autosaves an answer before a later answer hides the question.
+  collectUnknownAnswers(definition, answers, errors);
+
   // ONE forward walk decides what the respondent saw — page show rules, question show rules,
   // forward jumps and the terminal jump that ends the form, all folded together. Iterating
   // `resolveVisiblePages` and re-filtering each page's own list was the same answer only for
@@ -173,10 +205,89 @@ export function validateSubmission(
   // ends the form mid-page — a second pass over that page's list puts every one of them back.
   // The widget renders this same walk, so a question it never showed can no longer be required
   // here (plan invariant 2, which held for pages and silently did not hold for questions).
-  for (const question of resolveRenderedQuestions(definition.pages, answerMap)) {
+  const rendered = resolveRenderedQuestions(definition.pages, answerMap);
+  for (const question of rendered) {
     collectVisibleQuestion(question, answerMap, inputByQuestion, mode, errors, visible);
   }
+
+  // A finished submission that stores nothing is not a response, and must not become a
+  // `Complete` row: both quotas count those — the distribution's `ResponseCount` and the form's
+  // `COUNT(Status='Complete')` — so an empty one spends a slot a real respondent needed (#124).
+  // Refused here, before anything is written, rather than written-and-not-counted, because the
+  // form-level count would still see the row.
+  //
+  // Three conditions, and each excludes a submission that is legitimately empty:
+  //
+  //  - `asksForEverything` — a draft with nothing typed yet is the normal autosave case. A
+  //    `screened-out` submission is exempt too, but NOT because it "carries the answer that
+  //    screened it": a knockout is a terminal jump whose `when` group reads the RAW answer map,
+  //    so a jump reading a HIDDEN question fires while that answer is dropped, and the response
+  //    carries nothing (measured: a `Disqualified` row with 0 answers). The real reason is that
+  //    its row records the SCREENING, not answers — "stores nothing" is not a reason to refuse it,
+  //    and refusing would throw away the one fact it exists to record. That fact is WRITTEN DOWN
+  //    rather than implied: the disqualifying screen's id goes to
+  //    `SourceMetadata.disqualifiedByScreenId`, because `Status = 'Disqualified'` alone cannot say
+  //    which knockout fired on a form carrying several, and on this path it is the whole row.
+  //  - `errors.length === 0` — a required-field error already says what is missing, more
+  //    precisely than this can.
+  //  - `askedAnything` — the respondent must have had something to answer. Without this the
+  //    check fires on a form that asked nothing at all: an acknowledgement form of pure
+  //    `Statement` copy, or one whose every answerable question is hidden on this path. `visible`
+  //    is then empty for EVERY possible respondent, so the form becomes unsubmittable by anyone
+  //    and the message tells them to answer a question that is not on their screen. The widget
+  //    has drawn this same distinction all along — `FormRuntime.hasAnswerableQuestions` names
+  //    both shapes — and this is the server spelling the same predicate over the same walk.
+  //
+  // The bound this buys is therefore "a form that asked something cannot be filled by submissions
+  // that answer nothing", NOT "no contentless row can ever be written". On a form that asks
+  // nothing, every response is contentless by construction — that IS the response — so there is
+  // no signal here to separate use from abuse, and refusing them would simply put the
+  // acknowledgement form back in the hole above. What bounds THAT form is the rate limiter and
+  // `partialCapExceeded`, which count rows rather than reading them. `rendered` is derived from
+  // the caller's own answers, so the same is true of a form whose every answerable question a
+  // crafted payload leaves hidden.
+  const askedAnything = rendered.some((question) => isAnswerableQuestionType(question.type));
+  if (asksForEverything(mode) && errors.length === 0 && visible.length === 0 && askedAnything) {
+    errors.push({ message: NOTHING_TO_SUBMIT_MESSAGE });
+  }
   return { errors, answers: visible, answerMap };
+}
+
+/** Every question id the published version carries, rendered or not, answerable or not. */
+function knownQuestionIds(definition: PublishedFormDefinition): Set<string> {
+  const ids = new Set<string>();
+  for (const page of definition.pages) {
+    for (const question of page.questions) {
+      ids.add(question.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Append one error per unknown QUESTION ID — not per answer naming one.
+ *
+ * Matched EXACTLY — the same key {@link validateSubmission}'s `inputByQuestion` lookup uses — so
+ * "known" means "would be matched", and an id that would silently miss the lookup cannot
+ * masquerade as known here.
+ *
+ * De-duplicated because the finding is a property of the id, and because the widget renders these
+ * by joining every message into one banner (`mj-form.component.ts`): two answers carrying the same
+ * unknown id used to print the same sentence to the respondent twice.
+ */
+function collectUnknownAnswers(
+  definition: PublishedFormDefinition,
+  answers: FormAnswerInput[],
+  errors: FieldError[],
+): void {
+  const known = knownQuestionIds(definition);
+  const reported = new Set<string>();
+  for (const answer of answers) {
+    if (!known.has(answer.questionId) && !reported.has(answer.questionId)) {
+      reported.add(answer.questionId);
+      errors.push({ questionId: answer.questionId, message: UNKNOWN_QUESTION_MESSAGE });
+    }
+  }
 }
 
 /**
@@ -253,7 +364,7 @@ function validateValue(
 ): string | undefined {
   const rule = question.validationRule;
   if (mode === 'draft') {
-    return rule ? validateUpperBounds(value, rule) : undefined;
+    return validateDraft(question, value, rule);
   }
   // The whole question, not just its type: an option-based answer cannot be checked against
   // options it was never given. See `AnswerFormatQuestion`.
@@ -271,6 +382,34 @@ function validateValue(
     }
   }
   return validateNumericRange(value, rule);
+}
+
+/**
+ * What a DRAFT is held to: the ceilings, plus anything the row cannot physically hold.
+ *
+ * The second clause is scoped to the `date` column, and only to it, because it is the one typed
+ * column whose transport is wider than its storage: `dateValue` is a GraphQL `String`,
+ * `DateValue` is a `DATETIMEOFFSET`. The text, numeric, boolean and JSON columns store what the
+ * transport already typed, and a file id is vouched for by the upload ledger before persistence
+ * sees it — so the date column is the only place a draft can carry a value the row will choke
+ * on. An unparseable date is also never a value "still being typed": `<input type="date">` and
+ * `<input type="time">` emit nothing until the value is whole, so holding a draft to it costs no
+ * respondent any progress. Before this, a draft `Date` or `Time` carrying such a value reached
+ * `Save()` and came back as the bare `RangeError` message "Invalid time value", attributed to no
+ * question (#116).
+ */
+function validateDraft(
+  question: PublishedFormQuestion,
+  value: AnswerValue,
+  rule: ValidationRule | undefined,
+): string | undefined {
+  if (answerColumnFor(question.type) === 'date') {
+    const unstorable = validateAnswerFormat(question, value);
+    if (unstorable) {
+      return unstorable;
+    }
+  }
+  return rule ? validateUpperBounds(value, rule) : undefined;
 }
 
 /**

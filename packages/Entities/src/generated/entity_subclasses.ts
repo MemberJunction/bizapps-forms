@@ -375,7 +375,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Field Name: MagicLinkInviteID
         * * Display Name: Magic Link Invite
         * * SQL Data Type: uniqueidentifier
-        * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution`),
+        * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.`),
     CaptchaRequired: z.boolean().describe(`
         * * Field Name: CaptchaRequired
         * * Display Name: Captcha Required
@@ -402,7 +402,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Field Name: PublicLinkToken
         * * Display Name: Public Link Token
         * * SQL Data Type: nvarchar(255)
-        * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.`),
+        * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.`),
     Form: z.string().describe(`
         * * Field Name: Form
         * * Display Name: Form Name
@@ -2331,7 +2331,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
     * * Field Name: MagicLinkInviteID
     * * Display Name: Magic Link Invite
     * * SQL Data Type: uniqueidentifier
-    * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution
+    * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.
     */
     get MagicLinkInviteID(): string | null {
         return this.Get('MagicLinkInviteID');
@@ -2392,7 +2392,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
     * * Field Name: PublicLinkToken
     * * Display Name: Public Link Token
     * * SQL Data Type: nvarchar(255)
-    * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.
+    * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.
     */
     get PublicLinkToken(): string | null {
         return this.Get('PublicLinkToken');

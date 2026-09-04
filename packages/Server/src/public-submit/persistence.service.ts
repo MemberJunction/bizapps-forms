@@ -19,14 +19,14 @@
  *
  * All entity objects are created via `provider.GetEntityObject<T>(name, contextUser)`
  * (never `new`), passing the anonymous `contextUser`. Every `Save()`/`Delete()` boolean is
- * checked; on failure we read `LatestResult.CompleteMessage` (per CLAUDE.md). The answer
- * typed columns mirror the `FormAnswerInput` transport exactly.
+ * checked; on failure `LatestResult.CompleteMessage` (per CLAUDE.md) goes to the server log and
+ * the caller gets {@link SAVE_FAILED_MESSAGE} — the diagnostic is for the operator, never for the
+ * respondent. The answer typed columns mirror the `FormAnswerInput` transport exactly.
  */
 import { LogError } from '@memberjunction/core';
 import type { BaseEntity, DatabaseProviderBase, UserInfo } from '@memberjunction/core';
-import { quoteSqlString } from '@mj-biz-apps/forms-entities';
+import { dateAnswerInstant, quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type {
-  FormAnswerInput,
   JSONValue,
   mjBizAppsFormsFormDistributionEntity,
   mjBizAppsFormsFormResponseAnswerEntity,
@@ -81,18 +81,19 @@ export interface PersistenceInputs {
  * this package compiles without `strictNullChecks`, where discriminated-union
  * narrowing via `!result.ok` does not work — a flat shape keeps field access safe.
  */
-export interface PersistenceResult {
-  ok: boolean;
-  responseId?: string;
-  status?: mjBizAppsFormsFormResponseEntity['Status'];
-  message?: string;
-  /**
-   * True when this submission was an idempotent no-op against a row a CONCURRENT request had
-   * already Completed (duplicate-key recovery hit a terminal row). The caller must NOT re-fire
-   * on-submit hooks — the winning request already did — so double-firing is avoided on the race.
-   */
-  deduped?: boolean;
-}
+export type PersistenceResult =
+  | { outcome: 'failed'; message: string }
+  | {
+      outcome: 'saved';
+      responseId: string;
+      status: mjBizAppsFormsFormResponseEntity['Status'];
+      /**
+       * True when this submission was an idempotent no-op against a row a CONCURRENT request had
+       * already Completed (duplicate-key recovery hit a terminal row). The caller must NOT re-fire
+       * on-submit hooks — the winning request already did — so double-firing is avoided on the race.
+       */
+      deduped?: boolean;
+    };
 
 /** Internal result of saving the parent response row. */
 interface SaveResponseResult {
@@ -128,9 +129,64 @@ interface SaveAnswerResult {
   message?: string;
 }
 
-/** Read a failed Save/Delete's detail message in the MJ-prescribed way. */
-function saveError(entity: BaseEntity, fallback: string): string {
-  return entity.LatestResult?.CompleteMessage ?? fallback;
+/**
+ * The one sentence a respondent is told when a row could not be written. Authored here, never
+ * derived from the failure: `LatestResult.CompleteMessage` is MJ's OPERATOR diagnostic, and the SQL
+ * provider fills it with the driver's error plus the entire T-SQL batch it ran — database name,
+ * schema, table, constraint, stored-procedure names, parameter values. That text used to be
+ * returned as the failure's `message`, which the pipeline hands to the widget verbatim, so an
+ * anonymous respondent read it off their screen (issue #119). It reaches the log instead.
+ */
+export const SAVE_FAILED_MESSAGE = 'Your response could not be saved. Please try again.';
+
+/** The two rows this module writes; both carry the `ID` the log line needs. */
+type ResponseOrAnswerEntity = mjBizAppsFormsFormResponseEntity | mjBizAppsFormsFormResponseAnswerEntity;
+
+/** What the log says when the provider reported nothing usable. One constant, two readers. */
+const NO_PROVIDER_DETAIL = 'the provider reported no detail';
+
+/**
+ * The provider's diagnostic without the statement it echoes back — and so without the answers.
+ *
+ * `SQLServerDataProvider` builds `CompleteMessage` as
+ * `Error executing SQL\n    Error: <driver>\n    Query: <the whole T-SQL batch>\n    Parameters: <JSON>`,
+ * and the batch carries the answer values inlined (`SET @TextValue_… = N'…'`). Moving that string
+ * verbatim from the wire to the log would fix one disclosure and open another: on a forms product an
+ * answer can be a diagnosis, a salary or a national identifier, and a host's error log has a
+ * different audience, retention and export path from its database.
+ *
+ * {@link runSubmitPipeline}'s catch already made this call the other way — it logs the slug and
+ * version and deliberately not the answers. This is the same decision, made the same way, one
+ * module over.
+ *
+ * The driver's error line is what an operator debugs from: it names the constraint, the table and
+ * the database. The echoed statement adds nothing they cannot get from the schema, and it is the
+ * only part carrying the payload. A diagnostic with no `Query:` section — MJ's own validation and
+ * not-null failures — is returned untouched, and a truncation is never allowed to empty the line,
+ * because a logged failure that says nothing is worse than a noisy one.
+ */
+export function withoutQueryEcho(completeMessage: string): string {
+  const trimmed = completeMessage.replace(/\n\s*Query:[\s\S]*$/, '').trim();
+  if (trimmed !== '') {
+    return trimmed;
+  }
+  // Nothing survived the truncation, or there was nothing to begin with. Say so rather than
+  // returning the empty string: a log line that reads `… failed: ` tells an operator the save broke
+  // and nothing else, and looks like a bug in the logging rather than a provider that said nothing.
+  return completeMessage.trim() === '' ? NO_PROVIDER_DETAIL : completeMessage.trim();
+}
+
+/**
+ * Record a failed Save/Delete where the operator can read it, and return what the respondent may.
+ *
+ * `LogError`, not `LogStatus`: MJ silences `LogStatus` under `NODE_ENV=production`, so the
+ * pipeline's own `— REFUSED:` timing line is not there on a production host. This line is the one
+ * record that ties the provider's dump to the row and question it was about.
+ */
+function logSaveFailure(action: string, entityName: string, entity: ResponseOrAnswerEntity): string {
+  const raw = entity.LatestResult?.CompleteMessage ?? NO_PROVIDER_DETAIL;
+  LogError(`[Forms] ${action} ${entityName} ${entity.ID} failed: ${withoutQueryEcho(raw)}`);
+  return SAVE_FAILED_MESSAGE;
 }
 
 /**
@@ -381,7 +437,7 @@ async function createResponse(
   if (adoptedId && isDuplicateKeyError(response)) {
     return reconcileDuplicate(provider, inputs, adoptedId, contextUser);
   }
-  return { ok: false, message: saveError(response, 'Failed to save form response.') };
+  return { ok: false, message: logSaveFailure('creating', FORM_RESPONSE_ENTITY, response) };
 }
 
 /**
@@ -491,32 +547,81 @@ async function saveAnswer(
   answer.NewRecord();
   answer.ResponseID = responseId;
   answer.QuestionID = validated.question.id;
-  applyAnswerValue(answer, validated.input);
+  const unstorable = applyAnswerValue(answer, validated);
+  if (unstorable) {
+    return { ok: false, message: unstorable };
+  }
 
   if (!(await answer.Save())) {
-    return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
+    return {
+      ok: false,
+      message: logSaveFailure(`inserting (question ${validated.question.id})`, FORM_RESPONSE_ANSWER_ENTITY, answer),
+    };
   }
   return { ok: true };
 }
 
-/** Copy the populated typed value(s) from the input onto the answer entity. */
-function applyAnswerValue(answer: mjBizAppsFormsFormResponseAnswerEntity, input: FormAnswerInput): void {
-  if (input.textValue !== undefined) {
+/**
+ * Copy the populated typed value(s) from the input onto the answer entity, or say why one of
+ * them cannot go on.
+ *
+ * The date column is the one that can refuse. `dateValue` is a GraphQL `String` and `DateValue`
+ * is a `DATETIMEOFFSET`, so the string is parsed here through the contract's
+ * {@link dateAnswerInstant} — the same parse validation accepted it with. This used to be a bare
+ * `new Date(input.dateValue)`, and `new Date('14:30')` (a `Time` answer, as its control emits
+ * it) is an Invalid Date that the provider's `toISOString()` turns into `RangeError: Invalid
+ * time value` from inside `Save()`, attributed to no question (#116).
+ *
+ * EVERY branch tests `!= null`, not `!== undefined`, because absent and null mean the same thing
+ * here — "this answer does not use this column" — and the transport really does deliver both.
+ * Measured against the running API: a field OMITTED from the mutation arrives as `undefined`, and
+ * a field a client sends explicitly as `null` arrives as `null`. (A comment elsewhere in this
+ * package claims omission is coerced to null; it is not, and the two behave differently.) Only an
+ * explicit null was ever a problem, and it was a problem twice:
+ *
+ *   - `dateValue` PARSES before assigning, so a null reached `text.trim()` and threw `TypeError`
+ *     out of the anonymous public mutation as an INTERNAL_SERVER_ERROR.
+ *   - `jsonValue` STRINGIFIES before assigning, and `JSON.stringify(null)` is the four-character
+ *     string `'null'` — not SQL NULL. `collapseAnswer` then reads that row as an ANSWERED question
+ *     whose value is null, which no reader can distinguish from a real answer. Quieter than the
+ *     crash and worse to diagnose.
+ *
+ * The other four assign the transport value straight through, where writing a null would be
+ * harmless — but they test the same way regardless, because a rule that holds for four of six
+ * columns is a rule the next reader has to check rather than know. `parseJsonValue` in
+ * `input-mapping.ts` carries the same `== null` guard for the same reason, added after
+ * `null.trim()` first shipped.
+ *
+ * Validation already refuses an unstorable date on every mode. Checking again here is
+ * deliberate, not belt-and-braces: validation judges the column a question's TYPE routes to,
+ * and a caller can post `dateValue` on a question of any type — so this is the only guard on
+ * that path, and a bad value there gets a message naming the question instead of a throw.
+ */
+function applyAnswerValue(
+  answer: mjBizAppsFormsFormResponseAnswerEntity,
+  { question, input }: ValidatedAnswer,
+): string | undefined {
+  if (input.textValue != null) {
     answer.TextValue = input.textValue;
   }
-  if (input.numericValue !== undefined) {
+  if (input.numericValue != null) {
     answer.NumericValue = input.numericValue;
   }
-  if (input.dateValue !== undefined) {
-    answer.DateValue = new Date(input.dateValue);
+  if (input.dateValue != null) {
+    const instant = dateAnswerInstant(question.type, input.dateValue);
+    if (!instant) {
+      const kind = question.type === 'Time' ? 'time' : 'date';
+      return `Answer to "${question.prompt}" is not a valid ${kind}.`;
+    }
+    answer.DateValue = instant;
   }
-  if (input.booleanValue !== undefined) {
+  if (input.booleanValue != null) {
     answer.BooleanValue = input.booleanValue;
   }
-  if (input.jsonValue !== undefined) {
+  if (input.jsonValue != null) {
     answer.JSONValue = JSON.stringify(input.jsonValue);
   }
-  if (input.fileId !== undefined) {
+  if (input.fileId != null) {
     answer.FileID = input.fileId;
   }
 }
@@ -558,7 +663,8 @@ async function reconcileAnswers(
     contextUser,
   );
   if (!existing.Success) {
-    return { ok: false, message: 'Failed to load existing answers for replacement.' };
+    LogError(`[Forms] reading the stored answers of response ${responseId} failed: ${existing.ErrorMessage}`);
+    return { ok: false, message: SAVE_FAILED_MESSAGE };
   }
 
   const stale = new Map<string, mjBizAppsFormsFormResponseAnswerEntity>();
@@ -584,7 +690,10 @@ async function reconcileAnswers(
   // answer cleared. Everything the respondent still has an answer for is already stored.
   for (const orphan of stale.values()) {
     if (!(await orphan.Delete())) {
-      return { ok: false, message: saveError(orphan, 'Failed to clear a prior answer.') };
+      return {
+        ok: false,
+        message: logSaveFailure(`deleting (question ${orphan.QuestionID})`, FORM_RESPONSE_ANSWER_ENTITY, orphan),
+      };
     }
   }
   return { ok: true };
@@ -609,9 +718,15 @@ async function rewriteAnswer(
   answer.BooleanValue = null;
   answer.JSONValue = null;
   answer.FileID = null;
-  applyAnswerValue(answer, validated.input);
+  const unstorable = applyAnswerValue(answer, validated);
+  if (unstorable) {
+    return { ok: false, message: unstorable };
+  }
   if (!(await answer.Save())) {
-    return { ok: false, message: saveError(answer, 'Failed to save form response answer.') };
+    return {
+      ok: false,
+      message: logSaveFailure(`rewriting (question ${validated.question.id})`, FORM_RESPONSE_ANSWER_ENTITY, answer),
+    };
   }
   return { ok: true };
 }
@@ -634,7 +749,7 @@ async function incrementResponseCount(
     // Non-fatal: the response is already saved. Surface for observability only.
     console.warn(
       `[forms] Failed to increment ResponseCount for distribution ${distributionId}: ` +
-        saveError(dist, 'unknown error'),
+        (dist.LatestResult?.CompleteMessage ?? 'unknown error'),
     );
   }
 }
@@ -702,14 +817,14 @@ export async function persistSubmission(
     ? await updateResponse(provider, inputs, inputs.existingResponseId as string, contextUser)
     : await createResponse(provider, inputs, contextUser);
   if (!saved.ok || !saved.entity) {
-    return { ok: false, message: saved.message };
+    return { outcome: 'failed', message: saved.message ?? SAVE_FAILED_MESSAGE };
   }
   const responseId = saved.entity.ID;
 
   // A concurrent request already Completed this row (duplicate-key recovery): it is terminal, so
   // its answers and count are already recorded — return the existing id/status untouched.
   if (saved.skipAnswers) {
-    return { ok: true, responseId, status: saved.entity.Status, deduped: true };
+    return { outcome: 'saved', responseId, status: saved.entity.Status, deduped: true };
   }
 
   // One pass for both paths. A fresh CREATE has nothing stored, so this inserts; an upsert or a
@@ -718,7 +833,7 @@ export async function persistSubmission(
   // until every incoming answer is safely written.
   const written = await reconcileAnswers(provider, responseId, inputs.answers, contextUser);
   if (!written.ok) {
-    return { ok: false, message: written.message };
+    return { outcome: 'failed', message: written.message ?? SAVE_FAILED_MESSAGE };
   }
 
   // SEALED LAST. Until this line the row is a draft: whatever went wrong above, it never claimed
@@ -727,7 +842,7 @@ export async function persistSubmission(
   if (saved.pendingSeal) {
     applyResponseOutcome(saved.entity, inputs);
     if (!(await saved.entity.Save())) {
-      return { ok: false, message: saveError(saved.entity, 'Failed to save form response.') };
+      return { outcome: 'failed', message: logSaveFailure('sealing', FORM_RESPONSE_ENTITY, saved.entity) };
     }
   }
 
@@ -742,5 +857,5 @@ export async function persistSubmission(
   if (saved.countable) {
     await incrementResponseCount(provider, inputs.distributionId, contextUser);
   }
-  return { ok: true, responseId, status: statusFor(inputs) };
+  return { outcome: 'saved', responseId, status: statusFor(inputs) };
 }

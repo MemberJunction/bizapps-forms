@@ -82,11 +82,11 @@ describe('checkRespondentReadiness', () => {
   // client/server validation split caused.
   it('checks the role this app actually grants, not a hardcoded one', () => {
     const custom = 'Survey Respondent';
-    const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [RESPONDENT_ROLE] }, custom);
+    const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [RESPONDENT_ROLE] }, () => custom);
     expect(result.ready).toBe(false);
     expect(result.ready === false && result.reason).toContain(custom);
 
-    expect(checkRespondentReadiness({ enabled: true, grantableRoleNames: [custom] }, custom))
+    expect(checkRespondentReadiness({ enabled: true, grantableRoleNames: [custom] }, () => custom))
       .toEqual({ ready: true });
   });
   // Core compares role names case- and whitespace-insensitively: magicLinkCore's
@@ -118,8 +118,18 @@ describe('checkRespondentReadiness', () => {
   // consults the allow-list. Without the same guard, a config carrying a blank string would make
   // a blank role name "grantable" — agreeing with core means agreeing about this too.
   it('never treats a blank role name as grantable, as core does not', () => {
-    const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [''] }, '   ');
+    const result = checkRespondentReadiness({ enabled: true, grantableRoleNames: [''] }, () => '   ');
     expect(result.ready).toBe(false);
+  });
+
+  it('reports a provisioning config that cannot be resolved as NOT ready, instead of throwing', () => {
+    // The boot-time caller is not inside a try. A throw there takes down all of MJAPI — which
+    // also serves Caliber and ATS — over a Forms env-var typo. The readiness line is exactly
+    // where broken host config is meant to surface, so the check owns this case.
+    const readiness = checkRespondentReadiness({ enabled: true, grantableRoleNames: [RESPONDENT_ROLE] }, () => {
+      throw new Error("FORMS_MAGICLINK_CHANNELS contains 'embed', which is not a distribution channel.");
+    });
+    expect(readiness).toEqual({ ready: false, reason: expect.stringContaining("'embed'") });
   });
 });
 
@@ -237,7 +247,7 @@ describe('checkProvisioningUserReadiness', () => {
 describe('assessRespondentReadiness', () => {
   const readyHost: RespondentReadinessInputs = {
     magicLink: { enabled: true, grantableRoleNames: [RESPONDENT_ROLE], contextUserForProvisioning: 'System' },
-    roleName: RESPONDENT_ROLE,
+    resolveRoleName: () => RESPONDENT_ROLE,
     userHandling: undefined,
     userExists: (name) => name === 'System',
     systemUserName: 'System',

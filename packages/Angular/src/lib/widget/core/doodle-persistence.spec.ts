@@ -49,6 +49,7 @@ function twoSectionForm(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
     pages: [
       { id: 'p1', displayOrder: 1, questions: [question('q-name', 'ShortText', 1)] },
       {

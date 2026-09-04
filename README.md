@@ -2,276 +2,167 @@
 
 <br/>
 
-# 📋 &nbsp; MJ Forms
+# 📝 &nbsp; MJ Forms
 
 ### Forms, surveys &amp; intake — beautiful, free, and built on _your_ data.
 
-**A source-available [MemberJunction](https://github.com/MemberJunction/MJ) Open App.**
-Anonymous-friendly public links. Gorgeous on mobile. Set up in two minutes by a human _or_ an AI agent.
-And every response is a **first-class record in your MemberJunction database** — not an export trapped in someone else's silo.
+Anonymous public links · mobile-first · built in minutes.<br/>
+Every response lands as a **first-class record in your MemberJunction database** —
+not an export trapped in someone else's silo.
 
-<br/>
-
-[![Live design gallery](https://img.shields.io/badge/%F0%9F%8E%A8_live_design_gallery-view_now-7c5cff?style=for-the-badge)](https://memberjunction.github.io/bizapps-forms/)
+[![Live design gallery](https://img.shields.io/badge/%F0%9F%8E%A8_design_gallery-view-7c5cff?style=for-the-badge)](https://memberjunction.github.io/bizapps-forms/)
 [![Built on MemberJunction](https://img.shields.io/badge/built%20on-MemberJunction-264FAF?style=for-the-badge)](https://github.com/MemberJunction/MJ)
-[![License: ISC](https://img.shields.io/badge/license-ISC-2c7be5?style=for-the-badge)](#-license)
-[![Status: scaffold](https://img.shields.io/badge/status-Phase%201-e8a33d?style=for-the-badge)](plans/FORMS_BUILD_PLAN.md)
-
-**🎨 Live design explorations →** [**memberjunction.github.io/bizapps-forms**](https://memberjunction.github.io/bizapps-forms/) — three contemporary UX directions (Aurora · Editorial · Warm) across the respondent form, builder, and analytics dashboard.
+[![License: BUSL-1.1](https://img.shields.io/badge/license-BUSL--1.1-2c7be5?style=for-the-badge)](#-license)
 
 <br/>
 
-[**What it is**](#-what-it-is) · [**The moat**](#-why-its-different-the-moat) · [**Anonymous by default**](#-anonymous-by-default) · [**Architecture**](#%EF%B8%8F-architecture) · [**Quick start**](#-quick-start) · [**Roadmap**](#%EF%B8%8F-roadmap) · [📚 **The full plan**](plans/FORMS_BUILD_PLAN.md)
+<img src="docs/images/01-build-and-preview.gif" alt="Adding a question in the MJ Forms builder, then previewing the same form at desktop, tablet and phone sizes and submitting it." width="100%">
 
 </div>
 
 ---
 
-## 🧭 What it is
-
-The **80–90% of form/survey usage is simple** — contact forms, RSVPs, feedback/NPS, lead capture,
-applications, registrations, quizzes — and it maps almost perfectly onto things **MemberJunction
-already does well**. Standalone tools charge a recurring premium for capabilities that, on top of MJ,
-are largely **reuse, not new build**.
-
-So MJ Forms ships the simple 80% **beautifully and for free**, and makes the powerful 20% _possible_
-by leaning on MJ infrastructure — **Actions, Agents, AI Prompts, RSU** — instead of a bespoke
-workflow engine. It's deliberately **source-available under the Business Source License 1.1**, with a soft spot for the audiences
-MJ already serves best: **nonprofits and associations**, for whom per-response metered survey tools
-are a real, recurring budget pain.
-
-```mermaid
-flowchart LR
-    A["📝 <b>Build</b><br/><sub>visual builder<br/>or AI-authored</sub>"] --> B["🚀 <b>Publish</b><br/><sub>link · embed<br/>QR · popup</sub>"]
-    B --> C["📱 <b>Respond</b><br/><sub>mobile-first<br/>&lt;mj-form&gt; widget</sub>"]
-    C --> D["💾 <b>Capture</b><br/><sub>FormResponse<br/>+ Answers</sub>"]
-    D --> E["⚡ <b>Automate</b><br/><sub>on-submit<br/>Actions / Agents</sub>"]
-    E --> F["📊 <b>Report</b><br/><sub>native MJ<br/>dashboards + Skip</sub>"]
-```
-
----
-
-## ✨ Why it's different (the moat)
+## Why it's different
 
 A standalone survey tool traps responses in a silo. MJ Forms inverts that — responses are
-**operational data the moment they land.**
+operational data the moment they land.
 
-|   | Capability | What it means |
-|---|---|---|
-| 🧩 | **Responses are records, not exports** | A submission can _become_ (or link to) a [bizapps-common](https://github.com/MemberJunction/bizapps-common) **Person / Organization / ContactMethod** — instantly actionable in the same system that runs the org's CRM, committees, and tasks. No CSV round-trip, no Zapier tax. |
-| ⚡ | **On-submit automation — free** | Send an email, create a Task, upsert a Person, route to an agent, run an LLM-judge on a free-text answer. The "integrations + logic + AI" that incumbents charge the most for, MJ already has. |
-| 🧬 | **Promote responses to first-class entities** | A recurring instrument can be projected — via a live SQL view, or an opt-in **RSU-materialized table** — into something the whole MJ toolchain (viewing system, query builder, dashboards, **Skip**) treats natively. _No form tool on the market does this._ |
+- 🧩 &nbsp;**Responses are records, not exports.** A submission can _become_ a **Person**,
+  an **Organization**, a **ContactMethod** — actionable in the same system that runs your
+  CRM, committees and tasks. No CSV round-trip, no Zapier tax.
+- ⚙️ &nbsp;**On-submit automation, free.** Send an email, create a Task, upsert a Person,
+  route to an agent, run an LLM judge over a free-text answer. What incumbents charge the
+  most for, MemberJunction already has.
+- 🧬 &nbsp;**Promote responses to first-class entities.** A recurring instrument can be
+  projected — via a live SQL view or an opt-in materialized table — into something the whole
+  toolchain (dashboards, query builder, **Skip**) treats natively. _No form tool on the
+  market does this._
 
-> **Philosophy:** _beat the meter_ — free and unlimited at the core — and differentiate on **native
-> data integration**, not on out-feature-ing the long tail.
-
----
-
-## 🔐 Anonymous by default
-
-The scary part of public surveys — anonymous identity with server-side scope that can't be escalated —
-is **already solved by MJ.**
-
-- Public submissions ride **anonymous magic-link sessions**: `IdentityMode='anonymous'`, authorization
-  enforced server-side from the JWT's `mj_scopes` claims — **never DB roles**, so there's no privilege
-  accretion. Two anonymous visitors share one identity but hold different scopes.
-- A **`FormDistribution`** record wraps a multi-use, scoped link as a first-class "public form URL,"
-  with its own quota, expiry, open/close window, and per-link analytics.
-- The one deliberate exception to magic-link read-only convention is a restricted **"Form Respondent"**
-  role with **CanCreate on response entities only** — authored as metadata.
-- The only meaningful net-new server surface is a public-write **hardening layer**: Cloudflare
-  Turnstile (per-form toggle) + rate-limit + quota + dedupe + IP-hash/UA capture.
-
-```mermaid
-sequenceDiagram
-  actor V as Anonymous Visitor
-  participant W as mj-form Widget
-  participant S as Submit Endpoint
-  participant A as MJ Auth (mj_scopes)
-  participant DB as Forms Tables
-  V->>W: open public link / embed
-  W->>S: GET published FormVersion
-  S->>A: validate anon scope (read)
-  A-->>W: form definition
-  V->>W: fill + submit (+ Turnstile)
-  W->>S: POST answers
-  S->>S: Turnstile · rate-limit · quota · dedupe
-  S->>A: validate scope (CREATE response only)
-  S->>DB: Save FormResponse + Answers
-  S-->>W: confirmation / redirect
-```
+> **Philosophy: _beat the meter._** Free and unlimited at the core; differentiate on native
+> data integration, not on out-feature-ing the long tail.
 
 ---
 
-## 🏗️ Architecture
+## 🛠️ &nbsp;Build
 
-Two surfaces, one definition:
+Drag questions onto the canvas, set logic and validation inline, and preview at every screen
+size before you publish.
 
-| Surface | What it is |
-|---|---|
-| 📱 **Respondent widget** | An Angular **custom element** (`<mj-form id="…">`) published to a CDN. Tiny, no Explorer shell — embed via `<script>`, iframe, popup, full-page, or QR. Two render modes (classic scroll **and** Typeform-style one-question-at-a-time) from the same definition. The public-facing ticket. |
-| 🖥️ **Builder / Admin** | Runs in **MJExplorer**: visual form builder, response management, reporting dashboards. Internal staff only; full reuse of MJ dashboard / grid / query infrastructure. |
+**25 question types** — short &amp; long text · email · phone · website · number · yes/no ·
+single choice · multiple choice · dropdown · picture choice · rating · NPS · opinion scale ·
+ranking · matrix · checkbox · legal · date · time · address · contact info · file upload ·
+doodle · statement.
 
-<details>
-<summary><b>Repo layout</b> (mirrors the bizapps-common Open App skeleton)</summary>
+**Theme it without writing CSS.** The Design tab edits _this form's_ look directly —
+background colour and image, button colours, corner radius, fonts, logo, and the sizing and
+alignment of titles and questions — with a live preview beside it. There is no theme gallery
+to wade through: every control writes a `--mjf-*` token the widget honours, so what you see
+is what publishes.
 
-```
-bizapps-forms/
-├─ mj-app.json            # OpenApp manifest
-├─ mj.config.cjs          # schema + entity prefix + CodeGen output paths
-├─ package.json           # npm workspace (apps/* + packages/*), turbo
-├─ turbo.json
-├─ migrations/            # VYYYYMMDDHHMM__v*__*.sql  (skyway)  ·  migrations-pg/
-├─ metadata/              # mj-sync seed data (categories, styles, roles, perms)
-├─ packages/
-│  ├─ Entities/             @mj-biz-apps/forms-entities              (CodeGen entity subclasses)
-│  ├─ Actions/              @mj-biz-apps/forms-actions               (CodeGen + hand-written actions)
-│  ├─ CoreEntitiesServer/   @mj-biz-apps/forms-core-entities-server  (server-side lifecycle hooks)
-│  ├─ Server/               @mj-biz-apps/forms-server                (bootstrap + resolvers + submit endpoint)
-│  └─ Angular/              @mj-biz-apps/forms-ng                    (Explorer builder/admin + <mj-form> widget)
-└─ apps/
-   └─ MJAPI/               API-only dev harness    (mj-forms-api-harness, `node server.mjs`)
-                           No MJExplorer here — the builder UI runs in MJ's own host.
-                           See docs/local-host.md.
-```
-
-</details>
-
-### 📐 Data model (Phase 1)
-
-`FormCategory` (hierarchical) · `FormStyle` (themeable CSS) · **`Form`** · `FormVersion` (immutable
-snapshots) · `FormPage` · `FormQuestion` · `FormQuestionOption` · **`FormResponse`** (identified
-respondents link to a `bizapps-common` Person via `RespondentPersonID`) · `FormResponseAnswer`
-(typed columns + JSON fallback) · `FormDistribution`. _Phase 2 adds `FormGroup` carrying the optional
-`MaterializedEntityID` RSU bridge._
-
-> **Hard dependencies:** MJ Forms builds on two sibling Open Apps —
-> [`bizapps-common`](https://github.com/MemberJunction/bizapps-common) (identity) and
-> [`bizapps-tasks`](https://github.com/MemberJunction/bizapps-tasks) (review/approve-before-publish
-> routing). Both are free OSS and **auto-install** with MJ Forms (declared in `mj-app.json`).
-
-### 🧱 ~70% is reuse, not new build
-
-Anonymous magic-link `mj_scopes` · API-key scopes · Actions / Agents / AI Prompts · RunView / RunQuery /
-dashboards · RSU (`RuntimeSchemaManager` + `SchemaEvolution`) · bizapps-common identity. **All present in
-published MJ on the line this app pins** (`mjVersionRange` in `mj-app.json`) — see the [reuse map](plans/FORMS_BUILD_PLAN.md#33-reuse-map--what-mj-already-gives-us-the-heart-of-this-plan).
+<img src="docs/images/02-theming.gif" alt="Changing a form's background, text and button colours in the Design tab, with the live preview updating alongside." width="100%">
 
 ---
 
-## 🚀 Quick start
+## 🔗 &nbsp;Publish — a link, an embed, a QR code
 
-MJ Forms is an Open App: it installs **into** an existing MemberJunction database alongside its two
-required siblings. A working local stack therefore needs an MJ core schema and both siblings present
-before Forms' own steps do anything useful.
+Public submissions ride **anonymous magic-link sessions** — `IdentityMode='anonymous'`, with
+authorization enforced server-side from the JWT's `mj_scopes` claims, **never DB roles**, so
+there is no privilege accretion.
 
-**1. Configure.** There is no default connection — nothing works until this exists.
+- A **`FormDistribution`** record wraps a multi-use scoped link as a first-class public URL,
+  with its own response quota, open/close window, live response count and captcha toggle.
+- The one deliberate exception to magic-link read-only convention is a restricted
+  **"Form Respondent"** role with **CanCreate on response entities only**.
+- Public writes are hardened: rate limit, quota, dedupe, IP-hash and UA capture, with
+  Cloudflare Turnstile verification server-side.
+
+---
+
+## 📱 &nbsp;Respond — on any screen
+
+Two render modes from one definition — classic scroll, or one-question-at-a-time. Mobile-first,
+WCAG AA, with the right keyboard for every field. Preview at **desktop, tablet and phone**
+before you publish.
+
+The respondent surface is an Angular **custom element** — `<mj-form slug="…">` — published as
+a standalone bundle. Embed it with a `<script>` tag, an iframe, a popup, a full page or a QR
+code. No Explorer shell, nothing to log into.
+
+---
+
+## 📊 &nbsp;Report — the moment they land
+
+<p align="center">
+<img src="docs/images/03-analytics.png" alt="The Responses and Analytics dashboard: 19 of 27 responses completed, a where-people-stop funnel, an NPS breakdown, and per-question aggregates for a matrix, checkboxes, ranking and dropdown." width="556">
+</p>
+
+Summaries, a completion funnel, per-question breakdowns and export ship with the app — no
+separate BI step, because responses are already queryable MJ entities.
+
+Four hooks run on every submit: **upsert the respondent as a Person · send a confirmation
+email · create a follow-up Task · analyze written responses with an LLM judge.** The judge
+writes its score and rationale onto the answer record, where any RunView or Skip question can
+read it.
+
+> What runs after Submit, how to configure or decline each hook, and which record owns
+> respondent identity → **[docs/on-submit-automations.md](docs/on-submit-automations.md)**
+
+---
+
+## ⚡ &nbsp;Quick start
+
+MJ Forms is an Open App: it installs **into** an existing MemberJunction database, alongside
+its two required siblings.
 
 ```bash
-npm install                        # repo root only — never inside a package dir
-cp .env.example .env               # then fill in the placeholders (see the file's comments)
-ln -sf ../../.env apps/MJAPI/.env  # MJAPI runs with cwd apps/MJAPI and reads .env from there
-```
+# 1. Configure — there is no default connection
+pnpm install                       # repo root only, never inside a package dir
+cp .env.example .env               # then fill in the placeholders
+ln -sf ../../.env apps/MJAPI/.env
 
-**2. Lay down MJ core.** Forms' migrations assume the `__mj` schema already exists; they do not
-create it. Point MJ's own migrations at your database (from a MemberJunction checkout):
+# 2. Lay down MJ core (from a MemberJunction checkout — Forms' migrations assume __mj exists)
+npm run mj:migrate --prefix /path/to/MJ
 
-```bash
-DB_HOST=localhost DB_PORT=<port> DB_DATABASE=<db> DB_USERNAME=sa DB_PASSWORD=<pw> \
-  npm run mj:migrate --prefix /path/to/MJ
-```
-
-**3. Install the sibling Open Apps, leaf-first.** `bizapps-common` and `bizapps-tasks` are hard
-`mj-app.json` dependencies — the on-submit hooks write into both schemas.
-
-```bash
+# 3. Install the siblings, leaf-first
 npx mj migrate --schema __mj_BizAppsCommon --dir /path/to/bizapps-common/migrations
 npx mj migrate --schema __mj_BizAppsTasks  --dir /path/to/bizapps-tasks/migrations
+
+# 4. Install Forms — schema, tables and the metadata seed
+npm run mj:migrate
+npm run mj:codegen
+
+# 5. Build and run
+pnpm run build                     # all packages, including the <mj-form> bundle
+cd apps/MJAPI && node server.mjs   # API harness → http://localhost:4121
 ```
-
-**4. Install Forms.**
-
-```bash
-npm run mj:migrate          # schema, tables, AND the metadata seed
-npm run mj:codegen          # generate entity / action / resolver / Angular subclasses
-```
-
-> **There is no separate metadata step any more.** Roles, entity permissions, actions, AI prompts,
-> styles, categories, the application and its dashboards all ship inside
-> `migrations/V…__Metadata_Sync.sql`, because `mj-app.json`'s `metadata.directory` is a dev-time
-> pointer MJ's install engine never reads — migrations are the only channel to a database that is
-> not yours. Earlier versions of this guide told you to run `mj sync push` here; that was the whole
-> bug, and it meant every install but the author's got a Forms deployment with no `Form Respondent`
-> role and no anonymous submit path, while reporting success at every step.
->
-> **`mj sync push` is an authoring tool, not an install step, and a host never runs it.** It is how a
-> *contributor* who edited `metadata/` pushes the change into a dev database, and how the build
-> engineer generates the release's seed migration. The push is how metadata gets into a migration;
-> the migration is how it reaches anybody else. A contributor's PR carries the JSON and no seed —
-> one consolidated `Metadata_Sync` is generated per release, and `npm run check:release-seed` says
-> what that seed still owes. See [`migrations/README.md`](migrations/README.md).
-
-**5. Build and run.**
-
-```bash
-pnpm run build              # build all packages (turbo), including the <mj-form> bundle
-cd apps/MJAPI && node server.mjs   # the API harness → http://localhost:4121
-```
-
-> There is **no `start:api` / `start:explorer` script** — they did not survive the pnpm migration,
-> and this repo has no Explorer at all. `apps/MJAPI` is an API-only harness, which is enough for the
-> respondent path, the submit endpoint and the smoke scripts. For the **builder / admin UI**, run
-> MJ's own host with this repo linked in: `cd ../MJ && pnpm start` (Explorer `:4201`).
-> **[docs/local-host.md](docs/local-host.md)** is the full procedure.
-
-> `npm run build` now also emits `dist/widget/mj-form.js`, the `<mj-form>` custom-element bundle
-> the respondent page loads — it is part of `forms-ng`'s `build`, not a separate step you have to
-> remember. (`npm run build:widget` still exists to rebuild just that bundle during widget work.)
 
 A published form is then reachable anonymously at `http://localhost:4121/f/<distribution-slug>`.
-
-> **What happens after Submit** — which automations run, how to configure or decline them from code,
-> and which record owns respondent identity (read `FormResponse.RespondentPersonID`; do not derive a
-> second Person) — is **[docs/on-submit-automations.md](docs/on-submit-automations.md)**. Read it
-> before building an app that consumes Forms responses.
-
-**Verify it actually works** — this exercises the public path end to end (host page, session token,
-widget bundle, published definition, anonymous submit) and is the check that would have caught the
-respondent-path defects in 0.2.1:
+Verify the whole public path — host page, session token, widget bundle, published definition,
+anonymous submit — with:
 
 ```bash
 npm run smoke:respondent -- <distribution-slug>
 ```
 
-Two environment knobs, because the defaults stopped being right when the dev environment changed:
-
-| variable | default | when to set it |
-|---|---|---|
-| `FORMS_SMOKE_URL` | `http://localhost:4121` | the API actually serving Forms. In the shared dev workspace that is **`http://localhost:4000`** — `4121` is this repo's own harness, which the workspace no longer runs. |
-| `FORMS_SQL_CONTAINER` | `sql-mj-it` | the docker SQL Server the scripts that seed state shell into (`automation-semantics`, `upload-provenance`, `resume-arc`, `binding`). Was `forms-sql` until the per-app databases were retired. |
-
-```bash
-FORMS_SMOKE_URL=http://localhost:4000 npm run smoke:respondent -- <distribution-slug>
-```
+> **`apps/MJAPI` is an API-only harness — there is no Explorer in this repo.** It serves the
+> respondent path and the smoke suites. For the **builder and admin UI**, run MJ's own host
+> with this repo linked in. Full procedure: **[docs/local-host.md](docs/local-host.md)** ·
+> deeper install notes, environment knobs and the metadata-seeding rules:
+> **[docs/install.md](docs/install.md)**
 
 ---
 
-## 🔌 Installing MJ Forms into a host app
+## 🔌 &nbsp;Install into a host app
 
-MJ Forms is an Open App: it does not run standalone in production, it installs **into** another
-MemberJunction application (the way [bizapps-caliber](https://github.com/MemberJunction/bizapps-caliber)
-hosts it). `mj app install` handles the schema, migrations and package wiring from `mj-app.json`.
-The metadata arrives *through* those migrations, not from the `metadata/` directory — the install
-engine never reads it — and `mj app remove` retires the rows Forms wrote into the shared `__mj`
-schema via `migrations-teardown/`.
-
-Two requirements it **cannot** wire for you, because they live in the host's own server config:
+`mj app install` handles schema, migrations and package wiring from `mj-app.json`. Two things
+it cannot wire for you, because they live in the host's own server config:
 
 ```js
 // <host>/apps/MJAPI/mj.config.cjs
 module.exports = {
   magicLink: {
     enabled: true,
-    restrictedRoleName: 'Form Respondent',   // the role Forms' seed migration creates
+    restrictedRoleName: 'Form Respondent',   // created by Forms' seed migration
     grantableRoleNames: ['Form Respondent'],
     // The user whose context provisions each anonymous respondent. Core matches this against
     // User.NAME (not Email, whatever its own comment says); the MJ system user is the natural
@@ -291,83 +182,103 @@ FORMS_TURNSTILE_SITE_KEY=...
 FORMS_TURNSTILE_SECRET=...
 ```
 
-Without `magicLink`, forms still publish — but every public link answers **409**, because no
-anonymous session can be minted and `FormDistribution.PublicLinkToken` stays null. Forms checks
-all of this at startup — `magicLink` and the role, the provisioning user, and whether Turnstile is
-configured on a host where a published form or an active link requires a captcha — and logs one
+Without `magicLink` forms still publish, but every public link answers **409** — no anonymous
+session can be minted. Forms checks all of this at startup — `magicLink` and the role, the
+provisioning user, and Turnstile on a host where a form or link requires a captcha — and logs one
 `[Forms] Anonymous respondent path is NOT ready: …` line per problem, naming the exact setting.
-Watch the host's boot log after installing; a clean boot prints none of them.
+A clean boot prints none of them.
 
 | Host requirement | Why |
 |---|---|
-| **MJ — the range in `mj-app.json`** | `node -p "require('./mj-app.json').mjVersionRange"`. Read it rather than trusting a number written here; the floor is set by our dependencies, not by preference. (It said `>=5.50.0` until 2026-08-31, two majors behind what the repo built against.) |
-| **`bizapps-common` + `bizapps-tasks` installed** | Hard `mj-app.json` dependencies. The on-submit hooks write a `Person` and a `Task` across schema boundaries |
-| **Their entity subclasses registered** | The hooks call `GetEntityObject` for both siblings' entities; unregistered, MJ returns a bare `BaseEntity` and every field assignment is silently lost |
+| **MemberJunction**, the range in `mj-app.json` | `node -p "require('./mj-app.json').mjVersionRange"` — read it rather than trusting a number written here |
+| **`bizapps-common` + `bizapps-tasks`** installed | Hard dependencies; the on-submit hooks write a Person and a Task across schema boundaries |
+| **Their entity subclasses registered** | The hooks call `GetEntityObject` for both siblings; unregistered, MJ returns a bare `BaseEntity` and every assignment is silently lost |
 | **`magicLink` configured** | As above — the anonymous respondent path depends on it entirely |
 | **`magicLink.contextUserForProvisioning` set** | The Name of a real user; otherwise provisioning is attributed to an arbitrary Owner and every link open logs an error |
 | **Turnstile keys, if captcha is used** | `FORMS_TURNSTILE_SITE_KEY` + `FORMS_TURNSTILE_SECRET`, both or neither. Captcha is opt-in per form and per link (`CaptchaRequired` defaults to off); a captcha-required submit on a keyless host is refused as a server misconfiguration |
-| **Forms metadata pushed** | Creates the `Form Respondent` role and its CanCreate-only permissions |
 
-The host should also add Forms to its own CodeGen `excludeSchemas` (or use an `includeSchemas`
-allow-list), so *its* CodeGen never generates `__mj_BizAppsForms` artifacts into *its* packages —
-the mirror image of what this repo does.
+---
+
+## 📐 &nbsp;Architecture
+
+Two surfaces, one definition:
+
+| Surface | What it is |
+|---|---|
+| 📱 **Respondent widget** | An Angular custom element (`<mj-form>`) published to a CDN. Tiny, no Explorer shell, both render modes from the same definition. The public-facing ticket. |
+| 🖥️ **Builder / admin** | Runs in MJExplorer: visual builder, response management, reporting dashboards. Internal staff only; full reuse of MJ dashboard, grid and query infrastructure. |
+
+<details>
+<summary><b>Data model, repo layout &amp; what's reused from MJ</b></summary>
+
+<br/>
 
 | | |
 |---|---|
 | **Database schema** | `__mj_BizAppsForms` |
 | **Entity prefix** | `MJ_BizApps_Forms: ` |
 | **npm scope** | `@mj-biz-apps/forms-*` |
-| **MJ version** | **not restated here, on purpose.** The supported range is `mjVersionRange` in `mj-app.json`; the exact pin is `@memberjunction/core` in `apps/MJAPI/package.json`. Those are the files an upgrade edits — a version copied into prose is one nobody updates, which is how this row claimed `5.50.0` while the repo built against the 6.1 line |
 | **Ports** | MJAPI `4121` · MJExplorer `4321` |
 
----
+**Entities.** Authoring — `FormCategory` (hierarchical) · `FormStyle` · **`Form`** ·
+`FormVersion` (immutable snapshots) · `FormPage` · `FormScreen` · `FormQuestion` ·
+`FormQuestionOption`. Responses — **`FormResponse`** (identified respondents link to a
+`bizapps-common` Person via `RespondentPersonID`) · `FormResponseAnswer` (typed columns +
+JSON fallback) · `FormUpload`. Delivery and automation — `FormDistribution` ·
+`FormAutomation` · `FormAutomationRun` · `FormEntityBinding` · `FormEntityBindingRecord`.
+Phase 2 adds `FormGroup` and the materialization bridge.
 
-## 🗺️ Roadmap
+**Hard dependencies.** [`bizapps-common`](https://github.com/MemberJunction/bizapps-common)
+(identity) and [`bizapps-tasks`](https://github.com/MemberJunction/bizapps-tasks)
+(review/approve routing). Both are free OSS and auto-install with MJ Forms.
 
-<table>
-<tr><th>Phase 1 — MVP (the differentiating slice)</th><th>Phase 2 — Power</th></tr>
-<tr valign="top"><td>
+**~70% is reuse, not new build.** Anonymous magic-link `mj_scopes` · API-key scopes ·
+Actions / Agents / AI Prompts · RunView / RunQuery / dashboards · runtime schema evolution ·
+bizapps-common identity — all present in published MJ on the line this app pins.
 
-- Schema + entities, migrate + CodeGen
-- **Public submit endpoint** (anon scope · Turnstile · rate-limit · quota)
-- **Mobile-first `<mj-form>` widget** (both render modes, a11y, file upload)
-- Visual **builder / admin** in MJExplorer + publish → `FormVersion`
-- **AI authoring** action/agent + template gallery
-- **Reporting dashboard** (summaries · funnel · export)
-- On-submit hooks (link Person · email · create Task)
+```
+bizapps-forms/
+├─ mj-app.json            # OpenApp manifest
+├─ mj.config.cjs          # schema + entity prefix + CodeGen output paths
+├─ migrations/            # skyway SQL  ·  migrations-pg/
+├─ metadata/              # mj-sync seed data (categories, styles, roles, perms)
+├─ packages/
+│  ├─ Entities/             @mj-biz-apps/forms-entities
+│  ├─ Actions/              @mj-biz-apps/forms-actions
+│  ├─ CoreEntitiesServer/   @mj-biz-apps/forms-core-entities-server
+│  ├─ Server/               @mj-biz-apps/forms-server
+│  └─ Angular/              @mj-biz-apps/forms-ng
+└─ apps/
+   └─ MJAPI/               API-only dev harness (no Explorer — see docs/local-host.md)
+```
 
-</td><td>
-
-- `FormGroup` + **view-projection** & opt-in **RSU materialization**
-- Advanced question types — **Payment** is what is left; Matrix, Ranking, Address and Doodle (the
-  Signature type, renamed in #97) all shipped in Phase 1
-- **LLM-judge** scoring on free-text answers
-- **Review/approve-before-publish** routing via bizapps-tasks
-- Partial-response resume · advanced quotas · richer logic
-
-</td></tr>
-</table>
-
----
-
-## 📚 The plan is the source of truth
-
-Everything above is distilled from **[`plans/FORMS_BUILD_PLAN.md`](plans/FORMS_BUILD_PLAN.md)** — the
-durable, byte-for-byte build plan and business case. It holds the full entity model, the
-anonymous-submission design, the dual-persistence / RSU approach, the phasing, and the decision gates
-(DG-1…DG-6). **Read its Status Snapshot + Progress Log before starting any session.**
-
-> The competitive-pricing section in the plan (§1.3) is from model knowledge and is flagged for live
-> re-verification — it is not load-bearing and should not be quoted as fact.
+</details>
 
 ---
 
-## 🌿 Branching
+## 🗺️ &nbsp;What's next
 
-`next` (integration — feature PRs land here) → `main` (release — publishes on push). Cut feature
-branches **from `next`**; they must track the same-named remote. Never commit directly to `main`.
+- **Author with AI** — draft a whole form from a one-sentence brief
+- **AI answer scores in the UI** — the LLM judge already writes them; nothing displays them yet
+- **Per-form captcha toggle** — Turnstile verifies server-side, but nothing switches it on
+- **Payment** question type
+- `FormGroup` + view projection and opt-in RSU materialization
+- Review/approve-before-publish routing via bizapps-tasks
+- **Cross-session** resume — in-session autosave already ships
+- Advanced quotas and richer conditional logic
 
-## 📄 License
+---
 
-[ISC](https://opensource.org/license/isc-license-txt) © [MemberJunction](https://memberjunction.com).
-Full source on GitHub — free and unrestricted for nonprofits, forever.
+## 📖 &nbsp;The plan is the source of truth
+
+Everything here is distilled from **[`plans/FORMS_BUILD_PLAN.md`](plans/FORMS_BUILD_PLAN.md)** —
+the durable build plan and business case, holding the full entity model, the
+anonymous-submission design, the phasing and the decision gates.
+
+Contributing? Branching model, build commands and conventions are in
+**[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+## ⚖️ &nbsp;License
+
+[Business Source License 1.1](LICENSE) © [MemberJunction](https://memberjunction.com).
+Source-available, and free for nonprofits.

@@ -5,9 +5,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserInfo } from '@memberjunction/core';
-import { runSubmitPipeline, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';
+import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineContext, type PipelineSubmission } from '../submit-pipeline';
 import { FormsRateLimiter } from '../rate-limit.service';
 import { resetPublicSubmitConfigForTests } from '../config';
+import type { FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import type { HookFireResult } from '../on-submit-hooks.service';
 import {
   makeContextUser,
@@ -151,6 +152,7 @@ describe('runSubmitPipeline', () => {
     const ctx: PipelineContext = {
       provider: fake.provider,
       contextUser: makeContextUser(),
+      elevatedUser: makeContextUser(),
       sessionId: 'sess-q',
     };
 
@@ -393,7 +395,7 @@ describe('runSubmitPipeline', () => {
     const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
     const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-respondent' });
 
-    const autosaves = [];
+    const autosaves: FormSubmissionResult[] = [];
     for (let i = 0; i < 4; i++) {
       autosaves.push(await runSubmitPipeline(ctx, validSubmission({ partial: true, answers: [] })));
     }
@@ -437,6 +439,42 @@ describe('runSubmitPipeline', () => {
     delete process.env.FORMS_COMPLETION_MAX;
   });
 
+  // THE SAME REASONING, APPLIED TO THE GATE THAT WAS ALREADY HERE — and this is the half that was
+  // missed. MJ hands the pipeline a BLANK `sessionId` for any client that omits `x-session-id`
+  // (curl, a bespoke integration, and this repo's own smoke scripts until `smoke/lib/session.mjs`
+  // was written), so every one of those callers hashes to the same key. The per-session gate is
+  // the tightest of the four at 5/min, so they do not merely share a bucket, they share the
+  // TIGHTEST one: a single script pushes it over and the next unrelated caller is refused with
+  // "Too many submissions" — a message about someone else's traffic. That is exactly the shared
+  // kill switch the ceiling above is keyed per-caller to avoid, and a gate that cannot tell two
+  // callers apart has no business refusing either of them.
+  it('does not let one header-less caller throttle another, and still bounds them by address', async () => {
+    process.env.FORMS_RATELIMIT_MAX = '1';
+    process.env.FORMS_RATELIMIT_IP_MAX = '2';
+    resetPublicSubmitConfigForTests();
+    const fireHooks = vi.fn(async (): Promise<HookFireResult[]> => []);
+    const { ctx } = makeContext(respondentPermissions(), { fireHooks, clientIpHash: 'ip-script' });
+
+    // Blank, and from an address that DID resolve: the routine shape of a scripted client.
+    ctx.sessionId = '';
+    const first = await runSubmitPipeline(ctx, validSubmission());
+    const second = await runSubmitPipeline(ctx, validSubmission());
+    const overCeiling = await runSubmitPipeline(ctx, validSubmission());
+
+    // A different header-less caller, on their own address, arriving after the first has spent
+    // everything the shared bucket had.
+    ctx.clientIpHash = 'ip-other-script';
+    const bystander = await runSubmitPipeline(ctx, validSubmission());
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(bystander.success).toBe(true);
+    // Dropping that gate must not leave them unbounded: their ADDRESS still bounds them, which is
+    // the identity they cannot rotate. Without this line the test would pass on no gates at all.
+    expect(overCeiling.success).toBe(false);
+    expect(overCeiling.errors?.[0].message).toMatch(/too many/i);
+  });
+
   // Turnstile ran BEFORE the rate limit, so a request the limiter was about to refuse had already
   // spent an outbound Cloudflare round trip — and, worse, a Turnstile token is single-use (see
   // the partial-save test above), so the refusal consumed the respondent's token. Their retry
@@ -469,3 +507,40 @@ describe('runSubmitPipeline', () => {
   });
 });
 
+
+/**
+ * The pipeline's contract is a RESULT, never a throw. Its own comments have said so since the shape
+ * guard was written ("never a throw that would yield a blank screen"), and every gate honours it —
+ * but an exception from a stage (a bug, a driver throwing instead of returning false, #116's
+ * `RangeError: Invalid time value` from a Date it could not parse) escaped to Apollo, which put the
+ * exception's own words in `errors[].message` for the widget to render to the respondent (#119).
+ */
+describe('runSubmitPipeline never throws', () => {
+  it('turns an exception from a stage into the authored failure and logs the exception with context', async () => {
+    const logged: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    try {
+      const { ctx } = makeContext(respondentPermissions());
+      // The definition load is the first stage that touches the provider; make it blow up the way
+      // an unexpected bug does — with an Error the pipeline has no branch for.
+      const throwing = Object.create(ctx.provider, {
+        RunView: { value: async () => { throw new RangeError('Invalid time value'); } },
+      }) as PipelineContext['provider'];
+
+      const result = await runSubmitPipeline({ ...ctx, provider: throwing }, validSubmission());
+
+      expect(result.success).toBe(false);
+      expect(result.errors?.[0].message).toBe(SUBMIT_FAILED_MESSAGE);
+      expect(JSON.stringify(result)).not.toContain('Invalid time value');
+
+      const line = logged.find((l) => l.includes('Invalid time value'));
+      expect(line, 'the exception must reach the server log').toBeDefined();
+      expect(line).toContain('public-1');
+      expect(line).toContain('ver-1');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

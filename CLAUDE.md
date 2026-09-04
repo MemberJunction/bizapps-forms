@@ -58,6 +58,7 @@ several details in the originals are wrong here, and each file says where and wh
 | `.claude/rules/typescript-style.md` | `**/*.ts` | No `any`, no weak typing, no cross-package re-exports, `BaseSingleton`, decomposition |
 | `.claude/rules/testing.md` | tests | Vitest conventions **here** (`.spec.ts`, no `test-utils`), and what unit tests structurally cannot catch |
 | `.claude/rules/design-tokens.md` | `**/*.css` | No hardcoded colours; `--mj-*` / `--mjf-*` tokens; the shadow-root constraint |
+| `.claude/rules/changesets.md` | `.changeset/*.md` | **`patch` unless the change ships a migration or metadata.** Why the fixed group makes the level a release-wide decision, not a local one |
 | `.claude/skills/mj-upgrade/` | on request | Full MJ version-upgrade runbook, including the core `__mj` migration that the pin bump alone does **not** do |
 
 Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not

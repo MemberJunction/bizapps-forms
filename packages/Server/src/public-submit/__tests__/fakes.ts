@@ -4,6 +4,7 @@
  * typed against the real interfaces (no `any`) via narrowly-scoped casts at the
  * boundary where the fake is handed to code expecting the full class.
  */
+import type { PersistenceResult } from '../persistence.service';
 import type {
   DatabaseProviderBase,
   EntityInfo,
@@ -121,6 +122,8 @@ function makeFakeEntity(
   const record = new Proxy(
     {
       ID: `id-${entityName}-${saved.length + 1}`,
+      // Only answer rows carry one; the loader below sets it when the fixture supplies it.
+      QuestionID: undefined as string | undefined,
       LatestResult: { CompleteMessage: 'forced save failure' },
       NewRecord: () => {
         isNew = true;
@@ -450,4 +453,28 @@ export function respondentPermissions(): CreatePermissions {
     'MJ_BizApps_Forms: Form Versions': false,
     'MJ_BizApps_Forms: Form Distributions': false,
   };
+}
+
+/**
+ * Narrow a {@link PersistenceResult} to one branch, failing the test with the OTHER branch's words
+ * if it went the other way.
+ *
+ * `PersistenceResult` is a discriminated union: a failure carries a `message`, a success carries a
+ * `responseId` and a `status`, and neither carries the other's fields. Before that, every field was
+ * optional and a spec could read `result.message` off a success and quietly assert `undefined`
+ * against `undefined`. These make the branch an explicit assertion, and a wrong branch reports what
+ * actually happened instead of a bare "expected undefined".
+ */
+export function expectPersistFailure(result: PersistenceResult): Extract<PersistenceResult, { outcome: 'failed' }> {
+  if (result.outcome === 'saved') {
+    throw new Error(`expected the save to FAIL, but it succeeded with response ${result.responseId}`);
+  }
+  return result;
+}
+
+export function expectPersistSuccess(result: PersistenceResult): Extract<PersistenceResult, { outcome: 'saved' }> {
+  if (result.outcome === 'failed') {
+    throw new Error(`expected the save to SUCCEED, but it failed: ${result.message}`);
+  }
+  return result;
 }

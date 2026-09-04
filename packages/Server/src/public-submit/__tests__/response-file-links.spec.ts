@@ -16,15 +16,7 @@ import { FILE_ENTITY_RECORD_LINK_ENTITY } from '../../file-links/file-links.serv
 import { persistSubmission, type PersistenceInputs } from '../persistence.service';
 import { FORM_RESPONSE_ENTITY } from '../entity-names';
 import type { ValidatedAnswer } from '../validation.service';
-import {
-  fakeEntityId,
-  makeContextUser,
-  makeDistribution,
-  makeFakeProvider,
-  respondentPermissions,
-  type FakeProviderConfig,
-  type SavedRecord,
-} from './fakes';
+import { expectPersistSuccess, fakeEntityId, makeContextUser, makeDistribution, makeFakeProvider, respondentPermissions, type FakeProviderConfig, type SavedRecord } from './fakes';
 
 const RESPONSE_ID = 'cccccccc-0000-4000-8000-000000000001';
 const FILE_A = 'dddddddd-0000-4000-8000-00000000000a';
@@ -72,7 +64,7 @@ describe('persistSubmission — response attachments', () => {
 
     const result = await persistSubmission(fake.provider, inputs([answer('q-file', { questionId: 'q-file', fileId: FILE_A })]), contextUser);
 
-    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('saved');
     expect(links(fake.saved)).toEqual([
       // The entity's ROW ID, not its name: that is what the attachments panel filters on.
       { FileID: FILE_A, EntityID: fakeEntityId(FORM_RESPONSE_ENTITY), RecordID: RESPONSE_ID },
@@ -164,8 +156,7 @@ describe('persistSubmission — response attachments', () => {
       contextUser,
     );
 
-    expect(result.ok).toBe(true);
-    expect(result.responseId).toBe(RESPONSE_ID);
+    expect(expectPersistSuccess(result).responseId).toBe(RESPONSE_ID);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(FILE_A));
     warn.mockRestore();
   });
@@ -185,7 +176,7 @@ describe('persistSubmission — response attachments', () => {
       contextUser,
     );
 
-    expect(result.deduped).toBe(true);
+    expect(expectPersistSuccess(result).deduped).toBe(true);
     expect(links(fake.saved)).toEqual([]);
   });
 });

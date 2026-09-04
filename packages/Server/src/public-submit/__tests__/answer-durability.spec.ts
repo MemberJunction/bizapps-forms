@@ -84,7 +84,7 @@ describe('a completion is never sealed without its answers', () => {
       const fake = provider(true);
       const result = await persistSubmission(fake.provider, inputs(), makeContextUser());
 
-      expect(result.ok).toBe(false);
+      expect(result.outcome).toBe('failed');
       // The failure the caller sees is honest. What must ALSO be true is that the row it leaves
       // behind does not claim to be a finished submission.
       const sealed = responseWrites(fake).filter((r) => r.values.Status === 'Complete');

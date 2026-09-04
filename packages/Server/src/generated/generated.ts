@@ -824,7 +824,7 @@ export class mjBizAppsFormsFormDistribution_ {
     @Field(() => Int, {description: `Running count of responses received through this distribution`}) 
     ResponseCount: number;
         
-    @Field({nullable: true, description: `ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution`}) 
+    @Field({nullable: true, description: `ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.`}) 
     @MaxLength(36)
     MagicLinkInviteID?: string;
         
@@ -840,7 +840,7 @@ export class mjBizAppsFormsFormDistribution_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
-    @Field({nullable: true, description: `Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written once after a successful mint and left unchanged thereafter; NULL until the anonymous link is provisioned.`}) 
+    @Field({nullable: true, description: `Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.`}) 
     @MaxLength(255)
     PublicLinkToken?: string;
         
