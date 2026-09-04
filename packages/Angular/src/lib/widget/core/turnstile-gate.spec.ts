@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 
 import {
   canRenderChallenge,
@@ -93,6 +93,25 @@ describe('isTurnstileError — reset trigger', () => {
     expect(isTurnstileError('missing-token')).toBe(true);
     expect(isTurnstileError('verification-failed')).toBe(true);
   });
+  // #122/#134. The server's config-gap refusal IS a Turnstile outcome — it is what
+  // `turnstile-not-configured` became once it stopped blaming the respondent. It reached the widget
+  // as prose containing neither the word "captcha" nor any code, so this classifier stopped
+  // recognising it and the spent single-use token was left un-cleared. The message is now one
+  // shared constant, so the two surfaces cannot drift apart again.
+  it('detects the server config-gap refusal, which carries no error code', () => {
+    expect(isTurnstileError(CAPTCHA_NOT_CONFIGURED_MESSAGE)).toBe(true);
+  });
+
+  // The widget does not hand this function one error — it hands it every error joined:
+  // `(res.errors ?? []).map((e) => e.message).join(' ')` (mj-form.component). An identity
+  // comparison would therefore hold only while the server happens to return exactly one, which is
+  // a property of today's `fail(message)` call and not of the contract. Matching the sentence
+  // inside the joined string is what actually survives a second error appearing beside it.
+  it('detects the config-gap refusal even when it is joined with another error', () => {
+    const joined = `Something else went wrong. ${CAPTCHA_NOT_CONFIGURED_MESSAGE}`;
+    expect(isTurnstileError(joined)).toBe(true);
+  });
+
   it('does not misfire on unrelated errors or empty input', () => {
     expect(isTurnstileError(undefined)).toBe(false);
     expect(isTurnstileError(null)).toBe(false);

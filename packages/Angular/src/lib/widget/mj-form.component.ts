@@ -22,6 +22,7 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  CAPTCHA_NOT_CONFIGURED_MESSAGE,
   computeScore,
   endingMessage,
   endingRedirectUrl,
@@ -814,9 +815,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * The config-gap half is the SHARED constant, not a second spelling of it. The server says the
+   * same sentence when its own half of Turnstile is missing, and `isTurnstileError` matches that
+   * sentence by identity — so a reworded duplicate here would silently stop the challenge being
+   * reset after a server-side refusal (#122).
+   */
   private captchaBlockedMessage(): string {
     return this.captchaConfigGap()
-      ? 'This form requires a security challenge, but it is not configured. Please contact the form owner.'
+      ? CAPTCHA_NOT_CONFIGURED_MESSAGE
       : 'Please complete the security challenge before submitting.';
   }
 

@@ -18,6 +18,7 @@ import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { getPublicSubmitConfig } from './config';
 import { createStageTimer, formatTimings } from './stage-timer';
 import {
+  CAPTCHA_NOT_CONFIGURED_MESSAGE,
   endingMessage,
   endingRedirectUrl,
   hasUnreachableAutomations,
@@ -176,14 +177,6 @@ function refusalSuffix(result: FormSubmissionResult): string {
   const reason = result.errors?.[0]?.message?.trim();
   return ` — REFUSED: ${reason || 'no reason given'}`;
 }
-
-/**
- * What the respondent reads when a captcha is required and the host cannot verify one. Mirrors the
- * widget's own config-gap copy (`captchaBlockedMessage` in mj-form.component) so the two surfaces
- * say the same thing; names nobody's failure, because there was none.
- */
-const CAPTCHA_MISCONFIGURED_MESSAGE =
-  'This form requires a security check that has not been set up on this server. Please contact the form owner.';
 
 function fail(message: string, errors?: FieldError[]): FormSubmissionResult {
   return { success: false, status: undefined, errors: errors ?? [{ message }] };
@@ -462,7 +455,7 @@ async function runSubmitPipelineInner(
         `not set on this host. Set FORMS_TURNSTILE_SECRET and FORMS_TURNSTILE_SITE_KEY, or turn the captcha ` +
         `off on that form or link. Refusing as a server misconfiguration.`,
     );
-    return report(fail(CAPTCHA_MISCONFIGURED_MESSAGE));
+    return report(fail(CAPTCHA_NOT_CONFIGURED_MESSAGE));
   }
   if (!turnstile.success) {
     return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
