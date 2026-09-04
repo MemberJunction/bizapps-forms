@@ -148,7 +148,9 @@ npm run smoke:respondent -- <distribution-slug>
 > respondent path and the smoke suites. For the **builder and admin UI**, run MJ's own host
 > with this repo linked in. Full procedure: **[docs/local-host.md](docs/local-host.md)** ·
 > deeper install notes, environment knobs and the metadata-seeding rules:
-> **[docs/install.md](docs/install.md)**
+> **[docs/install.md](docs/install.md)** ·
+> running `mj migrate` / `mj codegen`, or upgrading MJ →
+> **[docs/database-operations.md](docs/database-operations.md)**
 
 ---
 
