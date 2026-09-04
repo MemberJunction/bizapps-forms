@@ -18,11 +18,22 @@
 -- the generating database happened to hold (migrations/README.md, "order is a correctness
 -- property"). Each step is idempotent, so re-running it is a no-op.
 --
--- Existing rows are deliberately NOT touched. A stored 1 is either an author's explicit choice
--- through the builder or a direct writer's reliance on the old default, and the two cannot be told
--- apart after the fact; silently removing a captcha an author chose is the worse error. An operator
--- who knows a row was born by accident flips it in the builder, and the boot-time readiness check
--- now names any active link that still requires a captcha on a host without Turnstile.
+-- Existing rows are deliberately NOT touched, and it is worth being exact about why, because the
+-- obvious reason is wrong. The Forms builder UI cannot produce a 1: `distribution.service.ts`
+-- writes `input.captchaRequired ?? false`, no call site supplies that field, and the service has no
+-- mutator for it (there is no captcha control anywhere in `packages/Angular/src/lib/builder/`). So
+-- a stored 1 is NOT "an author's explicit choice through the builder".
+--
+-- What it can be is a deliberate write from somewhere else: a direct INSERT or import, an
+-- entity-layer/GraphQL caller, Explorer's generated FormDistribution form (which does expose the
+-- field), or an embedder passing `captchaRequired: true` through the exported
+-- `CreateDistributionInput`. Those are indistinguishable from a writer that simply relied on the
+-- old default -- and an UPDATE here would silently switch a captcha off for whoever chose it.
+-- The cost of leaving them is bounded and visible: the boot-time readiness check added alongside
+-- this migration names any active link that still requires a captcha on a Turnstile-less host, so
+-- an operator is told rather than left to discover it. Flipping such a row back is done on
+-- Explorer's entity form or by a direct write -- not in the Forms builder, which has no such
+-- control. See #134 for the widget-side gap that makes a 1 unusable even WITH Turnstile configured.
 
 -- 1. The column default. The baseline's inline DEFAULT got a server-generated name
 --    (DF__FormDistr__Captc__<hex>, different on every host), so it is looked up, not assumed.
@@ -58,6 +69,14 @@ DECLARE @proc NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID('[${flyway:defaultSche
 IF @proc IS NULL
     THROW 50122, 'spCreateFormDistribution is missing; the CodeGen chain this migration patches has not been applied.', 1;
 
+-- The CREATE PROCEDURE anchor below is safe, and not by luck: SQL Server normalizes a module's
+-- stored definition to its CREATE form, so OBJECT_DEFINITION returns text beginning with
+-- 'CREATE PROCEDURE' even for a procedure whose last definition statement was an ALTER -- including
+-- the ALTER this very migration issues. (Verified on SQL Server: CREATE a procedure, ALTER it, read
+-- OBJECT_DEFINITION -- it still says CREATE PROCEDURE.) So CHARINDEX cannot return 0 here for a
+-- procedure that exists, and STUFF cannot be handed a start position of 0. The one case where
+-- OBJECT_DEFINITION really is NULL -- a module created WITH ENCRYPTION -- is caught by the
+-- IS NULL check above, before this point.
 IF CHARINDEX('ISNULL(@CaptchaRequired, 1)', @proc) > 0
 BEGIN
     SET @proc = REPLACE(@proc, 'ISNULL(@CaptchaRequired, 1)', 'ISNULL(@CaptchaRequired, 0)');
