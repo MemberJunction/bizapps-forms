@@ -1,5 +1,24 @@
 # CodeGen Convention: Contradiction, Rule, and Gate — Implementation Plan
 
+> **⚠️ SUPERSEDED IN PART — this is the plan as authored, not a description of what shipped.**
+> Executing it corrected the plan in six places, and those corrections are the shipped code and
+> rules, not this document. Read `scripts/check-codegen-append.mjs`, its spec, and
+> `.claude/rules/migrations-codegen.md` for current behaviour; read this for why the work was
+> shaped the way it was.
+>
+> Specifically, do NOT copy from the task drafts below: **(1)** the `carriesCodeGenOutput` listing
+> in Task 2 returns `true` on the banner alone, which review found lets a comment merely *mentioning*
+> the banner disable the check for a whole file — the shipped version searches the slice *after* the
+> banner instead; **(2)** "five merged migrations carry CodeGen output without a banner" is **six**;
+> **(3)** the `migrations/README.md:70` citations went stale when this branch's own edit moved that
+> heading, and are quoted-heading citations in the shipped files; **(4)** `@codegen-none` gained a
+> requirement that its reason name every table the DDL touches; **(5)** the description-only rule is
+> independent of the DDL rule, not gated on it; **(6)** `@codegen-none` is legitimate on a
+> `DROP TABLE` — CodeGen emits nothing for a table that no longer exists.
+>
+> The drafts are kept verbatim on purpose: they are the record of what was planned, and the gap
+> between them and what shipped is the useful part. See PR #162.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended)
 > or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
 

@@ -259,7 +259,7 @@ a tracked run file. Skyway globs `**/*.sql` recursively and *does* read it, then
 committed run file reads as "the CodeGen output shipped" while shipping nothing, and MJ has no
 code that reads one back. For an Open App that is fatal rather than untidy: `mj app install`
 adds our schema to the host's `excludeSchemas`
-(`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980`), so the host's CodeGen
+(`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1980-1983`), so the host's CodeGen
 never runs against `__mj_BizAppsForms` and **if it is not in the migration it does not exist on
 the host**. The single convention is MJ's (`MJ/guides/MIGRATION_CODEGEN_WORKFLOW_GUIDE.md`
 steps 4–5, `MJ/migrations/CLAUDE.md:172-179`): append below the banner, then delete the
