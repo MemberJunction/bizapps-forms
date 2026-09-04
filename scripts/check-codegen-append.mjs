@@ -273,3 +273,135 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
 
   return violations;
 }
+
+// ── CHECK 1: no capture file is tracked, anywhere ───────────────────────────────────────────────
+
+/**
+ * Every tracked path matching `CodeGen_Run_*.sql`.
+ *
+ * `git ls-files`, not the filesystem, and that is load-bearing: 14 untracked run files sit in
+ * `migrations/codegen/` on a developer machine right now. A pure-fs check would fail every local run
+ * and teach people that this gate is noise.
+ */
+export function trackedCaptureFiles(cwd) {
+  return execFileSync('git', ['ls-files', '--', '*CodeGen_Run_*.sql'], {
+    cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT,
+  }).split('\n').filter(Boolean);
+}
+
+// ── CHECK 2: a changed migration ships its output ───────────────────────────────────────────────
+
+function diffPaths(baseSha, headSha, cwd, filter) {
+  const args = ['diff', '--name-only'];
+  if (filter) args.push(`--diff-filter=${filter}`);
+  args.push(baseSha, headSha, '--', 'migrations/');
+  return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT })
+    .split('\n').filter(Boolean);
+}
+
+/** Top-level `migrations/*.sql` added or modified between two commits. */
+export function changedMigrations(baseSha, headSha, cwd) {
+  return diffPaths(baseSha, headSha, cwd, 'AM').filter((p) => /^migrations\/[^/]+\.sql$/.test(p));
+}
+
+/** Of those, the ones the diff ADDS — the only files the banner rule applies to. */
+export function addedMigrations(baseSha, headSha, cwd) {
+  return diffPaths(baseSha, headSha, cwd, 'A').filter((p) => /^migrations\/[^/]+\.sql$/.test(p));
+}
+
+/** File contents at `sha`, or null when the path does not exist there. */
+function readAt(sha, relPath, cwd) {
+  try {
+    return execFileSync('git', ['show', `${sha}:${relPath}`], {
+      cwd, encoding: 'utf8', maxBuffer: GIT_OUTPUT_LIMIT,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function main() {
+  const [, , baseSha, headSha] = process.argv;
+  const cwd = process.cwd();
+  const violations = [];
+
+  // CHECK 1 — always, with or without a diff.
+  const captures = trackedCaptureFiles(cwd);
+  for (const f of captures) {
+    violations.push(
+      `${f}: a standalone CodeGen capture is tracked. Nothing applies it — skyway globs **/*.sql, ` +
+        `fails to parse a name that is not V…__/B…__/R__, and swallows the error into a warning, so ` +
+        `this reads as "the output shipped" while shipping nothing. Append it below a ` +
+        `"-- CodeGen output (appended)" banner in the migration that caused it, then delete it.`
+    );
+  }
+
+  // CHECK 2 — only when given a range.
+  if (baseSha && headSha) {
+    let changed, added;
+    try {
+      changed = changedMigrations(baseSha, headSha, cwd);
+      added = new Set(addedMigrations(baseSha, headSha, cwd));
+    } catch (error) {
+      // Named as itself. The unfetched-base case must never be mistaken for a clean run.
+      console.error(
+        `::error::Could not diff ${baseSha}..${headSha} from ${cwd}: ${error.message.trim()}\n` +
+          `This check ran nothing. Confirm the base commit is fetched (\`fetch-depth: 0\`) and that ` +
+          `both refs exist.`
+      );
+      process.exit(1);
+    }
+
+    for (const relPath of changed) {
+      const sql = readAt(headSha, relPath, cwd);
+      if (sql === null) {
+        violations.push(`${relPath}: listed as added/modified but unreadable at ${headSha}.`);
+        continue;
+      }
+      const findings = classifyMigration(relPath, sql, { isNew: added.has(relPath) });
+      if (findings.length === 0) continue;
+
+      // A merged migration's output may have shipped in a later one — verified, never assumed.
+      const remedy = OUTPUT_SHIPPED_LATER.get(path.basename(relPath));
+      if (remedy) {
+        const remedySql = readAt(headSha, `migrations/${remedy}`, cwd);
+        if (remedySql === null) {
+          violations.push(
+            `${relPath}: recorded as remedied by ${remedy}, but that migration does not exist at ` +
+              `${headSha}. The columns are unregistered on every host either way.`
+          );
+        } else if (!carriesCodeGenOutput(remedySql)) {
+          violations.push(
+            `${relPath}: recorded as remedied by ${remedy}, but that migration carries no CodeGen ` +
+              `output. The exemption no longer holds.`
+          );
+        } else {
+          console.log(
+            `::notice file=migrations/${remedy}::${path.basename(relPath)} ships no output of its ` +
+              `own — it was already merged when that was found; its registration ships here.`
+          );
+        }
+        continue;
+      }
+      violations.push(...findings);
+    }
+
+    if (violations.length === 0) {
+      console.log(`::notice::${changed.length} changed migration(s) ship their CodeGen output.`);
+    }
+  } else if (violations.length === 0) {
+    console.log('::notice::No CodeGen capture files are tracked.');
+  }
+
+  if (violations.length > 0) {
+    console.error('::error::CodeGen output convention violated:');
+    for (const v of violations) console.error(`  - ${v}`);
+    console.error('See .claude/rules/migrations-codegen.md and migrations/README.md.');
+    process.exit(1);
+  }
+}
+
+// Only run as a CLI when executed directly, so the spec can import the pure parts.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

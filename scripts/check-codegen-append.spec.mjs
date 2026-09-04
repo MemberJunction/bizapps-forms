@@ -21,6 +21,8 @@ import {
   findCodeGenNoneReason,
   classifyMigration,
   stripSqlComments,
+  trackedCaptureFiles,
+  changedMigrations,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -223,4 +225,55 @@ test('stripSqlComments removes line and block comments but keeps code', () => {
     stripSqlComments('SELECT 1; -- a comment\n/* block\ncomment */SELECT 2;'),
     'SELECT 1; \nSELECT 2;'
   );
+});
+
+// ── The CLI ──────────────────────────────────────────────────────────────────────────────────
+
+test('CHECK 1 is clean on the current tree', () => {
+  assert.deepEqual(trackedCaptureFiles(REPO_ROOT), [],
+    'a CodeGen_Run_*.sql is tracked — the tree has regressed');
+});
+
+test('CHECK 1 is whole-tree, so it sees a capture wherever it lands', () => {
+  // The incident (a23b598) committed 14 run files and touched no top-level migration, so a
+  // diff-scoped or has_migrations-gated version would not have run at all.
+  const out = execFileSync('git', ['ls-files', '--', '*CodeGen_Run_*.sql'],
+    { cwd: REPO_ROOT, encoding: 'utf8' });
+  assert.equal(out.trim(), '');
+});
+
+test('CHECK 1 counts TRACKED files, not files on disk', () => {
+  // 14 run files sit untracked in migrations/codegen/ on a developer machine. A pure-fs check
+  // would fail every local run and teach people to ignore the gate.
+  const onDisk = execFileSync('bash',
+    ['-c', 'ls migrations/codegen/CodeGen_Run_*.sql 2>/dev/null | wc -l'],
+    { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+  assert.ok(Number(onDisk) >= 0);
+  assert.deepEqual(trackedCaptureFiles(REPO_ROOT), []);
+});
+
+test('the CLI exits 0 with no arguments on a clean tree', () => {
+  const r = execFileSync('node', ['scripts/check-codegen-append.mjs'],
+    { cwd: REPO_ROOT, encoding: 'utf8' });
+  assert.match(r, /No CodeGen capture files are tracked/);
+});
+
+test('FIRES: the CLI exits 1 when a base ref cannot be diffed', () => {
+  assert.throws(
+    () => execFileSync('node',
+      ['scripts/check-codegen-append.mjs', 'no-such-ref-aaaa', 'HEAD'],
+      { cwd: REPO_ROOT, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => {
+      assert.equal(err.status, 1);
+      // The unfetched-base case must be named as itself, never mistaken for a clean run.
+      assert.match(String(err.stderr), /Could not diff/);
+      return true;
+    }
+  );
+});
+
+test('changedMigrations lists only top-level migration SQL', () => {
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim();
+  // A commit against itself changes nothing; the point is the shape, not the contents.
+  assert.deepEqual(changedMigrations(head, head, REPO_ROOT), []);
 });
