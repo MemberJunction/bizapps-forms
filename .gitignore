@@ -4,6 +4,11 @@ node_modules/
 .turbo/
 .angular/
 codegen.output.log
+# CodeGen's raw run files are gitignored STAGING, not shippable output. The SQL that a host
+# must run is APPENDED into the migration that caused it (docs/database-operations.md §2,
+# migrations/README.md); the standalone file is then deleted. Committing these ships dead SQL
+# in two places with nothing keeping them in sync.
+migrations/codegen/
 dist/
 SQL Scripts/
 Schema Files/

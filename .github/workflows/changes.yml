@@ -24,7 +24,10 @@ jobs:
       - name: Check for migration file changes
         id: migration_check
         run: |
-          MIGRATION_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^migrations/.*\.sql$' || true)
+          # `migrations/` is flat: every shippable file sits at the top level. `migrations/codegen/`
+          # is gitignored CodeGen staging, and matching it here made a diff that only touches staging
+          # demand a `minor` changeset for a release that ships no migration at all.
+          MIGRATION_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '^migrations/[^/]+\.sql$' || true)
           if [ -n "$MIGRATION_FILES" ]; then
             echo "has_migrations=true" >> "$GITHUB_OUTPUT"
             echo "Migration files changed:"
