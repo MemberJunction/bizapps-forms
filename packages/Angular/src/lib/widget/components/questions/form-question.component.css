@@ -648,8 +648,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  /* 2.75rem = 44 px, the tap minimum every other control here meets. These arrows are the only
+     path for a respondent who cannot drag, so they are the last control that may be too small. */
+  width: 2.75rem;
+  height: 2.75rem;
   cursor: pointer;
   color: var(--mjf-page-ink-soft);
   background: transparent;

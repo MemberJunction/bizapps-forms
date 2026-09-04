@@ -46,6 +46,7 @@ import {
 
 import { PadCaptures, type CaptureClaim } from './pad-captures';
 import { addStroke, drawStroke, type DoodlePoint, type DoodleStroke } from './doodle-strokes';
+import { IconComponent } from '../icon.component';
 
 /**
  * Bitmap resolution of the exported drawing, independent of the CSS size the pad is drawn at.
@@ -219,6 +220,7 @@ const DOODLE_PAD_CSS = /* css */ `
 @Component({
   selector: 'mjf-doodle-pad',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [DOODLE_PAD_CSS],
   template: `
@@ -275,10 +277,10 @@ const DOODLE_PAD_CSS = /* css */ `
       <div class="mjf-doodle__bar">
         <p class="mjf-doodle__hint">{{ hint() }}</p>
         <button type="button" class="mjf-doodle__action" [disabled]="!canUndo()" (click)="undo()">
-          <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Undo
+          <mjf-icon name="rotate-left" /> Undo
         </button>
         <button type="button" class="mjf-doodle__action mjf-doodle__clear" [disabled]="!hasInk() && !recorded()" (click)="clear()">
-          <i class="fa-solid fa-eraser" aria-hidden="true"></i> Clear
+          <mjf-icon name="eraser" /> Clear
         </button>
       </div>
     </div>

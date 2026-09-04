@@ -54,6 +54,7 @@ import {
   inputTypeFor,
 } from './input-mode';
 import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
+import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
 /** How long a reordered row takes to travel to its new place. */
@@ -83,7 +84,7 @@ type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
   selector: 'mjf-form-question',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, DoodlePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
+  imports: [NgTemplateOutlet, DoodlePadComponent, IconComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
   templateUrl: './form-question.component.html',
   styleUrls: ['./form-question.component.css'],
 })

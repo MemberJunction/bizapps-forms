@@ -143,7 +143,7 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 - Net-new server work is the **public-write hardening layer**: Cloudflare Turnstile (per-form toggle) + rate-limit + quota + dedupe + IP-hash/UA capture, then Save response/answers and fire on-submit Actions/Agents.
 
 ## UI / design tokens
-- All component CSS uses semantic `--mj-*` design tokens — **no hardcoded colors** (breaks dark mode). Use `@memberjunction/ng-ui-components` + AG Grid + `angular-split` + `<mj-loading>`. Dialog buttons: confirm LEFT, cancel RIGHT. Font Awesome for icons. **Mobile-first or it doesn't ship** — hold every respondent-facing surface to the plan's §2 UX Quality Bar (WCAG AA, per-field mobile keyboards, large tap targets, progress signal).
+- All component CSS uses semantic `--mj-*` design tokens — **no hardcoded colors** (breaks dark mode). Use `@memberjunction/ng-ui-components` + AG Grid + `angular-split` + `<mj-loading>`. Dialog buttons: confirm LEFT, cancel RIGHT. Font Awesome for icons in Explorer-hosted surfaces (builder, dashboards); the **respondent widget draws its own inline SVG via `<mjf-icon name="…">`** (`packages/Angular/src/lib/widget/components/icon-glyphs.ts`) because its host page loads no icon font — a `fa-*` class there renders 0 × 0 (#115), and `icon.spec.ts` fails `pnpm test` on one. **Mobile-first or it doesn't ship** — hold every respondent-facing surface to the plan's §2 UX Quality Bar (WCAG AA, per-field mobile keyboards, large tap targets, progress signal).
 
 ## Functional decomposition
 - Small, focused functions (~30–40 lines max). Decompose complex logic. DRY via base classes/shared utilities.
