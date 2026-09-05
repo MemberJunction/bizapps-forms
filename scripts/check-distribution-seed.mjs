@@ -543,7 +543,16 @@ const WRITER_CAPABILITIES = ['Update', 'Delete'];
 const MAX_VARIABLE_CHASE = 8;
 
 const PERMISSION_CALL = /\bEXEC(?:UTE)?\s+(?:(?:\[[^\]]*\]|[\w${}]+)\s*\.\s*)?\[?(sp(?:Create|Update)EntityPermission)\]?/gi;
-const UUID_LITERAL = /^N?'([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})'$/;
+
+/**
+ * A UUID, as regex SOURCE, so the several shapes that need one all spell it the same way.
+ *
+ * CHECK 7 embeds it mid-pattern (`EntityID = '<uuid>'`) where an anchored regex is no use, and a
+ * second spelling of the character class is the kind of duplication that drifts silently — one
+ * copy gaining a `{8}` the other lacks would leave one check reading ids the other cannot see.
+ */
+const UUID_PATTERN = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}';
+const UUID_LITERAL = new RegExp(`^N?'(${UUID_PATTERN})'$`);
 
 /**
  * Two offset-preserving copies of `sql`, both with comment bodies blanked to spaces:
@@ -1355,6 +1364,349 @@ function checkExtendedPropertyValueTypes(repoRoot, violations) {
 }
 
 // ---------------------------------------------------------------------------
+// CHECK 7 — an entity id shipped SQL REFERENCES is one shipped SQL SEEDS
+// ---------------------------------------------------------------------------
+
+/**
+ * CHECK 7 — NO SHIPPED SQL POINTS AT AN `__mj.Entity` ROW NOTHING SHIPPED CREATES.
+ *
+ * CodeGen introspects the developer's database and writes the ids it finds there into the SQL it
+ * emits. Hardcoding is correct MJ practice — a fixed id is what makes a fresh install deterministic
+ * — but only for an entity whose id THIS REPO SEEDS. Where it does not, the literal is a fact about
+ * one laptop.
+ *
+ * That is #155. `V202608252340__Rules_And_Branching.sql` was generated on a host where the
+ * `MJ_BizApps_Forms: Form Screens` entity carried `A1F8CC58-B040-429C-B695-70DB0E9E7327` — an id
+ * no shipped migration creates, because `V202608182100` added the FormScreen table with no metadata
+ * behind it and `V202608191300` later repaired that under a NATURAL-KEY guard, which means the id a
+ * host ends up with is whatever it minted or `V202608191300`'s own literal. Neither is A1F8CC58. On
+ * every database but the one it was generated on, the chain died at that file:
+ *
+ *   FAILED: V202608252340 — batch 5/16: The INSERT statement conflicted with the FOREIGN KEY
+ *   constraint "FK_EntityField_Entity" ... table "__mj.Entity", column 'ID'.
+ *
+ * The same family as CHECK 4 and CHECK 5, and invisible for the same reason: everything built, every
+ * test passed, and the app worked perfectly on the machine that produced the file. Nothing in the
+ * repo reads shipped SQL for what it ASSUMES about the database it lands on — and this failure is
+ * not even silent, it is total: nothing after the file it stops at can run.
+ *
+ * WHAT THE CORRECT SHAPE LOOKS LIKE, so the message can name it. Resolve the entity by natural key
+ * into a variable and THROW when the lookup comes back NULL — `V202608191400` and the fixed
+ * `V202608252340` both do it. A lookup is not merely safer than a literal here, it is more correct:
+ * whichever id a host minted, the lookup finds it, and so does the next CodeGen run against any of
+ * them.
+ *
+ * THE ASYMMETRY THAT SETS THIS CHECK'S SHAPE. A seed this parser fails to read makes every reference
+ * to that id fire — loud, and easy to trace. A reference it fails to read is invisible, which is the
+ * failure mode this whole file exists to refuse. So the seed side is written narrowly and the
+ * reference side is written from the corpus: four shapes, each discovered in shipped SQL and each
+ * pinned by its own spec case and its own mutant.
+ *
+ * ONE HOLE, NAMED RATHER THAN PAPERED OVER. A positional `[EntityID]` in a column-list INSERT with no
+ * `-- Entity:` annotation is NOT read. That is not an oversight: `V202608081200` ships
+ * `INSERT INTO [__mj].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], …) VALUES (…,
+ * 'E1238F34-2837-EF11-86D4-6045BDEE16E6', …)` — `MJ: Users`, an MJ CORE entity whose id this repo
+ * legitimately does not seed, and `MJ: Files` beside it. Reading that shape would fire on correct,
+ * shipped SQL, and the only way to quiet it would be a hand-maintained allow-list of foreign ids —
+ * the same instrument CHECK 5's comments already explain cannot work, because it can never name the
+ * app nobody here has heard of. CHECK 4 covers those same inserts from the other side (guard on the
+ * natural key), and the annotated shape below covers the EntityField inserts — which is where #155
+ * actually landed, and the shape CodeGen emits far more of.
+ */
+
+/** The core schema, in every spelling shipped SQL uses for it — both dialects, both quotings. */
+const CORE_SCHEMA_PATTERN = '(?:\\[\\$\\{mjSchema\\}\\]|"\\$\\{mjSchema\\}"|\\[__mj\\]|"__mj"|__mj)';
+
+/**
+ * `INSERT INTO <core>.[Entity] (` — the only statement that can make an entity id exist.
+ *
+ * The table name is spelled out in each dialect's quoting and nothing else, so `[EntityField]` and
+ * `[EntityRelationship]` — which carry an `[ID]` column of their own, in the same first position —
+ * cannot be read as seeds. That direction matters more than the other: a seed this check invents is
+ * an id it then stops asking about, and stopping asking is how the defect ships.
+ */
+const ENTITY_SEED_INSERT = new RegExp(
+    `\\bINSERT\\s+INTO\\s+${CORE_SCHEMA_PATTERN}\\s*\\.\\s*(?:\\[Entity\\]|"Entity"|Entity)\\s*\\(`,
+    'gi',
+);
+
+/** `[start, end)` of each comma-separated item at paren depth zero inside `masked[from, to)`. */
+function topLevelItemRanges(masked, from, to) {
+    const ranges = [];
+    let depth = 0;
+    let start = from;
+    for (let i = from; i < to; i++) {
+        const char = masked[i];
+        if (char === '(') depth++;
+        else if (char === ')') depth--;
+        else if (char === ',' && depth === 0) {
+            ranges.push([start, i]);
+            start = i + 1;
+        }
+    }
+    ranges.push([start, to]);
+    return ranges;
+}
+
+/** A column name with whatever quoting its dialect uses stripped off. */
+function bareColumnName(text) {
+    return text.trim().replace(/^\[|\]$|^"|"$/g, '').toLowerCase();
+}
+
+/**
+ * Every entity id an `INSERT INTO <core>.[Entity]` in `sql` creates. Pure read; exported for the spec.
+ *
+ * Read across BOTH masks, which is the same division of labour `collectAssignments` uses: the
+ * statement's SHAPE — the INSERT, its parentheses, its top-level commas — comes off `structure`,
+ * where string bodies are blanked, so a description that happens to contain the text of an INSERT
+ * cannot invent a seed; the id itself is sliced from `values` at the same offsets, where string
+ * bodies survive, because the whole point is to read what the literal says.
+ *
+ * The column position of `[ID]` is looked up rather than assumed to be first. CodeGen puts it first
+ * today; a check that reads position 0 blindly would silently start seeding whatever column moved
+ * into that slot, and a wrong id in the seeded set is the direction that goes quiet.
+ */
+export function findSeededEntityIds(sql) {
+    const { structure, values } = maskSql(sql);
+    const seeded = new Set();
+    for (const insert of structure.matchAll(ENTITY_SEED_INSERT)) {
+        const columnsOpen = insert.index + insert[0].length - 1;
+        const columnsClose = matchingParen(structure, columnsOpen);
+        if (columnsClose === -1) continue;
+        const idColumn = topLevelItemRanges(structure, columnsOpen + 1, columnsClose)
+            .findIndex(([from, to]) => bareColumnName(structure.slice(from, to)) === 'id');
+        if (idColumn === -1) continue;
+        const row = valuesRowOf(structure, columnsClose + 1);
+        if (row === null) continue;
+        const items = topLevelItemRanges(structure, row[0], row[1]);
+        if (idColumn >= items.length) continue;
+        const id = literalUuid(values.slice(items[idColumn][0], items[idColumn][1]).trim());
+        if (id !== null) seeded.add(id);
+    }
+    return seeded;
+}
+
+/**
+ * `[start, end)` of the first `VALUES ( … )` row, when it follows the column list IMMEDIATELY.
+ *
+ * "Immediately" is the whole guard. Searching forward for the next `VALUES` would, on an
+ * `INSERT … SELECT`, walk past the end of its own statement and read the NEXT insert's row against
+ * THIS insert's column list — pairing an id column with someone else's value. Returning null for a
+ * shape this parser does not model costs a seed, and a missing seed fails loud (see the asymmetry
+ * note above); a mispaired one would quietly add a bogus id to the allowed set.
+ */
+function valuesRowOf(structure, after) {
+    const keyword = /\bVALUES\s*\(/gi;
+    keyword.lastIndex = after;
+    const match = keyword.exec(structure);
+    if (match === null || structure.slice(after, match.index).trim() !== '') return null;
+    const open = match.index + match[0].length - 1;
+    const close = matchingParen(structure, open);
+    return close === -1 ? null : [open + 1, close];
+}
+
+/**
+ * CodeGen's annotation on a positional entity id: `'<guid>', -- Entity: MJ_BizApps_Forms: Form Screens`.
+ *
+ * Matched on the RAW source and anchored to the end of a literal the `values` mask already proved is
+ * CODE, which is the only way to read this shape at all: the guid lives in the statement and the
+ * label that identifies it as an entity reference lives in a COMMENT, and no single mask holds both
+ * (`structure` blanks the guid, `values` blanks the comment). Two constraints keep that from
+ * becoming the comment-scanning gate this file warns against everywhere else —
+ *
+ *   1. the literal must survive on `values`, so a guid discussed in prose is invisible. The fixed
+ *      `V202608252340` header names A1F8CC58 half a dozen times on purpose, to record the
+ *      provenance; a gate that fired on that is a gate the next author switches off.
+ *   2. the annotation must be on the SAME LINE. CodeGen's file banners open with
+ *      `-- Entity: MJ_BizApps_Forms: Form Uploads` on a line of their own, several lines below
+ *      whatever code precedes them, and `migrations-pg/` is full of them.
+ */
+const ENTITY_VALUE_ANNOTATION = /^[ \t]*,?[ \t]*--[ \t]*(?:Related)?Entity:/i;
+
+/** A bare UUID, for the tokens of a comma-separated `@EntityIDs` list. */
+const BARE_UUID = new RegExp(`^${UUID_PATTERN}$`, 'i');
+
+/**
+ * The two core-metadata columns CODEGEN writes an `__mj.Entity` id into. Both point at that table.
+ *
+ * NOT every column that does. This app's own `FormEntityBinding.TargetEntityID` is a declared
+ * foreign key to `__mj.Entity(ID)`, and `__mj.GeneratedCode.LinkedEntityID` is another. Neither is
+ * in scope, deliberately: no generator writes either as a literal — they carry runtime data, and
+ * shipped SQL contains no `TargetEntityID = '<guid>'` anywhere today. This list is the shapes a
+ * CodeGen paste produces, which is where #155 came from and where the next one will. If a migration
+ * ever seeds a `FormEntityBinding` row by literal id, add the column here and give it a case; that
+ * literal would be as wrong on a stranger's host as A1F8CC58 was.
+ */
+const ENTITY_ID_COLUMNS = '(?:Related)?EntityID';
+
+/**
+ * "Not the tail of a longer identifier, and not a variable."
+ *
+ * Without the first half, `TargetEntityID = '<guid>'` reads as one of the two columns above, which
+ * would quietly widen the check past the scope its comment claims — and a scope nobody wrote down
+ * is one the next reader has to reverse-engineer from a regex. Without the second,
+ * `@EntityID = '<guid>'` is read twice: once here as a column and once by
+ * {@link GENERATED_ENTITY_ID_VARIABLE}, which is what it actually is.
+ */
+const NOT_PART_OF_A_LONGER_NAME = '(?<![\\w@])';
+
+/** `EntityID = '<guid>'`, bracketed, double-quoted or bare, as both dialects spell it. */
+const ENTITY_ID_COLUMN_REFERENCE = new RegExp(
+    `${NOT_PART_OF_A_LONGER_NAME}(?:\\[|")?${ENTITY_ID_COLUMNS}(?:\\]|")?\\s*=\\s*N?'(${UUID_PATTERN})'`,
+    'gi',
+);
+
+/** Any quoted UUID. {@link ENTITY_VALUE_ANNOTATION} decides which of them is an entity reference. */
+const QUOTED_UUID = new RegExp(`N?'(${UUID_PATTERN})'`, 'gi');
+
+/**
+ * `@EntityIDs='<guid>[,<guid>…]'` — how CodeGen scopes the two heal procedures.
+ *
+ * Comma-separated, and the argument where a wrong id does the MOST damage rather than the least:
+ * `spDeleteUnneededEntityFields` reads a NULL or empty `@EntityIDs` as "unscoped" and sweeps every
+ * entity its exclusion list does not name.
+ */
+const ENTITY_IDS_ARGUMENT = /@EntityIDs\s*=\s*N?'([^']*)'/gi;
+
+/**
+ * `SET @EntityID_<hash> = '<guid>'` — how a generated metadata seed carries one.
+ *
+ * `mj sync push` suffixes every variable with a per-record hash, so the suffix is optional rather
+ * than absent. This is #155 arriving by the other route: a seed REGENERATED on a developer's box
+ * carries whatever ids that box minted.
+ */
+const GENERATED_ENTITY_ID_VARIABLE = new RegExp(
+    `(?<!\\w)@${ENTITY_ID_COLUMNS}(?:_\\w+)?\\s*=\\s*N?'(${UUID_PATTERN})'`,
+    'gi',
+);
+
+/**
+ * How shipped SQL names an `__mj.Entity` row by literal id. Every entry was found in this repo's own
+ * migrations; none is invented, and none may be dropped without a spec case going red.
+ *
+ * `read` returns the ids one match states — a list, because `@EntityIDs` may carry several.
+ * `confirm` is the escape hatch for a shape no single mask can express; only the annotated
+ * positional value needs it.
+ *
+ * What is deliberately NOT here: `EntityID = @Variable` and
+ * `EntityID = (SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity] WHERE …)`. Those are the CORRECT shape —
+ * they resolve on the host — so they must not match, and they cannot: neither is a quoted UUID.
+ */
+const ENTITY_REFERENCE_SHAPES = [
+    {
+        shape: 'an [EntityID] / [RelatedEntityID] column compared to a literal',
+        pattern: ENTITY_ID_COLUMN_REFERENCE,
+        read: (match) => [match[1]],
+    },
+    {
+        shape: "CodeGen's `-- Entity:` annotation on a positional value",
+        pattern: QUOTED_UUID,
+        read: (match) => [match[1]],
+        confirm: (raw, match) => ENTITY_VALUE_ANNOTATION.test(raw.slice(match.index + match[0].length)),
+    },
+    {
+        shape: 'the @EntityIDs argument that scopes a schema-sync call',
+        pattern: ENTITY_IDS_ARGUMENT,
+        read: (match) => match[1].split(',').map((token) => token.trim()).filter((token) => BARE_UUID.test(token)),
+    },
+    {
+        shape: 'a generated @EntityID variable in a metadata seed',
+        pattern: GENERATED_ENTITY_ID_VARIABLE,
+        read: (match) => [match[1]],
+    },
+];
+
+/**
+ * Every entity id `sql` references by literal, with the line and the shape it was written in.
+ *
+ * Read off the `values` mask: comments are blanked there, so prose about an id — the provenance note
+ * the fixed migration carries, or this file's own examples if they ever moved into SQL — cannot be
+ * mistaken for a reference. String BODIES survive, which is the deliberate cost: an id quoted inside
+ * a description would read as a reference. That is a false positive in the loud direction, and this
+ * file prefers loud. Pure read; exported for the spec.
+ */
+export function findEntityIdReferences(sql) {
+    const { values } = maskSql(sql);
+    const found = [];
+    for (const { shape, pattern, read, confirm } of ENTITY_REFERENCE_SHAPES) {
+        for (const match of values.matchAll(pattern)) {
+            if (confirm !== undefined && !confirm(sql, match)) continue;
+            const line = values.slice(0, match.index).split('\n').length;
+            for (const id of read(match)) found.push({ id: id.toUpperCase(), line, shape });
+        }
+    }
+    return found;
+}
+
+/**
+ * The `.sql` files of `dirNames`, read once each.
+ *
+ * `readdirSync` is not recursive, and that is load-bearing rather than incidental:
+ * `migrations/codegen/` is gitignored CodeGen staging, full of raw un-normalised output that ships
+ * nowhere, and every check in this file relies on the same non-recursion to exclude it.
+ */
+function shippedSqlFiles(repoRoot, dirNames) {
+    const files = [];
+    for (const dirName of dirNames) {
+        const dir = join(repoRoot, dirName);
+        if (!existsSync(dir)) continue;
+        for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+            files.push({ path: join(dir, file), sql: readFileSync(join(dir, file), 'utf-8') });
+        }
+    }
+    return files;
+}
+
+/**
+ * Where the seeds come from, and where the references are read — deliberately not the same list.
+ *
+ * A teardown script only ever DELETEs an `[Entity]` row, so it can never be what makes an id exist
+ * and must not contribute to the seeded set. It is read for references all the same: a hardcoded
+ * entity id in a teardown deletes nothing on a host that minted its own, which is the same defect
+ * wearing different clothes.
+ *
+ * The seeded set is ONE UNION across both dialects rather than one set per dialect, and that rests
+ * on a fact worth stating: `migrations-pg/` is a converted mirror that stops at 0.8.x, and every id
+ * it seeds is one `migrations/` seeds too (the reverse does not hold — `V202608191300`'s Form
+ * Screens row has no PG twin). Splitting them today would draw a distinction with no difference.
+ * If the two chains ever diverge, this is the assumption to revisit: a PostgreSQL host runs only
+ * `migrations-pg/`, so a PG file referencing an id only the T-SQL chain seeds would install broken.
+ */
+const ENTITY_SEED_DIRS = SHIPPED_MIGRATION_DIRS;
+const ENTITY_REFERENCE_DIRS = [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown'];
+
+function checkEntityIdReferences(repoRoot, violations) {
+    const seeded = new Set();
+    for (const { sql } of shippedSqlFiles(repoRoot, ENTITY_SEED_DIRS)) {
+        for (const id of findSeededEntityIds(sql)) seeded.add(id);
+    }
+    for (const { path, sql } of shippedSqlFiles(repoRoot, ENTITY_REFERENCE_DIRS)) {
+        // One violation per id per file, listing every line: the same wrong literal is written five
+        // times in one generated file, and five identical messages train people to skim.
+        const unseeded = new Map();
+        for (const { id, line } of findEntityIdReferences(sql)) {
+            if (seeded.has(id)) continue;
+            if (!unseeded.has(id)) unseeded.set(id, new Set());
+            unseeded.get(id).add(line);
+        }
+        for (const [id, lines] of unseeded) {
+            violations.push(
+                `${relative(repoRoot, path)}:${[...lines].sort((a, b) => a - b).join(',')} references \`__mj.Entity\` ` +
+                    `id ${id}, which no shipped migration seeds. CodeGen bakes in the id the DEVELOPER'S database ` +
+                    'happened to hold; on every other host there is no such row, the foreign key to [__mj].[Entity] ' +
+                    'fails, and `mj app install` stops at this file — taking every migration after it down with it ' +
+                    '(#155). Resolve the entity by natural key instead: `DECLARE @X UNIQUEIDENTIFIER = (SELECT TOP 1 ' +
+                    "[ID] FROM [${mjSchema}].[Entity] WHERE [BaseTable] = '<Table>' AND [SchemaName] = " +
+                    "'${flyway:defaultSchema}');` with a THROW when it comes back NULL — the shape V202608191400 and " +
+                    'V202608252340 already use, and the one that stays correct whichever id the host minted. If the ' +
+                    'id genuinely belongs to an entity this repo does not own — MJ core, or a sibling Open App — it ' +
+                    'still may not be a literal, because that host minted its own too: look it up by name the same way.',
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Entry point. Skipped when imported (by the spec and the mutation harness).
 // ---------------------------------------------------------------------------
 
@@ -1366,6 +1718,7 @@ export function runChecks(repoRoot = REPO_ROOT) {
     checkIdOnlyGuards(repoRoot, violations);
     checkSchemaSyncScope(repoRoot, violations);
     checkExtendedPropertyValueTypes(repoRoot, violations);
+    checkEntityIdReferences(repoRoot, violations);
     return violations;
 }
 
@@ -1382,6 +1735,7 @@ if (process.argv[1] && process.argv[1].endsWith('check-distribution-seed.mjs')) 
         '✅ Distribution gate passed — shipped SQL uses only install-supplied placeholders; no post-hardening ' +
             'seed re-grants the Form Respondent role unfiltered access; no new core-metadata insert is guarded ' +
             'on its own ID alone; no shipped schema sync reaches a schema this app does not own; no extended-property ' +
-            'write hands `sql_variant` a MAX-typed value.',
+            'write hands `sql_variant` a MAX-typed value; and every `__mj.Entity` id shipped SQL references is one ' +
+            'shipped SQL also seeds.',
     );
 }
