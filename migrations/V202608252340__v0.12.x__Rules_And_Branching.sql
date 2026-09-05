@@ -41,14 +41,41 @@ GO
 -- every save), the 'Disqualified' EntityFieldValue for FormResponse.Status (plus resequencing),
 -- and the regenerated vwFormScreens / spCreateFormScreen / spUpdateFormScreen / spDeleteFormScreen
 -- that actually carry the new column.
+--
+-- ONE EDIT to CodeGen's raw output (#155) — the same edit V202608191400 already carries, for the
+-- same entity and the same reason: the Form Screens entity id is RESOLVED BY NATURAL KEY instead of
+-- hardcoded. CodeGen captured A1F8CC58-B040-429C-B695-70DB0E9E7327, which is simply the id the
+-- database it introspected happened to hold. No shipped SQL creates that row. V202608182100 added
+-- the FormScreen table with no metadata behind it; V202608191300 repaired that with an Entity INSERT
+-- guarded on the NATURAL key, so a host that had already run CodeGen by hand keeps whatever id it
+-- minted and a host that had not gets V202608191300's literal 6313B0B1-37E8-432F-AEB6-F35F218C5D22.
+-- This file asked for neither on a fresh install, and its EntityField INSERT died on
+-- FK_EntityField_Entity — taking the whole chain with it, since nothing after this file can run on a
+-- host stuck at it.
+--
+-- Edited in place rather than repaired by a later migration because the file CANNOT APPLY AT ALL on
+-- the databases that need fixing, which is the test migrations/README.md sets for that exception.
+-- Hosts that already applied it are unaffected: Skyway's Migrate() resolves applied migrations by
+-- version and never checksum-validates.
+--
+-- The replacement is deliberately not a second literal. Whichever id a host minted, the lookup finds
+-- it, and the next CodeGen run against any of them stays correct here.
 -- ------------------------------------------------------------------------------------------------
 
 /* SQL text to update existing entities from schema */
 EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';
 
+-- #155: resolve Form Screens by natural key — see the header.
+DECLARE @FormScreensEntityID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity]
+    WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '${flyway:defaultSchema}'
+);
+IF @FormScreensEntityID IS NULL
+    THROW 50000, 'V202608252340: no [Entity] row for FormScreen in this schema. V202608191300 seeds it — run the Forms migrations in order.', 1;
+
 /* SQL text to insert 1 new entity field(s) */
 
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '0992c64a-75b2-4897-bedd-e0cc36e20413' OR (EntityID = 'A1F8CC58-B040-429C-B695-70DB0E9E7327' AND Name = 'IsDisqualification')) BEGIN
+      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '0992c64a-75b2-4897-bedd-e0cc36e20413' OR (EntityID = @FormScreensEntityID AND Name = 'IsDisqualification')) BEGIN
          INSERT INTO [${mjSchema}].[EntityField]
          (
             [ID],
@@ -82,8 +109,8 @@ EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='sy
          VALUES
          (
             '0992c64a-75b2-4897-bedd-e0cc36e20413',
-            'A1F8CC58-B040-429C-B695-70DB0E9E7327', -- Entity: MJ_BizApps_Forms: Form Screens
-            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = 'A1F8CC58-B040-429C-B695-70DB0E9E7327') + 15,
+            @FormScreensEntityID, -- Entity: MJ_BizApps_Forms: Form Screens
+            (SELECT COALESCE(MAX([Sequence]), 0) FROM [${mjSchema}].[EntityField] WHERE [EntityID] = @FormScreensEntityID) + 15,
             'IsDisqualification',
             'Is Disqualification',
             'Ending only: this screen is a disqualification — its ConditionalRule is evaluated while the respondent answers, and a match ends the form immediately with FormResponse.Status = Disqualified. The flag alone never fires; the rule arms it',
@@ -511,11 +538,23 @@ GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormScreen] TO [cdp_Develope
 
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteFormScreen] TO [cdp_Developer], [cdp_Integration];
 
+-- #155 again: T-SQL variables do not survive a GO, so this batch resolves the id for itself.
+-- The NULL check is not ceremony here. spDeleteUnneededEntityFields reads a NULL or empty
+-- @EntityIDs as "unscoped" and then sweeps EVERY entity in every schema its exclude-list does not
+-- name, so an unresolved id passed through would turn a one-entity heal into a database-wide delete.
+DECLARE @FormScreensEntityID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity]
+    WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '${flyway:defaultSchema}'
+);
+IF @FormScreensEntityID IS NULL
+    THROW 50000, 'V202608252340: no [Entity] row for FormScreen in this schema. V202608191300 seeds it — run the Forms migrations in order.', 1;
+DECLARE @FormScreensEntityIDList NVARCHAR(36) = CONVERT(NVARCHAR(36), @FormScreensEntityID);
+
 /* SQL text to delete unneeded entity fields (1 scoped entities) */
-EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @EntityIDs='A1F8CC58-B040-429C-B695-70DB0E9E7327';
+EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @EntityIDs=@FormScreensEntityIDList;
 
 /* SQL text to update existing entity fields from schema (1 scoped entities) */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @EntityIDs='A1F8CC58-B040-429C-B695-70DB0E9E7327';
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @EntityIDs=@FormScreensEntityIDList;
 
 /* SQL text to set default column width where needed */
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber';

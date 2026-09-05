@@ -74,7 +74,7 @@ row-level filter (#41). See [Regenerating the metadata seed](#regenerating-the-m
 `V202608081700` is applied wherever it is applied, and rewriting it changes what a database that
 already ran it believes it ran.
 
-> **The one exception, and what earned it (2026-08-13, #39).** `V202608081700` was edited in place
+> **The first exception, and what earned it (2026-08-13, #39).** `V202608081700` was edited in place
 > to make its two `spCreateRole` calls adopt-or-skip by name. It qualified on a test worth reusing
 > before anyone claims the exception again: **the file could not apply at all** on the hosts that
 > needed fixing — `Role.Name` is UNIQUE and `spCreateRole` is a bare INSERT, so on any database where
@@ -87,6 +87,26 @@ already ran it believes it ran.
 > manifest that then existed were untouched. Everything else #39 fixed shipped as a new
 > migration (`V202608131600__v0.10.x__Respondent_Grant_Hardening.sql`), which is the rule, not the
 > exception.
+
+> **The second exception, and it passes the same test (2026-09-04, #155).**
+> `V202608252340__v0.12.x__Rules_And_Branching.sql` — a CodeGen feature migration, not a seed, but
+> the same append-only rule — was edited in place so the Form Screens entity id is resolved by
+> natural key, replacing all five occurrences of the literal `A1F8CC58-B040-429C-B695-70DB0E9E7327`.
+> That is the edit `V202608191400` already carries, for the same entity and the same reason: the
+> literal is only the id the database CodeGen was run against happened to hold, and no shipped SQL
+> creates that row. `V202608182100` added the `FormScreen` table with no `__mj` metadata behind it;
+> `V202608191300` repaired that with an `Entity` INSERT guarded on the **natural** key, so a fresh
+> install gets its literal `6313B0B1-37E8-432F-AEB6-F35F218C5D22` and a host that had already run
+> CodeGen by hand keeps whatever id it minted. Neither is `A1F8CC58`, so **the file could not apply
+> at all** on any database but the one it was generated on — its `EntityField` INSERT died on
+> `FK_EntityField_Entity` — and the six migrations after it are unreachable while it is stuck, which
+> means a repair shipped as a LATER migration could never have run. Same exemption as #39, for the
+> same reason, plus one that file did not have: this one is unreleased anyway. The last tag,
+> `v0.10.0`, stops at `V202608131600` (`git ls-tree v0.10.0 migrations/`), so no INSTALLED host has run
+> it in either form — only the dev machines it was authored on. The edit changes no record, only how
+> the entity id is resolved, so `metadata/` is untouched. The durable half is not the edit:
+> `npm run lint:distribution` now refuses a shipped migration that uses a GUID as an `EntityID` when
+> no shipped SQL seeds that GUID, so this class cannot ship again.
 
 So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
 release's records. That delta is the path below.
