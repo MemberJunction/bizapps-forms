@@ -21,6 +21,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
+import { DEFAULT_SESSION_HASH_SALT, warnOnceIfDefaultHashSalt } from '../public-submit/source-metadata.service.js';
+
 /** The slice of an Express request needed to identify the caller. */
 export interface IdentifiableRequest {
   headers: Record<string, string | string[] | undefined>;
@@ -72,9 +74,15 @@ export function hashClientIp(ip: string): string {
   return createHash('sha256').update(`${ipHashSalt()}:ip:${normalizeIpForKeying(ip)}`).digest('hex');
 }
 
-/** Salt for the one-way IP hash; shared with the session hash, with the same stable default. */
+/**
+ * Salt for the one-way IP hash; shared with the session hash, with the same stable default.
+ * The default is PUBLIC (it ships in source), so first use on it warns once — see
+ * `warnOnceIfDefaultHashSalt`.
+ */
 function ipHashSalt(): string {
-  return process.env.FORMS_SESSION_HASH_SALT?.trim() || 'mj-forms-source-metadata-v1';
+  const salt = process.env.FORMS_SESSION_HASH_SALT?.trim() || DEFAULT_SESSION_HASH_SALT;
+  warnOnceIfDefaultHashSalt(salt);
+  return salt;
 }
 
 /**

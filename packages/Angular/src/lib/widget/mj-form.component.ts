@@ -927,9 +927,30 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.phase.set('error');
   }
 
+  /**
+   * Navigate to an author-configured (or server-echoed) redirect URL — http(s) ONLY.
+   *
+   * The URL is author-controlled content rendered on an EMBEDDING site, so passing it to
+   * `window.location.assign` unvalidated let a `javascript:` (or `data:`) URL execute in the
+   * host page's origin — script injection on whatever site embeds the widget. Parsed with the
+   * current location as base so a relative URL still works, then gated on the scheme; anything
+   * else is dropped with a warning and the confirmation screen simply remains.
+   */
   private redirect(url: string): void {
-    if (typeof window !== 'undefined') {
-      window.location.assign(url);
+    if (typeof window === 'undefined') {
+      return;
     }
+    let parsed: URL;
+    try {
+      parsed = new URL(url, window.location.href);
+    } catch {
+      console.warn(`[mj-form] ignoring an unparseable redirect URL: ${url}`);
+      return;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.warn(`[mj-form] ignoring a redirect URL with a disallowed scheme (${parsed.protocol}); only http(s) redirects are followed.`);
+      return;
+    }
+    window.location.assign(url);
   }
 }

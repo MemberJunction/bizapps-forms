@@ -59,7 +59,13 @@ export class PublicFormResolver extends ResolverBase {
         renderMode: definition.renderMode,
         settingsJSON: JSON.stringify(definition.settings),
         styleTokensJSON: JSON.stringify(definition.styleTokens),
-        definitionJSON: JSON.stringify(definition),
+        // The automations are SERVER configuration — action names, bindings, conditions — and
+        // this is the anonymous respondent surface. The widget renders pages/screens/settings
+        // and never reads `automations` from the public definition (the server re-resolves them
+        // from its own snapshot at submit time), so an anonymous caller has no business seeing
+        // them. Emptied rather than deleted so the parsed shape still satisfies
+        // `PublishedFormDefinition`.
+        definitionJSON: JSON.stringify({ ...definition, automations: [] }),
       });
     });
   }
