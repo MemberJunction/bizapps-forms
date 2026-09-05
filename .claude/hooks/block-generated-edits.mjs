@@ -47,8 +47,16 @@ import { readFileSync } from 'node:fs';
  * exactly half of the #156 edit through — the half that touches the two form templates.
  *
  * Backslashes are normalised to forward slashes first so the same pattern holds on Windows.
+ *
+ * CASE-INSENSITIVE, which is a correctness requirement rather than a courtesy. Windows and macOS
+ * both mount case-insensitive by default, so `Packages/Entities/src/generated/x.ts` and
+ * `packages/Entities/src/generated/x.ts` open the SAME file — and a case-sensitive pattern denied
+ * one spelling while waving the other through. That is a bypass, not an edge case: it took one
+ * shifted capital to defeat the guard on the machine this repo is developed on. On a genuinely
+ * case-sensitive filesystem the extra spellings name paths that do not exist, so denying them
+ * costs nothing; a guard should err toward refusing.
  */
-const GENERATED_PATH = /packages\/[^/]+\/src\/(?:.*\/)?generated\//;
+const GENERATED_PATH = /packages\/[^/]+\/src\/(?:.*\/)?generated\//i;
 
 const DENIAL =
   'This file is CodeGen output and must never be hand-edited. Apply your migration to a database, ' +

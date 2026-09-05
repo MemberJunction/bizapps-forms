@@ -103,6 +103,15 @@ jobs:
       - name: Guard-mutation gate
         run: npm run lint:guard-mutants:test && npm run lint:guard-mutants
 
+      # Stdlib-only, like the gate specs under scripts/. The hook refuses hand edits of CodeGen
+      # output, and its failure mode is SILENCE — it allows, and nothing says so. Two bypasses have
+      # already shipped in it: NotebookEdit names its target `notebook_path` rather than
+      # `file_path`, and the path pattern was case-sensitive while Windows and macOS both mount
+      # case-insensitive, so one shifted capital walked straight past it. The suite pins both, and
+      # the allow-cases stop a future "deny everything" from passing as a fix.
+      - name: Generated-edit hook tests
+        run: npm run lint:hook-guard:test
+
       # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
       # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a
       # failure whose whole character is that the run still looks like it passed.
