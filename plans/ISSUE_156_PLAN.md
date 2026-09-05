@@ -1,5 +1,36 @@
 # Issue #156 — Adopt MJ 6.1's `IsHierarchy` opt-in
 
+> ## SUPERSEDED WHERE EXECUTION CORRECTED IT — read this before following any step below
+>
+> These task drafts are **pre-execution**, reproduced verbatim. Execution corrected two of them, and
+> the drafts stay as written for the same reason `plans/CODEGEN_CONVENTION_GATE_PLAN.md` keeps its
+> own: rewriting them to match what shipped would destroy the one thing the document is for — the
+> record of what was planned, and the gap between that and what survived contact. **The shipped
+> files are authoritative; the drafts below are historical record, not instructions.**
+>
+> **1. Task 3 is reversed. Do NOT hand-apply a generated delta.** Task 3 is headed *"Why
+> hand-applied rather than regenerated"* and lists five hand-edit steps into
+> `entity_subclasses.ts`, `generated.ts` and two Angular templates, ending *"This is the deliberate
+> exception; say so in the PR body."* **That was wrong**, and CLAUDE.md already said so. The change
+> was redone as a real `mj codegen` run against a clean-room database, and its output committed as
+> written. Worth keeping in view: the hand-written content turned out byte-identical to CodeGen's —
+> the edit was right on *content* and still wrong on *artifact*, because the same run also relayouts
+> the entity and GraphQL output into per-schema modules, rewrites twelve Angular templates, and
+> breaks a drift guard that read the old path. Hand-editing gets the lines right and the layout
+> wrong. The rule and its reasoning are now in `.claude/rules/generated-code.md`, and
+> `.claude/hooks/block-generated-edits.mjs` refuses the edit rather than advising against it — so
+> following Task 3 as written is now blocked by a hook this same change shipped.
+>
+> **2. The "out of scope" line about #159 no longer holds.** The Out-of-scope section lists
+> *"Regenerating all generated code onto edge.5's per-schema layout — issue #159"*. Because Task 3
+> was redone properly, that regeneration **is** in this change, necessarily and not by choice: the
+> two cannot be separated by hand without recreating the defect. #159's remaining scope shrinks
+> accordingly.
+>
+> Everything else in the plan — the two `IsHierarchy` decisions, the migration's structure, the
+> natural-key resolution, the postconditions — was executed as drafted.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`.
 > Steps use checkbox (`- [ ]`) syntax for tracking.
 
