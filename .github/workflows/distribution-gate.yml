@@ -85,7 +85,10 @@ jobs:
       # The step above proves the gate FIRES; this one proves its spec would NOTICE a behaviour
       # going missing. CHECK 3's failure mode is silence, so an untested behaviour is one a
       # refactor deletes with the suite green — which is what #44 found nine of. It runs the spec
-      # once per mutant in a fresh process, so it costs roughly (mutants x suite): ~3 minutes since
-      # CHECK 7, which reads every shipped .sql file, joined the suite.
+      # once per mutant in a fresh process, so it costs (mutants x suite) and grows with both.
+      # Measured on this runner, not on a laptop: 3m12s on next before CHECK 7 (run 33923880019),
+      # 7m08s after it (run 33933840700), because CHECK 7 reads every shipped .sql file and the spec
+      # calls runChecks against the real tree. The comment this replaces said "~40 seconds" and had
+      # been wrong through several checks, so re-measure here rather than adjusting by feel.
       - name: Check the gate's spec still kills what it claims to cover
         run: npm run lint:distribution:mutants
