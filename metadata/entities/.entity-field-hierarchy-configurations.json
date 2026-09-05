@@ -1,0 +1,76 @@
+[
+  {
+    "_comments": [
+      "Seeds Hierarchy.IsHierarchy=true in EntityField.Configuration for FormCategory.ParentID.",
+      "Form categories are a genuine tree: the builder nests them and scripts/pg-objectmodel-test.mjs",
+      "asserts vwFormCategories.RootParentID walks to the root. MJ 6.1.0-edge.3 gated the base-view",
+      "hierarchy columns behind this flag, so without this file CodeGen drops RootParentID and every",
+      "read of the entity fails with 'Invalid column name' — which a grid renders as 'no data'. #156.",
+      "BOTH RECORDS IN THIS FILE: no `uuidgen` primaryKey UUID anywhere here, departing from CLAUDE.md's",
+      "convention on purpose. Every id in this file is an @lookup because these are UPDATEs to Entity /",
+      "EntityField rows CodeGen created, whose ids differ per host — there is no id of ours to declare. The",
+      "consequence is that check-release-seed-coverage.mjs, which collects only UUID-shaped ids, measures",
+      "nothing for these two records; that is correct, not a gap.",
+      "BOTH RECORDS IN THIS FILE, second point: on why they key on the entity NAME while V202609050300 keys",
+      "on SchemaName + BaseTable, which its own comment calls the safe key — both are right for where they",
+      "run. mj sync's @lookup has no SchemaName+BaseTable form, and this file is pushed against OUR database,",
+      "where the MJ_BizApps_Forms: prefix is what mj.config.cjs sets. The migration is the artifact that reaches",
+      "other hosts, where that prefix is configurable — so it cannot use the name."
+    ],
+    "fields": {
+      "Name": "MJ_BizApps_Forms: Form Categories"
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "Configuration": {
+              "Hierarchy": {
+                "IsHierarchy": true
+              }
+            }
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Categories&Name=ParentID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Categories"
+    }
+  },
+  {
+    "_comments": [
+      "Seeds Hierarchy.IsHierarchy=FALSE for Form.TemplateSourceFormID — a deliberate negative,",
+      "recorded rather than left ambiguous (the bizapps-tasks precedent for Tasks.ParentID).",
+      "V202608211600's header states the link is set on the TEMPLATE row, points at the form it was",
+      "saved FROM, and is deliberately never set on forms created from a template. It is a one-hop",
+      "provenance pointer, not a tree — the MergedIntoID / PreviousVersionID class MJ's hierarchy",
+      "guide names as exactly what the gate suppresses. Seeding true would put a recursive-CTE OUTER",
+      "APPLY on vwForms, the view every form load reads, to answer a question that never chains. #156."
+    ],
+    "fields": {
+      "Name": "MJ_BizApps_Forms: Forms"
+    },
+    "relatedEntities": {
+      "MJ: Entity Fields": [
+        {
+          "fields": {
+            "Configuration": {
+              "Hierarchy": {
+                "IsHierarchy": false
+              }
+            }
+          },
+          "primaryKey": {
+            "ID": "@lookup:MJ: Entity Fields.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms&Name=TemplateSourceFormID"
+          }
+        }
+      ]
+    },
+    "primaryKey": {
+      "ID": "@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms"
+    }
+  }
+]
