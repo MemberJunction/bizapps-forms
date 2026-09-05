@@ -58,6 +58,8 @@ import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.
 import { assessRespondentReadiness } from './host-readiness.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
+import { checkRedeemRateLimit, redeemInFlightLimiter } from './redeem-rate-limit.js';
+import { currentRequestIdentity } from '../http/request-identity.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
@@ -80,7 +82,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       // so the baked-in value is just a default.
       const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
       // Never let an unexpected error crash the route — always render a page.
-      void this.handleRequest(slug, res).catch((e: unknown) => {
+      void this.handleMetered(slug, res).catch((e: unknown) => {
         LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
         this.sendError(res, { status: 500, message: 'We could not open this form right now. Please try again later.' });
       });
@@ -130,6 +132,40 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     });
     for (const reason of reasons) {
       LogError(`[Forms] Anonymous respondent path is NOT ready: ${reason}`);
+    }
+  }
+
+  /**
+   * Two gates BEFORE the redeem work, mirroring `UploadMiddleware`: a process-wide in-flight cap
+   * (how much may run at once) and a per-caller window keyed on the resolved peer IP (how often
+   * one caller may act). Every hit past them costs a DB slug lookup plus an outbound POST to
+   * core's magic-link redeem, which mints a session JWT — real work that was previously entirely
+   * unmetered on an anonymous route.
+   *
+   * The in-flight cap goes FIRST so a request shed for load is never charged to anyone's window,
+   * and the slot wraps the whole request in a `finally` so it releases on every exit path.
+   */
+  private async handleMetered(slug: string, res: Response): Promise<void> {
+    if (!redeemInFlightLimiter().TryEnter()) {
+      // 503 (load), not 429 (over budget): this clears the instant in-flight work drains.
+      LogStatus('[Forms] Respondent host refused: too many redeems in flight. Clears as work drains.');
+      this.sendError(res, { status: 503, message: 'This form is receiving a lot of traffic right now. Please try again in a moment.' });
+      return;
+    }
+    try {
+      const limit = checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
+      if (!limit.allowed) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000));
+        this.sendError(res, {
+          status: 429,
+          message: `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'} and try again.`,
+          retryAfter: String(retryAfterSeconds),
+        });
+        return;
+      }
+      await this.handleRequest(slug, res);
+    } finally {
+      redeemInFlightLimiter().Exit();
     }
   }
 

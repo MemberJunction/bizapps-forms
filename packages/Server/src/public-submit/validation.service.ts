@@ -27,10 +27,11 @@
  * way anywhere. Exempting the ceilings too meant an author's `maxLength` bought nothing on the
  * autosave path.
  *
- * Note what this does NOT do: a question with no `validationRule` at all — the common case — is
- * still capped only by MJAPI's 50mb GraphQL body limit, on the draft path and the complete path
- * alike. Enforcing an author's ceiling is not the same as having a global one, and a global
- * answer-size cap is a product decision rather than something to smuggle in here.
+ * Beyond any author-configured rule, EVERY answer value is held to a global server-side ceiling
+ * ({@link MAX_ANSWER_VALUE_BYTES}), in every mode. Without it a question with no
+ * `validationRule` — the common case — was capped only by MJAPI's 50mb GraphQL body limit, so an
+ * anonymous caller could persist multi-megabyte values into `NVARCHAR(MAX)` columns on the draft
+ * path and the complete path alike.
  *
  * Step 3's type check was missing until 2026-08-01, and this comment claimed it was there. The
  * widget enforced it, the server did not, so an `Email` question authored without a `pattern`
@@ -172,6 +173,43 @@ function asksForEverything(mode: ValidationMode): boolean {
 const UNKNOWN_QUESTION_MESSAGE = 'That answer does not belong to any question on this form.';
 
 /**
+ * Global server-side ceiling on ONE answer value, independent of any author-configured rule.
+ *
+ * A hard abuse bound, not a product knob: `FormResponseAnswer.TextValue` is `NVARCHAR(MAX)` and
+ * the widget sets no `maxlength`, so without this the only limit on a question without a
+ * `validationRule` was MJAPI's 50mb GraphQL body cap. 64KB is far beyond any legitimate typed
+ * answer while keeping a hostile payload from filling response storage one save at a time.
+ * Enforced in EVERY mode — an autosaved draft persists a row just like a completion does.
+ */
+export const MAX_ANSWER_VALUE_BYTES = 64 * 1024;
+
+/** How many UTF-8 bytes one answer value occupies (JSON-serialized for non-string shapes). */
+function answerValueBytes(value: AnswerValue): number {
+  if (value === undefined) {
+    return 0;
+  }
+  if (typeof value === 'string') {
+    return Buffer.byteLength(value, 'utf8');
+  }
+  return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+}
+
+/**
+ * Append one error per answer whose value exceeds {@link MAX_ANSWER_VALUE_BYTES}.
+ *
+ * Judged on the RAW inputs, before visibility drops any of them: an oversized value the walk
+ * would discard still travelled and still describes a caller this save should refuse whole,
+ * exactly like an unknown question id above.
+ */
+function collectOversizedAnswers(answers: FormAnswerInput[], errors: FieldError[]): void {
+  for (const answer of answers) {
+    if (answerValueBytes(answerValueOf(answer)) > MAX_ANSWER_VALUE_BYTES) {
+      errors.push({ questionId: answer.questionId, message: 'That answer is too large. Answers are limited to 64KB each.' });
+    }
+  }
+}
+
+/**
  * Run full server-side validation. See {@link ValidationMode} for what each mode waives.
  */
 export function validateSubmission(
@@ -196,6 +234,10 @@ export function validateSubmission(
   // known id, and its answer is still dropped silently below — deliberately, since a widget
   // legitimately autosaves an answer before a later answer hides the question.
   collectUnknownAnswers(definition, answers, errors);
+
+  // The global size ceiling holds in every mode — drafts included, since an autosave persists a
+  // row too — and independently of any author-configured `maxLength`.
+  collectOversizedAnswers(answers, errors);
 
   // ONE forward walk decides what the respondent saw — page show rules, question show rules,
   // forward jumps and the terminal jump that ends the form, all folded together. Iterating
