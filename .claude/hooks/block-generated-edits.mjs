@@ -58,8 +58,15 @@ const DENIAL =
 function filePathFromStdin() {
     // fd 0 rather than a stream: the payload is small, this runs once per tool call, and a
     // synchronous read cannot leave the hook hanging on a stdin that never closes.
+    //
+    // `notebook_path` as well as `file_path`, because NotebookEdit names its target with the
+    // former. The matcher in `.claude/settings.json` lists NotebookEdit, so reading only
+    // `file_path` waved through the one tool the hook advertises blocking — the empty string fell
+    // into the same branch as a malformed payload, which fails OPEN by design. Failing open is
+    // right for input we cannot judge; it is wrong for a well-formed payload from a matched tool.
     const raw = readFileSync(0, 'utf8');
-    const path = JSON.parse(raw)?.tool_input?.file_path;
+    const input = JSON.parse(raw)?.tool_input;
+    const path = input?.file_path ?? input?.notebook_path;
     return typeof path === 'string' ? path.replace(/\\/g, '/') : '';
 }
 
