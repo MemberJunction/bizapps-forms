@@ -60,6 +60,7 @@ than left to be inferred:
 |---|---|
 | `V202608302200__…Link_Credential_Lifecycle` | rewrites two column descriptions (`sp_updateextendedproperty` + `__mj.EntityField`) whose `EntityField` rows the seed-less PostgreSQL chain never created; the `COMMENT ON COLUMN` half is trivial to port, the metadata half needs the seed |
 | `V202608302210__…Revoke_Credentials_Of_Retired_Links` | repairs `__mj.MagicLinkInvite` rows minted by the respondent path, which has never run on PostgreSQL, so there is nothing to repair. Idempotent and data-only; port it verbatim (three UPDATEs, `CAST(d."ID" AS text)` for the ownership join) the day the path runs there |
+| `V202609050300__…Hierarchy_Opt_In` | seeds `EntityField.Configuration → Hierarchy.IsHierarchy` behind the SQL Server CodeGen gate MJ 6.1.0-edge.3 added. PostgreSQL never runs CodeGen — the documented install is migrations-only — so `root_parentid` in `V202606301400__…CodeGen_Objects.pgonly.sql` is already produced ungated and `scripts/pg-objectmodel-test.mjs:88` (`vwFormCategories.RootParentID` walks the tree to the root) still passes without this seed. The day PostgreSQL runs CodeGen, it needs this seed too, and the capture moves from that one column to the five-column shape (`RootParentID`, `ParentIDDepth`, `ParentIDPath`, `ParentIDIsLeaf`, `ParentIDChildCount`) the SQL Server twin produces |
 
 Porting the chain is a piece of work in its own right — a converter run plus the hand-fixes the
 "Converter gaps" section lists, then the seed — and is tracked as such rather than done one
