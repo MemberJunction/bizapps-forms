@@ -58,7 +58,8 @@ involved are unreleased (last tag `v0.10.0` stops at `V202608131600`).
 
 ### 1. `migrations/V202608252340__v0.12.x__Rules_And_Branching.sql` — the fix
 - Resolve `@FormScreensEntityID` by natural key in each of the two batches that need it (T-SQL
-  variables do not cross `GO`), replacing all three `A1F8CC58` references.
+  variables do not cross `GO`), replacing all five `A1F8CC58` references (the guard predicate, the positional value, the
+  `MAX([Sequence])` subquery, and the two `@EntityIDs` arguments).
 - `THROW` when the lookup returns NULL. Not ceremony: `spDeleteUnneededEntityFields` treats a
   NULL/empty `@EntityIDs` as *no scope* and then sweeps every entity in every non-excluded schema, so
   an unresolved id must never be passed through.
@@ -101,8 +102,8 @@ of ~3 minutes.
 | 3 | Does the fix apply from zero? | `MJ_Issue155_Fixed`: **31 of 31** migrations applied. |
 | 4 | Does it still apply on the host the file was generated on? | Simulated by rewriting `V202608191300`'s literal to `A1F8CC58` and stopping the chain at `V202608252300` (24 applied), then running the real fixed set on top: **7 applied**, clean. |
 | 5 | Do both populations end in the same state? | On both: `IsDisqualification` field `0992C64A-…` attached to `FormScreen`; `FormResponse.Status` values `Complete,Disqualified,Partial`; the column present in `vwFormScreens`; **0** orphaned `EntityField` rows. |
-| 6 | Does the `THROW` fire, and only when it should? | The shipped guard text, run with `defaultSchema` pointed at a schema owning no `FormScreen`: `Msg 50000 … no [Entity] row for FormScreen in this schema`. Pointed at the real schema: falls through. |
-| 7 | Does the gate catch the defect it exists for? | `runChecks` against a tree holding the pre-fix file from `git show HEAD:…` reports one violation naming all five literal sites (`:51,85,86,515,518`), and stays green on the fixed tree — whose header names the captured id six times in prose. |
+| 6 | Does the `THROW` fire, and only when it should? | The shipped guard text, run with `defaultSchema` pointed at a schema owning no `FormScreen`: `Msg 51173 … no [Entity] row for FormScreen in this schema`. Pointed at the real schema: falls through. |
+| 7 | Does the gate catch the defect it exists for? | `runChecks` against a tree holding the pre-fix file from `git show HEAD:…` reports one violation naming all five literal sites (`:51,85,86,515,518`), and stays green on the fixed tree, whose header records the captured id in prose (once) rather than as code. |
 | 8 | Does the gate's own suite still kill what it claims? | `lint:distribution:mutants`: 96 load-bearing behaviours, all killed; the 2 asserted-unobservable ones still unobservable. |
 
 Two things the fix deliberately does **not** do, recorded so they are not re-derived:

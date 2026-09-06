@@ -28,4 +28,6 @@ so a repair migration could never have reached the hosts that need it. It is unr
 Skyway resolves applied migrations by version and never checksum-validates. No record changed, only
 how the entity id is resolved, so `metadata/` is untouched and there is nothing to do on upgrade.
 `npm run lint:distribution` now refuses a shipped migration that uses a GUID as an `EntityID` when no
-shipped SQL seeds that GUID, which is the half that stops this recurring.
+shipped SQL seeds that GUID, which is the half that stops the commonest form of this recurring. It
+narrows the class rather than closing it — the check's docblock names the three shapes it still
+cannot see — so it is a gate, not a guarantee.

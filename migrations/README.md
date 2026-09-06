@@ -106,7 +106,10 @@ already ran it believes it ran.
 > it in either form — only the dev machines it was authored on. The edit changes no record, only how
 > the entity id is resolved, so `metadata/` is untouched. The durable half is not the edit:
 > `npm run lint:distribution` now refuses a shipped migration that uses a GUID as an `EntityID` when
-> no shipped SQL seeds that GUID, so this class cannot ship again.
+> no shipped SQL seeds that GUID. That narrows the class rather than closing it, and the gate's own
+> docblock names the three holes precisely: a positional `[EntityID]` in a column-list INSERT is not
+> read, a conditionally guarded seed is credited as an unconditional one, and only `EntityID`
+> columns are in scope — not `EntityFieldID`, which fails the same way.
 
 So a release's metadata changes become one new `V<newstamp>__v<ver>__Metadata_Sync.sql` carrying that
 release's records. That delta is the path below.
