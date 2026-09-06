@@ -8,9 +8,13 @@
  * submit and upload routes beside it were both capped.
  *
  * Mirrors `upload/upload-rate-limit.ts` deliberately:
- *  - Keyed on the resolved peer IP (`RequestIdentityMiddleware`, mounted pre-auth like this
- *    route), which is the one caller attribute they did not choose. Keying on the slug would put
- *    the bucket back under the caller's control.
+ *  - Keyed on the resolved peer IP, which is the one caller attribute they did not choose. Keying
+ *    on the slug would put the bucket back under the caller's control.
+ *    The identity does NOT arrive from the globally mounted `RequestIdentityMiddleware`: this
+ *    route registers through `ConfigureExpressApp`, which MJServer runs BEFORE it mounts any
+ *    pre-auth handler, so the route mounts `requestIdentityHandler()` itself. Getting this wrong
+ *    is invisible — the gate below then takes its "cannot identify the caller" branch forever and
+ *    admits everyone while looking installed.
  *  - The window comes from the shared public-submit config (`FORMS_RATELIMIT_WINDOW_MS`), so a
  *    deployment tuning how long it remembers a caller tunes every public route at once.
  *  - WITH NO IP, THE PER-CALLER GATE DOES NOTHING — on purpose. The only alternative identity is

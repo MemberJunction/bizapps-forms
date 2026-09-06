@@ -60,6 +60,7 @@ import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
 import { checkRedeemRateLimit, redeemInFlightLimiter } from './redeem-rate-limit.js';
 import { currentRequestIdentity } from '../http/request-identity.js';
+import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
@@ -77,7 +78,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   public override async ConfigureExpressApp(app: Application): Promise<void> {
     const cfg = getRespondentHostConfig();
 
-    app.get(RESPONDENT_HOST_ROUTE, (req: Request, res: Response) => {
+    // `requestIdentityHandler()` is mounted ON THE ROUTE, not relied on globally. MJServer calls
+    // this method at `index.ts:809` — inside the loop that merely COLLECTS pre-auth handlers — and
+    // does not `app.use` them until `index.ts:1143`. Express dispatches in registration order, so
+    // the globally mounted copy is added after this route and never runs for it: without this
+    // argument `currentRequestIdentity()` below is always undefined and the per-IP meter admits
+    // every caller at any `FORMS_REDEEM_IP_MAX`. See `requestIdentityHandler`'s own note.
+    app.get(RESPONDENT_HOST_ROUTE, requestIdentityHandler(), (req: Request, res: Response) => {
       // Slug arrives on the path (`/f/:slug`). The page also accepts `?slug=` as a fallback,
       // so the baked-in value is just a default.
       const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
