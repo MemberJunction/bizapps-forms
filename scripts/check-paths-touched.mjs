@@ -16,9 +16,10 @@
  * expensive job is skipped, reports SUCCESS, and the pull request goes green having built nothing.
  * That is a silently-green gate, which is the failure this repository keeps re-fixing.
  *
- * Therefore: every uncertainty resolves to `true`. An unreadable diff, a missing base SHA, the
- * all-zeroes base of a brand-new branch, an empty pattern list — all run the job. The cost of a
- * wrong `true` is runner minutes. The cost of a wrong `false` is a lie.
+ * Therefore: every uncertainty resolves to `true`. An unreadable diff, a missing or all-zeroes base
+ * or head SHA (the all-zeroes case shows up on a brand-new branch's parent, or a still-forming ref
+ * on the other side), an empty pattern list — all run the job. The cost of a wrong `true` is runner
+ * minutes. The cost of a wrong `false` is a lie.
  *
  * ── NODE STDLIB ONLY ────────────────────────────────────────────────────────────────────────────
  * Like every other gate here: no dependencies, no marketplace action, so a dependency problem can
@@ -48,7 +49,7 @@ export function pathsTouched({ changed, patterns }) {
  * `changedOrNull` is `null` when the diff could not be read at all.
  */
 export function resolveDecision({ baseSha, headSha, changedOrNull, patterns }) {
-    if (!baseSha || !headSha || ALL_ZEROES.test(baseSha)) return true;
+    if (!baseSha || !headSha || ALL_ZEROES.test(baseSha) || ALL_ZEROES.test(headSha)) return true;
     if (changedOrNull === null) return true;
     if (patterns.length === 0) return true;
     return pathsTouched({ changed: changedOrNull, patterns });
@@ -67,7 +68,7 @@ function readChangedPaths(baseSha, headSha) {
 // `import.meta.main` is Node 24+ and these workflows pin Node 20 as well, so compare argv instead.
 if (process.argv[1] && process.argv[1].endsWith('check-paths-touched.mjs')) {
     const [baseSha = '', headSha = '', ...patterns] = process.argv.slice(2);
-    const changedOrNull =
-        !baseSha || !headSha || ALL_ZEROES.test(baseSha) ? null : readChangedPaths(baseSha, headSha);
-    process.stdout.write(String(resolveDecision({ baseSha, headSha, changedOrNull, patterns })));
+    process.stdout.write(
+        String(resolveDecision({ baseSha, headSha, changedOrNull: readChangedPaths(baseSha, headSha), patterns })),
+    );
 }

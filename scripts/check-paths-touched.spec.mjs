@@ -42,6 +42,14 @@ test('a missing base sha fails open', () => {
     assert.equal(resolveDecision({ baseSha: '', headSha: 'b2', changedOrNull: [], patterns: ['packages/'] }), true);
 });
 
+test('a missing head sha fails open', () => {
+    assert.equal(resolveDecision({ baseSha: 'a1', headSha: '', changedOrNull: [], patterns: ['packages/'] }), true);
+});
+
+test('an all-zeroes head sha fails open', () => {
+    assert.equal(resolveDecision({ baseSha: 'a1', headSha: ZERO, changedOrNull: [], patterns: ['packages/'] }), true);
+});
+
 test('a readable diff that misses every pattern is the one case that returns false', () => {
     assert.equal(resolveDecision({ baseSha: 'a1', headSha: 'b2', changedOrNull: ['README.md'], patterns: ['packages/'] }), false);
 });
