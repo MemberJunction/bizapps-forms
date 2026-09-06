@@ -167,158 +167,18 @@ GO
 
 /* ============================================================================================
    ==== CODEGEN OUTPUT — DO NOT EDIT BELOW THIS LINE ====
-   Local MJ CLI 6.1.0-edge.5, includeSchemas __mj_BizAppsForms, --skipfiles.
-   Source: migrations/codegen/CodeGen_Run_2026-09-06_17-40-47.sql
+   Local MJ CLI 6.1.0-edge.5, includeSchemas __mj_BizAppsForms.
+   Pending-fields query now honors excludeSchemas (compiled includeSchemas).
+   Common Activity Files/Links EntityField inserts stripped; remaining emit is
+   Forms Screens/Categories/Forms + IsDisqualification from this DB.
+   Source: migrations/codegen/CodeGen_Run_2026-09-06_17-40-47.sql (scoped)
    ============================================================================================ */
 
 /* SQL text to update existing entities from schema */
 EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema},${flyway:defaultSchema}';
 
 /* SQL text to insert 6 new entity field(s) */
-UPDATE [${mjSchema}].[EntityField]
-         SET [Sequence] = [Sequence] + 100000
-       WHERE [EntityID] = '232C27E0-0AAC-450B-B902-251EF20A2802'
-         AND [Sequence] < 100000
-         AND NOT EXISTS (
-             SELECT 1 FROM [${mjSchema}].[EntityField]
-              WHERE [EntityID] = '232C27E0-0AAC-450B-B902-251EF20A2802'
-                AND [Sequence] >= 100000
-         );
 
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '54faba75-f2a8-409e-8134-689d21b2c032' OR (EntityID = '232C27E0-0AAC-450B-B902-251EF20A2802' AND Name = 'Activity')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '54faba75-f2a8-409e-8134-689d21b2c032',
-            '232C27E0-0AAC-450B-B902-251EF20A2802', -- Entity: MJ_BizApps_Common: Activity Files
-            8,
-            'Activity',
-            'Activity',
-            NULL,
-            'nvarchar',
-            1000,
-            0,
-            0,
-            0,
-            NULL,
-            0,
-            0,
-            1,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
-UPDATE [${mjSchema}].[EntityField]
-         SET [Sequence] = [Sequence] + 100000
-       WHERE [EntityID] = '9C48DF77-E4A1-4ADB-AABF-916F5798B894'
-         AND [Sequence] < 100000
-         AND NOT EXISTS (
-             SELECT 1 FROM [${mjSchema}].[EntityField]
-              WHERE [EntityID] = '9C48DF77-E4A1-4ADB-AABF-916F5798B894'
-                AND [Sequence] >= 100000
-         );
-
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '794c88df-c712-42d1-a29f-2b04514f3664' OR (EntityID = '9C48DF77-E4A1-4ADB-AABF-916F5798B894' AND Name = 'Activity')) BEGIN
-         INSERT INTO [${mjSchema}].[EntityField]
-         (
-            [ID],
-            [EntityID],
-            [Sequence],
-            [Name],
-            [DisplayName],
-            [Description],
-            [Type],
-            [Length],
-            [Precision],
-            [Scale],
-            [AllowsNull],
-            [DefaultValue],
-            [AutoIncrement],
-            [AllowUpdateAPI],
-            [IsVirtual],
-            [IsComputed],
-            [RelatedEntityID],
-            [RelatedEntityFieldName],
-            [IsNameField],
-            [IncludeInUserSearchAPI],
-            [IncludeRelatedEntityNameFieldInBaseView],
-            [DefaultInView],
-            [IsPrimaryKey],
-            [IsUnique],
-            [RelatedEntityDisplayType],
-            [__mj_CreatedAt],
-            [__mj_UpdatedAt]
-         )
-         VALUES
-         (
-            '794c88df-c712-42d1-a29f-2b04514f3664',
-            '9C48DF77-E4A1-4ADB-AABF-916F5798B894', -- Entity: MJ_BizApps_Common: Activity Links
-            11,
-            'Activity',
-            'Activity',
-            NULL,
-            'nvarchar',
-            1000,
-            0,
-            0,
-            0,
-            NULL,
-            0,
-            0,
-            1,
-            0,
-            NULL,
-            NULL,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            'Search',
-            GETUTCDATE(),
-            GETUTCDATE()
-         )
-      END;
 UPDATE [${mjSchema}].[EntityField]
          SET [Sequence] = [Sequence] + 100000
        WHERE [EntityID] = '6313B0B1-37E8-432F-AEB6-F35F218C5D22'
@@ -665,7 +525,6 @@ BEGIN
     WHERE
         [ID] = @ID
 
-
     -- Check if the delete was successful
     IF @@ROWCOUNT = 0
         SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
@@ -1000,7 +859,6 @@ BEGIN
     WHERE
         [ID] = @ID
 
-
     -- Check if the delete was successful
     IF @@ROWCOUNT = 0
         SELECT NULL AS [ID] -- Return NULL for all primary key fields to indicate no record was deleted
@@ -1317,7 +1175,6 @@ BEGIN
         [${flyway:defaultSchema}].[Form]
     WHERE
         [ID] = @ID
-
 
     -- Check if the delete was successful
     IF @@ROWCOUNT = 0
