@@ -1402,7 +1402,28 @@ function checkExtendedPropertyValueTypes(repoRoot, violations) {
  * reference side is written from the corpus: four shapes, each discovered in shipped SQL and each
  * pinned by its own spec case and its own mutant.
  *
- * ONE HOLE, NAMED RATHER THAN PAPERED OVER. A positional `[EntityID]` in a column-list INSERT with no
+ * THREE HOLES, NAMED RATHER THAN PAPERED OVER. What this check enforces is narrower than "a literal
+ * entity id can never ship again", and the difference is worth stating precisely so nobody reads the
+ * release note as a stronger guarantee than the code makes.
+ *
+ * HOLE 2 — A CONDITIONALLY GUARDED SEED IS READ AS AN UNCONDITIONAL ONE. `findSeededEntityIds` has no
+ * notion of enclosing control flow, so `V202608191300`'s Form Screens INSERT — which sits inside
+ * `IF NOT EXISTS (… WHERE [BaseTable] = 'FormScreen' …) BEGIN … END` — puts 6313B0B1 in the seeded
+ * set unconditionally. But that id exists ONLY on hosts that had no FormScreen entity when they ran
+ * it; a host that had already run CodeGen kept its own. So a future CodeGen paste hardcoding
+ * 6313B0B1 would pass this gate and still die with FK_EntityField_Entity on the other population —
+ * the same shape as #155, which `plans/ISSUE_155_PLAN.md` explicitly rejected as a fix for exactly
+ * that reason. Not live today: of the 16 seeded ids, one is guarded and nothing references it by
+ * literal. Closing it means teaching the seed reader the guard analysis CHECK 4 already does, plus
+ * its own case and mutant — see the issue filed from the #163 review.
+ *
+ * HOLE 3 — ONLY `EntityID` COLUMNS ARE IN SCOPE. `ENTITY_ID_COLUMNS` is `(?:Related)?EntityID`, so a
+ * host-local `EntityFieldID` literal is invisible, and 28 of them ship today
+ * (`grep -c "@EntityFieldID='" migrations/*.sql`). `EntityFieldValue.EntityFieldID` is a real foreign
+ * key and fails the same way; this file's scope note at ENTITY_ID_COLUMNS says why the column list is
+ * deliberately short, and the answer is not "because the other columns are safe".
+ *
+ * HOLE 1 — A positional `[EntityID]` in a column-list INSERT with no
  * `-- Entity:` annotation is NOT read. That is not an oversight: `V202608081200` ships
  * `INSERT INTO [__mj].[EntityRelationship] ([ID], [EntityID], [RelatedEntityID], …) VALUES (…,
  * 'E1238F34-2837-EF11-86D4-6045BDEE16E6', …)` — `MJ: Users`, an MJ CORE entity whose id this repo
@@ -1515,8 +1536,11 @@ function valuesRowOf(structure, after) {
  * becoming the comment-scanning gate this file warns against everywhere else —
  *
  *   1. the literal must survive on `values`, so a guid discussed in prose is invisible. The fixed
- *      `V202608252340` header names A1F8CC58 half a dozen times on purpose, to record the
- *      provenance; a gate that fired on that is a gate the next author switches off.
+ *      `V202608252340` header records A1F8CC58 in prose on purpose, as provenance; a gate that
+ *      fired on that is a gate the next author switches off. Deliberately no count here — this
+ *      line said "half a dozen" while the header named it once, which is what a number in prose
+ *      does. Case 107 holds the pairing to account instead: the header still mentions the id, and
+ *      the gate still reads no reference to it.
  *   2. the annotation must be on the SAME LINE. CodeGen's file banners open with
  *      `-- Entity: MJ_BizApps_Forms: Form Uploads` on a line of their own, several lines below
  *      whatever code precedes them, and `migrations-pg/` is full of them.

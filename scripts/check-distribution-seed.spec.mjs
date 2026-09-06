@@ -1860,7 +1860,8 @@ withFixture(
 
 // 106–107. Against the real tree, both halves. The constants above are only worth what they cost if
 //          they still describe shipped SQL, and the comment trap is LIVE: the fixed migration's
-//          header names the captured id half a dozen times to record where it came from.
+//          header records the captured id in prose to say where it came from — no count here, see
+//          the note on ENTITY_VALUE_ANNOTATION in check-distribution-seed.mjs.
 check(
     'case 106: the shipped V202608191300 still seeds the Form Screens entity id these cases name',
     findSeededEntityIds(

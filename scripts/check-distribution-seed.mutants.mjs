@@ -53,13 +53,20 @@
  * Node stdlib only and no build step, same constraint as the gate and its spec, so CI runs it
  * without an install.
  *
- * Serial, and it costs about three minutes (measured 2026-09-04: 174s wall, 96 mutants). It was 40s
- * for 66 before CHECK 7, and the step grew by more than the mutant count: each mutant runs the whole
- * spec in a fresh process, and CHECK 7 reads every shipped `.sql` file twice per `runChecks` — which
- * the spec does against the REAL tree, not only against fixtures. The spec builds 99 of those
- * (measured at `mkdtempSync`, not counted off the source — the table-driven loops multiply 15 call
- * sites into 99). It no longer copies the `metadata/` tree into each of them — that was CHECK 1's,
- * and #105 removed the check and the copy together. Each run is capped by SPEC_TIMEOUT_MS:
+ * Serial, and on CI it costs about seven minutes: 3m12s on next before CHECK 7 (run 33923880019),
+ * 7m08s after it (run 33933840700) — measured on the GitHub runner, which is the machine whose cost
+ * anyone actually pays. A laptop run of the same 96 mutants took 174s on 2026-09-04; that figure is
+ * kept only to say how far a local number sits from the runner's. The step grew by more than the
+ * mutant count (it was 40s for 66 before CHECK 7): each mutant runs the whole spec in a fresh
+ * process, and CHECK 7 reads every shipped `.sql` file TWICE per `runChecks` (once for the seed set,
+ * once for the references — the two `shippedSqlFiles` calls in `checkEntityIdReferences`). The spec
+ * invokes `runChecks(REPO_ROOT)` FOUR times against the real tree, not once: line 141 calls it twice
+ * on one line, and the sql_variant case twice more. That is 4 x 75 shipped-file reads per spec run,
+ * x 96 mutants — which is where the added minutes are. The fixtures are the cheap half: the spec
+ * builds 99 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
+ * multiply 15 call sites into 99), and each is a tree of two or three files. It no longer copies
+ * the `metadata/` tree into each of them — that was CHECK 1's, and #105 removed the check and the
+ * copy together. Each run is capped by SPEC_TIMEOUT_MS:
  * `mask/block-comment-first-close` injects a `while` loop into the gate, and a mutant that hangs
  * would otherwise hang CI with no signal at all. Those are the honest numbers — a workflow step
  * whose real cost is quadruple what its comment claims is a step someone deletes in a hurry later,
