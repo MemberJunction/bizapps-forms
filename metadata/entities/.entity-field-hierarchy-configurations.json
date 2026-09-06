@@ -1,5 +1,12 @@
 [
   {
+    "Entity": "MJ_BizApps_Forms: Form Categories",
+    "FieldName": "ParentID",
+    "Configuration": {
+      "Hierarchy": {
+        "IsHierarchy": true
+      }
+    },
     "_comments": [
       "Seeds Hierarchy.IsHierarchy=true in EntityField.Configuration for FormCategory.ParentID.",
       "Form categories are a genuine tree: the builder nests them and scripts/pg-objectmodel-test.mjs",
@@ -32,6 +39,10 @@
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Form Categories&Name=ParentID"
+          },
+          "sync": {
+            "lastModified": "2026-09-06T17:43:24.592Z",
+            "checksum": "c9d7f02681366f41bfee4d9aea7fcd14c0e8d47223c47f20891c562673cfefa1"
           }
         }
       ]
@@ -65,6 +76,10 @@
           },
           "primaryKey": {
             "ID": "@lookup:MJ: Entity Fields.EntityID=@lookup:MJ: Entities.Name=MJ_BizApps_Forms: Forms&Name=TemplateSourceFormID"
+          },
+          "sync": {
+            "lastModified": "2026-09-06T17:43:24.617Z",
+            "checksum": "d02287b3479b4e9f0cb12cdb142b5c3b8dd3fbec670867c2894acd8dc0b1e35a"
           }
         }
       ]
