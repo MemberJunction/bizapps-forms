@@ -89,31 +89,31 @@ GO
    ============================================================================================== */
 
 /* SQL text to recompile all views (dependency order: inner layered views before g.* wrappers) */
-EXEC [${mjSchema}].spRecompileAllViews
+EXEC [${mjSchema}].spRecompileAllViews @IncludedSchemaNames='${flyway:defaultSchema}'
 GO
 
 /* SQL text to update existing entities from schema */
-EXEC [${mjSchema}].spUpdateExistingEntitiesFromSchema @ExcludedSchemaNames='sys,staging'
+EXEC [${mjSchema}].spUpdateExistingEntitiesFromSchema @ExcludedSchemaNames='sys,staging', @IncludedSchemaNames='${flyway:defaultSchema}'
 GO
 
 /* SQL text to sync schema info from database schemas */
-EXEC [${mjSchema}].spUpdateSchemaInfoFromDatabase @ExcludedSchemaNames='sys,staging'
+EXEC [${mjSchema}].spUpdateSchemaInfoFromDatabase @ExcludedSchemaNames='sys,staging', @IncludedSchemaNames='${flyway:defaultSchema}'
 GO
 
 /* SQL text to delete unneeded entity fields */
-EXEC [${mjSchema}].spDeleteUnneededEntityFields @ExcludedSchemaNames='sys,staging'
+EXEC [${mjSchema}].spDeleteUnneededEntityFields @ExcludedSchemaNames='sys,staging', @IncludedSchemaNames='${flyway:defaultSchema}'
 GO
 
 /* SQL text to update existing entity fields from schema */
-EXEC [${mjSchema}].spUpdateExistingEntityFieldsFromSchema @ExcludedSchemaNames='sys,staging'
+EXEC [${mjSchema}].spUpdateExistingEntityFieldsFromSchema @ExcludedSchemaNames='sys,staging', @IncludedSchemaNames='${flyway:defaultSchema}'
 GO
 
 /* SQL text to set default column width where needed */
-EXEC [${mjSchema}].spSetDefaultColumnWidthWhereNeeded @ExcludedSchemaNames='sys,staging'
+EXEC [${mjSchema}].spSetDefaultColumnWidthWhereNeeded @ExcludedSchemaNames='sys,staging', @IncludedSchemaNames='${flyway:defaultSchema}'
 GO
 
 /* SQL text to recompile all stored procedures in dependency order */
-EXEC [${mjSchema}].spRecompileAllProceduresInDependencyOrder @ExcludedSchemaNames='sys,staging', @LogOutput=0, @ContinueOnError=1
+EXEC [${mjSchema}].spRecompileAllProceduresInDependencyOrder @ExcludedSchemaNames='sys,staging,dbo,${mjSchema},${mjSchema}_BizAppsCommon,${mjSchema}_BizAppsTasks,${mjSchema}_bizappscommon,${mjSchema}_bizappstasks,${mjSchema}_BizAppsATS,${mjSchema}_BizAppsCaliber', @LogOutput=0, @ContinueOnError=1
 GO
 
 
@@ -177,19 +177,38 @@ GO
 /* SQL text to update existing entities from schema */
 EXEC [${mjSchema}].[spUpdateExistingEntitiesFromSchema] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema},${flyway:defaultSchema}';
 
+-- #155 (again). CodeGen captured this database's Form Screens entity id. Regenerating against a
+-- CLEAN database does not make that id portable -- it only changes WHICH population breaks: the
+-- literal 6313B0B1 is the one `V202608191300` seeds, and that seed is wrapped in
+-- `IF NOT EXISTS (... BaseTable = 'FormScreen' ...)`, so a host that ran `mj codegen` before it
+-- shipped kept its own id and never received 6313B0B1. Proven, not argued: this file with the
+-- literals still died on that host with `FK_EntityField_Entity` at batch 12/45, the same error and
+-- the same stopping point as the defect it was written to fix.
+--
+-- Resolved once here because lines 118-270 are a single batch; T-SQL variables do not cross a GO.
+-- Keyed on BaseTable + SchemaName, never on Entity.Name -- the entity-name prefix is host
+-- configurable via mj.config.cjs, the table this app creates is not.
+-- See .claude/rules/migrations-codegen.md, "The __mj.Entity id rule".
+DECLARE @FormScreensEntityID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity]
+    WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '${flyway:defaultSchema}'
+);
+IF @FormScreensEntityID IS NULL
+    THROW 51173, 'V202608252340: no [Entity] row for FormScreen in this schema. V202608191300 seeds it - run the Forms migrations in order.', 1;
+
 /* SQL text to insert 6 new entity field(s) */
 
 UPDATE [${mjSchema}].[EntityField]
          SET [Sequence] = [Sequence] + 100000
-       WHERE [EntityID] = '6313B0B1-37E8-432F-AEB6-F35F218C5D22'
+       WHERE [EntityID] = @FormScreensEntityID
          AND [Sequence] < 100000
          AND NOT EXISTS (
              SELECT 1 FROM [${mjSchema}].[EntityField]
-              WHERE [EntityID] = '6313B0B1-37E8-432F-AEB6-F35F218C5D22'
+              WHERE [EntityID] = @FormScreensEntityID
                 AND [Sequence] >= 100000
          );
 
-      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '213ed24a-c20a-4323-a73c-5090b2dd7663' OR (EntityID = '6313B0B1-37E8-432F-AEB6-F35F218C5D22' AND Name = 'IsDisqualification')) BEGIN
+      IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityField] WHERE ID = '213ed24a-c20a-4323-a73c-5090b2dd7663' OR (EntityID = @FormScreensEntityID AND Name = 'IsDisqualification')) BEGIN
          INSERT INTO [${mjSchema}].[EntityField]
          (
             [ID],
@@ -223,7 +242,7 @@ UPDATE [${mjSchema}].[EntityField]
          VALUES
          (
             '213ed24a-c20a-4323-a73c-5090b2dd7663',
-            '6313B0B1-37E8-432F-AEB6-F35F218C5D22', -- Entity: MJ_BizApps_Forms: Form Screens
+            @FormScreensEntityID, -- Entity: MJ_BizApps_Forms: Form Screens
             15,
             'IsDisqualification',
             'Is Disqualification',
@@ -259,10 +278,27 @@ EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema},${flyway:defaultSchema}';
 
 /* SQL text to insert entity field value with ID 68a6bc5f-1b58-4ffb-9ff2-11ee9113dfa8 */
-INSERT INTO [${mjSchema}].[EntityFieldValue]
-                                       ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
-                                    VALUES
-                                       ('68a6bc5f-1b58-4ffb-9ff2-11ee9113dfa8', '38CA5677-5A04-4121-AA5C-D8FD325FEF67', 2, 'Disqualified', 'Disqualified', GETUTCDATE(), GETUTCDATE());
+-- CodeGen emits this bare, which is correct for the database it just introspected and wrong for one
+-- that already has the row: re-running it there is a primary-key violation, and "replay-safe" is
+-- exactly what this file set out to be. The EntityFieldID is resolved rather than captured for the
+-- same reason as the entity id above -- EntityField ids are minted per database too, and a literal
+-- one silently matches nothing on a host that minted its own.
+DECLARE @FormResponseStatusFieldID UNIQUEIDENTIFIER = (
+    SELECT TOP 1 ef.[ID] FROM [${mjSchema}].[EntityField] ef
+      JOIN [${mjSchema}].[Entity] e ON e.[ID] = ef.[EntityID]
+     WHERE e.[BaseTable] = 'FormResponse' AND e.[SchemaName] = '${flyway:defaultSchema}'
+       AND ef.[Name] = 'Status'
+);
+IF @FormResponseStatusFieldID IS NULL
+    THROW 51175, 'V202608252340: no [EntityField] row for FormResponse.Status in this schema. Run the Forms migrations in order.', 1;
+
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[EntityFieldValue]
+                WHERE [EntityFieldID] = @FormResponseStatusFieldID AND [Value] = 'Disqualified')
+BEGIN
+    INSERT INTO [${mjSchema}].[EntityFieldValue]
+           ([ID], [EntityFieldID], [Sequence], [Value], [Code], [__mj_CreatedAt], [__mj_UpdatedAt])
+    VALUES ('68a6bc5f-1b58-4ffb-9ff2-11ee9113dfa8', @FormResponseStatusFieldID, 2, 'Disqualified', 'Disqualified', GETUTCDATE(), GETUTCDATE());
+END
 
 /* SQL text to update entity field value sequence */
 UPDATE [${mjSchema}].[EntityFieldValue] SET Sequence=3 WHERE ID='719712D6-558C-4087-8C3C-A1254801E211';
@@ -1190,10 +1226,10 @@ GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteForm] TO [cdp_Developer], [c
 GRANT EXECUTE ON [${flyway:defaultSchema}].[spDeleteForm] TO [cdp_Developer], [cdp_Integration];
 
 /* SQL text to delete unneeded entity fields (3 scoped entities) */
-EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='', @EntityIDs='232C27E0-0AAC-450B-B902-251EF20A2802,9C48DF77-E4A1-4ADB-AABF-916F5798B894,6313B0B1-37E8-432F-AEB6-F35F218C5D22', @IncludedSchemaNames='${flyway:defaultSchema},${flyway:defaultSchema}';
+EXEC [${mjSchema}].[spDeleteUnneededEntityFields] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema}';
 
 /* SQL text to update existing entity fields from schema (3 scoped entities) */
-EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @EntityIDs='232C27E0-0AAC-450B-B902-251EF20A2802,9C48DF77-E4A1-4ADB-AABF-916F5798B894,6313B0B1-37E8-432F-AEB6-F35F218C5D22', @IncludedSchemaNames='${flyway:defaultSchema},${flyway:defaultSchema}';
+EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema}';
 
 /* SQL text to set default column width where needed */
 EXEC [${mjSchema}].[spSetDefaultColumnWidthWhereNeeded] @ExcludedSchemaNames='', @IncludedSchemaNames='${flyway:defaultSchema},${flyway:defaultSchema}';
