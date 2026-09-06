@@ -118,7 +118,14 @@ module.exports = {
     folderPath: './migrations/codegen/',
     appendToFile: false,
     convertCoreSchemaToFlywayMigrationFile: true,
-    omitRecurringScriptsFromLog: false,
+    // TRUE, deliberately: the recurring scripts are the schema-heal EXECs, and CodeGen builds their
+    // @EntityIDs argument as a comma-joined list of RAW GUIDs read off the database it just ran
+    // against (MJ/packages/CodeGenLib/src/Database/heal-schema-params.ts:55). Logged into a shipped
+    // migration, those ids resolve on the author's box and nowhere else -- which is how #168 put two
+    // entity ids that no shipped SQL seeds onto next. The heal runs on every host anyway via MJ's own
+    // R__RefreshMetadata; shipping a captured copy of it buys nothing and carries this hazard.
+    // See .claude/rules/migrations-codegen.md, "The __mj.Entity id rule".
+    omitRecurringScriptsFromLog: true,
     schemaPlaceholders: [
       // Order matters: the more-specific app schema must come first so the
       // greedy '__mj' rule doesn't partially match '__mj_BizAppsForms'.
