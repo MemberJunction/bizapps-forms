@@ -56,7 +56,7 @@ describe('failures reach the reader', () => {
   });
 
   it('keeps the error against the file it belongs to', () => {
-    // A response with a resume and a signature needs to say which one failed.
+    // A response with a resume and a drawing needs to say which one failed.
     expect(component()).toContain('DownloadErrorFileId === f.fileId');
   });
 });

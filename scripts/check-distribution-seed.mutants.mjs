@@ -49,11 +49,15 @@
  * Node stdlib only and no build step, same constraint as the gate and its spec, so CI runs it
  * without an install.
  *
- * Serial, and it costs about a minute: ~1s per mutant, because each one runs the whole spec in a
- * fresh process and the spec copies `metadata/` per fixture. Each run is capped by SPEC_TIMEOUT_MS:
- * `mask/block-comment-first-close` injects a `while` loop into the gate, and a mutant that hangs
- * would otherwise hang CI with no signal at all. That is the honest number — a workflow
- * step whose real cost is double what its comment claims is a step someone deletes in a hurry later.
+ * Serial, and it costs about 40 seconds (measured 2026-08-30, 66 mutants): each one runs the whole
+ * spec in a fresh process, and the spec builds 87 fixtures (measured at `mkdtempSync`, not counted
+ * off the source — the table-driven loops multiply 11 call sites into 87). It no longer copies the `metadata/`
+ * tree into each of those — that was CHECK 1's, and #105 removed the check and the copy together.
+ * Each run is capped by SPEC_TIMEOUT_MS: `mask/block-comment-first-close` injects a `while` loop
+ * into the gate, and a mutant that hangs would otherwise hang CI with no signal at all. That is the
+ * honest number — a workflow step whose real cost is double what its comment claims is a step
+ * someone deletes in a hurry later.
+ *
  * Parallelising is possible and deliberately not done: the gate only runs on paths that touch it,
  * and a worker pool is more of this harness to own for forty seconds nobody is waiting on.
  */
@@ -74,6 +78,34 @@ const SPEC = join(SCRIPTS_DIR, 'check-distribution-seed.spec.mjs');
  * is what a survivor's error message has to tell someone who has never read this file.
  */
 const MUTANTS = [
+    // --- CHECK 6: an extended-property write never hands `sql_variant` a MAX type ----------------
+    // Every one of these was a real hole in a shipped cut of the check, found by review rather
+    // than by the spec — which is exactly the state this harness exists to make impossible.
+    ['sqlvariant/case-insensitive-type', 'the MAX-type scan is case-insensitive, so `nvarchar(max)` is caught as readily as the shouted form',
+        `const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\\s+(?:AS\\s+)?((?:N?VARCHAR|VARBINARY)\\s*\\(\\s*MAX\\s*\\)|XML\\b)/gi;`,
+        `const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\\s+(?:AS\\s+)?((?:N?VARCHAR|VARBINARY)\\s*\\(\\s*MAX\\s*\\)|XML\\b)/g;`],
+    ['sqlvariant/optional-as', 'the optional `AS` in a DECLARE is tolerated, so `DECLARE @d AS NVARCHAR(MAX)` cannot hide the type',
+        `(?:AS\\s+)?`, ``],
+    ['sqlvariant/xml-included', 'XML is a rejected type in its own right, not only the parenthesised MAX ones',
+        `|XML\\b)/gi;`, `)/gi;`],
+    ['sqlvariant/varbinary-included', 'VARBINARY(MAX) is rejected too — the restriction is the MAX type, not the string types',
+        `(?:N?VARCHAR|VARBINARY)`, `(?:N?VARCHAR)`],
+    ['sqlvariant/positional-arguments', 'every argument of the call is read, not only a NAMED `@value =` — T-SQL allows the value positionally, and the named-only form was the shape that let a broken migration through',
+        `        for (const ref of args.matchAll(/@[A-Za-z0-9_]+/g)) {`,
+        `        for (const ref of args.matchAll(/(?<=@value\\s{0,4}=\\s{0,4})@[A-Za-z0-9_]+/gi)) {`],
+    ['sqlvariant/proc-restriction', 'only the extended-property procedures are gated, so an ordinary procedure taking a MAX argument is not blamed',
+        `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty)\\b/gi;`,
+        `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty|spSomethingElse)\\b/gi;`],
+    ['sqlvariant/declare-only', 'only a variable inside a DECLARE statement is a MAX-typed candidate, so a procedure parameter named @Value cannot be mistaken for the call\'s argument',
+        `    for (const decl of sql.matchAll(DECLARE_STATEMENT)) {\n        for (const m of decl[1].matchAll(MAX_TYPED_DECLARATION)) {\n            maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\\s+/g, ''));\n        }\n    }`,
+        `    for (const m of sql.matchAll(MAX_TYPED_DECLARATION)) {\n        maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\\s+/g, ''));\n    }`],
+    ['sqlvariant/blank-line-terminates', 'a blank line ends an unterminated call, so a missing semicolon cannot swallow the rest of the file into one argument list',
+        `const terminator = sql.slice(from).search(/;|\\n\\s*\\n|^\\s*GO\\s*$/m);`,
+        `const terminator = sql.slice(from).search(/;|^\\s*GO\\s*$/m);`],
+    ['sqlvariant/teardown-scanned', 'migrations-teardown is scanned by CHECK 6 too — a teardown that cannot execute is as fatal as an install that cannot',
+        `for (const dirName of [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown']) {`,
+        `for (const dirName of [...SHIPPED_MIGRATION_DIRS]) {`],
+
     // --- the masking layer: the gate's worst bug history, every entry a former silent pass -------
     ['mask/code-units', 'the mask is built from UTF-16 code units, so an astral character cannot slide it out of alignment with the source',
         `    const structure = sql.split('');\n    const values = sql.split('');`,
@@ -184,23 +216,12 @@ const MUTANTS = [
     ['scope/migrations-pg', 'migrations-pg/ is scanned, so the first PostgreSQL seed is checked from birth',
         `const SHIPPED_MIGRATION_DIRS = ['migrations', 'migrations-pg'];`, `const SHIPPED_MIGRATION_DIRS = ['migrations'];`],
 
-    // --- CHECK 1 and CHECK 2 ---------------------------------------------------------------------
-    ['seed/missing-migration', 'metadata with no seed migration at all is reported',
-        '    if (seeds.length === 0) {', '    if (false && seeds.length === 0) {'],
-    ['seed/missing-manifest', 'a seed with no manifest to date it is reported',
-        // Deletes the violation and keeps the early return. `if (false)` would be the obvious
-        // mutant and a weak one: it falls through to a readFileSync on the file it just proved
-        // absent, so the spec dies on ENOENT and "killed" says only that the module broke.
-        `        violations.push(\n            \`Seed migration(s) present (\${seeds.join(', ')}) but \${relative(repoRoot, MANIFEST_PATH)} is \` +\n                'missing, so nothing can tell whether they are current. Run \`npm run seed:manifest\`.',\n        );\n        return;`,
-        '        return;'],
-    ['seed/changed-metadata', 'metadata edited after the seed was generated is reported',
-        '        } else if (recorded[file] !== hash) {', '        } else if (false) {'],
-    ['seed/new-metadata', 'metadata added after the seed was generated is reported as NEW, not as changed',
-        '        if (!(file in recorded)) {', '        if (false) {'],
-    ['seed/deleted-metadata', 'metadata deleted after the seed was generated is reported — the seed still creates its records',
-        '        if (!(file in current)) {', '        if (false) {'],
-    ['seed/sync-block-ignored', 'a rewritten `sync` bookkeeping block is not content, so the gate does not cry wolf on the push that regenerated the seed',
-        `                    .filter(([k]) => k !== 'sync')\n`, ''],
+    // --- CHECK 2 -----------------------------------------------------------------------------------
+    //
+    // Six `seed/*` mutants pinned CHECK 1, the hash manifest, and were removed with it in #105. They
+    // are not replaced here: what took CHECK 1's place is a release-readiness check on the actual
+    // property (scripts/check-release-seed-coverage.mjs), which has its own spec and is not part of
+    // this gate.
     ['placeholder/teardown-map', 'teardown scripts get the stricter map — MJ substitutes only ${mjSchema} there',
         `dir.endsWith('migrations-teardown') ? new Set(['mjSchema']) : INSTALL_SUPPLIED_PLACEHOLDERS`,
         'INSTALL_SUPPLIED_PLACEHOLDERS'],
@@ -233,6 +254,39 @@ const MUTANTS = [
         '    const { structure } = maskSql(sql);', '    const structure = sql;'],
     ['idguard/stops-at-any-statement', 'the scan stops at the FIRST statement of any kind, so a guard over a PRINT cannot reach forward and blame the next insert',
         '            if (!GOVERNED_DML.has(keyword)) return [i, i];', '            if (!GOVERNED_DML.has(keyword)) continue;'],
+    ['idguard/unguarded-inserts', 'a core insert with NO guard at all is reported, not merely invisible to a walk that starts from guards',
+        '        if (guarded.some(([from, to]) => insert.index >= from && insert.index < to)) continue;',
+        '        continue;'],
+    ['schemasync/parse-accounting', 'CHECK 5 counts the sync calls it should have parsed, so a removed or variable-bound list is caught instead of unseen',
+        '            if (calls > parsed) {', '            if (false) {'],
+    ['schemasync/history-floor', 'CHECK 5 requires everything the repo has already shipped, not only the hand-written floor',
+        '            ...previouslyExcluded(lists, list.stamp),', '            ...[],'],
+    ['schemasync/reports-the-narrowing', 'CHECK 5 reports a narrowed list rather than computing the difference and discarding it',
+        '        if (missing.length > 0) {', '        if (false) {'],
+    ['schemasync/watershed', 'CHECK 5 skips migrations older than the watershed instead of gating every file ever shipped',
+        '        if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;', '        if (false) continue;'],
+    ['schemasync/proc-floor', 'the accounting knows the procs CodeGen emits even when no call in the corpus passes the argument',
+        "        'spdeleteunneededentityfields',", "        'spnevermatches',"],
+    ['schemasync/backstop-independent-of-string-mask', "CHECK 5's accounting counts on `values`, so a call hidden in a dynamic-SQL literal cannot slip past it",
+        "            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).values, procNames);",
+        "            const calls = countSchemaSyncCalls(maskSql(readFileSync(path, 'utf-8')).structure, procNames);"],
+    ['schemasync/unbracketed-call', 'a call counts whether or not the procedure name is bracketed — T-SQL makes that optional',
+        '    for (const call of sql.matchAll(/\\bEXEC(?:UTE)?\\s+(?:\\[[^\\]]*\\]|[\\w$.{}]+)?\\s*\\.?\\s*\\[?"?(sp\\w+)/gi)) {',
+        '    for (const call of sql.matchAll(/\\bEXEC(?:UTE)?\\s+(?:\\[[^\\]]*\\]|[\\w$.{}]+)?\\s*\\.?\\s*\\["?(sp\\w+)/gi)) {'],
+    ['schemasync/unqualified-exec', 'an `EXEC spX` with no schema qualifier is counted too',
+        '    for (const call of sql.matchAll(/\\bEXEC(?:UTE)?\\s+(?:\\[[^\\]]*\\]|[\\w$.{}]+)?\\s*\\.?\\s*\\[?"?(sp\\w+)/gi)) {',
+        '    for (const call of sql.matchAll(/\\bEXEC(?:UTE)?\\s+(?:\\[[^\\]]*\\]|[\\w$.{}]+)\\s*\\.\\s*\\[?"?(sp\\w+)/gi)) {'],
+    ['schemasync/call-syntax-required', 'the accounting counts a call only where a keyword introduces it, so a procedure named in prose is not a call',
+        '    for (const call of sql.matchAll(/\\bEXEC(?:UTE)?\\s+(?:\\[[^\\]]*\\]|[\\w$.{}]+)?\\s*\\.?\\s*\\[?"?(sp\\w+)/gi)) {',
+        '    for (const call of sql.matchAll(/[.["](sp\\w+)/gi)) {'],
+    ['schemasync/unorderable-fails-safe', 'a shipped .sql whose version this gate cannot order is gated, not exempted',
+        "    return stamp === null ? '999999999999' : stamp[1];", '    return stamp === null ? null : stamp[1];'],
+    ['schemasync/positional-proc-filter', 'the positional matcher reads a list only for a proc known to take one, so a generated CRUD function is not mistaken for a schema sync',
+        '        if (procNames.has(positional[1].toLowerCase())) {\n            found.push(positional[2]);\n        }',
+        '        found.push(positional[2]);'],
+    ['schemasync/pg-positional', 'exclusion lists are read in BOTH dialects, so the PostgreSQL positional form is not invisible',
+        '    for (const positional of sql.matchAll(/"(sp\\w+)"\\s*\\(\\s*\'([^\']*)\'/gi)) {',
+        '    for (const positional of []) {'],
 ];
 
 /**
@@ -264,19 +318,19 @@ const SPEC_TIMEOUT_MS = 60_000;
 /**
  * A repo-shaped directory whose `scripts/` is real files and whose data directories are symlinks —
  * the spec resolves REPO_ROOT from its own location, so it must sit two levels inside something that
- * looks like this repo, but `metadata/` and the three migration directories are read-only to it and
- * cost nothing to share.
+ * looks like this repo, but the three migration directories are read-only to it and cost nothing to
+ * share. `metadata/` is NOT among them: with CHECK 1 gone the gate reads only SQL, so a link to it
+ * would be a dependency this harness does not have.
  *
  * The teardown below `rmSync`s this tree, and its children are links INTO the working tree. That is
- * safe — Node unlinks a symlink rather than recursing through it — but the spec's own `cpSync`
- * carries a `dereference` comment about the mirror image of this hazard, so it is worth saying here
- * too: nothing in this file may ever follow these links while deleting.
+ * safe — Node unlinks a symlink rather than recursing through it — but it is worth saying out loud:
+ * nothing in this file may ever follow these links while deleting.
  */
 function buildHarnessTree() {
     const root = mkdtempSync(join(tmpdir(), 'seed-mutants-'));
     mkdirSync(join(root, 'scripts'));
     writeFileSync(join(root, 'scripts', 'check-distribution-seed.spec.mjs'), readFileSync(SPEC, 'utf-8'));
-    for (const dir of ['metadata', 'migrations', 'migrations-pg', 'migrations-teardown']) {
+    for (const dir of ['migrations', 'migrations-pg', 'migrations-teardown']) {
         if (existsSync(join(REPO_ROOT, dir))) symlinkSync(join(REPO_ROOT, dir), join(root, dir), 'dir');
     }
     return root;

@@ -12,6 +12,7 @@ import {
   slugify as buildSlug,
   randomSuffix,
 } from './distribution-links';
+import { SHARE_LINK_FIELDS, type ShareLinkFacts } from './share-state';
 
 /** The channel kinds the builder can mint (Phase 1: PublicLink / Embed / QR). */
 export type DistributionChannel = mjBizAppsFormsFormDistributionEntityType['ChannelType'];
@@ -92,7 +93,9 @@ export class DistributionService {
     const result = await rv.RunView<mjBizAppsFormsFormDistributionEntity>(
       {
         EntityName: FORMS_ENTITY.FormDistribution,
-        ExtraFilter: `FormID='${formId}'`,
+        // Same escaping as every other filter this service builds. It was raw interpolation,
+        // which is a second spelling of one decision and the one that is wrong when it matters.
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
         OrderBy: '__mj_CreatedAt DESC',
         ResultType: 'entity_object',
       },
@@ -104,6 +107,47 @@ export class DistributionService {
       return { ok: false, error };
     }
     return { ok: true, items: result.Results ?? [] };
+  }
+
+  /**
+   * Just enough of a form's share links to say whether a respondent could reach it.
+   *
+   * Deliberately NOT {@link list}. That one hands back `entity_object` rows because the
+   * Distribute tab edits them; a caller that only wants to KNOW something has no business
+   * holding five savable records, and this read runs on every builder load rather than only
+   * when someone opens the tab. Seven named columns, `ResultType: 'simple'`.
+   *
+   * `null` — never `[]` — when the read cannot be performed, for the reason
+   * {@link DistributionListResult} exists: "this form has no share links" is a real state
+   * with its own message, and a failed read is not it. Collapsing the two would send an
+   * author off to create a link that already exists.
+   */
+  public async shareLinkFacts(formId: string): Promise<ShareLinkFacts[] | null> {
+    if (!formId) {
+      // Not a data state — a caller asking about a form that has never been saved. Answering
+      // "no share links" would be a confident lie about a form that does not exist yet.
+      LogError('Refusing to read share links: no form id was supplied.');
+      return null;
+    }
+    const rv = new RunView();
+    const result = await rv.RunView<ShareLinkFacts>(
+      {
+        EntityName: FORMS_ENTITY.FormDistribution,
+        ExtraFilter: `FormID=${quoteSqlString(formId)}`,
+        // Owned by `share-state.ts`, not restated here: the field list and the facts the state
+        // machine reads have to be the same set, and only one of the two places can be right.
+        Fields: [...SHARE_LINK_FIELDS],
+        ResultType: 'simple',
+      },
+      this.user,
+    );
+    if (!result.Success) {
+      LogError(
+        `Failed to read share links for form ${formId}: ${result.ErrorMessage ?? 'unknown error'}`,
+      );
+      return null;
+    }
+    return result.Results ?? [];
   }
 
   /**
@@ -164,12 +208,30 @@ export class DistributionService {
     return `${base}-${randomSuffix()}`;
   }
 
-  /** Open a distribution for responses (Status -> Active). */
+  /**
+   * Open a distribution for responses (Status -> Active).
+   *
+   * The server mints a FRESH access token on the way through, because closing revoked the
+   * previous one. The slug is untouched, so every shared URL keeps working; only the
+   * credential behind it is new. The caller must reload afterwards — see {@link close}.
+   *
+   * "Open to responses" means `Status='Active'` AND `IsActive`, so this writes both — see
+   * {@link openForResponses} for why writing only `Status` made this do nothing at all on one
+   * of the two rows that reach it.
+   */
   public async open(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
-    return this.setStatus(dist, 'Active');
+    return this.openForResponses(dist, 'reopen this share link');
   }
 
-  /** Close a distribution (Status -> Closed). */
+  /**
+   * Close a distribution (Status -> Closed).
+   *
+   * The server-side hook revokes this link's magic-link credential and clears
+   * `PublicLinkToken` on the same save, so the token stops being redeemable rather than
+   * merely being refused by the Forms door. That second write is invisible to this
+   * client's copy of the record, which is why both this and {@link open} are paired with
+   * a reload at the call site.
+   */
   public async close(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
     return this.setStatus(dist, 'Closed');
   }
@@ -199,16 +261,63 @@ export class DistributionService {
    * paired with a reload at the call site.
    */
   public async issueLink(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    return this.openForResponses(dist, 'issue a link for this share link');
+  }
+
+  /**
+   * Make this link open to responses, and make sure the server's provisioning hook runs.
+   *
+   * ONE implementation behind {@link open} and {@link issueLink}, because they are one operation.
+   * They were two, and the difference was a silent dead end: `open` wrote only `Status`, so a row
+   * sitting at `Status='Active', IsActive=false` was left completely unchanged, `Save()` skipped
+   * the clean record, and the control reported success having done nothing — permanently, since
+   * nothing else repairs it.
+   *
+   * That row is not hypothetical; it is what the new server produces. Provisioning requires
+   * `isActive`, so any `IsActive=0` distribution has its token cleared on its next save. Before
+   * bizapps-forms#104 reordered the badge cascade, such a row read `pending`, whose remedy is
+   * `issueLink` — which wrote both fields and forced the save, and so repaired it. After the
+   * reorder it reads `paused`, whose remedy was `open`. The reorder is right; routing the row to
+   * the weaker of two spellings of one operation is what broke, and the fix is to stop having two.
+   *
+   * `IgnoreDirtyState` is the other half. A record already `Active`/`IsActive` is unchanged by
+   * both assignments, and `Save()` skips a clean record outright (baseEntity.ts:
+   * `if (options.IgnoreDirtyState || initialDirtyState || ...)`), so the server-side hook would
+   * never run — in precisely the common case, a live link whose token the server failed to mint.
+   */
+  private async openForResponses(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    action: string,
+  ): Promise<MutationOutcome> {
     dist.Status = 'Active';
     dist.IsActive = true;
-    // IgnoreDirtyState is the whole reason this works. A record that is ALREADY active is
-    // unchanged by the two lines above, and `Save()` skips a clean record outright
-    // (baseEntity.ts: `if (options.IgnoreDirtyState || initialDirtyState || ...)`), so the
-    // server-side hook would never run and this button would silently do nothing — in
-    // precisely the common case, an active link the server failed to mint a token for.
     const options = new EntitySaveOptions();
     options.IgnoreDirtyState = true;
-    return this.saveDist(dist, 'issue a link for this share link', options);
+    return this.saveDist(dist, action, options);
+  }
+
+  /**
+   * Give this link a brand-new access token, keeping its web address.
+   *
+   * The recourse for a leaked or over-shared credential, and the reason bizapps-forms#104
+   * exists: before it, the only way to stop a token being redeemable was to delete the
+   * distribution, which changes the slug and breaks every poster, QR code and embed
+   * already in the wild.
+   *
+   * There is no "reissue" API to call, and deliberately so. Clearing `PublicLinkToken`
+   * IS the request: the server-side hook reads a live link with no usable token as "this
+   * credential is gone, and one is warranted", so it revokes the old invite and mints a
+   * replacement in the same save. That keeps ONE enforcement point — a builder that
+   * cleared the columns itself would leave the old invite Active and unreferenced, which
+   * is precisely the orphaned-credential defect being fixed.
+   *
+   * `MagicLinkInviteID` is deliberately left alone: it is what tells the server WHICH
+   * invite to revoke. Success here means the SAVE succeeded, not that a new token
+   * appeared — the hook is fail-soft — so this is paired with a reload at the call site.
+   */
+  public async reissueLink(dist: mjBizAppsFormsFormDistributionEntity): Promise<MutationOutcome> {
+    dist.PublicLinkToken = null;
+    return this.saveDist(dist, 'reissue this link');
   }
 
   /** Rename a distribution. The caller is responsible for trimming and rejecting blanks. */

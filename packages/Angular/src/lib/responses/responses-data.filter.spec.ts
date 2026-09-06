@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   answersForFormFilter,
+  definitionForVersionQuery,
   responseDetailQueries,
   responsesForFormFilter,
   uploadsForFileIdsFilter,
@@ -41,6 +42,25 @@ describe('uploadsForFileIdsFilter', () => {
 
   it('returns null for no ids so the caller skips the query rather than emitting IN ()', () => {
     expect(uploadsForFileIdsFilter([])).toBeNull();
+  });
+});
+
+describe('definitionForVersionQuery', () => {
+  it('resolves the version by id and never by status (regression: #82 retires old versions)', () => {
+    const query = definitionForVersionQuery('ver-7');
+
+    // Publishing now retires the version it replaces, so most versions carrying responses are
+    // Retired. A `Status='Published'` predicate here would blank the question labels on every
+    // response submitted before the current version — and would have looked correct right up
+    // until the first republish.
+    expect(query.ExtraFilter).toBe("ID='ver-7'");
+    expect(query.ExtraFilter).not.toContain('Status');
+  });
+
+  it('reads the snapshot, and reads it simple — nothing here is mutated', () => {
+    const query = definitionForVersionQuery('ver-7');
+    expect(query.Fields).toContain('DefinitionSnapshot');
+    expect(query.ResultType).toBe('simple');
   });
 });
 

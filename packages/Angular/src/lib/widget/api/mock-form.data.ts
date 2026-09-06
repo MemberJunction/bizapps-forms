@@ -296,9 +296,9 @@ export function buildMockForm(_distributionSlug: string): PublishedFormDefinitio
             },
           },
           {
-            id: 'q-signature',
-            type: 'Signature',
-            prompt: 'Sign to confirm',
+            id: 'q-doodle',
+            type: 'Doodle',
+            prompt: 'Draw something to finish',
             isRequired: false,
             displayOrder: 10,
             options: [],
@@ -323,7 +323,10 @@ export function buildMockForm(_distributionSlug: string): PublishedFormDefinitio
         title: 'See you in the front row',
         body: 'You ranked talks first, so we have saved you a seat near the stage.',
         displayOrder: 0,
-        conditionalRule: { show: { all: [{ questionId: 'q-rank', op: 'contains', value: 'talks' }] } },
+        // `in` against a one-item list, which is exactly what `contains` did on an array answer
+        // before that operator was removed: `isMember` intersects, so this reads "talks is
+        // somewhere in the ranking".
+        conditionalRule: { show: { all: [{ questionId: 'q-rank', op: 'in', value: ['talks'] }] } },
       },
       {
         id: 'screen-end-default',

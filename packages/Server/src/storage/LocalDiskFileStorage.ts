@@ -5,8 +5,8 @@
  * service — AWS, Azure, Box, Dropbox, Google Drive, Google Cloud, SharePoint. There is no
  * local option, so on a developer's machine `FileStorageEngine.UploadFile` fails with
  * "no file storage accounts configured" and every path that stores bytes is untestable:
- * FileUpload answers, and Signature answers, which are FileUpload answers whose file came
- * from a canvas. Testing a signature end to end therefore required cloud credentials,
+ * FileUpload answers, and Doodle answers, which are FileUpload answers whose file came
+ * from a canvas. Testing a drawing end to end therefore required cloud credentials,
  * which is an absurd price for "does the pad save".
  *
  * WHY IT IS SAFE TO HAVE AROUND. It refuses to initialise unless

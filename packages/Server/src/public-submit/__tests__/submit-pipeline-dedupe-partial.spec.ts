@@ -160,7 +160,9 @@ describe('partial semantics (Task 4)', () => {
   });
 });
 
-describe('client-supplied responseId ownership guard (autosave seam)', () => {
+// These cover which row the LOOKUPS propose for a client-supplied responseId. Whether the caller
+// may then write to it is a separate decision made at persistence — `session-ownership.spec.ts`.
+describe('client-supplied responseId lookup (autosave seam)', () => {
   it('adopts a client responseId that belongs to THIS session (threads the same partial)', async () => {
     // Row owned by the current session; client sends its id explicitly as the autosave target.
     const { ctx, fake } = build({ existingResponses: [partialRow()] });
@@ -179,8 +181,14 @@ describe('client-supplied responseId ownership guard (autosave seam)', () => {
 
   it("IGNORES a client responseId owned by ANOTHER session (cannot hijack a foreign partial)", async () => {
     // The only stored Partial belongs to a DIFFERENT anonymous session. The current session
-    // supplies that foreign id as its autosave hint — it must be rejected by the ownership guard,
-    // and NO existing row adopted (a fresh row is created instead).
+    // supplies that foreign id as its autosave hint — the lookup must not resolve it, and NO
+    // existing row is adopted (a fresh row is created instead).
+    //
+    // NOTE ON WHAT THIS DOES *NOT* COVER. `resp-foreign-1` is not a UUID, so persistence never
+    // adopts it as a primary key and the insert cannot collide with the foreign row. That is why
+    // this test passed throughout issue #78: with a real uuid the same request took over the row
+    // through the duplicate-key recovery. The takeover family is covered in
+    // `session-ownership.spec.ts`, which uses uuids for exactly that reason.
     const foreignRow: ExistingResponseRow = {
       ID: 'resp-foreign-1',
       Status: 'Partial',
@@ -332,8 +340,11 @@ describe('client-id upsert idempotency with a BLANK session (the core bug)', () 
       validSubmission({ partial: true, clientResponseId: CLIENT_ID }),
     );
 
-    // The proof lookup misses, so a fresh row is created (adopting the id as its own PK) rather
-    // than overwriting the unproven row.
+    // The proof lookup misses, so no candidate is proposed and persistence CREATEs — which
+    // collides on the primary key it just adopted and recovers onto the row already there. One
+    // save either way, which is what this asserts. (The earlier comment here claimed a "fresh
+    // row" was created instead; there is only ever one row at a given client id, and the
+    // unproven row is reachable precisely because it has no owner — see session-ownership.spec.)
     expect(result.success).toBe(true);
     const responseSaves = fake.saved.filter((r) => r.entityName === FORM_RESPONSE_ENTITY);
     expect(responseSaves).toHaveLength(1);

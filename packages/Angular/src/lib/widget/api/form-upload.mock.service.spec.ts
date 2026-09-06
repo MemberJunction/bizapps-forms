@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import { FormsMockUploadService } from './form-upload.mock.service';
 
-const png = (name = 'signature.png'): File =>
+const png = (name = 'doodle.png'): File =>
   new File(['bytes'], name, { type: 'image/png' });
 
 describe('FormsMockUploadService', () => {
@@ -10,7 +10,7 @@ describe('FormsMockUploadService', () => {
     const result = await new FormsMockUploadService().upload(png(), 'preview', 'q-1');
 
     expect(result.fileId).not.toBe('');
-    expect(result.name).toBe('signature.png');
+    expect(result.name).toBe('doodle.png');
     expect(result.contentType).toBe('image/png');
   });
 });

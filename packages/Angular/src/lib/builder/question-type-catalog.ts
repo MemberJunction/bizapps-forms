@@ -85,7 +85,11 @@ const PRESENTATION: Record<FormQuestionType, Omit<QuestionTypeMeta, 'type'>> = {
 
   // --- Uploads ---
   FileUpload: { label: 'File upload', icon: 'fa-solid fa-paperclip', group: 'Upload', hint: 'A file the respondent attaches' },
-  Signature: { label: 'Signature', icon: 'fa-solid fa-signature', group: 'Upload', hint: 'A signature drawn on screen, stored as an image' },
+  // Stays in `Upload` with `FileUpload`, and that grouping is mechanical rather than lazy: the
+  // palette groups by what an answer IS, and a doodle's answer is a file that takes the identical
+  // upload path. A one-member "Draw" group would add a heading, a hue and an ordering decision to
+  // say what the label and hint already say next to it.
+  Doodle: { label: 'Doodle', icon: 'fa-solid fa-pen-nib', group: 'Upload', hint: 'A freehand drawing or sketch made on screen, stored as an image' },
 
   // --- Structure ---
   Statement: { label: 'Statement', icon: 'fa-solid fa-quote-left', group: 'Structure', hint: 'Text shown to the respondent — collects no answer' },

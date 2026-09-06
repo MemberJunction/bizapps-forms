@@ -127,3 +127,50 @@ describe('endingRedirectUrl', () => {
     expect(endingRedirectUrl(ending({ redirectURL: '  ' }), { redirectUrl: '  ' })).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// RULES_AND_BRANCHING_PLAN Phase C — disqualification exclusion + score bands.
+// ---------------------------------------------------------------------------
+
+describe('resolveEndingScreen vs disqualification screens (C3)', () => {
+  it('never falls back to a disqualification screen, ruleless or default-flagged', () => {
+    const dqNoRule = ending({ id: 'dq', isDisqualification: true });
+    const dqDefault = ending({ id: 'dq-def', isDisqualification: true, isDefault: true });
+    const plain = ending({ id: 'plain', displayOrder: 5 });
+    // Alone, a disqualify screen is not a usable ending at all.
+    expect(resolveEndingScreen([dqNoRule], noAnswers)).toBeUndefined();
+    expect(resolveEndingScreen([dqDefault], noAnswers)).toBeUndefined();
+    // Beside a real ending, the real ending wins both fallback arms.
+    expect(resolveEndingScreen([dqNoRule, plain], noAnswers)?.id).toBe('plain');
+    expect(resolveEndingScreen([dqDefault, plain], noAnswers)?.id).toBe('plain');
+  });
+
+  it('a disqualification never wins the conditional arm either, however well it matches', () => {
+    const answers = new Map<string, AnswerValue>([['q1', 'fail']]);
+    const dq = ending({
+      id: 'dq',
+      isDisqualification: true,
+      conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'fail' }] } },
+    });
+    const fallback = ending({ id: 'fallback', displayOrder: 9 });
+    expect(resolveEndingScreen([dq, fallback], answers)?.id).toBe('fallback');
+  });
+});
+
+describe('score-banded endings (C4)', () => {
+  const pass = ending({
+    id: 'pass',
+    displayOrder: 0,
+    conditionalRule: { show: { all: [{ source: 'score', op: 'greaterThan', value: 70 }] } },
+  });
+  const fail = ending({ id: 'fail', displayOrder: 1, isDefault: true });
+
+  it('routes by the supplied score', () => {
+    expect(resolveEndingScreen([pass, fail], noAnswers, { score: 85 })?.id).toBe('pass');
+    expect(resolveEndingScreen([pass, fail], noAnswers, { score: 40 })?.id).toBe('fail');
+  });
+
+  it('with no score supplied a band never fires — the default wins', () => {
+    expect(resolveEndingScreen([pass, fail], noAnswers)?.id).toBe('fail');
+  });
+});

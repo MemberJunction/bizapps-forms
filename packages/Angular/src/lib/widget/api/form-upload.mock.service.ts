@@ -4,7 +4,7 @@
  * The builder's Preview modal runs the widget with an empty {@link FormsApiConfig} so a trial
  * submission writes nothing. That leaves nowhere to PUT a file either — which is why this
  * exists. It accepts the bytes, drops them, and answers with the metadata the respondent UI
- * needs, so an author can draw a signature or pick a file, watch the same states a respondent
+ * needs, so an author can make a drawing or pick a file, watch the same states a respondent
  * will, satisfy a required file question, and reach the ending screen. Nothing leaves the page.
  *
  * The `fileId` is deliberately a `preview-…` string rather than a plausible GUID: it is only
@@ -12,7 +12,7 @@
  * loudly instead of chasing a well-formed id that was never stored.
  *
  * Mirrors {@link FormsMockApiService}, including its simulated latency — the progress bar and
- * the "Saving signature…" state are part of what the author is previewing.
+ * the "Saving drawing…" state are part of what the author is previewing.
  */
 import { Injectable } from '@angular/core';
 

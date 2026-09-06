@@ -252,7 +252,59 @@
   }
 }
 
-/* ---- File ---- */
+/* ---- File ----
+   The label draws the control and the transparent input lies on top of it (see the template for
+   why the input must keep its size). So the label carries the look and the input carries every
+   behaviour: the click, the drop, and the focus that :focus-within reflects back onto the label. */
+.mjf-file {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+}
+
+.mjf-file__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.mjf-file__input:disabled {
+  cursor: default;
+}
+
+.mjf-file__pick {
+  display: inline-flex;
+  /* The input above owns the pointer; a label that also took clicks would double-fire the
+     picker on the browsers where a label click forwards to an already-clicked control. */
+  pointer-events: none;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  font-family: var(--mjf-font-body);
+  font-size: 0.9375rem;
+  color: var(--mjf-page-ink);
+  background: var(--mjf-choice-bg);
+  border: 1px solid var(--mjf-choice-border);
+  border-radius: var(--mjf-input-radius);
+  cursor: pointer;
+}
+
+/* The input is the thing that takes focus; the label is the thing that can show it. */
+.mjf-file:focus-within .mjf-file__pick {
+  border-color: var(--mjf-accent);
+  box-shadow: var(--mjf-focus-ring);
+}
+
+.mjf-file--busy .mjf-file__pick {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .mjf-file__name {
   margin: 0.5rem 0 0;
   font-size: 0.875rem;

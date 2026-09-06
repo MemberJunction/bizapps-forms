@@ -54,4 +54,4 @@ jobs:
       # pin. It cannot be caught locally — `ng-base-forms` is symlinked into the MJ checkout there,
       # so the templates type-check against 6.x — and it has already broken the Angular build twice.
       - name: Run generated-output API compatibility gate
-        run: npm run lint:codegen-compat
+        run: npm run lint:codegen-compat:test && npm run lint:codegen-compat

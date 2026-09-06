@@ -12,10 +12,24 @@
  * the widget is a field that does nothing; a key the widget reads that is missing here is a
  * capability with no way to reach it. Both are worth checking when either side changes.
  */
-import type { FormQuestionType, JSONValue } from '@mj-biz-apps/forms-entities';
+import {
+  DOODLE_PEN_COLORS,
+  DOODLE_PEN_CONTROL_CHOICES,
+  DOODLE_PEN_DEFAULTS,
+  DOODLE_PEN_WIDTH_NAMES,
+  type FormQuestionType,
+  type JSONValue,
+} from '@mj-biz-apps/forms-entities';
 
-/** How one setting is edited. */
-export type SettingKind = 'text' | 'number' | 'multiline';
+/**
+ * How one setting is edited.
+ *
+ * `choice` is a closed list rendered as a `<select>`, and it exists because a free text box for a
+ * value the widget validates against a fixed set is a trap: the author types `blue`, the widget
+ * accepts only `Blue`, and the fallback is silent by design. Offering the list makes the two
+ * agree by construction — the options come FROM the same contract the widget validates against.
+ */
+export type SettingKind = 'text' | 'number' | 'multiline' | 'choice';
 
 /** One editable setting on a question. */
 export interface QuestionSettingField {
@@ -26,6 +40,34 @@ export interface QuestionSettingField {
   placeholder?: string;
   /** One-line explanation shown under the control. */
   hint?: string;
+  /**
+   * `choice` only: the values on offer, in display order.
+   *
+   * An empty-string value is the "leave it to the default" option, which `withSetting` then
+   * deletes rather than storing — the same blank-means-default rule the text fields follow.
+   */
+  choices?: readonly { readonly value: string; readonly label: string }[];
+}
+
+/**
+ * Turn a contract's value tuple into `choice` options, ALWAYS with a named blank at the front.
+ *
+ * The blank is not optional and not conditional on the tuple containing one. It is the row's
+ * "leave it to the default" option, and it carries two jobs: `withSetting` deletes the key when
+ * it is picked (so the widget's own default applies), and its LABEL is the only place the panel
+ * tells the author what that default is. A list with no blank cannot be cleared once set, and —
+ * worse — renders the first value as though it were the default, so the panel says `Fine` over a
+ * pad that draws `Medium`.
+ *
+ * Values equal to the blank are dropped, so a tuple that already carries `''` does not produce a
+ * duplicate. Pass `values` WITHOUT the default's own name: the blank already means it, and two
+ * entries with one outcome is a choice that is not a choice.
+ */
+function choicesOf(values: readonly string[], blankLabel: string): QuestionSettingField['choices'] {
+  return [
+    { value: '', label: blankLabel },
+    ...values.filter((value) => value !== '').map((value) => ({ value, label: value })),
+  ];
 }
 
 const PLACEHOLDER: QuestionSettingField = {
@@ -82,6 +124,38 @@ const SETTINGS: Partial<Record<FormQuestionType, readonly QuestionSettingField[]
       kind: 'text',
       placeholder: 'image/*,.pdf',
       hint: 'A browser accept list. Blank allows anything the server permits.',
+    },
+  ],
+  // Every option comes from the contract the widget validates against, so the panel cannot offer
+  // a pen the pad would silently fall back on. All three default to blank, which is deleted —
+  // an author who touches none of them gets the pad exactly as it has always behaved.
+  Doodle: [
+    {
+      key: 'penColor',
+      label: 'Pen colour',
+      kind: 'choice',
+      choices: choicesOf(
+        DOODLE_PEN_COLORS.filter((c) => c !== DOODLE_PEN_DEFAULTS.color),
+        `${DOODLE_PEN_DEFAULTS.color} — follow the form’s text colour`,
+      ),
+      hint: 'The colour a drawing starts in. Every pen is mixed toward the form’s text colour so it stays legible on any background.',
+    },
+    {
+      key: 'penWidth',
+      label: 'Stroke width',
+      kind: 'choice',
+      choices: choicesOf(
+        DOODLE_PEN_WIDTH_NAMES.filter((w) => w !== DOODLE_PEN_DEFAULTS.width),
+        `${DOODLE_PEN_DEFAULTS.width} (default)`,
+      ),
+      hint: 'How thick a drawing starts.',
+    },
+    {
+      key: 'penControls',
+      label: 'Respondent can change',
+      kind: 'choice',
+      choices: choicesOf(DOODLE_PEN_CONTROL_CHOICES, 'Nothing'),
+      hint: 'Which pen controls appear on the pad. Undo and Clear are always available.',
     },
   ],
 };

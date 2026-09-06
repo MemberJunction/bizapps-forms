@@ -6,13 +6,18 @@
  * zod runtime validators FROM HERE. Do not fork these definitions.
  */
 export * from './json-value';
+export * from './link-precedence';
 export * from './conditional-rule';
+export * from './rule-verbs';
+export * from './scoring';
 export * from './question-types';
+export * from './doodle-pen';
 export * from './form-definition';
 export * from './form-screens';
 export * from './published-automation-builder';
 export * from './on-submit-dispatch';
 export * from './answer-format';
+export * from './answer-date';
 export * from './social-links';
 export * from './answer-canonical';
 export * from './entity-binding';

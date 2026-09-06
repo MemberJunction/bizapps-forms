@@ -1,16 +1,16 @@
 /**
  * When a page marked `isPartialSubmitPoint` counts as PASSED.
  *
- * The obvious definition — "the respondent pressed Next on that page" — does not exist in either
- * render mode. `Scroll` shows every page at once and has no Next at all; `OneQuestion` steps by
- * QUESTION, so it crosses a page boundary without ever being on a page as such. Defining the
- * trigger per mode would mean two rules, one of which does nothing in half the forms, and an
- * author would have no way to know which they were getting.
+ * The obvious definition — "the respondent pressed Next on that page" — exists in only one of
+ * the two render modes. `Scroll` now steps by SECTION, so it has a real Next; `OneQuestion`
+ * steps by QUESTION, so it crosses a page boundary without ever being on a page as such.
+ * Defining the trigger per mode would mean two rules, one of which does nothing in half the
+ * forms, and an author would have no way to know which they were getting.
  *
- * So the rule is stated in terms of ANSWERS, which both modes have: a submit-point page is
- * passed once the respondent has answered something on a LATER page. That is true the moment
- * they move on in `OneQuestion`, and the moment they scroll down and start typing in `Scroll`,
- * which is as close to "moved on" as a single-screen form gets.
+ * So the rule stays stated in terms of ANSWERS, which both modes have: a submit-point page is
+ * passed once the respondent has answered something on a LATER page. In `Scroll` that is now
+ * true the moment they answer anything on the next section, which is a stricter and more
+ * literal reading of "moved past" than the single-screen version could manage.
  *
  * Pure and framework-free; the widget owns the "already banked" bookkeeping.
  */

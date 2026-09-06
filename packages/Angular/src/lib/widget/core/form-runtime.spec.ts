@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type { PublishedFormDefinition, PublishedFormQuestion } from '@mj-biz-apps/forms-entities';
+import { resolveVisibleQuestions } from '@mj-biz-apps/forms-entities';
 import { FormRuntime } from './form-runtime';
 
 /** A small two-page form with a conditional follow-up + a required field. */
@@ -11,6 +12,8 @@ function makeDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -104,6 +107,8 @@ function phoneDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p',
@@ -193,8 +198,137 @@ function formOf(
   return def;
 }
 
+describe('FormRuntime.transmittedAnswers', () => {
+  /**
+   * The set the widget SENDS is `visibleAnswerableQuestions` (see `buildAnswerInputs`), and the
+   * server judges knockouts, endings and score from exactly what arrives. So any client-side
+   * verdict has to be reached on the same set, or the two sides disagree about the same
+   * submission — and the client's copy is the one the respondent sees while the server's is the
+   * one that gets recorded.
+   *
+   * The raw map keeps an answer whose question has since been hidden: `setValue` deletes a key
+   * only on null/undefined, and nothing prunes on visibility change.
+   */
+  it('drops an answer whose question is no longer visible', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gate' },
+        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+      ]),
+    );
+    rt.setValue('gate', 'Company');
+    rt.setValue('detail', 'left over');
+    expect([...rt.transmittedAnswers().keys()].sort()).toEqual(['detail', 'gate']);
+
+    rt.setValue('gate', 'Individual');
+    // Still in the raw map — nothing prunes it — but no longer part of what this form is saying.
+    expect(rt.currentAnswers().has('detail')).toBe(true);
+    expect([...rt.transmittedAnswers().keys()]).toEqual(['gate']);
+  });
+
+  it('is exactly what buildAnswerInputs will send', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gate' },
+        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+        { id: 'note', type: 'Statement' },
+      ]),
+    );
+    rt.setValue('gate', 'Individual');
+    rt.setValue('detail', 'left over');
+
+    expect([...rt.transmittedAnswers().keys()].sort()).toEqual(rt.buildAnswerInputs().map((a) => a.questionId).sort());
+  });
+});
+
+describe('FormRuntime.transmittedView', () => {
+  /**
+   * The server does TWO things with a submission: it reads the answers that arrive, and it
+   * re-derives the visible question set FROM those answers. Matching only the first is not
+   * matching. `visibleAnswers()` restricted the values while `visibleAnswerableQuestions` still
+   * resolved over the RAW map, so a show-rule naming a question that is itself hidden made the two
+   * sets differ — and the client's verdict was reached on a set the server would never compute.
+   */
+  const chained = () =>
+    formOf([
+      { id: 'type' },
+      { id: 'sector', conditionalRule: { show: { all: [{ questionId: 'type', op: 'equals', value: 'Company' }] } } },
+      { id: 'risk', conditionalRule: { show: { all: [{ questionId: 'sector', op: 'equals', value: 'Energy' }] } } },
+    ]);
+
+  it('derives the question set from what will be SENT, not from the raw map', () => {
+    const rt = new FormRuntime(chained());
+    rt.setValue('type', 'Company');
+    rt.setValue('sector', 'Energy');
+    rt.setValue('risk', 'High');
+    expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type', 'sector', 'risk']);
+
+    // Hiding `sector` orphans `risk`'s rule: it reads `sector` from the raw map and still passes,
+    // so the widget would render and send `risk` — but the server, resolving over the payload,
+    // sees no `sector` and drops `risk`. That gap is the divergence.
+    rt.setValue('type', 'Individual');
+    // Both halves now agree, and an earlier version of this case asserted that they would NOT —
+    // it expected the payload to carry an orphaned `risk` while the server dropped it, which
+    // described the divergence rather than the fix. Once the rendered set is a fixed point, `risk`
+    // is not rendered, so it is not sent, so there is nothing for the server to disagree about.
+    expect([...rt.transmittedView().answers.keys()]).toEqual(['type']);
+    expect(rt.transmittedView().questions.map((q) => q.id)).toEqual(['type']);
+  });
+
+  it('renders the same set the server will derive from the payload', () => {
+    // THE invariant, and the one an earlier version of this case could not test: it compared
+    // `resolveVisibleQuestions(pages, view.answers)` against `view.questions`, which is how
+    // `view.questions` is defined — `f(x) === f(x)`, unfailable. What actually matters is whether
+    // the RENDERED set agrees, because that is the set whose answers get sent.
+    const rt = new FormRuntime(chained());
+    rt.setValue('type', 'Company');
+    rt.setValue('sector', 'Energy');
+    rt.setValue('risk', 'High');
+    rt.setValue('type', 'Individual');
+
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(
+      rt.transmittedView().questions.map((q) => q.id),
+    );
+  });
+
+  it('renders a question the server will REQUIRE, even when the raw map hides it', () => {
+    // The mirror of the divergence `transmittedView` fixed, and it is unrecoverable rather than
+    // merely wrong. `why` is shown when `detail isNotAnswered` — an operator this PR added. The
+    // respondent picks Company, types a detail, switches to Individual: nothing prunes `detail`
+    // from the raw map, so the widget reads it as answered and hides `why`, and sends neither.
+    // The server, seeing no `detail`, finds `isNotAnswered` true, makes `why` visible AND required,
+    // and rejects the submission naming a field that was never on screen. Every retry sends the
+    // identical payload, so the respondent cannot get out of it.
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gate' },
+        { id: 'detail', conditionalRule: { show: { all: [{ questionId: 'gate', op: 'equals', value: 'Company' }] } } },
+        {
+          id: 'why',
+          isRequired: true,
+          conditionalRule: { show: { all: [{ questionId: 'detail', op: 'isNotAnswered' }] } },
+        },
+      ]),
+    );
+    rt.setValue('gate', 'Company');
+    rt.setValue('detail', 'Acme');
+    rt.setValue('gate', 'Individual');
+
+    expect(rt.visibleAnswerableQuestions().map((q) => q.id)).toEqual(['gate', 'why']);
+  });
+});
+
 describe('FormRuntime progress', () => {
-  it('does not let optional questions dilute the bar', () => {
+  /**
+   * This used to read `does not let optional questions dilute the bar` and assert `toBe(1)` on
+   * exactly this form — #88 at runtime level: one required question answered, three blank optional
+   * ones sitting underneath, bar completely full. Same form, opposite verdict.
+   *
+   * SUBMITTABLE and COMPLETE are different facts. The bar reports the second; `isFormValid` (and
+   * the ready line it drives) reports the first, which is why the bar no longer has to overload
+   * its own top end to say "you can submit".
+   */
+  it('counts the optional questions too, so a merely submittable form does not read full', () => {
     const rt = new FormRuntime(
       formOf([
         { id: 'req', isRequired: true },
@@ -205,9 +339,27 @@ describe('FormRuntime progress', () => {
     );
 
     rt.setValue('req', 'answered');
+    expect(rt.isFormValid()).toBe(true);
+    expect(rt.progress()).toBeLessThan(1);
 
-    // Everything that could stop a submit is done, so the bar is done.
+    rt.setValue('opt-a', 'x');
+    rt.setValue('opt-b', 'x');
+    rt.setValue('opt-c', 'x');
     expect(rt.progress()).toBe(1);
+  });
+
+  // `isRequired` reaches the weighting — the mapping this class owns, and the one thing
+  // `progress.spec.ts` cannot see, since it is handed `ProgressQuestion` already built.
+  it('still weights the required answer above an optional one', () => {
+    const form = () =>
+      new FormRuntime(formOf([{ id: 'req', isRequired: true }, { id: 'opt-a' }, { id: 'opt-b' }]));
+
+    const afterRequired = form();
+    afterRequired.setValue('req', 'answered');
+    const afterOptional = form();
+    afterOptional.setValue('opt-a', 'answered');
+
+    expect(afterRequired.progress()).toBeGreaterThan(afterOptional.progress());
   });
 });
 
@@ -255,11 +407,155 @@ describe('FormRuntime progress and conditional questions', () => {
     rt.setValue('followup', 'done');
     expect(rt.progress()).toBe(1);
   });
+
+  it('only rises as the respondent works down one branch', () => {
+    const rt = new FormRuntime(conditionalForm());
+    const seen = [rt.progress()];
+
+    rt.setValue('trigger', 'yes');
+    seen.push(rt.progress());
+    rt.setValue('followup', 'done');
+    seen.push(rt.progress());
+
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i], `step ${i} moved the bar backwards`).toBeGreaterThan(seen[i - 1]);
+    }
+    expect(seen[seen.length - 1]).toBe(1);
+  });
+
+  /**
+   * Repro #2 in #88, at the level it was reported: the respondent picked "Blue", the bar read
+   * 100% with eight optional questions blank below it, and switching to "Other" then dropped it
+   * to 50% — the bar running BACKWARDS out of a state it had called finished.
+   *
+   * A bar over a branching form can legitimately fall: switching branches grows the path, and the
+   * denominator with it. Typeform has the same property, and the alternative — clamping to a
+   * high-water mark — would hold 100% over a required question the respondent has not answered,
+   * which is the lie this whole change is about. What must not happen is falling out of a CLAIMED
+   * COMPLETE state, and that is what this pins: on this form the bar never claims one.
+   */
+  it('never claims completion on a branching form while questions are still blank', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q-color', isRequired: true },
+        ...Array.from({ length: 8 }, (_, i) => ({ id: `opt-${i}` })),
+        {
+          id: 'q-other',
+          isRequired: true,
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-color', op: 'equals', value: 'other' }] },
+          },
+        },
+      ]),
+    );
+
+    rt.setValue('q-color', 'blue');
+    expect(rt.progress(), 'read complete with eight optional questions blank').toBeLessThan(1);
+
+    rt.setValue('q-color', 'other');
+    expect(rt.progress(), 'read complete with a revealed required question blank').toBeLessThan(1);
+  });
+
+  /**
+   * The boundary of the decision above, written down so it is a decision and not an oversight.
+   *
+   * A respondent who genuinely finishes a short branching form and then goes back and switches
+   * branches WILL see the bar fall from 100%, because the denominator is the current path and the
+   * new branch is longer. #88 asks that the bar never fall from 100%, and this is the one case
+   * where it still can — the difference being that the 100% is now earned rather than claimed over
+   * blank questions.
+   *
+   * The alternative is a high-water clamp, and it is worse in exactly the way the issue is about:
+   * it would hold 100% over a required follow-up nobody has answered, which is the original lie
+   * with the sign flipped. An honest bar over a path that can grow is the trade Typeform makes too.
+   */
+  it('falls from an EARNED completion when the respondent switches to a longer branch', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q-color', isRequired: true },
+        { id: 'q-opt' },
+        {
+          id: 'q-other',
+          isRequired: true,
+          conditionalRule: {
+            show: { all: [{ questionId: 'q-color', op: 'equals', value: 'other' }] },
+          },
+        },
+      ]),
+    );
+    rt.setValue('q-color', 'blue');
+    rt.setValue('q-opt', 'noted');
+
+    // Earned: every question on this path is answered.
+    expect(rt.progress()).toBe(1);
+
+    rt.setValue('q-color', 'other');
+    expect(rt.progress()).toBeLessThan(1);
+    expect(rt.isFormValid()).toBe(false);
+  });
+});
+
+describe('FormRuntime progress and the submit button read the same path', () => {
+  /**
+   * The bar and the button answer DIFFERENT questions — how much is filled in, versus whether it
+   * can be submitted — and since #88 they are reported by different controls. What they must still
+   * share is the SET they judge: `progress` counts only visible questions and `isFormValid` judges
+   * only visible questions, so the pair has to move together as a show rule opens and closes. A
+   * full bar over a form the button will not accept leaves the respondent no clue what is missing;
+   * so does a bar that has already stopped counting a question the button is still holding.
+   *
+   * These cases used to exercise the `require` verb, which was the other way the two could diverge.
+   * Visibility is the way they still can.
+   */
+  it('a required question revealed by a show rule holds both the bar and the button back', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q1', isRequired: true },
+        {
+          id: 'q2',
+          isRequired: true,
+          conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
+        },
+      ]),
+    );
+    rt.setValue('q1', 'Other');
+
+    expect(rt.isFormValid()).toBe(false);
+    expect(rt.progress()).toBeLessThan(1);
+  });
+
+  it('and stops counting once the show rule no longer fires', () => {
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'q1', isRequired: true },
+        {
+          id: 'q2',
+          isRequired: true,
+          conditionalRule: { show: { all: [{ questionId: 'q1', op: 'equals', value: 'Other' }] } },
+        },
+      ]),
+    );
+    rt.setValue('q1', 'Red');
+
+    expect(rt.isFormValid()).toBe(true);
+    expect(rt.progress()).toBe(1);
+  });
 });
 
 describe('FormRuntime progress edge cases', () => {
   it('reports complete for a form with nothing to answer', () => {
+    // Vacuously: no unanswered question is left. The renderers do not show a bar in this state at
+    // all (see `hasAnswerableQuestions`), so the number is never painted — it is here so the
+    // function stays total rather than growing a null case.
     expect(new FormRuntime(formOf([{ id: 's', type: 'Statement' }])).progress()).toBe(1);
+  });
+
+  it('says when there is nothing to fill in, which is what suppresses the bar', () => {
+    const copyOnly = new FormRuntime(formOf([{ id: 's', type: 'Statement' }]));
+    const askSomething = new FormRuntime(formOf([{ id: 's', type: 'Statement' }, { id: 'q' }]));
+
+    expect(copyOnly.hasAnswerableQuestions()).toBe(false);
+    expect(askSomething.hasAnswerableQuestions()).toBe(true);
   });
 
   it('goes back down when an answer is cleared', () => {
@@ -288,5 +584,238 @@ describe('FormRuntime progress edge cases', () => {
       expect(rt.progress()).toBeGreaterThanOrEqual(0);
       expect(rt.progress()).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+/**
+ * What the SCROLL renderer puts on screen.
+ *
+ * Scroll mode asks the runtime for one page's questions at a time, and that reader applied the
+ * question's own `show` rule and nothing else — so a `Go to` rule changed what the form SUBMITS
+ * without changing what it DISPLAYS. Three things came apart at once, all silent:
+ *
+ *  - a skipped question stayed on screen, asterisk and all, and was never validated on submit;
+ *  - whatever the respondent typed into it was dropped from the payload;
+ *  - the progress bar counted the flow's set, so it could read 100% with visibly empty
+ *    required fields still on the page.
+ *
+ * One walk decides what renders, and the renderer reads that walk. `visibleAnswerableQuestions`
+ * is the same walk narrowed to answerable types, so the two cannot disagree by construction.
+ */
+function jumpDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f1',
+    formVersionId: 'v1',
+    name: 'Jump',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          {
+            id: 'q-first',
+            type: 'ShortText',
+            prompt: 'First name',
+            isRequired: false,
+            displayOrder: 1,
+            options: [],
+            conditionalRule: {
+              jump: [
+                {
+                  when: { all: [{ questionId: 'q-first', op: 'equals', value: 'Soham' }] },
+                  target: { kind: 'question', id: 'q-email' },
+                },
+              ],
+            },
+          },
+          { id: 'q-last', type: 'ShortText', prompt: 'Last name', isRequired: true, displayOrder: 2, options: [] },
+          { id: 'q-note', type: 'Statement', prompt: 'Nearly there', isRequired: false, displayOrder: 3, options: [] },
+          { id: 'q-email', type: 'ShortText', prompt: 'Email', isRequired: true, displayOrder: 4, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('FormRuntime — the scroll renderer follows the flow, not just show rules', () => {
+  describe('happy', () => {
+    it('takes a jumped-over question off the page', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      const page = rt.visiblePages()[0];
+      expect(rt.visibleQuestions(page).map((q) => q.id)).toEqual(['q-first', 'q-last', 'q-note', 'q-email']);
+
+      rt.setValue('q-first', 'Soham');
+      expect(rt.visibleQuestions(page).map((q) => q.id)).toEqual(['q-first', 'q-email']);
+    });
+
+    it('still renders display-only questions the flow reaches', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      const page = rt.visiblePages()[0];
+      expect(rt.visibleQuestions(page).some((q) => q.type === 'Statement')).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('what renders and what submits describe the same questions', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      rt.setValue('q-first', 'Soham');
+      const rendered = rt.visibleQuestions(rt.visiblePages()[0]).filter((q) => q.type !== 'Statement');
+      expect(rendered.map((q) => q.id)).toEqual(rt.visibleAnswerableQuestions().map((q) => q.id));
+    });
+  });
+
+  describe('worst', () => {
+    it('a skipped REQUIRED question neither blocks the submit nor sits on the page asking', () => {
+      // The two halves have to move together. Off the page but still required is an unsubmittable
+      // form; on the page but no longer required is a question the respondent answers for nothing.
+      const rt = new FormRuntime(jumpDefinition());
+      rt.setValue('q-first', 'Soham');
+      rt.setValue('q-email', 'a@b.com');
+      expect(rt.visibleQuestions(rt.visiblePages()[0]).map((q) => q.id)).not.toContain('q-last');
+      expect(rt.isFormValid()).toBe(true);
+    });
+
+    it('a full progress bar means nothing on the page is still being asked for', () => {
+      const rt = new FormRuntime(jumpDefinition());
+      rt.setValue('q-first', 'Soham');
+      rt.setValue('q-email', 'a@b.com');
+      expect(rt.progress()).toBe(1);
+      const unanswered = rt
+        .visibleQuestions(rt.visiblePages()[0])
+        .filter((q) => q.isRequired && !rt.valueFor(q.id));
+      expect(unanswered).toEqual([]);
+    });
+  });
+});
+
+/**
+ * What a rule reading a question answered LATER than it runs actually does to a respondent.
+ *
+ * Issue #73's badge says such a rule "reads a blank". These are what makes that sentence
+ * checkable rather than plausible — the builder can only report the hazard honestly if the
+ * hazard is what is written here.
+ *
+ * The issue itself claims the guarded item is "hidden from every respondent, permanently, and
+ * never recovers". It is not: visibility is a fixed point re-derived on every keystroke, so the
+ * item comes back — in front of the respondent, mid-fill.
+ */
+describe('a rule whose source is answered after it runs', () => {
+  it('shows the gated question the moment the later source is answered', () => {
+    // "Permanently hidden" is disprovable in Preview in ten seconds, which is why the badge does
+    // not say it. What the respondent gets is a question APPEARING above the one they are on.
+    const rt = new FormRuntime(
+      formOf([
+        { id: 'gated', conditionalRule: { show: { all: [{ questionId: 'source', op: 'equals', value: 'yes' }] } } },
+        { id: 'source' },
+        { id: 'tail' },
+      ]),
+    );
+    expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['source', 'tail']);
+
+    rt.setValue('source', 'yes');
+    expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['gated', 'source', 'tail']);
+  });
+
+  it("takes an already-typed answer out of the submission when a jump's `when` reads later", () => {
+    // The variant the issue does not mention, and the one that costs data rather than nerves.
+    // `q1` jumps to `q3` on `q3`'s own answer — legal-looking, unauthorable, arrived at by
+    // reordering. The respondent fills `q2`, answers `q3`, and `q2` leaves the payload.
+    const rt = new FormRuntime(
+      formOf([
+        {
+          id: 'q1',
+          conditionalRule: {
+            jump: [{ when: { all: [{ questionId: 'q3', op: 'equals', value: 'yes' }] }, target: { kind: 'question', id: 'q3' } }],
+          },
+        },
+        { id: 'q2' },
+        { id: 'q3' },
+        { id: 'tail' },
+      ]),
+    );
+    rt.setValue('q1', 'a');
+    rt.setValue('q2', 'typed by the respondent');
+    expect([...rt.transmittedView().answers.keys()]).toContain('q2');
+
+    rt.setValue('q3', 'yes');
+    expect(rt.renderedQuestions().map((q) => q.id)).toEqual(['q1', 'q3', 'tail']);
+    expect([...rt.transmittedView().answers.keys()]).not.toContain('q2');
+  });
+
+  it('warns rather than looping when two rules can never agree', () => {
+    // Visibility is NOT monotone: `isNotAnswered` means removing an answer can REVEAL a
+    // question, so the iteration has no guaranteed fixed point. This is where the builder's
+    // badge and the respondent's screen diverge most, and it is capped, not solved.
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (message: string) => void warnings.push(message);
+    try {
+      const rt = new FormRuntime(
+        formOf([
+          { id: 'a', conditionalRule: { show: { all: [{ questionId: 'b', op: 'isNotAnswered' }] } } },
+          { id: 'b', conditionalRule: { show: { all: [{ questionId: 'a', op: 'isAnswered' }] } } },
+        ]),
+      );
+      rt.setValue('a', '1');
+      rt.setValue('b', '2');
+      rt.renderedQuestions();
+    } finally {
+      console.warn = original;
+    }
+    expect(warnings.join('\n')).toContain('visibility did not settle');
+  });
+});
+
+/**
+ * Issue #124's client half. The server refuses a final submit that would store nothing on a form
+ * that asked something; the widget has to know the same thing, or the respondent learns it only
+ * after a round trip — while every OTHER validation rule in this widget blocks or annotates
+ * inline. The predicate has to match the server's exactly, including its exemption for a form
+ * that asked nothing at all.
+ */
+describe('FormRuntime.wouldSubmitNothing (#124)', () => {
+  function formOf(questions: PublishedFormQuestion[]): PublishedFormDefinition {
+    return { ...makeDefinition(), pages: [{ id: 'p1', displayOrder: 1, questions }] };
+  }
+  const optional = (id: string): PublishedFormQuestion =>
+    ({ id, type: 'ShortText', prompt: id, isRequired: false, displayOrder: 1, options: [] });
+
+  it('is true when the form asked something and nothing has been filled in', () => {
+    const rt = new FormRuntime(formOf([optional('q-a')]));
+    expect(rt.wouldSubmitNothing()).toBe(true);
+  });
+
+  it('is false once any question carries a real answer', () => {
+    const rt = new FormRuntime(formOf([optional('q-a')]));
+    rt.setValue('q-a', 'Ada');
+    expect(rt.wouldSubmitNothing()).toBe(false);
+  });
+
+  it('is true for a whitespace-only answer, which the payload builder drops', () => {
+    const rt = new FormRuntime(formOf([optional('q-a')]));
+    rt.setValue('q-a', '   ');
+    expect(rt.wouldSubmitNothing()).toBe(true);
+  });
+
+  it('is FALSE on an acknowledgement form, which asked nothing and is completable', () => {
+    const rt = new FormRuntime(formOf([
+      { id: 'q-note', type: 'Statement', prompt: 'I have read it.', isRequired: false, displayOrder: 1, options: [] },
+    ]));
+    expect(rt.wouldSubmitNothing()).toBe(false);
+  });
+
+  it('is FALSE when every answerable question is hidden on this path', () => {
+    const rt = new FormRuntime(formOf([
+      {
+        id: 'q-branch', type: 'ShortText', prompt: 'Branch', isRequired: false, displayOrder: 1, options: [],
+        conditionalRule: { show: { all: [{ questionId: 'q-absent', op: 'equals', value: 'yes' }] } },
+      },
+    ]));
+    expect(rt.wouldSubmitNothing()).toBe(false);
   });
 });

@@ -26,14 +26,13 @@ import {
   type mjBizAppsFormsFormScreenEntity,
 } from '@mj-biz-apps/forms-entities';
 import { FORMS_UI_CSS, FORMS_VIZ_CSS } from '../shared';
-import {
-  ConditionalRuleEditorComponent,
-  type ConditionalSourceQuestion,
-} from './conditional-rule-editor.component';
+import { RulesPanelComponent } from './rules-panel.component';
+import type { ConditionalSourceQuestion } from './condition-sources';
 import { ImageFieldComponent } from './image-field.component';
 import { SettingRowComponent } from './setting-row.component';
 import { isOptionalOpen, toggleOptional } from './optional-setting';
 import { parseConditionalRule, serializeConditionalRule } from './json-fields';
+import type { FormSection } from './section-groups';
 
 const SCREEN_EDITOR_CSS = /* css */ `
 :host { display: block; }
@@ -73,7 +72,7 @@ const SCREEN_EDITOR_CSS = /* css */ `
   imports: [
     CommonModule,
     FormsModule,
-    ConditionalRuleEditorComponent,
+    RulesPanelComponent,
     ImageFieldComponent,
     SettingRowComponent,
   ],
@@ -120,19 +119,51 @@ const SCREEN_EDITOR_CSS = /* css */ `
         />
 
         @if (s.ScreenType === 'Ending') {
+          <!-- A switch that only turns ON, and only for a screen that could actually win.
+               Turning it off would leave the form with no catch-all, which the old free toggle
+               allowed and nothing reported; and a screened-out ending takes no part in ending
+               resolution at all, so making one the default would be a setting that does nothing.
+               The form-wide half of the write — clearing whichever ending holds it today — is
+               the host's, because this editor only ever has ONE screen. -->
+          @if (!s.IsDisqualification) {
+            <mjf-setting-row
+              label="Default ending"
+              hint="Shown when no other ending's condition matches. Every form has exactly one — turning this on moves it here."
+            >
+              <button
+                slot="control"
+                type="button"
+                class="mjf-switch"
+                role="switch"
+                [attr.aria-checked]="s.IsDefault"
+                [class.is-on]="s.IsDefault"
+                [disabled]="s.IsDefault"
+                [attr.title]="s.IsDefault ? 'This is the default ending. Make another ending the default to move it.' : null"
+                aria-label="Default ending"
+                (click)="makeDefault()"
+              ></button>
+            </mjf-setting-row>
+          }
+
+          <!-- What arriving here MEANS, which is the screen's business rather than any rule's.
+               A Go-to rule names this screen; this toggle decides how the response is recorded.
+               Keeping the two apart is what removed the old disqualify rule card, whose group
+               had to mean "which thank-you page" or "who is screened out" depending on a flag
+               one panel away. -->
           <mjf-setting-row
-            label="Default ending"
-            hint="Shown when no other ending's condition matches. Every form needs exactly one."
+            label="Screened out"
+            [hint]="s.IsDefault ? 'The default ending cannot be screened out — everyone who finishes normally lands here. Make another ending the default first.' : 'Responses that reach this screen are recorded as disqualified — they do not count toward your response limit, and no automations run. Send people here with a Go to rule.'"
           >
             <button
               slot="control"
               type="button"
               class="mjf-switch"
               role="switch"
-              [attr.aria-checked]="s.IsDefault"
-              [class.is-on]="s.IsDefault"
-              aria-label="Default ending"
-              (click)="toggleDefault()"
+              [attr.aria-checked]="s.IsDisqualification"
+              [class.is-on]="s.IsDisqualification"
+              [disabled]="s.IsDefault"
+              aria-label="Screened out"
+              (click)="toggleDisqualification()"
             ></button>
           </mjf-setting-row>
 
@@ -188,38 +219,36 @@ const SCREEN_EDITOR_CSS = /* css */ `
             </div>
           </mjf-setting-row>
 
-          <mjf-setting-row
-            label="Show only if"
-            hint="Endings are checked in order and the first match wins. One with no condition is only reachable as the default."
-            [open]="conditionalOpen"
-          >
-            <button
-              slot="control"
-              type="button"
-              class="mjf-switch"
-              [class.is-on]="conditionalOpen"
-              role="switch"
-              [attr.aria-checked]="conditionalOpen"
-              aria-label="Show only if"
-              (click)="toggleConditional()"
-            ></button>
-            <mjf-conditional-rule-editor
+          <div class="se-section">
+            <mjf-rules-panel
+              [sections]="sections"
+              [subjectId]="s.ID"
               [rule]="conditionalRule"
               [sources]="conditionalSources"
+              [formSources]="formSources"
+              [allowJumps]="false"
+              itemNoun="screen"
               (ruleChange)="onConditionalChange($event)"
             />
-          </mjf-setting-row>
+          </div>
         }
       </div>
     }
   `,
 })
 export class ScreenEditorComponent {
+  /**
+   * The form's sections, so this item's rule pickers can group what they offer by the section
+   * that owns it rather than listing every question on the form flat. Presentation only — see
+   * `section-groups.ts`.
+   */
+  @Input() sections: FormSection[] = [];
+
   @Input()
   public set screen(value: mjBizAppsFormsFormScreenEntity | null) {
     if (value?.ID !== this.current?.ID) {
       // A new screen's emptiness is not the previous screen's — start its rows closed.
-      this.requested = { redirect: false, conditional: false, social: false };
+      this.requested = { redirect: false, social: false };
     }
     this.current = value;
   }
@@ -229,20 +258,31 @@ export class ScreenEditorComponent {
   private current: mjBizAppsFormsFormScreenEntity | null = null;
 
   /** Rows switched on but not yet filled in — see {@link isOptionalOpen}. */
-  private requested = { redirect: false, conditional: false, social: false };
+
+  private requested = { redirect: false, social: false };
   /** Every question on the form — all of them are valid sources for an ending's condition. */
   @Input() conditionalSources: ConditionalSourceQuestion[] = [];
 
+  /**
+   * Every answerable question on the form — what lets a stale condition row say WHY it is stale.
+   * See `ConditionalRuleEditorComponent.formSources`.
+   */
+  @Input() formSources: ConditionalSourceQuestion[] = [];
+
   /** Emitted whenever a field on the screen entity changed (parent persists). */
   @Output() screenChanged = new EventEmitter<mjBizAppsFormsFormScreenEntity>();
+  /**
+   * This screen should become the form's default ending.
+   *
+   * A REQUEST rather than a change, because it is not one: the host must also clear the ending
+   * that holds it today, and only the host has that screen. See {@link makeDefault}.
+   */
+  @Output() makeDefaultRequested = new EventEmitter<mjBizAppsFormsFormScreenEntity>();
 
   protected get redirectOpen(): boolean {
     return isOptionalOpen(!!this.screen?.RedirectURL, this.requested.redirect);
   }
 
-  protected get conditionalOpen(): boolean {
-    return isOptionalOpen(!!this.conditionalRule, this.requested.conditional);
-  }
 
   protected toggleRedirect(): void {
     const next = toggleOptional(!!this.screen?.RedirectURL, this.requested.redirect);
@@ -252,13 +292,6 @@ export class ScreenEditorComponent {
     }
   }
 
-  protected toggleConditional(): void {
-    const next = toggleOptional(!!this.conditionalRule, this.requested.conditional);
-    this.requested.conditional = next.requested;
-    if (next.clear) {
-      this.onConditionalChange(undefined);
-    }
-  }
 
   // --- Social links ---------------------------------------------------------
 
@@ -346,9 +379,25 @@ export class ScreenEditorComponent {
     });
   }
 
-  protected toggleDefault(): void {
+  /**
+   * Ask the host to move the form's default ending here.
+   *
+   * Deliberately NOT `apply()`. Every other control on this panel writes one field on the one
+   * screen it was handed, and `apply` exists for exactly that. This one also has to clear
+   * whichever OTHER ending currently holds the default — a screen this editor has never seen —
+   * so it reports the intent and lets the host, which holds the whole tree, perform both writes
+   * in the order the unique index requires.
+   */
+  protected makeDefault(): void {
+    if (!this.screen || this.screen.IsDefault) {
+      return;
+    }
+    this.makeDefaultRequested.emit(this.screen);
+  }
+
+  protected toggleDisqualification(): void {
     this.apply((s) => {
-      s.IsDefault = !s.IsDefault;
+      s.IsDisqualification = !s.IsDisqualification;
     });
   }
 

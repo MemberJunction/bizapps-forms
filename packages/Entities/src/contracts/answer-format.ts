@@ -13,17 +13,20 @@
  *
  * `Phone` and `Date` are validated by neither side before this module existed — the widget's
  * switch fell through to `default: return VALID` for both — so they are new enforcement here,
- * not a one-sided gap being closed.
+ * not a one-sided gap being closed. `Time` joined them later still (#116): it fell through this
+ * module's own `default` too, and the value it let past could not be stored.
  *
  * Runs BEFORE the declarative rule and does not replace it: an explicit `ValidationRule`
  * still applies on top, so an author who supplies their own `pattern` keeps full control and can
- * constrain a type further, never loosen it. The one case where this check does not run at all
- * is an autosave draft — see `validateValue` in forms-server, which holds a `partial` save to
- * upper bounds only. A draft can never reach `Complete` without passing through the full check.
+ * constrain a type further, never loosen it. The one case where most of this check does not run
+ * is an autosave draft — see `validateDraft` in forms-server, which holds a draft to upper
+ * bounds, plus the `Date` / `Time` cases here, because those are the one column the row cannot
+ * store an unparsed value in. A draft can never reach `Complete` without the full check.
  */
+import { dateAnswerInstant } from './answer-date';
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
-import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS } from './question-types';
+import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, questionTypeBehavior } from './question-types';
 import type { FormQuestionType } from './question-types';
 import type { JSONValue } from './json-value';
 
@@ -75,6 +78,103 @@ export function opinionScaleBounds(settings?: Record<string, JSONValue>): { min:
 }
 
 /**
+ * The most points any implied answer set may carry.
+ *
+ * Every point becomes something rendered — a clickable star in the widget, an `<option>` in the
+ * condition editor — and the bound comes from `Settings`, which is an open JSON blob reachable
+ * by paste, by API and by typo. Without a cap, `{"max": 1000000}` is a form that hangs the
+ * respondent's browser and a rule dropdown that hangs the author's. Well above any real scale
+ * (NPS, the widest fixed one, is eleven points).
+ */
+export const MAX_IMPLIED_SCALE_POINTS = 101;
+
+/** Default `Rating` star count when the author set none. Must match what the widget renders. */
+const RATING_DEFAULT_MAX = 5;
+
+/** `NPS` is 0–10 by definition, not by configuration — the scale IS the question. */
+const NPS_MIN = 0;
+const NPS_MAX = 10;
+
+/**
+ * How many stars a `Rating` offers.
+ *
+ * Shared for the same reason {@link opinionScaleBounds} is: the widget renders this many stars
+ * and the condition editor offers this many values to compare against, and a rule naming a star
+ * the form does not render can never fire. A non-positive setting falls back rather than
+ * pinning the scale to zero — `question-settings.ts` deletes a blank key precisely so the
+ * default applies, and a zero-star rating renders nothing to click.
+ */
+export function ratingScaleMax(settings?: Record<string, JSONValue>): number {
+  const raw = settings?.['max'];
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 1) {
+    return RATING_DEFAULT_MAX;
+  }
+  return Math.min(Math.trunc(raw), MAX_IMPLIED_SCALE_POINTS);
+}
+
+/**
+ * The discrete numbers a scale question can be answered with, or `undefined` for a type that
+ * does not answer on a scale.
+ *
+ * `Number` is deliberately absent: any number is an answer to it, so there is nothing to offer.
+ * That absence is what the condition editor reads to decide between a picker and a number box.
+ */
+export function numericScalePoints(
+  type: FormQuestionType,
+  settings?: Record<string, JSONValue>,
+): readonly number[] | undefined {
+  switch (type) {
+    case 'Rating':
+      return countFrom(1, ratingScaleMax(settings));
+    case 'NPS':
+      return countFrom(NPS_MIN, NPS_MAX);
+    case 'OpinionScale': {
+      const { min, max } = opinionScaleBounds(settings);
+      return countFrom(min, max);
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** The integers from `min` to `max` inclusive, never more than the cap allows. */
+function countFrom(min: number, max: number): readonly number[] {
+  const length = Math.min(max - min + 1, MAX_IMPLIED_SCALE_POINTS);
+  return Array.from({ length }, (_, i) => min + i);
+}
+
+/**
+ * Every value a question of this type can be answered with — when the TYPE fixes them.
+ *
+ * The point is the distinction, not the list: a question whose answers are fixed is one whose
+ * comparison value should be PICKED, and a question whose answers are open is one where it must
+ * be typed. Until this existed only AUTHORED options carried that signal (`optionMode`), so a
+ * `Rating` and a `ShortText` looked identical to anything asking "is this answer set known?" —
+ * which is why the condition editor offered a free-text box for a five-star rating and let an
+ * author compare it against `"excellent"`.
+ *
+ * Values come back in the type the answer is STORED as — `5` and `true`, never `'5'` and
+ * `'true'` — because that is what an `equals` condition has to hold to ever match. Their LABELS
+ * are not here: "Yes" / "Accepted" / "Checked" are presentation, and belong with the rest of the
+ * chrome in `forms-ng`.
+ *
+ * Returns `undefined`, not `[]`, for a type with no implied set. An empty array would read as
+ * "this question has no possible answers", which is a different and much stranger claim.
+ */
+export function impliedAnswerValues(
+  type: FormQuestionType,
+  settings?: Record<string, JSONValue>,
+): readonly (number | boolean)[] | undefined {
+  if (questionTypeBehavior(type).answerColumn === 'boolean') {
+    return BOOLEAN_ANSWER_VALUES;
+  }
+  return numericScalePoints(type, settings);
+}
+
+/** True before false, so a picker reads "Yes / No" rather than "No / Yes". */
+const BOOLEAN_ANSWER_VALUES: readonly boolean[] = [true, false];
+
+/**
  * Check an answered value against the format its question TYPE implies.
  *
  * @param question the question as authored — its type, its options and its settings
@@ -113,7 +213,9 @@ export function validateAnswerFormat(
     case 'Website':
       return isWebUrl(String(value)) ? undefined : 'Enter a valid web address.';
     case 'Date':
-      return isDate(value) ? undefined : 'Enter a valid date.';
+      return isStorableDate(type, value) ? undefined : 'Enter a valid date.';
+    case 'Time':
+      return isStorableDate(type, value) ? undefined : 'Enter a valid time.';
     case 'Checkbox':
     case 'Legal':
       // Distinct from `isRequired`: a REQUIRED consent box must be TICKED, which is the
@@ -441,21 +543,23 @@ function isPhone(text: string): boolean {
 }
 
 /**
- * A date answer must be a string JS can parse as a real instant.
+ * A `Date` / `Time` answer must be a string the `date` column can actually store.
  *
- * Deliberately lenient about WHICH string formats parse, for the same reason as the email
- * check — but strict that it must be a string at all. `dateValue` is a plain nullable GraphQL
- * `String` on `FormAnswerInputType` (there is no date scalar in the schema), so nothing
- * upstream coerces or rejects it; a caller posting straight at the mutation can put a number,
- * a boolean or an array on a `Date` question. This used to return `true` for every non-string
- * on the theory that "transport already vetted it". Transport vets nothing, so that was the
- * same bypass this module exists to close for `Email`, left open for `Date`.
+ * "Can store" is decided by {@link dateAnswerInstant} — the same parse persistence writes
+ * through — rather than by a check of this module's own, because the two disagreed before
+ * (#116): this module had no opinion on `Time`, persistence did `new Date('14:30')`, and the
+ * Invalid Date threw from inside `Save()` as an unattributed "Invalid time value". A value
+ * accepted here is now, by construction, a value that can be stored.
+ *
+ * Strict that it must be a string at all. `dateValue` is a plain nullable GraphQL `String` on
+ * `FormAnswerInputType` (there is no date scalar in the schema), so nothing upstream coerces or
+ * rejects it; a caller posting straight at the mutation can put a number, a boolean or an
+ * array on a `Date` question. This used to return `true` for every non-string on the theory
+ * that "transport already vetted it". Transport vets nothing, so that was the same bypass this
+ * module exists to close for `Email`, left open for `Date`.
  */
-function isDate(value: AnswerValue): boolean {
-  if (typeof value !== 'string') {
-    return false;
-  }
-  return !Number.isNaN(new Date(value.trim()).getTime());
+function isStorableDate(type: FormQuestionType, value: AnswerValue): boolean {
+  return typeof value === 'string' && dateAnswerInstant(type, value) !== undefined;
 }
 
 /**

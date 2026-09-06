@@ -10,9 +10,17 @@
  * These functions are deliberately free of Angular/DOM so they can be unit-tested
  * without a browser or the Turnstile global (the package's Vitest suite is node-only).
  */
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import { CAPTCHA_NOT_CONFIGURED_MESSAGE, type PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
 
-/** Server-side Turnstile error codes surfaced to the client (see Server/turnstile.service.ts). */
+/**
+ * Server-side Turnstile error codes that reach the client inside a message
+ * (see Server/turnstile.service.ts, and `Captcha verification failed (<code>).` in submit-pipeline).
+ *
+ * `turnstile-not-configured` is listed but is NO LONGER one of them: the pipeline intercepts that
+ * code and answers with {@link CAPTCHA_NOT_CONFIGURED_MESSAGE} instead, so it can only arrive here
+ * from an older server. It stays in the list for exactly that reason — a widget bundle outlives the
+ * server it was built against — not because the current server can still send it.
+ */
 export const TURNSTILE_ERROR_CODES = [
   'missing-token',
   'turnstile-not-configured',
@@ -75,12 +83,27 @@ export function canSubmit(
 /**
  * Whether a failed-submit error message came from the Turnstile check, meaning the
  * (single-use) token was consumed/rejected and the challenge must be reset so the
- * respondent can solve a fresh one. The server phrases these as
+ * respondent can solve a fresh one. The server phrases most of these as
  * `Captcha verification failed (<code>).`.
+ *
+ * The one that is NOT phrased that way is the host's own config gap, which is deliberately worded
+ * to blame nobody and therefore contains neither the word "captcha" nor a code (#122). It is
+ * matched against the shared constant rather than sniffed for, because that is the only clause
+ * here that cannot drift when the copy is next reworded — which is exactly how this case was lost
+ * the first time.
+ *
+ * `includes`, not `===`: the caller joins every error's message before classifying
+ * (`(res.errors ?? []).map((e) => e.message).join(' ')` in mj-form.component), so an identity test
+ * would hold only while the server happens to return exactly one error. That is a property of
+ * today's `fail(message)` call, not of the contract — and relying on it would be the same kind of
+ * accident as relying on the word "captcha" was.
  */
 export function isTurnstileError(message: string | undefined | null): boolean {
   if (!message) {
     return false;
+  }
+  if (message.includes(CAPTCHA_NOT_CONFIGURED_MESSAGE)) {
+    return true;
   }
   const lower = message.toLowerCase();
   if (lower.includes('captcha')) {

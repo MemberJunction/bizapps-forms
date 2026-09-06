@@ -18,7 +18,8 @@ describe('parseFormBlueprint', () => {
   });
 
   it('rejects a question type outside the contract taxonomy', () => {
-    // Was `Signature`, which the taxonomy has since grown to include — a rejection test whose
+    // Was `Signature`, which the taxonomy grew to include and has since retired — a rejection
+    // test whose
     // example became valid stops testing rejection and starts asserting nothing. `Payment` is a
     // type we have deliberately NOT implemented, so it is a stable stand-in for "not a type".
     expect(() =>

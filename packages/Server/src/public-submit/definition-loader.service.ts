@@ -19,6 +19,7 @@ import type {
   mjBizAppsFormsFormVersionEntityType,
   PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
+import { distributionWindowClosed } from './distribution-window';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from './entity-names';
 import { parsePublishedDefinition } from './snapshot-parser';
 
@@ -76,7 +77,37 @@ async function loadDistribution(
   return result.Results[0];
 }
 
-/** Load the single Published version for a form, or `undefined`. */
+/**
+ * The `ExtraFilter` that means "a Published version of this form".
+ *
+ * Exported because the respondent-host door refuses a link whose form has none (bizapps-forms#118)
+ * with an existence read of its own — it needs a yes/no, not the snapshot — and the two gates must
+ * mean the same thing by "published". Sharing the filter is what guarantees that.
+ *
+ * It guarantees agreement about PUBLISHED, and deliberately not about SERVABLE. This gate does one
+ * more thing the door's ID-only read cannot: {@link parsePublishedDefinition} on the row's
+ * `DefinitionSnapshot`, which still fails as `invalid-snapshot` below. A Published version whose
+ * snapshot does not parse therefore still reaches the door's admitted path and dead-ends in the
+ * widget — the same symptom #118 fixed for the missing-version case, from a different cause. Making
+ * the door see it would mean reading and parsing the whole snapshot on every open of every link,
+ * which is the cost this narrow read exists to avoid; it is a separate change with a separate
+ * trade-off, not an oversight in this filter.
+ */
+export function publishedVersionFilter(formId: string): string {
+  return `FormID=${quoteSqlString(formId)} AND Status='Published'`;
+}
+
+/**
+ * Load the single Published version for a form, or `undefined`.
+ *
+ * "Single" is now true of the data: publishing retires the incumbent in the same transaction and
+ * `UQ_FormVersion_OnePublishedPerForm` keeps a second one unrepresentable (#82). It used to be an
+ * assumption the data contradicted — one dev form carried three simultaneously-Published versions
+ * — and this `ORDER BY` was the only reason the newest one was the one being served.
+ *
+ * The ordering stays for exactly that reason: it is what makes this correct on a host whose
+ * database has not yet run the backfill migration.
+ */
 async function loadPublishedVersion(
   provider: DefinitionRunViewProvider,
   formId: string,
@@ -85,7 +116,7 @@ async function loadPublishedVersion(
   const result = await provider.RunView<mjBizAppsFormsFormVersionEntityType>(
     {
       EntityName: FORM_VERSION_ENTITY,
-      ExtraFilter: `FormID=${quoteSqlString(formId)} AND Status='Published'`,
+      ExtraFilter: publishedVersionFilter(formId),
       OrderBy: 'VersionNumber DESC',
       ResultType: 'simple',
     },
@@ -95,23 +126,6 @@ async function loadPublishedVersion(
     return undefined;
   }
   return result.Results[0];
-}
-
-/** Distribution is open if Active, not Closed, and within its open/close window. */
-function distributionIsOpen(
-  dist: mjBizAppsFormsFormDistributionEntityType,
-  now: Date,
-): boolean {
-  if (!dist.IsActive || dist.Status === 'Closed') {
-    return false;
-  }
-  if (dist.OpenAt && new Date(dist.OpenAt) > now) {
-    return false;
-  }
-  if (dist.CloseAt && new Date(dist.CloseAt) < now) {
-    return false;
-  }
-  return true;
 }
 
 /**
@@ -146,7 +160,13 @@ export async function resolvePublishedDefinition(
   if (!distribution) {
     return { ok: false, failure: 'distribution-not-found' };
   }
-  if (!distributionIsOpen(distribution, now)) {
+  // The window only — deliberately not the response cap, unlike the respondent-host door, which
+  // refuses a full link outright (bizapps-forms#81). This gate runs for EVERY submit, including a
+  // partial save and a disqualifying knockout, neither of which consumes a slot; folding the cap
+  // in here would strand a respondent already mid-form and would replace `checkQuotas`' specific
+  // "(quota reached)" message with a generic closure. The cap belongs where that gate applies it:
+  // on a terminal completion, as the authority for the last-slot race between two respondents.
+  if (distributionWindowClosed(distribution, now)) {
     return { ok: false, failure: 'distribution-closed' };
   }
 

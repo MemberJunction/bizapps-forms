@@ -38,12 +38,36 @@ export function requireDbEnv(scriptName) {
   }
 }
 
-function run(args, maxBuffer) {
+/**
+ * Prefix a batch with the session options SQL Server requires of the statements in it.
+ *
+ * `sqlcmd` is the only client in this workspace that defaults `QUOTED_IDENTIFIER` to OFF; tedious —
+ * and therefore every write the shipped code makes through MJ — defaults it ON. SQL Server refuses
+ * INSERT/UPDATE/DELETE against a table carrying a FILTERED index while the option is off, with
+ * `Msg 1934` naming the option but not the index. So `V202608272250`'s
+ * `UQ_FormVersion_OnePublishedPerForm` broke every sqlcmd write to `FormVersion` — three smoke
+ * scripts patch `DefinitionSnapshot`, and `seed-binding-smoke` failing there took `smoke:file-links`
+ * down with it thirty seconds later, reported as "the binding itself did not run".
+ *
+ * Applied to EVERY batch rather than the statements known to need it, and here rather than at the
+ * two call sites, because the next filtered index is the thing to survive: it will be added to some
+ * other table by someone who has never read this file, and the failure it causes points at a
+ * session option instead of at the index that made it matter.
+ */
+export function withSessionOptions(query) {
+  return `SET QUOTED_IDENTIFIER ON; ${query}`;
+}
+
+/**
+ * The one place a batch is handed to sqlcmd, so {@link withSessionOptions} cannot be skipped by a
+ * future helper: flags vary between {@link sql} and {@link sqlWide}, the batch does not.
+ */
+function run(flags, query, maxBuffer) {
   const env = process.env;
   const res = spawnSync(
     'docker',
     ['exec', SQL_CONTAINER, '/opt/mssql-tools18/bin/sqlcmd', '-S', 'localhost', '-d', env.DB_DATABASE,
-      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', ...args],
+      '-U', env.DB_USERNAME, '-P', env.DB_PASSWORD, '-C', '-b', ...flags, '-Q', withSessionOptions(query)],
     { encoding: 'utf8', maxBuffer },
   );
   if (res.status !== 0) {
@@ -63,7 +87,7 @@ function run(args, maxBuffer) {
  * the separator, which is why one helper serves both shapes.
  */
 export function sql(query) {
-  return run(['-h', '-1', '-W', '-s', '|', '-Q', `SET NOCOUNT ON; ${query}`], 64 * 1024 * 1024).trim();
+  return run(['-h', '-1', '-W', '-s', '|'], `SET NOCOUNT ON; ${query}`, 64 * 1024 * 1024).trim();
 }
 
 /**
@@ -76,7 +100,7 @@ export function sql(query) {
  * like JSON, it is just half a document.
  */
 export function sqlWide(query) {
-  return run(['-y', '0', '-Q', query], 64 * 1024 * 1024)
+  return run(['-y', '0'], query, 64 * 1024 * 1024)
     .split('\n')
     // Drop sqlcmd's column header and its dashed rule; keep the payload lines.
     .filter((line) => !/^JSON_/.test(line) && !/^-+$/.test(line.trim()) && line.trim() !== '')

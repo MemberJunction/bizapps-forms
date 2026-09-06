@@ -3,7 +3,7 @@
 **Status:** Draft for implementation · **Date:** 2026-08-19 · **Author:** Soham Desai (research + verification via Claude)
 **Audience:** the build agent implementing this feature. Every file/class/line reference in this document was
 verified against the working tree (branch `feat/forms-ui-redesign`) and against the MemberJunction source
-checkout at `~/Projects/MJ` on 2026-08-19 — including at the **`v5.51.0` git tag**, so nothing here depends on
+checkout beside this repo (`../MJ`) on 2026-08-19 — including at the **`v5.51.0` git tag**, so nothing here depends on
 6.x-only APIs. Where behavior differs between 5.51.0 and the current 6.1.0-edge workspace, it is called out.
 
 ---
@@ -84,10 +84,11 @@ From `packages/Entities/src/generated/entity_subclasses.ts` (verified):
   (line 214), and `screens` (line ~232). **The preview can therefore render everything this spec generates
   with zero contract changes.**
 
-**No schema migration is required for any phase of this spec.** New AIPrompt/template metadata *does*
-require a regenerated `V…__Metadata_Sync.sql` migration + `npm run seed:manifest` (repo rule: `migrations/`
-is the only thing that ships; `npm run lint:distribution` enforces). Follow `migrations/README.md` for the
-regeneration recipe — it is not a plain re-push.
+**No schema migration is required for any phase of this spec.** New AIPrompt/template metadata ships
+as declarative JSON under `metadata/`; the `V…__Metadata_Sync.sql` that carries it is generated once
+per release by the build engineer, not in this work's PRs (repo rule: `migrations/` is the only thing
+that ships, but the seed is release work — `migrations/README.md`, and MJ/metadata/CLAUDE.md §1b).
+`npm run check:release-seed` lists what the next seed owes.
 
 ### MJ-core APIs this spec depends on — availability verified at the `v5.51.0` tag
 
@@ -172,7 +173,7 @@ existing `generate-form.action.spec.ts` stubs the Designer.
 
 ## 4. Workstream A — Extend the blueprint + Designer (closes G1/G2/G3, part of G6)
 
-**Packages:** `packages/Actions` (schema + builder), `metadata/` (prompt), one regenerated Metadata_Sync migration.
+**Packages:** `packages/Actions` (schema + builder), `metadata/` (prompt). No Metadata_Sync migration — the release seed carries the prompt records.
 
 ### A1. Blueprint schema (`form-blueprint.ts`)
 
@@ -238,8 +239,9 @@ Update `metadata/templates/templates/forms-form-designer.template.md` +
 - Keep `OutputType='object'`, `ResponseFormat='JSON'`, `SelectionStrategy='Specific'` as-is. Model changes
   are metadata operations (AI Prompt Model row), never code.
 
-Then: `mj sync push` → regenerate the Metadata_Sync migration per `migrations/README.md` →
-`npm run seed:manifest` → `npm run lint:distribution` must pass.
+Then: commit the changed JSON under `metadata/` (no `sync` block, no `Metadata_Sync` migration in the
+PR) and confirm `npm run check:release-seed` lists the new records as owed — the release seed picks
+them up. `npm run lint:distribution` must pass, as on any PR.
 
 ### A4. Theme input — text-only in this phase
 
@@ -416,7 +418,7 @@ contract becomes "the current definition", which is what its name already claims
 
 **Acceptance (D):** spec tests for the service's event parsing/filtering/terminal reconcile with a mocked
 observable; component test that an `applyPageDetail` patch changes `designPreviewDefinition` output;
-manual smoke via the MJ host (`~/Projects/MJ && pnpm start`, Explorer :4201) — watch a real brief build
+manual smoke via the MJ host (`cd ../MJ && pnpm start`, Explorer :4201) — watch a real brief build
 live; kill the websocket mid-run and confirm the identical final form.
 
 ---
@@ -425,7 +427,7 @@ live; kill the websocket mid-run and confirm the identical final form.
 
 **Phase A (correctness):** Workstream A. Ships alone: single-shot generation now emits theme-less but
 screen/logic/validation-complete forms. Commits: (1) blueprint+builder extension + tests, (2) prompt
-metadata + regenerated Metadata_Sync migration.
+metadata (JSON only; the release seed carries it).
 **Phase B (streaming):** D3 fix commit → Workstream B + §6 seam/events → Workstream D. The dashboard
 keeps working between commits because no-`SessionID` behavior is unchanged.
 **Phase C (media + theme):** Workstream C (image stage commit, theme stage commit).
@@ -462,7 +464,7 @@ stage fails soft). Say so in the PR body rather than implying test coverage prov
 
 ## 11. MJ 6.x capabilities assessed — and why this spec doesn't build on them yet
 
-Full survey of the MJ repo (`~/Projects/MJ`, 6.1.0-edge.2) performed 2026-08-19, diffed against the
+Full survey of the MJ repo (`../MJ`, 6.1.0-edge.2) performed 2026-08-19, diffed against the
 `v5.51.0` tag. Governing fact for everything below: **MJ 6.x is relicensed to BUSL-1.1** (commit
 `19937deb8b`; 5.51.0 is ISC) and there is no 6.0 stable — the 6.x line is `6.1.0-edge.*` and requires 6.1
 core `__mj` migrations on the host. Adopting any 6.x-only capability is therefore a *repo-level* platform

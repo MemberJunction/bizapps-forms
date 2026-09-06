@@ -21,8 +21,9 @@ import { AUTHORED_AUTOMATION_FIELDS, buildPublishedAutomations } from '@mj-biz-a
 import { buildAnswers, resolveFormId, resolveSeededSlug } from './lib/fixture.mjs';
 import { sql, sqlWide } from './lib/sqlcmd.mjs';
 import { sessionIdFor } from './lib/session.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const AUTOMATION_ID = '11111111-2222-4333-8444-555555555002';
 // The form this suite is wired to, NOT whichever form sorts first. Every scenario below rewrites
 // the authored row above, republishes THAT form's snapshot from THAT form's authored rows, and
@@ -264,7 +265,13 @@ async function main() {
     const def = await definitionFor(token);
     const email = emailFor('ledger');
     const first = await submit(token, def, { email, name: 'Ledger' });
-    const again = await submit(await newSession(), def, {
+    // The SAME session, deliberately: a replay is one client retrying its own submit, which is
+    // the only shape a real widget produces (it mints `sessionId` per instance and
+    // `clientResponseId` per load, so an id is never presented under a foreign session). This
+    // used to call `newSession()`, which made the replay a DIFFERENT session writing to another
+    // session's row — route 3 of issue #78. That only ever "worked" because duplicate-key
+    // recovery handed back a foreign terminal row; the ownership gate now refuses it, correctly.
+    const again = await submit(token, def, {
       email, name: 'Ledger', responseId: first.responseId,
     });
     check(again.responseId === first.responseId, 'the replay reuses the same response id');

@@ -296,8 +296,8 @@ function validateQuestion(
     return fail(400, 'Unknown "questionId" for this form.');
   }
   // Ask the question-type contract whether this answer IS a file, rather than naming one type.
-  // The hardcoded 'FileUpload' rejected every Signature upload with a 400 — the pad exports a
-  // PNG and sends it down this exact route, so the respondent drew a signature and got
+  // The hardcoded 'FileUpload' rejected every Doodle upload with a 400 — the pad exports a
+  // PNG and sends it down this exact route, so the respondent drew something and got
   // "Upload failed (HTTP 400)" underneath it with nothing to do about it. Both types declare
   // `answerColumn: 'file'`, which is the property this guard was always reaching for: the
   // ledger row must match a file answer at submit, and that is decided by the column, not the
@@ -428,10 +428,10 @@ function describeAllowedTypes(allowed: readonly string[]): string {
  * Where one upload's bytes go, given whatever prefix the operator configured.
  *
  * The UUID is the whole point, not decoration. The object path is `<prefix>/<filename>`, and the
- * signature pad names every file it exports `signature.png` — so without a unique segment every
- * signature drawn on a given day, by every respondent, on every form, resolved to ONE object.
+ * doodle pad names every file it exports `doodle.png` — so without a unique segment every
+ * drawing made on a given day, by every respondent, on every form, resolved to ONE object.
  * Each upload overwrote the previous one while its own MJ: Files row was created happily, leaving
- * several responses pointing at whichever bytes landed last: a respondent's signature replaced by
+ * several responses pointing at whichever bytes landed last: a respondent's drawing replaced by
  * a stranger's, now served to a reviewer with a 200 by the download route.
  *
  * `configured` is folded in HERE rather than short-circuiting this function, because the first

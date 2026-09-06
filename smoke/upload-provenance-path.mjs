@@ -14,8 +14,9 @@
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveFormId, resolveSlug } from './lib/fixture.mjs';
 import { sql } from './lib/sqlcmd.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const SLUG = resolveSlug('upload-provenance-path.mjs');
 // Resolved up front so a wrong slug fails naming the slugs that would have worked, rather 
 // than as an HTTP error several steps later that reads like the server is broken.
@@ -118,7 +119,7 @@ async function main() {
   // The question a real upload would be made against, from the published definition.
   const fileQuestion = (definition.pages ?? [])
     .flatMap((p) => p.questions ?? [])
-    .find((q) => q.type === 'FileUpload' || q.type === 'Signature');
+    .find((q) => q.type === 'FileUpload' || q.type === 'Doodle');
   let fileId;
 
   const uploaded = await upload(tokenA, responseA, fileQuestion?.id);

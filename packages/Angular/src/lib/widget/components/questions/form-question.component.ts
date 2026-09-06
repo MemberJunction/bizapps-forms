@@ -7,8 +7,8 @@
  * `@case`; ShortText, Email, Phone, Website, Date and Time share the `@default` input, differing
  * only in the `type`/`inputmode`/`autocomplete` triple `input-mode.ts` derives.
  *
- * `Signature` is delegated to {@link SignaturePadComponent} and then travels the SAME upload
- * path a `FileUpload` answer does — it is a file answer whose file came from a canvas.
+ * `Doodle` is delegated to {@link DoodlePadComponent} and then travels the SAME upload path a
+ * `FileUpload` answer does — it is a file answer whose file came from a canvas.
  */
 import {
   afterNextRender,
@@ -31,8 +31,11 @@ import { moveItem } from '../../../shared/move-item';
 import {
   ADDRESS_FIELDS,
   CONTACT_INFO_FIELDS,
+  doodlePen,
   isAnswerableQuestionType,
+  numericScalePoints,
   opinionScaleBounds,
+  ratingScaleMax,
   type AnswerValue,
   type PublishedFormQuestion,
   type PublishedFormQuestionOption,
@@ -41,6 +44,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 
 import { FORMS_UPLOAD_SERVICE } from '../../api/form-upload.interface';
+import { FormUploadStore } from '../../core/upload-store';
 import {
   autocompleteFor,
   compositeAutocompleteFor,
@@ -49,7 +53,7 @@ import {
   inputModeFor,
   inputTypeFor,
 } from './input-mode';
-import { SignaturePadComponent } from './signature-pad.component';
+import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
 /** How long a reordered row takes to travel to its new place. */
@@ -79,7 +83,7 @@ type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
   selector: 'mjf-form-question',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, SignaturePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
+  imports: [NgTemplateOutlet, DoodlePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
   templateUrl: './form-question.component.html',
   styleUrls: ['./form-question.component.css'],
 })
@@ -111,15 +115,50 @@ export class FormQuestionComponent {
   public readonly valueChange = output<AnswerValue>();
 
   private readonly uploader = inject(FORMS_UPLOAD_SERVICE);
+  /**
+   * Upload state, keyed by question id rather than held here.
+   *
+   * These four used to be plain signals on this component, which quietly assumed one instance
+   * per question for the life of the form. Neither render mode works that way — see the note on
+   * {@link FormUploadStore} — so the state outlived the question it described and was announced
+   * against whichever question the framework reused this instance for.
+   */
+  private readonly uploads = inject(FormUploadStore);
 
-  /** FileUpload UI state (upload lifecycle for the current file). */
-  protected readonly uploadStatus = signal<UploadStatus>('idle');
+  /** This question's upload lifecycle, and nobody else's. */
+  private readonly upload = computed(() => this.uploads.viewFor(this.question().id));
+  protected readonly uploadStatus = computed<UploadStatus>(() => this.upload().status);
   /** Progress 0–1 while uploading, or `null` for an indeterminate phase. */
-  protected readonly uploadProgress = signal<number | null>(null);
+  protected readonly uploadProgress = computed(() => this.upload().progress);
   /** Display name of the selected/uploaded file (the stored answer is the fileId). */
-  protected readonly uploadFileName = signal<string>('');
+  protected readonly uploadFileName = computed(() => this.upload().fileName);
   /** Inline, respondent-facing upload error, or `null`. */
-  protected readonly uploadError = signal<string | null>(null);
+  protected readonly uploadError = computed(() => this.upload().error);
+  /**
+   * The file held locally for this question, whatever its upload has done — or `null`.
+   *
+   * "Local" is the distinction that matters, and the reason it is not called `uploadedFile`: the
+   * file is here from the moment it is chosen or drawn, while it is uploading, and after an
+   * upload has failed. Only {@link answerRecorded} says a file is stored. What this is for is
+   * rendering — the doodle pad repaints itself from it after Angular destroys the control —
+   * and retrying. Read from the store, keyed by question id, for the same reason every other
+   * upload fact is: this component instance is recycled across questions and cannot be trusted
+   * to still be the one the file belongs to.
+   */
+  protected readonly localFile = computed(() => this.upload().file);
+  /**
+   * Whether a file answer is on record for this question — the answer id, not the artifact.
+   *
+   * The two can come apart, and a control that reads only the artifact then renders EMPTY over a
+   * stored answer. That is the shape of the bug the doodle pad had, one level up: the upload
+   * store is per-widget memory, so a drawing or file captured in an earlier session leaves the
+   * answer with nothing local to show for it. Reading the answer itself is what keeps the control
+   * from claiming a question is unanswered when it is not.
+   */
+  protected readonly answerRecorded = computed(() => {
+    const value = this.value();
+    return typeof value === 'string' && value.trim() !== '';
+  });
   /** Whole-number progress percent for the aria-valuenow / label. */
   protected readonly uploadPercent = computed(() => {
     const p = this.uploadProgress();
@@ -139,6 +178,22 @@ export class FormQuestionComponent {
     return optionLetter(index);
   }
   protected readonly errorId = computed(() => `${this.inputId()}-error`);
+  protected readonly statusId = computed(() => `${this.inputId()}-status`);
+
+  /**
+   * Whether the file control's status line currently says anything.
+   *
+   * Read by the input's `aria-describedby`, because that line is the ONLY place the attached
+   * file is named: a re-created file input reports "No file chosen" no matter what is stored, so
+   * a screen-reader user who is not pointed at the status is never told their answer exists.
+   * `aria-live` does not cover it — the text is already on the page when the control is
+   * rendered, and a live region announces changes, not what was there on arrival.
+   */
+  protected readonly hasFileStatus = computed(
+    () =>
+      this.question().type === 'FileUpload' &&
+      (this.uploadStatus() === 'uploading' || this.uploadStatus() === 'done' || this.answerRecorded()),
+  );
 
   /** True when the failure is field-level, which is what decides where messages are rendered. */
   protected readonly hasPartErrors = computed(() => Object.keys(this.partErrors()).length > 0);
@@ -172,6 +227,9 @@ export class FormQuestionComponent {
     if (this.errorMessage()) {
       ids.push(this.errorId());
     }
+    if (this.hasFileStatus()) {
+      ids.push(this.statusId());
+    }
     return ids.length ? ids.join(' ') : null;
   });
 
@@ -192,15 +250,18 @@ export class FormQuestionComponent {
     return [];
   });
 
-  /** Rating scale max (default 5); NPS is fixed 0–10 handled in template. */
-  protected readonly ratingMax = computed(() => {
-    const raw = this.question().settings?.['max'];
-    return typeof raw === 'number' && raw > 0 ? raw : 5;
-  });
-  protected readonly ratingScale = computed(() =>
-    Array.from({ length: this.ratingMax() }, (_, i) => i + 1),
+  // Both scales come from the shared contract, for the reason `opinionScaleBounds` already
+  // carries: derived twice, they drift, and the respondent is told that the number they were
+  // just shown and allowed to click is out of range. The second reader is now the condition
+  // editor, which offers exactly these points as a rule's comparison value — a rule naming a
+  // sixth star on a five-star question can never fire, and neither screen would say why.
+  /** Rating scale max — the author's `settings.max`, or the shared default. */
+  protected readonly ratingMax = computed(() => ratingScaleMax(this.question().settings));
+  protected readonly ratingScale = computed(
+    () => numericScalePoints('Rating', this.question().settings) ?? [],
   );
-  protected readonly npsScale = Array.from({ length: 11 }, (_, i) => i);
+  /** NPS is 0–10 by definition, not by configuration. */
+  protected readonly npsScale = numericScalePoints('NPS') ?? [];
 
   protected readonly placeholder = computed(() => {
     const raw = this.question().settings?.['placeholder'];
@@ -507,24 +568,37 @@ export class FormQuestionComponent {
     this.valueChange.emit(Object.keys(next).length > 0 ? next : null);
   }
 
-  // --- Signature -----------------------------------------------------------
+  // --- Doodle --------------------------------------------------------------
 
-  /** A drawn signature takes the ordinary file-answer path from here. */
-  protected async onSignatureDrawn(file: File): Promise<void> {
-    this.lastFile = file;
-    await this.uploadFile(file);
+  /**
+   * A drawing takes the ordinary file-answer path from here.
+   *
+   * Stored against the question the capture NAMES, not against `this.question()`. The export
+   * finishes after the gesture, and this handler is routed by the view — in OneQuestion mode one
+   * pad serves consecutive Doodle questions, so reading the current question here filed the
+   * first one's drawing as the second one's answer.
+   */
+  protected async onDoodleDrawn(capture: DoodleCapture): Promise<void> {
+    await this.uploadFile(capture.file, capture.subject);
   }
 
-  protected onSignatureCleared(): void {
-    // Retire the running upload before clearing. Without this, a respondent who draws, dislikes
-    // it and taps Clear gets the discarded signature back a moment later: the in-flight upload
-    // resolves and emits its fileId over the null, leaving a stored signature beside an empty pad
-    // that reads "Draw your signature above."
-    this.uploadGeneration += 1;
-    this.lastFile = null;
-    this.resetUploadState();
+  protected onDoodleCleared(): void {
+    // `clear` also retires the running upload. Without that, a respondent who draws, dislikes it
+    // and taps Clear gets the discarded drawing back a moment later: the in-flight upload
+    // resolves and emits its fileId over the null, leaving a stored drawing beside an empty pad
+    // that reads "Draw here."
+    this.uploads.clear(this.question().id);
     this.valueChange.emit(null);
   }
+
+  /**
+   * The pen this doodle question draws with, validated on the way out of the open settings blob.
+   *
+   * Parsed HERE rather than inside the pad so the pad receives a value it can always render:
+   * `Settings` is reachable by paste and by API, and `doodlePen` falls back key by key, so an
+   * unknown colour or a nonsense width becomes the default before it can reach a canvas.
+   */
+  protected readonly pen = computed(() => doodlePen(this.question().settings));
 
   /** Read a string setting off the question, or '' when unset or the wrong type. */
   private settingText(key: string): string {
@@ -572,92 +646,49 @@ export class FormQuestionComponent {
     this.valueChange.emit(this.booleanValue() === value ? null : value);
   }
 
-  /** Last selected file, retained so the respondent can retry a failed upload. */
-  private lastFile: File | null = null;
-
-  /**
-   * Which upload is allowed to write the answer.
-   *
-   * Uploads are not serialized — the signature pad can start a second one while the first is
-   * still going, and a respondent can pick a different file mid-upload — so without a stamp the
-   * answer is whichever response ARRIVES last rather than whichever the respondent asked for
-   * last. On a lossy mobile link those differ routinely. Every upload captures this value at the
-   * start and refuses to touch component state if it has moved on since.
-   */
-  private uploadGeneration = 0;
-
   protected async onFile(input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0] ?? null;
     if (!file) {
-      // Cleared the picker — drop the answer + any prior upload state.
-      this.lastFile = null;
-      this.resetUploadState();
-      this.valueChange.emit(null);
+      // Cleared the picker — the store drops the upload state AND the answer together.
+      this.uploads.clear(this.question().id);
       return;
     }
-    this.lastFile = file;
-    await this.uploadFile(file);
+    // A picker's `change` fires with the view as rendered, so the current question IS the one
+    // the respondent chose the file for. Only the pad's export outlives its gesture.
+    await this.uploadFile(file, this.question().id);
   }
 
   /** Re-run the upload for the previously-selected file after a failure. */
   protected async retryUpload(): Promise<void> {
-    if (this.lastFile) {
-      await this.uploadFile(this.lastFile);
+    const last = this.localFile();
+    if (last) {
+      await this.uploadFile(last, this.question().id);
     }
   }
 
   /**
-   * Upload one file to the anonymous `/forms/upload` endpoint and store the returned
-   * `fileId` as the answer. The answer is cleared while the upload is in flight so a
-   * required FileUpload cannot be satisfied by a not-yet-stored file.
+   * Upload one file to the anonymous `/forms/upload` endpoint.
+   *
+   * The result does NOT travel back through `valueChange`, and that is the whole point. An output
+   * is routed by the view: `(valueChange)="onValueChange(q, $event)"` writes to whichever question
+   * the template is bound to at the moment it fires, which after an `await` is no longer reliably
+   * the question the upload was for. The store commits the answer under the token's own question
+   * id instead — see `succeed` for the two ways that went wrong.
    */
-  private async uploadFile(file: File): Promise<void> {
-    const generation = ++this.uploadGeneration;
-    this.uploadFileName.set(file.name);
-    this.uploadError.set(null);
-    this.uploadStatus.set('uploading');
-    this.uploadProgress.set(0);
-    // Clear any prior fileId until the new upload confirms.
-    this.valueChange.emit(null);
+  private async uploadFile(file: File, questionId: string): Promise<void> {
+    const token = this.uploads.begin(questionId, file);
     try {
       const result = await this.uploader.upload(
         file,
         this.distributionSlug(),
-        this.question().id,
-        (fraction) => {
-          if (generation !== this.uploadGeneration) {
-            return;
-          }
-          this.uploadProgress.set(fraction);
-        },
+        questionId,
+        (fraction) => this.uploads.setProgress(token, fraction),
         this.responseId() || undefined,
       );
-      // A superseded upload must not write ANYTHING: not the answer, not the status. Its bytes
-      // are stored and its MJ: Files row exists, but the respondent has since asked for a
-      // different file — or for none — and that is the answer that has to stand.
-      if (generation !== this.uploadGeneration) {
-        return;
-      }
-      this.uploadStatus.set('done');
-      this.uploadProgress.set(1);
-      this.valueChange.emit(result.fileId);
+      this.uploads.succeed(token, result.fileId);
     } catch (err) {
-      // Guarded for the same reason, and it matters more here: an unguarded stale failure emits
-      // null and wipes the answer the NEWER upload had already stored successfully.
-      if (generation !== this.uploadGeneration) {
-        return;
-      }
-      this.uploadStatus.set('error');
-      this.uploadProgress.set(null);
-      this.uploadError.set(err instanceof Error ? err.message : 'Upload failed. Please try again.');
-      this.valueChange.emit(null);
+      const message = err instanceof Error ? err.message : 'Upload failed. Please try again.';
+      this.uploads.fail(token, message);
     }
-  }
-
-  private resetUploadState(): void {
-    this.uploadStatus.set('idle');
-    this.uploadProgress.set(null);
-    this.uploadFileName.set('');
-    this.uploadError.set(null);
   }
 }

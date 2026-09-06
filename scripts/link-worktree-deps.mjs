@@ -17,12 +17,47 @@
  * Everything it writes is a symlink into the main checkout's store, and `node_modules` is
  * gitignored, so this is reversible by deleting the directories it creates.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const WORKTREE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const MAIN = process.env.BIZAPPS_MAIN_CHECKOUT ?? '/Users/sohamdesai/Projects/bizapps-forms';
+
+/**
+ * The main checkout, asked of git rather than configured.
+ *
+ * A worktree's `.git` is a pointer; `--git-common-dir` resolves to the ONE real git directory
+ * every worktree shares, which lives inside the main checkout — so its parent is the answer, on
+ * any machine, with no setup. This used to be a hardcoded absolute path with an env-var override,
+ * which meant the script worked on exactly one laptop and failed on every other with a message
+ * about a directory that had never existed there.
+ *
+ * The override is kept for a layout git cannot describe (a bare repo, a relocated store).
+ */
+function mainCheckout() {
+  if (process.env.BIZAPPS_MAIN_CHECKOUT) {
+    return resolve(process.env.BIZAPPS_MAIN_CHECKOUT);
+  }
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: WORKTREE,
+      encoding: 'utf8',
+    }).trim();
+    return dirname(resolve(WORKTREE, common));
+  } catch (err) {
+    // Never guessed. A wrong main checkout would symlink this worktree's packages against some
+    // other tree's store, which typechecks and is silently wrong — the exact drift this script
+    // exists to prevent.
+    console.error(
+      `Could not locate the main checkout from ${WORKTREE}: ${err instanceof Error ? err.message : String(err)}\n` +
+        'Run this from inside a git worktree, or set BIZAPPS_MAIN_CHECKOUT to the main checkout.',
+    );
+    process.exit(1);
+  }
+}
+
+const MAIN = mainCheckout();
 
 if (resolve(MAIN) === WORKTREE) {
   console.error('Refusing to run: this IS the main checkout. Run `pnpm install` instead.');

@@ -150,6 +150,48 @@ jobs:
           fi
           echo "No migrations changed since v${CURRENT_VERSION} — a patch release is in policy"
 
+      # RELEASE READINESS, and the only place this runs. PRs contribute declarative JSON under
+      # metadata/ and no Metadata_Sync migration; the build engineer generates ONE consolidated seed
+      # per release from a clean database (MJ/metadata/CLAUDE.md §1b and §10). Nothing on a feature
+      # PR can tell whether that has happened yet, and asking every PR would re-impose the per-PR
+      # cadence MJ rules out — so the question is asked HERE, at the release, where the answer is
+      # actionable: does every primaryKey declared under metadata/ appear in a shipped migration?
+      #
+      # A red step means the release seed has not been regenerated. Fix it by generating the
+      # Metadata_Sync (migrations/README.md) — never by editing this step. It sits before `Update
+      # version`, `Publish to npm` and the tag, so a failure here costs nothing but a re-run.
+      #
+      # The self-test runs first, for the reason the check exists at all: a gate nobody has watched
+      # fail is indistinguishable from one that returns "pass" unconditionally, which is precisely
+      # how its predecessor went green over a record that shipped nowhere (#105). Node stdlib only,
+      # so neither needs anything installed.
+      - name: Release readiness (every metadata record is in the shipped seed)
+        if: steps.changeset_check.outputs.pending != '0'
+        run: |
+          node scripts/check-release-seed-coverage.spec.mjs
+          npm run check:release-seed
+
+      # The OTHER half of #105, and the one coverage structurally cannot ask. Coverage answers "is
+      # this ID named by some shipped migration?" — a per-PR seed delta satisfies that perfectly
+      # while being exactly the cadence #105 abolished, so coverage would go green over it forever.
+      # This asks whether the release ships ONE consolidated seed or a pile of per-PR deltas.
+      #
+      # Separate step, not folded into the one above, so a red run names the rule that broke. It is
+      # also a separate SCRIPT because it needs git tags to know what has shipped, and the coverage
+      # check is deliberately pure-fs so it runs on any checkout — `fetch-depth: 0` and
+      # `fetch-tags: true` on this job's checkout are what make the tags available here.
+      #
+      # EXPECT THIS RED ON THE FIRST RELEASE AFTER #105 MERGES. Two unreleased Metadata_Sync deltas
+      # are on `next` right now (Designer_Taxonomy, OnSubmit_Params). Neither has ever been in a
+      # release tag, so neither is append-only history, and both are meant to be folded into the
+      # first consolidated seed. Red here is the check doing its job, not a defect: generate the
+      # seed per migrations/README.md, delete the two deltas, re-run.
+      - name: Release readiness (one consolidated seed, not per-PR deltas)
+        if: steps.changeset_check.outputs.pending != '0'
+        run: |
+          node scripts/check-release-seed-cadence.spec.mjs
+          npm run check:seed-cadence
+
       - name: Determine next expected version
         if: steps.changeset_check.outputs.pending != '0' && github.ref == 'refs/heads/main' && !github.event.inputs.targetVersion
         id: version_check

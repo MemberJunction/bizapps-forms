@@ -57,11 +57,11 @@ function makeUploadDefinition() {
     displayOrder: 2,
     options: [],
   });
-  // A Signature answer IS a file answer — the pad exports a PNG and sends it down this same
+  // A Doodle answer IS a file answer — the pad exports a PNG and sends it down this same
   // route — so the definition carries one to upload against.
   definition.pages[0].questions.push({
     id: 'q-sign',
-    type: 'Signature',
+    type: 'Doodle',
     prompt: 'Sign here',
     isRequired: false,
     displayOrder: 3,
@@ -239,10 +239,10 @@ describe('runUpload', () => {
 
   it('gives every upload its own storage path, even for identical filenames', async () => {
     // DATA LOSS. The prefix was `forms-uploads/<date>` with nothing unique in it, and the
-    // signature pad names every file it exports `signature.png` — so every signature drawn
+    // doodle pad names every file it exports `doodle.png` — so every drawing made
     // on a given day, by every respondent, on every form, wrote to the SAME object path.
     // Each upload silently overwrote the last, and the MJ: Files rows all pointed at one
-    // set of bytes, so a response ended up showing a stranger's signature. Verified on a
+    // set of bytes, so a response ended up showing a stranger's drawing. Verified on a
     // real host: five uploads, one file on disk. MJ's own default prefix carries a UUID
     // for exactly this reason; this one dropped it.
     const { engine, upload } = storageEngine();
@@ -257,8 +257,8 @@ describe('runUpload', () => {
     // The fix above lived in the `?? defaultPathPrefix()` FALLBACK, so it only protected hosts
     // that had not configured anything. `FORMS_UPLOAD_PATH_PREFIX` is a documented, supported
     // setting, and setting it put back the exact data loss the fallback had just removed:
-    // `cfg.pathPrefix` is a constant string, so every `signature.png` writes to one object and
-    // the new download route hands a reviewer whichever respondent's signature landed last.
+    // `cfg.pathPrefix` is a constant string, so every `doodle.png` writes to one object and
+    // the new download route hands a reviewer whichever respondent's drawing landed last.
     // Uniqueness has to be an invariant of the path builder, not of one branch of it.
     process.env.FORMS_UPLOAD_PATH_PREFIX = 'forms-uploads';
     resetUploadConfigForTests();
@@ -275,10 +275,10 @@ describe('runUpload', () => {
     }
   });
 
-  it('accepts a Signature question, whose answer is a file drawn on a canvas', async () => {
-    // The shipped bug: the guard hardcoded 'FileUpload', so every signature came back 400
-    // and the respondent saw "Upload failed (HTTP 400)" under a signature they had just
-    // drawn, with no way forward. Signature and FileUpload both declare answerColumn:
+  it('accepts a Doodle question, whose answer is a file drawn on a canvas', async () => {
+    // The shipped bug: the guard hardcoded 'FileUpload', so every drawing came back 400
+    // and the respondent saw "Upload failed (HTTP 400)" under a drawing they had just
+    // made, with no way forward. Doodle and FileUpload both declare answerColumn:
     // 'file' in the question-type contract, which is the thing this should be asking.
     const { engine, upload } = storageEngine();
     const result = await runUpload(context({ storage: engine }), request({ questionId: 'q-sign' }));

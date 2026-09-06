@@ -10,9 +10,9 @@ describe('deriveUploadUrl', () => {
   it('does not double the slash when the origin has no path', () => {
     // The shipped bug, exactly as it reached the browser: MJAPI is configured as
     // `http://localhost:4000/`, whose pathname is '/', the /graphql replace finds nothing,
-    // and '/' + '/forms/upload' produces '//forms/upload'. Every FileUpload and Signature
+    // and '/' + '/forms/upload' produces '//forms/upload'. Every FileUpload and Doodle
     // answer then POSTed to a URL the route does not serve and came back 400 — which read
-    // as "signatures are broken" when it was the address that was wrong.
+    // as "drawings are broken" when it was the address that was wrong.
     expect(deriveUploadUrl('http://localhost:4000/')).toBe('http://localhost:4000/forms/upload');
     expect(deriveUploadUrl('http://localhost:4000')).toBe('http://localhost:4000/forms/upload');
   });

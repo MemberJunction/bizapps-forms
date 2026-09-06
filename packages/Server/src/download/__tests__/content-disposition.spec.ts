@@ -6,7 +6,7 @@ describe('attachmentDisposition', () => {
   it('says attachment, which is what turns a click into a download', () => {
     // Without this the PNG opens in the tab and the reader has to right-click-save — the exact
     // behaviour this route replaces.
-    expect(attachmentDisposition('signature.png')).toBe('attachment; filename="signature.png"');
+    expect(attachmentDisposition('doodle.png')).toBe('attachment; filename="doodle.png"');
   });
 
   it('does not repeat a plain ASCII name in both parameters', () => {

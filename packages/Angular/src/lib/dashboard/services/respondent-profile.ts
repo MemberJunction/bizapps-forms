@@ -194,7 +194,7 @@ export function buildRespondentProfile(
   const websiteResponses = new Set<string>();
   const addressResponses = new Set<string>();
   const fileResponses = new Set<string>();
-  const signatureResponses = new Set<string>();
+  const doodleResponses = new Set<string>();
   let hasIdentityQuestion = false;
   let hasAttachmentQuestion = false;
 
@@ -249,8 +249,8 @@ export function buildRespondentProfile(
         case 'FileUpload':
           if (a.FileID) fileResponses.add(a.ResponseID);
           break;
-        case 'Signature':
-          if (a.FileID) signatureResponses.add(a.ResponseID);
+        case 'Doodle':
+          if (a.FileID) doodleResponses.add(a.ResponseID);
           break;
         default:
           // Every identity/attachment type is handled above. A new one reaching here
@@ -291,7 +291,7 @@ export function buildRespondentProfile(
   if (phoneResponses.size > 0) metrics.push(ratioMetric('Phone given', phoneResponses.size, totalResponses, 'responses'));
   if (websiteResponses.size > 0) metrics.push(ratioMetric('Website given', websiteResponses.size, totalResponses, 'responses'));
   if (addressResponses.size > 0) metrics.push(ratioMetric('Address given', addressResponses.size, totalResponses, 'responses'));
-  if (signatureResponses.size > 0) metrics.push(ratioMetric('Signed', signatureResponses.size, totalResponses, 'responses'));
+  if (doodleResponses.size > 0) metrics.push(ratioMetric('Drawing given', doodleResponses.size, totalResponses, 'responses'));
   if (fileResponses.size > 0) metrics.push(ratioMetric('Files attached', fileResponses.size, totalResponses, 'responses'));
 
   const distributions: ProfileDistribution[] = [];

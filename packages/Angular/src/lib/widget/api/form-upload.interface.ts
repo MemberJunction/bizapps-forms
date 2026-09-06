@@ -1,5 +1,5 @@
 /**
- * Seam S1-upload — the binary transport a `FileUpload` or `Signature` answer travels on.
+ * Seam S1-upload — the binary transport a `FileUpload` or `Doodle` answer travels on.
  *
  * Sibling of {@link IFormsApiService}: the widget codes only against this interface so the
  * real XHR transport ({@link FormUploadService}) and the preview stand-in

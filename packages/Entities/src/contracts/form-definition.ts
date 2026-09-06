@@ -9,6 +9,7 @@
  * (WP-C) and server (WP-B) consume it.
  */
 import type { ConditionalRule, ValidationRule } from './conditional-rule';
+import type { QuestionScoring } from './scoring';
 import type { SocialLink } from './social-links';
 import type { JSONValue } from './json-value';
 import type { FormQuestionType, MatrixAxis } from './question-types';
@@ -110,6 +111,8 @@ export interface PublishedFormQuestion {
   conditionalRule?: ConditionalRule;
   /** Declarative validation (S2). `required` lives on `isRequired`, not here. */
   validationRule?: ValidationRule;
+  /** Per-option points (C4), from `FormQuestion.ScoringConfig`. Absent => the question does not score. */
+  scoring?: QuestionScoring;
   /** Per-question-type open settings (scale bounds, placeholders, etc.). */
   settings?: Record<string, JSONValue>;
   /** Options for choice-style questions; empty for non-choice types. */
@@ -243,6 +246,12 @@ export interface PublishedFormScreen {
   conditionalRule?: ConditionalRule;
   /** `Ending` only: the fallback shown when no conditional ending matched. */
   isDefault?: boolean;
+  /**
+   * `Ending` only (C3): this ending is a DISQUALIFICATION — its rule is evaluated while the
+   * respondent answers, and a match ends the form immediately with `Status='Disqualified'`.
+   * From `FormScreen.IsDisqualification`. The flag alone never fires; the rule arms it.
+   */
+  isDisqualification?: boolean;
 }
 
 /**

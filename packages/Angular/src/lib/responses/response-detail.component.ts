@@ -408,7 +408,7 @@ export class FormsResponseDetailComponent implements AfterViewInit {
    * Download one file answer.
    *
    * State is kept per file id rather than as a single boolean so a failure lands next to the
-   * file it belongs to. A reviewer looking at a response with a résumé and a signature needs to
+   * file it belongs to. A reviewer looking at a response with a résumé and a drawing needs to
    * know which one did not arrive, and one shared error message beside both answers that
    * question wrongly half the time.
    */

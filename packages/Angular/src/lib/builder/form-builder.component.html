@@ -1,11 +1,22 @@
 <div class="fb">
   <!-- Topbar -->
   <header class="fb-top">
+    <!-- Edited in place, so every way OUT of the box has to mean something. Selecting the whole
+         value on focus is the cue that this is ONE value being replaced rather than a text field
+         to put a caret in — the same thing MJ's whiteboard rename, the theme-studio rename and
+         `OnFKFocus` in base-forms all do.
+
+         Escape restores the saved name and blurs; blur fires `change`; so the abandon path and
+         the commit path meet in `setName` and cannot form two opinions about an empty box. See
+         `inline-edit.ts` for what that one opinion is. -->
     <input
       #nameInput
       class="fb-name"
       [value]="record.Name"
-      (change)="setName(nameInput.value)"
+      (focus)="nameInput.select()"
+      (keydown.escape)="cancelNameEdit(nameInput)"
+      (keydown.enter)="nameInput.blur()"
+      (change)="setName(nameInput, nameInput.value)"
       aria-label="Form name"
     />
 
@@ -81,23 +92,60 @@
          settles meant showing "Published" and then swapping it for "Publish changes" a moment
          later — which Angular reported as NG0100 (the branch changed after it was checked) and an
          author reads as the button changing its mind. -->
+    <!-- The live region is the WRAPPER, and it has to be: a screen reader announces a region
+         whose contents change, not one that is inserted already holding them. Every state below
+         replaces its predecessor, so the role sat on elements that came and went and announced
+         nothing — including the one state a person most needs told about, that their published
+         form is reachable by nobody. -->
+    <div class="fb-publish-status" role="status" aria-live="polite">
     @if (!publishStateReady) {
-      <span class="fb-published" role="status" aria-live="polite">
+      <span class="fb-published">
         <i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Checking…
       </span>
     } @else {
     @switch (publishState) {
       @case ('current') {
-        <span class="fb-published" role="status" title="Everything in this form is live on its public link.">
-          <i class="fa-solid fa-circle-check" aria-hidden="true"></i> Published
-        </span>
+        <!-- WHAT PUBLISHING ACTUALLY DID, which is less than this chip used to claim. Publishing
+             writes a FormVersion; a share link is a separate act on the Distribute tab, so the
+             fixed "live on its public link" here was addressed to a form that, more often than
+             not, no respondent could open (issue #83). The sentence now comes from `publishReach`,
+             which asks the same question of a FormDistribution that the server asks before it
+             accepts a submission.
+
+             The label carries the answer, not just the tooltip: `title` needs a hover and a phone
+             has none, and this is the surface the mobile-first bar applies to as much as any. -->
+        <!-- One evaluation per render, and one snapshot for all three reads: the getter walks the
+             links against a fresh `now`, so reading it three times could in principle disagree
+             with itself across midnight on a link's closing date. -->
+        @let reach = publishReach;
+        @if (reach.reachable) {
+          <span class="fb-published" [title]="reach.detail">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i> {{ reach.label }}
+          </span>
+        } @else {
+          <!-- A button, not a badge, in every state that is not reachable — including the one
+               where the links could not be read, because the Distribute tab is where that
+               failure is actually explained. The remedy lives on another tab, and a status that
+               reports a problem and leaves you to find the tab is half a message. The full
+               sentence goes on `aria-label` as well as `title`, so the instruction is not
+               hover-only for anyone. -->
+          <button
+            type="button"
+            class="fb-published fb-published--unshared"
+            [title]="reach.detail"
+            [attr.aria-label]="reach.detail"
+            (click)="setTab('distribute')"
+          >
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> {{ reach.label }}
+          </button>
+        }
       }
       @case ('update') {
         <button
           type="button"
           class="mjf-btn mjf-btn--primary fb-publish"
           [disabled]="busy"
-          title="Your edits are not on the public link yet. Publishing pushes them live."
+          title="Your edits are not published yet. Publishing pushes them live."
           (click)="publish()"
         >
           <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish changes
@@ -108,7 +156,7 @@
           type="button"
           class="mjf-btn mjf-btn--primary fb-publish"
           [disabled]="busy"
-          title="Publish this form to make its public link live."
+          title="Publish this form so it can be shared and answered."
           (click)="publish()"
         >
           <i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i> Publish
@@ -116,6 +164,7 @@
       }
     }
     }
+    </div>
   </header>
 
   <!-- A refused save or delete. Rendered here rather than logged and forgotten: BaseEntity
@@ -126,6 +175,29 @@
       <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
       <span class="fb-failure-text">{{ failure }}</span>
       <button type="button" class="fb-failure-close" (click)="state.dismissFailure()" aria-label="Dismiss">
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+      </button>
+    </div>
+  }
+
+  <!-- A reorder that broke a rule (issue #73). Deliberately NOT the band above: that one means
+       one thing, "the database refused a write", and widening it to "and also, consequences of
+       things that succeeded" makes a clear signal vague — the two genuinely co-occur. No timer;
+       an auto-hiding warning about something otherwise silent is how this got missed. -->
+  @if (reorderNotice; as notice) {
+    <div class="fb-reorder-notice" role="alert">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span class="fb-reorder-text">{{ notice.text }}</span>
+      <button
+        type="button"
+        class="fb-reorder-undo"
+        [disabled]="busy"
+        title="Put the question back where it was."
+        (click)="undoReorder()"
+      >
+        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Undo
+      </button>
+      <button type="button" class="fb-reorder-close" (click)="dismissReorderNotice()" aria-label="Dismiss">
         <i class="fa-solid fa-xmark" aria-hidden="true"></i>
       </button>
     </div>
@@ -193,21 +265,16 @@
     <div class="fb-body">
       <!-- LEFT: palette -->
       <nav class="fb-pane fb-pane--left" aria-label="Add question palette">
-        <div class="fb-palette-tools">
-          <div class="fb-palette-search">
-            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-            <input
-              type="search"
-              class="mjf-input"
-              placeholder="Search form elements"
-              aria-label="Search form elements"
-              [value]="paletteQuery"
-              (input)="setPaletteQuery($any($event.target).value)"
-            />
-          </div>
-          <button type="button" class="fb-palette-import" [disabled]="busy" (click)="openImport()">
-            <i class="fa-solid fa-file-import" aria-hidden="true"></i> Import questions
-          </button>
+        <div class="fb-palette-search">
+          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+          <input
+            type="search"
+            class="mjf-input"
+            placeholder="Search form elements"
+            aria-label="Search form elements"
+            [value]="paletteQuery"
+            (input)="setPaletteQuery($any($event.target).value)"
+          />
         </div>
 
         @for (group of paletteGroups; track group) {
@@ -245,7 +312,14 @@
 
           <!-- Screens bracket the questions on the canvas exactly as they bracket the intake at
                runtime, so the author reads the whole flow top to bottom. They are styled as a
-               distinct card, not as question rows, because they are not questions. -->
+               distinct card, not as question rows, because they are not questions.
+
+               THE ZONE, not the card, carries the rule below it — the twin of the one above the
+               endings, and the pair is what makes those three zones legible as three. It wraps
+               both arms deliberately: the boundary is the FORM's, so a form with no welcome
+               screen still starts somewhere, and the frame must not blink out the moment an
+               author deletes the screen. -->
+          <div class="fb-opening">
           @if (welcomeScreen; as ws) {
             <article
               class="fb-screen"
@@ -274,6 +348,12 @@
               Add a welcome screen
             </button>
           }
+          </div>
+
+          <!-- Read once, indexed per item. A getter called per question would walk every rule
+               on the form once per question, and the form long enough to need this is the one
+               that can least afford it. -->
+          @let badges = ruleBadges;
 
           @for (page of pages; track page.entity.ID) {
             <!-- Pages were invisible on the canvas: a multi-page form rendered as one
@@ -281,7 +361,11 @@
                  setting. Shown only when there IS more than one page, so a simple one-page form
                  gains no chrome it has no use for. -->
             @if (pages.length > 1) {
-              <div class="fb-page-head">
+              <div
+                class="fb-page-head"
+                [class.is-selected]="selectedPageId === page.entity.ID"
+                (click)="selectPage(page)"
+              >
                 <span class="fb-page-num">{{ $index + 1 }}</span>
                 <input
                   #pageTitle
@@ -306,12 +390,24 @@
                     Save progress here
                   </span>
                 </label>
+                <!-- A page rule hides every question on the page. Nothing on the canvas said
+                     so, and the tab that did is gone. -->
+                @for (badge of badges.get(page.entity.ID) ?? []; track badge.icon) {
+                  <mjf-rule-badge [badge]="badge" />
+                }
+                <button
+                  type="button"
+                  class="fb-q-btn fb-reveal"
+                  [disabled]="busy"
+                  [attr.aria-label]="'Rules for section ' + ($index + 1)"
+                  (click)="selectPage(page)"
+                ><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
                 <button
                   type="button"
                   class="fb-q-btn fb-q-btn--danger fb-reveal"
                   [disabled]="busy"
                   [attr.aria-label]="'Delete section ' + ($index + 1)"
-                  (click)="deletePage(page)"
+                  (click)="$event.stopPropagation(); deletePage(page)"
                 ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
               </div>
               <!-- The widget has always rendered this under the section heading; nothing in the
@@ -353,6 +449,9 @@
                   <span class="fb-q-num">{{ displayIndex(page, node) }}</span>
                   <span class="fb-q-label">{{ node.entity.Prompt }}</span>
                 </div>
+                <!-- The card is now a COLUMN: its row, and an add-content footer that appears once
+                     the question is selected. -->
+                <div class="fb-q-row">
                 <button
                   type="button"
                   class="fb-q-handle"
@@ -372,20 +471,32 @@
                     @if (node.entity.IsRequired) {
                       <span class="mjf-badge">Required</span>
                     }
+                    <!-- Where the Rules tab used to be. It said things about a question that
+                         belonged beside that question, and an author had to know it existed to
+                         find out a question was conditional at all. The tooltip carries the
+                         rules in full; a broken one says so instead of saying what it does,
+                         because a rule whose source was deleted hides this question from every
+                         respondent, silently, with the form still looking correct. -->
+                    @for (badge of badges.get(node.entity.ID) ?? []; track badge.icon) {
+                      <mjf-rule-badge [badge]="badge" />
+                    }
                   </div>
                 </div>
                 <div class="fb-q-side fb-reveal">
+                  <!-- Bound to `canMoveQuestion`, not to this loop's own `$first` / `$last`:
+                       the arrow and the guard that refuses the move are then one decision
+                       instead of two that can drift. See the method for why that matters. -->
                   <button
                     type="button"
                     class="fb-q-btn"
-                    [disabled]="busy"
+                    [disabled]="busy || !canMoveQuestion(page, node, -1)"
                     (click)="moveQuestion(page, node, -1); $event.stopPropagation()"
                     aria-label="Move up"
                   ><i class="fa-solid fa-chevron-up" aria-hidden="true"></i></button>
                   <button
                     type="button"
                     class="fb-q-btn"
-                    [disabled]="busy"
+                    [disabled]="busy || !canMoveQuestion(page, node, 1)"
                     (click)="moveQuestion(page, node, 1); $event.stopPropagation()"
                     aria-label="Move down"
                   ><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
@@ -397,6 +508,38 @@
                     aria-label="Delete question"
                   ><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
                 </div>
+                </div>
+
+                <!-- ADD CONTENT, attached under the question it acts on and offered only while
+                     that question is selected.
+
+                     Selection rather than hover is what makes this work on a touch screen: you
+                     already tap a question to edit it, and a hover-revealed control simply does
+                     not exist on a tablet. The gutter + this replaced needed a media query to
+                     force itself visible below a breakpoint; that special case is gone rather
+                     than relocated.
+
+                     $index + 1 because a bar UNDER a card can only mean "after this one". -->
+                @if (node.entity.ID === selectedQuestionId) {
+                  <div class="fb-q-add">
+                    <button
+                      type="button"
+                      class="fb-screen-add fb-q-add-btn"
+                      [disabled]="busy"
+                      [attr.aria-label]="'Add content after ' + node.entity.Prompt"
+                      [attr.aria-expanded]="isPickerOpen(page, $index + 1)"
+                      (click)="$event.stopPropagation(); openTypePicker(page, $index + 1)"
+                    >
+                      <i class="fa-solid fa-plus" aria-hidden="true"></i> Add content
+                    </button>
+                  </div>
+                }
+                @if (isPickerOpen(page, $index + 1)) {
+                  <mjf-question-type-picker
+                    (Picked)="insertQuestionAt($event)"
+                    (Dismissed)="closeTypePicker()"
+                  />
+                }
               </article>
             }
             </div>
@@ -424,18 +567,27 @@
                 <span class="fb-screen-icon mjf-viz-2"><i class="fa-solid fa-flag-checkered" aria-hidden="true"></i></span>
                 <div class="fb-screen-main">
                   <div class="fb-screen-kind">
-                    @if (es.IsDefault) {
-                      Default ending
-                    } @else if (es.ConditionalRule) {
-                      Conditional ending
-                    } @else {
-                      <!-- Endings are checked in order and the first match wins, so one with no
-                           condition is only ever reachable as the default — and there already is
-                           one. Saying "Ending" here made a dead screen look like a normal screen. -->
+                    <!-- Three routes reach an ending — the default, a condition on the screen, or
+                         a `Go to` rule naming it — and `endingReachFor` is what knows which apply.
+                         This used to read the screen alone, so a screen deliberately wired up as a
+                         rule's destination was labelled unreachable and told to add a condition. -->
+                    @let reach = endingReach.get(es.ID);
+                    @if (reach?.unreachable) {
                       <span class="fb-screen-warn">
                         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                        Never shown — add a condition
+                        {{ reach?.label }}
                       </span>
+                    } @else {
+                      {{ reach?.label }}
+                    }
+                    <!-- An ending already says it is conditional; what it could not say is
+                         that its condition stopped working. A broken ending rule is the worst
+                         of the three, because the screen it guards is where a respondent was
+                         supposed to LAND. -->
+                    @for (badge of badges.get(es.ID) ?? []; track badge.icon) {
+                      @if (badge.broken) {
+                        <mjf-rule-badge [badge]="badge" />
+                      }
                     }
                   </div>
                   <div class="fb-screen-title">{{ es.Title }}</div>
@@ -473,16 +625,40 @@
       <aside class="fb-pane fb-pane--right" aria-label="Properties">
         @if (selectedScreen; as screen) {
           <mjf-screen-editor
+            [sections]="formSections"
             [screen]="screen"
             [conditionalSources]="endingConditionalSources"
+            [formSources]="formSources"
             (screenChanged)="onScreenChanged($event)"
+            (makeDefaultRequested)="onMakeDefaultEnding($event)"
+          />
+        } @else if (selectedPage; as page) {
+          <mjf-page-editor
+            [sections]="formSections"
+            [page]="page"
+            [pageNumber]="selectedPageIndex + 1"
+            [conditionalSources]="pageConditionalSources"
+            [jumpConditionSources]="pageJumpConditionSources"
+            [formSources]="formSources"
+            [formTargets]="formTargets"
+            [jumpTargets]="pageJumpTargets"
+            [reachNotes]="pageReachNotes"
+            [defaultEndingLabel]="defaultEndingLabel"
+            (pageChanged)="onPageChanged($event)"
           />
         } @else {
           <mjf-question-editor
+            [sections]="formSections"
             [node]="selectedNode"
             [selectedId]="selectedNode?.entity?.ID ?? ''"
             [formId]="record.ID"
             [conditionalSources]="conditionalSources"
+            [jumpConditionSources]="questionJumpSources"
+            [formSources]="formSources"
+            [formTargets]="formTargets"
+            [jumpTargets]="questionJumpTargets"
+            [reachNotes]="questionReachNotes"
+            [defaultEndingLabel]="defaultEndingLabel"
             (questionChanged)="onQuestionChanged($event)"
             (optionChanged)="onOptionChanged($event)"
             (addOptionRequested)="onAddOption($event)"
@@ -503,10 +679,6 @@
     <div class="fb-distribute">
       <mjf-distribution-manager [formId]="record.ID"></mjf-distribution-manager>
     </div>
-  }
-
-  @if (importOpen) {
-    <mjf-import-questions (imported)="onImported($event)" (cancelled)="closeImport()" />
   }
 
   @if (previewDef) {

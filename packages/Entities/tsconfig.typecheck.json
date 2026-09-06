@@ -1,0 +1,10 @@
+{
+  // Type-checks the SPECS. The base tsconfig excludes them so the build does not emit them, and
+  // Vitest transpiles without checking — so until this existed nothing in the repo compiled a test
+  // file, and seventy errors accumulated. Extends the real config and drops only the spec globs from
+  // `exclude`; that omission IS the gate.
+  "extends": "./tsconfig.json",
+  // See `packages/Server/tsconfig.typecheck.json` for why this flag is in the no-emit gate.
+  "compilerOptions": { "noEmit": true, "strictNullChecks": true },
+  "exclude": ["node_modules", "dist"]
+}

@@ -15,8 +15,23 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   padding: 0.75rem 0;
   background: var(--mjf-page-bg);
+}
+
+.mjf-scroll__progress mjf-form-progress {
+  flex: 1;
+  min-width: 0;
+}
+
+.mjf-scroll__step {
+  flex: none;
+  font-size: 0.8125rem;
+  color: var(--mjf-page-ink-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .mjf-scroll__body {
@@ -54,9 +69,101 @@
   gap: 1.75rem;
 }
 
+/* The section is the step, so it takes focus when it changes — without a visible ring, which
+   would read as an error state on a heading nobody clicked. */
+.mjf-page:focus {
+  outline: none;
+}
+
+.mjf-page:focus-visible {
+  outline: none;
+  box-shadow: var(--mjf-card-shadow), var(--mjf-focus-ring);
+}
+
+/*
+ * The note left where a jump passed some questions over.
+ *
+ * Quiet by design: it explains an absence, it is not a thing to act on, and it sits in the flow
+ * of questions the respondent IS answering. It fades in rather than appearing, because the
+ * questions it replaces vanish the instant an answer changes and a hard swap is what reads as a
+ * glitch. Only the arrival is animated — Angular removes the questions from the DOM outright, so
+ * there is no exit to soften without an animation package this widget does not carry.
+ */
+.mjf-skipped {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  color: var(--mjf-page-ink-muted);
+  background: var(--mjf-page-bg);
+  border: 1px dashed var(--mjf-card-border);
+  border-radius: var(--mjf-card-radius);
+  animation: mjf-skipped-in 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.mjf-skipped i {
+  flex: none;
+  opacity: 0.7;
+}
+
+@keyframes mjf-skipped-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mjf-skipped {
+    animation: none;
+  }
+}
+
+.mjf-scroll__empty {
+  margin: 0;
+  color: var(--mjf-page-ink-muted);
+}
+
 .mjf-scroll__actions {
   display: flex;
   justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+/* Back sits at the far left of the row, the primary at the far right — the two ends a thumb
+   reaches for, and the order dialogs in this app already use. */
+.mjf-scroll__actions--stepped {
+  justify-content: space-between;
+}
+
+.mjf-back {
+  min-height: 3rem;
+  padding: 0.75rem 1.5rem;
+  font-family: var(--mjf-font-body);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--mjf-page-ink);
+  background: transparent;
+  border: 1px solid var(--mjf-card-border);
+  border-radius: var(--mjf-btn-radius);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.mjf-back:hover:not(:disabled) {
+  border-color: var(--mjf-accent);
+}
+
+.mjf-back:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mjf-back:focus-visible {
+  outline: none;
+  box-shadow: var(--mjf-focus-ring);
 }
 
 .mjf-submit {

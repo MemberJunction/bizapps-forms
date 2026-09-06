@@ -1,25 +1,39 @@
 /**
- * How full the progress bar is.
+ * How full the progress bar is: the fraction of the visible form that is FILLED IN.
  *
- * Two earlier models each failed in an instructive way, and this one is shaped by both.
+ * THE INVARIANT: the bar reads 100% if and only if every visible answerable question is answered.
+ * Nothing else may reach the top of the track.
  *
- * Counting EVERY question meant a form you could legitimately submit still read 60% — the bar
- * said "not done" when the respondent was done.
+ * That invariant is the whole point, because the bar had the opposite one and it lied. It used to
+ * short-circuit to full the moment every REQUIRED question was satisfied — "you can submit, so you
+ * are done" — which on a nine-question form with one required email painted a completely full bar
+ * above eight visibly blank questions (#88). Respondents act on a full bar; the goal-gradient
+ * effect this file was written around is exactly why they stop at one. Optional questions the
+ * author deliberately asked got skipped because the UI had signalled completion.
  *
- * Counting only REQUIRED questions fixed the meaning and broke the feel: on a form with five
- * required fields each one is worth 20%, so the bar lurched a fifth of the way, then sat dead
- * through the two or three optional questions in between, then lurched again. A control that
- * does not respond for three consecutive actions has taught the respondent that their input
- * does not register — which is the opposite of what a progress bar is for, and measurably
- * worse for completion.
+ * It also made 100% non-terminal. Reachable early, it could be followed by more work — or by the
+ * bar FALLING, to 50%, when changing an answer revealed a required follow-up. A control that goes
+ * backwards from a claimed finish has taught the respondent it cannot be trusted, which is the
+ * failure this file set out to avoid.
  *
- * So: WEIGHTED. Required questions are worth several optional ones, so the bar tracks readiness;
- * optional ones are worth something, so every single answer moves it. And once the required set
- * is complete the bar reads full, because at that point the respondent IS done and a bar that
- * still says 80% is lying to them about what is left.
+ * Two earlier models each failed in an instructive way, and the weighting is shaped by both.
  *
- * The goal-gradient effect is the reason the last property matters most: people accelerate as a
- * goal comes into view, and they only accelerate toward a finish line they can believe.
+ * Counting only REQUIRED questions broke the feel: on a form with five required fields each one is
+ * worth 20%, so the bar lurched a fifth of the way, then sat dead through the two or three optional
+ * questions between them, then lurched again. A control that does not respond for three consecutive
+ * actions has taught the respondent that their input does not register — the opposite of what a
+ * progress bar is for, and measurably worse for completion.
+ *
+ * Counting every question EQUALLY put the required path — the only part that gates a submit — on
+ * the same footing as the optional asides beside it.
+ *
+ * So: WEIGHTED, and run all the way to the end. Required questions are worth several optional ones,
+ * so the bar leans toward the path that actually gates the submit; optional ones are worth
+ * something, so every single answer moves it. Neither can finish it alone.
+ *
+ * "You can submit now" is a separate signal — the ready line on `FormProgressComponent`, driven by
+ * `FormRuntime.isFormValid` — precisely so the bar does not have to overload its own top end to
+ * say it. Submittable and complete are different facts, and each now has its own control.
  */
 
 /** One visible, answerable question, reduced to the two facts progress depends on. */
@@ -46,15 +60,16 @@ export interface ProgressQuestion {
 const REQUIRED_WEIGHT = 3;
 const OPTIONAL_WEIGHT = 1;
 
-/** Fraction complete, 0..1. */
+/**
+ * Fraction complete, 0..1.
+ *
+ * A form with nothing to answer is complete — vacuously, there is no unanswered question left —
+ * which keeps the invariant above total and the function free of a null case. The renderers do not
+ * lean on that number: they suppress the bar entirely when there is nothing answerable, because a
+ * progress bar over an empty form is a control with no subject either way.
+ */
 export function computeProgress(questions: readonly ProgressQuestion[]): number {
   if (questions.length === 0) {
-    return 1;
-  }
-  const required = questions.filter((q) => q.required);
-  // Satisfied, not complete: a composite counts as answered on any one part, which is exactly
-  // what validation lets a respondent submit on. The bar must agree with the submit button.
-  if (required.length > 0 && required.every((q) => q.completeness > 0)) {
     return 1;
   }
   let earned = 0;
@@ -64,7 +79,25 @@ export function computeProgress(questions: readonly ProgressQuestion[]): number 
     total += weight;
     earned += weight * clamp01(q.completeness);
   }
-  return total === 0 ? 1 : clamp01(earned / total);
+  // `total` cannot be zero here: both weights are positive and the list is non-empty.
+  return clamp01(earned / total);
+}
+
+/**
+ * The whole-number percentage the bar is painted and announced from.
+ *
+ * FLOOR, not round, and it lives here rather than in the component because the painted layer has
+ * to keep the same promise the number does. `Math.round` reports 100 for anything from 99.5% up,
+ * so a long form — or one with a partly filled composite among many optionals — could paint a full
+ * bar, glow `is-complete` and publish `aria-valuenow="100"` with questions still blank. That is the
+ * same defect one layer down, and `aria-valuenow` is the yardstick #88 was measured with.
+ *
+ * Flooring makes 100 reachable only from a value of exactly 1. {@link computeProgress} returns
+ * exactly 1 only when every question is answered: the weights are then summed identically on both
+ * sides of the division, so the quotient is 1 with no floating-point slack to lose.
+ */
+export function progressPercent(fraction: number): number {
+  return Math.floor(clamp01(fraction) * 100);
 }
 
 /** Guard against a caller handing us a fraction outside the range the bar is drawn from. */

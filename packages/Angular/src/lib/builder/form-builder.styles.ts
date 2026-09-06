@@ -37,6 +37,53 @@ const LAYOUT_CSS = /* css */ `
 .fb-failure-close:hover { background: var(--mj-bg-surface-hover); }
 .fb-failure-close:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
 
+/* The reorder notice: a write that SUCCEEDED and cost something. Warning-toned, one step down
+   from the error band it sits under, because nothing is broken about the form's data — a rule
+   on it stopped being readable. Undo LEFT, dismiss right: the confirm-left convention, and the
+   one action here that is not "make this go away". */
+.fb-reorder-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--mjf-gap-sm);
+  padding: 10px var(--mjf-gutter);
+  font-size: var(--mjf-meta);
+  color: var(--mj-status-warning-text);
+  background: var(--mj-status-warning-bg);
+  border-bottom: 1px solid var(--mj-status-warning-border);
+}
+.fb-reorder-text { flex: 1 1 auto; min-width: 0; }
+.fb-reorder-undo {
+  flex: none;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  cursor: pointer;
+  color: inherit;
+  background: var(--mj-bg-surface);
+  border: 1px solid var(--mj-status-warning-border);
+  border-radius: var(--mjf-radius-sm);
+}
+.fb-reorder-undo:hover:not(:disabled) { background: var(--mj-bg-surface-hover); }
+.fb-reorder-undo:disabled { opacity: 0.6; cursor: default; }
+.fb-reorder-close {
+  flex: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: var(--mjf-radius-sm);
+}
+.fb-reorder-close:hover { background: var(--mj-bg-surface-hover); }
+.fb-reorder-undo:focus-visible,
+.fb-reorder-close:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 1px; }
+
 /* "Saved as template" — the resting state of a control that has already been used. Success-toned
    rather than muted: it reports an accomplished fact, and it uses the same token as the
    neighbouring "Published" state so the two read as the same kind of statement.
@@ -100,6 +147,10 @@ const LAYOUT_CSS = /* css */ `
 
 .fb-status { font-size: var(--mjf-meta); color: var(--mj-text-secondary); }
 
+/* The publish control's persistent live region. Holds exactly one chip or button at a time,
+   so inline-flex reproduces what those elements did as direct children of the flex topbar. */
+.fb-publish-status { display: inline-flex; align-items: center; }
+
 /* The "nothing to publish" state. Quiet on purpose: it is a status, not an action, so it
    reads as text with a check rather than as a button you have failed to press. Success
    tone at low saturation — the point is reassurance, not celebration. */
@@ -118,6 +169,30 @@ const LAYOUT_CSS = /* css */ `
   border: 1px solid var(--mj-status-success-border);
 }
 .fb-published i { font-size: 0.875rem; }
+
+/* Published, but no respondent can reach it: no share link exists, or every one of them has
+   been switched off, expired or filled up. Warning tone rather than success, because the
+   author's mental model after pressing Publish is "it is out there" and it is not.
+
+   This one IS a button — the remedy lives on another tab — so it needs the affordances a
+   span got for free: a pointer, a hover, and a visible focus ring for anyone arriving by
+   keyboard. It keeps the .fb-published box, so the chip does not move or resize when the
+   author creates a link and it flips back to the reassuring version. */
+.fb-published--unshared {
+  font: inherit;
+  font-size: var(--mjf-meta);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--mj-status-warning-text);
+  background: var(--mj-status-warning-bg);
+  border-color: var(--mj-status-warning-border);
+  transition: filter var(--mjf-ease);
+}
+.fb-published--unshared:hover { filter: brightness(0.97); }
+.fb-published--unshared:focus-visible {
+  outline: 2px solid var(--mj-brand-primary);
+  outline-offset: 2px;
+}
 
 /* The publish action itself carries no extra ring: it only appears when there is
    genuinely something to publish, so its presence is the signal. */
@@ -171,6 +246,8 @@ const LAYOUT_CSS = /* css */ `
    own sizing below; these two are whole components, so they get it from the host. */
 .fb-pane-host { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
+/* The count of broken rules, carried on the tab so the problem is visible without opening it. */
+
 /* ----------------------------------------------------------------- build body */
 
 .fb-body { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 340px; min-height: 0; overflow: hidden; }
@@ -181,17 +258,15 @@ const LAYOUT_CSS = /* css */ `
 
 /* ------------------------------------------------------------------- palette */
 
-/* Palette tools — search + import, pinned above the groups. At 25 types across seven groups,
-   scanning is slower than typing, and an author who knows what they want should not have to
-   know which heading we filed it under. */
-.fb-palette-tools {
+/* Palette search, pinned above the groups. At 25 types across seven groups, scanning is slower
+   than typing, and an author who knows what they want should not have to know which heading we
+   filed it under. */
+.fb-palette-search {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
   margin-bottom: var(--mjf-stack);
 }
-
-.fb-palette-search { position: relative; display: flex; align-items: center; }
 .fb-palette-search i {
   position: absolute;
   left: 10px;
@@ -200,26 +275,6 @@ const LAYOUT_CSS = /* css */ `
   pointer-events: none;
 }
 .fb-palette-search .mjf-input { padding-left: 30px; }
-
-.fb-palette-import {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--mjf-meta);
-  color: var(--mj-text-secondary);
-  background: transparent;
-  border: 1px dashed var(--mj-border-default);
-  border-radius: var(--mjf-radius-sm);
-  transition: background var(--mjf-ease), border-color var(--mjf-ease);
-}
-.fb-palette-import:hover:not(:disabled) { border-color: var(--mj-brand-primary); background: var(--mj-bg-surface-hover); }
-.fb-palette-import:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: -2px; }
-.fb-palette-import:disabled { opacity: 0.45; cursor: not-allowed; }
-.fb-palette-import i { width: 16px; text-align: center; color: var(--mj-text-muted); }
 
 /* ---- Screens on the canvas ----
    Rendered as a distinct card rather than as another question row, because that visual
@@ -319,6 +374,14 @@ const LAYOUT_CSS = /* css */ `
   margin: var(--mjf-stack) 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--mjf-rule);
+  cursor: pointer;
+}
+.fb-page-head.is-selected {
+  border-bottom-color: var(--mj-brand-primary);
+}
+.fb-page-head.is-selected .fb-page-num {
+  background: var(--mj-brand-primary);
+  color: var(--mj-brand-on-primary, var(--mj-text-inverse));
 }
 .fb-page-num {
   flex: none;
@@ -371,7 +434,30 @@ const LAYOUT_CSS = /* css */ `
 .fb-page-desc:focus { outline: none; border-color: var(--mj-brand-primary); background: var(--mj-bg-surface); }
 .fb-page-desc::placeholder { color: var(--mj-text-muted); }
 
-.fb-endings { margin-top: var(--mjf-stack); padding-top: var(--mjf-stack); border-top: 1px solid var(--mjf-rule); }
+/* THE MATCHED PAIR OF RULES THAT BRACKET THE QUESTION REGION.
+   The screens sit OUTSIDE the frame and the questions inside it, which is what makes the canvas
+   read as three zones rather than as one long list with a stray line near the bottom. The rule
+   above the endings has always been here; its twin below the opening had not, so the canvas
+   said where the questions stopped and never where they started.
+
+   Declared together because two rules only read as a pair while they are IDENTICAL — a heavier
+   weight or a different token on one turns the frame back into a stray line unless the other
+   follows, and nothing about a border declaration three hundred lines from its twin makes that
+   obvious to whoever changes it. The common half is therefore stated once, and
+   canvas-zones.wiring.spec.ts compares the two against each other rather than against
+   literals, so a deliberate change to both keeps passing and a change to one does not. */
+.fb-opening,
+.fb-endings { border: 0 solid var(--mjf-rule); }
+.fb-opening { margin-bottom: var(--mjf-stack); padding-bottom: var(--mjf-stack); border-bottom-width: 1px; }
+.fb-endings { margin-top: var(--mjf-stack); padding-top: var(--mjf-stack); border-top-width: 1px; }
+
+/* The add-button carries a bottom margin from before the canvas had a gap. Inside the opening
+   it would push the rule down in the no-welcome-screen state only, putting the boundary 8px
+   lower on a form with no welcome screen than on one with — which contradicts the claim the pair
+   is making, that the boundary belongs to the form rather than to the card. Scoped rather than
+   removed outright: the same button is the "Add a section" and "Add a conditional ending"
+   affordance, and their spacing is not this change's business. */
+.fb-opening .fb-screen-add { margin-bottom: 0; }
 
 /* An ending no respondent can reach is an authoring mistake, not a variant, so it is marked
    rather than merely labelled. */
@@ -443,8 +529,23 @@ const LAYOUT_CSS = /* css */ `
 /* One question. Previously this was ~120px tall for a one-line question, because the
    three actions were stacked in a fixed column down the right edge. They are a row
    now, revealed on hover, so the card is as tall as its content. */
+/* THE ARTICLE IS A SLOT, not the card. It holds the question and, once selected, the control
+   for adding after it — with air between them, because a bar sharing the question's bordered
+   box reads as part of the question rather than as something that follows it.
+
+   The visible card is .fb-q-row. The article keeps the class hooks (.is-selected, :hover,
+   cdkDrag) so the drop list still has exactly one child per question and every existing
+   selector keeps its meaning; it just paints nothing itself. */
 .fb-q {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+.fb-q-row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -452,12 +553,21 @@ const LAYOUT_CSS = /* css */ `
   border-radius: var(--mjf-radius);
   border: 1px solid var(--mj-border-subtle);
   background: var(--mj-bg-surface);
-  cursor: pointer;
   transition: border-color var(--mjf-ease), box-shadow var(--mjf-ease);
 }
-.fb-q:hover { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
-.fb-q:focus-visible { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
-.fb-q.is-selected { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
+/* ADD CONTENT — its own control below the question, not a row inside it. It wears the same
+   dashed treatment as "Add a section" and "Add a welcome screen" (.fb-screen-add), so it reads
+   as the same KIND of thing those are: an offer to add something here, rather than one more of
+   the question's settings. Centred, because it spans the card rather than starting a list. */
+.fb-q-add-btn { justify-content: center; margin-bottom: 0; }
+
+/* Hidden mid-drag. The placeholder and the preview are clones of the article, so a visible bar
+   would be towed around with the card and the gap it leaves behind would be reserved for one. */
+.fb-q-list.cdk-drop-list-dragging .fb-q-add { display: none; }
+
+.fb-q:hover .fb-q-row { border-color: var(--mj-border-strong); box-shadow: var(--mj-shadow-sm); }
+.fb-q:focus-visible .fb-q-row { outline: 2px solid var(--mjf-focus-ring); outline-offset: 2px; }
+.fb-q.is-selected .fb-q-row { border-color: var(--mj-brand-primary); box-shadow: 0 0 0 1px var(--mj-brand-primary); }
 
 /* Drag handle — pointer/touch reorder (arrows remain the keyboard fallback). */
 .fb-q-handle {
@@ -483,7 +593,7 @@ const LAYOUT_CSS = /* css */ `
 
 /* CDK drag-drop visual states — token-only so dark mode stays intact. */
 .fb-q-list.cdk-drop-list-dragging .fb-q:not(.cdk-drag-placeholder) { transition: transform var(--mjf-ease); }
-.cdk-drag-preview.fb-q { box-shadow: var(--mj-shadow-lg); border-color: var(--mj-brand-primary); }
+.cdk-drag-preview.fb-q .fb-q-row { box-shadow: var(--mj-shadow-lg); border-color: var(--mj-brand-primary); }
 .fb-q-drag-preview {
   display: flex;
   align-items: center;
@@ -496,6 +606,10 @@ const LAYOUT_CSS = /* css */ `
   box-shadow: var(--mj-shadow-lg);
 }
 .cdk-drag-placeholder { opacity: 0.4; border-style: dashed !important; border-color: var(--mj-brand-primary) !important; background: var(--mj-bg-surface-sunken) !important; }
+/* A question's placeholder paints on its ROW, since the article itself no longer has a surface.
+   The generic rule above still serves the other reorderable lists (options, automation steps). */
+.fb-q.cdk-drag-placeholder { background: transparent !important; border: none !important; }
+.fb-q.cdk-drag-placeholder .fb-q-row { border-style: dashed !important; border-color: var(--mj-brand-primary) !important; background: var(--mj-bg-surface-sunken) !important; }
 .cdk-drag-animating { transition: transform var(--mjf-ease); }
 
 /* The number sits in its own gutter so every question label starts on the same
@@ -522,6 +636,15 @@ const LAYOUT_CSS = /* css */ `
 .fb-q-help { font-size: var(--mjf-meta); color: var(--mj-text-muted); word-break: break-word; }
 .fb-q-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .fb-q-tags .mjf-badge { padding: 1px 8px; font-size: 0.6875rem; }
+.fb-q-tags mjf-rule-badge, .fb-page-head mjf-rule-badge { display: inline-flex; }
+
+/* What a rule looks like on the canvas. A help cursor rather than the default one, because the
+   badge is two words and the sentences it stands for are in its tooltip — the cursor is the only
+   thing that says there is more to read. */
+/* The rule badge and its tooltip live in rule-badge.component.ts now. A native title showed
+   nothing for about a second, which reads as a broken control on the badge whose whole job is to
+   report a broken rule — and the compact sizing went with it, because a parent's scoped CSS does
+   not reach inside a child component. */
 
 /* Actions live in the card's top-right corner and appear on hover. They stay visible
    whenever focus is inside the card, so the keyboard path never depends on hover. */

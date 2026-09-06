@@ -117,27 +117,58 @@
       ></mjf-validation-rule-editor>
     </mjf-setting-row>
 
-    <mjf-setting-row
-      label="Show only if"
-      hint="Hide this question unless an earlier answer matches."
-      [open]="conditionalOpen"
-    >
-      <button
-        slot="control"
-        type="button"
-        class="mjf-switch"
-        [class.is-on]="conditionalOpen"
-        role="switch"
-        [attr.aria-checked]="conditionalOpen"
-        aria-label="Show only if"
-        (click)="toggleConditional()"
-      ></button>
-      <mjf-conditional-rule-editor
-        [sources]="conditionalSources"
+    @if (scoringChoices.length > 0) {
+      <mjf-setting-row
+        label="Scoring"
+        hint="Points per answer. The running total can route ending screens (score bands) and automations."
+        [open]="scoringOpen"
+      >
+        <button
+          slot="control"
+          type="button"
+          class="mjf-switch"
+          [class.is-on]="scoringOpen"
+          role="switch"
+          [attr.aria-checked]="scoringOpen"
+          aria-label="Scoring"
+          (click)="toggleScoring()"
+        ></button>
+        <div class="qe-points">
+          @for (choice of scoringChoices; track choice.value) {
+            <label class="qe-points-row">
+              <span class="qe-points-label">{{ choice.label }}</span>
+              <input
+                #pointsInput
+                class="mjf-input qe-points-input"
+                type="number"
+                step="any"
+                placeholder="0"
+                [value]="pointsFor(choice.value)"
+                (change)="setPoints(choice.value, pointsInput.value)"
+                [attr.aria-label]="'Points for ' + choice.label"
+              />
+            </label>
+          }
+        </div>
+      </mjf-setting-row>
+    }
+
+    <div class="qe-section">
+      <mjf-rules-panel
+        [sections]="sections"
+        [subjectId]="node.entity.ID"
         [rule]="conditionalRule"
+        [sources]="conditionalSources"
+        [jumpSources]="jumpConditionSources"
+        [formSources]="formSources"
+        [formTargets]="formTargets"
+        [targets]="jumpTargets"
+        [reachNotes]="reachNotes"
+        [defaultEndingLabel]="defaultEndingLabel"
+        itemNoun="question"
         (ruleChange)="onConditionalChange($event)"
-      ></mjf-conditional-rule-editor>
-    </mjf-setting-row>
+      />
+    </div>
 
     @if (otherSettingFields.length > 0) {
       <div class="qe-section">
@@ -145,7 +176,25 @@
         @for (field of otherSettingFields; track field.key) {
           <div class="mjf-field">
             <label class="mjf-field-label" [attr.for]="'qe-set-' + field.key">{{ field.label }}</label>
-            @if (field.kind === 'multiline') {
+            @if (field.kind === 'choice') {
+              <select
+                #setSelect
+                class="mjf-select"
+                [id]="'qe-set-' + field.key"
+                [value]="settingValue(field)"
+                (change)="setSetting(field, setSelect.value)"
+              >
+                <!-- [selected] as well as the select's [value], for the reason spelled out in
+                     conditional-rule-editor: Angular writes that value BEFORE these options
+                     exist, so it does not stick and the browser selects the first option on its
+                     own. One editor instance serves every question, so this <select> survives a
+                     switch between two Doodle questions and would otherwise show the previous
+                     one's pen. -->
+                @for (choice of field.choices ?? []; track choice.value) {
+                  <option [value]="choice.value" [selected]="choice.value === settingValue(field)">{{ choice.label }}</option>
+                }
+              </select>
+            } @else if (field.kind === 'multiline') {
               <textarea
                 #setInput
                 class="mjf-textarea"

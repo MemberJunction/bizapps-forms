@@ -71,3 +71,29 @@ export function withUniqueValues<T extends LabelledOption>(options: readonly T[]
   });
 }
 
+
+/** The entity-side fields that determine an option's published identity. */
+export interface PublishableOptionFields {
+  Label: string;
+  Value: string | null;
+  DisplayOrder: number;
+}
+
+/**
+ * An option's published identity — its label plus THE value a published form stores as the
+ * respondent's answer — in display order, uniquified via {@link withUniqueValues}.
+ *
+ * Extracted (RULES_AND_BRANCHING_PLAN A1) so the snapshot builder and the condition editor's
+ * option picker cannot drift: the picker must offer exactly the values a published form will
+ * store, including the `Value ?? Label` fallback and the uniqueness rewrite, or it re-creates
+ * the typo'd-value bug it exists to remove. `source` carries the original row for callers that
+ * need more than identity (id, isDefault, image).
+ */
+export function publishedOptionIdentities<T extends PublishableOptionFields>(
+  options: readonly T[],
+): Array<{ source: T; label: string; value: string }> {
+  const identified = [...options]
+    .sort((a, b) => a.DisplayOrder - b.DisplayOrder)
+    .map((opt) => ({ source: opt, label: opt.Label, value: opt.Value ?? opt.Label }));
+  return withUniqueValues(identified);
+}

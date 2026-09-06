@@ -7,8 +7,8 @@ const ROOT = resolve('/tmp/forms-local-storage');
 
 describe('resolveWithinRoot', () => {
   it('resolves an ordinary object name under the root', () => {
-    expect(resolveWithinRoot(ROOT, 'uploads/signature.png')).toBe(
-      `${ROOT}${sep}uploads${sep}signature.png`,
+    expect(resolveWithinRoot(ROOT, 'uploads/doodle.png')).toBe(
+      `${ROOT}${sep}uploads${sep}doodle.png`,
     );
   });
 

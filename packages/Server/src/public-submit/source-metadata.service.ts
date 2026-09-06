@@ -22,10 +22,10 @@ import { createHash } from 'node:crypto';
 import { LogStatus } from '@memberjunction/core';
 import type { ClientMeta, JSONObject } from '@mj-biz-apps/forms-entities';
 
-/** Salt for the one-way session hash; overridable via env, with a stable default. */
-function sessionHashSalt(): string {
-  return process.env.FORMS_SESSION_HASH_SALT?.trim() || 'mj-forms-source-metadata-v1';
-}
+// The salt BOTH privacy hashes share lives in the transport layer rather than here. `http/` is
+// already imported by this module (and by submit-pipeline), so defining a fact both layers need
+// in the feature layer inverted that edge and put a cycle one edit away.
+import { sessionHashSalt } from '../http/hash-salt.js';
 
 /**
  * One-way SHA-256 of the anonymous session id (never store the raw id).
@@ -70,6 +70,23 @@ export interface SourceMetadataInputs {
    * UUID — unguessable — so possessing it is proof of ownership when no session exists).
    */
   clientResponseId?: string;
+  /**
+   * The ending screen that screened this respondent out, when one did.
+   *
+   * Recorded because a `Disqualified` row can be EMPTY. A knockout's `when` group is evaluated
+   * against the RAW answer map while the answers that get stored are the rendered ones, so a jump
+   * fires on an answer to a question the walk hid and that answer is dropped on the way to
+   * persistence — measured: a `Disqualified` row with 0 answers. `validateSubmission` lets that
+   * row through deliberately, on the stated grounds that it records the SCREENING rather than
+   * answers; `Status` alone does not, on a form carrying more than one knockout screen. Without
+   * this the row cannot say what screened them, which is the only question anyone reading a
+   * disqualification record has.
+   *
+   * In the blob rather than a column because that is what this blob is for — a fact about one
+   * submission with nowhere else to live, exactly like `clientResponseId` above. A column would
+   * be the better home the day these are queried in bulk, and that day is a migration.
+   */
+  disqualifiedByScreenId?: string;
 }
 
 /**
@@ -105,6 +122,24 @@ export function rateLimitKey(inputs: Pick<SourceMetadataInputs, 'sessionId' | 'd
 export function abuseIdentity(clientIpHash: string | undefined): string | undefined {
   const ipHash = clientIpHash?.trim();
   return ipHash ? `ip:${ipHash}` : undefined;
+}
+
+/**
+ * The session a per-session gate may key on, or `undefined` when the caller named nobody.
+ *
+ * The distinction {@link abuseIdentity} draws for the ceilings, applied to the gate that predates
+ * them. MJ populates `sessionId` from the `x-session-id` header and leaves it BLANK for every
+ * client that omits one, so all of those callers hash to a single key — and that key belongs to
+ * the TIGHTEST of the four buckets. Sharing it does not throttle abuse: it lets any one of those
+ * callers spend the budget and refuse the form for all the others, with a message about traffic
+ * that was never theirs. That is the failure `abuseIdentity` exists to decline to create, and the
+ * one this gate had been quietly creating all along.
+ *
+ * Returned RAW rather than trimmed, so a caller who sends a real id keeps the exact bucket they
+ * had before this predicate existed and the only behaviour that changes is the blank one.
+ */
+export function sessionIdentity(sessionId: string): string | undefined {
+  return sessionId.trim() ? sessionId : undefined;
 }
 
 let warnedAboutDegradedKeying = false;
@@ -155,6 +190,36 @@ export function completionCeilingKey(distributionId: string, identity: string): 
 }
 
 /**
+ * Bucket for DISQUALIFYING submits, per (caller, distribution).
+ *
+ * Its own bucket, deliberately. Sharing the completion one let a burst of ineligible respondents
+ * behind a single address lock real completions out of a form — that bucket is tight because a
+ * completion fires automations a knockout never fires. But leaving knockouts unthrottled was the
+ * opposite mistake: each one writes a PERMANENT row, so the durable row ceiling fell an order of
+ * magnitude faster than it was sized for. Its own bucket is the only answer that is neither.
+ */
+export function knockoutCeilingKey(distributionId: string, identity: string): string {
+  return `knockout:${distributionId}:${identity}`;
+}
+
+/**
+ * Ceiling on one client-supplied metadata string (userAgent, referrer) before storage.
+ *
+ * Both arrive verbatim from `ClientMeta` — a payload any caller writes — and land in the
+ * `SourceMetadata` JSON blob on every response row. Real values are a few hundred characters;
+ * without a cap a hostile caller could pad each row with megabytes of "user agent". Truncated
+ * rather than rejected because the metadata is diagnostic, never load-bearing: a clipped value
+ * still identifies the browser, and refusing the whole submission over it would cost answers.
+ */
+export const MAX_CLIENT_META_CHARS = 2048;
+
+/** Trimmed and capped at {@link MAX_CLIENT_META_CHARS}; undefined when empty. */
+function cappedClientMeta(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  return value ? value.slice(0, MAX_CLIENT_META_CHARS) : undefined;
+}
+
+/**
  * Assemble the structured `SourceMetadata` payload persisted on the FormResponse.
  * Only non-empty fields are included so the stored JSON stays compact.
  */
@@ -167,11 +232,15 @@ export function buildSourceMetadata(inputs: SourceMetadataInputs): JSONObject {
   if (clientResponseId) {
     meta.clientResponseId = clientResponseId;
   }
-  const ua = inputs.clientMeta?.userAgent?.trim();
+  const disqualifiedByScreenId = inputs.disqualifiedByScreenId?.trim();
+  if (disqualifiedByScreenId) {
+    meta.disqualifiedByScreenId = disqualifiedByScreenId;
+  }
+  const ua = cappedClientMeta(inputs.clientMeta?.userAgent);
   if (ua) {
     meta.userAgent = ua;
   }
-  const referrer = inputs.clientMeta?.referrer?.trim();
+  const referrer = cappedClientMeta(inputs.clientMeta?.referrer);
   if (referrer) {
     meta.referrer = referrer;
   }

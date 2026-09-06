@@ -34,6 +34,12 @@ installConfirmationEmailSender();
 // back to the client-settable `x-session-id`, which a caller can rotate to escape them.
 import './http/RequestIdentityMiddleware.js';
 
+// Import the stacktrace-redaction middleware so its @RegisterClass fires and MJ server bootstrap
+// merges its Apollo plugin. Apollo puts `extensions.stacktrace` — server paths, dependency versions
+// — on every error unless NODE_ENV is production, and the anonymous session a public link mints is
+// enough to request one; this keeps it off the wire whatever NODE_ENV says (#119).
+import './http/StacktraceRedactionMiddleware.js';
+
 // WP-B: import the custom public-submit resolver so its TypeGraphQL metadata is registered.
 import './public-submit/PublicFormResolver.js';
 

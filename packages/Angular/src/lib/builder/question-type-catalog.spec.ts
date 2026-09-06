@@ -70,7 +70,7 @@ describe('question type catalog', () => {
     for (const type of ['SingleChoice', 'MultiChoice', 'Dropdown', 'PictureChoice', 'Ranking', 'Matrix'] as const) {
       expect(questionTypeHasOptions(type), type).toBe(true);
     }
-    for (const type of ['ShortText', 'Rating', 'Address', 'Signature', 'Statement'] as const) {
+    for (const type of ['ShortText', 'Rating', 'Address', 'Doodle', 'Statement'] as const) {
       expect(questionTypeHasOptions(type), type).toBe(false);
     }
   });
@@ -113,7 +113,7 @@ describe('searchQuestionTypes', () => {
   });
 
   it('is case-insensitive and returns nothing for a miss', () => {
-    expect(searchQuestionTypes('SIGNATURE').map((m) => m.type)).toContain('Signature');
+    expect(searchQuestionTypes('DOODLE').map((m) => m.type)).toContain('Doodle');
     expect(searchQuestionTypes('zzzz')).toEqual([]);
   });
 });

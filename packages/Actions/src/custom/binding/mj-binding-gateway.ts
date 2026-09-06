@@ -7,11 +7,11 @@
  * story of binding: the respondent's grants let them create a response, and the elevated write to
  * a business entity happens downstream, from configuration the client never supplied.
  */
-import { CompositeKey, LogError, Metadata, RunView } from '@memberjunction/core';
+import { CompositeKey, EntityFieldTSType, LogError, Metadata, RunView } from '@memberjunction/core';
 import type { BaseEntity, EntityInfo, UserInfo } from '@memberjunction/core';
 import { sqlLiteral } from '@mj-biz-apps/forms-entities';
 import type { CanonicalAnswerValue, IdentityNormalization } from '@mj-biz-apps/forms-entities';
-import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery } from './binding-executor';
+import type { BindingTargetGateway, EntityCapability, MatchedRecord, MatchQuery, TargetFields } from './binding-executor';
 
 export class MJBindingGateway implements BindingTargetGateway {
   constructor(private readonly contextUser: UserInfo) {}
@@ -25,7 +25,7 @@ export class MJBindingGateway implements BindingTargetGateway {
    * with `AllowCreateAPI` off would fail on every single submission, and finding that out at
    * authoring time is much cheaper.
    */
-  public async describeEntity(entityName: string, needs: EntityCapability): Promise<ReadonlySet<string> | null> {
+  public async describeEntity(entityName: string, needs: EntityCapability): Promise<TargetFields | null> {
     const entity = new Metadata().EntityByName(entityName);
     if (!entity || !entity.IncludeInAPI || entity.VirtualEntity) {
       return null;
@@ -40,7 +40,14 @@ export class MJBindingGateway implements BindingTargetGateway {
     if (needs.update && !entity.AllowUpdateAPI) {
       return null;
     }
-    return new Set(entity.Fields.filter((f) => !f.ReadOnly).map((f) => f.Name));
+    const writable = entity.Fields.filter((f) => !f.ReadOnly);
+    // `temporal` is read from the same EntityInfo, so it costs nothing and cannot drift from the
+    // name set beside it. It decides whether a date-column ANSWER is written as an instant or as
+    // the respondent's own reading — see `TargetFields`.
+    return {
+      names: new Set(writable.map((f) => f.Name)),
+      temporal: new Set(writable.filter((f) => f.TSType === EntityFieldTSType.Date).map((f) => f.Name)),
+    };
   }
 
   /**

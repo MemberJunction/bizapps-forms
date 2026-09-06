@@ -1,8 +1,17 @@
 <div class="mjf-oneq">
-  <div class="mjf-oneq__progress">
-    <mjf-form-progress [value]="progress()" />
-    <span class="mjf-oneq__step" aria-live="polite">{{ stepLabel() }}</span>
-  </div>
+  <!--
+    Nothing to fill in, nothing to report: the bar would be a control with no subject and the live
+    region beside it would announce "1 of 0". The readiness line goes with them deliberately — it
+    exists to explain a bar that is not full, so with no bar there is nothing for it to say, and
+    the Submit button below is the whole affordance. Same predicate as the scroll renderer, read
+    off the runtime so the two cannot drift.
+  -->
+  @if (runtime().hasAnswerableQuestions()) {
+    <div class="mjf-oneq__progress">
+      <mjf-form-progress [value]="progress()" [ready]="readyToSubmit()" />
+      <span class="mjf-oneq__step" aria-live="polite">{{ stepLabel() }}</span>
+    </div>
+  }
 
   @if (current(); as q) {
     <div class="mjf-oneq__card" tabindex="-1" (keydown)="onKeydown($event)">

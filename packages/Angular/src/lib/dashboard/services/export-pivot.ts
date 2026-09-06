@@ -43,7 +43,7 @@ export function buildExportColumns(questions: PublishedFormQuestion[]): ExportCo
  * only evidence in the sheet that a file was submitted at all.
  */
 function exportAnswerValue(q: PublishedFormQuestion, a: AnswerRow): string {
-  // Keyed on the answer COLUMN, not the type name, so `Signature` — a file answer produced by a
+  // Keyed on the answer COLUMN, not the type name, so `Doodle` — a file answer produced by a
   // canvas rather than a picker — exports its joinable id like any other file instead of the
   // empty string `renderAnswer` gives it.
   if (answerColumnFor(q.type) === 'file') {

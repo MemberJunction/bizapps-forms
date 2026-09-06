@@ -1,0 +1,9 @@
+---
+"@mj-biz-apps/forms-actions": patch
+---
+
+**The shared on-submit context loader quotes its ids like everything else does.** `RunView` takes SQL text and offers no parameter binding, so every `ExtraFilter` in this repo goes through `quoteSqlString` — except the two in `form-response-context.ts`, which built their literals inline: `` `ResponseID='${responseId}'` `` and an `ID IN (…)` list assembled from `` `'${id}'` ``. Both are fed DB-sourced, validated GUIDs by today's only caller, so nothing was exploitable and nothing changes for a valid id; the output is identical.
+
+**It is where the next caller will be wrong.** This is the *shared* loader on the on-submit automation path — `Upsert Respondent Person`, `Create Followup Task`, `Send Confirmation Email`, `Analyze Written Responses` and `Bind Response To Entity` all enter through it, and `submit-pipeline` calls it for every completed response. A future hook that resolves a question id from a template, a mapping, or an inbound payload inherits whichever convention this file happens to be using, and an escaping decision that holds only because of who calls it today is not a decision anyone can rely on. `quoteSqlString` is already imported throughout the repo and already the answer; there was no reason for two files to disagree about it.
+
+**Pinned by assertions on the filter text, not on the rows.** The loader's spec now records the `ExtraFilter` each read sends and asserts a quote is doubled rather than allowed to close the literal — in the id and in every element of the IN list. Asserting on the returned rows cannot tell an escaped literal from an interpolated one, because for a valid GUID they are the same rows; the filter string is the only place the difference is observable. Verified sensitive by reverting the change and watching all three assertions fail, one of them on the filter `ResponseID='resp-1' OR '1'='1'`.

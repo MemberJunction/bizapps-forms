@@ -25,7 +25,7 @@ import { screenChips } from './screen-strip';
  *
  * The empty `graphqlUrl` is the whole point, not a placeholder: `formsWidgetProviders`
  * reads it to pick BOTH mocks, so a trial submission writes nothing and a FileUpload or
- * Signature answer is accepted in-memory rather than shipped anywhere. Omitting
+ * Doodle answer is accepted in-memory rather than shipped anywhere. Omitting
  * `turnstileSiteKey` likewise keeps a captcha-required form from rendering a live
  * Cloudflare challenge at an author who is only previewing.
  */
