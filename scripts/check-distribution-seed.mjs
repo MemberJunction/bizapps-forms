@@ -140,7 +140,12 @@ function checkPlaceholders(repoRoot, violations) {
         // literal string split, no Skyway involved.
         const allowed = dir.endsWith('migrations-teardown') ? new Set(['mjSchema']) : INSTALL_SUPPLIED_PLACEHOLDERS;
         for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
-            const sql = readFileSync(join(dir, file), 'utf-8');
+            // The `values` mask, for the same reason CHECK 7 reads it: comments are blanked, so a
+            // header that DISCUSSES a placeholder — PR #168's said it had removed
+            // `${flyway:timestamp}` — is not read as using one, while string bodies survive because
+            // a placeholder inside a literal really would ship unresolved. A gate that fires on the
+            // sentence explaining a fix is a gate the next author stops believing.
+            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
             const seen = new Set();
             for (const match of sql.matchAll(/\$\{([^}]+)\}/g)) {
                 const name = match[1];
@@ -364,10 +369,45 @@ function gatedVersionOf(file) {
  * accounting backstop was reporting those files as calls-it-could-not-parse; that was the check
  * working, and taking it for an over-count would have been the wrong lesson entirely.
  */
+/**
+ * The schema this app owns, as shipped SQL is required to spell it. Anything else in an
+ * `@IncludedSchemaNames` list is a schema this app does not own, which is the thing CHECK 5 exists
+ * to refuse — so the positive filter only exempts a call when it names this and nothing else.
+ */
+const OWNED_SCHEMA = '${flyway:defaultSchema}';
+
+/**
+ * True when the sync call containing `from` limits itself to this app's own schema.
+ *
+ * `@IncludedSchemaNames` is MJ 6.1.0-edge.4's positive filter (`MJ/migrations/v6/V202608260829`):
+ * when non-empty the heal is limited to those schemas AND still minus the exclusions. A call that
+ * names only our own schema therefore cannot reach `__mj` or a sibling Open App whatever its
+ * exclusion list says — it is strictly SAFER than the long negative list this check was written
+ * around, and refusing it pushed authors back toward the shape that caused the problem.
+ *
+ * Bounded to the statement, not the line: `V202609050300` writes the proc name on one line and its
+ * arguments on the next, so a line-scoped read would miss the pairing. `GO` bounds it too, because
+ * the inlined `R__RefreshMetadata` block runs its calls with no terminating semicolon at all —
+ * those must keep failing, and do.
+ */
+function scopedToOwnSchema(sql, from) {
+    const rest = sql.slice(from);
+    const end = Math.min(
+        ...[/;/, /\bEXEC(?:UTE)?\b/i, /^[ \t]*GO[ \t]*$/im]
+            .map((re) => { const m = re.exec(rest); return m === null ? Infinity : m.index; })
+            .filter((i) => i > 0),
+    );
+    const statement = rest.slice(0, end === Infinity ? rest.length : end);
+    const included = /@IncludedSchemaNames\s*=\s*N?'([^']*)'/i.exec(statement);
+    if (included === null) return false;
+    const names = included[1].split(',').map((n) => n.trim()).filter((n) => n.length > 0);
+    return names.length > 0 && names.every((n) => n === OWNED_SCHEMA);
+}
+
 function exclusionListsIn(sql, procNames) {
     const found = [];
     for (const named of sql.matchAll(/@ExcludedSchemaNames\s*=\s*'([^']*)'/g)) {
-        found.push(named[1]);
+        found.push({ raw: named[1], positivelyScoped: scopedToOwnSchema(sql, named.index) });
     }
     // Positional form, and ONLY for a proc known to take an exclusion list. Unfiltered, this would
     // read the first string argument of any `"spSomething"('…')` as a schema list — there is no
@@ -375,7 +415,7 @@ function exclusionListsIn(sql, procNames) {
     // one of them growing a string parameter would silently become an "exclusion list".
     for (const positional of sql.matchAll(/"(sp\w+)"\s*\(\s*'([^']*)'/gi)) {
         if (procNames.has(positional[1].toLowerCase())) {
-            found.push(positional[2]);
+            found.push({ raw: positional[2], positivelyScoped: false });
         }
     }
     return found;
@@ -401,9 +441,9 @@ function shippedExclusionLists(repoRoot) {
             // check then reported every real migration as "dropping" a schema called `s`. A
             // commented-out call also excludes nothing, so reading one is wrong twice over.
             const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;
-            for (const raw of exclusionListsIn(sql, procNames)) {
+            for (const { raw, positivelyScoped } of exclusionListsIn(sql, procNames)) {
                 const names = raw.split(',').map((n) => n.trim()).filter((n) => n.length > 0);
-                lists.push({ stamp: version, file: join(dir, file), names, raw });
+                lists.push({ stamp: version, file: join(dir, file), names, raw, positivelyScoped });
             }
         }
     }
@@ -472,6 +512,9 @@ function checkSchemaSyncScope(repoRoot, violations) {
     checkEverySyncCallWasParsed(repoRoot, lists, violations);
     for (const list of lists) {
         if (list.stamp < SCHEMA_SYNC_GATE_FROM) continue;
+        // Still counted by checkEverySyncCallWasParsed — it IS a readable list — but its breadth is
+        // moot: the positive filter already confines the call to our own schema.
+        if (list.positivelyScoped) continue;
         const required = new Set([
             ...SCHEMAS_NEVER_SYNCED.map(schemaIdentity),
             ...previouslyExcluded(lists, list.stamp),
@@ -1136,6 +1179,25 @@ function governedStatement(text, from) {
 }
 
 /**
+ * The `[start, end)` ranges an `IF NOT EXISTS (…)` governs, on an already-masked text.
+ *
+ * One definition of "guarded", used by CHECK 4 (which asks whether anything was asked at all) and by
+ * {@link findSeededEntityIds} (which asks whether a seed is CONDITIONAL). Those two questions have
+ * to share an answer: a range CHECK 4 calls guarded is exactly a range whose INSERT may not run, and
+ * an INSERT that may not run cannot license a literal reference elsewhere.
+ */
+function guardedRanges(masked) {
+    const ranges = [];
+    for (const guard of masked.matchAll(/\bIF\s+NOT\s+EXISTS\s*\(/gi)) {
+        const open = guard.index + guard[0].length - 1;
+        const close = matchingParen(masked, open);
+        if (close === -1) continue;
+        ranges.push(governedStatement(masked, close + 1));
+    }
+    return ranges;
+}
+
+/**
  * Core-metadata tables inserted under an `IF NOT EXISTS` whose predicate tests only `[ID]`.
  *
  * Read off the STRUCTURE mask, like CHECK 3's parser: string bodies are blanked, so a guid inside a
@@ -1183,13 +1245,7 @@ export function findUnguardedCoreInserts(sql) {
     // insert inside it. A first attempt looked backwards from each insert for a nearby `IF`, which
     // reported the SECOND insert under one fence as unguarded: the gate's own spec caught it,
     // which is the whole reason that spec exists.
-    const guarded = [];
-    for (const guard of masked.matchAll(/\bIF\s+NOT\s+EXISTS\s*\(/gi)) {
-        const open = guard.index + guard[0].length - 1;
-        const close = matchingParen(masked, open);
-        if (close === -1) continue;
-        guarded.push(governedStatement(masked, close + 1));
-    }
+    const guarded = guardedRanges(masked);
     const found = [];
     for (const insert of masked.matchAll(CORE_INSERT)) {
         if (!CORE_METADATA_TABLES.has(insert[1].toLowerCase())) continue;
@@ -1490,7 +1546,16 @@ function bareColumnName(text) {
 export function findSeededEntityIds(sql) {
     const { structure, values } = maskSql(sql);
     const seeded = new Set();
+    // A seed inside an `IF NOT EXISTS` licenses NOTHING, because it does not run everywhere. This is
+    // #155 wearing the other face: `V202608191300` seeds Form Screens under a natural-key guard, so
+    // its literal exists only on hosts that had no such entity when they ran it — a host that ran
+    // CodeGen first kept its own id and skipped the block. Crediting that literal unconditionally is
+    // what let PR #168 ship six references to it that FK-violate on exactly that population, proven
+    // by running its own file there. Same `guardedRanges` CHECK 4 uses, so the two checks cannot
+    // drift into disagreeing about what "guarded" means.
+    const conditional = guardedRanges(structure);
     for (const insert of structure.matchAll(ENTITY_SEED_INSERT)) {
+        if (conditional.some(([from, to]) => insert.index >= from && insert.index < to)) continue;
         const columnsOpen = insert.index + insert[0].length - 1;
         const columnsClose = matchingParen(structure, columnsOpen);
         if (columnsClose === -1) continue;

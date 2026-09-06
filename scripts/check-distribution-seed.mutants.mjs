@@ -297,11 +297,24 @@ const MUTANTS = [
     ['schemasync/unorderable-fails-safe', 'a shipped .sql whose version this gate cannot order is gated, not exempted',
         "    return stamp === null ? '999999999999' : stamp[1];", '    return stamp === null ? null : stamp[1];'],
     ['schemasync/positional-proc-filter', 'the positional matcher reads a list only for a proc known to take one, so a generated CRUD function is not mistaken for a schema sync',
-        '        if (procNames.has(positional[1].toLowerCase())) {\n            found.push(positional[2]);\n        }',
-        '        found.push(positional[2]);'],
+        '        if (procNames.has(positional[1].toLowerCase())) {\n            found.push({ raw: positional[2], positivelyScoped: false });\n        }',
+        '        found.push({ raw: positional[2], positivelyScoped: false });'],
+    ['schemasync/positive-filter-read', 'the @IncludedSchemaNames positive filter is read at all, so a correctly scoped heal is not refused',
+        '    const included = /@IncludedSchemaNames\\s*=\\s*N?\'([^\']*)\'/i.exec(statement);\n    if (included === null) return false;',
+        '    const included = null;\n    if (included === null) return false;'],
+    ['schemasync/positive-filter-owned-only', 'the positive filter exempts a call ONLY when every schema it names is ours',
+        '    return names.length > 0 && names.every((n) => n === OWNED_SCHEMA);',
+        '    return names.length > 0;'],
     ['schemasync/pg-positional', 'exclusion lists are read in BOTH dialects, so the PostgreSQL positional form is not invisible',
         '    for (const positional of sql.matchAll(/"(sp\\w+)"\\s*\\(\\s*\'([^\']*)\'/gi)) {',
         '    for (const positional of []) {'],
+
+    ['seed/conditional-licenses-nothing', 'a seed inside an IF NOT EXISTS licenses no literal, because it does not run on every host (#171)',
+        '        if (conditional.some(([from, to]) => insert.index >= from && insert.index < to)) continue;',
+        '        if (false) continue;'],
+    ['placeholder/comment-mask', 'CHECK 2 reads the comment-blanked mask, so a placeholder NAMED in prose is not read as used',
+        "            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;\n            const seen = new Set();",
+        "            const sql = readFileSync(join(dir, file), 'utf-8');\n            const seen = new Set();"],
 
     // --- CHECK 7: an entity id shipped SQL references is one shipped SQL seeds (#155) -------------
     //

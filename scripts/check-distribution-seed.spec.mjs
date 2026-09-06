@@ -102,6 +102,96 @@ console.log('distribution gate:');
 //     the manifest was written, and a rewritten `sync` block that must NOT fire). They were removed
 //     with CHECK 1 in #105 — see this file's header for why the numbers are not reused.
 
+// 5c. CHECK 5 and the POSITIVE scope. `@IncludedSchemaNames` landed in MJ 6.1.0-edge.4
+//     (MJ/migrations/v6/V202608260829) as a positive filter: when non-empty, the heal is limited to
+//     those schemas. It is strictly safer than the negative list CHECK 5 models, and CHECK 5 had
+//     never heard of it — so it reported PR #168's correctly-scoped calls as unsafe.
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V202609090001__v0.13.x__Positive.sql'),
+            "EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', " +
+                "@IncludedSchemaNames='${flyway:defaultSchema}';\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 113: a heal scoped to this app\'s own schema by @IncludedSchemaNames needs no exclusion list',
+            !violations.some((v) => v.includes('ExcludedSchemaNames')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V202609090002__v0.13.x__Reaches_Core.sql'),
+            "EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='', " +
+                "@IncludedSchemaNames='${flyway:defaultSchema},${mjSchema}';\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 114: an include list naming a schema this app does NOT own is still refused',
+            violations.some((v) => v.includes('ExcludedSchemaNames')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V202609090003__v0.13.x__No_Include.sql'),
+            "EXEC [${mjSchema}].[spUpdateExistingEntityFieldsFromSchema] @ExcludedSchemaNames='sys,staging';\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 115: a bare `sys,staging` exclusion with NO include list is still refused',
+            violations.some((v) => v.includes('ExcludedSchemaNames')),
+            'this is the inlined R__RefreshMetadata shape — faithful to MJ core, but core runs it as ' +
+                'core; shipped inside an app migration it reaches __mj and every sibling on the host',
+        );
+    },
+);
+
+// 5b. CHECK 2 and the comment trap. Added after PR #168 shipped a header saying it had REMOVED
+//     `${flyway:timestamp}`, and CHECK 2 read the word in that sentence as a live placeholder.
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V2__Prose.sql'),
+            '-- inlined copy of R__RefreshMetadata.sql (minus ${flyway:timestamp}). EXEC target ${mjSchema}.\n' +
+                "EXEC [${mjSchema}].[spRecompileAllViews];\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 111: a placeholder NAMED IN A COMMENT is not a placeholder the file uses',
+            !violations.some((v) => v.includes('flyway:timestamp')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
+withFixture(
+    (root) => {
+        writeFileSync(
+            join(root, 'migrations', 'V2__Real.sql'),
+            "EXEC [${mjSchema}].[spThing] @When='${flyway:timestamp}';\n",
+        );
+    },
+    (violations) => {
+        check(
+            'case 112: the same placeholder in CODE is still flagged — 111 must not blind the check',
+            violations.some((v) => v.includes('flyway:timestamp')),
+            JSON.stringify(violations),
+        );
+    },
+);
+
 // 5. The placeholder leak, in the form it actually shipped in.
 withFixture(
     (root) => {
@@ -1757,6 +1847,45 @@ check(
     'a mispaired row would put a foreign id into the seeded set, and the gate would go quiet about it',
 );
 
+check(
+    'case 108: a CONDITIONALLY GUARDED `[Entity]` insert seeds nothing — the id exists only where the guard fired',
+    findSeededEntityIds(
+        `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'FormScreen')\n` +
+            `BEGIN\n` +
+            `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'FormScreen');\n` +
+            `END`,
+    ).size === 0,
+    'this is #155 in the other direction: a host that ran CodeGen first keeps its own id and skips the block, ' +
+        'so crediting the literal unconditionally licenses a reference that FK-violates there (issue #171)',
+);
+
+check(
+    'case 109: an UNGUARDED `[Entity]` insert still seeds — the fix for 108 must not swallow the normal case',
+    findSeededEntityIds(
+        `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'FormScreen');`,
+    ).has(SEEDED_ENTITY),
+    'every baseline in this repo and its siblings seeds unguarded; reading none of them would fail the whole corpus',
+);
+
+check(
+    'case 110: a guard around ONE insert does not disqualify an unguarded insert later in the file',
+    findSeededEntityIds(
+        `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'A')\n` +
+            `BEGIN\n` +
+            `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${CAPTURED_ENTITY}', 'A');\n` +
+            `END\n` +
+            `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'B');`,
+    ).has(SEEDED_ENTITY) &&
+        !findSeededEntityIds(
+            `IF NOT EXISTS (SELECT 1 FROM [\${mjSchema}].[Entity] WHERE [BaseTable] = 'A')\n` +
+                `BEGIN\n` +
+                `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${CAPTURED_ENTITY}', 'A');\n` +
+                `END\n` +
+                `INSERT INTO [\${mjSchema}].[Entity] ([ID], [BaseTable]) VALUES ('${SEEDED_ENTITY}', 'B');`,
+        ).has(CAPTURED_ENTITY),
+    'the governed range must end at the END, or one guard would disqualify the rest of the file',
+);
+
 // 98–105. The wiring: which directories are read, which of them may SEED, and the message itself.
 
 withFixture(
@@ -1863,11 +1992,17 @@ withFixture(
 //          header records the captured id in prose to say where it came from — no count here, see
 //          the note on ENTITY_VALUE_ANNOTATION in check-distribution-seed.mjs.
 check(
-    'case 106: the shipped V202608191300 still seeds the Form Screens entity id these cases name',
-    findSeededEntityIds(
-        readFileSync(join(REPO_ROOT, 'migrations', 'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql'), 'utf-8'),
-    ).has(SEEDED_ENTITY),
-    'if this id drifted, every case above would be testing a constant that describes nothing',
+    'case 106: the shipped V202608191300 seeds Form Screens CONDITIONALLY, so it licenses no literal',
+    (() => {
+        const backfill = readFileSync(
+            join(REPO_ROOT, 'migrations', 'V202608191300__v0.11.x__Element_Parity_Metadata_Backfill.sql'),
+            'utf-8',
+        );
+        // The literal is there, and it is inside `IF NOT EXISTS (… BaseTable = 'FormScreen' …)`.
+        return backfill.toUpperCase().includes(SEEDED_ENTITY) && !findSeededEntityIds(backfill).has(SEEDED_ENTITY);
+    })(),
+    'this is the fact the whole check rests on: the id exists only where the guard fired, so a host ' +
+        'that ran CodeGen first kept its own and a literal reference FK-violates there',
 );
 
 const rulesAndBranching = readFileSync(
@@ -1875,9 +2010,12 @@ const rulesAndBranching = readFileSync(
     'utf-8',
 );
 check(
-    'case 107: the fixed V202608252340 discusses the captured id in prose and references none',
-    rulesAndBranching.includes(CAPTURED_ENTITY) && !idsIn(rulesAndBranching).includes(CAPTURED_ENTITY),
-    JSON.stringify(findEntityIdReferences(rulesAndBranching).filter((r) => r.id === CAPTURED_ENTITY)),
+    'case 107: no shipped migration references the Form Screens entity id by literal',
+    findEntityIdReferences(rulesAndBranching).every((r) => r.id !== SEEDED_ENTITY),
+    'PR #168 regenerated this file against a clean database and captured ' + SEEDED_ENTITY + ' six times. ' +
+        'Proven to FK-violate on a host that minted its own id — same error, same file, same stopping point ' +
+        'as #155. Resolve by natural key: ' +
+        JSON.stringify(findEntityIdReferences(rulesAndBranching).filter((r) => r.id === SEEDED_ENTITY).map((r) => r.line)),
 );
 
 if (failures > 0) {
