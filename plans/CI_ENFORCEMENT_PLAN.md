@@ -1223,11 +1223,19 @@ jq -c '.rules' "$D/ruleset-20589383.before.json" "$D/ruleset-18239666.before.jso
 ```
 Expected: both print `[{"type":"deletion"},{"type":"non_fast_forward"}]`.
 
-- [ ] **Step 2: Build the request body once, for both rulesets**
+- [ ] **Step 2: Build one request body per ruleset, carrying its identity forward**
+
+`PUT` on a ruleset is a whole-object write, and this endpoint's fields are all optional — which
+means the difference between "omitted is left alone" and "omitted is cleared" is not something to
+find out by experiment on a live branch protection. So each body restates `name`, `target`,
+`enforcement` and `conditions` **read back from the `.before.json` captured in Step 1**, rather than
+sending `rules` alone and hoping. If the endpoint ignores them the write is identical; if it does
+not, the ruleset keeps pointing at the branch it is supposed to protect instead of silently
+detaching from `refs/heads/next`.
 
 ```bash
 D=/private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
-cat > "$D/required-checks-rule.json" <<'EOF'
+cat > "$D/rules-fragment.json" <<'EOF'
 {
   "rules": [
     { "type": "deletion" },
@@ -1254,15 +1262,27 @@ cat > "$D/required-checks-rule.json" <<'EOF'
   ]
 }
 EOF
-jq . "$D/required-checks-rule.json" > /dev/null && echo "body is valid JSON"
+
+# Splice the fragment onto each ruleset's own identity, so neither PUT can detach a ruleset from
+# the branch it protects.
+for ID in 20589383 18239666; do
+  jq -s '.[0] * {name: .[1].name, target: .[1].target, enforcement: .[1].enforcement, conditions: .[1].conditions}' \
+     "$D/rules-fragment.json" "$D/ruleset-$ID.before.json" > "$D/ruleset-$ID.put.json"
+  jq '{name, target, enforcement, conditions: (.conditions.ref_name.include), rules: [.rules[].type], bypass: [.bypass_actors[].actor_id]}' "$D/ruleset-$ID.put.json"
+done
 ```
+Expected: `20589383` shows `name: "next-protect"` with `["refs/heads/next"]`, and `18239666` shows
+`name: "protect-main"` with `["refs/heads/main"]`. Both list all three rule types and `[15368]`.
+If either `conditions` array is empty or wrong, **stop** — a ruleset detached from its branch
+protects nothing while still reporting `enforcement: active`, which is precisely the shape of the
+bug this whole change exists to remove.
 
 - [ ] **Step 3: Apply it to `next-protect` (20589383)**
 
 ```bash
 D=/private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
 gh api --method PUT repos/MemberJunction/bizapps-forms/rulesets/20589383 \
-  --input "$D/required-checks-rule.json" > "$D/ruleset-20589383.after.json"
+  --input "$D/ruleset-20589383.put.json" > "$D/ruleset-20589383.after.json"
 jq '.rules[] | select(.type=="required_status_checks") | .parameters' "$D/ruleset-20589383.after.json"
 ```
 Expected: `strict_required_status_checks_policy: true` and all seven contexts.
@@ -1272,7 +1292,7 @@ Expected: `strict_required_status_checks_policy: true` and all seven contexts.
 ```bash
 D=/private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
 gh api --method PUT repos/MemberJunction/bizapps-forms/rulesets/18239666 \
-  --input "$D/required-checks-rule.json" > "$D/ruleset-18239666.after.json"
+  --input "$D/ruleset-18239666.put.json" > "$D/ruleset-18239666.after.json"
 jq '.rules[] | select(.type=="required_status_checks") | .parameters' "$D/ruleset-18239666.after.json"
 ```
 Expected: the same.
@@ -1288,8 +1308,18 @@ done
 ```
 Expected for both: `enforcement: "active"`; rules include `required_status_checks`; `strict: true`;
 seven contexts; `bypass` contains `{actor_id: 15368, actor_type: "Integration", bypass_mode: "always"}`.
-If `bypass` is empty, **stop** — the next release will fail on its push to `main` — and re-apply
-Step 3/4, because `PUT` replaces the whole ruleset and an omitted `bypass_actors` clears it.
+
+Two ways to **stop** here rather than proceed. If `bypass` is empty, the next release fails on its
+push to `main` — re-apply Steps 3/4. And check the `conditions` each ruleset came back with:
+
+```bash
+for ID in 20589383 18239666; do
+  gh api "repos/MemberJunction/bizapps-forms/rulesets/$ID" --jq '{id: .id, name: .name, include: .conditions.ref_name.include}'
+done
+```
+Expected: `next-protect` → `["refs/heads/next"]`, `protect-main` → `["refs/heads/main"]`, unchanged
+from Step 1's capture. An empty or altered `include` means the PUT detached the ruleset from its
+branch — restore immediately from the `.before.json` files and do not proceed.
 
 - [ ] **Step 6: Verify the skip-path probe is still MERGEABLE, now that checks are required**
 
