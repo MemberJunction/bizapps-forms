@@ -1,0 +1,11 @@
+[
+  {
+    "Entity": "MJ_BizApps_Forms: Form Categories",
+    "FieldName": "ParentID",
+    "Configuration": {
+      "Hierarchy": {
+        "IsHierarchy": true
+      }
+    }
+  }
+]
