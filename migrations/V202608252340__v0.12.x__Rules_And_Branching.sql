@@ -71,7 +71,7 @@ DECLARE @FormScreensEntityID UNIQUEIDENTIFIER = (
     WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '${flyway:defaultSchema}'
 );
 IF @FormScreensEntityID IS NULL
-    THROW 50000, 'V202608252340: no [Entity] row for FormScreen in this schema. V202608191300 seeds it — run the Forms migrations in order.', 1;
+    THROW 51173, 'V202608252340 (EntityField insert): no [Entity] row for FormScreen in this schema. V202608191300 seeds it — run the Forms migrations in order.', 1;
 
 /* SQL text to insert 1 new entity field(s) */
 
@@ -547,7 +547,7 @@ DECLARE @FormScreensEntityID UNIQUEIDENTIFIER = (
     WHERE [BaseTable] = 'FormScreen' AND [SchemaName] = '${flyway:defaultSchema}'
 );
 IF @FormScreensEntityID IS NULL
-    THROW 50000, 'V202608252340: no [Entity] row for FormScreen in this schema. V202608191300 seeds it — run the Forms migrations in order.', 1;
+    THROW 51174, 'V202608252340 (scoped field heal): no [Entity] row for FormScreen in this schema. V202608191300 seeds it — run the Forms migrations in order. Reaching this after the earlier guard passed means the entity vanished mid-migration.', 1;
 DECLARE @FormScreensEntityIDList NVARCHAR(36) = CONVERT(NVARCHAR(36), @FormScreensEntityID);
 
 /* SQL text to delete unneeded entity fields (1 scoped entities) */
