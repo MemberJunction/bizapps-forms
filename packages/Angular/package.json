@@ -38,6 +38,7 @@
     "@memberjunction/ng-base-forms": "^6.1.0-edge.5",
     "@memberjunction/ng-entity-viewer": "^6.1.0-edge.5",
     "@memberjunction/ng-export-service": "^6.1.0-edge.5",
+    "@memberjunction/ng-hierarchy-tree": "^6.1.0-edge.5",
     "@memberjunction/ng-link-directives": "^6.1.0-edge.5",
     "@memberjunction/ng-shared": "^6.1.0-edge.5"
   },

@@ -88,7 +88,9 @@ export class FormCategoryHierarchyPanel extends BaseFormPanel<mjBizAppsFormsForm
                 ParentField: 'ParentID',
                 SubtitleField: 'Description',
                 DefaultIcon: 'fa-solid fa-folder-tree',
-                DefaultColor: '#6366f1',
+                // The tree binds this straight into [style.background] / [style.color], so a
+                // var() resolves — which is how MJ's own component defaults the same field.
+                DefaultColor: 'var(--mj-brand-primary, #6366f1)',
                 ActiveRecordID: recId || undefined,
                 Height: '100%',
                 MinHeight: '640px',
