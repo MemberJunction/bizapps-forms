@@ -21,7 +21,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
-import { DEFAULT_SESSION_HASH_SALT, warnOnceIfDefaultHashSalt } from '../public-submit/source-metadata.service.js';
+import { sessionHashSalt } from './hash-salt.js';
 
 /** The slice of an Express request needed to identify the caller. */
 export interface IdentifiableRequest {
@@ -75,14 +75,12 @@ export function hashClientIp(ip: string): string {
 }
 
 /**
- * Salt for the one-way IP hash; shared with the session hash, with the same stable default.
- * The default is PUBLIC (it ships in source), so first use on it warns once — see
- * `warnOnceIfDefaultHashSalt`.
+ * Salt for the one-way IP hash — literally the same secret the session hash uses, resolved by the
+ * same function so the two cannot drift. See `http/hash-salt.ts` for why they share it and why
+ * that is safe (each side tags its own preimage).
  */
 function ipHashSalt(): string {
-  const salt = process.env.FORMS_SESSION_HASH_SALT?.trim() || DEFAULT_SESSION_HASH_SALT;
-  warnOnceIfDefaultHashSalt(salt);
-  return salt;
+  return sessionHashSalt();
 }
 
 /**

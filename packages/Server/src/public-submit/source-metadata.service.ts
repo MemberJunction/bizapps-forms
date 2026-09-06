@@ -22,48 +22,10 @@ import { createHash } from 'node:crypto';
 import { LogStatus } from '@memberjunction/core';
 import type { ClientMeta, JSONObject } from '@mj-biz-apps/forms-entities';
 
-/**
- * The built-in fallback salt — PUBLIC, since it ships in source. A deployment running on it gets
- * hashes anyone with this repo can recompute, which quietly weakens the "raw IPs/session ids are
- * never stored" privacy property to "stored behind a dictionary the world holds". Named so the
- * warning below (and `http/request-identity.ts`, which shares the salt) compare against the one
- * constant rather than a second spelling that could drift.
- */
-export const DEFAULT_SESSION_HASH_SALT = 'mj-forms-source-metadata-v1';
-
-let warnedAboutDefaultSalt = false;
-
-/**
- * Say ONCE, loudly, when the privacy hashes are running on the built-in public salt.
- *
- * Mirrors {@link warnOnceIfAbuseKeyingDegraded}: the degraded mode is otherwise invisible —
- * hashing keeps working, rows keep filling, and the only symptom is that the stored hashes are
- * reversible by dictionary. Called at first USE (either hash side) rather than at boot, so a
- * process that never hashes anything never warns about it.
- */
-export function warnOnceIfDefaultHashSalt(salt: string): void {
-  if (salt !== DEFAULT_SESSION_HASH_SALT || warnedAboutDefaultSalt) {
-    return;
-  }
-  warnedAboutDefaultSalt = true;
-  LogStatus(
-    '[Forms] WARNING: FORMS_SESSION_HASH_SALT is not set — session and IP privacy hashes are using ' +
-      'the built-in PUBLIC default salt, so they can be recomputed by anyone with the source. ' +
-      'Production deployments must set FORMS_SESSION_HASH_SALT to a private value.',
-  );
-}
-
-/** Test-only: forget that the default-salt warning has been emitted. */
-export function resetDefaultSaltWarningForTests(): void {
-  warnedAboutDefaultSalt = false;
-}
-
-/** Salt for the one-way session hash; overridable via env, with a stable default. */
-function sessionHashSalt(): string {
-  const salt = process.env.FORMS_SESSION_HASH_SALT?.trim() || DEFAULT_SESSION_HASH_SALT;
-  warnOnceIfDefaultHashSalt(salt);
-  return salt;
-}
+// The salt BOTH privacy hashes share lives in the transport layer rather than here. `http/` is
+// already imported by this module (and by submit-pipeline), so defining a fact both layers need
+// in the feature layer inverted that edge and put a cycle one edit away.
+import { sessionHashSalt } from '../http/hash-salt.js';
 
 /**
  * One-way SHA-256 of the anonymous session id (never store the raw id).
