@@ -149,6 +149,12 @@ jobs:
       - name: Generated-edit hook tests
         run: npm run lint:hook-guard:test
 
+      # Same reasoning as the step above, for the other hook. Its failure mode is also SILENCE: if
+      # `isGitWriteCommand` stops matching, every commit sails through and nothing says so. The
+      # allow-cases in the spec are what stop a future "deny everything" from passing as a fix.
+      - name: Commit-gate hook tests
+        run: npm run lint:git-gate:test
+
       # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
       # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a
       # failure whose whole character is that the run still looks like it passed.
