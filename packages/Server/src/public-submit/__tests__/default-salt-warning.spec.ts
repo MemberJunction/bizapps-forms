@@ -8,9 +8,23 @@
  *
  * `resetDefaultSaltWarningForTests` exists precisely so these can run independently; before this
  * spec it was exported and never called.
+ *
+ * `LogStatus` is captured with `vi.mock` + `vi.hoisted`, NOT `vi.spyOn(core, 'LogStatus')`.
+ * `vi.spyOn` on a module export passes locally and fails in CI, and the difference is invisible
+ * from here: in this dev workspace `@memberjunction/core` resolves to MJ's LINKED SOURCE
+ * (`MJ/packages/MJCore/dist/index.js`), which Vitest transforms into a namespace whose properties
+ * can be redefined. On a clean install it resolves to the published tarball, which Vitest
+ * externalises as real ESM — and an ESM namespace object is frozen, so the spy throws
+ * `Cannot redefine property: LogStatus`. Replacing the module sidesteps the difference entirely.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as core from '@memberjunction/core';
+
+const { logStatus } = vi.hoisted(() => ({ logStatus: vi.fn() }));
+
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogStatus: logStatus,
+}));
 
 import { hashSessionId } from '../source-metadata.service';
 import { hashClientIp } from '../../http/request-identity';
@@ -21,22 +35,19 @@ import {
 } from '../../http/hash-salt';
 
 /** Only the default-salt warning; other LogStatus traffic must not make a count pass. */
-function saltWarnings(spy: ReturnType<typeof vi.spyOn>): string[] {
-  return spy.mock.calls
+function saltWarnings(): string[] {
+  return logStatus.mock.calls
     .map((c) => String(c[0]))
     .filter((line) => line.includes('FORMS_SESSION_HASH_SALT'));
 }
 
-let logSpy: ReturnType<typeof vi.spyOn>;
-
 beforeEach(() => {
   resetDefaultSaltWarningForTests();
   delete process.env.FORMS_SESSION_HASH_SALT;
-  logSpy = vi.spyOn(core, 'LogStatus').mockImplementation(() => undefined);
+  logStatus.mockClear();
 });
 
 afterEach(() => {
-  logSpy.mockRestore();
   delete process.env.FORMS_SESSION_HASH_SALT;
   resetDefaultSaltWarningForTests();
 });
@@ -45,8 +56,8 @@ describe('warnOnceIfDefaultHashSalt', () => {
   it('warns when the salt is the shipped public default', () => {
     warnOnceIfDefaultHashSalt(DEFAULT_SESSION_HASH_SALT);
 
-    expect(saltWarnings(logSpy)).toHaveLength(1);
-    expect(saltWarnings(logSpy)[0]).toMatch(/production deployments must set/i);
+    expect(saltWarnings()).toHaveLength(1);
+    expect(saltWarnings()[0]).toMatch(/production deployments must set/i);
   });
 
   it('warns only ONCE however many times it is asked', () => {
@@ -54,13 +65,13 @@ describe('warnOnceIfDefaultHashSalt', () => {
       warnOnceIfDefaultHashSalt(DEFAULT_SESSION_HASH_SALT);
     }
 
-    expect(saltWarnings(logSpy)).toHaveLength(1);
+    expect(saltWarnings()).toHaveLength(1);
   });
 
   it('says nothing when the deployment set its own salt', () => {
     warnOnceIfDefaultHashSalt('a-private-per-deployment-salt');
 
-    expect(saltWarnings(logSpy)).toHaveLength(0);
+    expect(saltWarnings()).toHaveLength(0);
   });
 });
 
@@ -68,20 +79,20 @@ describe('the warning reaches both hashing sides', () => {
   it('fires on the IP hash', () => {
     hashClientIp('203.0.113.9');
 
-    expect(saltWarnings(logSpy)).toHaveLength(1);
+    expect(saltWarnings()).toHaveLength(1);
   });
 
   it('fires on the session hash', () => {
     hashSessionId('some-session-id');
 
-    expect(saltWarnings(logSpy)).toHaveLength(1);
+    expect(saltWarnings()).toHaveLength(1);
   });
 
   it('still fires only once across BOTH sides — they share one salt and one warning', () => {
     hashClientIp('203.0.113.9');
     hashSessionId('some-session-id');
 
-    expect(saltWarnings(logSpy)).toHaveLength(1);
+    expect(saltWarnings()).toHaveLength(1);
   });
 
   it('stays silent on both sides once a salt is configured', () => {
@@ -90,7 +101,7 @@ describe('the warning reaches both hashing sides', () => {
     hashClientIp('203.0.113.9');
     hashSessionId('some-session-id');
 
-    expect(saltWarnings(logSpy)).toHaveLength(0);
+    expect(saltWarnings()).toHaveLength(0);
   });
 });
 
