@@ -138,3 +138,135 @@ migration — `V202608191300` and `V202608191400` are what that looks like.
 a changed migration with app-schema DDL that ships no output and states no reason. Full workflow:
 [`docs/database-operations.md`](../../docs/database-operations.md) §2 and
 [`migrations/README.md`](../../migrations/README.md).
+
+## The `__mj.Entity` id rule — read this before shipping any CodeGen output
+
+**A migration that creates a table MUST insert that table's `__mj.Entity` row in the SAME file,
+with a hardcoded `uuidgen` id, guarded on the natural key.** Not a later backfill. Not "CodeGen will
+register it". The same file.
+
+```sql
+CREATE TABLE __mj_BizAppsForms.FormThing ( ... );
+GO
+
+-- Ship the entity row here, in this file. See below for why the gap is fatal.
+IF NOT EXISTS (
+    SELECT 1 FROM [${mjSchema}].[Entity]
+    WHERE [BaseTable] = 'FormThing' AND [SchemaName] = '${flyway:defaultSchema}'
+)
+BEGIN
+    INSERT INTO [${mjSchema}].[Entity] ([ID], [Name], [BaseTable], [SchemaName], ...)
+    VALUES ('<uuidgen>', 'MJ_BizApps_Forms: Form Things', 'FormThing', '${flyway:defaultSchema}', ...);
+END
+GO
+```
+
+### Why this works — the mechanism, not a convention
+
+MJ discovers unregistered tables with
+`SELECT t.* FROM [__mj].[vwSQLTablesAndEntities] t WHERE t.[EntityID] IS NULL`
+(`MJ/packages/CodeGenLib/src/Database/manage-metadata.ts:5682`), and that view joins
+`Entity e ON t.name = e.BaseTable AND s.name = e.SchemaName`
+(`MJ/migrations/v5/B202607091514__v5.46.x__Baseline.sql:94567`).
+
+So **if your row already exists under that natural key, `EntityID IS NOT NULL`, CodeGen skips the
+table entirely and adopts your id.** If it does not, `createNewEntity()` mints one with `uuidv4()`
+(`manage-metadata.ts:5933,5957`) — a different GUID on every database, forever.
+
+There is no deterministic-id scheme in MJ. Core's own ids are stable only because someone froze
+random GUIDs into a baseline. `uuidv4()` is the whole story.
+
+### The window that actually bites
+
+The danger is not "no seed ever" — every table in this repo and its siblings has one today. It is
+the **gap between the CREATE and the seed**. Any developer who runs `mj codegen` inside that gap
+mints the id locally, and a later seed guarded on the natural key then correctly *skips* their box,
+which keeps their divergent id forever. Everything CodeGen emits on that box afterwards carries it.
+
+Measured in this repo: **16 tables, 16 seeds, and exactly one seeded in a later file than its
+CREATE** — `FormScreen`, created by `V202608182100`, seeded by `V202608191300`. That one table is
+the entire cause of #155. The same shape cost `bizapps-common` an 8-day gap (`V202608171935` →
+`V202608251531`, whose header records the fallout) and `bizapps-caliber` a month.
+
+### Two fixes were tried on #155. Record of both, so neither is repeated.
+
+**Attempt 1 — #163 (this branch).** Replaced the five captured `A1F8CC58` literals with a natural-key
+lookup into a `DECLARE`d variable plus a `THROW` when it returns NULL. Verified on both populations:
+32/32 applied on a fresh install AND on a simulated host holding the other id, converging on
+identical metadata.
+
+**Attempt 2 — #168 (merged to `next`).** Re-authored the file: DDL → CodeGen against a clean database
+→ append. This is the more thorough-looking fix and it is the one that shipped. **It does not close
+the bug.** Regenerating on a clean database captures the id a clean database holds — `6313B0B1` — and
+that id exists *only* on hosts where `V202608191300`'s conditional seed actually fired. Proven by
+running #168's own file against a host that minted its own id:
+
+```
+Failed at batch 12/45 (lines 118-290): The INSERT statement conflicted with the FOREIGN KEY
+constraint "FK_EntityField_Entity" ... table "__mj.Entity", column 'ID'.
+   FAILED: V202608252340__v0.12.x__Rules_And_Branching.sql       (25 applied, chain dead)
+```
+
+Same error, same file, same stopping point as the original defect. **Regenerating on a clean database
+does not make a captured id portable — it only changes which population breaks.**
+
+| population | before #168 | after #168 |
+|---|---|---|
+| fresh install | broken | works |
+| ran CodeGen before the seed shipped | works | **broken** |
+
+The lesson generalises past this file: **"I regenerated it against a clean DB" is not evidence that a
+migration is portable.** The only evidence is running it on both populations, or not shipping a
+captured id at all.
+
+### So: what to do with the entity ids CodeGen hands you
+
+1. **Prevent them.** Seed the entity row in the CREATE's own file (above). Then the id CodeGen
+   captures is the id the repo shipped, on every host, and the capture is correct by construction.
+   This is the fix; everything below is for output you already have.
+2. **Drop the heal EXECs.** `mj.config.cjs` → `SQLOutput.omitRecurringScriptsFromLog: true` keeps the
+   `@EntityIDs='<guid>,<guid>'` arguments out of the logged migration entirely
+   (`MJ/packages/CodeGenLib/src/Misc/sql_logging.ts:158`). This repo had it `false`, which is how two
+   ids that no shipped SQL seeds reached `next` in #168.
+3. **De-literalise what is left**, by natural key into a variable, with a `THROW` on NULL:
+
+   ```sql
+   DECLARE @X UNIQUEIDENTIFIER = (
+       SELECT TOP 1 [ID] FROM [${mjSchema}].[Entity]
+       WHERE [BaseTable] = 'FormThing' AND [SchemaName] = '${flyway:defaultSchema}');
+   IF @X IS NULL THROW 5xxxx, '<file>: no [Entity] row for FormThing in this schema.', 1;
+   ```
+
+   Re-declare in each `GO` batch that needs it — T-SQL variables do not cross a batch. The `THROW`
+   is load-bearing, not ceremony: `spDeleteUnneededEntityFields` reads a NULL or empty `@EntityIDs`
+   as **unscoped** and then sweeps every entity in every schema its exclude-list does not name.
+
+**Key on `BaseTable` + `SchemaName`, never on `Entity.Name`.** The entity-name prefix is
+host-configurable (`mj.config.cjs` → `newEntityDefaults.NameRulesBySchema`), so a name-keyed lookup
+matches nothing on a host configured differently — and reports success while doing so. The table this
+app creates is not configurable. `bizapps-ats/.claude/rules/migrations.md:112` reaches the same
+conclusion independently; `bizapps-caliber` still keys on `Name` and should not be copied on this
+point.
+
+### Which failure you get, and why the loud one is the lucky one
+
+A captured id that is wrong on a host fails in one of two ways, and the difference matters more than
+the defect:
+
+- **Positional value in an INSERT** → `FK_EntityField_Entity` violation, `mj app install` stops, every
+  later migration is unreachable. Loud, total, immediately diagnosed.
+- **Inside a `WHERE` or an `IF NOT EXISTS` guard** → matches nothing, the statement reports success
+  having changed no rows, the migration exits 0 and the diff looks like every other capture. Silent.
+
+`V202608252340` on `next` currently carries six `6313B0B1` references: one positional (crashes) and
+four in predicates (silent). Both classes ship together, which is why "it applied cleanly" is not
+evidence of anything.
+
+### Gates
+
+- `npm run lint:distribution` — CHECK 7 refuses an `__mj.Entity` id no shipped SQL seeds. Its
+  docblock names the three shapes it still cannot see; read that before trusting it.
+- `npm run lint:codegen-append` — refuses a `CREATE TABLE` that ships no CodeGen output.
+- **The check that catches this every time, and the only one that does: apply the chain from zero on
+  a throwaway database, and again on one that holds a different entity id.** Recipe in
+  [`docs/database-operations.md`](../../docs/database-operations.md).

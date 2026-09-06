@@ -3,8 +3,13 @@ name: Distribution Gate
 # Reads the SQL this app ships for hazards that are invisible from inside a working checkout: a
 # placeholder `mj app install` cannot resolve (Skyway leaves unknown ones untouched, so they ship as
 # literal strings rather than erroring), a regenerated seed re-granting the anonymous Form Respondent
-# role unfiltered access, a core-metadata insert guarded on its own ID alone, and a schema sync
-# reaching a schema this app does not own. See plans/DISTRIBUTION_SEED_PLAN.md.
+# role unfiltered access, a core-metadata insert guarded on its own ID alone, a schema sync reaching a
+# schema this app does not own, an extended-property write handing `sql_variant` a MAX-typed value,
+# and an `__mj.Entity` id referenced by a literal no shipped SQL seeds. See
+# plans/DISTRIBUTION_SEED_PLAN.md.
+#
+# The count is deliberately not written down here. It was "four" through three more checks landing,
+# which is what a number in prose does; the file itself documents each one.
 #
 # Metadata currency is NOT gated here (#105). PRs contribute declarative JSON only and the build
 # engineer generates one consolidated Metadata_Sync per release, so no PR can answer "has the seed
@@ -71,7 +76,7 @@ jobs:
 
       # No `npm ci`: the gate is Node stdlib only, deliberately, so a dependency problem can never
       # be the reason nobody finds out the app does not install.
-      - name: Check shipped SQL for the four install-time hazards
+      - name: Check shipped SQL for every install-time hazard the gate knows
         run: npm run lint:distribution
 
       - name: Check the gate itself still fires
@@ -79,7 +84,11 @@ jobs:
 
       # The step above proves the gate FIRES; this one proves its spec would NOTICE a behaviour
       # going missing. CHECK 3's failure mode is silence, so an untested behaviour is one a
-      # refactor deletes with the suite green — which is what #44 found nine of. Takes ~40 seconds:
-      # it runs the spec once per mutant, in a fresh process each time.
+      # refactor deletes with the suite green — which is what #44 found nine of. It runs the spec
+      # once per mutant in a fresh process, so it costs (mutants x suite) and grows with both.
+      # Measured on this runner, not on a laptop: 3m12s on next before CHECK 7 (run 33923880019),
+      # 7m08s after it (run 33933840700), because CHECK 7 reads every shipped .sql file and the spec
+      # calls runChecks against the real tree. The comment this replaces said "~40 seconds" and had
+      # been wrong through several checks, so re-measure here rather than adjusting by feel.
       - name: Check the gate's spec still kills what it claims to cover
         run: npm run lint:distribution:mutants
