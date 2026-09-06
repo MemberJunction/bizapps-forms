@@ -25,6 +25,7 @@ import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } fro
 import { toAnswerInputs } from './input-mapping';
 import { respondentSafe } from './respondent-safe';
 import { currentRequestIdentity } from '../http/request-identity';
+import { publicFormPayload } from './public-form-payload';
 
 @Resolver()
 export class PublicFormResolver extends ResolverBase {
@@ -51,22 +52,11 @@ export class PublicFormResolver extends ResolverBase {
         return null;
       }
       const { definition } = loaded.value;
-      return Object.assign(new PublishedFormType(), {
-        formId: definition.formId,
-        formVersionId: definition.formVersionId,
-        name: definition.name,
-        description: definition.description,
-        renderMode: definition.renderMode,
-        settingsJSON: JSON.stringify(definition.settings),
-        styleTokensJSON: JSON.stringify(definition.styleTokens),
-        // The automations are SERVER configuration — action names, bindings, conditions — and
-        // this is the anonymous respondent surface. The widget renders pages/screens/settings
-        // and never reads `automations` from the public definition (the server re-resolves them
-        // from its own snapshot at submit time), so an anonymous caller has no business seeing
-        // them. Emptied rather than deleted so the parsed shape still satisfies
-        // `PublishedFormDefinition`.
-        definitionJSON: JSON.stringify({ ...definition, automations: [] }),
-      });
+      // What an anonymous caller may see — including the `automations` narrowing — is decided by
+      // `publicFormPayload`, which is pure and asserted whole in `public-form-payload.spec.ts`.
+      // Inline here it was a contract narrowing nothing could test, and therefore one that could
+      // be deleted with the suite green.
+      return Object.assign(new PublishedFormType(), publicFormPayload(definition));
     });
   }
 
