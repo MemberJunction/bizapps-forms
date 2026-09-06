@@ -61,6 +61,7 @@ import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
 import type { WidgetPhase } from './core/submit-phase';
+import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
 
 @Component({
   selector: 'mj-form',
@@ -927,9 +928,24 @@ export class MjFormComponent implements OnInit, OnDestroy {
     this.phase.set('error');
   }
 
+  /**
+   * Navigate to an author-configured (or server-echoed) redirect URL — http(s) ONLY.
+   *
+   * The URL is author-controlled content rendered on an EMBEDDING site, so passing it to
+   * `window.location.assign` unvalidated let a `javascript:` (or `data:`) URL execute in the
+   * host page's origin — script injection on whatever site embeds the widget. The judgement
+   * itself lives in {@link judgeRedirect}, as a pure function: it is a security guard, and a
+   * private method on a component this heavy is a guard nothing can test.
+   */
   private redirect(url: string): void {
-    if (typeof window !== 'undefined') {
-      window.location.assign(url);
+    if (typeof window === 'undefined') {
+      return;
     }
+    const refusal = judgeRedirect(url, window.location.href);
+    if (refusal) {
+      console.warn(redirectRefusalMessage(url, refusal));
+      return;
+    }
+    window.location.assign(url);
   }
 }

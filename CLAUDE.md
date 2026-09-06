@@ -59,6 +59,7 @@ several details in the originals are wrong here, and each file says where and wh
 | `.claude/rules/testing.md` | tests | Vitest conventions **here** (`.spec.ts`, no `test-utils`), and what unit tests structurally cannot catch |
 | `.claude/rules/design-tokens.md` | `**/*.css` | No hardcoded colours; `--mj-*` / `--mjf-*` tokens; the shadow-root constraint |
 | `.claude/rules/changesets.md` | `.changeset/*.md` | **`patch` unless the change ships a migration or metadata.** Why the fixed group makes the level a release-wide decision, not a local one |
+| `.claude/rules/generated-code.md` | `packages/*/src/**/generated/**` | **Never hand-edit CodeGen output** — why the rule survived being followed-in-spirit, and what the durable check would be. Enforced by `.claude/hooks/block-generated-edits.mjs` |
 | `.claude/skills/mj-upgrade/` | on request | Full MJ version-upgrade runbook, including the core `__mj` migration that the pin bump alone does **not** do |
 
 Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
@@ -121,7 +122,7 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 
 ## CodeGen
 - **Running CodeGen, `mj migrate`, or an MJ upgrade → [`docs/database-operations.md`](docs/database-operations.md).** It covers the three commands whose failure modes report success: which `mj migrate` targets core vs this app's schema, what `--skipfiles`/`--skipdb` really do, the ordering trap on a fresh database, the `IsHierarchy` opt-in for self-referencing FKs, and the clean-room build.
-- Generated code lives in `packages/*/src/generated/` (entities, actions, resolvers, Angular forms). **Never hand-edit generated files.** Run `npm run mj:codegen` after any schema change. Write TypeScript against generated types **only after** CodeGen runs.
+- Generated code lives in `packages/*/src/**/generated/` (entities, actions, resolvers, Angular forms — Angular's is under `src/lib/generated/`, and at MJ 6.1 the entity and GraphQL output moved into per-schema modules with a barrel left behind). **Never hand-edit generated files** — `.claude/hooks/block-generated-edits.mjs` now refuses it, and `.claude/rules/generated-code.md` explains why a hand edit that produces byte-identical *lines* is still wrong. Run `npm run mj:codegen` after any schema change, against a clean-room database rather than the shared one ([`docs/database-operations.md`](docs/database-operations.md)). Write TypeScript against generated types **only after** CodeGen runs.
 - The scaffold ships **placeholder** `generated/` files so the packages compile before the first CodeGen run; CodeGen overwrites them.
 
 ## Migrations
