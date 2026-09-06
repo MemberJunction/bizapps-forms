@@ -15,7 +15,7 @@ import { ActionEngineServer } from '@memberjunction/actions';
 import { ActionParam, RunActionParams } from '@memberjunction/actions-base';
 import type { UserInfo } from '@memberjunction/core';
 import { LEGACY_ON_SUBMIT_ACTION_NAMES, type LegacyOnSubmitActionName } from '@mj-biz-apps/forms-entities';
-import { UserCache } from '@memberjunction/generic-database-provider';
+import { resolveAutomationPrincipal } from '../automation/service-principal';
 
 /**
  * The S3 action names — the frozen contract WP-E implements.
@@ -39,7 +39,7 @@ export type OnSubmitActionName = LegacyOnSubmitActionName;
 /** Per-hook outcome for observability/tests. */
 export interface HookFireResult {
   name: OnSubmitActionName;
-  status: 'fired' | 'skipped-not-registered' | 'failed';
+  status: 'fired' | 'skipped-not-registered' | 'skipped-no-principal' | 'failed';
   message?: string;
 }
 
@@ -102,13 +102,23 @@ async function fireOne(
 export async function fireOnSubmitHooks(
   ctx: OnSubmitContext,
   engine: ActionEngineServer = ActionEngineServer.Instance,
-  runAsUser: UserInfo = UserCache.Instance.GetSystemUser(),
+  runAsUser: UserInfo | null = resolveAutomationPrincipal(),
 ): Promise<HookFireResult[]> {
-  // On-submit automations run under the MJ **system user** (service principal), NOT the anonymous
-  // respondent. The respondent scope is CanCreate-on-responses only, so it cannot read the response
-  // back, run privileged actions (upsert Person, create Task, analyze answers), or write MJ's
-  // Action Execution Logs. Elevating here keeps the public submit path itself minimally-scoped
-  // (no privilege accretion on the respondent). See ON_SUBMIT_AUTOMATION_SPEC §7.
+  // On-submit hooks run under the SCOPED automation principal ("Forms Automation Service"), NOT
+  // the anonymous respondent and NOT the full system user. The respondent scope is
+  // CanCreate-on-responses only, so it cannot read the response back, run privileged actions
+  // (upsert Person, create Task, analyze answers), or write MJ's Action Execution Logs — the work
+  // needs elevation, but only to the grants the automation principal carries. This path used to
+  // fall back to `UserCache.GetSystemUser()`, which silently restored the broad grants the
+  // dedicated principal exists to avoid; it now fails CLOSED exactly like the configured-automation
+  // path (`runConfiguredAutomations`): no resolvable principal means the hooks are skipped with a
+  // logged warning, never elevated further. See ON_SUBMIT_AUTOMATION_SPEC §7.
+  if (!runAsUser) {
+    // `resolveAutomationPrincipal` has already logged WHY (missing/inactive user, and how to fix
+    // it); this line says what that costs on THIS path.
+    console.warn('[forms] legacy on-submit hooks skipped: no automation principal could be resolved.');
+    return ON_SUBMIT_ACTION_NAMES.map((name) => ({ name, status: 'skipped-no-principal' as const }));
+  }
   await engine.Config(false, runAsUser);
   const results: HookFireResult[] = [];
   for (const name of ON_SUBMIT_ACTION_NAMES) {

@@ -21,6 +21,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
+import { sessionHashSalt } from './hash-salt.js';
+
 /** The slice of an Express request needed to identify the caller. */
 export interface IdentifiableRequest {
   headers: Record<string, string | string[] | undefined>;
@@ -72,9 +74,13 @@ export function hashClientIp(ip: string): string {
   return createHash('sha256').update(`${ipHashSalt()}:ip:${normalizeIpForKeying(ip)}`).digest('hex');
 }
 
-/** Salt for the one-way IP hash; shared with the session hash, with the same stable default. */
+/**
+ * Salt for the one-way IP hash — literally the same secret the session hash uses, resolved by the
+ * same function so the two cannot drift. See `http/hash-salt.ts` for why they share it and why
+ * that is safe (each side tags its own preimage).
+ */
 function ipHashSalt(): string {
-  return process.env.FORMS_SESSION_HASH_SALT?.trim() || 'mj-forms-source-metadata-v1';
+  return sessionHashSalt();
 }
 
 /**

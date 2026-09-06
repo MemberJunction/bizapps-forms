@@ -25,6 +25,7 @@ import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } fro
 import { toAnswerInputs } from './input-mapping';
 import { respondentSafe } from './respondent-safe';
 import { currentRequestIdentity } from '../http/request-identity';
+import { publicFormPayload } from './public-form-payload';
 
 @Resolver()
 export class PublicFormResolver extends ResolverBase {
@@ -51,16 +52,11 @@ export class PublicFormResolver extends ResolverBase {
         return null;
       }
       const { definition } = loaded.value;
-      return Object.assign(new PublishedFormType(), {
-        formId: definition.formId,
-        formVersionId: definition.formVersionId,
-        name: definition.name,
-        description: definition.description,
-        renderMode: definition.renderMode,
-        settingsJSON: JSON.stringify(definition.settings),
-        styleTokensJSON: JSON.stringify(definition.styleTokens),
-        definitionJSON: JSON.stringify(definition),
-      });
+      // What an anonymous caller may see — including the `automations` narrowing — is decided by
+      // `publicFormPayload`, which is pure and asserted whole in `public-form-payload.spec.ts`.
+      // Inline here it was a contract narrowing nothing could test, and therefore one that could
+      // be deleted with the suite green.
+      return Object.assign(new PublishedFormType(), publicFormPayload(definition));
     });
   }
 
