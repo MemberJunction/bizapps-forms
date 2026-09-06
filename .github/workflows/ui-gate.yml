@@ -2,12 +2,18 @@ name: UI Token Gate
 
 on:
   workflow_dispatch:
+  # No `paths:` filter, and that is the point. A workflow skipped by an `on: paths:` filter creates
+  # NO check run, so a required check sits at "Expected — Waiting for status" and the pull request
+  # can never be merged. This gate costs 0.2s; buying that back was never worth a filter, and once
+  # `ui-token-gate` is a required check the filter is actively a deadlock. See #173.
+  #
+  # `push:` is new. Without it a hardcoded colour reaching next by direct push — the release
+  # workflow's own `mergemain:update-lock`, or an admin push — was never checked at all, which is
+  # why next's head carried no UI-token verdict.
+  push:
+    branches: [next, main]
   pull_request:
     branches: [next, main]
-    paths:
-      - 'packages/Angular/**'
-      - 'scripts/check-ui-tokens.mjs'
-      - '.github/workflows/ui-gate.yml'
 
 concurrency:
   group: ui-gate-${{ github.ref }}
