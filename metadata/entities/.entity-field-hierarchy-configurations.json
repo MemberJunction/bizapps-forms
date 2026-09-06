@@ -1,5 +1,11 @@
 [
   {
+    "Entity": "MJ_BizApps_Forms: Form Categories",
+    "FieldName": "ParentID",
+    "Configuration": {
+      "Hierarchy": {
+        "IsHierarchy": true
+      }
     "_comments": [
       "Seeds Hierarchy.IsHierarchy=true in EntityField.Configuration for FormCategory.ParentID.",
       "Form categories are a genuine tree: the builder nests them and scripts/pg-objectmodel-test.mjs",
