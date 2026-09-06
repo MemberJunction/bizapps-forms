@@ -165,6 +165,7 @@ GO
 
 
 
+-- CodeGen output (appended)
 /* ============================================================================================
    ==== CODEGEN OUTPUT — DO NOT EDIT BELOW THIS LINE ====
    Local MJ CLI 6.1.0-edge.5, includeSchemas __mj_BizAppsForms.
