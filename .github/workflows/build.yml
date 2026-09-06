@@ -2,53 +2,83 @@ name: Build and Test
 
 on:
   workflow_dispatch:
+  # `main` as well as `next`. This workflow was filtered to `[next]` on both triggers, so a pull
+  # request whose base is `main` — every next → main release promotion — never started it at all.
+  # Once `build-and-test` is a required check on protect-main, that is a permanent deadlock on the
+  # release PR. See #173.
+  #
+  # No `paths:` filter either. A workflow skipped by `on: paths:` creates NO check run, so the PR
+  # hangs on "Expected — Waiting for status" forever; a job skipped by a job-level `if:` reports
+  # `skipped`, which a required check treats as passing. The path list therefore moved down into
+  # the `scope` job, which is the only place it is now allowed to live.
   push:
-    branches: [next]
-    paths:
-      - 'pnpm-lock.yaml'
-      - 'packages/**'
-      # The MJAPI dev harness is a workspace member, so its package.json participates in the
-      # lockfile and its code is what a developer's live verification actually runs. Without
-      # this, a PR editing only apps/** runs no workflow at all and reports green — the same
-      # silently-not-running failure class the note below describes.
-      - 'apps/**'
-      - 'scripts/**'
-      - 'smoke/**'
-      - 'turbo.json'
-      - 'package.json'
-      # The gates themselves live here. Without this, a PR that edits ONLY
-      # .github/scripts/validate-widget-bundle.sh does not run this workflow, so a broken gate
-      # reports green — which is the same class of failure (a check that silently does not run)
-      # that let four releases ship without the widget bundle.
-      - '.github/workflows/build.yml'
-      - '.github/scripts/**'
+    branches: [next, main]
   pull_request:
-    branches: [next]
-    paths:
-      - 'pnpm-lock.yaml'
-      - 'packages/**'
-      # The MJAPI dev harness is a workspace member, so its package.json participates in the
-      # lockfile and its code is what a developer's live verification actually runs. Without
-      # this, a PR editing only apps/** runs no workflow at all and reports green — the same
-      # silently-not-running failure class the note below describes.
-      - 'apps/**'
-      - 'scripts/**'
-      - 'smoke/**'
-      - 'turbo.json'
-      - 'package.json'
-      # The gates themselves live here. Without this, a PR that edits ONLY
-      # .github/scripts/validate-widget-bundle.sh does not run this workflow, so a broken gate
-      # reports green — which is the same class of failure (a check that silently does not run)
-      # that let four releases ship without the widget bundle.
-      - '.github/workflows/build.yml'
-      - '.github/scripts/**'
+    branches: [next, main]
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Answers one question — is there anything here for build-and-test to do? — and nothing else.
+  # It exists because the path list can no longer live in `on:` (see the header above), and a
+  # job-level `if:` cannot read a diff by itself.
+  #
+  # The list below is the one that used to sit under `on: paths:`, carried over unchanged, and the
+  # reasons each entry earns its place are unchanged too:
+  #   - apps/**   the MJAPI dev harness is a workspace member, so its package.json participates in
+  #               the lockfile and its code is what a developer's live verification actually runs.
+  #   - .github/scripts/** and this file: the gates themselves live here, and a PR editing only a
+  #               gate script must still run the gate. Four releases shipped without the widget
+  #               bundle because it did not.
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.decide.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The decision is a diff against the base, which shallow history does not contain.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The decider runs before it is trusted. Its restrictive-direction failure reports SUCCESS,
+      # so an unwatched decider is indistinguishable from one that always says "nothing to do".
+      - name: Check the path decider still fires
+        run: npm run lint:paths-touched:test
+
+      - name: Does this change touch anything build-and-test reads?
+        id: decide
+        env:
+          # A pull_request diffs against its base; a push diffs against what was there before it.
+          # A workflow_dispatch has neither, which check-paths-touched.mjs treats as fail-open.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          RELEVANT=$(node scripts/check-paths-touched.mjs "$BASE_SHA" "$HEAD_SHA" \
+            pnpm-lock.yaml \
+            turbo.json \
+            package.json \
+            packages/ \
+            apps/ \
+            scripts/ \
+            smoke/ \
+            .github/scripts/ \
+            .github/workflows/build.yml)
+          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          echo "build-and-test relevant: $RELEVANT"
+
   build-and-test:
+    needs: scope
+    # A job skipped by this `if:` reports conclusion `skipped`, and a required status check treats
+    # `skipped` as passing — which is the entire reason the path list moved out of `on:`. Do not
+    # move it back.
+    if: needs.scope.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
