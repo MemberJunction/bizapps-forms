@@ -178,10 +178,27 @@ const UNKNOWN_QUESTION_MESSAGE = 'That answer does not belong to any question on
  * A hard abuse bound, not a product knob: `FormResponseAnswer.TextValue` is `NVARCHAR(MAX)` and
  * the widget sets no `maxlength`, so without this the only limit on a question without a
  * `validationRule` was MJAPI's 50mb GraphQL body cap. 64KB is far beyond any legitimate typed
- * answer while keeping a hostile payload from filling response storage one save at a time.
- * Enforced in EVERY mode — an autosaved draft persists a row just like a completion does.
+ * answer. Enforced in EVERY mode — an autosaved draft persists a row just like a completion does.
+ *
+ * WHAT THIS DOES NOT BOUND, stated because the obvious reading is wrong: it is a cap per ANSWER,
+ * and nothing here caps how many answers one payload may carry. `collectUnknownAnswers` limits
+ * them to the form's own question set, but that count is author-controlled, so a 100-question
+ * form still admits 100 x 64KB in a single save. Bounding the payload as a whole is a separate
+ * decision with a separate number, and claiming this one already does it would be the kind of
+ * stale rationale that stops the next reader looking.
  */
 export const MAX_ANSWER_VALUE_BYTES = 64 * 1024;
+
+/**
+ * What an oversized answer is told, derived from the bound rather than restating it.
+ *
+ * The sentence used to spell "64KB" as a literal beside a `MAX_ANSWER_VALUE_BYTES` that also
+ * meant 64KB — two copies of one decision, so raising the ceiling would leave the respondent
+ * being told the old number. Computed here so there is only ever one.
+ */
+function oversizedAnswerMessage(): string {
+  return `That answer is too large. Answers are limited to ${MAX_ANSWER_VALUE_BYTES / 1024}KB each.`;
+}
 
 /** How many UTF-8 bytes one answer value occupies (JSON-serialized for non-string shapes). */
 function answerValueBytes(value: AnswerValue): number {
@@ -204,7 +221,7 @@ function answerValueBytes(value: AnswerValue): number {
 function collectOversizedAnswers(answers: FormAnswerInput[], errors: FieldError[]): void {
   for (const answer of answers) {
     if (answerValueBytes(answerValueOf(answer)) > MAX_ANSWER_VALUE_BYTES) {
-      errors.push({ questionId: answer.questionId, message: 'That answer is too large. Answers are limited to 64KB each.' });
+      errors.push({ questionId: answer.questionId, message: oversizedAnswerMessage() });
     }
   }
 }

@@ -278,6 +278,15 @@ function safeRedirectUrl(raw: string | undefined): string | undefined {
   } catch {
     // No absolute scheme — a relative URL. The WHATWG parser strips tabs/newlines and lowercases
     // the scheme before this throw, so anything scheme-bearing lands in the branch above.
+    //
+    // THIS IS DELIBERATELY MORE PERMISSIVE THAN THE WIDGET, and the asymmetry is not an oversight.
+    // The widget parses WITH the page as base, so it can judge a relative URL and refuses anything
+    // that still fails to parse. The server has no base to resolve against — only the client knows
+    // what page the widget is embedded in — so "did not parse" here means "relative", and the only
+    // safe reading of an unparseable relative URL is to pass it on and let the client, which CAN
+    // resolve it, make the call. The consequence is real and bounded: a string like `http://[`
+    // is echoed by the server and refused by the widget. It cannot name a scheme (that is the
+    // branch above), so it cannot execute; the worst case is a client that fails to navigate.
   }
   return url;
 }
