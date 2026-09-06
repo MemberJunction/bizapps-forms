@@ -78,7 +78,14 @@ jobs:
     # A job skipped by this `if:` reports conclusion `skipped`, and a required status check treats
     # `skipped` as passing — which is the entire reason the path list moved out of `on:`. Do not
     # move it back.
-    if: needs.scope.outputs.relevant == 'true'
+    #
+    # The `needs.scope.result != 'success'` half is not defensive padding. A job `if:` is implicitly
+    # ANDed with `success()` over its `needs`, so without it a FAILING scope job — the self-test
+    # catching a broken decider, say — would skip this job, report `skipped`, and count as a passing
+    # required check over a build that never ran. `scope` is not itself a required context, so its
+    # red X would block nothing. This is the same fail-open rule check-paths-touched.mjs applies to
+    # its own uncertainty, enforced one level up: if the decider could not decide, build.
+    if: ${{ !cancelled() && (needs.scope.result != 'success' || needs.scope.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
