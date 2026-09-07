@@ -108,6 +108,23 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 - Cut feature branches **from `next`**, push, open a PR → `next`. A single coordinating PR promotes `next` → `main`.
 - **Feature branches MUST track the same-named remote** (`origin/<branch>`), never `origin/next` or `origin/main`. Verify with `git branch -vv` before every push.
 - Never commit directly to `main`. Never hand-author the `chore: Update package-lock.json` commit — the publish workflow creates it.
+- **CI is blocking (since #173).** Both rulesets require these seven **job** names — `build-and-test`,
+  `changes_and_migrations`, `codegen-append-gate`, `distribution-gate`, `generated-scope-gate`,
+  `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a stale
+  branch must be updated before it can merge. **Nobody can bypass it, including repo admins**
+  (`current_user_can_bypass: never`, `bypass_actors: []`).
+- **Every gate reports on every PR, by design.** Path filtering lives in a job-level `if:` fed by
+  `scripts/check-paths-touched.mjs` — **never** in `on: paths:`. A workflow skipped by `on: paths:`
+  creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
+  Waiting for status"); a job skipped by a job-level `if:` reports `skipped`, which counts as
+  passing. Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
+- **Known follow-up, and it will bite the next release:** the publish pipeline pushes *directly* to
+  `main` (`ci/commit_push.mjs`, the `Version Packages [skip ci]` commit) and to `next`
+  (`ci/merge_main_and_update_lock.mjs`). Required status checks reject direct pushes, and `[skip ci]`
+  means no check can ever report — so those pushes are refused permanently. The natural fix, a
+  GitHub Actions bypass actor, is refused at repo level (`422 — Actor GitHub Actions integration must
+  be part of the ruleset source or owner organization`) and needs an org owner. Until that is
+  resolved, either add the bypass at org level or route those two pushes through pull requests.
 
 ## Build & dev commands
 - `pnpm install` (repo root only — never inside a package dir)
