@@ -40,6 +40,28 @@ test('an unrelated command is not a git write', () => {
     assert.equal(isGitWriteCommand('ls -la'), false);
 });
 
+test('command substitution does not hide a git write', () => {
+    assert.equal(isGitWriteCommand('out=$(git commit -m "x" 2>&1)'), true);
+    assert.equal(isGitWriteCommand('(git commit -m x)'), true);
+    assert.equal(isGitWriteCommand('`git push`'), true);
+});
+
+// macOS and Windows both mount case-insensitive, so `Git commit` really runs git — the same
+// bypass block-generated-edits.mjs was bitten by.
+test('a shifted capital does not hide a git write', () => {
+    assert.equal(isGitWriteCommand('Git commit -m x'), true);
+    assert.equal(isGitWriteCommand('GIT PUSH origin next'), true);
+});
+
+test('an env-prefixed git write is still a git write', () => {
+    assert.equal(isGitWriteCommand('GIT_AUTHOR_DATE=x git commit -m y'), true);
+});
+
+test('a longer subcommand that merely starts with commit or push is not a git write', () => {
+    assert.equal(isGitWriteCommand('git commitpush'), false);
+    assert.equal(isGitWriteCommand('git pushall'), false);
+});
+
 test('a non-git command never runs the checks at all', () => {
     let ran = false;
     const result = decisionFor({ command: 'ls', runChecks: () => { ran = true; return []; } });

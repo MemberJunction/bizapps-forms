@@ -49,9 +49,27 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  * first because `commitpush` is one word, the second because the match must begin a command.
  * `(?:-C \S+ |-c \S+ )*` covers `git -C <dir> commit`, which is otherwise a straight bypass.
  * Over-inclusiveness is cheap here (a needless check is 13ms warm) and under-inclusiveness is the
- * bug, so `&&`, `;`, `|` and newlines all count as command starts.
+ * bug, so `&&`, `;`, `|` and newlines all count as command starts — and so do the pieces below,
+ * each closing a real bypass found in review rather than a hypothetical one:
+ *
+ * - The boundary class also includes a bare space, `(`, and a backtick. A space is a command
+ *   start because an env-prefixed invocation — `GIT_AUTHOR_DATE=x git commit -m y` — has nothing
+ *   but whitespace before `git`. `(` and a backtick are command starts because a subshell
+ *   (`(git commit -m x)`) and command substitution (`out=$(git commit -m "x" 2>&1)`, `` `git
+ *   push` ``) both put `git` right after them — an ordinary way to capture commit output, not an
+ *   exotic one.
+ * - `/i` makes the match case-insensitive. macOS and Windows both mount case-insensitive, so
+ *   `Git commit` and `GIT PUSH` really invoke `git` on this machine — the identical bug class
+ *   `block-generated-edits.mjs`'s header records being bitten by ("the path pattern was
+ *   case-sensitive ... so one shifted capital walked straight past it").
+ * - The trailing `(?![\w-])` replaces what used to be `(?:\s|$)`. A closing backtick is neither
+ *   whitespace nor end-of-string, so `` `git push` `` was still missed by the old trailing check
+ *   even after fixing the leading boundary — the lookahead terminates the match on any
+ *   non-word-or-hyphen character instead, while still correctly leaving `git commitpush`,
+ *   `git pushall` and `git commit-tree x` allowed (their next character is a word character or a
+ *   hyphen, so the lookahead fails and `commit`/`push` never matches as its own subcommand).
  */
-const GIT_WRITE = /(?:^|[;&|]|\n)\s*git\s+(?:(?:-C|-c)\s+\S+\s+)*(?:commit|push)(?:\s|$)/;
+const GIT_WRITE = /(?:^|[\s;&|(`])\s*git\s+(?:(?:-C|-c)\s+\S+\s+)*(?:commit|push)(?![\w-])/i;
 
 export function isGitWriteCommand(command) {
     return typeof command === 'string' && GIT_WRITE.test(command);
