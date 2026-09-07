@@ -14,9 +14,17 @@
  * than a report twenty minutes later.
  *
  * ── WHY BOTH CHECKS ARE CHEAP ENOUGH TO RUN EVERY TIME ──────────────────────────────────────────
- * `lint:ui` is 0.2s of Node stdlib. `typecheck` is a turbo task with `cache: true`, so a repeat run
- * with nothing changed is 13ms — turbo's content hash already answers "which packages changed"
- * better than anything this hook could compute, so it does not try.
+ * `lint:ui` is 0.2s of Node stdlib. `typecheck` is a turbo task with `cache: true`, so turbo's
+ * content hash already answers "which packages changed" better than anything this hook could
+ * compute, and it does not try.
+ *
+ * Measure it rather than quoting the warm number, which is what an earlier version of this comment
+ * did ("13ms"). That figure describes a repeat run with nothing changed, and this hook fires on
+ * `git commit`, which by construction happens AFTER something changed — and `turbo.json` gives
+ * `typecheck` `dependsOn: ["^build"]`, so the realistic invocation rebuilds the changed package and
+ * everything downstream. On this repo: 217 ms warm, 6.9 s after touching one leaf source file,
+ * 6.5 s cold. Seconds, not milliseconds. Still worth paying before a commit; not worth
+ * misdescribing, because the number is what a reader uses to judge whether the design is sound.
  *
  * ── WHY IT ASKS RATHER THAN ALLOWS WHEN IT CANNOT RUN ───────────────────────────────────────────
  * `block-generated-edits.mjs` deliberately fails OPEN, and it is right to: it judges a payload it
@@ -47,7 +55,18 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *
  * The leading boundary makes `npm run commitpush` and `grep -rn "git commit" docs/` allow — the
  * first because `commitpush` is one word, the second because the match must begin a command.
- * `(?:-C \S+ |-c \S+ )*` covers `git -C <dir> commit`, which is otherwise a straight bypass.
+ * The middle segment covers GLOBAL OPTIONS between `git` and the subcommand, which are otherwise a
+ * straight bypass. It describes their SHAPE rather than naming them: an earlier version enumerated
+ * `-C` and `-c` only, so `git --no-pager commit`, `git -P commit`, `git --git-dir=… commit` and
+ * `git --exec-path=/x push` all walked past unchecked — the same under-inclusiveness this comment
+ * warns about, in the one part of the pattern the earlier fixes did not revisit. The general
+ * `-\S+\s+` arm means an unknown option can never cause a miss; the first arm exists only because
+ * `-C <dir>` and friends put their value in a SEPARATE word, which would otherwise break the chain.
+ *
+ * The obvious general form, `(?:-\S+(?:\s+\S+)?\s+)*`, is deliberately NOT used: its nested
+ * optional inside a `*` backtracks exponentially on non-matching input (measured: 0.02ms at 15
+ * options, 0.25ms at 20, 1.65ms at 24). This pattern runs on EVERY Bash tool call, so that is a
+ * ReDoS in a hot path — strictly worse than the bug it would fix. The form below stays flat.
  * Over-inclusiveness is cheap here (a needless check is 13ms warm) and under-inclusiveness is the
  * bug, so `&&`, `;`, `|` and newlines all count as command starts — and so do the pieces below,
  * each closing a real bypass found in review rather than a hypothetical one:
@@ -69,7 +88,8 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   `git pushall` and `git commit-tree x` allowed (their next character is a word character or a
  *   hyphen, so the lookahead fails and `commit`/`push` never matches as its own subcommand).
  */
-const GIT_WRITE = /(?:^|[\s;&|(`])\s*git\s+(?:(?:-C|-c)\s+\S+\s+)*(?:commit|push)(?![\w-])/i;
+const GIT_WRITE =
+    /(?:^|[\s;&|(`])\s*git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
 
 export function isGitWriteCommand(command) {
     return typeof command === 'string' && GIT_WRITE.test(command);
@@ -109,6 +129,41 @@ export function decisionFor({ command, runChecks }) {
     };
 }
 
+/**
+ * How long one checker may take before it is treated as unrunnable rather than as slow. Generous
+ * against measurement, not a guess: `typecheck` is 217 ms warm, 6.9 s after one leaf source file
+ * changes, and 6.5 s cold on this repo. The cap exists for a checker that HANGS, not for a slow
+ * one. Without it spawnSync waits forever, the harness eventually cancels the hook, the hook writes
+ * nothing — and writing nothing is `allow`, which is the silence this file exists to prevent.
+ */
+const CHECK_TIMEOUT_MS = 120_000;
+
+/**
+ * Pure. Decides what one finished check MEANT: `null` if it passed, a failure record if it ran and
+ * failed, and a throw if it did not run to completion.
+ *
+ * The throw is the point. `decisionFor` turns it into `ask`, and the distinction it preserves is
+ * the one the header calls the reason this hook differs from block-generated-edits.mjs — "a check
+ * nobody can run must never read as a check that passed". Before this existed, only a MISSING
+ * checker and a failed spawn reached `ask`; a killed or timed-out one had no path at all, and the
+ * absence of a path meant silence.
+ */
+export function classifyCheckResult(name, result) {
+    if (result.error) throw new Error(`${name} could not be spawned: ${result.error.message}`);
+    if (result.signal) {
+        throw new Error(
+            `${name} was killed by ${result.signal} before it could finish, so this tree is ` +
+            'unverified rather than clean.',
+        );
+    }
+    if (typeof result.status !== 'number') {
+        throw new Error(`${name} did not run to completion, so this tree is unverified.`);
+    }
+    if (result.status === 0) return null;
+    const combined = `${result.stdout || ''}${result.stderr || ''}`;
+    return { name, output: combined.split('\n').slice(-40).join('\n') };
+}
+
 /** Runs the real checks. Throws when a checker is missing rather than reporting it as clean. */
 function runChecks() {
     const turbo = path.join(PROJECT_DIR, 'node_modules', 'turbo', 'bin', 'turbo');
@@ -129,12 +184,10 @@ function runChecks() {
             encoding: 'utf8',
             shell: false,
             maxBuffer: 32 * 1024 * 1024,
+            timeout: CHECK_TIMEOUT_MS,
         });
-        if (result.error) throw new Error(`${name} could not be spawned: ${result.error.message}`);
-        if (result.status !== 0) {
-            const combined = `${result.stdout || ''}${result.stderr || ''}`;
-            failures.push({ name, output: combined.split('\n').slice(-40).join('\n') });
-        }
+        const failure = classifyCheckResult(name, result);
+        if (failure) failures.push(failure);
     }
     return failures;
 }

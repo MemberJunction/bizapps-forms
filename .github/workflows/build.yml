@@ -33,10 +33,34 @@ jobs:
   #   - .github/scripts/** and this file: the gates themselves live here, and a PR editing only a
   #               gate script must still run the gate. Four releases shipped without the widget
   #               bundle because it did not.
+  #   - migrations/  NOT only the migration gates' business. packages/Entities/src/contracts/
+  #               question-types.spec.ts reads every file in migrations/, extracts the last
+  #               CK_FormQuestion_QuestionType CHECK, and asserts it equals the hand-written
+  #               FORM_QUESTION_TYPES union — under `vitest run`, i.e. inside `npm test`, i.e. here.
+  #               A migration-only PR is the normal shape for a DDL change (check-codegen-append
+  #               CHECK 2 wants the CodeGen output appended INTO the migration file), so without
+  #               this entry the most ordinary schema PR there is skips the suite that validates it
+  #               and reports `skipped` = pass.
   #   - .claude/  same argument, for the hook specs: `lint:hook-guard:test` and `lint:git-gate:test`
   #               run nowhere else in this repo, so a PR editing only a hook must still run this
   #               job — otherwise the PR that disables a hook is exactly the PR that skips the
   #               hook's own test.
+  #
+  # The four ROOT-LEVEL build inputs below were never in the `on: paths:` list either, because a
+  # `packages/**`-shaped glob cannot reach the repository root. That cost nothing while this check
+  # was advisory — the workflow just did not run and nobody was blocked. It is not free now: a
+  # missing entry skips this job, `skipped` reports SUCCESS to a required status check, and the
+  # pull request goes green over a build that never ran. Verified rather than assumed: perturbing
+  # tsconfig.server.json and running `npx turbo typecheck --force` goes from 9 successful to
+  # `error TS2688`, 0 of 2 — a red CI run that would have merged green.
+  #   - tsconfig.angular.json / tsconfig.server.json
+  #               the `extends` targets of all five package tsconfigs.
+  #   - pnpm-workspace.yaml
+  #               workspace members and `linkWorkspacePackages`; it decides what
+  #               `pnpm install --frozen-lockfile` even produces.
+  #   - .npmrc    `auto-install-peers` and the `@mj-biz-apps` registry, same argument.
+  # scripts/check-paths-touched.spec.mjs pins each of these, so shortening this list fails a
+  # required check rather than quietly widening the hole.
   scope:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -67,12 +91,17 @@ jobs:
         run: |
           RELEVANT=$(node scripts/check-paths-touched.mjs "$BASE_SHA" "$HEAD_SHA" \
             pnpm-lock.yaml \
+            pnpm-workspace.yaml \
+            .npmrc \
             turbo.json \
             package.json \
+            tsconfig.angular.json \
+            tsconfig.server.json \
             packages/ \
             apps/ \
             scripts/ \
             smoke/ \
+            migrations/ \
             .github/scripts/ \
             .claude/ \
             .github/workflows/build.yml)

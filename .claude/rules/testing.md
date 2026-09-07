@@ -85,9 +85,11 @@ present form with different questions produced `Submission is missing required v
 which reads like a product defect and never was one. If a fixture cannot be satisfied now, the
 script says which form it looked at, what role it needed, and which slugs would have worked.
 
-**None of these run in CI.** `smoke/**` appears in `build.yml`'s path filter, so editing one
-triggers the workflow — but no job executes them: they need a live API, a SQL Server container and
-a published form, which no build agent has. They are manual, and they are the only thing standing
+**None of these run in CI.** `smoke/` appears in the scope list `build.yml`'s `scope` job feeds to
+`scripts/check-paths-touched.mjs`, so editing one still starts `build-and-test` — but no job
+executes them: they need a live API, a SQL Server container and a published form, which no build
+agent has. (Three plain-Node specs *under* `smoke/lib/` — `fixture`, `sqlcmd`, `target` — do run
+there, and run nowhere else.) They are manual, and they are the only thing standing
 between you and the failure class below.
 
 > A publish bug once made entity binding completely inert — the snapshot never carried the
@@ -139,6 +141,16 @@ because the new behaviour is correct, update the test. Never leave a broken test
 > Until 2026-07-30 **no workflow ran any tests** — all 434 could have been red and a PR would still
 > have gone green. If you are adding a workflow, check it actually runs something.
 
-Its path filter now includes `apps/**`, `scripts/**`, `smoke/**`, `turbo.json` and `package.json`;
-previously only `packages/**` and `package-lock.json` triggered it, so a change breaking MJAPI or a
-gate script never ran CI at all.
+**Since #173 there is no `paths:` filter on the trigger, and putting one back would break the
+repo.** `build-and-test` is a required status check on both rulesets, and a workflow skipped by
+`on: paths:` creates *no check run at all*, so the pull request hangs on "Expected — Waiting for
+status" forever. The path list now lives in the `scope` job, which feeds
+`scripts/check-paths-touched.mjs` and gates `build-and-test` with a job-level `if:` — a job skipped
+that way reports `skipped`, which counts as passing. See CLAUDE.md, "Every gate reports on every PR".
+
+That list covers `packages/`, `apps/`, `scripts/`, `smoke/`, `migrations/`, `.claude/`,
+`.github/scripts/`, the root tsconfigs, `pnpm-workspace.yaml`, `.npmrc`, `pnpm-lock.yaml`,
+`turbo.json` and `package.json`; previously only `packages/**` and `package-lock.json` triggered the
+workflow, so a change breaking MJAPI or a gate script never ran CI at all. Every entry is pinned by
+`scripts/check-paths-touched.spec.mjs`, so shortening the list fails a required check rather than
+quietly skipping the job — add the entry and its reason there in the same commit.

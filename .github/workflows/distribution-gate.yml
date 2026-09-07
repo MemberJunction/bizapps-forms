@@ -50,6 +50,14 @@ jobs:
         with:
           node-version: '20'
 
+      # The decider runs before it is trusted, for the same reason build.yml's `scope` job says so:
+      # this script's restrictive-direction failure is SILENT. A decider stuck on `false` retires
+      # the mutant suite below while this job keeps reporting success, and `distribution-gate` IS a
+      # required check — so nothing would be blocked. build.yml runs this spec twice for that
+      # reason; running the decider here without it was the asymmetry.
+      - name: Check the path decider still fires
+        run: npm run lint:paths-touched:test
+
       # Only the 7m08s mutant suite is worth a condition; everything else here costs 2.6s and runs
       # unconditionally. The list is the one that used to sit under `on: paths:`, carried over.
       - name: Does this change touch anything the mutant suite covers?
