@@ -284,3 +284,5 @@ Contributing? Branching model, build commands and conventions are in
 
 [Business Source License 1.1](LICENSE) © [MemberJunction](https://memberjunction.com).
 Source-available, and free for nonprofits.
+
+<!-- #173 skip-path probe — throwaway branch, deleted after verification. -->
