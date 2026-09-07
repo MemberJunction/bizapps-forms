@@ -60,7 +60,13 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.sha }}
         run: |
-          RELEVANT=$(node scripts/check-paths-touched.mjs "$BASE_SHA" "$HEAD_SHA" \
+          # ── THROWAWAY PROBE BRANCH (#173) — NOT FOR MERGE ──────────────────────────────────
+          # Hardcoded false so build-and-test takes the job-level `if:` skip path. This branch
+          # exists to answer two questions that no local check can: does a job skipped by a
+          # job-level `if:` emit a check run at all, and does a required status check treat that
+          # `skipped` conclusion as passing? The real decision is the command below it.
+          RELEVANT=false
+          UNUSED=$(node scripts/check-paths-touched.mjs "$BASE_SHA" "$HEAD_SHA" \
             pnpm-lock.yaml \
             turbo.json \
             package.json \
