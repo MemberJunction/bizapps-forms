@@ -113,18 +113,23 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
   `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a stale
   branch must be updated before it can merge. **Nobody can bypass it, including repo admins**
   (`current_user_can_bypass: never`, `bypass_actors: []`).
-- **Every gate reports on every PR, by design.** Path filtering lives in a job-level `if:` fed by
-  `scripts/check-paths-touched.mjs` — **never** in `on: paths:`. A workflow skipped by `on: paths:`
+- **Every gate reports on every PR, by design.** Path filtering lives in a job- or step-level `if:`
+  fed by `scripts/check-paths-touched.mjs` — **never** in `on: paths:` (`distribution-gate.yml` is
+  the one gate that filters at the step level rather than the job level, since only its 7-minute
+  mutant suite is expensive enough to be worth the condition). A workflow skipped by `on: paths:`
   creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
-  Waiting for status"); a job skipped by a job-level `if:` reports `skipped`, which counts as
-  passing. Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
+  Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
+  Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
 - **Known follow-up, and it will bite the next release:** the publish pipeline pushes *directly* to
   `main` (`ci/commit_push.mjs`, the `Version Packages [skip ci]` commit) and to `next`
-  (`ci/merge_main_and_update_lock.mjs`). Required status checks reject direct pushes, and `[skip ci]`
-  means no check can ever report — so those pushes are refused permanently. The natural fix, a
-  GitHub Actions bypass actor, is refused at repo level (`422 — Actor GitHub Actions integration must
-  be part of the ruleset source or owner organization`) and needs an org owner. Until that is
-  resolved, either add the bypass at org level or route those two pushes through pull requests.
+  (`ci/merge_main_and_update_lock.mjs`). Required status checks reject direct pushes outright.
+  `[skip ci]` is part of why no check can ever report on that commit, but it is not the deciding
+  fact: `changes.yml` carries only a `pull_request` trigger and no `push` trigger at all, so
+  `changes_and_migrations` could never report on a direct push even with `[skip ci]` removed. The
+  natural fix, a GitHub Actions bypass actor, is refused at repo level (`422 — Actor GitHub Actions
+  integration must be part of the ruleset source or owner organization`) and needs an org owner.
+  Until that is resolved, either add the bypass at org level or route those two pushes through pull
+  requests (tracked in #177).
 
 ## Build & dev commands
 - `pnpm install` (repo root only — never inside a package dir)

@@ -8,9 +8,10 @@ on:
   # release PR. See #173.
   #
   # No `paths:` filter either. A workflow skipped by `on: paths:` creates NO check run, so the PR
-  # hangs on "Expected — Waiting for status" forever; a job skipped by a job-level `if:` reports
+  # hangs on "Expected — Waiting for status" forever; a job or step skipped by an `if:` reports
   # `skipped`, which a required check treats as passing. The path list therefore moved down into
-  # the `scope` job, which is the only place it is now allowed to live.
+  # the `scope` job — a job-level `if:` here, though `distribution-gate.yml` makes the same move at
+  # step level for its one expensive step. Either is fine; `on: paths:` never is.
   push:
     branches: [next, main]
   pull_request:
@@ -32,6 +33,10 @@ jobs:
   #   - .github/scripts/** and this file: the gates themselves live here, and a PR editing only a
   #               gate script must still run the gate. Four releases shipped without the widget
   #               bundle because it did not.
+  #   - .claude/  same argument, for the hook specs: `lint:hook-guard:test` and `lint:git-gate:test`
+  #               run nowhere else in this repo, so a PR editing only a hook must still run this
+  #               job — otherwise the PR that disables a hook is exactly the PR that skips the
+  #               hook's own test.
   scope:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -69,6 +74,7 @@ jobs:
             scripts/ \
             smoke/ \
             .github/scripts/ \
+            .claude/ \
             .github/workflows/build.yml)
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           echo "build-and-test relevant: $RELEVANT"
@@ -85,6 +91,17 @@ jobs:
     # required check over a build that never ran. `scope` is not itself a required context, so its
     # red X would block nothing. This is the same fail-open rule check-paths-touched.mjs applies to
     # its own uncertainty, enforced one level up: if the decider could not decide, build.
+    #
+    # `!cancelled()` stays, not `always()`, even though a manually cancelled run on the head SHA
+    # leaves this job reporting `skipped` — which counts as passing. That is a real gap, and the
+    # trade was made deliberately rather than missed:
+    #   - `always()` in its place would close it, but GitHub's own guidance warns `always()` keeps a
+    #     job running after cancellation is requested, and this workflow sets
+    #     `concurrency: cancel-in-progress: true` — so every superseded push could start a 30-minute
+    #     build that nothing stops.
+    #   - The residual exposure is therefore a deliberate manual cancel on the head SHA by someone
+    #     with write access, which is visible in the run list — not a silent green.
+    #   - That trade is the reason for the choice; revisit it if the concurrency group ever changes.
     if: ${{ !cancelled() && (needs.scope.result != 'success' || needs.scope.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -154,6 +171,13 @@ jobs:
       # allow-cases in the spec are what stop a future "deny everything" from passing as a fix.
       - name: Commit-gate hook tests
         run: npm run lint:git-gate:test
+
+      # Duplicated deliberately. The `scope` job above also runs this spec, but `scope` is not
+      # itself a required context — a PR that weakened it would show a red X there that blocks
+      # nothing. This copy runs inside `build-and-test`, which IS required, so a weakened spec here
+      # fails a check the merge actually depends on.
+      - name: Path decider spec (required-job copy)
+        run: npm run lint:paths-touched:test
 
       # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
       # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a

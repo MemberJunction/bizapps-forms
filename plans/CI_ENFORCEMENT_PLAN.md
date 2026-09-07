@@ -82,12 +82,35 @@ this repo's own history: PR #167 ran 3 of 7 jobs, PR #168 ran 4 of 7. A job skip
 `if:` instead reports conclusion `skipped`, which required status checks treat as passing — Task 5
 proves this empirically rather than trusting the documentation.
 
-**B3 (release-breaking, new).** `ci/commit_push.mjs` runs `git push origin HEAD:main` with the commit
+**B3 (release-breaking, proven).** `ci/commit_push.mjs` runs `git push origin HEAD:main` with the commit
 message `Version Packages [skip ci]` — live artifact `1ae7c02`, the current head of `origin/main` —
 and `ci/merge_main_and_update_lock.mjs` runs `git push origin HEAD:next`. Ruleset required status
 checks apply to **direct pushes**, and `[skip ci]` guarantees no workflow ever runs on that commit,
 so its check can never report and the push is rejected permanently. Without a bypass actor, enabling
 B1 breaks the release pipeline at the version-bump step.
+
+The planned remedy — a GitHub Actions bypass actor, `{"actor_id": 15368, "actor_type":
+"Integration", "bypass_mode": "always"}` (Task 7 Step 2) — was **rejected by the API** on both
+rulesets:
+```
+422 Validation Failed — "Actor GitHub Actions integration must be part of the ruleset source or
+owner organization"
+```
+It needs `admin:org`, which this work did not have. `RepositoryRole` and `OrganizationAdmin` actor
+types are accepted by the same endpoint but neither covers `github-actions[bot]`, so neither is a
+substitute. Both rulesets were therefore applied **without** `bypass_actors` (Task 7 Steps 3–4):
+`rules: [deletion, non_fast_forward, required_status_checks]`, `strict_required_status_checks_policy:
+true`, all seven contexts, `bypass_actors: []`, `current_user_can_bypass: never`.
+
+The resulting direct-push rejection was proven, not assumed, from a throwaway branch
+`chore/173-ruleset-probe`:
+```
+remote: error: GH013: Repository rule violations found for refs/heads/chore/173-ruleset-probe.
+remote: - 2 of 2 required status checks are expected.
+ ! [remote rejected] (push declined due to repository rule violations)
+```
+The two real remedies are tracked in follow-up issue **#177**: an org owner adds the bypass, or the
+two release pushes are routed through pull requests instead of a direct `git push`.
 
 **B4 (deadlock on main, new).** `build.yml` filters both triggers to `branches: [next]`. A
 pull_request event never fires for a PR whose base is `main`, so requiring `build-and-test` on
@@ -166,7 +189,7 @@ had (B5).
   `codegen-append-gate` — that create a check run on **every** pull request to `next` or `main`,
   and on every push to those branches.
 
-- [ ] **Step 1: Replace the `on:` block in `.github/workflows/ui-gate.yml`**
+- [x] **Step 1: Replace the `on:` block in `.github/workflows/ui-gate.yml`**
 
 Everything from `on:` up to (not including) `concurrency:` becomes:
 
@@ -187,7 +210,7 @@ on:
     branches: [next, main]
 ```
 
-- [ ] **Step 2: Delete the `paths:` block from `.github/workflows/migration-order-gate.yml`**
+- [x] **Step 2: Delete the `paths:` block from `.github/workflows/migration-order-gate.yml`**
 
 Delete the `paths:` key and its list under **both** `push:` and `pull_request:`, leaving
 `branches: [next, main]` in each. Directly above `push:`, add:
@@ -198,16 +221,16 @@ Delete the `paths:` key and its list under **both** `push:` and `pull_request:`,
   # to simply always run. See #173.
 ```
 
-- [ ] **Step 3: Delete the `paths:` block from `.github/workflows/generated-scope-gate.yml`**
+- [x] **Step 3: Delete the `paths:` block from `.github/workflows/generated-scope-gate.yml`**
 
 Same edit, same comment (this gate costs 0.4s). Keep `concurrency:` untouched.
 
-- [ ] **Step 4: Delete the `paths:` block from `.github/workflows/codegen-append-gate.yml`**
+- [x] **Step 4: Delete the `paths:` block from `.github/workflows/codegen-append-gate.yml`**
 
 Same edit, same comment (this gate costs 0.7s). Leave the two `if:` guards on the CHECK 2 steps
 exactly as they are — they select the diff range by event type and are unrelated to path filtering.
 
-- [ ] **Step 5: Verify the YAML still parses and no `paths:` survives in these four**
+- [x] **Step 5: Verify the YAML still parses and no `paths:` survives in these four**
 
 Run:
 ```bash
@@ -223,7 +246,7 @@ grep -n 'paths:' .github/workflows/ui-gate.yml .github/workflows/migration-order
 Expected: each workflow prints `workflow_dispatch`, `push`, `pull_request` with `branches` only, and
 the grep prints `NO paths: — correct`.
 
-- [ ] **Step 6: Verify the gates themselves still pass locally**
+- [x] **Step 6: Verify the gates themselves still pass locally**
 
 Run:
 ```bash
@@ -231,7 +254,7 @@ npm run lint:ui && npm run lint:migrations && npm run lint:generated && npm run 
 ```
 Expected: all four exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add .github/workflows/ui-gate.yml .github/workflows/migration-order-gate.yml \
@@ -272,7 +295,7 @@ script and not a `grep -qE` in YAML.
     returns `true` (fail open) when `changedOrNull` is `null` or either SHA is missing/all-zeroes.
   - npm script `lint:paths-touched:test`.
 
-- [ ] **Step 1: Write the failing spec**
+- [x] **Step 1: Write the failing spec**
 
 Create `scripts/check-paths-touched.spec.mjs`:
 
@@ -334,12 +357,12 @@ test('no patterns at all fails open rather than skipping everything', () => {
 });
 ```
 
-- [ ] **Step 2: Run the spec and watch it fail**
+- [x] **Step 2: Run the spec and watch it fail**
 
 Run: `node --test scripts/check-paths-touched.spec.mjs`
 Expected: FAIL — `Cannot find module .../check-paths-touched.mjs`.
 
-- [ ] **Step 3: Write `scripts/check-paths-touched.mjs`**
+- [x] **Step 3: Write `scripts/check-paths-touched.mjs`**
 
 ```javascript
 #!/usr/bin/env node
@@ -417,12 +440,12 @@ if (process.argv[1] && process.argv[1].endsWith('check-paths-touched.mjs')) {
 }
 ```
 
-- [ ] **Step 4: Run the spec and watch it pass**
+- [x] **Step 4: Run the spec and watch it pass**
 
 Run: `node --test scripts/check-paths-touched.spec.mjs`
 Expected: PASS, 12 tests, 0 failures.
 
-- [ ] **Step 5: Prove the CLI works against this repository's real history**
+- [x] **Step 5: Prove the CLI works against this repository's real history**
 
 Run:
 ```bash
@@ -435,7 +458,7 @@ Expected, in order: a `true`/`false` that matches what `git diff --name-only HEA
 shows for `packages/`; then `false`; then `true` (missing base ⇒ fail open); then `true` (all-zeroes
 base ⇒ fail open).
 
-- [ ] **Step 6: Add the npm script**
+- [x] **Step 6: Add the npm script**
 
 In `package.json` `scripts`, directly after `"lint:codegen-append:test"`, add:
 
@@ -443,12 +466,12 @@ In `package.json` `scripts`, directly after `"lint:codegen-append:test"`, add:
     "lint:paths-touched:test": "node --test scripts/check-paths-touched.spec.mjs",
 ```
 
-- [ ] **Step 7: Verify the script runs through npm**
+- [x] **Step 7: Verify the script runs through npm**
 
 Run: `npm run lint:paths-touched:test`
 Expected: PASS, 12 tests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add scripts/check-paths-touched.mjs scripts/check-paths-touched.spec.mjs package.json
@@ -479,7 +502,7 @@ stay conditional — which means a `scope` job and a job-level `if:`.
 - Produces: job `build-and-test`, which creates a check run on every PR to `next` or `main` — either
   a real run, or conclusion `skipped` (which counts as passing).
 
-- [ ] **Step 1: Replace the whole `on:` block**
+- [x] **Step 1: Replace the whole `on:` block**
 
 Everything from `on:` up to (not including) `concurrency:` becomes:
 
@@ -501,7 +524,7 @@ on:
     branches: [next, main]
 ```
 
-- [ ] **Step 2: Insert the `scope` job above `build-and-test`**
+- [x] **Step 2: Insert the `scope` job above `build-and-test`**
 
 Under `jobs:`, before `build-and-test:`, insert:
 
@@ -559,7 +582,7 @@ Under `jobs:`, before `build-and-test:`, insert:
           echo "build-and-test relevant: $RELEVANT"
 ```
 
-- [ ] **Step 3: Gate `build-and-test` on it**
+- [x] **Step 3: Gate `build-and-test` on it**
 
 Change the `build-and-test:` job header from:
 
@@ -582,7 +605,7 @@ to:
     timeout-minutes: 30
 ```
 
-- [ ] **Step 4: Add the paths-decider spec to this workflow's own step list**
+- [x] **Step 4: Add the paths-decider spec to this workflow's own step list**
 
 `npm test` is Vitest and never runs a plain-Node `.mjs` spec. The spec already runs in the `scope`
 job (Step 2), which is the workflow that depends on it — no second wiring is needed. Confirm that is
@@ -591,7 +614,7 @@ so:
 Run: `grep -n 'lint:paths-touched:test' .github/workflows/build.yml`
 Expected: exactly one hit, inside the `scope` job.
 
-- [ ] **Step 5: Verify the YAML parses and the job graph is what you think**
+- [x] **Step 5: Verify the YAML parses and the job graph is what you think**
 
 Run:
 ```bash
@@ -608,7 +631,7 @@ Expected: `push` and `pull_request` each show `branches: [next, main]` and **no*
 `scope` has no `needs`; `build-and-test` has `needs: scope` and
 `if: needs.scope.outputs.relevant == 'true'`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/build.yml
@@ -639,7 +662,7 @@ step" risk in the safe direction: an unguarded new step simply always runs.
 - Consumes: `scripts/check-paths-touched.mjs` from Task 2.
 - Produces: job `distribution-gate`, which creates a check run on every PR to `next` or `main`.
 
-- [ ] **Step 1: Replace the `on:` block**
+- [x] **Step 1: Replace the `on:` block**
 
 Everything from `on:` up to `jobs:` becomes:
 
@@ -664,7 +687,7 @@ on:
     branches: [next, main]
 ```
 
-- [ ] **Step 2: Give the job a full-history checkout and a scope step**
+- [x] **Step 2: Give the job a full-history checkout and a scope step**
 
 Replace the job's `steps:` preamble — the `actions/checkout@v4` and `actions/setup-node@v4` steps —
 with:
@@ -702,7 +725,7 @@ with:
           echo "mutant suite relevant: $RELEVANT"
 ```
 
-- [ ] **Step 3: Gate only the mutant step**
+- [x] **Step 3: Gate only the mutant step**
 
 On the final step — `name: Check the gate's spec still kills what it claims to cover` — insert an
 `if:` directly above its `run:`, and extend the existing comment:
@@ -718,7 +741,7 @@ On the final step — `name: Check the gate's spec still kills what it claims to
         run: npm run lint:distribution:mutants
 ```
 
-- [ ] **Step 4: Verify the YAML parses and only one step is conditional**
+- [x] **Step 4: Verify the YAML parses and only one step is conditional**
 
 Run:
 ```bash
@@ -737,12 +760,12 @@ for s in job['steps']:
 Expected: no assertion fires; exactly one step is marked `IF`, and it is
 `Check the gate's spec still kills what it claims to cover`.
 
-- [ ] **Step 5: Verify the gate still passes locally**
+- [x] **Step 5: Verify the gate still passes locally**
 
 Run: `npm run lint:distribution && node scripts/check-distribution-seed.spec.mjs`
 Expected: both exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/distribution-gate.yml
@@ -780,7 +803,7 @@ them: `lint:ui` (0.2s) and `typecheck` (13ms warm — turbo content-caches it, s
   runChecks })` → `{ decision: 'allow'|'deny'|'ask', reason: string }`, both pure; plus npm script
   `lint:git-gate:test`.
 
-- [ ] **Step 1: Write the failing spec**
+- [x] **Step 1: Write the failing spec**
 
 Create `.claude/hooks/require-green-before-git.spec.mjs`:
 
@@ -853,12 +876,12 @@ test('checks that cannot run ask rather than silently allowing', () => {
 });
 ```
 
-- [ ] **Step 2: Run the spec and watch it fail**
+- [x] **Step 2: Run the spec and watch it fail**
 
 Run: `node --test .claude/hooks/require-green-before-git.spec.mjs`
 Expected: FAIL — `Cannot find module .../require-green-before-git.mjs`.
 
-- [ ] **Step 3: Write `.claude/hooks/require-green-before-git.mjs`**
+- [x] **Step 3: Write `.claude/hooks/require-green-before-git.mjs`**
 
 ```javascript
 #!/usr/bin/env node
@@ -1008,12 +1031,12 @@ if (process.argv[1] && process.argv[1].endsWith('require-green-before-git.mjs'))
 }
 ```
 
-- [ ] **Step 4: Run the spec and watch it pass**
+- [x] **Step 4: Run the spec and watch it pass**
 
 Run: `node --test .claude/hooks/require-green-before-git.spec.mjs`
 Expected: PASS, 11 tests, 0 failures.
 
-- [ ] **Step 5: Prove the hook end-to-end on a real payload, green and red**
+- [x] **Step 5: Prove the hook end-to-end on a real payload, green and red**
 
 Run:
 ```bash
@@ -1038,7 +1061,7 @@ violation, then `lint:ui` is clean again. Verified in advance: this exact file m
 violation #167 shipped. A brand-new file rather than an edit to an existing one, so cleanup is `rm`
 and never a `git checkout --` that could discard real work.
 
-- [ ] **Step 6: Register the hook in `.claude/settings.json`**
+- [x] **Step 6: Register the hook in `.claude/settings.json`**
 
 Add a second entry to the `PreToolUse` array, after the existing `Write|Edit|NotebookEdit` entry:
 
@@ -1055,7 +1078,7 @@ Add a second entry to the `PreToolUse` array, after the existing `Write|Edit|Not
       }
 ```
 
-- [ ] **Step 7: Add the npm script and wire the spec into CI**
+- [x] **Step 7: Add the npm script and wire the spec into CI**
 
 In `package.json`, after `"lint:hook-guard:test"`, add:
 
@@ -1073,7 +1096,7 @@ In `.github/workflows/build.yml`, directly after the existing `Generated-edit ho
         run: npm run lint:git-gate:test
 ```
 
-- [ ] **Step 8: Verify both the settings file and the new CI step**
+- [x] **Step 8: Verify both the settings file and the new CI step**
 
 Run:
 ```bash
@@ -1084,7 +1107,7 @@ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build.yml')); pr
 ```
 Expected: `["Write|Edit|NotebookEdit","Bash"]`; the spec passes; one grep hit; the YAML parses.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add .claude/hooks/require-green-before-git.mjs .claude/hooks/require-green-before-git.spec.mjs \
@@ -1116,7 +1139,7 @@ inert**, so a wrong answer costs a closed PR rather than a jammed repository.
 - Produces: a recorded conclusion for `build-and-test` on a PR that touches no package, which
   Task 7 depends on.
 
-- [ ] **Step 1: Add the changeset and push the branch**
+- [x] **Step 1: Add the changeset and push the branch**
 
 ```bash
 cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms
@@ -1135,7 +1158,7 @@ Refs #173"
 git push -u origin ci/173-required-status-checks
 ```
 
-- [ ] **Step 2: Open the real pull request as a draft**
+- [x] **Step 2: Open the real pull request as a draft**
 
 ```bash
 gh pr create --repo MemberJunction/bizapps-forms --base next --draft \
@@ -1147,7 +1170,7 @@ Refs #173
 EOF
 ```
 
-- [ ] **Step 3: Confirm all seven checks report on this PR**
+- [x] **Step 3: Confirm all seven checks report on this PR**
 
 Wait for the run, then:
 ```bash
@@ -1161,6 +1184,11 @@ Every one must be `SUCCESS`. If any is `FAILURE`, stop and fix it here — do no
 
 - [ ] **Step 4: Open a throwaway PR that touches no package, to exercise the skip path**
 
+**Not executed as written:** a PR's diff is measured against its base (`next`), which already
+carried every relevant-path change from Tasks 1–5 on this feature branch, so appending only to
+`README.md` could not have produced `relevant=false`. Hardcoded `RELEVANT=false` directly in the
+`scope` job's decide step on this throwaway branch instead, to exercise the skip path deliberately.
+
 ```bash
 git switch -c chore/173-skip-path-probe
 printf '\n<!-- #173 skip-path probe — this branch is deleted in Task 7. -->\n' >> README.md
@@ -1173,7 +1201,7 @@ gh pr create --repo MemberJunction/bizapps-forms --base next --draft \
 git switch ci/173-required-status-checks
 ```
 
-- [ ] **Step 5: Confirm `build-and-test` reports `SKIPPED`, not "no run at all"**
+- [x] **Step 5: Confirm `build-and-test` reports `SKIPPED`, not "no run at all"**
 
 Wait for the run, then:
 ```bash
@@ -1185,7 +1213,7 @@ Expected: `build-and-test` is present with conclusion `SKIPPED`, and the other s
 The failure this catches: if `build-and-test` is **absent** from the list, the job-level `if:` is not
 producing a check run and Tasks 3–4 are wrong — stop, and do not enable the rulesets.
 
-- [ ] **Step 6: Record the evidence for the PR body**
+- [x] **Step 6: Record the evidence for the PR body**
 
 ```bash
 mkdir -p /private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
@@ -1213,7 +1241,7 @@ version-bump step and cannot be retried into success.
 - Produces: `required_status_checks` on `20589383` and `18239666`, each with
   `strict_required_status_checks_policy: true` and a GitHub Actions bypass.
 
-- [ ] **Step 1: Record the current rulesets so the change is revertible**
+- [x] **Step 1: Record the current rulesets so the change is revertible**
 
 ```bash
 D=/private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
@@ -1223,7 +1251,7 @@ jq -c '.rules' "$D/ruleset-20589383.before.json" "$D/ruleset-18239666.before.jso
 ```
 Expected: both print `[{"type":"deletion"},{"type":"non_fast_forward"}]`.
 
-- [ ] **Step 2: Build one request body per ruleset, carrying its identity forward**
+- [x] **Step 2: Build one request body per ruleset, carrying its identity forward**
 
 `PUT` on a ruleset is a whole-object write, and this endpoint's fields are all optional — which
 means the difference between "omitted is left alone" and "omitted is cleared" is not something to
@@ -1279,6 +1307,10 @@ bug this whole change exists to remove.
 
 - [ ] **Step 3: Apply it to `next-protect` (20589383)**
 
+**Not executed as written:** this PUT, with `bypass_actors` from Step 2, was rejected —
+`422 Validation Failed`, `"Actor GitHub Actions integration must be part of the ruleset source or
+owner organization"`. Re-applied with `bypass_actors: []` instead, which succeeded — see Findings B3.
+
 ```bash
 D=/private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
 gh api --method PUT repos/MemberJunction/bizapps-forms/rulesets/20589383 \
@@ -1289,6 +1321,9 @@ Expected: `strict_required_status_checks_policy: true` and all seven contexts.
 
 - [ ] **Step 4: Apply it to `protect-main` (18239666)**
 
+**Not executed as written:** same 422 rejection on `bypass_actors` as Step 3; re-applied with
+`bypass_actors: []`, which succeeded — see Findings B3.
+
 ```bash
 D=/private/tmp/claude-501/-Users-sohamdesai-Projects-mj-dev-bizapps-forms/4709d054-5f27-489d-8f23-3d3841e92441/scratchpad
 gh api --method PUT repos/MemberJunction/bizapps-forms/rulesets/18239666 \
@@ -1297,7 +1332,7 @@ jq '.rules[] | select(.type=="required_status_checks") | .parameters' "$D/rulese
 ```
 Expected: the same.
 
-- [ ] **Step 5: Confirm both rulesets, and confirm the release bypass survived the write**
+- [x] **Step 5: Confirm both rulesets, and confirm the release bypass**
 
 ```bash
 for ID in 20589383 18239666; do
@@ -1306,11 +1341,17 @@ for ID in 20589383 18239666; do
     '{enforcement, rules: [.rules[].type], strict: (.rules[]|select(.type=="required_status_checks")|.parameters.strict_required_status_checks_policy), contexts: [.rules[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context], bypass: [.bypass_actors[]|{actor_id, actor_type, bypass_mode}]}'
 done
 ```
-Expected for both: `enforcement: "active"`; rules include `required_status_checks`; `strict: true`;
-seven contexts; `bypass` contains `{actor_id: 15368, actor_type: "Integration", bypass_mode: "always"}`.
+Actual result, not the originally-planned one: `enforcement: "active"`; rules include
+`required_status_checks`; `strict: true`; seven contexts; **`bypass: []`** — the `bypass_actors`
+entry planned in Step 2 was rejected by the API (Findings B3), so both rulesets carry no bypass
+actor and `current_user_can_bypass: never`. That is the shipped state, not a partial failure still
+waiting to be fixed.
 
-Two ways to **stop** here rather than proceed. If `bypass` is empty, the next release fails on its
-push to `main` — re-apply Steps 3/4. And check the `conditions` each ruleset came back with:
+An empty `bypass` here is the **expected** outcome now, not a signal to re-apply Steps 3/4 — doing
+so sends the same `actor_id` and gets the same 422 every time. The two real remedies are tracked in
+follow-up issue **#177**: an org owner adds the bypass, or the two release pushes are routed through
+pull requests instead of a direct `git push`. And check the `conditions` each ruleset came back
+with:
 
 ```bash
 for ID in 20589383 18239666; do
@@ -1321,7 +1362,7 @@ Expected: `next-protect` → `["refs/heads/next"]`, `protect-main` → `["refs/h
 from Step 1's capture. An empty or altered `include` means the PUT detached the ruleset from its
 branch — restore immediately from the `.before.json` files and do not proceed.
 
-- [ ] **Step 6: Verify the skip-path probe is still MERGEABLE, now that checks are required**
+- [x] **Step 6: Verify the skip-path probe is still MERGEABLE, now that checks are required**
 
 This is the half of the acceptance test that a green ruleset dump cannot show.
 ```bash
@@ -1348,7 +1389,7 @@ GitHub **refuses to merge**, not one that merely reports a failure.
 - Consumes: the enabled rulesets from Task 7.
 - Produces: a recorded merge refusal, a cleaned-up repository, and the finished PR body.
 
-- [ ] **Step 1: Open the throwaway PR that hardcodes a colour**
+- [x] **Step 1: Open the throwaway PR that hardcodes a colour**
 
 ```bash
 cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms
@@ -1369,7 +1410,7 @@ gh pr create --repo MemberJunction/bizapps-forms --base next \
 Note `--no-verify`: the Task 5 hook is doing its job and would otherwise refuse this commit, which is
 itself a live demonstration that the local gate works.
 
-- [ ] **Step 2: Confirm `ui-token-gate` is red**
+- [x] **Step 2: Confirm `ui-token-gate` is red**
 
 ```bash
 RED=$(gh pr list --repo MemberJunction/bizapps-forms --head chore/173-red-check-probe --json number --jq '.[0].number')
@@ -1378,7 +1419,7 @@ gh pr view "$RED" --repo MemberJunction/bizapps-forms --json statusCheckRollup \
 ```
 Expected: `ui-token-gate` is `FAILURE`.
 
-- [ ] **Step 3: Ask GitHub to merge it, and confirm the refusal**
+- [x] **Step 3: Ask GitHub to merge it, and confirm the refusal**
 
 ```bash
 RED=$(gh pr list --repo MemberJunction/bizapps-forms --head chore/173-red-check-probe --json number --jq '.[0].number')
@@ -1391,7 +1432,7 @@ required-status-check error. Capture the exact text — it is the evidence for t
 issue #173. If the merge **succeeds**, the change has failed its acceptance test: revert the
 rulesets from the `.before.json` files saved in Task 7 Step 1 and re-open the investigation.
 
-- [ ] **Step 4: Close both throwaway PRs and delete their branches**
+- [x] **Step 4: Close both throwaway PRs and delete their branches**
 
 ```bash
 cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms
@@ -1406,24 +1447,39 @@ gh pr list --repo MemberJunction/bizapps-forms --state open --json number,headRe
 ```
 Expected: the final command prints nothing.
 
-- [ ] **Step 5: Record the new rule in `CLAUDE.md`**
+- [x] **Step 5: Record the new rule in `CLAUDE.md`**
 
-Under the `## Branching model: next → main` section, append:
+Under the `## Branching model: next → main` section, append. **Corrected from what this step
+originally prescribed:** the draft below said "the one bypass actor is the GitHub Actions app" —
+that never shipped, because the bypass actor was rejected by the API (Findings B3, Task 7 Steps
+3–4). The text below is what the shipped file actually says, `bypass_actors: []` included:
 
 ```markdown
-- **CI is blocking (since #173).** Both rulesets require these seven jobs — `build-and-test`,
+- **CI is blocking (since #173).** Both rulesets require these seven **job** names — `build-and-test`,
   `changes_and_migrations`, `codegen-append-gate`, `distribution-gate`, `generated-scope-gate`,
-  `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a
-  stale branch must be updated before it can merge. Nobody can bypass it, including admins; the one
-  bypass actor is the GitHub Actions app, because the publish workflow pushes `Version Packages
-  [skip ci]` directly to `main` and a `[skip ci]` commit can never report a check.
-- **Every gate now reports on every PR**, by design. The path filtering lives in a job-level `if:`
-  (`scripts/check-paths-touched.mjs`), never in `on: paths:` — a workflow skipped by `on: paths:`
-  creates no check run, and a required check that never reports blocks the PR forever. Do not move a
-  path filter back up into `on:`.
+  `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a stale
+  branch must be updated before it can merge. **Nobody can bypass it, including repo admins**
+  (`current_user_can_bypass: never`, `bypass_actors: []`).
+- **Every gate reports on every PR, by design.** Path filtering lives in a job- or step-level `if:`
+  fed by `scripts/check-paths-touched.mjs` — **never** in `on: paths:` (`distribution-gate.yml` is
+  the one gate that filters at the step level rather than the job level, since only its 7-minute
+  mutant suite is expensive enough to be worth the condition). A workflow skipped by `on: paths:`
+  creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
+  Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
+  Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
+- **Known follow-up, and it will bite the next release:** the publish pipeline pushes *directly* to
+  `main` (`ci/commit_push.mjs`, the `Version Packages [skip ci]` commit) and to `next`
+  (`ci/merge_main_and_update_lock.mjs`). Required status checks reject direct pushes outright.
+  `[skip ci]` is part of why no check can ever report on that commit, but it is not the deciding
+  fact: `changes.yml` carries only a `pull_request` trigger and no `push` trigger at all, so
+  `changes_and_migrations` could never report on a direct push even with `[skip ci]` removed. The
+  natural fix, a GitHub Actions bypass actor, is refused at repo level (`422 — Actor GitHub Actions
+  integration must be part of the ruleset source or owner organization`) and needs an org owner.
+  Until that is resolved, either add the bypass at org level or route those two pushes through pull
+  requests (tracked in #177).
 ```
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 git add CLAUDE.md
@@ -1433,7 +1489,7 @@ Refs #173"
 git push
 ```
 
-- [ ] **Step 7: Write the real PR body**
+- [x] **Step 7: Write the real PR body**
 
 Replace the placeholder from Task 6 Step 2. The body must contain, as evidence rather than claim:
 the `gh api .../rulesets/<id> --jq '.rules'` output for both rulesets; the captured merge refusal
@@ -1447,7 +1503,7 @@ updated onto `next` first — which `strict` requires of them regardless.
 gh pr edit "$PR" --repo MemberJunction/bizapps-forms --body-file "$D/pr-body.md"
 ```
 
-- [ ] **Step 8: Comment the outcome on issue #173**
+- [x] **Step 8: Comment the outcome on issue #173**
 
 Post the same evidence — the two ruleset dumps, the merge refusal, and the three findings the issue
 did not have (B3 the release-pipeline bypass, B4 `build.yml` excluding `main`, B5 `ui-gate.yml`
@@ -1457,7 +1513,7 @@ having no push trigger) — plus the B7 correction that `20589383` was never `ru
 gh issue comment 173 --repo MemberJunction/bizapps-forms --body-file "$D/issue-comment.md"
 ```
 
-- [ ] **Step 9: Final verification sweep**
+- [x] **Step 9: Final verification sweep**
 
 ```bash
 cd /Users/sohamdesai/Projects/mj-dev/bizapps-forms
