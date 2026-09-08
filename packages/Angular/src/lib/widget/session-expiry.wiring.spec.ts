@@ -47,9 +47,35 @@ describe('the widget recognises an expired session on every path that talks to t
 
   it('routes the submit, the autosave and the load through the same reaction', () => {
     // One decision — "an expired session ends the fill" — made in one place and reached from
-    // each request that can discover it. Three call sites, not three copies of the rule.
+    // each request that can discover it. Four call sites, not four copies of the rule.
     const calls = component().match(/this\.endSessionIfExpired\(err\)/g) ?? [];
-    expect(calls.length).toBeGreaterThanOrEqual(3);
+    expect(calls.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('routes the KNOCKOUT SEAL through it too — it is a request like any other', () => {
+    // `trySeal` sends a completion, so it can meet the expiry first: `endEarly` calls `settle()`
+    // beforehand, which cancels the pending debounce WITHOUT firing it, so on a choice knockout
+    // the seal is the first request issued after the token lapses. Its catch used to swallow
+    // every throwable into a console.warn, which meant the one error the widget must react to by
+    // type was the one error this path discarded.
+    expect(component()).toMatch(
+      /the disqualification could not be recorded[\s\S]{0,400}?this\.endSessionIfExpired\(err\)/,
+    );
+  });
+
+  it('does not let an early ending overwrite the notice it just raised', () => {
+    // The bug this guards: `endEarly` writes a terminal phase UNCONDITIONALLY after two awaits
+    // (`settle()`, then `sealEarlyEnd()`), and the second of those can set phase='expired' —
+    // `flushNow` -> `savePartial` -> `endSessionIfExpired`. Nothing between them re-read the
+    // phase, so `phase.set('done')` tore the notice down, un-inerted the form, showed a knockout
+    // screen for an outcome that was never recorded, and fired `redirect()` if the screen had one.
+    // Before this feature there was no second terminal phase for that write to clobber.
+    const src = component();
+    const endEarly = src.match(/private async endEarly\([\s\S]*?\n  \}/)?.[0] ?? '';
+    expect(endEarly).not.toBe('');
+    // The phase must be re-read after the awaits and before anything terminal is written.
+    const guardBeforeDone = /await this\.sealEarlyEnd\(\);[\s\S]*?this\.phase\(\) === 'expired'[\s\S]*?return;[\s\S]*?this\.phase\.set\('done'\)/;
+    expect(endEarly).toMatch(guardBeforeDone);
   });
 
   it('withdraws submit while the session is expired', () => {

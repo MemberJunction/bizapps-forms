@@ -502,6 +502,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // `clientResponseId` — the primary-key collision the submit path guards the same way.
     await this.autosave?.settle();
     await this.sealEarlyEnd();
+    // Both awaits above can END THE FILL for a different reason: either writes through
+    // `savePartial`, which answers a lapsed session by setting the terminal `expired` phase. This
+    // method's ending is not the one that then applies. Without this re-read the unconditional
+    // `phase.set('done')` below tore the notice back down, un-inerted the form, and showed a
+    // knockout screen — with a redirect, if the screen carried one — for an outcome the server
+    // refused and never recorded. The write below predates the `expired` phase and was correct
+    // when `done` was the only terminal state; it is this feature that gave it something to clobber.
+    if (this.phase() === 'expired') {
+      return;
+    }
     // Disqualifying or not, the client does the SAME thing here: seal a completion and show the
     // screen. Which status gets written is the server's call, from the same shared outcome — an
     // ending jump to an unflagged screen is an ordinary completion (quota counts it, automations
@@ -567,6 +577,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
       console.warn(`[mj-form] the disqualification could not be recorded: ${why || 'refused'}`);
       return false;
     } catch (err) {
+      // A fourth request that can DISCOVER an expiry, and the first one to do so on a choice
+      // knockout: `endEarly` calls `settle()` beforehand, which cancels the pending debounce
+      // without firing it, so no autosave is in flight when this is sent. Routed through the same
+      // single decision as the other three rather than swallowed here — the log line below stays
+      // for every other refusal, which really is fail-soft background work.
+      this.endSessionIfExpired(err);
       console.warn(`[mj-form] the disqualification could not be recorded: ${String(err)}`);
       return false;
     }
