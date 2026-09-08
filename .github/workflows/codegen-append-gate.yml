@@ -25,32 +25,13 @@ on:
   workflow_dispatch:
   # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
   # land a tracked capture without the gate ever running.
+  # No `paths:` filter: this gate is a required check, and a workflow skipped by `on: paths:`
+  # creates no check run at all, which hangs the pull request on "Expected" forever. It costs 0.7s
+  # to simply always run. See #173.
   push:
     branches: [next, main]
-    paths:
-      - 'migrations/**'
-      # CHECK 1 is whole-tree on purpose (it's the only scope that catches a23b598), so the
-      # trigger has to be whole-tree too. The output folder is set by mj.config.cjs's
-      # SQLOutput.folderPath, not fixed at './migrations/codegen/' -- a capture committed
-      # anywhere else must still start this workflow.
-      - '**/CodeGen_Run_*.sql'
-      - 'scripts/check-codegen-append.mjs'
-      # The gate's own spec. `npm test` is Vitest and never runs a plain-Node .mjs spec, so without
-      # this entry a PR that weakened a case would run neither step.
-      - 'scripts/check-codegen-append.spec.mjs'
-      - '.github/workflows/codegen-append-gate.yml'
   pull_request:
     branches: [next, main]
-    paths:
-      - 'migrations/**'
-      # CHECK 1 is whole-tree on purpose (it's the only scope that catches a23b598), so the
-      # trigger has to be whole-tree too. The output folder is set by mj.config.cjs's
-      # SQLOutput.folderPath, not fixed at './migrations/codegen/' -- a capture committed
-      # anywhere else must still start this workflow.
-      - '**/CodeGen_Run_*.sql'
-      - 'scripts/check-codegen-append.mjs'
-      - 'scripts/check-codegen-append.spec.mjs'
-      - '.github/workflows/codegen-append-gate.yml'
 
 jobs:
   codegen-append-gate:
