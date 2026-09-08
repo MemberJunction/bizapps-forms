@@ -28,25 +28,33 @@ describe('redeemFailureToView', () => {
   // 410 asserts permanent removal, which is what crawlers and monitors would record for a form
   // that opens on schedule. 503 + Retry-After is "not now, and here is when" (bizapps-forms#118).
   describe('distribution-not-yet-open', () => {
+    // A PINNED PAIR, not one pinned date against the wall clock. `notYetOpenView` names the time
+    // only while the opening is still ahead of `now`, and `now` defaults to `new Date()` — so an
+    // `opensAt` literal on its own is true until that instant and false for every run after it.
+    // This one expired at 18:41:58Z on 2026-09-08 and took the suite red mid-afternoon, on a branch
+    // that had not touched this package. `redeemFailureToView` takes the clock for exactly this
+    // reason ("a testable decision instead of a hidden clock", `error-view.ts`); it just was not
+    // being passed one. The literal `opensAt` stays, because the assertions below read its wording.
+    const now = new Date('2026-09-08T12:00:00Z');
     const opensAt = new Date('2026-09-08T18:41:58Z');
 
     it('is a temporary 503, never the 410 that closed links get', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', opensAt).status).toBe(503);
+      expect(redeemFailureToView('distribution-not-yet-open', opensAt, now).status).toBe(503);
     });
 
     it('sends Retry-After as the HTTP-date of the opening time', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', opensAt).retryAfter).toBe(opensAt.toUTCString());
+      expect(redeemFailureToView('distribution-not-yet-open', opensAt, now).retryAfter).toBe(opensAt.toUTCString());
     });
 
     it('names when the form opens, in UTC, and says so', () => {
-      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt);
+      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt, now);
       expect(message).toContain('September 8, 2026');
       expect(message).toContain('6:41 PM');
       expect(message).toContain('UTC');
     });
 
     it('does not tell the holder the form is "no longer" taking responses', () => {
-      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt);
+      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt, now);
       expect(message).not.toBe(redeemFailureToView('distribution-closed').message);
       expect(message.toLowerCase()).not.toContain('no longer');
     });
