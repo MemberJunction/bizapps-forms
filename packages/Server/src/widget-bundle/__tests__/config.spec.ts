@@ -5,12 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
   LogError: vi.fn(),
+  LogStatus: vi.fn(),
 }));
 
 import { writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { LogError } from '@memberjunction/core';
+import { LogError, LogStatus } from '@memberjunction/core';
 import {
   getWidgetBundleConfig,
   resetWidgetBundleConfigForTests,
@@ -26,6 +27,7 @@ afterEach(() => {
   delete process.env.FORMS_WIDGET_SOURCEMAP_ENABLED;
   process.env.NODE_ENV = originalNodeEnv;
   vi.mocked(LogError).mockClear();
+  vi.mocked(LogStatus).mockClear();
   resetWidgetBundleConfigForTests();
 });
 
@@ -181,6 +183,32 @@ describe('widget sourcemap gate (#121)', () => {
     const cfg = getWidgetBundleConfig();
     expect(cfg.sourcemapEnabled).toBe(false);
     expect(cfg.sourcemapPath).toBeUndefined();
+  });
+
+  // The fail-open direction has to be AUDIBLE. `NODE_ENV` unset is the default for
+  // `node server.mjs` (the path docs/local-host.md documents) and nothing in this repo sets it,
+  // so a deploy that never exported it serves the map and would otherwise say nothing at all.
+  // Same posture as `warnOnceIfDefaultHashSalt` in http/hash-salt.ts: an insecure-by-omission
+  // default is allowed, but it announces itself once at boot.
+  it('warns that the map is public when nothing told the host whether it is production', () => {
+    stageBundleWithMap();
+    delete process.env.NODE_ENV;
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(true);
+    expect(vi.mocked(LogStatus)).toHaveBeenCalledWith(
+      expect.stringContaining('FORMS_WIDGET_SOURCEMAP_ENABLED'),
+    );
+  });
+
+  // ...but a host that HAS said what it is gets no warning: the operator answered the question,
+  // and a line printed on every boot everywhere is a line nobody reads.
+  it('does not warn when the host has declared its environment', () => {
+    stageBundleWithMap();
+    process.env.NODE_ENV = 'development';
+    resetWidgetBundleConfigForTests();
+    getWidgetBundleConfig();
+    expect(vi.mocked(LogStatus)).not.toHaveBeenCalled();
   });
 
   // A typo must not be silently read as either answer. The default for the environment applies

@@ -18,7 +18,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import { LogError } from '@memberjunction/core';
+import { LogError, LogStatus } from '@memberjunction/core';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -47,12 +47,29 @@ export interface WidgetBundleConfig {
   /**
    * Whether the sourcemap route serves the map at all (#121).
    *
-   * The route is public and unauthenticated, so on a production host it would hand the widget's
-   * full annotated source (8.5 MB) to anyone who opens devtools on a form. Default: ON unless
-   * `NODE_ENV=production` — the switch this host already uses for the same class of decision
-   * (Apollo stack traces). `FORMS_WIDGET_SOURCEMAP_ENABLED=true|false` overrides the default in
-   * either direction. When off, the route stays registered and answers 404, never the 401 that
-   * an unserved path falls through to.
+   * The route is public and unauthenticated, so on a production host it hands the widget's full
+   * annotated source (8.5 MB) to anyone who opens devtools on a form. Default: ON unless
+   * `NODE_ENV=production`. `FORMS_WIDGET_SOURCEMAP_ENABLED=true|false` overrides in either
+   * direction. When off, the route stays registered and answers 404, never the 401 that an
+   * unserved path falls through to.
+   *
+   * WHY A `NODE_ENV` DEFAULT, GIVEN THIS REPO'S OWN MISGIVINGS ABOUT ONE. The neighbouring
+   * decision — Apollo stack traces — was NOT left to `NODE_ENV`:
+   * `http/StacktraceRedactionMiddleware.ts` strips them unconditionally because "a production
+   * host is clean only for as long as its `NODE_ENV` stays exactly right". That reasoning is
+   * about a control that could be made unconditional at no cost; the same file still concludes
+   * `NODE_ENV=production` "remains the correct production setting" and is the only thing covering
+   * the three responses no plugin can reach. This gate cannot be unconditional, because the map
+   * is the thing a developer is *meant* to get — issue #121 asks for "enabled in development,
+   * disabled by default in production", and withholding it everywhere reinstates the confusing
+   * 401-on-a-reference-the-build-emits that this route was created to remove.
+   *
+   * So the default is allowed to fail OPEN, and is made AUDIBLE instead: a host that never
+   * declared `NODE_ENV` warns once at boot that the map is public (see
+   * {@link resolveSourcemapEnabled}). What leaks is annotated source of a **public,
+   * source-available** repository, so the real cost is 8.5 MB of bandwidth per devtools session
+   * rather than disclosure — which is what makes "warn loudly" proportionate here where
+   * "redact unconditionally" was right for stack traces carrying filesystem paths.
    */
   sourcemapEnabled: boolean;
   /**
@@ -91,11 +108,25 @@ export function getWidgetBundleConfig(): WidgetBundleConfig {
  * environment decides (served everywhere but production). Any other value is REJECTED AND LOGGED
  * rather than read as one of the answers — an operator who typed `yes` in production would
  * otherwise find the map withheld with nothing saying why.
+ *
+ * A host that declared neither variable is the fail-open case, and it warns rather than passing
+ * silently: `NODE_ENV` unset is what `node server.mjs` gives you (the path `docs/local-host.md`
+ * documents), nothing in this repo exports it, and the withheld-branch `LogStatus` in the
+ * middleware only ever fires when the gate is already doing its job. Once per process, at boot,
+ * exactly as `http/hash-salt.ts` announces the default session salt.
  */
 function resolveSourcemapEnabled(): boolean {
   const byDefault = process.env.NODE_ENV !== 'production';
   const explicit = process.env.FORMS_WIDGET_SOURCEMAP_ENABLED?.trim();
   if (explicit === undefined || explicit === '') {
+    if (process.env.NODE_ENV === undefined) {
+      LogStatus(
+        `[Forms] WARNING: NODE_ENV is not set, so the widget sourcemap at ${WIDGET_SOURCEMAP_ROUTE} ` +
+          `is being served PUBLICLY (8.5 MB of annotated source, no authentication). Set ` +
+          `NODE_ENV=production on a production host, or FORMS_WIDGET_SOURCEMAP_ENABLED=false to ` +
+          `withhold it here.`,
+      );
+    }
     return byDefault;
   }
   if (explicit === 'true' || explicit === 'false') {
