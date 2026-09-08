@@ -1,6 +1,6 @@
 @let q = question();
 
-<div class="mjf-question" [class.mjf-question--error]="!!errorMessage()">
+<div class="mjf-question" [id]="focusTargetId()" tabindex="-1" [class.mjf-question--error]="!!errorMessage()">
   @if (!isAnswerable()) {
     <div class="mjf-statement" role="note">
       <h3 class="mjf-statement__title">{{ q.prompt }}</h3>

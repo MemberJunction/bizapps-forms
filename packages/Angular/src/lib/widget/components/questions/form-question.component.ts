@@ -179,6 +179,18 @@ export class FormQuestionComponent {
   protected readonly labelId = computed(() => `${this.inputId()}-label`);
 
   /**
+   * The id of the question's outer container — where focus lands when the control cannot take it.
+   *
+   * A renderer moving focus to the question that failed validation asks the DOM for
+   * {@link inputId}, and only the native branches bind that id on an element. A group of buttons
+   * binds it nowhere, and neither do Ranking, Matrix, Doodle or the composites, so the lookup
+   * found nothing for thirteen of the twenty-five types and focus stayed on the Next button —
+   * the same fact as #117, one layer up: the id names a control a grouped question does not have.
+   * This container always renders, so there is always somewhere to land.
+   */
+  protected readonly focusTargetId = computed(() => `${this.inputId()}-question`);
+
+  /**
    * The A/B/C badge for the option at this position.
    *
    * Position, never the label or the value: the badge is a way to refer to a choice out loud
