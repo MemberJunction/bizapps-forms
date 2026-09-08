@@ -51,12 +51,18 @@ export class PublicFormResolver extends ResolverBase {
       if (!loaded.ok || !loaded.value) {
         return null;
       }
-      const { definition } = loaded.value;
-      // What an anonymous caller may see — including the `automations` narrowing — is decided by
-      // `publicFormPayload`, which is pure and asserted whole in `public-form-payload.spec.ts`.
-      // Inline here it was a contract narrowing nothing could test, and therefore one that could
-      // be deleted with the suite green.
-      return Object.assign(new PublishedFormType(), publicFormPayload(definition));
+      const { definition, distribution } = loaded.value;
+      // What an anonymous caller may see — the `automations` narrowing, and the distribution's
+      // captcha flag folded into the definition — is decided by `publicFormPayload`, which is pure
+      // and asserted whole in `public-form-payload.spec.ts`. Inline here it was a contract
+      // narrowing nothing could test, and therefore one that could be deleted with the suite green.
+      //
+      // `CaptchaRequired` is passed because the SUBMIT gate reads it and this query did not, so a
+      // link with it on demanded a token from a widget that was never told to collect one (#151).
+      return Object.assign(
+        new PublishedFormType(),
+        publicFormPayload(definition, distribution.CaptchaRequired),
+      );
     });
   }
 
