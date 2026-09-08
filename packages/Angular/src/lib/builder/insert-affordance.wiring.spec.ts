@@ -177,3 +177,52 @@ describe('the type picker takes focus when it opens', () => {
     expect(picker()).toMatch(/\.qtp:focus[^{]*\{[^}]*outline:\s*none/);
   });
 });
+
+describe('an empty section can add its first question', () => {
+  /**
+   * The empty state, comment-stripped, from its own div up to the question list that follows it.
+   * Sliced to the NEXT LANDMARK rather than to `</div>`, so a later nested element inside the
+   * block cannot silently shrink what these assertions read.
+   */
+  const emptyState = (): string => {
+    const source = html();
+    const start = source.indexOf('class="fb-canvas-empty"');
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf('class="fb-q-list"', start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
+  it('offers an add-content control, so the canvas can serve the one request it exists for', () => {
+    // The defect this replaced: the ONLY add-content button lived inside the question loop behind
+    // a selection gate, so a section with no questions had none — reproduced live on a new form
+    // and on a section whose last question was deleted (0 buttons in both).
+    const block = emptyState();
+    expect(block).toMatch(/<button/);
+    expect(block).toMatch(/class="fb-screen-add"/);
+  });
+
+  it('seams at index 0, the only seam an empty section has', () => {
+    // insertQuestionAt clamps with Math.min(seam.index, page.questions.length), so 0 on an empty
+    // page is exact rather than merely safe. Index 0 is also unreachable from the per-question
+    // bar, which always opens $index + 1 — the two openers cannot collide.
+    const block = emptyState();
+    expect(block).toMatch(/openTypePicker\(page,\s*0\)/);
+    expect(block).toMatch(/isPickerOpen\(page,\s*0\)/);
+    expect(block).toMatch(/<mjf-question-type-picker/);
+    expect(block).toMatch(/\(Picked\)="insertQuestionAt\(\$event\)"/);
+  });
+
+  it('no longer tells the author the palette is the only route', () => {
+    // The copy was a redirect to a different pane: the canvas could not do the thing it is for.
+    expect(emptyState()).not.toMatch(/Pick a question type from the left to start/);
+  });
+
+  it('does not put a dashed box inside a dashed box', () => {
+    // .fb-screen-add IS the dashed treatment. The empty state's own dashed frame was standing in
+    // for "nothing here yet"; with a real control inside, the frame is a second border 14px from
+    // the first and says nothing the control does not.
+    const rule = /\.fb-canvas-empty \{([^}]*)\}/.exec(css())?.[1] ?? '';
+    expect(rule).not.toMatch(/border:/);
+  });
+});

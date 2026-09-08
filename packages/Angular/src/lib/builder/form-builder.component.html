@@ -422,10 +422,36 @@
                 (change)="setPageDescription(page, pageDesc.value)"
               />
             }
+            <!-- An empty section's own way in. The add-content bar under a question is gated on
+                 that question being SELECTED — deliberately, because selection is a tap and hover
+                 is not — and an empty section has nothing to select, so the gate has no meaning
+                 here rather than an exception made to it. Without this the canvas had to send the
+                 author to the palette to do the one thing the canvas is for.
+
+                 Seam 0 is exact, not merely clamped: it is the only seam an empty page has, and
+                 the per-question bar always opens $index + 1, so the two openers cannot collide.
+                 No stopPropagation, unlike that bar: this does not sit inside a clickable card. -->
             @if (page.questions.length === 0) {
               <div class="fb-canvas-empty">
                 <i class="fa-solid fa-list-check" aria-hidden="true"></i>
-                <p>Pick a question type from the left to start building this form.</p>
+                <p>This section is empty. Add your first question here, or pick a type from the palette.</p>
+                <button
+                  type="button"
+                  class="fb-screen-add"
+                  [disabled]="busy"
+                  [attr.aria-label]="'Add the first question to section ' + ($index + 1)"
+                  [attr.aria-expanded]="isPickerOpen(page, 0)"
+                  (click)="openTypePicker(page, 0)"
+                >
+                  <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                  Add content
+                </button>
+                @if (isPickerOpen(page, 0)) {
+                  <mjf-question-type-picker
+                    (Picked)="insertQuestionAt($event)"
+                    (Dismissed)="closeTypePicker()"
+                  />
+                }
               </div>
             }
             <div

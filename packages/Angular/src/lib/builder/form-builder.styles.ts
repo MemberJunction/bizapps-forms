@@ -703,17 +703,22 @@ const LAYOUT_CSS = /* css */ `
 .fb-q-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .fb-q-btn--danger:hover:not(:disabled) { background: var(--mj-status-error-bg); color: var(--mj-status-error-text); }
 
+/* EMPTY SECTION. No dashed frame of its own: it holds an "Add content" button, and .fb-screen-add
+   IS the dashed treatment, so the frame became a second border 14px outside the first. It was
+   standing in for "nothing here yet" — the control now says that, and says what to do about it.
+   Padding trimmed with the frame gone: 56px was holding a box open, and there is no box. */
 .fb-canvas-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--mjf-gap-sm);
-  padding: 56px var(--mjf-card-pad);
+  padding: 32px var(--mjf-card-pad) var(--mjf-gap-sm);
   text-align: center;
   color: var(--mj-text-secondary);
-  border: 1px dashed var(--mj-border-default);
-  border-radius: var(--mjf-radius);
 }
+/* The stacking margin every canvas add-button carries is wrong for the last child of a flex column
+   that already has a gap — the same override .fb-q-add-btn makes, for the same reason. */
+.fb-canvas-empty .fb-screen-add { margin-bottom: 0; }
 .fb-canvas-empty i { font-size: 1.5rem; color: var(--mj-text-disabled); }
 .fb-canvas-empty p { margin: 0; font-size: var(--mjf-meta); }
 
