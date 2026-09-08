@@ -140,13 +140,56 @@ describe('every icon the templates ask for exists', () => {
 });
 
 describe('Ranking reorder buttons meet the tap-target minimum', () => {
-  // Contract test (documents rather than drove the number): WCAG 2.5.5 / the widget's own bar
-  // is 44 CSS px = 2.75rem, which every other control in the widget already meets. The arrows
-  // are the ONLY path for a respondent who cannot drag, and they measured 36 × 36 on a phone.
-  it('sizes .mjf-rank__move at 2.75rem square', () => {
-    const css = stripComments(readFileSync(join(__dirname, 'questions/form-question.component.css'), 'utf8'));
-    const rule = css.match(/\.mjf-rank__move\s*\{([^}]*)\}/)?.[1] ?? '';
-    expect(rule).toMatch(/width:\s*2\.75rem/);
-    expect(rule).toMatch(/height:\s*2\.75rem/);
+  // Contract test (documents rather than drove the number): WCAG 2.5.5 puts the bar at 44 CSS px
+  // = 2.75rem. These arrows are the ONLY reorder path for a respondent who cannot drag — the grip
+  // beside them is aria-hidden and pointer-only — and they measured 36 × 36 on a phone.
+  const rankCss = (): string =>
+    stripComments(readFileSync(join(__dirname, 'questions/form-question.component.css'), 'utf8'));
+  const rule = (css: string, selector: string): string =>
+    css.match(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+
+  it('declares the tap target once, at 2.75rem = 44 px', () => {
+    expect(rankCss()).toMatch(/--mjf-rank-tap:\s*2\.75rem/);
+  });
+
+  it('sizes .mjf-rank__move from that tap target', () => {
+    const move = rule(rankCss(), '.mjf-rank__move');
+    expect(move).toMatch(/width:\s*var\(--mjf-rank-tap\)/);
+    expect(move).toMatch(/height:\s*var\(--mjf-rank-tap\)/);
+  });
+});
+
+describe('the drag placeholder matches the row it replaces', () => {
+  // The arrows are the tallest thing in a `.mjf-rank__item`, so THEY set the row's height. The
+  // placeholder CDK swaps in during a drag carried its own `height: 3rem` literal, which did not
+  // move when the arrows went 36 px -> 44 px: the hole went from 10 px to 18 px shorter than the
+  // row that came out of it, defeating that rule's own stated intent ("so the list keeps its
+  // shape"). Matching the row's BOX rather than restating a height is what stops it drifting
+  // again — and it keeps them equal under device-pixel border rounding, which inflates both
+  // borders together on a fractional-DPR display.
+  const rankCss = (): string =>
+    stripComments(readFileSync(join(__dirname, 'questions/form-question.component.css'), 'utf8'));
+  const rule = (css: string, selector: string): string =>
+    css.match(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+
+  it('hard-codes no height of its own', () => {
+    expect(rule(rankCss(), '.mjf-rank__ghost')).not.toMatch(/(^|[^-])height:\s*[\d.]+(rem|px|em)/);
+  });
+
+  it('takes its content box from the same tap target as the arrows', () => {
+    expect(rule(rankCss(), '.mjf-rank__ghost')).toMatch(/min-height:\s*var\(--mjf-rank-tap\)/);
+  });
+
+  it('carries the same padding and border width as the row, so both round identically', () => {
+    const css = rankCss();
+    const ghost = rule(css, '.mjf-rank__ghost');
+    const item = rule(css, '.mjf-rank__item');
+    const itemPadding = /padding:\s*([^;]+);/.exec(item)?.[1].trim();
+    expect(itemPadding, 'the row must declare a padding to match').toBeTruthy();
+    expect(ghost).toContain(`padding: ${itemPadding};`);
+    // content-box, so min-height describes the same content the row's tallest child occupies
+    expect(ghost).toMatch(/box-sizing:\s*content-box/);
+    const border = (r: string): string | undefined => /border:\s*([\d.]+px)/.exec(r)?.[1];
+    expect(border(ghost), 'ghost border width').toBe(border(item));
   });
 });
