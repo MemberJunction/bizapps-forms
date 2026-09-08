@@ -43,7 +43,10 @@ describe('templateFingerprint — real differences', () => {
   it('does not report drift merely because keys serialize in a different order', () => {
     const a = def();
     const b = def();
-    const reordered = JSON.parse(JSON.stringify({ pages: b.pages, settings: b.settings, ...b }));
+    // `pages` and `settings` moved to the front; every other key keeps b's order. Destructured so the
+    // reorder is explicit — spreading b AFTER them would overwrite the two and TS says so.
+    const { pages, settings, ...rest } = b;
+    const reordered = JSON.parse(JSON.stringify({ pages, settings, ...rest }));
     expect(templateFingerprint(reordered)).toBe(templateFingerprint(a));
   });
 });

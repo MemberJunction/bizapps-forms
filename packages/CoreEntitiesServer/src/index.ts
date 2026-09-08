@@ -23,6 +23,10 @@ export {
   type IAnonymousMagicLinkMinter,
   type MintAnonymousInviteParams,
   type MintAnonymousInviteResult,
+  type InviteWriteHost,
+  type InviteWriteResult,
+  type InviteExpiryBounds,
+  type AnonymousCredentialRef,
 } from './magic-link/minter.js';
 export {
   getMagicLinkProvisioningConfig,
@@ -35,11 +39,14 @@ export {
   resolveExpiry,
   type DistributionProvisioningState,
   type ProvisioningDecision,
+  type ProvisioningReason,
 } from './magic-link/provisioning-decision.js';
 export {
   runProvisioning,
   DISTRIBUTION_ENTITY_NAME,
   type ProvisionContext,
   type ProvisionOutcome,
+  type MintedLink,
+  type PersistCredential,
 } from './magic-link/provision-runner.js';
 export { FormDistributionEntityServer } from './magic-link/FormDistributionEntityServer.js';

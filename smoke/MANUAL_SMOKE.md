@@ -153,6 +153,29 @@ Each row is *action → expected*. Mark ⚠️ and capture the evidence when exp
 - [ ] Decode the JWT → `role: "Form Respondent"`, `resourceId` = **this** distribution, `mj_anon: true`, sane expiry
 - [ ] Two separate fetches mint **distinct** `mj_sid`
 
+**Credential lifecycle (#104).** The automated end-to-end version of this is
+`pnpm run smoke:credentials` — it boots the harness in-process and drives the real hook, so run
+that FIRST and use the list below only for what a browser adds (the badge, the switch, the copy).
+The rows here exist because the server assertions used to have no home at all: every unit suite
+mocks the minter, so nothing checked that a revoked token actually stops redeeming.
+
+Run `pnpm run smoke:credentials:least-privilege` too. Every assertion in the suite above runs as the
+system user, which holds Developer — so it proves revocation works WHEN PERMITTED and nothing about
+which principals permit it. That gap was a live defect (#114): the credential write lands on a core
+entity no Forms seed grants, so on a host whose authors are not Developers, pausing a link returned
+green and left the token redeeming. The second suite seeds exactly that author and repeats the
+operations as them, with a System control beside each one.
+
+- [ ] Turn *Open to responses* OFF → the row's `MagicLinkInviteID` and `PublicLinkToken` are both
+      NULL, and the invite is `Revoked`
+- [ ] `POST /magic-link/redeem` with the OLD raw token → refused, `errorCode: "revoked"`
+- [ ] The badge reads **Paused** and does NOT claim the token was withdrawn if the columns are
+      still populated (a failed revoke is fail-soft and leaves them)
+- [ ] Turn it back ON → a NEW token, the **same** `/f/<slug>`, and the old token still refused
+- [ ] `Reissue link` → new token, same slug, previous invite `Revoked`, previous token refused
+- [ ] The switch reads OFF for a row at `Status='Active', IsActive=0`, and clicking it REOPENS
+- [ ] Delete a link with no responses → its invite is `Revoked`, not left `Active`
+
 ### F. Public GraphQL — read
 - [ ] `PublishedForm` with the right slug → correct ids, `renderMode`, `settingsJSON`
 - [ ] `PublishedForm` with **another form's** slug → `null`

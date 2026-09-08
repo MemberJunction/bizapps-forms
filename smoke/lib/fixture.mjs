@@ -258,8 +258,14 @@ export function answerFor(question, { email, name } = {}) {
     case 'YesNo':
       return { booleanValue: true };
     case 'Date':
-    case 'Time':
       return { dateValue: new Date(0).toISOString() };
+    // A Time answer is a bare clock reading, NOT an instant — the wire format `<input type="time">`
+    // emits and the only one the server accepts (#116, `contracts/answer-date.ts`). This shared the
+    // `Date` case until the format was pinned, sending an ISO instant that every Time question now
+    // refuses with "Enter a valid time.", which would have failed every smoke that submits a
+    // response against a form carrying one.
+    case 'Time':
+      return { dateValue: '09:30' };
     case 'MultiChoice':
       return optionValue ? { jsonValue: JSON.stringify([optionValue]) } : null;
     case 'SingleChoice':
@@ -270,12 +276,51 @@ export function answerFor(question, { email, name } = {}) {
       return { textValue: email ?? 'smoke@example.com' };
     case 'Phone':
       return { textValue: '+1 555 010 1234' };
+    case 'Website':
+      return { textValue: 'https://example.com/smoke' };
+    case 'OpinionScale':
+      // Default bounds are 1..10 (`opinionScaleBounds`); 1 is inside every scale an author can set,
+      // since the minimum is the one end that is always offered.
+      return { numericValue: opinionScaleMinimum(question) };
+    case 'Checkbox':
+    case 'Legal':
+      return { booleanValue: true };
+    case 'Ranking':
+      // Every offered option exactly once, in the order offered — the only ranking that is valid
+      // whatever the options are.
+      return optionValues(question).length > 0 ? { jsonValue: JSON.stringify(optionValues(question)) } : null;
+    case 'Address':
+      return { jsonValue: JSON.stringify({ line1: '1 Smoke Street', city: 'Testville', postalCode: '00000' }) };
+    case 'ContactInfo':
+      return { jsonValue: JSON.stringify({ name: name ?? 'Smoke Check', email: email ?? 'smoke@example.com' }) };
+    case 'ShortText':
+    case 'LongText':
+      return { textValue: /name/i.test(question.prompt ?? '') && name ? name : 'smoke check' };
     case 'Doodle':
     case 'FileUpload':
-      return null;
+    case 'Matrix':
+    case 'Statement':
     default:
-      return { textValue: /name/i.test(question.prompt ?? '') && name ? name : 'smoke check' };
+      // DECLINE rather than guess. A Doodle, a file or a Matrix needs a real artifact or the
+      // form's own rows and columns; a Statement takes no answer at all; and a type this table
+      // has never heard of is one the server will validate in a way this cannot predict. Until
+      // 2026-09-01 this branch sent `'smoke check'` for all of them, and the first form with a
+      // Website question turned every submitting smoke red with "Enter a valid web address." —
+      // a message that reads like a product defect and was the fixture lying about the form.
+      // `buildAnswers` skips a declined optional question and throws on a required one.
+      return null;
   }
+}
+
+/** The values a choice-bearing question offers, in the order it offers them. */
+function optionValues(question) {
+  return (question.options ?? []).map((o) => o.value ?? o.label).filter((v) => v !== undefined && v !== null);
+}
+
+/** The lowest point on an OpinionScale — its settings' `min`, or the contract's default of 1. */
+function opinionScaleMinimum(question) {
+  const raw = question.settings?.min;
+  return typeof raw === 'number' ? Math.trunc(raw) : 1;
 }
 
 /**

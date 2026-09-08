@@ -18,6 +18,7 @@ import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { getPublicSubmitConfig } from './config';
 import { createStageTimer, formatTimings } from './stage-timer';
 import {
+  CAPTCHA_NOT_CONFIGURED_MESSAGE,
   endingMessage,
   endingRedirectUrl,
   hasUnreachableAutomations,
@@ -33,6 +34,8 @@ import {
   type FieldError,
   type mjBizAppsFormsFormResponseEntityType,
   type PublishedFormScreen,
+  type FormQuestionType,
+  type PublishedFormDefinition,
 } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition, type ResolvedDefinition } from './definition-loader.service';
 import { fireOnSubmitHooks, type HookFireResult } from './on-submit-hooks.service';
@@ -59,10 +62,11 @@ import {
   completionCeilingKey,
   knockoutCeilingKey,
   rateLimitKey,
+  sessionIdentity,
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
-import { captchaRequired, verifyTurnstile } from './turnstile.service';
+import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
 import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
 import {
   evaluateProvenance,
@@ -144,8 +148,8 @@ export interface PipelineContext {
   fetchImpl?: typeof fetch;
   /**
    * Injectable hook firing for tests; defaults to the real ActionEngine path. Hooks run under
-   * the system user (resolved inside {@link fireOnSubmitHooks}), NOT the anonymous respondent,
-   * so no context user is threaded here.
+   * the scoped automation principal (resolved inside {@link fireOnSubmitHooks}, fail-closed),
+   * NOT the anonymous respondent, so no context user is threaded here.
    */
   fireHooks?: (
     ctx: { responseId: string; formId: string; formVersionId: string; distributionId: string },
@@ -251,6 +255,42 @@ function scoreFor(resolved: ResolvedDefinition, answers: ReadonlyMap<string, Ans
   return computeScore(resolveVisibleQuestions(resolved.definition.pages, answers), answers);
 }
 
+/**
+ * An author-configured redirect URL, or `undefined` when its scheme cannot be trusted.
+ *
+ * The widget follows the echoed URL with `window.location.assign` on whatever site embeds it, so
+ * a `javascript:` (or `data:`) URL here is script injection into the embedding page's origin.
+ * The widget validates too, but a bespoke client consuming the mutation directly gets only this
+ * check — so any URL that names a scheme must name http(s). A RELATIVE URL (no scheme) is passed
+ * through: it cannot smuggle a scheme, and only the client knows the base to resolve it against.
+ */
+function safeRedirectUrl(raw: string | undefined): string | undefined {
+  const url = raw?.trim();
+  if (!url) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.warn(`[forms] dropping an ending-screen redirect URL with a disallowed scheme (${parsed.protocol}).`);
+      return undefined;
+    }
+  } catch {
+    // No absolute scheme — a relative URL. The WHATWG parser strips tabs/newlines and lowercases
+    // the scheme before this throw, so anything scheme-bearing lands in the branch above.
+    //
+    // THIS IS DELIBERATELY MORE PERMISSIVE THAN THE WIDGET, and the asymmetry is not an oversight.
+    // The widget parses WITH the page as base, so it can judge a relative URL and refuses anything
+    // that still fails to parse. The server has no base to resolve against — only the client knows
+    // what page the widget is embedded in — so "did not parse" here means "relative", and the only
+    // safe reading of an unparseable relative URL is to pass it on and let the client, which CAN
+    // resolve it, make the call. The consequence is real and bounded: a string like `http://[`
+    // is echoed by the server and refused by the widget. It cannot name a scheme (that is the
+    // branch above), so it cannot execute; the worst case is a client that fails to navigate.
+  }
+  return url;
+}
+
 function confirmationFields(
   resolved: ResolvedDefinition,
   answers?: ReadonlyMap<string, AnswerValue>,
@@ -258,7 +298,7 @@ function confirmationFields(
   const { settings, endScreens } = resolved.definition;
   const map = answers ?? new Map<string, AnswerValue>();
   const ending = resolveEndingScreen(endScreens ?? [], map, { score: scoreFor(resolved, map) });
-  const redirectUrl = endingRedirectUrl(ending, settings);
+  const redirectUrl = safeRedirectUrl(endingRedirectUrl(ending, settings));
   return {
     // A redirect and a confirmation message are alternatives, not companions: sending both lets
     // a client that ignores the redirect show a message meant for a page nobody lands on.
@@ -291,11 +331,24 @@ export function resetSubmitInFlightForTests(): void {
 }
 
 /**
+ * What the respondent is told when a stage threw instead of returning a result. Authored, and
+ * deliberately says nothing about what happened: the exception's own words are for the log.
+ */
+export const SUBMIT_FAILED_MESSAGE = 'Something went wrong while submitting your response. Please try again.';
+
+/**
  * Run the full pipeline behind the process-wide in-flight cap.
  *
  * The cap wraps the WHOLE pipeline in a `finally` so its slot releases on every exit — refusal or
  * success. Over capacity we refuse immediately with a clean result (never a throw that would blank
  * the widget), because holding the request would be the resource exhaustion this defends against.
+ *
+ * NEVER THROWS. Every gate returns a result, but a stage can still throw — a bug, a driver that
+ * throws where it should return false, `RangeError: Invalid time value` from a Date the validator
+ * could not parse (#116). An exception that escapes here reaches Apollo, which puts the exception's
+ * own words into `errors[].message`, and the widget renders that to the anonymous respondent — on a
+ * production host too, since nothing about it is a stack trace (#119). So the boundary is here: the
+ * exception goes to the log with the request it belonged to, and the respondent gets one sentence.
  */
 export async function runSubmitPipeline(
   ctx: PipelineContext,
@@ -306,6 +359,15 @@ export async function runSubmitPipeline(
   }
   try {
     return await runSubmitPipelineInner(ctx, submission);
+  } catch (err: unknown) {
+    // Slug and version identify the request; the answers are deliberately not logged (they are
+    // the respondent's data, and the failure is not about their content).
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    LogError(
+      `[Forms] submit for ${submission.distributionSlug} (version ${submission.formVersionId}, ` +
+        `partial=${submission.partial === true}) threw: ${detail}`,
+    );
+    return fail(SUBMIT_FAILED_MESSAGE);
   } finally {
     submitInFlightLimiter().Exit();
   }
@@ -318,8 +380,14 @@ async function runSubmitPipelineInner(
 ): Promise<FormSubmissionResult> {
   // Timed end to end. "The submit is slow" is a report nobody can act on across eleven
   // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
-  // trip or a dedupe query can each outweigh the write. `report` is called on EVERY exit,
-  // including refusals, because a slow rejection is still a slow request.
+  // trip or a dedupe query can each outweigh the write. `report` is called on every exit OF THIS
+  // FUNCTION, including refusals, because a slow rejection is still a slow request.
+  //
+  // The one exit it does not cover is an exception, which unwinds past it to `runSubmitPipeline`'s
+  // catch. That exit emits the `… threw:` line instead, which carries the exception and its stack —
+  // strictly more useful than a timing breakdown for a stage that did not finish. Said here because
+  // this comment used to claim EVERY exit, and an operator who greps for a `[Forms] submit` line to
+  // pair with a failure would otherwise conclude the request never arrived.
   const timer = createStageTimer();
   const report = <T extends FormSubmissionResult>(result: T): T => {
     LogStatus(`[Forms] submit ${formatTimings(timer.finish())}${refusalSuffix(result)}`);
@@ -411,6 +479,20 @@ async function runSubmitPipelineInner(
   const needCaptcha =
     complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
+  if (!turnstile.success && turnstile.errorCode === TURNSTILE_NOT_CONFIGURED) {
+    // The one refusal here that is not the respondent's doing: this form or link asks for a
+    // captcha and the host never configured Turnstile. Said as such — to them, without blame,
+    // and to the operator, by setting name. The boot-time readiness check reports the same
+    // condition for whatever required a captcha at startup; this catches what was published
+    // after it. Same shape as every other refusal (a result, not a throw) so the widget renders
+    // it rather than a blank screen (#122).
+    LogError(
+      `[Forms] submit to '${submission.distributionSlug}' requires a captcha but FORMS_TURNSTILE_SECRET is ` +
+        `not set on this host. Set FORMS_TURNSTILE_SECRET and FORMS_TURNSTILE_SITE_KEY, or turn the captcha ` +
+        `off on that form or link. Refusing as a server misconfiguration.`,
+    );
+    return report(fail(CAPTCHA_NOT_CONFIGURED_MESSAGE));
+  }
   if (!turnstile.success) {
     return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
   }
@@ -534,6 +616,9 @@ async function runSubmitPipelineInner(
         distributionId: resolved.distribution.ID,
         clientMeta: submission.clientMeta,
         clientResponseId: submission.clientResponseId,
+        // The screen, not merely the fact. On the zero-answer knockout path this is the row's
+        // entire content — see the field's note in `source-metadata.service.ts`.
+        disqualifiedByScreenId: disqualifiedBy?.id,
       }),
       answers: validation.answers,
       existingResponseId: existingPartial.response?.ID,
@@ -541,7 +626,7 @@ async function runSubmitPipelineInner(
     },
     ctx.elevatedUser,
   );
-  if (!persisted.ok) {
+  if (persisted.outcome === 'failed') {
     return report(fail(persisted.message));
   }
 
@@ -638,7 +723,7 @@ function terminalRepeatFields(
 function disqualificationFields(
   screen: PublishedFormScreen,
 ): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
-  const redirectUrl = screen.redirectURL?.trim() || undefined;
+  const redirectUrl = safeRedirectUrl(screen.redirectURL);
   const copy = [screen.title, screen.body].filter((t) => !!t?.trim()).join('\n\n');
   return {
     confirmationMessage: redirectUrl ? undefined : copy || SCREENED_OUT_MESSAGE,
@@ -655,7 +740,9 @@ function disqualificationFields(
  *   (a) per (session, distribution) — the fine-grained limit for a client that identifies itself
  *       honestly. Keyed on the `x-session-id` header, which the caller chooses, so a caller who
  *       wants a fresh bucket simply sends a new value. Useful for shaping a real widget's
- *       behaviour, worthless as a ceiling — and treating it as one was the defect.
+ *       behaviour, worthless as a ceiling — and treating it as one was the defect. Charged only
+ *       when the caller actually named a session: blank is not one caller, it is every
+ *       header-less caller at once (see `sessionIdentity`).
  *   (b) per (caller, distribution) — keyed on the resolved peer IP, which the caller cannot
  *       rotate. This is the ceiling. It does not make abuse impossible; it makes it cost
  *       ADDRESSES, which is the only currency a public endpoint can charge.
@@ -674,14 +761,21 @@ function rateLimitGatesFor(
   knockout: boolean,
 ): RateLimitGate[] {
   const config = getPublicSubmitConfig();
-  const gates: RateLimitGate[] = [
-    { key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax },
-  ];
   const identity = abuseIdentity(ctx.clientIpHash);
+  const gates: RateLimitGate[] = [];
+  // (a) is a per-CALLER gate, so it is charged only where it has a caller. A blank session is
+  // every header-less client at once, and this is the tightest bucket of the four — so charging
+  // them together refuses each of them for the others' traffic rather than for abuse, which is
+  // the shared kill switch `abuseIdentity` refuses to build for the ceilings. The exception is
+  // the case where nothing else can be keyed either: with no address, this coarse
+  // per-distribution circuit breaker is the only bound there is, and one is better than none.
+  // `warnOnceIfAbuseKeyingDegraded` has already announced that mode.
+  if (sessionIdentity(ctx.sessionId) || !identity) {
+    gates.push({ key: rateLimitKey({ sessionId: ctx.sessionId, distributionId }), max: config.rateLimitMax });
+  }
   if (!identity) {
-    // No resolved IP, so (b) and (c) have nothing to key on. They are omitted rather than keyed
-    // on something weaker — see `abuseIdentity`. Gate (a) is untouched, so this is exactly the
-    // behaviour that shipped before the ceilings existed, and the warning above has said so.
+    // No resolved IP, so (b), (c) and (d) have nothing to key on. They are omitted rather than
+    // keyed on something weaker — see `abuseIdentity`.
     return gates;
   }
   gates.push({ key: saveCeilingKey(distributionId, identity), max: config.ipRateLimitMax });
@@ -963,8 +1057,9 @@ async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinitio
     );
   }
 
-  // Default firer runs under the system user internally; the anonymous ctx.contextUser is
-  // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
+  // Default firer resolves the scoped automation principal internally (fail-closed, like
+  // `runConfiguredAutomations`); the anonymous ctx.contextUser is intentionally NOT passed
+  // (on-submit automations are privileged — see fireOnSubmitHooks).
   const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
   try {
     await fire({
@@ -1074,6 +1169,7 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
           formVersionId: resolved.version.ID,
           distributionId: resolved.distribution.ID,
           answers: context.canonicalAnswers,
+          questionTypes: questionTypesOf(resolved.definition),
           principal,
           allowedEntities: allowedBindingEntities(),
         }),
@@ -1082,4 +1178,18 @@ async function runConfiguredAutomations(resolved: ResolvedDefinition, responseId
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[forms] automations failed for response ${responseId}: ${message}`);
   }
+}
+/**
+ * Every question's type, keyed by id, for consumers that must write an answer onward in a shape
+ * the destination can hold. `CanonicalAnswers` carries values without types by design; entity
+ * binding needs both to decide whether a `Time` is an instant or a clock at its target column.
+ */
+function questionTypesOf(definition: PublishedFormDefinition): ReadonlyMap<string, FormQuestionType> {
+  const types = new Map<string, FormQuestionType>();
+  for (const page of definition.pages) {
+    for (const question of page.questions) {
+      types.set(question.id, question.type);
+    }
+  }
+  return types;
 }

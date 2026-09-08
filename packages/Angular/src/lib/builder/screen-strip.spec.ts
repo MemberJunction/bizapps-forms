@@ -13,7 +13,7 @@ function definition(overrides: Partial<PublishedFormDefinition> = {}): Published
     formVersionId: 'v1',
     name: 'Test form',
     renderMode: 'Scroll',
-    settings: {},
+    settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
     pages: [],
     automations: [],

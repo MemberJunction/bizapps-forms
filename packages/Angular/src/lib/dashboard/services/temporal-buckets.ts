@@ -30,15 +30,37 @@ const TIME_BANDS: { label: string; untilHour: number }[] = [
   { label: 'Night (9pm–midnight)', untilHour: 24 },
 ];
 
-/** "Mar 2026" — the month a date falls in, sortable by the key beside it. */
+/**
+ * "Mar 2026" — the month a date falls in, sortable by the key beside it.
+ *
+ * Reads UTC, for the same reason {@link bandOf} does: a `Date` answer is stored as UTC MIDNIGHT of
+ * the day the respondent picked (`answer-date.ts` in forms-entities), so local fields give the
+ * previous day for every viewer west of Greenwich. Only the 1st of a month crosses a month
+ * boundary, which is what made this survive — the bucket is right on 29 days in 30 and silently
+ * wrong on the 30th. In Chicago a `2026-09-01` answer was filed under "Aug 2026", and an epoch
+ * date under "Dec 1969".
+ *
+ * BOTH halves read UTC, and they have to move together: the key comes from the date fields and the
+ * label from `toLocaleDateString`, so correcting one alone yields a card that sorts under September
+ * and is captioned "Aug 2026". `timeZone: 'UTC'` pins the instant while leaving the viewer's LOCALE
+ * alone — a French reader still gets "sept. 2026" — because the locale was never the problem.
+ */
 function monthOf(date: Date): { key: string; label: string } {
-  const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  const label = date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  const key = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+  const label = date.toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
   return { key, label };
 }
 
+/**
+ * The part of the day a stored `Time` falls in.
+ *
+ * Reads the UTC hour, because that is what a stored Time IS: the contract (`answer-date.ts` in
+ * forms-entities) stores `14:30` as `1970-01-01T14:30:00Z`, the UTC fields being the answer.
+ * `getHours()` would give the viewer's local reading of that instant — 08:30 in Chicago — and
+ * file an afternoon under "Morning" for every viewer outside UTC.
+ */
 function bandOf(date: Date): { key: string; label: string } {
-  const hour = date.getHours();
+  const hour = date.getUTCHours();
   for (const [index, band] of TIME_BANDS.entries()) {
     if (hour < band.untilHour) return { key: String(index), label: band.label };
   }
