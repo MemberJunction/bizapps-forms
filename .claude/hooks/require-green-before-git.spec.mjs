@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isGitWriteCommand, decisionFor, classifyCheckResult } from './require-green-before-git.mjs';
+import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf } from './require-green-before-git.mjs';
 
 const green = () => [];
 const red = () => [{ name: 'lint:ui', output: "hardcoded color: DefaultColor: '#6366f1'," }];
@@ -166,4 +166,26 @@ test('a check killed before it finished throws rather than reporting a failure',
 
 test('a check with no exit status at all throws', () => {
     assert.throws(() => classifyCheckResult('lint:ui', { status: null, stdout: '', stderr: '' }), /lint:ui/);
+});
+
+// ── Which tree gets checked ─────────────────────────────────────────────────────────────────────
+// The hook used to run both checks in `CLAUDE_PROJECT_DIR`, which keeps naming the launch checkout
+// after a session enters a git worktree. A worktree session was therefore refused for a stranger's
+// half-finished edit in the main checkout, and — the direction that actually matters — a broken
+// worktree would have been waved through because the main checkout was green.
+
+test('resolves the worktree root, not the checkout the session started in', () => {
+    // This spec file lives in a linked worktree whenever the suite runs from one, so the assertion
+    // is simply: whatever git says is the top of THIS tree is a directory this file sits under.
+    const top = gitToplevelOf(new URL('.', import.meta.url).pathname);
+    assert.ok(top, 'git rev-parse --show-toplevel should answer inside the repo');
+    assert.ok(
+        new URL('.', import.meta.url).pathname.startsWith(top),
+        `the hook's own directory should sit under the resolved toplevel (got ${top})`,
+    );
+});
+
+test('answers null outside a repository, so the caller can fall back rather than crash', () => {
+    // A hook that threw here would break every Bash call in a non-repo cwd.
+    assert.equal(gitToplevelOf('/'), null);
 });
