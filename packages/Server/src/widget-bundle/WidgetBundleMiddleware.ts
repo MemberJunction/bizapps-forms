@@ -22,6 +22,17 @@
  * the slot a public static asset wants. Same negotiation, threshold and level as everything else
  * MJAPI serves; nothing compression-specific lives here. The Upload/Download/Asset routes in
  * this package contribute handlers the same way.
+ *
+ * WHAT ELSE MOVING SLOTS BUYS, ON PURPOSE. `GetPreAuthMiddleware` contributions are mounted as
+ * ONE ordered `app.use` chain, so the bundle is no longer ahead of every other pre-auth handler
+ * — it is behind them. That includes MJ's own `RateLimitMiddleware`, a global IP-keyed limiter
+ * (`enabled: false` by default). Under the old registration this route bypassed it entirely; it
+ * no longer does, and a host that switches rate limiting on will see the bundle counted and
+ * eventually answer 429. That is the right trade — a 1.2 MB unauthenticated asset is the largest
+ * amplification target here, and exempting it would be the surprising choice — but the failure
+ * mode is worth knowing, because a respondent whose bundle is refused sees a BLANK FORM rather
+ * than any rate-limit message. Forms cannot pick its position in that chain anyway: the order
+ * comes from ClassFactory registration order across every middleware the host loads.
  */
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
@@ -106,13 +117,16 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
    * GET and HEAD, like the `app.get` this replaced (Express routes HEAD to GET handlers, and
    * `sendFile` answers HEAD with headers only). Anything else passes through untouched.
    *
+   * "Its own path" means the same set of URLs `app.get` claimed — see {@link matchesRoute}.
+   *
    * The bundle and its sourcemap differ only in which config property they read, their content
    * type, and whether a missing file deserves a log — so they share this rather than carrying two
    * copies of the same send-with-fallbacks dance.
    */
   private serveStaticAsset(asset: StaticAsset): RequestHandler {
+    const route = asset.route.toLowerCase();
     return (req: Request, res: Response, next: NextFunction): void => {
-      if ((req.method !== 'GET' && req.method !== 'HEAD') || req.path !== asset.route) {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || !matchesRoute(req.path, route)) {
         next();
         return;
       }
@@ -163,6 +177,27 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
         });
     };
   }
+}
+
+/**
+ * Does `requestPath` name `lowercaseRoute`, on the same terms `app.get` used?
+ *
+ * A plain `!==` is NOT equivalent to the `app.get(ROUTE, ...)` this replaced. That registered an
+ * Express Layer, whose path is compiled by path-to-regexp under the app's `case sensitive
+ * routing` and `strict routing` settings — both OFF by default — so it also answered
+ * `/Forms/Widget/MJ-Form.js` and a single trailing slash. Moving the route to the pre-auth slot
+ * was about WHERE it sits relative to compression, and must not quietly narrow WHAT it answers:
+ * a mis-cased `FORMS_WIDGET_BUNDLE_URL` would otherwise fall through to MJAPI's authenticated
+ * routes and return the same confusing 401 the sourcemap half of #121 exists to eliminate.
+ *
+ * Deliberately no wider than the router was, which is why this is not a general normaliser:
+ * exactly one trailing slash is dropped (`…js//` stays unclaimed, as it was), and nothing is
+ * percent-decoded (`…mj-form%2Ejs` stays unclaimed, as it was). Verified against both shapes on
+ * live servers across 14 method/URL cases; these two rules are the whole difference.
+ */
+function matchesRoute(requestPath: string, lowercaseRoute: string): boolean {
+  const withoutTrailingSlash = requestPath.endsWith('/') ? requestPath.slice(0, -1) : requestPath;
+  return withoutTrailingSlash.toLowerCase() === lowercaseRoute;
 }
 
 /** One unauthenticated static file this middleware serves. */

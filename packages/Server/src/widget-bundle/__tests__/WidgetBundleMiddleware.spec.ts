@@ -292,6 +292,25 @@ describe('widget bundle transfer (#121)', () => {
     });
   });
 
+  // The route this replaced was `app.get(WIDGET_BUNDLE_ROUTE, ...)`, i.e. an Express Layer, whose
+  // path is compiled under the app's `case sensitive routing` and `strict routing` settings — both
+  // OFF by default. So `app.get` also answered `/Forms/Widget/MJ-Form.js` and a trailing slash. A
+  // hand-rolled `req.path !== route` has neither property, and dropping them is a narrowing this
+  // change never intended: the sourcemap half of #121 exists precisely to stop a widget URL
+  // answering 401, and a mis-cased `FORMS_WIDGET_BUNDLE_URL` would land on exactly that.
+  // Measured on live express servers, these three are the ONLY cases where the two shapes differ.
+  it('claims the same URLs the app.get route did — case and one trailing slash', async () => {
+    stageBundle(join('opt', 'app', 'dist', 'widget'));
+    await withServer(async (get) => {
+      expect((await get('/Forms/Widget/MJ-Form.js')).status).toBe(200);
+      expect((await get('/FORMS/WIDGET/MJ-FORM.JS')).status).toBe(200);
+      expect((await get(`${WIDGET_BUNDLE_ROUTE}/`)).status).toBe(200);
+      // ...without widening it either: two slashes and a percent-encoded dot were 401 before.
+      expect((await get(`${WIDGET_BUNDLE_ROUTE}//`)).status).toBe(401);
+      expect((await get('/forms/widget/mj-form%2Ejs')).status).toBe(401);
+    });
+  });
+
   // A handler that claims its own path must leave every other path alone — MJAPI's own routes
   // are mounted behind it, and a handler that answered 404 for a path it did not own would shadow
   // them. The catch-all in `mountLikeMJServer` is what makes "left alone" observable.
