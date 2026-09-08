@@ -43,6 +43,18 @@ describe.each(renderModes)('$mode mode asks the bar for both facts', ({ ts, html
     expect(body).toMatch(/isFormValid\(\)/);
   });
 
+  it('does not promise a submit the widget itself would refuse (#124)', () => {
+    // "You can submit now." and "Please answer at least one question before submitting." were on
+    // screen together: nothing is INVALID on a form of optional questions, so `isFormValid` is
+    // true, while the #124 gate refuses the submit. Readiness has to mean the submit would be
+    // accepted, not merely that no field is in error.
+    const source = stripped(ts);
+    const declaration = source.slice(source.indexOf('readyToSubmit'));
+    const body = declaration.slice(0, declaration.indexOf(';'));
+
+    expect(body).toMatch(/wouldSubmitNothing\(\)/);
+  });
+
   it('renders no bar at all when the form has nothing to answer', () => {
     // One predicate, read off the runtime, so the two modes cannot drift into disagreeing about
     // when the bar is worth showing. A bar over an empty set reports either "done" or "not

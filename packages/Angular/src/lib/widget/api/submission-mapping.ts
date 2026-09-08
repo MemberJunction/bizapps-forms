@@ -10,15 +10,23 @@
  */
 import type { ClientMeta, FormAnswerInput, FormSubmissionInput } from '@mj-biz-apps/forms-entities';
 
-/** `FormAnswerInputType` per WP-B's SDL: `jsonValue` is a JSON STRING, `dateValue` a String. */
+/**
+ * `FormAnswerInputType` per WP-B's SDL: `jsonValue` is a JSON STRING, `dateValue` a String.
+ *
+ * Every typed field is `| null` to match the contract: a `nullable: true` GraphQL field may carry
+ * an explicit `null`, and typing it as merely optional is what let a `null.trim()` reach the
+ * public write path twice. This widget never SENDS a null — `answer-value.ts` only sets the one
+ * column an answer uses — but the type is the wire's, not this client's, and the lock below pins
+ * the two together.
+ */
 export interface FormAnswerInputType {
   questionId: string;
-  textValue?: string;
-  numericValue?: number;
-  dateValue?: string;
-  booleanValue?: boolean;
-  jsonValue?: string;
-  fileId?: string;
+  textValue?: string | null;
+  numericValue?: number | null;
+  dateValue?: string | null;
+  booleanValue?: boolean | null;
+  jsonValue?: string | null;
+  fileId?: string | null;
 }
 
 /** `FormSubmissionInputType` per WP-B's SDL (answers use {@link FormAnswerInputType}). */
@@ -106,8 +114,8 @@ type AssertExact<T extends true> = T;
 type _LockAnswer = AssertExact<Exact<Omit<FormAnswerInput, 'jsonValue'>, Omit<FormAnswerInputType, 'jsonValue'>>>;
 // jsonValue is a scalar union, not an object — assert it directly (Id<> is for object shapes).
 type _LockAnswerJson = AssertExact<
-  [FormAnswerInputType['jsonValue']] extends [string | undefined]
-    ? ([string | undefined] extends [FormAnswerInputType['jsonValue']] ? true : false)
+  [FormAnswerInputType['jsonValue']] extends [string | null | undefined]
+    ? ([string | null | undefined] extends [FormAnswerInputType['jsonValue']] ? true : false)
     : false
 >;
 

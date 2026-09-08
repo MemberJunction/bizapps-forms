@@ -73,7 +73,7 @@ function contextFor(definition: PublishedFormDefinition): PipelineContext {
     contextUser: makeContextUser(),
     elevatedUser: makeContextUser(),
     sessionId: 'sess-score',
-    fireHooks: async () => {},
+    fireHooks: async () => [],
   };
 }
 

@@ -42,7 +42,7 @@ node MJ/packages/MJCLI/bin/run.js dev workspace --force --clean-members \
 ```
 
 **This step is not optional and symlinks are not a substitute.** Published
-`@memberjunction/core@6.1.0-edge.2` and MJ's *source* `6.1.0-edge.2` are different code under the
+`@memberjunction/core@6.1.0-edge.5` and MJ's *source* `6.1.0-edge.5` are different code under the
 same version string — the source has `BaseEntity.InitializeEmbeddedRecords`, the published copy does
 not. Without one shared store, our generated entity subclasses extend a different `BaseEntity` than
 MJAPI uses and the API dies during bootstrap with ~94 `newObject.InitializeEmbeddedRecords is not a

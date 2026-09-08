@@ -92,7 +92,14 @@ export class FormOneQuestionComponent {
    * This is the signal the progress bar used to carry by reading 100% early (#88).
    */
   protected readonly readyToSubmit = computed(
-    () => this.isLast() && !this.primaryDisabled() && this.runtime().isFormValid(),
+    () =>
+      this.isLast() &&
+      !this.primaryDisabled() &&
+      this.runtime().isFormValid() &&
+      // ...and the submit would actually be ACCEPTED. `isFormValid` only asks whether any field is
+      // in error, which nothing is on a form of blank optional questions — so without this the bar
+      // said "You can submit now." beside the #124 banner refusing that exact submit.
+      !this.runtime().wouldSubmitNothing(),
   );
 
   constructor() {

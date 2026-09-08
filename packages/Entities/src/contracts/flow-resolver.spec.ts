@@ -30,7 +30,7 @@ function page(id: string, displayOrder: number, questions: PublishedFormQuestion
 }
 
 /** `Go to <target>` when q1 answers `value`. */
-function goTo(target: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['target'] : never, value = 'skip'): ConditionalRule {
+function goTo(target: NonNullable<ConditionalRule['jump']>[number]['target'], value = 'skip'): ConditionalRule {
   return { jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value }] }, target }] };
 }
 
@@ -421,7 +421,7 @@ describe('endsWithoutSubmit', () => {
  * everything, which is visible, complainable, and loses nobody's data.
  */
 describe('a Go to rule with no conditions', () => {
-  const pages = (when: ConditionalRule['jump'] extends (infer R)[] | undefined ? R['when'] : never) => [
+  const pages = (when: NonNullable<ConditionalRule['jump']>[number]['when']) => [
     page('p1', 0, [q('q1', 0, { conditionalRule: { jump: [{ when, target: { kind: 'question', id: 'q3' } }] } }), q('q2', 1), q('q3', 2)]),
   ];
 

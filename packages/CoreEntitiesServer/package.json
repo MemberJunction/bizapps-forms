@@ -2,7 +2,7 @@
   "name": "@mj-biz-apps/forms-core-entities-server",
   "type": "module",
   "version": "0.10.0",
-  "description": "Server-side entity subclasses for MJ Forms — lifecycle hooks (validation, hardening, cross-record invariants) that run only on the server.",
+  "description": "Server-side entity subclasses for MJ Forms \u2014 lifecycle hooks (validation, hardening, cross-record invariants) that run only on the server.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "publishConfig": {
@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "tsc && tsc-alias -f",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "vitest run"
   },
   "author": "MemberJunction.com",
@@ -25,10 +26,10 @@
     "@mj-biz-apps/forms-entities": "0.10.0"
   },
   "peerDependencies": {
-    "@memberjunction/core": "^6.1.0-edge.1",
-    "@memberjunction/core-entities": "^6.1.0-edge.1",
-    "@memberjunction/global": "^6.1.0-edge.1",
-    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.1"
+    "@memberjunction/core": "^6.1.0-edge.5",
+    "@memberjunction/core-entities": "^6.1.0-edge.5",
+    "@memberjunction/global": "^6.1.0-edge.5",
+    "@memberjunction/sqlserver-dataprovider": "^6.1.0-edge.5"
   },
   "repository": {
     "type": "git",

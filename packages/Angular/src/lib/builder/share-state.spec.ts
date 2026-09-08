@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   autoShareName,
   formReach,
+  credentialMayStillRedeem,
+  isOpenToResponses,
   shareState,
   SHARE_LINK_FIELDS,
   type ShareLinkFacts,
@@ -75,11 +77,24 @@ describe('shareState', () => {
   });
 
   describe('when several things are wrong at once', () => {
-    it('puts a missing link ahead of every other reason', () => {
+    it('calls a paused link paused, even though pausing takes its token away', () => {
+      // The order of these two flipped with bizapps-forms#104. A paused link now
+      // legitimately has no token — pausing revokes the credential — so leading with
+      // "Not ready · Issue the link" would send the author to a button when the honest
+      // answer is the switch they themselves turned off.
+      const state = shareState(
+        link({ PublicLinkToken: null, Status: 'Closed', OpenAt: FUTURE, MaxResponses: 0 }),
+        NOW,
+      );
+      expect(state.kind).toBe('paused');
+      expect(state.fix).toBe('Turn it back on');
+    });
+
+    it('puts a missing link ahead of every calendar or cap reason', () => {
       // Telling someone their never-issued link is merely "Scheduled" sends them to
       // edit a date when the actual problem is that the host never minted a token.
       const state = shareState(
-        link({ PublicLinkToken: null, Status: 'Closed', OpenAt: FUTURE, MaxResponses: 0 }),
+        link({ PublicLinkToken: null, OpenAt: FUTURE, MaxResponses: 0 }),
         NOW,
       );
       expect(state.kind).toBe('pending');
@@ -245,5 +260,175 @@ describe('autoShareName', () => {
 
   it('leaves names the author chose alone', () => {
     expect(autoShareName(['Careers poster', 'Homepage'])).toBe('Share link');
+  });
+});
+
+describe('what a paused link is told about its token', () => {
+  it('never claims the token "has been withdrawn", because this state cannot know that', () => {
+    // Two reachable paused rows never held a token to withdraw: `Draft` is the column's own
+    // DEFAULT, so anything creating a distribution outside the builder starts there; and a link
+    // the host could never mint for is switched off with nothing to revoke. Revocation is also
+    // fail-soft server-side, so even the usual case is not something these facts establish.
+    for (const facts of [{ Status: 'Draft' as const }, { IsActive: false }, { Status: 'Closed' as const }]) {
+      const { detail } = shareState(link({ PublicLinkToken: null, ...facts }), NOW);
+      expect(detail, JSON.stringify(facts)).not.toMatch(/has been withdrawn/i);
+    }
+  });
+
+  it('still promises a fresh token at the same address on reopening, which is true in every case', () => {
+    const { detail } = shareState(link({ Status: 'Closed', PublicLinkToken: null }), NOW);
+    expect(detail).toMatch(/fresh one at the same/i);
+  });
+});
+
+describe('isOpenToResponses', () => {
+  // The predicate behind the "Open to responses" switch. It exists as one exported function
+  // because it had been written out three times — in `stateKind`, in the switch's own
+  // `[class.is-on]`, and in `toggleOpen`'s `reopening` — and two of the three copies were
+  // wrong in the same way: they read `Status` alone.
+  it('needs BOTH halves, because that is what the server needs', () => {
+    // `decideProvisioning` warrants a credential on `status === 'Active' && isActive`, and
+    // `openForResponses` writes both. A predicate that reads one of them answers a different
+    // question from the one the switch is labelled with.
+    expect(isOpenToResponses(link())).toBe(true);
+    expect(isOpenToResponses(link({ Status: 'Closed' }))).toBe(false);
+    expect(isOpenToResponses(link({ Status: 'Draft' }))).toBe(false);
+    expect(isOpenToResponses(link({ IsActive: false }))).toBe(false);
+  });
+
+  it('is false for the row the switch used to render as ON', () => {
+    // Status='Active' with IsActive=0 is the exact shape `openForResponses` was written for
+    // (see its docstring). Reading `Status` alone renders the switch ON for a link the server
+    // treats as paused and whose credential it has revoked — and then the click handler, using
+    // the same half-predicate, decides it is "already open" and CLOSES it. The control showed
+    // the wrong state and then did the opposite of what it offered.
+    const halfOff = link({ Status: 'Active', IsActive: false });
+    expect(isOpenToResponses(halfOff)).toBe(false);
+    expect(shareState(halfOff, NOW).kind).toBe('paused');
+  });
+
+  it('agrees with the badge in every combination', () => {
+    // The two must never disagree: a switch reading ON beside a "Paused" badge is a
+    // contradiction the author cannot resolve from the screen.
+    for (const Status of ['Active', 'Draft', 'Closed'] as const) {
+      for (const IsActive of [true, false]) {
+        const facts = link({ Status, IsActive });
+        expect(isOpenToResponses(facts), `${Status}/${IsActive}`).toBe(
+          shareState(facts, NOW).kind !== 'paused',
+        );
+      }
+    }
+  });
+});
+
+describe('a paused link is honest about its access token', () => {
+  // The server's revocation is fail-soft BY DESIGN: `FormDistributionEntityServer.Save()`
+  // logs a failed revoke and still returns true, because a distribution save must not fail
+  // over provisioning. So "the author clicked pause, the save came back green, and the
+  // credential is still redeemable" is a real, reachable outcome. It was once the ONLY outcome
+  // on any host whose form authors are not Developers, because the write ran as the caller
+  // (bizapps-forms#114); it is now an ordinary failure rather than a whole class of deployment.
+  //
+  // The record carries the evidence, because the server leaves the credential LINKED
+  // precisely so the next save retries it. The badge must read that evidence rather than
+  // assert the happy path from Status alone.
+  it('does not claim withdrawal while the record still carries a token', () => {
+    const stillTokened = shareState(link({ Status: 'Closed', PublicLinkToken: 'tok_abc' }), NOW);
+    expect(stillTokened.kind).toBe('paused');
+    expect(stillTokened.detail).not.toMatch(/holds no working access token/);
+    expect(stillTokened.detail).toMatch(/withdraw/i);
+  });
+
+  it('does claim it once the token is gone, which is what withdrawal looks like', () => {
+    // The pair is cleared together and only after a successful revoke, so an empty token on
+    // a paused link IS the server reporting the credential dead.
+    const withdrawn = shareState(link({ Status: 'Closed', PublicLinkToken: null }), NOW);
+    expect(withdrawn.kind).toBe('paused');
+    expect(withdrawn.detail).toMatch(/holds no working access token/);
+  });
+
+  it('still offers the same one-click remedy either way', () => {
+    // Both are paused and both are cured by turning it back on; only the sentence differs.
+    for (const PublicLinkToken of ['tok_abc', null]) {
+      const state = shareState(link({ Status: 'Closed', PublicLinkToken }), NOW);
+      expect(state.fix, String(PublicLinkToken)).toBe('Turn it back on');
+      expect(state.accepting, String(PublicLinkToken)).toBe(false);
+      expect(state.label, String(PublicLinkToken)).toBe('Paused');
+    }
+  });
+});
+
+describe('credentialMayStillRedeem', () => {
+  // The evidence a fail-soft revoke leaves behind, named once so the badge and the
+  // post-close warning read it the same way.
+  it('is true for a link that is off but still advertising a token', () => {
+    expect(credentialMayStillRedeem(link({ Status: 'Closed', PublicLinkToken: 'tok_abc' }))).toBe(true);
+    expect(credentialMayStillRedeem(link({ IsActive: false, PublicLinkToken: 'tok_abc' }))).toBe(true);
+  });
+
+  it('is false once the pair has been cleared — that is what a landed revoke looks like', () => {
+    expect(credentialMayStillRedeem(link({ Status: 'Closed', PublicLinkToken: null }))).toBe(false);
+  });
+
+  it('is false for a live link, whose token is SUPPOSED to redeem', () => {
+    // The obvious mis-read: a working live link is not a failed revocation.
+    expect(credentialMayStillRedeem(link())).toBe(false);
+  });
+
+  it('says exactly what the paused badge says, so the two cannot drift', () => {
+    for (const Status of ['Active', 'Closed'] as const) {
+      for (const PublicLinkToken of ['tok_abc', null]) {
+        const facts = link({ Status, PublicLinkToken });
+        const claimsWithdrawn = /holds no working access token/.test(shareState(facts, NOW).detail);
+        expect(credentialMayStillRedeem(facts), `${Status}/${PublicLinkToken}`).toBe(
+          shareState(facts, NOW).kind === 'paused' && !claimsWithdrawn,
+        );
+      }
+    }
+  });
+});
+
+describe('the paused detail claims only what the record can prove', () => {
+  // The predicate this text is built on documents its own limit: credentialMayStillRedeem is
+  // "nothing here proves it was withdrawn", NOT "the token is definitely still redeemable".
+  // The sentence must not go further than the predicate.
+  //
+  // It matters because both server failure branches leave the SAME row. `revoke-failed` means
+  // the invite is untouched and the token really does still redeem; `unlink-failed` means the
+  // revoke LANDED — the invite is Revoked, the token is dead — and only the record's copy of it
+  // is stale. Identical columns, opposite truths. Asserting the first is wrong half the time,
+  // and wrong in the reassuring direction is the half that matters less: telling an author a
+  // dead token is live costs them a needless panic, where the reverse costs them a live leak.
+  const detailOf = (t: string | null) =>
+    shareState(link({ Status: 'Closed', PublicLinkToken: t }), NOW).detail;
+
+  it('does not assert the token is still redeemable', () => {
+    expect(detailOf('tok_abc')).not.toMatch(/can still be traded|is still redeemable/i);
+  });
+
+  it('does not assert the withdrawal has not happened', () => {
+    expect(detailOf('tok_abc')).not.toMatch(/has NOT been withdrawn|was not withdrawn/i);
+  });
+
+  it('still warns — hedging must not become silence', () => {
+    // The whole point is that the author is told. A detail that says nothing is as wrong as
+    // one that overclaims, just quieter.
+    const detail = detailOf('tok_abc');
+    expect(detail).toMatch(/withdraw/i);
+    expect(detail).toMatch(/may|might|not confirmed|treat/i);
+    expect(detail).not.toBe(detailOf(null));
+  });
+});
+
+describe('a link that was never turned on is not told to turn itself back on', () => {
+  it('gives a Draft link its own detail, with no claim about a withdrawal', () => {
+    // `Draft` is the column's own default, so an Action or an import lands here. The static
+    // paused copy says "while it is off" and "turning it back on" about a link that was never
+    // on, and reads as if something was withdrawn. Nothing was.
+    const draft = shareState(link({ Status: 'Draft', IsActive: true, PublicLinkToken: null }), NOW);
+    expect(draft.kind).toBe('paused');
+    expect(draft.detail).toMatch(/not been turned on/i);
+    expect(draft.detail).not.toMatch(/back on/);
+    expect(draft.detail).not.toMatch(/withdraw/i);
   });
 });

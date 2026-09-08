@@ -32,12 +32,13 @@ import { steppableSections } from '../core/section-stepper';
 import { clampCursor } from '../core/stepper';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
+import { IconComponent } from './icon.component';
 
 @Component({
   selector: 'mjf-form-scroll',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormProgressComponent, FormQuestionComponent],
+  imports: [FormProgressComponent, FormQuestionComponent, IconComponent],
   templateUrl: './form-scroll.component.html',
   styleUrls: ['./form-scroll.component.css'],
 })
@@ -118,7 +119,14 @@ export class FormScrollComponent {
    * bar can report fill honestly and this can say the thing the respondent actually needed to hear.
    */
   protected readonly readyToSubmit = computed(
-    () => this.isLast() && !this.primaryDisabled() && this.runtime().isFormValid(),
+    () =>
+      this.isLast() &&
+      !this.primaryDisabled() &&
+      this.runtime().isFormValid() &&
+      // ...and the submit would actually be ACCEPTED. `isFormValid` only asks whether any field is
+      // in error, which nothing is on a form of blank optional questions — so without this the bar
+      // said "You can submit now." beside the #124 banner refusing that exact submit.
+      !this.runtime().wouldSubmitNothing(),
   );
 
   constructor() {

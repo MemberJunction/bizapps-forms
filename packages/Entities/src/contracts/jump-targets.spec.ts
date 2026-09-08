@@ -13,7 +13,7 @@ import { parseConditionalRule } from './schemas';
 const WHEN = { all: [{ questionId: 'q1', op: 'equals', value: 'yes' }] };
 
 /** The single jump on a parsed rule, for brevity in the assertions below. */
-function jumpOf(raw: unknown) {
+function jumpOf(raw: string | object) {
   return parseConditionalRule(raw).jump?.[0];
 }
 

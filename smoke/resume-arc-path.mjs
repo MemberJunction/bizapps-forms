@@ -37,8 +37,9 @@ import { randomUUID } from 'node:crypto';
 import { sql } from './lib/sqlcmd.mjs';
 import { buildAnswers, pickEmailQuestion, pickNameQuestion, requireQuestion, resolveFormId, resolveQuestions, resolveSeededSlug } from './lib/fixture.mjs';
 import { sessionIdFor } from './lib/session.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = 'http://localhost:4121';
+const BASE = smokeBaseUrl();
 const BINDING_ID = '11111111-2222-4333-8444-555555555001';
 
 const SLUG = resolveSeededSlug('resume-arc-path.mjs', { bindingId: BINDING_ID });
