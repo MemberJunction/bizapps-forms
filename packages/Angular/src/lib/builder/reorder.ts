@@ -20,6 +20,39 @@ export function isValidReorder(from: number, to: number, length: number): boolea
   );
 }
 
+/**
+ * Whether a proposed move BETWEEN two pages is a real, in-bounds move (issue #149).
+ *
+ * Deliberately not {@link isValidReorder}, and the difference is not cosmetic. That one's two
+ * indices address ONE list, so it rejects `from === to` and requires `to < length`. Here they
+ * address different lists:
+ *
+ *  - `from` indexes the SOURCE page as it stands.
+ *  - `to` indexes the DESTINATION page AFTER the removal from the source, so `to === length` is
+ *    legal and is the only way to express "drop below the last question". Reusing
+ *    `isValidReorder` would make appending to a section impossible.
+ *  - `from === to` carries no meaning at all across two lists, so it is not a refusal.
+ *
+ * The PAGES being different is the caller's business — it branched on
+ * `event.previousContainer === event.container` to get here — and asserting it again from index
+ * arithmetic that cannot see a page id would be a guard that only looks like one.
+ */
+export function isValidCrossPageMove(
+  from: number,
+  sourceLength: number,
+  to: number,
+  destinationLength: number,
+): boolean {
+  return (
+    Number.isInteger(from) &&
+    Number.isInteger(to) &&
+    from >= 0 &&
+    from < sourceLength &&
+    to >= 0 &&
+    to <= destinationLength
+  );
+}
+
 // ---------------------------------------------------------------------------
 // What a move COSTS (issue #73)
 // ---------------------------------------------------------------------------

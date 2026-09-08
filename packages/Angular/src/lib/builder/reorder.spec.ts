@@ -4,6 +4,7 @@ import type { ConditionalSourceQuestion } from './condition-sources';
 import { collectRuleEntries, type RuleEntry, type RuleInventoryForm } from './rules-inventory';
 import {
   damageKeys,
+  isValidCrossPageMove,
   isValidReorder,
   newlyBrokenRules,
   noticeStillTrue,
@@ -33,6 +34,61 @@ describe('isValidReorder', () => {
 
   it('rejects non-integer indices', () => {
     expect(isValidReorder(0.5, 1, 3)).toBe(false);
+  });
+});
+
+describe('isValidCrossPageMove', () => {
+  describe('happy', () => {
+    it('accepts a move into the middle of another section', () => {
+      expect(isValidCrossPageMove(1, 3, 1, 2)).toBe(true);
+    });
+
+    it('accepts identical indices, which mean nothing across two lists', () => {
+      // `isValidReorder` rejects from === to because both index ONE list. Position 0 of
+      // section 1 and position 0 of section 2 are different places.
+      expect(isValidCrossPageMove(0, 3, 0, 2)).toBe(true);
+    });
+  });
+
+  describe('edge', () => {
+    it('accepts a drop at the END of the destination, which is index === length', () => {
+      // `to` addresses the destination AFTER the removal from the source, so appending is
+      // index === length. Rejecting it would make "drop below the last question" impossible,
+      // which is the most common cross-section drop there is.
+      expect(isValidCrossPageMove(0, 2, 2, 2)).toBe(true);
+    });
+
+    it('accepts a move into an EMPTY destination section', () => {
+      expect(isValidCrossPageMove(0, 1, 0, 0)).toBe(true);
+    });
+
+    it('accepts emptying the source section', () => {
+      expect(isValidCrossPageMove(0, 1, 0, 3)).toBe(true);
+    });
+  });
+
+  describe('worst', () => {
+    it('rejects a source index past the end of the source', () => {
+      expect(isValidCrossPageMove(3, 3, 0, 2)).toBe(false);
+    });
+
+    it('rejects a destination index past the append position', () => {
+      expect(isValidCrossPageMove(0, 3, 3, 2)).toBe(false);
+    });
+
+    it('rejects negative indices', () => {
+      expect(isValidCrossPageMove(-1, 3, 0, 2)).toBe(false);
+      expect(isValidCrossPageMove(0, 3, -1, 2)).toBe(false);
+    });
+
+    it('rejects everything out of an empty source', () => {
+      expect(isValidCrossPageMove(0, 0, 0, 2)).toBe(false);
+    });
+
+    it('rejects non-integer indices', () => {
+      expect(isValidCrossPageMove(0.5, 3, 1, 2)).toBe(false);
+      expect(isValidCrossPageMove(0, 3, 1.5, 2)).toBe(false);
+    });
   });
 });
 
