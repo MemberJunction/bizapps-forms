@@ -502,7 +502,20 @@
 }
 
 /* ---- Ranking ---- */
-.mjf-rank { display: flex; flex-direction: column; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.mjf-rank {
+  /* The reorder arrows are the tallest thing in a row, so THEY set the row's height — and the
+     placeholder CDK swaps in during a drag has to be that same height or the list jumps the
+     moment a row is lifted. Declared once here because it is one decision serving three rules:
+     when the arrows went 36 px -> 44 px the placeholder's own literal stayed put and the hole it
+     leaves went from 10 px to 18 px short. */
+  --mjf-rank-tap: 2.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 
 .mjf-rank__hint {
   margin: 0 0 0.5rem;
@@ -573,7 +586,15 @@
 /* The hole it came out of. An outline rather than a blank, so the list keeps its shape and the
    landing place is obvious. */
 .mjf-rank__ghost {
-  height: 3rem;
+  /* Match the row's box, do not restate its height: same padding, same border width, and a
+     content box at least as tall as the arrows that set it. `content-box` is deliberate — the
+     host page ships `* { box-sizing: border-box }`, and under it a min-height would describe the
+     outer box instead of the content, so the padding would be subtracted rather than added.
+     Matching the box also keeps the two equal under device-pixel border rounding, which inflates
+     BOTH borders together on a fractional-DPR display. */
+  box-sizing: content-box;
+  min-height: var(--mjf-rank-tap);
+  padding: 0.625rem 0.75rem;
   border: 1px dashed var(--mjf-accent);
   border-radius: var(--mjf-choice-radius);
   background: var(--mjf-choice-selected-bg);
@@ -648,8 +669,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  /* 44 px, the WCAG 2.5.5 tap-target minimum. These arrows are the only reorder path for a
+     respondent who cannot drag — the grip beside them is aria-hidden and pointer-only, so these
+     buttons are the accessible path and the ones that have to clear the bar. They measured
+     36 x 36 on a phone. */
+  width: var(--mjf-rank-tap);
+  height: var(--mjf-rank-tap);
   cursor: pointer;
   color: var(--mjf-page-ink-soft);
   background: transparent;

@@ -32,12 +32,13 @@ import { steppableSections } from '../core/section-stepper';
 import { clampCursor } from '../core/stepper';
 import { FormProgressComponent } from './form-progress.component';
 import { FormQuestionComponent } from './questions/form-question.component';
+import { IconComponent } from './icon.component';
 
 @Component({
   selector: 'mjf-form-scroll',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormProgressComponent, FormQuestionComponent],
+  imports: [FormProgressComponent, FormQuestionComponent, IconComponent],
   templateUrl: './form-scroll.component.html',
   styleUrls: ['./form-scroll.component.css'],
 })

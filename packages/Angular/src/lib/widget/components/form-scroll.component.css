@@ -103,7 +103,7 @@
   animation: mjf-skipped-in 0.22s cubic-bezier(0.2, 0, 0, 1);
 }
 
-.mjf-skipped i {
+.mjf-skipped mjf-icon {
   flex: none;
   opacity: 0.7;
 }

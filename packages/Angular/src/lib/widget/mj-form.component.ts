@@ -60,6 +60,7 @@ import { FormScreenComponent } from './components/form-screen.component';
 import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
+import { IconComponent } from './components/icon.component';
 import type { WidgetPhase } from './core/submit-phase';
 import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
 
@@ -72,6 +73,7 @@ import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
     FormScrollComponent,
     FormOneQuestionComponent,
     TurnstileChallengeComponent,
+    IconComponent,
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
