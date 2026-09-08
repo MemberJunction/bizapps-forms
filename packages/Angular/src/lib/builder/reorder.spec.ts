@@ -204,67 +204,144 @@ describe('reorderNoticeText', () => {
 });
 
 describe('undoReorderMove', () => {
-  /** "qa3" used to sit immediately before "qa1" — see {@link ReorderNotice.wasBefore}. */
-  const notice = { pageId: 'pA', questionId: 'qa3', wasBefore: 'qa1' };
-
-  const undone = (
-    n: { questionId: string; wasBefore: string | null },
-    ids: readonly string[],
-  ): readonly string[] => {
-    const move = undoReorderMove(n, ids);
-    return move ? moved(ids, move.from, move.to) : ids;
-  };
-
-  it('moves the question back in front of the one it used to precede', () => {
-    expect(undoReorderMove(notice, ['qa1', 'qa2', 'qa3'])).toEqual({ from: 2, to: 0 });
+  /** An in-page notice: the question is on the page it started on. */
+  const inPage = (questionId: string, wasBefore: string | null) => ({
+    pageId: 'pA',
+    fromPageId: 'pA',
+    questionId,
+    wasBefore,
   });
 
-  it('survives an unrelated move made while the band stood', () => {
-    // The case a stored index gets wrong, and gets wrong SILENTLY. [X,A,C,D] with C reading A:
-    // A is dragged below C, then X is dragged to the end for reasons of its own. "Put A back at
-    // index 1" is where A already sits, so Undo did nothing at all and C still could not read A.
-    const c = { pageId: 'pA', questionId: 'A', wasBefore: 'C' };
-    expect(undone(c, ['C', 'A', 'D', 'X'])).toEqual(['A', 'C', 'D', 'X']);
+  /** A cross-page notice: the question is on pB now and belongs back on pA. */
+  const crossed = (questionId: string, wasBefore: string | null) => ({
+    pageId: 'pB',
+    fromPageId: 'pA',
+    questionId,
+    wasBefore,
   });
 
-  it('finds both the question and its anchor by id, not by index', () => {
-    // Something above them was deleted while the band stood. Indices shifted; the ids did not.
-    expect(undoReorderMove(notice, ['qa2', 'qa1', 'qa3'])).toEqual({ from: 2, to: 1 });
+  describe('happy', () => {
+    it('moves the question back in front of the one it used to precede', () => {
+      const n = inPage('qa1', 'qa2');
+      const ids = ['qa2', 'qa3', 'qa1'];
+      expect(undoReorderMove(n, ids, ids)).toEqual({ from: 2, to: 0, toPageId: 'pA' });
+    });
+
+    it('survives an unrelated move made while the band stood', () => {
+      const n = inPage('qa1', 'qa2');
+      const ids = ['qa3', 'qa2', 'qa1'];
+      expect(undoReorderMove(n, ids, ids)).toEqual({ from: 2, to: 1, toPageId: 'pA' });
+    });
+
+    it('finds both the question and its anchor by id, not by index', () => {
+      const n = inPage('qa1', 'qa3');
+      const ids = ['qa2', 'qa3', 'qa1'];
+      expect(undoReorderMove(n, ids, ids)).toEqual({ from: 2, to: 1, toPageId: 'pA' });
+    });
+
+    it('puts a question that was LAST back at the end', () => {
+      const n = inPage('qa1', null);
+      const ids = ['qa1', 'qa2', 'qa3'];
+      expect(undoReorderMove(n, ids, ids)).toEqual({ from: 0, to: 2, toPageId: 'pA' });
+    });
   });
 
-  it('puts a question that was LAST back at the end', () => {
-    // Nothing followed it, so there is no anchor to name — and the end of the page is still the
-    // end of the page however many questions have come and gone since.
-    const last = { pageId: 'pA', questionId: 'qa3', wasBefore: null };
-    expect(undone(last, ['qa3', 'qa1', 'qa2'])).toEqual(['qa1', 'qa2', 'qa3']);
+  describe('edge', () => {
+    it('sends a crossed question back to the page it came from', () => {
+      // It sits on pB now; home is pA, where it used to sit in front of qa2.
+      const n = crossed('qa1', 'qa2');
+      expect(undoReorderMove(n, ['qb1', 'qa1'], ['qa2', 'qa3'])).toEqual({
+        from: 1,
+        to: 0,
+        toPageId: 'pA',
+      });
+    });
+
+    it('does NOT apply the splice-out correction across pages', () => {
+      // In-page, removing the question shifts an anchor that sat AFTER it down by one, so the
+      // insert index is `anchor - 1`. Across pages the removal happens in the OTHER array, so
+      // the home page's indices do not move and the anchor's index is the answer as-is.
+      // `qa3` is at home index 2; the undo must land at 2, not 1.
+      const n = crossed('qa1', 'qa3');
+      expect(undoReorderMove(n, ['qa1'], ['qa2', 'qb9', 'qa3'])).toEqual({
+        from: 0,
+        to: 2,
+        toPageId: 'pA',
+      });
+    });
+
+    it('sends a crossed question that was LAST to index === length, not length - 1', () => {
+      // The home array does not shrink on this removal, so "after everything" is `length`.
+      const n = crossed('qa1', null);
+      expect(undoReorderMove(n, ['qa1'], ['qa2', 'qa3'])).toEqual({
+        from: 0,
+        to: 2,
+        toPageId: 'pA',
+      });
+    });
+
+    it('sends a crossed question home to a section that is now empty', () => {
+      // The move that emptied the section is exactly the one most worth undoing.
+      const n = crossed('qa1', null);
+      expect(undoReorderMove(n, ['qb1', 'qa1'], [])).toEqual({
+        from: 1,
+        to: 0,
+        toPageId: 'pA',
+      });
+    });
   });
 
-  it('refuses a question that is no longer there', () => {
-    expect(undoReorderMove(notice, ['qa1', 'qa2'])).toBeNull();
-  });
+  describe('worst', () => {
+    it('refuses a question that is no longer there', () => {
+      const n = inPage('gone', 'qa2');
+      const ids = ['qa1', 'qa2', 'qa3'];
+      expect(undoReorderMove(n, ids, ids)).toBeNull();
+    });
 
-  it('refuses when the page itself is gone, which arrives as an empty list', () => {
-    expect(undoReorderMove(notice, [])).toBeNull();
-  });
+    it('refuses when the page itself is gone, which arrives as an empty list', () => {
+      const n = inPage('qa1', 'qa2');
+      expect(undoReorderMove(n, [], [])).toBeNull();
+    });
 
-  it('refuses when the anchor was deleted, rather than guessing a position', () => {
-    // Where "before qa1" is on a page with no qa1 is a question with no answer. A band offering
-    // a move whose destination has to be invented is worse than a band that has lapsed.
-    expect(undoReorderMove(notice, ['qa2', 'qa3'])).toBeNull();
-  });
+    it('refuses when the HOME page is gone, which also arrives as an empty list', () => {
+      // A crossed question whose original section was deleted while the band stood. `wasBefore`
+      // names an anchor that is not in the empty home list, so this refuses through the same
+      // path as a deleted anchor rather than through a branch of its own.
+      const n = crossed('qa1', 'qa2');
+      expect(undoReorderMove(n, ['qb1', 'qa1'], [])).toBeNull();
+    });
 
-  it('refuses when the question is already back where it started', () => {
-    expect(undoReorderMove(notice, ['qa3', 'qa1', 'qa2'])).toBeNull();
-  });
+    it('refuses when the anchor was deleted, rather than guessing a position', () => {
+      // Where "before qa1" is on a page with no qa1 is a question with no answer. A band offering
+      // a move whose destination has to be invented is worse than a band that has lapsed.
+      const n = inPage('qa1', 'gone');
+      const ids = ['qa2', 'qa3', 'qa1'];
+      expect(undoReorderMove(n, ids, ids)).toBeNull();
+    });
 
-  it('resolves against where the anchor is NOW, which is the limit of what one anchor can do', () => {
-    // Pinned as a known edge, not as a claim to have solved it. No single neighbour survives
-    // being moved itself: undoing one move while a second has reordered the same pair has no
-    // unique right answer, and inventing one would move the author's question somewhere neither
-    // of them asked for. Refusing is the honest end of it — the BADGE still says the rule is
-    // broken, which is the half that must never be wrong.
-    const n = { pageId: 'pA', questionId: 'qa1', wasBefore: 'qa2' };
-    expect(undoReorderMove(n, ['qa1', 'qa2', 'qa3'])).toBeNull();
+    it('refuses when the question is already back where it started', () => {
+      const n = inPage('qa1', 'qa2');
+      const ids = ['qa3', 'qa1', 'qa2'];
+      expect(undoReorderMove(n, ids, ids)).toBeNull();
+    });
+
+    it('never resolves a CROSSED undo to a no-op, because the pages differ', () => {
+      // The in-page `to === from` refusal must not fire here: the indices belong to different
+      // lists, and putting the question on another page is never "already there".
+      const n = crossed('qa1', 'qa2');
+      expect(undoReorderMove(n, ['qa1'], ['qa2'])).toEqual({ from: 0, to: 0, toPageId: 'pA' });
+    });
+
+    it('resolves against where the anchor is NOW, which is the limit of what one anchor can do', () => {
+      // Pinned as a known edge, not as a claim to have solved it. No single neighbour survives
+      // being moved itself: undoing one move while a second has reordered the same pair has no
+      // unique right answer, and inventing one would move the author's question somewhere neither
+      // of them asked for. Refusing is the honest end of it — the BADGE still says the rule is
+      // broken, which is the half that must never be wrong.
+      const n = inPage('qa1', 'qa2');
+      const ids = ['qa1', 'qa2', 'qa3'];
+      expect(undoReorderMove(n, ids, ids)).toBeNull();
+    });
   });
 });
 
