@@ -1,17 +1,24 @@
 import { describe, expect, it } from 'vitest';
+import type {
+  mjBizAppsFormsFormPageEntity,
+  mjBizAppsFormsFormQuestionEntity,
+} from '@mj-biz-apps/forms-entities';
 import { NOTHING_SELECTED, selectPage, selectQuestion, selectScreen } from './builder-selection';
 import type { PageNode } from './builder-models';
 import { ADDING_HERE, ADDING_TO_LAST, targetPageFor } from './new-question-target';
 
 /**
- * A page carrying just the two fields the rule reads. The real `PageNode` holds a loaded entity;
- * the rule only ever compares ids, and the cast at this seam is what says so out loud.
+ * A page carrying the only field the rule reads. The node shape stays real and the cast is
+ * confined to the entity inside it — the same shape `snapshot-builder.spec.ts` uses — so a change
+ * to `PageNode` itself still breaks this fixture, which is exactly what should happen.
  */
-const page = (id: string, questionIds: readonly string[]): PageNode =>
-  ({
-    entity: { ID: id },
-    questions: questionIds.map((qid) => ({ entity: { ID: qid } })),
-  }) as unknown as PageNode;
+const page = (id: string, questionIds: readonly string[]): PageNode => ({
+  entity: { ID: id } as mjBizAppsFormsFormPageEntity,
+  questions: questionIds.map((qid) => ({
+    entity: { ID: qid } as mjBizAppsFormsFormQuestionEntity,
+    options: [],
+  })),
+});
 
 const pages: readonly PageNode[] = [page('page-1', ['q-1']), page('page-2', ['q-2'])];
 

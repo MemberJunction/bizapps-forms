@@ -17,6 +17,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type {
+  mjBizAppsFormsFormPageEntity,
+  mjBizAppsFormsFormQuestionEntity,
+} from '@mj-biz-apps/forms-entities';
 import { NOTHING_SELECTED, selectPage, selectQuestion, selectScreen } from './builder-selection';
 import type { PageNode } from './builder-models';
 import { ADDING_HERE, ADDING_TO_LAST, type NewQuestionTarget, targetPageFor } from './new-question-target';
@@ -30,11 +34,13 @@ const stripped = (file: string): string =>
 const component = (): string => stripped('form-builder.component.ts');
 const template = (): string => stripped('form-builder.component.html');
 
-const page = (id: string, questionIds: readonly string[]): PageNode =>
-  ({
-    entity: { ID: id },
-    questions: questionIds.map((qid) => ({ entity: { ID: qid } })),
-  }) as unknown as PageNode;
+const page = (id: string, questionIds: readonly string[]): PageNode => ({
+  entity: { ID: id } as mjBizAppsFormsFormPageEntity,
+  questions: questionIds.map((qid) => ({
+    entity: { ID: qid } as mjBizAppsFormsFormQuestionEntity,
+    options: [],
+  })),
+});
 
 const pages: readonly PageNode[] = [page('page-1', ['q-1']), page('page-2', ['q-2'])];
 
@@ -60,7 +66,10 @@ function announcementCondition(): (target: NewQuestionTarget | null, forPage: Pa
 }
 
 describe('the builder writes where it says it writes', () => {
-  it('asks the shared rule for the target instead of keeping its own', () => {
+  // The next two read source text, so they assert PRESENCE and not behaviour — a call site can be
+  // spelled correctly and still be wrong. They are the cheap guard against the private rule coming
+  // back; the announcement tests below are the ones that run the real expression.
+  it('names the shared rule in the component, and no longer defines a private one (source text)', () => {
     const src = component();
     expect(src).toContain('targetPageFor(');
     expect(
@@ -69,7 +78,7 @@ describe('the builder writes where it says it writes', () => {
     ).not.toContain('private targetPageForNewQuestion');
   });
 
-  it('adds the question to the page the rule returned', () => {
+  it('passes the rule’s own page to the create call (source text)', () => {
     // `addQuestion` has to push into the SAME page it created the question against, or the canvas
     // and the database disagree about which section holds it.
     const src = component();
