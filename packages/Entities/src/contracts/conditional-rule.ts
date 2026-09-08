@@ -12,6 +12,7 @@
  * { "show": { "all": [ { "questionId": "<id>", "op": "equals", "value": "Other" } ] } }
  * ```
  */
+import { parseClockTime } from './answer-date';
 import type { JSONObject } from './json-value';
 
 /**
@@ -538,13 +539,6 @@ interface Comparable {
 const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
 
 /**
- * A whole 24-hour clock reading, as `<input type="time">` emits it (`14:30`, some browsers
- * `14:30:00`). Anchored and range-checked rather than loose, so `25:00` and `14:60` stay
- * non-comparable instead of ordering as if they were times somebody could have answered.
- */
-const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
-
-/**
  * Coerce an answer/condition value to a {@link Comparable}, or `undefined`.
  *
  * Numeric strings stay numbers (`'42'` compares as 42, as it always did); only strings shaped
@@ -562,13 +556,16 @@ function toComparable(value: AnswerValue | ConditionValue | undefined): Comparab
     if (Number.isFinite(parsed)) {
       return { kind: 'number', n: parsed };
     }
-    const clock = CLOCK_TIME.exec(trimmed);
+    // The clock is read through the contract's parser rather than a regex of this module's own,
+    // so what the evaluator calls a Time answer is what the validator accepts and persistence
+    // stores — the three disagreeing is how #116 happened.
+    const clock = parseClockTime(trimmed);
     if (clock) {
       // Minutes since midnight, on its own scale. A Time answer is a point on a 24-hour clock
       // with no date attached, so it can be ordered against another time and against nothing
       // else — comparing it with a number would order "2:30pm" against "870" and fire a rule
       // no author meant.
-      return { kind: 'time', n: Number(clock[1]) * 60 + Number(clock[2]) + Number(clock[3] ?? 0) / 60 };
+      return { kind: 'time', n: clock.hours * 60 + clock.minutes + clock.seconds / 60 };
     }
     if (ISO_DATE_PREFIX.test(trimmed)) {
       const ms = Date.parse(trimmed);

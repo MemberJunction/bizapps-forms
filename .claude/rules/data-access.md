@@ -13,12 +13,12 @@ caching, and the performance patterns that go with them.
 ## Entity Metadata Best Practices (CRITICAL)
 
 ### 🚨 GROUND TRUTH FOR SCHEMA IS THE ORM LAYER — NOT MIGRATIONS 🚨
-- **When you need to know an entity's real schema — its fields, types, nullability, value-lists, relationships, primary keys — read the generated ORM layer in `packages/Entities/src/generated/entity_subclasses.ts` (this app's entities) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) (the entity classes + their Zod schemas), NOT the migration SQL.**
+- **When you need to know an entity's real schema — its fields, types, nullability, value-lists, relationships, primary keys — read the generated ORM layer in `packages/Entities/src/generated/entities/` (this app's entities — one module per schema; `entity_subclasses.ts` is now only a barrel that re-exports them) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) (the entity classes + their Zod schemas), NOT the migration SQL.**
 - **Why**: migrations are an *append-only history* of changes over time. The current true shape of a table/entity is the sum of the baseline plus every subsequent ALTER — reconstructing it from migrations is error-prone and often wrong. CodeGen regenerates the entity classes from the live database after every schema change, so the generated entity classes are the **authoritative, current** projection of the schema. A field you see added in one migration may have been altered or dropped in a later one; the ORM class reflects the net result.
-- **Practical rule**: to answer "what fields does entity X have / what type is field Y / what are the allowed values / what does it relate to", open the `X`-entity class in `packages/Entities/src/generated/entity_subclasses.ts` (this app's entities) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities). Use `SomeEntity['FieldName']` for a field's type. Only read migration SQL when you specifically need the *history* of a change, the *view/stored-proc body* (which isn't in the ORM), or to author a *new* migration.
+- **Practical rule**: to answer "what fields does entity X have / what type is field Y / what are the allowed values / what does it relate to", open the `X`-entity class in `packages/Entities/src/generated/entities/` (this app's entities — one module per schema; `entity_subclasses.ts` is now only a barrel that re-exports them) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities). Use `SomeEntity['FieldName']` for a field's type. Only read migration SQL when you specifically need the *history* of a change, the *view/stored-proc body* (which isn't in the ORM), or to author a *new* migration.
 
 ### Finding Entity Names
-- **ALWAYS** use `packages/Entities/src/generated/entity_subclasses.ts` (this app's entities) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) to find correct entity names
+- **ALWAYS** use `packages/Entities/src/generated/entities/` (this app's entities — one module per schema; `entity_subclasses.ts` is now only a barrel that re-exports them) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) to find correct entity names
 - Entity names are in the `@RegisterClass` decorator JSDoc comments
 - Examples:
   - `MJAIPromptEntity` → `"MJ: AI Prompts"`
@@ -114,7 +114,7 @@ const agentRun = await md.GetEntityObject<MJAIAgentRunEntity>('MJ: AI Agent Runs
 const agentPrompt = await md.GetEntityObject<MJAIAgentPromptEntity>('MJ: AI Agent Prompts', contextUser);
 ```
 
-**Always verify entity names** by checking `packages/Entities/src/generated/entity_subclasses.ts` (this app's entities) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) or the `@RegisterClass` decorator JSDoc comments.
+**Always verify entity names** by checking `packages/Entities/src/generated/entities/` (this app's entities — one module per schema; `entity_subclasses.ts` is now only a barrel that re-exports them) or `node_modules/@memberjunction/core-entities/dist/generated/entity_subclasses.d.ts` (MJ core entities) or the `@RegisterClass` decorator JSDoc comments.
 
 ---
 

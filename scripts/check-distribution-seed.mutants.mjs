@@ -41,6 +41,10 @@
  *     not model. The depth tracking stays (three lines, fails safe); it is unexercised defence.
  *   - the `seen` de-duplication in `checkPlaceholders`. No case asserts a violation COUNT, and the
  *     rule is cosmetic — one message per placeholder per file rather than one per occurrence.
+ *   - CHECK 7's seeded set being built across the WHOLE corpus rather than per file. The property is
+ *     real and `check-distribution-seed.spec.mjs` case 100 binds it — the seed lives in one migration
+ *     and the reference in another — but every narrow mutant for it also breaks `check7/seeds-are-read`,
+ *     so it would be killed for the wrong reason. Coverage, not mutation, is the tool for that one.
  *   - `@RoleID` bound inline in the `EXEC` rather than through a variable. D3 requires the shape and
  *     `check-distribution-seed.spec.mjs` case 43 covers it, but no narrow mutant expresses it: every
  *     candidate also breaks the inline arguments case 26 already binds, so it is killed for the
@@ -49,17 +53,28 @@
  * Node stdlib only and no build step, same constraint as the gate and its spec, so CI runs it
  * without an install.
  *
- * Serial, and it costs about 40 seconds (measured 2026-08-30, 66 mutants): each one runs the whole
- * spec in a fresh process, and the spec builds 87 fixtures (measured at `mkdtempSync`, not counted
- * off the source — the table-driven loops multiply 11 call sites into 87). It no longer copies the `metadata/`
- * tree into each of those — that was CHECK 1's, and #105 removed the check and the copy together.
- * Each run is capped by SPEC_TIMEOUT_MS: `mask/block-comment-first-close` injects a `while` loop
- * into the gate, and a mutant that hangs would otherwise hang CI with no signal at all. That is the
- * honest number — a workflow step whose real cost is double what its comment claims is a step
- * someone deletes in a hurry later.
+ * Serial, and on CI it costs about seven minutes: 3m12s on next before CHECK 7 (run 33923880019),
+ * 7m08s after it (run 33933840700) — measured on the GitHub runner, which is the machine whose cost
+ * anyone actually pays. A laptop run of the same 96 mutants took 174s on 2026-09-04; that figure is
+ * kept only to say how far a local number sits from the runner's. The step grew by more than the
+ * mutant count (it was 40s for 66 before CHECK 7): each mutant runs the whole spec in a fresh
+ * process, and CHECK 7 reads every shipped `.sql` file TWICE per `runChecks` (once for the seed set,
+ * once for the references — the two `shippedSqlFiles` calls in `checkEntityIdReferences`). The spec
+ * invokes `runChecks(REPO_ROOT)` FOUR times against the real tree, not once: line 141 calls it twice
+ * on one line, and the sql_variant case twice more. That is 4 x 75 shipped-file reads per spec run,
+ * x 96 mutants — which is where the added minutes are. The fixtures are the cheap half: the spec
+ * builds 99 of them (measured at `mkdtempSync`, not counted off the source — the table-driven loops
+ * multiply 15 call sites into 99), and each is a tree of two or three files. It no longer copies
+ * the `metadata/` tree into each of them — that was CHECK 1's, and #105 removed the check and the
+ * copy together. Each run is capped by SPEC_TIMEOUT_MS:
+ * `mask/block-comment-first-close` injects a `while` loop into the gate, and a mutant that hangs
+ * would otherwise hang CI with no signal at all. Those are the honest numbers — a workflow step
+ * whose real cost is quadruple what its comment claims is a step someone deletes in a hurry later,
+ * so RE-MEASURE when you add mutants rather than leaving the old figure in place.
  *
  * Parallelising is possible and deliberately not done: the gate only runs on paths that touch it,
- * and a worker pool is more of this harness to own for forty seconds nobody is waiting on.
+ * and a worker pool is more of this harness to own for three minutes nobody is waiting on. If the
+ * step ever outgrows that, the cost is in the spec's real-tree runs, not in the mutant count.
  */
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, symlinkSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -78,6 +93,34 @@ const SPEC = join(SCRIPTS_DIR, 'check-distribution-seed.spec.mjs');
  * is what a survivor's error message has to tell someone who has never read this file.
  */
 const MUTANTS = [
+    // --- CHECK 6: an extended-property write never hands `sql_variant` a MAX type ----------------
+    // Every one of these was a real hole in a shipped cut of the check, found by review rather
+    // than by the spec — which is exactly the state this harness exists to make impossible.
+    ['sqlvariant/case-insensitive-type', 'the MAX-type scan is case-insensitive, so `nvarchar(max)` is caught as readily as the shouted form',
+        `const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\\s+(?:AS\\s+)?((?:N?VARCHAR|VARBINARY)\\s*\\(\\s*MAX\\s*\\)|XML\\b)/gi;`,
+        `const MAX_TYPED_DECLARATION = /(@[A-Za-z0-9_]+)\\s+(?:AS\\s+)?((?:N?VARCHAR|VARBINARY)\\s*\\(\\s*MAX\\s*\\)|XML\\b)/g;`],
+    ['sqlvariant/optional-as', 'the optional `AS` in a DECLARE is tolerated, so `DECLARE @d AS NVARCHAR(MAX)` cannot hide the type',
+        `(?:AS\\s+)?`, ``],
+    ['sqlvariant/xml-included', 'XML is a rejected type in its own right, not only the parenthesised MAX ones',
+        `|XML\\b)/gi;`, `)/gi;`],
+    ['sqlvariant/varbinary-included', 'VARBINARY(MAX) is rejected too — the restriction is the MAX type, not the string types',
+        `(?:N?VARCHAR|VARBINARY)`, `(?:N?VARCHAR)`],
+    ['sqlvariant/positional-arguments', 'every argument of the call is read, not only a NAMED `@value =` — T-SQL allows the value positionally, and the named-only form was the shape that let a broken migration through',
+        `        for (const ref of args.matchAll(/@[A-Za-z0-9_]+/g)) {`,
+        `        for (const ref of args.matchAll(/(?<=@value\\s{0,4}=\\s{0,4})@[A-Za-z0-9_]+/gi)) {`],
+    ['sqlvariant/proc-restriction', 'only the extended-property procedures are gated, so an ordinary procedure taking a MAX argument is not blamed',
+        `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty)\\b/gi;`,
+        `const EXTENDED_PROPERTY_PROCS = /\\b(?:sp_addextendedproperty|sp_updateextendedproperty|spSomethingElse)\\b/gi;`],
+    ['sqlvariant/declare-only', 'only a variable inside a DECLARE statement is a MAX-typed candidate, so a procedure parameter named @Value cannot be mistaken for the call\'s argument',
+        `    for (const decl of sql.matchAll(DECLARE_STATEMENT)) {\n        for (const m of decl[1].matchAll(MAX_TYPED_DECLARATION)) {\n            maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\\s+/g, ''));\n        }\n    }`,
+        `    for (const m of sql.matchAll(MAX_TYPED_DECLARATION)) {\n        maxTyped.set(m[1].toLowerCase(), m[2].toUpperCase().replace(/\\s+/g, ''));\n    }`],
+    ['sqlvariant/blank-line-terminates', 'a blank line ends an unterminated call, so a missing semicolon cannot swallow the rest of the file into one argument list',
+        `const terminator = sql.slice(from).search(/;|\\n\\s*\\n|^\\s*GO\\s*$/m);`,
+        `const terminator = sql.slice(from).search(/;|^\\s*GO\\s*$/m);`],
+    ['sqlvariant/teardown-scanned', 'migrations-teardown is scanned by CHECK 6 too — a teardown that cannot execute is as fatal as an install that cannot',
+        `for (const dirName of [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown']) {`,
+        `for (const dirName of [...SHIPPED_MIGRATION_DIRS]) {`],
+
     // --- the masking layer: the gate's worst bug history, every entry a former silent pass -------
     ['mask/code-units', 'the mask is built from UTF-16 code units, so an astral character cannot slide it out of alignment with the source',
         `    const structure = sql.split('');\n    const values = sql.split('');`,
@@ -138,7 +181,7 @@ const MUTANTS = [
     ['identity/uuid-case', 'a literal UUID is normalised to upper case, so a lower-case id still matches the role and the guarded table',
         'return match ? match[1].toUpperCase() : null;', 'return match ? match[1] : null;'],
     ['identity/uuid-n-prefix', "a UUID literal written `N'…'` is read as a UUID",
-        `const UUID_LITERAL = /^N?'(`, `const UUID_LITERAL = /^'(`],
+        "const UUID_LITERAL = new RegExp(`^N?'(", "const UUID_LITERAL = new RegExp(`^'("],
     ['identity/entity-by-name', 'an entity named through a `WHERE Name = N\'…\'` subselect is resolved, so rule 4 knows which grant it is looking at',
         'return { entityId: literalUuid(value), entityName: readQuotedName(value) };',
         'return { entityId: literalUuid(value), entityName: null };'],
@@ -254,11 +297,82 @@ const MUTANTS = [
     ['schemasync/unorderable-fails-safe', 'a shipped .sql whose version this gate cannot order is gated, not exempted',
         "    return stamp === null ? '999999999999' : stamp[1];", '    return stamp === null ? null : stamp[1];'],
     ['schemasync/positional-proc-filter', 'the positional matcher reads a list only for a proc known to take one, so a generated CRUD function is not mistaken for a schema sync',
-        '        if (procNames.has(positional[1].toLowerCase())) {\n            found.push(positional[2]);\n        }',
-        '        found.push(positional[2]);'],
+        '        if (procNames.has(positional[1].toLowerCase())) {\n            found.push({ raw: positional[2], positivelyScoped: false });\n        }',
+        '        found.push({ raw: positional[2], positivelyScoped: false });'],
+    ['schemasync/positive-filter-read', 'the @IncludedSchemaNames positive filter is read at all, so a correctly scoped heal is not refused',
+        '    const included = /@IncludedSchemaNames\\s*=\\s*N?\'([^\']*)\'/i.exec(statement);\n    if (included === null) return false;',
+        '    const included = null;\n    if (included === null) return false;'],
+    ['schemasync/positive-filter-owned-only', 'the positive filter exempts a call ONLY when every schema it names is ours',
+        '    return names.length > 0 && names.every((n) => n === OWNED_SCHEMA);',
+        '    return names.length > 0;'],
     ['schemasync/pg-positional', 'exclusion lists are read in BOTH dialects, so the PostgreSQL positional form is not invisible',
         '    for (const positional of sql.matchAll(/"(sp\\w+)"\\s*\\(\\s*\'([^\']*)\'/gi)) {',
         '    for (const positional of []) {'],
+
+    ['seed/conditional-licenses-nothing', 'a seed inside an IF NOT EXISTS licenses no literal, because it does not run on every host (#171)',
+        '        if (conditional.some(([from, to]) => insert.index >= from && insert.index < to)) continue;',
+        '        if (false) continue;'],
+    ['placeholder/comment-mask', 'CHECK 2 reads the comment-blanked mask, so a placeholder NAMED in prose is not read as used',
+        "            const sql = maskSql(readFileSync(join(dir, file), 'utf-8')).values;\n            const seen = new Set();",
+        "            const sql = readFileSync(join(dir, file), 'utf-8');\n            const seen = new Set();"],
+
+    // --- CHECK 7: an entity id shipped SQL references is one shipped SQL seeds (#155) -------------
+    //
+    // The reference side carries four shapes, each found in this repo's own migrations. Dropping one
+    // is SILENT — the id it would have reported simply is not reported — so each gets its own
+    // mutant. The seed side fails the other way (a missed seed makes every reference to that id
+    // fire), which is why its mutants are about INVENTING a seed rather than missing one.
+    ['check7/registered', 'CHECK 7 runs at all — an unregistered check reads no SQL and reports nothing',
+        '    checkEntityIdReferences(repoRoot, violations);\n', ''],
+    ['check7/shape-column', 'an `EntityID = \'<guid>\'` comparison is read as a reference — the guard shape #155 shipped',
+        '        pattern: ENTITY_ID_COLUMN_REFERENCE,', '        pattern: /(?!)/g,'],
+    ['check7/shape-annotation', "CodeGen's positional `'<guid>', -- Entity: <name>` is read as a reference",
+        '        pattern: QUOTED_UUID,', '        pattern: /(?!)/g,'],
+    ['check7/shape-entityids', 'the `@EntityIDs` scoping argument is read as a reference — an id it cannot resolve makes the sweep unscoped',
+        '        pattern: ENTITY_IDS_ARGUMENT,', '        pattern: /(?!)/g,'],
+    ['check7/shape-variable', "a generated metadata seed's `@EntityID_<hash>` variable is read as a reference",
+        '        pattern: GENERATED_ENTITY_ID_VARIABLE,', '        pattern: /(?!)/g,'],
+    ['check7/related-column', '`RelatedEntityID` is read as well as `EntityID` — both columns point at the same table',
+        "const ENTITY_ID_COLUMNS = '(?:Related)?EntityID';", "const ENTITY_ID_COLUMNS = 'EntityID';"],
+    ['check7/identifier-boundary', "a longer identifier ending in EntityID stays out of scope, so the check does not silently widen past the two columns CodeGen writes (`TargetEntityID` is an entity FK too, and is deliberately not read)",
+        "const NOT_PART_OF_A_LONGER_NAME = '(?<![\\\\w@])';", "const NOT_PART_OF_A_LONGER_NAME = '';"],
+    ['check7/entityids-list', 'the `@EntityIDs` argument is split on commas, so an unseeded id hiding behind a seeded one is still read',
+        "        read: (match) => match[1].split(',').map((token) => token.trim()).filter((token) => BARE_UUID.test(token)),",
+        '        read: (match) => [match[1]],'],
+    ['check7/entityids-token-filter', 'only UUID-shaped tokens of that list are read, so a trailing separator does not report an empty id',
+        '.filter((token) => BARE_UUID.test(token)),', ','],
+    ['check7/annotation-confirmed', 'a quoted UUID is a reference only when the annotation confirms it, so every guid in the file is not read as an entity id',
+        '            if (confirm !== undefined && !confirm(sql, match)) continue;', '            if (false) continue;'],
+    ['check7/annotation-same-line', "the `-- Entity:` annotation must sit on the SAME LINE as the value it labels, so CodeGen's file banners do not annotate whatever precedes them",
+        'const ENTITY_VALUE_ANNOTATION = /^[ \\t]*,?[ \\t]*--[ \\t]*(?:Related)?Entity:/i;',
+        'const ENTITY_VALUE_ANNOTATION = /^\\s*,?\\s*--\\s*(?:Related)?Entity:/i;'],
+    ['check7/annotation-related', 'the `-- RelatedEntity:` spelling of the annotation is read too',
+        '--[ \\t]*(?:Related)?Entity:/i;', '--[ \\t]*Entity:/i;'],
+    ['check7/references-masked', 'references are read off the comment-blanked mask, so the provenance note the fixed migration carries is not read as the defect it describes',
+        '    const { values } = maskSql(sql);', '    const values = sql;'],
+    ['check7/seeds-masked', 'seeds are read off the comment-blanked mask too, so a commented-out `[Entity]` insert seeds nothing',
+        'export function findSeededEntityIds(sql) {\n    const { structure, values } = maskSql(sql);',
+        'export function findSeededEntityIds(sql) {\n    const structure = sql, values = sql;'],
+    ['check7/seed-id-column-lookup', 'the `[ID]` value is located by column NAME, so a seed that does not list it first is still read',
+        '        const idColumn = topLevelItemRanges(structure, columnsOpen + 1, columnsClose)\n            .findIndex(([from, to]) => bareColumnName(structure.slice(from, to)) === \'id\');',
+        '        const idColumn = 0;'],
+    ['check7/seed-table-exact', 'only `[Entity]` is a seed, so `[EntityField]` — whose first column is an [ID] too — cannot invent one',
+        `(?:\\\\[Entity\\\\]|"Entity"|Entity)`, `(?:\\\\[Entity\\\\w*\\\\]|"Entity"|Entity)`],
+    ['check7/values-row-adjacent', "the VALUES row must FOLLOW the column list immediately, so an `INSERT … SELECT` cannot pair with the next statement's row and seed a foreign id",
+        "    if (match === null || structure.slice(after, match.index).trim() !== '') return null;",
+        '    if (match === null) return null;'],
+    ['check7/seeds-are-read', 'the seeded set is actually collected, so a correctly seeded id is not reported',
+        '    const seeded = new Set();\n    for (const { sql } of shippedSqlFiles(repoRoot, ENTITY_SEED_DIRS)) {\n        for (const id of findSeededEntityIds(sql)) seeded.add(id);\n    }',
+        '    const seeded = new Set();'],
+    ['check7/teardown-not-a-seed', 'a teardown may not SEED — it only ever deletes an [Entity] row, so it cannot license a reference elsewhere',
+        'const ENTITY_SEED_DIRS = SHIPPED_MIGRATION_DIRS;',
+        "const ENTITY_SEED_DIRS = [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown'];"],
+    ['check7/teardown-references', 'a teardown IS read for references — a hardcoded id there deletes nothing on a host that minted its own',
+        "const ENTITY_REFERENCE_DIRS = [...SHIPPED_MIGRATION_DIRS, 'migrations-teardown'];",
+        'const ENTITY_REFERENCE_DIRS = SHIPPED_MIGRATION_DIRS;'],
+    ['check7/uuid-case', 'a referenced id is normalised to upper case, so CodeGen writing the seed lower-case and the reference upper-case is not read as two different entities',
+        '            for (const id of read(match)) found.push({ id: id.toUpperCase(), line, shape });',
+        '            for (const id of read(match)) found.push({ id, line, shape });'],
 ];
 
 /**

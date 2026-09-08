@@ -17,6 +17,8 @@ npm test                    # every workspace, via turbo — 434 tests
 npm run test:packages       # the five @mj-biz-apps/forms-* packages only
 cd packages/Server && npx vitest run     # one package
 cd packages/Server && npx vitest         # watch mode
+npm run typecheck           # tsc --noEmit per package WITH specs included — nothing else compiles a test file
+npm run lint:guard-mutants  # neutralise each declared load-bearing guard; its package suite must go red
 ```
 
 > `npm test` did not exist until 2026-07-30. Every package had a `test` script but `turbo.json`
@@ -58,10 +60,14 @@ So a green `npm test` is necessary and **not sufficient** for anything touching 
 ```bash
 npm run smoke:binding:seed                        # seeds the binding fixtures the next two need
 npm run smoke:respondent -- <distribution-slug>   # drives the real public surface end to end
+npm run smoke:errors -- <distribution-slug>       # what the public surface must never TELL a respondent (#119)
 npm run smoke:binding                             # entity binding: create / merge / match / ledger
 npm run smoke:automation                          # WHETHER and IN WHAT ORDER an automation runs
 npm run smoke:provenance                          # a file id cannot be claimed across sessions
 npm run smoke:file-links                          # uploads attach to the response AND the bound record
+npm run smoke:credentials                         # a revoked token no longer redeems; a delete is one transaction
+npm run smoke:credentials:least-privilege         # the same, performed by an author with no rights on core's invite table
+npm run smoke:backfill                            # the credential backfill migration, run verbatim and rolled back
 npm run lint:generated                            # CodeGen scope gate
 npm run lint:ui                                   # design-token gate
 ```
@@ -79,9 +85,11 @@ present form with different questions produced `Submission is missing required v
 which reads like a product defect and never was one. If a fixture cannot be satisfied now, the
 script says which form it looked at, what role it needed, and which slugs would have worked.
 
-**None of these run in CI.** `smoke/**` appears in `build.yml`'s path filter, so editing one
-triggers the workflow — but no job executes them: they need a live API, a SQL Server container and
-a published form, which no build agent has. They are manual, and they are the only thing standing
+**None of these run in CI.** `smoke/` appears in the scope list `build.yml`'s `scope` job feeds to
+`scripts/check-paths-touched.mjs`, so editing one still starts `build-and-test` — but no job
+executes them: they need a live API, a SQL Server container and a published form, which no build
+agent has. (Three plain-Node specs *under* `smoke/lib/` — `fixture`, `sqlcmd`, `target` — do run
+there, and run nowhere else.) They are manual, and they are the only thing standing
 between you and the failure class below.
 
 > A publish bug once made entity binding completely inert — the snapshot never carried the
@@ -110,6 +118,16 @@ queried from the database, because those two spellings of the same GUID differ i
 - **Assert the thing that was actually wrong.** The pre-existing version-mismatch test used
   `formVersionId: 'stale-version'` — a genuinely different string — so it passed regardless of case
   handling and never exercised the bug that shipped. A test can be present, passing, and worthless.
+- **A test that reads source text asserts presence, not behaviour.** It cannot see a condition or a
+  sequence. Mutation testing found seventeen guards this repo's own comments call load-bearing that
+  could be deleted with the suite green, every one behind a `readFileSync` spec. If the class can be
+  instantiated — `vi.mock` the generated base; `runInInjectionContext(Injector.create(...))` for a
+  component with field `inject()`; bare `new` for a service without constructor injection — test the
+  behaviour and add the guard to `scripts/check-guard-mutants.mjs`. Reserve source-text for template
+  text and for the cheap "the call still exists" smoke, and title it as exactly that.
+- **Specs are type-checked** (`npm run typecheck`, and in CI). A spec calling a signature that no
+  longer exists used to compile, run and pass for the wrong reason; seventy such errors were found the
+  day the gate was added, two of them in specs written that morning.
 
 ## Keeping tests green is your job
 
@@ -123,6 +141,16 @@ because the new behaviour is correct, update the test. Never leave a broken test
 > Until 2026-07-30 **no workflow ran any tests** — all 434 could have been red and a PR would still
 > have gone green. If you are adding a workflow, check it actually runs something.
 
-Its path filter now includes `apps/**`, `scripts/**`, `smoke/**`, `turbo.json` and `package.json`;
-previously only `packages/**` and `package-lock.json` triggered it, so a change breaking MJAPI or a
-gate script never ran CI at all.
+**Since #173 there is no `paths:` filter on the trigger, and putting one back would break the
+repo.** `build-and-test` is a required status check on both rulesets, and a workflow skipped by
+`on: paths:` creates *no check run at all*, so the pull request hangs on "Expected — Waiting for
+status" forever. The path list now lives in the `scope` job, which feeds
+`scripts/check-paths-touched.mjs` and gates `build-and-test` with a job-level `if:` — a job skipped
+that way reports `skipped`, which counts as passing. See CLAUDE.md, "Every gate reports on every PR".
+
+That list covers `packages/`, `apps/`, `scripts/`, `smoke/`, `migrations/`, `.claude/`,
+`.github/scripts/`, the root tsconfigs, `pnpm-workspace.yaml`, `.npmrc`, `pnpm-lock.yaml`,
+`turbo.json` and `package.json`; previously only `packages/**` and `package-lock.json` triggered the
+workflow, so a change breaking MJAPI or a gate script never ran CI at all. Every entry is pinned by
+`scripts/check-paths-touched.spec.mjs`, so shortening the list fails a required check rather than
+quietly skipping the job — add the entry and its reason there in the same commit.

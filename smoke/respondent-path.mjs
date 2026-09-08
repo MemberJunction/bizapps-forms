@@ -25,8 +25,9 @@
  */
 import { sessionIdFor } from './lib/session.mjs';
 import { buildAnswers, resolveSlug } from './lib/fixture.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 const SLUG = resolveSlug('respondent-path.mjs');
 
 let failures = 0;
@@ -57,7 +58,10 @@ async function main() {
 
   // 1. The public host page must render for an anonymous visitor with no session.
   const pageRes = await fetch(`${BASE}/f/${SLUG}`);
-  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`, `got ${pageRes.status} — 409 means the distribution has no PublicLinkToken (host magicLink not enabled?)`);
+  check(pageRes.status === 200, `GET /f/${SLUG} serves 200`,
+    `got ${pageRes.status} — 409 means either no PublicLinkToken (host magicLink not enabled?) or, ` +
+      'since bizapps-forms#118, that the form has no Published version; 503 means the link has an ' +
+      'OpenAt in the future. The page body says which.');
   const html = await pageRes.text();
 
   // 2. The page must carry a redeemed anonymous session token.
@@ -67,8 +71,13 @@ async function main() {
 
   // 3. The widget bundle must actually be served, not 404. Without it the page renders
   //    an empty shell — which looks like a styling problem, not a missing build step.
-  const widget = await fetch(`${BASE}/forms/widget/mj-form.js`);
+  //    And served COMPRESSED (#121): `fetch` offers gzip like a browser does, and a 1.2 MB
+  //    bundle with no Content-Encoding is the whole first-load cost on a phone. A route
+  //    registered ahead of MJAPI's compression middleware fails this while still answering 200.
+  const widget = await fetch(`${BASE}/forms/widget/mj-form.js`, { headers: { 'Accept-Encoding': 'gzip' } });
   check(widget.status === 200, 'widget bundle is served', `got ${widget.status} — run "npm run build:packages"`);
+  const encoding = widget.headers.get('content-encoding');
+  check(encoding === 'gzip', 'widget bundle is served compressed', `Content-Encoding: ${encoding ?? '(none)'}`);
 
   // 4. The published definition must load for that anonymous session.
   const published = await gql(token,

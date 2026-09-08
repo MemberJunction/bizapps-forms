@@ -13,14 +13,17 @@
  *
  * `Phone` and `Date` are validated by neither side before this module existed — the widget's
  * switch fell through to `default: return VALID` for both — so they are new enforcement here,
- * not a one-sided gap being closed.
+ * not a one-sided gap being closed. `Time` joined them later still (#116): it fell through this
+ * module's own `default` too, and the value it let past could not be stored.
  *
  * Runs BEFORE the declarative rule and does not replace it: an explicit `ValidationRule`
  * still applies on top, so an author who supplies their own `pattern` keeps full control and can
- * constrain a type further, never loosen it. The one case where this check does not run at all
- * is an autosave draft — see `validateValue` in forms-server, which holds a `partial` save to
- * upper bounds only. A draft can never reach `Complete` without passing through the full check.
+ * constrain a type further, never loosen it. The one case where most of this check does not run
+ * is an autosave draft — see `validateDraft` in forms-server, which holds a draft to upper
+ * bounds, plus the `Date` / `Time` cases here, because those are the one column the row cannot
+ * store an unparsed value in. A draft can never reach `Complete` without the full check.
  */
+import { dateAnswerInstant } from './answer-date';
 import { isAnswerSupplied } from './conditional-rule';
 import type { AnswerValue } from './conditional-rule';
 import { ADDRESS_FIELDS, CONTACT_INFO_FIELDS, questionTypeBehavior } from './question-types';
@@ -210,7 +213,9 @@ export function validateAnswerFormat(
     case 'Website':
       return isWebUrl(String(value)) ? undefined : 'Enter a valid web address.';
     case 'Date':
-      return isDate(value) ? undefined : 'Enter a valid date.';
+      return isStorableDate(type, value) ? undefined : 'Enter a valid date.';
+    case 'Time':
+      return isStorableDate(type, value) ? undefined : 'Enter a valid time.';
     case 'Checkbox':
     case 'Legal':
       // Distinct from `isRequired`: a REQUIRED consent box must be TICKED, which is the
@@ -538,21 +543,23 @@ function isPhone(text: string): boolean {
 }
 
 /**
- * A date answer must be a string JS can parse as a real instant.
+ * A `Date` / `Time` answer must be a string the `date` column can actually store.
  *
- * Deliberately lenient about WHICH string formats parse, for the same reason as the email
- * check — but strict that it must be a string at all. `dateValue` is a plain nullable GraphQL
- * `String` on `FormAnswerInputType` (there is no date scalar in the schema), so nothing
- * upstream coerces or rejects it; a caller posting straight at the mutation can put a number,
- * a boolean or an array on a `Date` question. This used to return `true` for every non-string
- * on the theory that "transport already vetted it". Transport vets nothing, so that was the
- * same bypass this module exists to close for `Email`, left open for `Date`.
+ * "Can store" is decided by {@link dateAnswerInstant} — the same parse persistence writes
+ * through — rather than by a check of this module's own, because the two disagreed before
+ * (#116): this module had no opinion on `Time`, persistence did `new Date('14:30')`, and the
+ * Invalid Date threw from inside `Save()` as an unattributed "Invalid time value". A value
+ * accepted here is now, by construction, a value that can be stored.
+ *
+ * Strict that it must be a string at all. `dateValue` is a plain nullable GraphQL `String` on
+ * `FormAnswerInputType` (there is no date scalar in the schema), so nothing upstream coerces or
+ * rejects it; a caller posting straight at the mutation can put a number, a boolean or an
+ * array on a `Date` question. This used to return `true` for every non-string on the theory
+ * that "transport already vetted it". Transport vets nothing, so that was the same bypass this
+ * module exists to close for `Email`, left open for `Date`.
  */
-function isDate(value: AnswerValue): boolean {
-  if (typeof value !== 'string') {
-    return false;
-  }
-  return !Number.isNaN(new Date(value.trim()).getTime());
+function isStorableDate(type: FormQuestionType, value: AnswerValue): boolean {
+  return typeof value === 'string' && dateAnswerInstant(type, value) !== undefined;
 }
 
 /**

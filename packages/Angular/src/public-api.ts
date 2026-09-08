@@ -15,6 +15,9 @@ import './lib/generated/generated-forms.module';
 // Import class registrations manifest
 import { CLASS_REGISTRATIONS } from './lib/generated/class-registrations-manifest';
 
+// Form Category hierarchy tree panel (side-effect @RegisterClass).
+import './lib/form-panels/form-category-hierarchy.panel';
+
 // Individual-response surface: the side-effect import fires
 // @RegisterClass(BaseFormComponent, 'MJ_BizApps_Forms: Form Responses', 10), which overrides the
 // generated Form Response property grid with the rich detail view everywhere a response opens.

@@ -19,6 +19,17 @@ const EXPIRED_BODY = JSON.parse(
   '{"errors":[{"message":"Token expired","extensions":{"code":"JWT_EXPIRED"}}]}',
 );
 
+/**
+ * The other real 401 body — a request with no token at all — byte for byte.
+ *
+ * Parsed rather than written as a literal, like {@link EXPIRED_BODY} above, because that is how it
+ * reaches the predicate in production: out of `response.json()`, untyped at the boundary. It also
+ * has to be. `GraphQLEnvelope` is a weak type (every field optional), so TypeScript refuses any
+ * object with no property in common with it — and having nothing in common with an envelope is the
+ * entire point of this body.
+ */
+const AUTH_FAILURE_BODY = JSON.parse('{"error":"Authentication required"}');
+
 describe('isSessionExpired', () => {
   it('recognises the JWT_EXPIRED code MJ sends for a lapsed session', () => {
     expect(isSessionExpired(EXPIRED_BODY)).toBe(true);
@@ -28,7 +39,7 @@ describe('isSessionExpired', () => {
     // No token / bad signature: `{"error":"Authentication required"}` / `{"error":"Authentication failed"}`.
     // Those mean something else (a preview embed with no token, a rotated key) and "your session
     // timed out" would be false for them.
-    expect(isSessionExpired({ error: 'Authentication required' })).toBe(false);
+    expect(isSessionExpired(AUTH_FAILURE_BODY)).toBe(false);
   });
 
   it('treats an ordinary GraphQL error as an ordinary failure', () => {

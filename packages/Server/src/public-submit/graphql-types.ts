@@ -57,28 +57,37 @@ export class ClientMetaInput {
   userAgent?: string;
 }
 
+/**
+ * One answer as it arrives on the wire.
+ *
+ * Every typed field is `| null` because `nullable: true` means a client may send an explicit
+ * `null`, and TypeGraphQL passes that through as `null` rather than dropping it. Typing them as
+ * merely optional told the compiler a value could not arrive that demonstrably does, which is how
+ * a `null.trim()` reached the anonymous public write path twice — once through `jsonValue` and
+ * again through `dateValue`. See `FormAnswerInput`.
+ */
 @InputType({ description: 'One answer in a submission (exactly one typed value, or jsonValue).' })
 export class FormAnswerInputType {
   @Field(() => ID)
   questionId!: string;
 
   @Field({ nullable: true })
-  textValue?: string;
+  textValue?: string | null;
 
   @Field(() => Float, { nullable: true })
-  numericValue?: number;
+  numericValue?: number | null;
 
   @Field({ nullable: true })
-  dateValue?: string;
+  dateValue?: string | null;
 
   @Field(() => Boolean, { nullable: true })
-  booleanValue?: boolean;
+  booleanValue?: boolean | null;
 
   @Field({ nullable: true, description: 'JSON string for multi/complex answers.' })
-  jsonValue?: string;
+  jsonValue?: string | null;
 
   @Field(() => ID, { nullable: true })
-  fileId?: string;
+  fileId?: string | null;
 }
 
 @InputType({ description: 'Payload posted to SubmitFormResponse.' })
@@ -180,20 +189,38 @@ type Exact<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
 /** Compile error unless `T` is exactly `true`. */
 type AssertExact<T extends true> = T;
 
+/**
+ * Resolve a type to its plain property shape, preserving optionality.
+ *
+ * {@link Exact} compares DECLARED types, and a `@ObjectType()` class does not declare its members
+ * identically to the interface it mirrors even when every field resolves the same — so under
+ * `strictNullChecks` the class-vs-interface locks below reported a divergence that does not exist
+ * (both assignability directions hold, and each field is individually `Exact`). Mapping both sides
+ * through this compares the shapes rather than the declarations. It normalises the container, not
+ * the fields: a field whose TYPE actually differs still fails. Verified by injection — changing one
+ * DTO field's type still breaks `npm run typecheck`, which is the gate these locks are enforced by
+ * (Vitest does not type-check, so no runtime spec can stand in for it).
+ */
+type Shape<T> = { [K in keyof T]: T[K] };
+
 /** The subset of contract `FormAnswerInput` whose fields the DTO must mirror exactly. */
 type AnswerContractExceptJson = Omit<FormAnswerInput, 'jsonValue'>;
 type AnswerDtoExceptJson = Omit<FormAnswerInputType, 'jsonValue'>;
 
 // Lock: the answer DTO matches the contract on every field EXCEPT the intentional jsonValue
 // (string) divergence, which is pinned to `string` here so a change is still caught.
-type _LockAnswerFields = AssertExact<Exact<AnswerContractExceptJson, AnswerDtoExceptJson>>;
-type _LockAnswerJsonIsString = AssertExact<Exact<FormAnswerInputType['jsonValue'], string | undefined>>;
+type _LockAnswerFields = AssertExact<Exact<Shape<AnswerContractExceptJson>, Shape<AnswerDtoExceptJson>>>;
+// `string | null | undefined`, and the `null` is load-bearing: this DTO accepts an EXPLICIT null
+// because a client sending one is what put `null.trim()` on the anonymous public write path twice
+// (see the field's own comment). The pin said `string | undefined`, which was only ever true with
+// `strictNullChecks` off — it silently stopped describing the field the moment the flag went on.
+type _LockAnswerJsonIsString = AssertExact<Exact<FormAnswerInputType['jsonValue'], string | null | undefined>>;
 
 // Lock: the result DTO the widget reads matches the contract field-for-field, and the nested
 // error type matches the contract's FieldError.
-type _LockResultFields = AssertExact<Exact<FormSubmissionResult, FormSubmissionResultType>>;
-type _LockErrorFields = AssertExact<Exact<FieldError, FieldErrorType>>;
-type _LockClientMeta = AssertExact<Exact<ClientMeta, ClientMetaInput>>;
+type _LockResultFields = AssertExact<Exact<Shape<FormSubmissionResult>, Shape<FormSubmissionResultType>>>;
+type _LockErrorFields = AssertExact<Exact<Shape<FieldError>, Shape<FieldErrorType>>>;
+type _LockClientMeta = AssertExact<Exact<Shape<ClientMeta>, Shape<ClientMetaInput>>>;
 
 // Reference the aliases so `noUnusedLocals` keeps them (they exist purely for the check above).
 export type ContractLocks = [

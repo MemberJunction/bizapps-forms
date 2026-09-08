@@ -11,6 +11,8 @@ function multiChoiceRequiredDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -50,6 +52,8 @@ describe('validateSubmission — FileUpload answered via fileId', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p1',
@@ -108,6 +112,8 @@ function typedQuestionsWithoutRulesDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -180,6 +186,8 @@ function partialSaveDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -210,6 +218,8 @@ function cappedDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -297,6 +307,76 @@ describe('validateSubmission — partial (autosave) saves', () => {
   });
 });
 
+/** One `Date` and one `Time` question, both optional, no rules — the all-types fixture's last page. */
+function temporalDefinition(): PublishedFormDefinition {
+  return {
+    formId: 'f',
+    formVersionId: 'v',
+    name: 'When',
+    renderMode: 'Scroll',
+    settings: { anonymousAllowed: true, captchaRequired: false },
+    styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
+    pages: [
+      {
+        id: 'p1',
+        displayOrder: 1,
+        questions: [
+          { id: 'q-date', type: 'Date', prompt: 'Which day', isRequired: false, displayOrder: 1, options: [] },
+          { id: 'q-time', type: 'Time', prompt: 'What time', isRequired: false, displayOrder: 2, options: [] },
+        ],
+      },
+    ],
+  };
+}
+
+describe('validateSubmission — the date column, in every mode (#116)', () => {
+  // `<input type="time">` emits `14:30`. There was no Time format case, so the value passed
+  // validation untouched, persistence did `new Date('14:30')`, and the Invalid Date threw from
+  // inside Save() as an unattributed "Invalid time value". Every form carrying a Time question
+  // was unsubmittable the moment someone answered it.
+  it('accepts a Time answered as the control emits it, and keeps it for persistence', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: '14:30' }], 'complete');
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-time']);
+  });
+
+  it('rejects a Time the column cannot store, attributed to its question', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: '25:99' }], 'complete');
+    expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
+    expect(outcome.answers).toEqual([]);
+  });
+
+  // A draft was held to upper bounds only, on the theory that everything else describes a
+  // finished value a respondent is still typing towards. A date control emits nothing until the
+  // value is whole, so an unparseable date is never "still typing" — and DateValue is a
+  // DATETIMEOFFSET, which cannot hold the string as a draft any more than as a submission. On
+  // `next`, a draft `Date` + "garbage" reached Save() and came back as "Invalid time value".
+  it('rejects an unstorable Date on a DRAFT too, since the column will not hold it either way', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-date', dateValue: 'garbage' }], 'draft');
+    expect(outcome.errors).toEqual([{ questionId: 'q-date', message: 'Enter a valid date.' }]);
+  });
+
+  it('rejects an unstorable Time on a DRAFT', () => {
+    const outcome = validateSubmission(temporalDefinition(), [{ questionId: 'q-time', dateValue: 'garbage' }], 'draft');
+    expect(outcome.errors).toEqual([{ questionId: 'q-time', message: 'Enter a valid time.' }]);
+  });
+
+  it('still lets a DRAFT carry a whole date or time', () => {
+    const outcome = validateSubmission(
+      temporalDefinition(),
+      [
+        { questionId: 'q-date', dateValue: '2026-09-01' },
+        { questionId: 'q-time', dateValue: '09:05' },
+      ],
+      'draft',
+    );
+    expect(outcome.errors).toEqual([]);
+    expect(outcome.answers.map((a) => a.question.id).sort()).toEqual(['q-date', 'q-time']);
+  });
+});
+
 /** A definition where q-other is shown only when q-choice equals 'Other'. */
 function conditionalDefinition(): PublishedFormDefinition {
   return {
@@ -306,6 +386,8 @@ function conditionalDefinition(): PublishedFormDefinition {
     renderMode: 'Scroll',
     settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
+    automations: [],
+    endScreens: [],
     pages: [
       {
         id: 'p1',
@@ -365,6 +447,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -404,6 +488,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -446,6 +532,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -481,6 +569,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -501,7 +591,10 @@ describe('validateSubmission', () => {
       ],
     };
     const outcome = validateSubmission(def, [{ questionId: 'q-trigger', textValue: '   ' }], 'complete');
-    expect(outcome.errors).toEqual([]);
+    // The branch stayed hidden, so nothing asks for `q-dependent`. The one error left is the
+    // form-level "nothing to submit" (#124): a whitespace-only answer stores nothing, and a
+    // completion that stores nothing is refused rather than sealed.
+    expect(outcome.errors.map((e) => e.questionId)).toEqual([undefined]);
     expect(outcome.answers).toEqual([]);
   });
 
@@ -517,6 +610,8 @@ describe('validateSubmission', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p',
@@ -553,6 +648,8 @@ describe('validateSubmission — what each mode waives', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         {
           id: 'p1',
@@ -594,5 +691,215 @@ describe('validateSubmission — what each mode waives', () => {
         'q-email',
       ]);
     });
+  });
+});
+
+/**
+ * Issue #124. An answer whose question id names NO question in the published version used to
+ * fall straight through: the walk visits the definition's questions and looks the inputs up, so
+ * an input nothing looks up is neither an error nor an answer. Persistence then sealed whatever
+ * was left — including nothing — as `Complete` and counted it against the quota.
+ */
+describe('validateSubmission — answers that match no question (#124)', () => {
+  /** Two OPTIONAL questions plus a Statement, so "nothing answered" is reachable without a required error. */
+  function optionalForm(): PublishedFormDefinition {
+    return {
+      formId: 'f',
+      formVersionId: 'v',
+      name: 'Optional',
+      renderMode: 'Scroll',
+      settings: { anonymousAllowed: true, captchaRequired: false },
+      styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-first', type: 'ShortText', prompt: 'First name', isRequired: false, displayOrder: 1, options: [] },
+            { id: 'q-colour', type: 'ShortText', prompt: 'Colour', isRequired: false, displayOrder: 2, options: [] },
+            { id: 'q-note', type: 'Statement', prompt: 'Display only', isRequired: false, displayOrder: 3, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  /**
+   * A form that asks NOTHING: display-only copy and a Submit button. Reading a policy and
+   * acknowledging it is a real form, and it is completable — the response records that someone
+   * arrived and pressed the button, which is the whole point of it.
+   */
+  function acknowledgementForm(): PublishedFormDefinition {
+    const def = optionalForm();
+    return {
+      ...def,
+      name: 'Acknowledgement',
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            { id: 'q-note', type: 'Statement', prompt: 'I have read the policy.', isRequired: false, displayOrder: 1, options: [] },
+          ],
+        },
+      ],
+    };
+  }
+
+  /** Answerable questions exist, but this respondent's path renders none of them. */
+  function allHiddenForm(): PublishedFormDefinition {
+    const def = optionalForm();
+    return {
+      ...def,
+      pages: [
+        {
+          id: 'p1',
+          displayOrder: 1,
+          questions: [
+            {
+              id: 'q-branch', type: 'ShortText', prompt: 'Branch only', isRequired: false, displayOrder: 1, options: [],
+              conditionalRule: { show: { all: [{ questionId: 'q-absent', op: 'equals', value: 'yes' }] } },
+            },
+          ],
+        },
+      ],
+    };
+  }
+
+  const ghost = { questionId: 'q-ghost', textValue: 'boo' };
+
+  describe('unknown question id', () => {
+    it('refuses an answer set that matches nothing, naming the id it could not place', () => {
+      const outcome = validateSubmission(optionalForm(), [ghost], 'complete');
+      expect(outcome.errors).toHaveLength(1);
+      expect(outcome.errors[0].questionId).toBe('q-ghost');
+      expect(outcome.answers).toEqual([]);
+    });
+
+    it('refuses a MIXED set whole, and names only the unknown id', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [{ questionId: 'q-first', textValue: 'Ada' }, ghost],
+        'complete',
+      );
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-ghost']);
+    });
+
+    it('is malformed input in every mode, so a draft is refused too', () => {
+      expect(validateSubmission(optionalForm(), [ghost], 'draft').errors.map((e) => e.questionId)).toEqual(['q-ghost']);
+    });
+
+    it('still drops a KNOWN question hidden by a rule silently (an autosave may predate the rule)', () => {
+      const outcome = validateSubmission(
+        conditionalDefinition(),
+        [
+          { questionId: 'q-choice', textValue: 'Yes' },
+          { questionId: 'q-other', textValue: 'stale' },
+        ],
+        'complete',
+      );
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-choice']);
+    });
+
+    it('still drops an answer to a display-only question silently', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [
+          { questionId: 'q-first', textValue: 'Ada' },
+          { questionId: 'q-note', textValue: 'noise' },
+        ],
+        'complete',
+      );
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers.map((a) => a.question.id)).toEqual(['q-first']);
+    });
+  });
+
+  describe('a completion that stores nothing', () => {
+    it('refuses an empty answer set on a final submit with a form-level error', () => {
+      const outcome = validateSubmission(optionalForm(), [], 'complete');
+      expect(outcome.errors).toHaveLength(1);
+      expect(outcome.errors[0].questionId).toBeUndefined();
+      expect(outcome.errors[0].message).toMatch(/at least one/i);
+    });
+
+    it('refuses a final submit whose only answers are blank', () => {
+      const outcome = validateSubmission(optionalForm(), [{ questionId: 'q-first', textValue: '   ' }], 'complete');
+      expect(outcome.errors.map((e) => e.questionId)).toEqual([undefined]);
+    });
+
+    it('lets an empty draft through — an autosave with nothing typed yet is normal', () => {
+      expect(validateSubmission(optionalForm(), [], 'draft').errors).toEqual([]);
+    });
+
+    it('does not double up on a required-field error', () => {
+      const outcome = validateSubmission(conditionalDefinition(), [], 'complete');
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-choice']);
+    });
+  });
+
+  /**
+   * "Nothing to submit" has to mean the respondent DECLINED to answer, not that the form never
+   * asked. The two are only the same on a form with something answerable on it, and refusing the
+   * other case tells a respondent to answer a question that is not on their screen.
+   *
+   * The widget already draws this distinction — `FormRuntime.hasAnswerableQuestions` exists for
+   * exactly these two shapes, and its comment names them: "A form of pure Statement copy — or one
+   * whose every question is currently hidden by a show rule".
+   */
+  describe('a form that asked the respondent nothing', () => {
+    it('completes an acknowledgement form, which has only display-only copy to show', () => {
+      const outcome = validateSubmission(acknowledgementForm(), [], 'complete');
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.answers).toEqual([]);
+    });
+
+    it('completes when every answerable question is hidden on this respondent\'s path', () => {
+      const outcome = validateSubmission(allHiddenForm(), [], 'complete');
+      expect(outcome.errors).toEqual([]);
+    });
+
+    it('still refuses a blank submission when the form DID ask something', () => {
+      expect(validateSubmission(optionalForm(), [], 'complete').errors.map((e) => e.message))
+        .toEqual(['Please answer at least one question before submitting.']);
+    });
+  });
+
+  describe('one error per unknown question, not per answer', () => {
+    it('reports a repeated unknown id once', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [{ questionId: 'q-ghost', textValue: 'a' }, { questionId: 'q-ghost', textValue: 'b' }],
+        'complete',
+      );
+      // The widget joins every message with a space into one banner, so a duplicated entry is a
+      // sentence the respondent reads twice.
+      expect(outcome.errors).toHaveLength(1);
+      expect(outcome.errors[0].questionId).toBe('q-ghost');
+    });
+
+    it('still reports each DISTINCT unknown id', () => {
+      const outcome = validateSubmission(
+        optionalForm(),
+        [{ questionId: 'q-ghost', textValue: 'a' }, { questionId: 'q-phantom', textValue: 'b' }],
+        'complete',
+      );
+      expect(outcome.errors.map((e) => e.questionId)).toEqual(['q-ghost', 'q-phantom']);
+    });
+  });
+
+  /**
+   * The exemption for `screened-out` is right, but not for the reason the code used to give. A
+   * knockout is a terminal JUMP whose `when` group is evaluated against the RAW answer map, while
+   * `visible` comes from the rendered walk — so a jump reading a HIDDEN question fires while that
+   * answer is dropped, and the response carries nothing. Measured live: a Disqualified row with 0
+   * answers, identically on this branch and on `next`.
+   */
+  it('seals a screened-out submission that carries no visible answer at all', () => {
+    const outcome = validateSubmission(optionalForm(), [], 'screened-out');
+    expect(outcome.errors).toEqual([]);
   });
 });
