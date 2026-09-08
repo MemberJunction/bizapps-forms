@@ -400,9 +400,15 @@ const PAGE_B = ['qb1', 'qb2', 'qb3'];
 
 describe('only rules on the moved page can newly break', () => {
   it('holds for every legal within-page move, on both sections', () => {
-    // Brute force rather than argued (§1.6). This is also the canary: it fails the day
-    // cross-section moves or section reordering land, which is the day the drag diff has to
-    // widen beyond the moved page.
+    // Brute force rather than argued (§1.6). Still true after #149: a move INSIDE one section
+    // cannot invert any pair involving a question in another, so the in-page drag's damage is
+    // page-local. What #149 changed is that this is no longer the only kind of move.
+    //
+    // IT WAS NEVER THE CANARY IT CLAIMED TO BE. The comment here used to promise it "fails the
+    // day cross-section moves land". It does not, and it did not: it only ever iterates
+    // within-page moves, so the property it brute-forces stayed true and the block stayed green
+    // through the change it was supposed to catch. The cross-section block below is the one that
+    // actually states what a move between sections can break.
     const before = collectRuleEntries(propertyForm(PAGE_A, PAGE_B));
     for (const [pageId, page] of [['pA', PAGE_A], ['pB', PAGE_B]] as const) {
       for (let from = 0; from < page.length; from += 1) {
@@ -436,6 +442,78 @@ describe('only rules on the moved page can newly break', () => {
     // "B3 shows when B1 is answered", with B1 dragged below B3.
     const afterB = collectRuleEntries(propertyForm(PAGE_A, moved(PAGE_B, 0, 2)));
     expect(newlyBrokenRules(before, afterB).map((e) => e.itemId)).toEqual(['qb3']);
+  });
+});
+
+/**
+ * The property the within-page block cannot state, and the reason the damage diff was never
+ * scoped to one page (issue #149).
+ *
+ * A cross-section move changes the position of the moved question relative to EVERY question on
+ * both pages at once, so it can break a rule on the source section, on the destination section,
+ * or on any page downstream of either. `newlyBrokenRules` is a set difference over
+ * `collectRuleEntries` for the whole tree, so it reports all of them without knowing it is doing
+ * anything new — which is exactly why the write path only had to be hooked, not taught.
+ */
+describe('a cross-section move can break a rule on either section', () => {
+  /** `from` of page A moved into page B at `to`, as two new orders. */
+  const across = (
+    a: readonly string[],
+    b: readonly string[],
+    from: number,
+    to: number,
+  ): { a: string[]; b: string[] } => {
+    const nextA = [...a];
+    const [lifted] = nextA.splice(from, 1);
+    const nextB = [...b];
+    nextB.splice(to, 0, lifted);
+    return { a: nextA, b: nextB };
+  };
+
+  it('reports damage for every legal move out of A into B without inventing a rule', () => {
+    const before = collectRuleEntries(propertyForm(PAGE_A, PAGE_B));
+    for (let from = 0; from < PAGE_A.length; from += 1) {
+      for (let to = 0; to <= PAGE_B.length; to += 1) {
+        const { a, b } = across(PAGE_A, PAGE_B, from, to);
+        const after = collectRuleEntries(propertyForm(a, b));
+        // Every reported id is a real rule on the form — the diff never mints one.
+        const ids = new Set(after.map((e) => e.id));
+        for (const broken of newlyBrokenRules(before, after)) {
+          expect(ids.has(broken.id)).toBe(true);
+          expect(broken.broken.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
+  it('is not vacuously true: one move breaks rules on BOTH sections at once', () => {
+    // Three rules read A1: "A3 shows when A1 is answered", A2's jump condition, and — the one
+    // that makes this a cross-section property rather than a source-section one — section B's
+    // OWN show rule. Dragging A1 out of A and into B puts it after the first two and INSIDE the
+    // third's section, so a page rule that runs before B's questions now reads a blank.
+    const before = collectRuleEntries(propertyForm(PAGE_A, PAGE_B));
+    const { a, b } = across(PAGE_A, PAGE_B, 0, PAGE_B.length);
+    const after = collectRuleEntries(propertyForm(a, b));
+    expect(newlyBrokenRules(before, after).map((e) => e.itemId).sort()).toEqual([
+      'pB',
+      'qa2',
+      'qa3',
+    ]);
+  });
+
+  it('reports damage on the SOURCE section, which a destination-scoped diff would miss', () => {
+    // What makes "diff the whole tree" load-bearing rather than incidental. The author dropped
+    // the question into section B; two of the rules that broke are on section A, which they are
+    // no longer looking at. A diff scoped to the page the drop landed on would report neither,
+    // and the band would under-report a move that cost two rules.
+    const before = collectRuleEntries(propertyForm(PAGE_A, PAGE_B));
+    const { a, b } = across(PAGE_A, PAGE_B, 0, 0);
+    const after = collectRuleEntries(propertyForm(a, b));
+    const onSourcePage = newlyBrokenRules(before, after)
+      .filter((e) => e.pageId === 'pA')
+      .map((e) => e.itemId)
+      .sort();
+    expect(onSourcePage).toEqual(['qa2', 'qa3']);
   });
 });
 

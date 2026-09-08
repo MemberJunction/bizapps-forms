@@ -166,9 +166,17 @@ describe('a reorder that breaks a rule says so at the drag', () => {
   it('remembers WHICH question moved, not which index it left', () => {
     // An index pair is only correct while nothing else has shifted the page. Resolving by id at
     // click time makes moving the wrong question unrepresentable rather than merely unlikely.
+    //
+    // The call now takes TWO id lists (#149): the page the question is on, and the page it has
+    // to go home to. They are the same page for an in-page undo and different ones once a move
+    // can cross a section — which is the whole reason the second argument exists, since the
+    // anchor `wasBefore` names a question on the page it LEFT.
     const source = builder();
     expect(source).toMatch(/questionId: moved\.entity\.ID/);
-    expect(source).toMatch(/undoReorderMove\(notice, page\.questions\.map\(/);
+    expect(source).toMatch(
+      /undoReorderMove\(notice, this\.questionIds\(current\), this\.questionIds\(home\)\)/,
+    );
+    expect(source).toMatch(/private questionIds\(page: PageNode\): string\[\] \{/);
   });
 
   it('holds the busy flag across the write it awaits', () => {
@@ -222,18 +230,56 @@ describe('a reorder that breaks a rule says so at the drag', () => {
   });
 });
 
-describe('only a reorder can invert a pair, so only a reorder is watched', () => {
-  it('keeps every other write path append-only', () => {
-    // Plan §1.5 is the proof that the drag diff needs to hook exactly one method. If a
-    // duplicate-below, an insert-at-index or a move-to-another-section ever ships, that proof
-    // lapses — and this is where it says so, rather than the notice quietly under-reporting.
+describe('every write that can invert a pair is watched', () => {
+  /** The cross-page write path, comments stripped — what actually runs. */
+  const crossPageMethod = (): string => {
     const source = builder();
-    const html = builderHtml();
-    expect(source).not.toMatch(/transferArrayItem/);
-    expect(html).not.toMatch(/cdkDropListConnectedTo/);
-    // No page-order write: sections cannot be reordered, so no page's questions can change
-    // their position relative to another page's.
-    expect(source).not.toMatch(/persistPageOrder/);
+    const start = source.indexOf('private async moveQuestionAcrossPages(');
+    expect(start, 'no moveQuestionAcrossPages in the builder').toBeGreaterThan(-1);
+    const end = source.indexOf('\n  }', start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
+  it('runs the damage diff over the cross-section write, not just the in-page one', () => {
+    // WHAT THIS REPLACED. This block used to BAN transferArrayItem and cdkDropListConnectedTo
+    // outright, as a tripwire: `reorderQuestion` claimed to be the only path that can invert a
+    // pair of surviving questions, and the ban is where that claim said so out loud rather than
+    // letting the notice quietly under-report. Issue #149 shipped the move it was watching for,
+    // so the obligation is DISCHARGED here instead of deleted — the new write runs the same
+    // `newlyBrokenRules` set difference, which is what the ban existed to guarantee. Deleting it
+    // would have left the band under-reporting in silence, the one outcome it was written to
+    // make impossible.
+    const method = crossPageMethod();
+    expect(method).toMatch(/newlyBrokenRules\(/);
+    expect(method).toMatch(/damageKeys\(/);
+    expect(method).toMatch(/reorderNoticeText\(/);
+  });
+
+  it('keeps the cross-section move to ONE write path', () => {
+    // The diff is hooked per method, so a second place that transfers between lists is a second
+    // place to forget it. One call site is what makes the guard above sufficient.
+    const occurrences = builder().match(/transferArrayItem\(/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    expect(crossPageMethod()).toMatch(/transferArrayItem\(/);
+  });
+
+  it('records BOTH pages on the band, so Undo returns the question to its section', () => {
+    expect(crossPageMethod()).toMatch(/fromPageId: source\.entity\.ID/);
+    expect(crossPageMethod()).toMatch(/pageId: destination\.entity\.ID/);
+  });
+
+  it('renumbers both sections through the one method that orders the writes', () => {
+    // Not two `persistQuestionOrder` calls here: the ORDER is the integrity story, and spreading
+    // it across the component would put it somewhere no spec can hold it.
+    expect(crossPageMethod()).toMatch(/state\.persistCrossPageMove\(/);
+    expect(crossPageMethod()).not.toMatch(/persistQuestionOrder\(/);
+  });
+
+  it('still refuses a page-order write, because sections cannot be reordered', () => {
+    // Unchanged and still in scope: #149 moves a question between sections; it does not move a
+    // section. No page's questions can change position relative to another page's.
+    expect(builder()).not.toMatch(/persistPageOrder/);
   });
 });
 
