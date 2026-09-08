@@ -22,6 +22,7 @@ import {
   parseIdentityRule,
   parseMergePolicy,
   type CanonicalAnswers,
+  type FormQuestionType,
   type PublishedFormAutomation,
 } from '@mj-biz-apps/forms-entities';
 import type {
@@ -51,6 +52,14 @@ export interface DispatchContext {
   formVersionId: string;
   distributionId: string;
   answers: CanonicalAnswers;
+  /**
+   * The type of every question in the published definition, keyed by id.
+   *
+   * `CanonicalAnswers` deliberately carries values without types, so anything that must write an
+   * answer ONWARD in a type-aware shape needs this beside it — entity binding writes a `Time` as a
+   * clock or as an instant depending on the target column, and cannot tell which without it.
+   */
+  questionTypes: ReadonlyMap<string, FormQuestionType>;
   principal: UserInfo;
   /** Entities this deployment permits bindings to write; null disables the check. */
   allowedEntities: ReadonlySet<string> | null;
@@ -240,6 +249,7 @@ async function runBindingTarget(
   const result = await executeBinding({
     config,
     answers: ctx.answers,
+    questionTypes: ctx.questionTypes,
     gateway: Object.assign(new MJBindingGateway(ctx.principal), {
       findPriorOutcome: (responseId: string) =>
         readPriorBindingOutcome(automation.bindingId as string, responseId, ctx.principal),

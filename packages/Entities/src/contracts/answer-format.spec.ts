@@ -119,6 +119,31 @@ describe('validateAnswerFormat — Date', () => {
   });
 });
 
+describe('validateAnswerFormat — Time', () => {
+  // There was no `Time` case at all: the value fell through to `default` as valid, persistence
+  // did `new Date('14:30')`, and the Invalid Date threw from inside `Save()` as an unattributed
+  // "Invalid time value" (#116). The check is the same parse persistence now stores through, so
+  // "accepted here" and "storable there" cannot disagree.
+  it('accepts what <input type="time"> emits', () => {
+    expect(validateAnswerFormat({ type: 'Time' }, '14:30')).toBeUndefined();
+    expect(validateAnswerFormat({ type: 'Time' }, '14:30:15')).toBeUndefined();
+  });
+
+  it('rejects an impossible or unparseable clock reading', () => {
+    expect(validateAnswerFormat({ type: 'Time' }, '25:99')).toBe('Enter a valid time.');
+    expect(validateAnswerFormat({ type: 'Time' }, 'half past two')).toBe('Enter a valid time.');
+  });
+
+  it('rejects an instant: the wire format for a Time is a clock reading, nothing else', () => {
+    expect(validateAnswerFormat({ type: 'Time' }, '2026-09-01T14:30:00Z')).toBe('Enter a valid time.');
+  });
+
+  it('rejects a non-string smuggled in through another typed column', () => {
+    expect(validateAnswerFormat({ type: 'Time' }, 870)).toBe('Enter a valid time.');
+    expect(validateAnswerFormat({ type: 'Time' }, ['14:30'])).toBe('Enter a valid time.');
+  });
+});
+
 describe('validateAnswerFormat — unanswered values', () => {
   // "Not answered" is the isRequired check's business. A format check that fired on an empty
   // value would report "Enter a valid email address." on a question the respondent simply left
@@ -129,6 +154,7 @@ describe('validateAnswerFormat — unanswered values', () => {
       expect(validateAnswerFormat({ type: 'Number' }, empty)).toBeUndefined();
       expect(validateAnswerFormat({ type: 'Phone' }, empty)).toBeUndefined();
       expect(validateAnswerFormat({ type: 'Date' }, empty)).toBeUndefined();
+      expect(validateAnswerFormat({ type: 'Time' }, empty)).toBeUndefined();
     }
   });
 });

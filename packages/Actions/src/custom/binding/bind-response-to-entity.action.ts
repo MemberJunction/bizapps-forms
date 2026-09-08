@@ -64,6 +64,11 @@ export class BindResponseToEntityAction extends BaseAction {
       const result = await executeBinding({
         config,
         answers: context.canonicalAnswers,
+        // `canonicalAnswers` collapses each answer to one value and drops the question's type with
+        // it, so a date-column answer arrives as a bare instant. The typed projection beside it
+        // still knows, which lets the executor write a `Time` as `14:30` onto a string column and
+        // as the instant onto a real datetime one.
+        questionTypes: new Map(context.answers.map((a) => [a.questionId, a.questionType])),
         // The same identity ledger the submit path uses. This entry point is the re-drivable one
         // — an approval hook, an admin re-run — so without it a second invocation would create a
         // second record under an AlwaysCreate rule and leave no trace that either had happened.

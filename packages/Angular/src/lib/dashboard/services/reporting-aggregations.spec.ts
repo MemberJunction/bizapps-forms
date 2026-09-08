@@ -1,5 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import type { PublishedFormDefinition } from '@mj-biz-apps/forms-entities';
+import type {
+  PublishedFormDefinition,
+  mjBizAppsFormsFormResponseEntityType,
+  mjBizAppsFormsFormResponseAnswerEntityType,
+} from '@mj-biz-apps/forms-entities';
+
+// The service keeps these two aliases module-private; the spec derives them from the same entity
+// types rather than importing what is not exported. Nothing here compiled before, so the bare
+// names resolved to nothing and Vitest — which does not type-check — never noticed.
+type ResponseRow = mjBizAppsFormsFormResponseEntityType;
+type AnswerRow = mjBizAppsFormsFormResponseAnswerEntityType;
 import {
   buildSummary,
   buildBreakdowns,
@@ -61,6 +71,8 @@ describe('flattenQuestions', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         { id: 'p2', displayOrder: 1, questions: [q('q3', 'Number', 0)] },
         { id: 'p1', displayOrder: 0, questions: [q('q2', 'Email', 1), q('q1', 'ShortText', 0)] },
@@ -324,6 +336,8 @@ describe('buildFunnel', () => {
       renderMode: 'Scroll',
       settings: { anonymousAllowed: true, captchaRequired: false },
       styleTokens: { cssVariables: {} },
+      automations: [],
+      endScreens: [],
       pages: [
         { id: 'p1', title: 'One', displayOrder: 0, questions: [q('q1', 'ShortText', 0)] },
         { id: 'p2', title: 'Two', displayOrder: 1, questions: [q('q2', 'ShortText', 0)] },

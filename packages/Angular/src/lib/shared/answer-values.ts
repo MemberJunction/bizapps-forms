@@ -12,6 +12,7 @@
 import {
   analysisKindFor,
   answerColumnFor,
+  dateAnswerText,
   FORM_QUESTION_TYPES,
   type mjBizAppsFormsFormResponseAnswerEntityType,
   type mjBizAppsFormsFormResponseEntityType,
@@ -116,9 +117,19 @@ export function renderAnswer(q: PublishedFormQuestion, a: AnswerRow): string {
   if (NUMERIC_TYPES.has(q.type)) {
     return a.NumericValue !== null && a.NumericValue !== undefined ? String(a.NumericValue) : '';
   }
-  if (q.type === 'Date' || q.type === 'Time') {
+  if (answerColumnFor(q.type) === 'date') {
+    // One reader for the whole column, because it is one column. `dateAnswerText` gives back the
+    // text the respondent entered — a `Time` as its clock, a `Date` as its calendar day — which is
+    // the inverse of the parse persistence stored it through (#116).
+    //
+    // Neither half is shown as the stored instant: `1970-01-01T14:30:00.000Z` says "1970" when the
+    // respondent said "half past two", and `2026-09-01T00:00:00.000Z` says rather less than
+    // "1 September". Nor is either localised — a stored Date is UTC midnight, so
+    // `toLocaleDateString()` renders the PREVIOUS day for every viewer west of Greenwich, which is
+    // the same skew `bandOf` was fixed for. A date answer carries no zone, so there is no zone to
+    // localise it in.
     const d = toDate(a.DateValue);
-    return d ? d.toISOString() : '';
+    return d ? dateAnswerText(q.type, d) : '';
   }
   if (COMPOSITE_TYPES.has(q.type)) {
     return renderComposite(q, a);

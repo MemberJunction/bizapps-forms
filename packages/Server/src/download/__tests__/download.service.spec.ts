@@ -30,12 +30,28 @@ function fileRow(over: Partial<StoredFileRow> = {}): StoredFileRow {
   };
 }
 
+/**
+ * A complete `RunViewResult`, built rather than cast. The two helpers used to assert their way to
+ * the type with `as`, which silently stopped being checkable once `strictNullChecks` was on — and
+ * a cast that no longer overlaps is a fixture that can drift from the interface it stands in for.
+ */
+function runViewResult<T>(rows: T[], errorMessage = ''): RunViewResult<T> {
+  return {
+    Success: errorMessage === '',
+    Results: rows,
+    RowCount: rows.length,
+    TotalRowCount: rows.length,
+    ExecutionTime: 0,
+    ErrorMessage: errorMessage,
+  };
+}
+
 function ok<T>(rows: T[]): RunViewResult<T> {
-  return { Success: true, Results: rows } as RunViewResult<T>;
+  return runViewResult(rows);
 }
 
 function denied<T>(): RunViewResult<T> {
-  return { Success: false, Results: [], ErrorMessage: 'no read permission' } as RunViewResult<T>;
+  return runViewResult<T>([], 'no read permission');
 }
 
 interface Stubs {

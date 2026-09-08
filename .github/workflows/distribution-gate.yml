@@ -3,8 +3,13 @@ name: Distribution Gate
 # Reads the SQL this app ships for hazards that are invisible from inside a working checkout: a
 # placeholder `mj app install` cannot resolve (Skyway leaves unknown ones untouched, so they ship as
 # literal strings rather than erroring), a regenerated seed re-granting the anonymous Form Respondent
-# role unfiltered access, a core-metadata insert guarded on its own ID alone, and a schema sync
-# reaching a schema this app does not own. See plans/DISTRIBUTION_SEED_PLAN.md.
+# role unfiltered access, a core-metadata insert guarded on its own ID alone, a schema sync reaching a
+# schema this app does not own, an extended-property write handing `sql_variant` a MAX-typed value,
+# and an `__mj.Entity` id referenced by a literal no shipped SQL seeds. See
+# plans/DISTRIBUTION_SEED_PLAN.md.
+#
+# The count is deliberately not written down here. It was "four" through three more checks landing,
+# which is what a number in prose does; the file itself documents each one.
 #
 # Metadata currency is NOT gated here (#105). PRs contribute declarative JSON only and the build
 # engineer generates one consolidated Metadata_Sync per release, so no PR can answer "has the seed
@@ -14,64 +19,68 @@ name: Distribution Gate
 
 on:
   workflow_dispatch:
+  # No `paths:` filter. This gate is a required check since #173, and a workflow skipped by an
+  # `on: paths:` filter creates NO check run, so the pull request hangs on "Expected — Waiting for
+  # status" forever. The checks this job runs cost 2.6s, so the job simply always runs; only the
+  # 7-minute mutant suite below stays conditional, and that condition lives on the step.
+  #
   # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
   # land shipped SQL without the gate ever reading it.
+  #
+  # metadata/** was deliberately absent from the old filter (#105) and nothing about that judgement
+  # changed: this gate reads shipped SQL and nothing else, so a metadata-only PR gives it nothing to
+  # say. It now reports success on such a PR rather than not reporting at all, which is the only
+  # difference.
   push:
     branches: [next, main]
-    paths:
-      # metadata/** is deliberately absent (#105): this gate reads shipped SQL and nothing else,
-      # so a metadata-only PR gives it nothing to say. It triggers on the directories that carry
-      # shipped SQL, plus its own sources.
-      - 'migrations/**'
-      # CHECK 3 scans this directory, so the first PostgreSQL seed must trigger the gate that
-      # will refuse it. Without this entry a PR adding one runs no gate at all.
-      - 'migrations-pg/**'
-      - 'migrations-teardown/**'
-      - 'mj-app.json'
-      - 'scripts/check-distribution-seed.mjs'
-      # The gate's own tests. The workflow RUNS this file below but did not trigger on it, and
-      # `npm test` is Vitest and never executes a plain-Node .mjs spec — so a PR that weakened or
-      # deleted a CHECK 3 case ran neither step. A gate whose tests nothing runs is a gate on trust.
-      - 'scripts/check-distribution-seed.spec.mjs'
-      # The mutation gate and, just as importantly, its list of load-bearing behaviours: editing
-      # that list is how coverage is dropped, so it has to be able to fail the PR that does it.
-      - 'scripts/check-distribution-seed.mutants.mjs'
-      - '.github/workflows/distribution-gate.yml'
   pull_request:
     branches: [next, main]
-    paths:
-      # metadata/** is deliberately absent (#105): this gate reads shipped SQL and nothing else,
-      # so a metadata-only PR gives it nothing to say. It triggers on the directories that carry
-      # shipped SQL, plus its own sources.
-      - 'migrations/**'
-      # CHECK 3 scans this directory, so the first PostgreSQL seed must trigger the gate that
-      # will refuse it. Without this entry a PR adding one runs no gate at all.
-      - 'migrations-pg/**'
-      - 'migrations-teardown/**'
-      - 'mj-app.json'
-      - 'scripts/check-distribution-seed.mjs'
-      # The gate's own tests. The workflow RUNS this file below but did not trigger on it, and
-      # `npm test` is Vitest and never executes a plain-Node .mjs spec — so a PR that weakened or
-      # deleted a CHECK 3 case ran neither step. A gate whose tests nothing runs is a gate on trust.
-      - 'scripts/check-distribution-seed.spec.mjs'
-      # The mutation gate and, just as importantly, its list of load-bearing behaviours: editing
-      # that list is how coverage is dropped, so it has to be able to fail the PR that does it.
-      - 'scripts/check-distribution-seed.mutants.mjs'
-      - '.github/workflows/distribution-gate.yml'
 
 jobs:
   distribution-gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The mutant-suite decision below is a diff against the base, which a shallow checkout
+          # does not contain.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # The decider runs before it is trusted, for the same reason build.yml's `scope` job says so:
+      # this script's restrictive-direction failure is SILENT. A decider stuck on `false` retires
+      # the mutant suite below while this job keeps reporting success, and `distribution-gate` IS a
+      # required check — so nothing would be blocked. build.yml runs this spec twice for that
+      # reason; running the decider here without it was the asymmetry.
+      - name: Check the path decider still fires
+        run: npm run lint:paths-touched:test
+
+      # Only the 7m08s mutant suite is worth a condition; everything else here costs 2.6s and runs
+      # unconditionally. The list is the one that used to sit under `on: paths:`, carried over.
+      - name: Does this change touch anything the mutant suite covers?
+        id: decide
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          RELEVANT=$(node scripts/check-paths-touched.mjs "$BASE_SHA" "$HEAD_SHA" \
+            mj-app.json \
+            migrations/ \
+            migrations-pg/ \
+            migrations-teardown/ \
+            scripts/check-distribution-seed.mjs \
+            scripts/check-distribution-seed.spec.mjs \
+            scripts/check-distribution-seed.mutants.mjs \
+            .github/workflows/distribution-gate.yml)
+          echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          echo "mutant suite relevant: $RELEVANT"
+
       # No `npm ci`: the gate is Node stdlib only, deliberately, so a dependency problem can never
       # be the reason nobody finds out the app does not install.
-      - name: Check shipped SQL for the four install-time hazards
+      - name: Check shipped SQL for every install-time hazard the gate knows
         run: npm run lint:distribution
 
       - name: Check the gate itself still fires
@@ -79,7 +88,16 @@ jobs:
 
       # The step above proves the gate FIRES; this one proves its spec would NOTICE a behaviour
       # going missing. CHECK 3's failure mode is silence, so an untested behaviour is one a
-      # refactor deletes with the suite green — which is what #44 found nine of. Takes ~40 seconds:
-      # it runs the spec once per mutant, in a fresh process each time.
+      # refactor deletes with the suite green — which is what #44 found nine of. It runs the spec
+      # once per mutant in a fresh process, so it costs (mutants x suite) and grows with both.
+      # Measured on this runner, not on a laptop: 3m12s on next before CHECK 7 (run 33923880019),
+      # 7m08s after it (run 33933840700), because CHECK 7 reads every shipped .sql file and the spec
+      # calls runChecks against the real tree. The comment this replaces said "~40 seconds" and had
+      # been wrong through several checks, so re-measure here rather than adjusting by feel.
+      #
+      # Conditional since #173, and it is the ONLY conditional step here. The job itself now runs on
+      # every pull request because it is a required check, but 7m08s of mutants on a PR that touches
+      # no shipped SQL buys nothing. A step skipped this way does not fail the job.
       - name: Check the gate's spec still kills what it claims to cover
+        if: steps.decide.outputs.relevant == 'true'
         run: npm run lint:distribution:mutants

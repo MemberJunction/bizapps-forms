@@ -96,7 +96,10 @@
         }
 
         @if (errorText()) {
-          <p class="mjf-banner-error" role="alert">{{ errorText() }}</p>
+          <!-- `tabindex="-1"` so a refusal can move focus here: the banner sits at the top of the
+               shell and Submit is at the bottom of a scroll-mode form, so rendering alone left a
+               sighted respondent with no visible change at all. Not reachable by Tab. -->
+          <p #bannerError class="mjf-banner-error" role="alert" tabindex="-1">{{ errorText() }}</p>
         }
 
         @if (runtime(); as rt) {
