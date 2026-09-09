@@ -55,6 +55,8 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *
  * The leading boundary makes `npm run commitpush` and `grep -rn "git commit" docs/` allow — the
  * first because `commitpush` is one word, the second because the match must begin a command.
+ * (`commitpush` was a real script here until #177 deleted it; it stays as the example because the
+ * boundary it exercises is what matters, not whether the script exists.)
  * The middle segment covers GLOBAL OPTIONS between `git` and the subcommand, which are otherwise a
  * straight bypass. It describes their SHAPE rather than naming them: an earlier version enumerated
  * `-C` and `-c` only, so `git --no-pager commit`, `git -P commit`, `git --git-dir=… commit` and
