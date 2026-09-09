@@ -117,7 +117,14 @@ describe('redeemFailureToView', () => {
     });
 
     it('leaves the states it does not speak for on the default title', () => {
-      for (const reason of ['distribution-closed', 'distribution-full', 'distribution-not-found', 'no-token', 'redeem-failed'] as const) {
+      for (const reason of [
+        'distribution-closed',
+        'distribution-full',
+        'distribution-not-found',
+        'no-token',
+        'rate-limited',
+        'redeem-failed',
+      ] as const) {
         expect(redeemFailureToView(reason).title).toBeUndefined();
       }
     });
@@ -143,7 +150,57 @@ describe('redeemFailureToView', () => {
     });
   });
 
-  it('sets no Retry-After on any reason but not-yet-open', () => {
+  // bizapps-forms#139. 502 says "the upstream server is broken". The truth is "this network asked
+  // more times in a minute than the cap allows" — and because the cap is keyed by IP, the people
+  // who hit it are a classroom, an office behind NAT or a conference wifi, not attackers. 429 with
+  // a retry hint is what browsers, CDNs, monitors and humans already understand.
+  describe('rate-limited', () => {
+    it('is a 429, never the 502 that means the server is broken', () => {
+      const view = redeemFailureToView('rate-limited');
+      expect(view.status).toBe(429);
+      expect(view.status).not.toBe(redeemFailureToView('redeem-failed').status);
+    });
+
+    it('blames the network, not the form, and promises a retry', () => {
+      const { message } = redeemFailureToView('rate-limited');
+      expect(message).toBe('Too many attempts from this network. Please try again in a minute.');
+    });
+
+    it('names the wait, and sends it as Retry-After, when the refusal said how long', () => {
+      const view = redeemFailureToView('rate-limited', { retryAfterSeconds: 54 });
+      expect(view.message).toContain('54 seconds');
+      expect(view.retryAfter).toBe('54');
+    });
+
+    it('rounds a longer wait to whole minutes rather than reciting seconds', () => {
+      const view = redeemFailureToView('rate-limited', { retryAfterSeconds: 150 });
+      expect(view.message).toContain('3 minutes');
+      expect(view.retryAfter).toBe('150');
+    });
+
+    it('says "1 second" and "1 minute", not "1 seconds"', () => {
+      expect(redeemFailureToView('rate-limited', { retryAfterSeconds: 1 }).message).toContain('1 second.');
+      expect(redeemFailureToView('rate-limited', { retryAfterSeconds: 60 }).message).toContain('1 minute.');
+    });
+
+    it('is a failure the page states plainly, not a quiet notice', () => {
+      const res = respondentErrorResponse(redeemFailureToView('rate-limited', { retryAfterSeconds: 54 }));
+      expect(res.status).toBe(429);
+      expect(res.headers['Retry-After']).toBe('54');
+      expect(res.html).toContain('class="mjf-host__error" role="alert"');
+    });
+  });
+
+  // The other half of #139: the two cases must stay distinguishable in the response. A genuinely
+  // broken redeem — revoked token, endpoint unreachable — is still the 502 it always was.
+  it('leaves a genuinely broken redeem on 502', () => {
+    const view = redeemFailureToView('redeem-failed');
+    expect(view.status).toBe(502);
+    expect(view.retryAfter).toBeUndefined();
+    expect(view.message).toBe('We could not open this form right now. Please try again later.');
+  });
+
+  it('sets no Retry-After on the reasons that cannot name one', () => {
     for (const reason of [
       'distribution-not-found',
       'distribution-closed',
@@ -164,6 +221,7 @@ describe('redeemFailureToView', () => {
       'distribution-full',
       'form-unpublished',
       'no-token',
+      'rate-limited',
       'redeem-failed',
     ] as const) {
       const view = redeemFailureToView(reason);

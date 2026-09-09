@@ -38,6 +38,8 @@ export type RespondentErrorTone = 'error' | 'notice';
 export interface RedeemFailureDetails {
   /** When the link opens — `distribution-not-yet-open` only. */
   opensAt?: Date;
+  /** Seconds until the caller's budget refills — `rate-limited` only. */
+  retryAfterSeconds?: number;
 }
 
 /**
@@ -82,6 +84,12 @@ export function redeemFailureToView(
       };
     case 'no-token':
       return { status: 409, message: 'This form link is not ready yet. Please try again later.' };
+    // 502 says "the upstream server is broken". The truth is "this network asked more times in a
+    // minute than the cap allows" — and the cap is keyed by IP, so the people who hit it are a
+    // classroom, an office behind NAT or a conference wifi, not attackers (bizapps-forms#139).
+    // 429 + Retry-After is what browsers, CDNs, monitors and humans already understand.
+    case 'rate-limited':
+      return rateLimitedView(details.retryAfterSeconds);
     case 'redeem-failed':
       return redeemFailedView();
     default:
@@ -97,6 +105,37 @@ export function redeemFailureToView(
 /** The generic failure view, shared by `redeem-failed` and the unreachable default. */
 function redeemFailedView(): RedeemErrorView {
   return { status: 502, message: 'We could not open this form right now. Please try again later.' };
+}
+
+/**
+ * The over-budget view. Names the wait when the refusal carried one and hedges to the window the
+ * cap actually uses (a minute) when it did not — the same knows-when/doesn't-know-when shape
+ * {@link notYetOpenView} uses, for the same reason: a number the door cannot stand behind is worse
+ * than no number at all. `tone` stays the default `'error'`: unlike a form awaiting its opening
+ * date, this refusal IS a failure of the request, and the respondent has to act on it.
+ */
+function rateLimitedView(retryAfterSeconds: number | undefined): RedeemErrorView {
+  const opening = 'Too many attempts from this network.';
+  if (retryAfterSeconds === undefined) {
+    return { status: 429, message: `${opening} Please try again in a minute.` };
+  }
+  return {
+    status: 429,
+    message: `${opening} Please try again in about ${formatWait(retryAfterSeconds)}.`,
+    // Delta-seconds, the form `express-rate-limit` itself sends. `Retry-After` accepts either that
+    // or an HTTP-date; the not-yet-open view above sends a date because it names an absolute
+    // instant, whereas this is a countdown and a date would go stale in a proxy cache.
+    retryAfter: String(retryAfterSeconds),
+  };
+}
+
+/** "45 seconds" / "3 minutes" — seconds stop being readable past a minute, and `Retry-After` carries the exact value regardless. */
+function formatWait(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
 
 /**

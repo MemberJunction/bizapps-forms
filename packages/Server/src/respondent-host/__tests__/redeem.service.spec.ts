@@ -78,11 +78,23 @@ function fakeProvider(opts: {
   return { provider, calls };
 }
 
-/** A `fetch` stub returning the given JSON body + ok status. */
-function fakeFetch(body: unknown, init: { ok?: boolean } = {}): typeof fetch {
+/**
+ * A `fetch` stub returning the given JSON body, status and headers.
+ *
+ * Status and headers matter since bizapps-forms#139: core spells a rate-limit refusal in the HTTP
+ * status and two headers, not only in the body. `ok` still defaults from the status so every
+ * pre-existing caller reads as an ordinary 200.
+ */
+function fakeFetch(
+  body: unknown,
+  init: { ok?: boolean; status?: number; headers?: Record<string, string> } = {},
+): typeof fetch {
+  const status = init.status ?? 200;
   return vi.fn(async () => {
     return {
-      ok: init.ok ?? true,
+      ok: init.ok ?? status < 400,
+      status,
+      headers: new Headers(init.headers ?? {}),
       json: async () => body,
     } as Response;
   }) as unknown as typeof fetch;
@@ -351,6 +363,83 @@ describe('redeemSlugToToken', () => {
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
     expect(out.reason).toBe('redeem-failed');
+  });
+
+  // bizapps-forms#139. Core rate-limits `/magic-link/redeem` by IP (20/min) and says so precisely:
+  // 429, `Retry-After`, and a body naming the reason. Collapsing all of that into 'redeem-failed'
+  // told a classroom, an office behind NAT or a conference wifi that the server was broken.
+  describe('a rate-limited redeem', () => {
+    const RATE_LIMIT_BODY = {
+      success: false,
+      errorCode: 'invalid',
+      error: 'Too many redemption attempts. Try again later.',
+    };
+
+    it('is reported as rate-limited, not as a failed redeem', async () => {
+      const fetchImpl = fakeFetch(RATE_LIMIT_BODY, { status: 429 });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.ok).toBe(false);
+      expect(out.reason).toBe('rate-limited');
+    });
+
+    it('carries the wait from Retry-After so the page can name it', async () => {
+      const fetchImpl = fakeFetch(RATE_LIMIT_BODY, { status: 429, headers: { 'Retry-After': '54' } });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.retryAfterSeconds).toBe(54);
+    });
+
+    // draft-7 is what MJ configures. `RateLimit: limit=20, remaining=0, reset=42` carries the same
+    // number as `Retry-After`, so a hop that drops one still leaves the door something to say.
+    it('falls back to the draft-7 RateLimit reset when Retry-After is absent', async () => {
+      const fetchImpl = fakeFetch(RATE_LIMIT_BODY, {
+        status: 429,
+        headers: { RateLimit: 'limit=20, remaining=0, reset=42' },
+      });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.retryAfterSeconds).toBe(42);
+    });
+
+    it('still refuses, naming no wait, when neither header survives', async () => {
+      const fetchImpl = fakeFetch(RATE_LIMIT_BODY, { status: 429 });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.reason).toBe('rate-limited');
+      expect(out.retryAfterSeconds).toBeUndefined();
+    });
+
+    it('reads the refusal from the body when the status did not survive the hop', async () => {
+      const fetchImpl = fakeFetch(RATE_LIMIT_BODY, { status: 200 });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.reason).toBe('rate-limited');
+    });
+
+    // The trap: `errorCode: 'invalid'` is ALSO what core sends for a malformed token, an unknown or
+    // revoked invite, and an inactive issuing user — all HTTP 410. Reading the code alone would
+    // answer "too many attempts from this network" to someone holding a revoked link.
+    it('does not mistake a revoked or malformed token for a rate limit', async () => {
+      const fetchImpl = fakeFetch(
+        { success: false, errorCode: 'invalid', error: 'Malformed token.' },
+        { status: 410 },
+      );
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.reason).toBe('redeem-failed');
+    });
+
+    it('leaves an unreachable endpoint on the generic failure', async () => {
+      const out = await redeemSlugToToken(deps({ fetchImpl: throwingFetch() }), 'customer-survey');
+      expect(out.reason).toBe('redeem-failed');
+    });
+
+    // A wait the door cannot stand behind is worse than none: `Retry-After: 0` invites an immediate
+    // retry that refuses again, the header also permits an HTTP-date, and an absurd value would be
+    // echoed onto the wire and park a monitor for the rest of the day.
+    it('ignores a retry hint that is not a usable number of seconds', async () => {
+      for (const value of ['0', '-5', 'Wed, 09 Sep 2026 14:17:25 GMT', '999999']) {
+        const fetchImpl = fakeFetch(RATE_LIMIT_BODY, { status: 429, headers: { 'Retry-After': value } });
+        const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+        expect(out.reason).toBe('rate-limited');
+        expect(out.retryAfterSeconds).toBeUndefined();
+      }
+    });
   });
 });
 
