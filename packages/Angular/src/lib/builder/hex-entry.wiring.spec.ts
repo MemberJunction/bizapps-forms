@@ -74,7 +74,7 @@ describe('the hex field sanitises while typing and expands only on commit', () =
     // save) and re-derived `hue` from the colour. Re-deriving hue is the one thing the hue signal
     // exists to prevent: a grey has no hue to recover, so the slider snaps to red and the author
     // loses the hue they were half-way through choosing.
-    const body = methodBody(picker(), 'private acceptHex(hex: string): void {');
+    const body = methodBody(picker(), 'protected acceptHex(hex: string): void {');
     const guardAt = body.indexOf('hex === this.value()');
     const hueAt = body.indexOf('this.hue.set(');
     const emitAt = body.indexOf('this.valueChange.emit(');
@@ -88,10 +88,31 @@ describe('the hex field sanitises while typing and expands only on commit', () =
   it('the box is still corrected when the finished entry resolves to the colour already set', () => {
     // The guard must not swallow the display update: typing '#abc' when the colour is already
     // '#aabbcc' changes nothing to announce, but the box must still stop reading '#abc'.
-    const body = methodBody(picker(), 'private acceptHex(hex: string): void {');
+    const body = methodBody(picker(), 'protected acceptHex(hex: string): void {');
     const draftAt = body.indexOf('this.draft.set(hex)');
     const guardAt = body.indexOf('hex === this.value()');
     expect(draftAt).toBeGreaterThan(-1);
     expect(draftAt).toBeLessThan(guardAt);
+  });
+  it('a preset arrives from outside the hue system, so it re-seeds the hue', () => {
+    // A preset is the same kind of event as a typed hex: a colour the hue slider did not produce.
+    // Routing it through `commit`, which deliberately leaves `hue` alone, left the slider and the
+    // plane painting the PREVIOUS hue — and the next plane gesture rebuilt the colour from that
+    // stale hue, discarding the preset (open on #1f5d4c, click #3b82f6, drag the plane -> #3d9980).
+    expect(picker()).toMatch(/\(click\)="acceptHex\(p\)"/);
+  });
+
+  it('the gestures that PRODUCE a hue keep using commit, which must not re-derive it', () => {
+    // The other half of the same rule, and the reason the two helpers cannot simply be merged:
+    // the slider and the plane already own the hue, so re-deriving it from their own output would
+    // snap the slider to red the moment a drag reaches near-black — the exact regression the
+    // `hue` signal exists to prevent.
+    const source = picker();
+    const plane = methodBody(source, 'private applyPlanePoint(event: PointerEvent): void {');
+    expect(plane).toMatch(/this\.commit\(/);
+    expect(plane).not.toMatch(/acceptHex\(/);
+    const onHue = methodBody(source, 'protected onHue(event: Event): void {');
+    expect(onHue).toMatch(/this\.commit\(/);
+    expect(onHue).not.toMatch(/acceptHex\(/);
   });
 });

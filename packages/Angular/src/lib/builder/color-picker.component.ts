@@ -122,7 +122,7 @@ const AA_BODY = 4.5;
               [attr.aria-label]="p"
               [attr.aria-pressed]="p === value()"
               [attr.title]="p"
-              (click)="commit(p)"
+              (click)="acceptHex(p)"
             ></button>
           }
         </div>
@@ -323,7 +323,7 @@ export class ColorPickerComponent {
    * working with — a grey has none to recover, so the slider would snap back to red, which is
    * the exact thing the `hue` signal exists to prevent.
    */
-  private acceptHex(hex: string): void {
+  protected acceptHex(hex: string): void {
     this.draft.set(hex);
     if (hex === this.value()) {
       return;
@@ -332,6 +332,14 @@ export class ColorPickerComponent {
     this.valueChange.emit(hex);
   }
 
+  /**
+   * A colour the hue system itself produced — the slider, a plane drag, an arrow nudge.
+   *
+   * Deliberately does NOT touch `hue`: these gestures already own it, and re-deriving it from
+   * their own output would snap the slider back to red the moment a drag reached near-black,
+   * which is the whole reason `hue` is held separately. A colour arriving from OUTSIDE that
+   * system — a typed hex, a preset — goes through {@link acceptHex} instead, which re-seeds it.
+   */
   protected commit(hex: string): void {
     this.draft.set(hex);
     this.valueChange.emit(hex);
