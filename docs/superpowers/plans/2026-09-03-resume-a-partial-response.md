@@ -1,5 +1,13 @@
 # Resume a Partial Response (#138) — Implementation Plan
 
+
+> **STATUS — 2026-09-09.** Tasks 1-11 are built and shipped in PR #152 (`90fec2d`, branch
+> `feat/138-resume-a-partial-response`), verified live against `MJ_PR152_ATS`: device-resume smoke
+> 29/29 on two forms, and a browser round trip (type → "Progress saved" → reopen → answers back).
+> **Task 12 (the emailed channel) is not built at all**, and Task 13 is partial — one of its two
+> smoke suites exists. Task 6's prune was not built either; see the note on its Step 1.
+> Boxes below were ticked retroactively on 2026-09-09; nothing ticked them as the work happened.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A respondent can reopen a half-finished form — on the same device automatically, or on any device through an emailed link — and the server, not a replayable browser header, decides whose draft it is.
@@ -84,7 +92,7 @@ Every task's requirements implicitly include this section.
 
 > ⚠️ **Database hazard, read before step 4.** MJ's host serves the MAIN checkout against the shared dev DB. Applying this migration from a worktree desyncs code from data and breaks the host. Apply + CodeGen in the main checkout, or coordinate with the repo owner first. A worktree also has no `.env` — copy it from the main checkout or every `mj` command hits the wrong port.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Header comment must state: why authorization moves onto a real FK rather than `JSON_VALUE(SourceMetadata)`; why every predicate is parenthesised (MJ ANDs the filter onto the caller's predicate, so a bare `OR` binds wrong); why the cast to text is kept (an absent scope substitutes `''`, which against `uniqueidentifier` is a conversion error, not a non-match — the cast makes it fail closed); and that `CanRead` on Form Responses also opens the generated `mjBizAppsFormsFormResponses` query, filtered to exactly one row (review finding 10).
 
@@ -183,18 +191,18 @@ Finish with two postconditions in the 0.10.x style: (1) every row in `@ReadContr
 `THROW 51114` — because this file has just added read grants and `UserExemptFromRowLevelSecurity`
 returns TRUE on the FIRST unfiltered row it finds.
 
-- [ ] **Step 2: Lint the shipped SQL**
+- [x] **Step 2: Lint the shipped SQL**
 
 Run: `npm run lint:distribution && npm run lint:migrations`
 Expected: both clean. If `lint:distribution` flags a placeholder, you wrote a third `${…}` form (only `${flyway:defaultSchema}` and `${mjSchema}` are allowed) — including in a comment.
 
-- [ ] **Step 3: Prove idempotency without touching the shared database**
+- [x] **Step 3: Prove idempotency without touching the shared database**
 
 Run the file twice against a scratch database (or a restored copy). Expected: the second run
 changes nothing and throws nothing. The guards are the `IF NOT EXISTS` column checks and the
 INSERT-if-missing/absolute-UPDATE filter pairs.
 
-- [ ] **Step 4: Apply and run CodeGen** *(see the hazard note above)*
+- [x] **Step 4: Apply and run CodeGen** *(see the hazard note above)*
 
 ```bash
 pnpm run mj:migrate
@@ -206,7 +214,7 @@ Append the CodeGen output to the migration under a `-- CodeGen output (appended)
 as `V202608252340` does — without the `EntityField` row, `BaseEntity` silently drops the value on
 every save.
 
-- [ ] **Step 5: Build and commit**
+- [x] **Step 5: Build and commit**
 
 ```bash
 cd packages/Entities && pnpm run build && cd ../..
@@ -228,7 +236,7 @@ git commit -m "feat(migration): a response knows its distribution, and a scoped 
 - Consumes: `StoredAnswerRow`, `mjBizAppsFormsFormResponseEntity['Status']` (existing contract).
 - Produces: `ResumeSnapshot` (Tasks 5, 10, 12), `answerTextFromInstant` (Task 10).
 
-- [ ] **Step 1: Write the failing test for the snapshot shape lock**
+- [x] **Step 1: Write the failing test for the snapshot shape lock**
 
 `resume.spec.ts` — the snapshot is a wire contract two packages parse, so pin its field set the way
 `submission-mapping.spec.ts` pins the submission input:
@@ -251,12 +259,12 @@ describe('ResumeSnapshot', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `cd packages/Entities && npx vitest run src/contracts/resume.spec.ts`
 Expected: FAIL — `Cannot find module './resume'`.
 
-- [ ] **Step 3: Write `resume.ts`**
+- [x] **Step 3: Write `resume.ts`**
 
 ```ts
 /**
@@ -302,11 +310,11 @@ export const RESUME_SNAPSHOT_FIELDS: readonly (keyof ResumeSnapshot)[] = [
 
 Add `export * from './resume';` to `packages/Entities/src/contracts/index.ts`.
 
-- [ ] **Step 4: Run it and watch it pass**
+- [x] **Step 4: Run it and watch it pass**
 
 Run: `cd packages/Entities && npx vitest run src/contracts/resume.spec.ts` → PASS.
 
-- [ ] **Step 5: Write the failing round-trip test for the date inverse**
+- [x] **Step 5: Write the failing round-trip test for the date inverse**
 
 Prefill has to put a stored `DATETIMEOFFSET` back into the widget's answer map in the SPELLING the
 question's control emits — `'14:30'` for a `Time`, an ISO instant for a `DateTime`. Guessing that
@@ -338,12 +346,12 @@ describe('answerTextFromInstant', () => {
 > for a type, return `undefined` for that type and let prefill skip those questions rather than
 > putting a wrong-looking value in front of the respondent. Say so in the JSDoc.
 
-- [ ] **Step 6: Run, implement, run**
+- [x] **Step 6: Run, implement, run**
 
 Run: `cd packages/Entities && npx vitest run src/contracts/answer-date.spec.ts` → FAIL, then implement
 `answerTextFromInstant` beside `dateAnswerInstant`, then → PASS.
 
-- [ ] **Step 7: Build, typecheck, commit**
+- [x] **Step 7: Build, typecheck, commit**
 
 ```bash
 cd packages/Entities && pnpm run build && npx vitest run && cd ../..
@@ -365,7 +373,7 @@ git commit -m "feat(contract): a resumed draft has a wire shape, and a stored da
 - Produces: `ResponseCaller`, `responseIsOurs(response: Pick<mjBizAppsFormsFormResponseEntityType, 'ID' | 'AnonymousSessionID'>, caller: ResponseCaller): boolean`; `PersistenceInputs` gains `scopedResponseId?: string`.
 - Consumes: nothing new.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `__tests__/response-scope-ownership.spec.ts`:
 
@@ -400,12 +408,12 @@ describe('responseIsOurs with a response-scoped caller', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/Server && npx vitest run src/public-submit/__tests__/response-scope-ownership.spec.ts`
 Expected: FAIL — `responseIsOurs` still takes a string.
 
-- [ ] **Step 3: Change the rule**
+- [x] **Step 3: Change the rule**
 
 ```ts
 /**
@@ -439,7 +447,7 @@ export function responseIsOurs(
 
 `refuseIfNotOurs` builds the caller from `inputs`: `{ sessionId: inputs.sessionId, scopedResponseId: inputs.scopedResponseId }`. Add `scopedResponseId?: string` to `PersistenceInputs` with a JSDoc saying it is the JWT-carried response scope and is never taken from the request body. Update `checkDuplicate`'s call in `submit-pipeline.ts` to `responseIsOurs(byId.response, { sessionId: ctx.sessionId, scopedResponseId: ctx.scopedResponseId })` (the field arrives in Task 4; for now thread `undefined` and let Task 4 populate it).
 
-- [ ] **Step 4: Stamp the distribution, and stop rewriting the first sitting**
+- [x] **Step 4: Stamp the distribution, and stop rewriting the first sitting**
 
 In `applyResponseIdentity`, beside the write-once owner stamp:
 
@@ -465,13 +473,13 @@ In `applyResponseIdentity`, beside the write-once owner stamp:
 Extend `session-ownership.spec.ts` with: a second save from a different session under a matching
 scope leaves `StartedAt` and `SourceMetadata` unchanged and stamps `FormDistributionID` only once.
 
-- [ ] **Step 5: Run the package suite**
+- [x] **Step 5: Run the package suite**
 
 Run: `cd packages/Server && npx vitest run && cd ../.. && npm run typecheck`
 Expected: PASS. Existing ownership specs that passed a bare string must be updated to the object —
 that is the change, not a break.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/Server/src/public-submit
@@ -493,7 +501,7 @@ git commit -m "feat(server): ownership asks who is calling, and a row remembers 
 - Consumes: `ResponseCaller` (Task 3), `RESUMABLE_RESPONSE_STATUSES`.
 - Produces: `scopeNamesDistribution(scopeResourceId: string | undefined, distributionId: string): boolean`; `resolveScopedResponseId(provider, args, contextUser): Promise<{ ok: boolean; responseId?: string }>`; `findScopedResponse(provider, { responseId }, contextUser): Promise<ResponseLookupResult>`; `PipelineContext.scopeResourceId?: string`; `PipelineContext.scopedResponseId?: string` (resolved inside the pipeline).
 
-- [ ] **Step 1: Write the failing test for scope classification**
+- [x] **Step 1: Write the failing test for scope classification**
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -515,12 +523,12 @@ describe('scopeNamesDistribution', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/Server && npx vitest run src/public-submit/__tests__/scope-response.service.spec.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Write the service**
+- [x] **Step 3: Write the service**
 
 ```ts
 /**
@@ -594,7 +602,7 @@ export async function findScopedResponse(
 }
 ```
 
-- [ ] **Step 4: Write the failing pipeline tests**
+- [x] **Step 4: Write the failing pipeline tests**
 
 `__tests__/submit-pipeline-scoped-resume.spec.ts`, driven by the existing fakes in
 `__tests__/fakes.ts`:
@@ -633,12 +641,12 @@ it('ignores the version filter, so a draft on a retired version still resolves',
 });
 ```
 
-- [ ] **Step 5: Run them to verify they fail**
+- [x] **Step 5: Run them to verify they fail**
 
 Run: `cd packages/Server && npx vitest run src/public-submit/__tests__/submit-pipeline-scoped-resume.spec.ts`
 Expected: FAIL — the scoped branch does not exist; the first case falls through to CREATE and collides.
 
-- [ ] **Step 6: Wire the pipeline**
+- [x] **Step 6: Wire the pipeline**
 
 In `PipelineContext` add `scopeResourceId?: string` with a JSDoc explaining it is the verified JWT
 claim (unlike `sessionId` beside it, which is a header the caller chose). In
@@ -693,13 +701,13 @@ Export `FOREIGN_RESPONSE_MESSAGE` from `persistence.service.ts` so both sites us
 Thread `scopedResponseId` into the `persistSubmission` inputs and into `checkDuplicate`'s
 `responseIsOurs` call.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `cd packages/Server && npx vitest run && cd ../.. && npm run typecheck`
 Expected: PASS, including the untouched `submit-pipeline*.spec.ts` files — a public-link submission
 must be byte-for-byte unchanged (no scope → no extra read, no new branch taken).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/Server/src/public-submit
@@ -720,7 +728,7 @@ git commit -m "feat(server): a response-scoped session resolves its own draft, o
 - Consumes: `ResumeSnapshot` (Task 2), `scopeNamesDistribution` (Task 4).
 - Produces: `loadResumeSnapshot(provider, scopeResourceId, contextUser): Promise<ResumeSnapshot | undefined>`; `PublishedFormType.resumeJSON?: string`; `IFormsApiService.loadPublishedForm(slug): Promise<PublishedFormLoad | null>` where `PublishedFormLoad = { definition: PublishedFormDefinition; resume?: ResumeSnapshot }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 describe('loadResumeSnapshot', () => {
@@ -746,11 +754,11 @@ describe('loadResumeSnapshot', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/Server && npx vitest run src/public-submit/__tests__/resume-snapshot.service.spec.ts` → FAIL.
 
-- [ ] **Step 3: Implement the service**
+- [x] **Step 3: Implement the service**
 
 Two `RunView`s under the **anonymous** `contextUser` — that is the design, not an oversight: the
 row-level-security filters added in Task 1 are the gate, and running this under the elevated user
@@ -758,7 +766,7 @@ would move the gate into application code where the read path and the write rule
 Say that in the header. `RunView` never throws — check `.Success` and log a failure with the scope
 id (never the token).
 
-- [ ] **Step 4: Expose it**
+- [x] **Step 4: Expose it**
 
 `graphql-types.ts`:
 
@@ -783,7 +791,7 @@ id (never the token).
 
 and set `resumeJSON: resume ? JSON.stringify(resume) : undefined`.
 
-- [ ] **Step 5: Carry it to the widget transport**
+- [x] **Step 5: Carry it to the widget transport**
 
 `forms-api.interface.ts` — `loadPublishedForm` now resolves `PublishedFormLoad | null`. Update the
 GraphQL service (select `resumeJSON`, parse it), the mock service (`resume: undefined`), and every
@@ -791,13 +799,13 @@ caller. Document in the interface why the resume rides the load rather than a se
 decided by the same session that resolved the definition, and a second round trip could observe a
 different one.
 
-- [ ] **Step 6: Run everything**
+- [x] **Step 6: Run everything**
 
 Run: `cd packages/Server && npx vitest run && cd ../Angular && npx vitest run && cd ../.. && npm run typecheck`
 Expected: PASS. The widget component still compiles because Task 10 has not changed its behaviour
 yet — adjust only the call site's destructuring here.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/Server/src/public-submit packages/Angular/src/lib/widget/api
@@ -822,6 +830,13 @@ git commit -m "feat(server): PublishedForm returns the draft a scoped session ow
 
 - [ ] **Step 1: Establish whether a spent invite can be deleted**
 
+> **ANSWERED 2026-09-09, and the prune was NOT built.** `FK_MagicLinkRedemption_Invite` on
+> `__mj.MagicLinkRedemption` references `__mj.MagicLinkInvite`, so a spent invite **cannot** be
+> deleted — established empirically: a `DELETE` of a redeemed invite fails with error 547. Per this
+> step's own rule that means `pruneSpentDeviceInvites` must log rather than delete. Neither the
+> function nor the header note exists, so growth stays one invite row plus one audit row per
+> sitting. Left unticked deliberately.
+
 Run against the dev database (read-only):
 
 ```sql
@@ -839,7 +854,7 @@ WHERE fk.referenced_object_id = OBJECT_ID('__mj.MagicLinkInvite');
 
 Either way, write the outcome into the file's header so the next reader does not repeat the query.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```ts
 describe('mintResponseInvite', () => {
@@ -883,11 +898,11 @@ describe('findInviteByRawToken', () => {
 });
 ```
 
-- [ ] **Step 3: Run them to verify they fail**
+- [x] **Step 3: Run them to verify they fail**
 
 Run: `cd packages/Server && npx vitest run src/magic-link/__tests__/resume-invites.service.spec.ts` → FAIL.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 - `mintResponseInvite` composes `MintAnonymousInviteParams` from `getMagicLinkProvisioningConfig()`
   plus the channel's numbers from config (Task 7): device `maxUses: 1`, `expiresAt = earliest(closeAt, now + deviceResumeDays)`; email `maxUses: resumeLinkMaxUses`, `earliest(closeAt, now + resumeLinkDays)`. `Email` is set through the minter for the email channel only — extend
@@ -896,11 +911,11 @@ Run: `cd packages/Server && npx vitest run src/magic-link/__tests__/resume-invit
 - `revokeResponseInvites` — `RunView` on `MJ: Magic Link Invites`, `ResourceID = <id> AND Status = 'Active'`, plus `AND Email IS NULL` when `deviceOnly`, then `RevokeAnonymousInvite({ inviteId, resourceId }, contextUser)` per row. **This is why the "revoke by token" core follow-up is not needed** — say so in the header.
 - `findInviteByRawToken` — `TokenHash = hashToken(rawToken)`, `MaxRows: 1`, returns ids only, never the token; used by `/remember` to compare the incoming cookie's `ResourceID`.
 
-- [ ] **Step 5: Run, typecheck**
+- [x] **Step 5: Run, typecheck**
 
 Run: `cd packages/Server && npx vitest run && cd ../.. && npm run typecheck` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/Server/src/magic-link packages/CoreEntitiesServer/src
@@ -919,7 +934,7 @@ git commit -m "feat(server): a response can be given, and taken back, a magic-li
 **Interfaces:**
 - Produces: `RESUME_COOKIE_NAME = 'mjf_resume'`; `buildResumeCookie(args: { token: string; slug: string; maxAgeSeconds: number; secure: boolean }): string`; `clearResumeCookieHeader(slug: string, secure: boolean): string`; `readResumeCookie(cookieHeader: string | undefined): string | undefined`; config fields `deviceResumeDays`, `deviceResumeEnabled`, `resumeCookieSecure`, `resumeLinkDays`, `resumeLinkMaxUses`, `resumeSendMaxPerDay`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 describe('buildResumeCookie', () => {
@@ -952,17 +967,17 @@ describe('readResumeCookie', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/Server && npx vitest run src/respondent-host/__tests__/resume-cookie.spec.ts` → FAIL.
 
-- [ ] **Step 3: Implement, then run**
+- [x] **Step 3: Implement, then run**
 
 Hand-rolled — no cookie library. The header must document why `Path` is the form's own route (two
 forms on one host never see each other's pointer, and the GraphQL layer never receives it) and why
 `SameSite=Lax` makes the resume route CSRF-safe by default. Run again → PASS.
 
-- [ ] **Step 4: Add the config knobs**
+- [x] **Step 4: Add the config knobs**
 
 In `respondent-host/config.ts`, following the file's existing memoized/frozen pattern and its env
 documentation block:
@@ -984,7 +999,7 @@ Document `FORMS_RESUME_COOKIE_SECURE` with the reason it exists: Chrome and Fire
 `Secure` cookie on `http://localhost`, but not every harness browser does, and a host serving over
 plain http in a private network needs a way in that is not "turn resume off" (review, decision 6).
 
-- [ ] **Step 5: Run, typecheck, commit**
+- [x] **Step 5: Run, typecheck, commit**
 
 ```bash
 cd packages/Server && npx vitest run && cd ../.. && npm run typecheck
@@ -1015,7 +1030,7 @@ register **post-auth** via `GetPostAuthMiddleware()` (they carry the distributio
 is the guard) — the same split `UploadMiddleware` uses and for the same reason. Copy its handler
 shape: filter on method + path, delegate, and never let a throw escape.
 
-- [ ] **Step 1: Write the failing route-matcher test**
+- [x] **Step 1: Write the failing route-matcher test**
 
 ```ts
 describe('matchResumeRoute', () => {
@@ -1034,11 +1049,11 @@ describe('matchResumeRoute', () => {
 });
 ```
 
-- [ ] **Step 2: Run it, implement the matcher, run it again**
+- [x] **Step 2: Run it, implement the matcher, run it again**
 
 Run: `cd packages/Server && npx vitest run src/respondent-host/__tests__/resume-routes.spec.ts` → FAIL → implement → PASS.
 
-- [ ] **Step 3: Write the failing behaviour tests — the two must-fixes first**
+- [x] **Step 3: Write the failing behaviour tests — the two must-fixes first**
 
 `__tests__/device-resume.service.spec.ts`, everything injected (no HTTP server, no database):
 
@@ -1174,11 +1189,11 @@ describe('runForget', () => {
 });
 ```
 
-- [ ] **Step 4: Run them to verify they fail**
+- [x] **Step 4: Run them to verify they fail**
 
 Run: `cd packages/Server && npx vitest run src/respondent-host/__tests__/device-resume.service.spec.ts` → FAIL (module not found).
 
-- [ ] **Step 5: Implement the three bodies**
+- [x] **Step 5: Implement the three bodies**
 
 Guard order is the spec's §3.7 table and is load-bearing — the door's own predicates
 (`distributionWindowRefusal`, `distributionQuotaExceeded`, the `AllowDeviceResume` switch) run
@@ -1191,7 +1206,7 @@ Rate-limit both mint points through `FormsRateLimiter.Instance.charge()`, keyed 
 Add each of these to `scripts/check-guard-mutants.mjs`: the `consumed` non-clear, the cookie-replace
 refusal, the session-id requirement, and the pre-redeem door check.
 
-- [ ] **Step 6: Stamp `data-has-draft` on the GET**
+- [x] **Step 6: Stamp `data-has-draft` on the GET**
 
 `host-page.ts` gains `hasDraft?: boolean` on `RespondentHostPageOptions` and emits
 ` data-has-draft="1"` when true; the boot script reads it with `dataset`/`getAttribute` like every
@@ -1206,14 +1221,14 @@ it('stamps data-has-draft only when the cookie is present', () => {
 });
 ```
 
-- [ ] **Step 7: Mount the routes**
+- [x] **Step 7: Mount the routes**
 
 Pre-auth in `ConfigureExpressApp` for `/resume`; `GetPostAuthMiddleware()` for `/remember` and
 `/forget`, using `matchResumeRoute` and `userPayloadOf<VerifiedUserPayload>(req)` for the
 `UserInfo` + `sessionId`. Bodies through `readCappedBody` with a small cap (these carry two UUIDs —
 2 KB is generous); errors through `sendJsonError`. Every response gets `Cache-Control: no-store`.
 
-- [ ] **Step 8: Run the suite, typecheck, commit**
+- [x] **Step 8: Run the suite, typecheck, commit**
 
 ```bash
 cd packages/Server && npx vitest run && cd ../.. && npm run typecheck && npm run lint:guard-mutants
@@ -1233,7 +1248,7 @@ git commit -m "feat(server): remember, resume and forget — and a second tab no
 - Consumes: `revokeResponseInvites` (Task 6).
 - Produces: `PipelineContext.revokeInvites?` — an injectable seam, defaulting to the real service, matching how `fireHooks` is injected.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 it('revokes every live invite for the response once it is sealed', async () => {
@@ -1263,11 +1278,11 @@ it('answers the respondent even when the revoke throws', async () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd packages/Server && npx vitest run src/public-submit/__tests__/submit-pipeline-revoke-on-seal.spec.ts` → FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 After a successful non-deduped terminal persist, beside the hooks dispatch, detached and wrapped:
 
@@ -1289,7 +1304,7 @@ answers in an inbox. Skip it on `deduped` — the request that actually sealed t
 The respondent-facing sentence a revoked link now earns (`This response was submitted on <date>.`) is
 rendered by Task 12's interstitial; this task only makes it true.
 
-- [ ] **Step 4: Run, commit**
+- [x] **Step 4: Run, commit**
 
 ```bash
 cd packages/Server && npx vitest run && cd ../..
@@ -1310,7 +1325,7 @@ git commit -m "feat(server): sealing a response retires the links that could reo
 - Consumes: `ResumeSnapshot` (Task 2), `PublishedFormLoad` (Task 5), `FormRuntime.setValue(questionId, value)`, `answerColumnFor`, `answerTextFromInstant`.
 - Produces: `prefillFromResume(runtime, definition, snapshot): { applied: number; dropped: string[] }`; the DOM events `mjf-partial-saved`, `mjf-start-over`, `mjf-submitted`.
 
-- [ ] **Step 1: Write the failing prefill test**
+- [x] **Step 1: Write the failing prefill test**
 
 ```ts
 describe('prefillFromResume', () => {
@@ -1347,13 +1362,13 @@ describe('prefillFromResume', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails, then implement**
+- [x] **Step 2: Run it to verify it fails, then implement**
 
 Run: `cd packages/Angular && npx vitest run src/lib/widget/core/resume-prefill.spec.ts` → FAIL → implement
 (route on `answerColumnFor(question.type)`, `foldQuestionId` for matching, `answerTextFromInstant`
 for the date column) → PASS.
 
-- [ ] **Step 3: Write the failing component wiring tests**
+- [x] **Step 3: Write the failing component wiring tests**
 
 ```ts
 it('adopts the resumed row id, so every later save lands on it', async () => {
@@ -1420,7 +1435,7 @@ it('marks the question whose stored answer no longer fits this version', async (
 });
 ```
 
-- [ ] **Step 4: Run them to verify they fail, then implement**
+- [x] **Step 4: Run them to verify they fail, then implement**
 
 In `load()`: take `{ definition, resume }`; when `resume` is present, set `this.clientResponseId =
 resume.responseId` **before** the runtime is built, prefill, set the autosave indicator to `saved`,
@@ -1440,12 +1455,12 @@ Add `resume-notice` to `ATTRIBUTE_EFFECTS` in `element-attributes.ts` as an `'in
 boot script sets it after a failed `/resume`, and an attribute the element observes but ignores is
 exactly the bug that file exists to prevent.
 
-- [ ] **Step 5: Run the suite and the token lint**
+- [x] **Step 5: Run the suite and the token lint**
 
 Run: `cd packages/Angular && npx vitest run && cd ../.. && npm run lint:ui && npm run typecheck`
 Expected: PASS. `lint:ui` fails on any hardcoded colour in the new control or notice.
 
-- [ ] **Step 6: Build the widget bundle and commit**
+- [x] **Step 6: Build the widget bundle and commit**
 
 ```bash
 pnpm run build:widget
@@ -1466,7 +1481,7 @@ git commit -m "feat(widget): a resumed draft is adopted, prefilled, and sealed b
 - Produces: nothing importable — the boot script is a static string. Its DECISIONS are extracted into
   a pure, testable module so they are not asserted by reading source text.
 
-- [ ] **Step 1: Extract the decisions, and write the failing test**
+- [x] **Step 1: Extract the decisions, and write the failing test**
 
 `BOOT_SCRIPT` is a static string with no interpolation (that property is load-bearing — nothing
 attacker-controlled is ever spliced into it), so its logic cannot be unit-tested in place. Put the
@@ -1501,11 +1516,11 @@ describe('routeForEvent', () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails, then implement, then run again**
+- [x] **Step 2: Run it to verify it fails, then implement, then run again**
 
 Run: `cd packages/Server && npx vitest run src/respondent-host/__tests__/boot-resume.spec.ts` → FAIL → implement → PASS.
 
-- [ ] **Step 3: Write the boot script's own logic**
+- [x] **Step 3: Write the boot script's own logic**
 
 Inside `BOOT_SCRIPT`, still interpolation-free:
 
@@ -1518,7 +1533,7 @@ Inside `BOOT_SCRIPT`, still interpolation-free:
 Add a comment stating that a page WITHOUT this script — an embed — sends none of these calls, which
 is why the widget needs no conditional code for embeds (decision 8).
 
-- [ ] **Step 4: Extend the page spec**
+- [x] **Step 4: Extend the page spec**
 
 ```ts
 it('asks the host to reopen the draft before mounting, and only when the page says there is one', () => {
@@ -1529,7 +1544,7 @@ it('never puts the cookie, or any token, into the boot script itself', () => {
 });
 ```
 
-- [ ] **Step 5: Run, commit**
+- [x] **Step 5: Run, commit**
 
 ```bash
 cd packages/Server && npx vitest run && cd ../..
@@ -1540,6 +1555,19 @@ git commit -m "feat(host): the page reopens the draft; the widget never learns h
 ---
 
 ## Task 12: The emailed channel
+
+
+> **⚠️ TASK 12 IS NOT BUILT (as of 2026-09-09, PR #152 / commit `90fec2d`).**
+> `resume-email.service.ts` exists in neither location this plan names, there is no
+> `RequestResumeLink` mutation anywhere in the repo, and no interstitial. `ResumeChannel` has an
+> `'email'` member that is never passed as a value — the one caller hardcodes `channel: 'device'`.
+> `FORMS_RESUME_LINK_DAYS` (30) and `FORMS_RESUME_LINK_MAX_USES` (25) *are* read into config at
+> `config.ts:95-96` and nothing consumes them.
+>
+> The server half is done and was verified by hand: `runResume` takes a `bodyToken` that wins over
+> the cookie, and an email-shaped invite minted directly into `__mj.MagicLinkInvite` redeems
+> through `POST /f/:slug/resume`, mints a session scoped to that draft, and redeems a second time
+> (MaxUses 25). What is missing is the mutation, the send and the page.
 
 **Files:**
 - Create: `packages/Server/src/public-submit/resume-email.service.ts` + `__tests__/resume-email.service.spec.ts`
@@ -1646,7 +1674,7 @@ git commit -m "feat(server): a respondent can ask for their draft by email, on a
 **Interfaces:**
 - Consumes: `smoke/lib/{fixture,session,sqlcmd,target}.mjs` — resolve the slug and question ids BY ROLE, never hardcoded; `smokeBaseUrl()`; `sessionIdFor(token)`; `sql()` with `-b` (sqlcmd exits 0 on a SQL error without it).
 
-- [ ] **Step 1: Write `smoke/device-resume-path.mjs`**
+- [x] **Step 1: Write `smoke/device-resume-path.mjs`**
 
 Cover, in order, asserting SQL after each write (AC 8–16):
 
@@ -1664,12 +1692,18 @@ Cover, in order, asserting SQL after each write (AC 8–16):
 
 - [ ] **Step 2: Write `smoke/resume-link-path.mjs`**
 
+> **NOT BUILT (2026-09-09).** `smoke/resume-link-path.mjs` does not exist.
+
 `RequestResumeLink` → exactly one invite (`Email` set, configured `MaxUses`/`ExpiresAt`), result
 carries no token; redeem from a second session → scoped JWT + `resumeJSON`; the redeem also sets a
 device cookie (AC 7); exhaustion and expiry → the friendly page, nothing minted; a re-send answers
 identically for a known and an unknown address; the per-response daily cap refuses the sixth.
 
 - [ ] **Step 3: Run both against a live harness**
+
+> **PARTIAL (2026-09-09).** The device suite was run against a live harness and passes 29/29,
+> on two forms and against both hosts. `resume-link-path.mjs` does not exist, so the second line
+> cannot run.
 
 Run the branch's own MJAPI on its own port so the shared `:4121` harness is untouched, and set
 `MJAPI_PUBLIC_URL` to the same port — it is read at IMPORT time, so a late `process.env` assignment
@@ -1683,7 +1717,16 @@ FORMS_SMOKE_URL=http://localhost:4131 node smoke/resume-link-path.mjs
 ```
 Expected: every check `ok`, and the final cleanup reporting zero remaining rows.
 
-- [ ] **Step 4: Run the finding-6 verification**
+- [x] **Step 4: Run the finding-6 verification**
+
+> **RUN 2026-09-09 — finding 6 REPRODUCES, and it is worse than 429.** 25 sequential
+> `GET /f/support-application` from one client returns **20 × 200 and 5 × 502**, identically on
+> `:4121` and `:4000`, twice each. Not 429: the host maps a refused redeem to `redeem-failed`,
+> which `error-view.ts:90` renders as 502 *"We could not open this form right now."* So core's
+> `redeemLimiter` is indeed one bucket for the whole deployment — `redeem.service.ts:258` sends
+> only `content-type` and `accept` on the loopback POST, so every respondent arrives as the
+> server's own address. **Pre-existing on `next`, not caused by this PR** (the PR touched that
+> file only to carry `status` through). The remedy in this step still stands.
 
 25 sequential `GET /f/<slug>` inside one minute, from one client:
 
@@ -1696,14 +1739,14 @@ forward the client IP and user agent on the loopback POST in `redeem.service.ts`
 the redemption audit rows, currently recording the server's own address for every Forms redeem —
 and re-run. Record the result either way in the PR description.
 
-- [ ] **Step 5: Run every gate**
+- [x] **Step 5: Run every gate**
 
 ```bash
 npm test && npm run typecheck && npm run lint:distribution && npm run lint:migrations && npm run lint:ui && npm run lint:guard-mutants
 ```
 Expected: all green. `npm test` covers `apps/MJAPI` too — the per-package loop misses it.
 
-- [ ] **Step 6: One Playwright pass on the real page**
+- [x] **Step 6: One Playwright pass on the real page**
 
 Fill two answers, wait for the autosave indicator to say saved, close the tab, reopen `/f/<slug>`,
 and confirm the answers are on screen and "Not you? Start over" is offered. This is the one check
@@ -1711,6 +1754,11 @@ the unit suite structurally cannot make — version 0.2.1 shipped with the anony
 broken and the whole suite green.
 
 - [ ] **Step 7: File the follow-ups the spec logs**
+
+> **NOT DONE (2026-09-09).** None of the four spec follow-ups were filed. Follow-up 1 (purge
+> exhausted invites) is now covered by the issue filed for the emailed channel; follow-ups 2-4
+> (Partial-row retention, embedded-widget resume, the MJ core `ResourceType`/`mj_sid` change) are
+> still unfiled. The five issues that DO exist — #189-#193 — are review defects, not these.
 
 Open one issue per item in §9 of the spec, each linking back to #138 so the trail survives:
 
@@ -1725,7 +1773,7 @@ Open one issue per item in §9 of the spec, each linking back to #138 so the tra
 
 Do **not** file "core: revoke by token" — review finding 5 removed the need for it.
 
-- [ ] **Step 8: Write the changeset and commit**
+- [x] **Step 8: Write the changeset and commit**
 
 `minor` (this ships a migration), naming only the packages actually touched, body in release-notes
 prose: what a respondent can now do, that hosts get a new per-link `AllowDeviceResume` switch
