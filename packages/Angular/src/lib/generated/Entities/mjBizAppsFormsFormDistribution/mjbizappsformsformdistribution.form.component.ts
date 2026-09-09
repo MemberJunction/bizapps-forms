@@ -19,7 +19,8 @@ export class mjBizAppsFormsFormDistributionFormComponent extends BaseFormCompone
             { sectionKey: 'distributionConfiguration', sectionName: 'Distribution Configuration', isExpanded: true },
             { sectionKey: 'accessAndLimits', sectionName: 'Access and Limits', isExpanded: true },
             { sectionKey: 'systemMetadata', sectionName: 'System Metadata', isExpanded: false },
-            { sectionKey: 'mJBizAppsFormsFormUploads', sectionName: 'Form Uploads', isExpanded: false }
+            { sectionKey: 'mJBizAppsFormsFormUploads', sectionName: 'Form Uploads', isExpanded: false },
+            { sectionKey: 'mJBizAppsFormsFormResponses', sectionName: 'Form Responses', isExpanded: false }
         ]);
     }
 }
