@@ -53,8 +53,9 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 /**
  * `commit` or `push` as a git SUBCOMMAND, not as a substring.
  *
- * The leading boundary makes `npm run commitpush` and `grep -rn "git commit" docs/` allow — the
- * first because `commitpush` is one word, the second because the match must begin a command.
+ * The leading boundary makes `npm run commitpush` allow, because `commitpush` is one word. It no
+ * longer makes `grep -rn "git commit" docs/` allow — see the QUOTE bullet below, which explains why
+ * that trade was taken, and the spec case that pins it deliberately.
  * The middle segment covers GLOBAL OPTIONS between `git` and the subcommand, which are otherwise a
  * straight bypass. It describes their SHAPE rather than naming them: an earlier version enumerated
  * `-C` and `-c` only, so `git --no-pager commit`, `git -P commit`, `git --git-dir=… commit` and
@@ -67,7 +68,9 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  * optional inside a `*` backtracks exponentially on non-matching input (measured: 0.02ms at 15
  * options, 0.25ms at 20, 1.65ms at 24). This pattern runs on EVERY Bash tool call, so that is a
  * ReDoS in a hot path — strictly worse than the bug it would fix. The form below stays flat.
- * Over-inclusiveness is cheap here (a needless check is 13ms warm) and under-inclusiveness is the
+ * Over-inclusiveness is cheap here (a needless check costs one measured run — 217 ms warm, ~6.9 s
+ * when a leaf source file changed, per the header above; the "13ms" this sentence used to quote was
+ * the same stale figure the header already corrects) and under-inclusiveness is the
  * bug, so `&&`, `;`, `|` and newlines all count as command starts — and so do the pieces below,
  * each closing a real bypass found in review rather than a hypothetical one:
  *
@@ -77,6 +80,18 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   (`(git commit -m x)`) and command substitution (`out=$(git commit -m "x" 2>&1)`, `` `git
  *   push` ``) both put `git` right after them — an ordinary way to capture commit output, not an
  *   exotic one.
+ * - The class also includes both QUOTE characters. A nested shell — `bash -c "git commit -m x"`,
+ *   `sh -lc 'git push'`, `ssh host "git push"` — always puts `git` immediately after a quote, so
+ *   without them every quoted invocation returned `allow` with neither checker spawned (#178).
+ *   This is the one boundary that costs a REAL false positive: `grep -rn "git commit" docs/` is
+ *   structurally identical to `bash -c "git commit -m x"` — both put `git commit` right after a
+ *   double quote — and it is now checked too. The difference between them is which program is being
+ *   invoked, and no character class can see it. Parsing the command instead of matching it could
+ *   tell them apart; a shell tokeniser handling nested quoting, escapes, `--` terminators and
+ *   per-shell `-c` placement is far more machinery than the rest of this hook, and every corner of
+ *   it is a new way for the gate to be silently wrong, so it was weighed and rejected rather than
+ *   missed. The deny message names this over-match, so a grep denied on a red tree can explain
+ *   itself.
  * - `/i` makes the match case-insensitive. macOS and Windows both mount case-insensitive, so
  *   `Git commit` and `GIT PUSH` really invoke `git` on this machine — the identical bug class
  *   `block-generated-edits.mjs`'s header records being bitten by ("the path pattern was
@@ -89,7 +104,7 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   hyphen, so the lookahead fails and `commit`/`push` never matches as its own subcommand).
  */
 const GIT_WRITE =
-    /(?:^|[\s;&|(`])\s*git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
+    /(?:^|[\s;&|(`'"])\s*git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
 
 export function isGitWriteCommand(command) {
     return typeof command === 'string' && GIT_WRITE.test(command);
