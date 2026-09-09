@@ -410,7 +410,10 @@ describe('redeemSlugToToken', () => {
           json: async () => {
             throw new SyntaxError('Unexpected token < in JSON at position 0');
           },
-        } as Response;
+          // Through `unknown`: a `json` that only ever throws is typed `Promise<never>`, which
+          // overlaps `Response` too little for a direct assertion, and the flow reads three
+          // members of the twelve a real `Response` carries.
+        } as unknown as Response;
       }) as unknown as typeof fetch;
     }
 
@@ -493,6 +496,9 @@ describe('redeemSlugToToken', () => {
         await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
       }
       const logged = loggedLines();
+      // First that there is a log at all: two `not.toContain` on an empty string pass for the
+      // wrong reason, and this assertion is the whole point of the change above it.
+      expect(logged.length).toBeGreaterThan(0);
       expect(logged).not.toContain('raw-public-token');
       expect(logged).not.toContain('minted-session-jwt');
     });
