@@ -42,7 +42,8 @@
  * the DB without a request JWT (the redeem is what mints that JWT). There is no request user to
  * borrow, so it uses the MJ-canonical server-side system user — `UserCache.Instance.GetSystemUser()`
  * (the same `UserInfo` the data provider uses for non-request server work) — with a `new Metadata()`
- * provider, exactly as other server-side-only MJ code does. Reads are a single slug lookup.
+ * provider, exactly as other server-side-only MJ code does. Reads are the slug lookup plus one
+ * primary-key read of the form's description for the page's `<head>` (see {@link loadFormIdentity}).
  */
 import type { Application, Request, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
@@ -55,6 +56,7 @@ import { getRespondentHostConfig } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
 import { redeemSlugToToken, type RedeemRunViewProvider } from './redeem.service.js';
+import { loadFormIdentity } from './form-identity.js';
 import { assessRespondentReadiness } from './host-readiness.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
@@ -64,6 +66,14 @@ import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
+
+/**
+ * Every browser asks the ORIGIN for this on every page, and a link unfurler may too. MJAPI serves no
+ * icon, so unmatched the request fell through to the authenticated routes and answered 401 — the one
+ * console error on a healthy respondent load, and auth-failure noise proportional to form traffic
+ * (bizapps-forms#120). Answering here keeps a public page from ever emitting an auth failure.
+ */
+export const FAVICON_ROUTE = '/favicon.ico';
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsRespondentHost')
 export class RespondentHostMiddleware extends BaseServerMiddleware {
@@ -93,6 +103,14 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
         LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
         this.sendError(res, { status: 500, message: 'We could not open this form right now. Please try again later.' });
       });
+    });
+
+    // An explicit "nothing to show" rather than an icon: there is no Forms icon asset to serve, and
+    // 204 is the answer every browser and fetcher treats as "no icon" without logging an error.
+    // Origin-wide by nature of the path; registered with the host page so disabling the page
+    // (FORMS_RESPONDENT_HOST_ENABLED=false) takes this with it.
+    app.get(FAVICON_ROUTE, (_req: Request, res: Response) => {
+      res.status(204).end();
     });
 
     LogStatus(
@@ -192,7 +210,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       slug,
     );
 
-    if (!outcome.ok) {
+    // Names BOTH things an identified page needs, because `RedeemOutcome` is a flat optional-field
+    // shape rather than a discriminated union: `ok` is a plain boolean, so it narrows nothing, and
+    // the row would otherwise arrive here as possibly-undefined. `redeemSlugToToken` sets the two
+    // together or neither, so the second clause is unreachable through that door today — it is the
+    // guard that keeps `loadFormIdentity` taking a row it can rely on, and without it a success
+    // carrying no row is a TypeError on `source.FormID`: a 500 with a stack, on the anonymous path.
+    if (!outcome.ok || !outcome.distribution) {
       // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
       // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
       // decision rather than a second one made here and kept in step by hand.
@@ -200,9 +224,15 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       return;
     }
 
+    // The page's identity — what the tab and an unfurl card show — comes from the row the door just
+    // resolved (never re-read) plus one primary-key read for the description. Best-effort by design:
+    // `loadFormIdentity` logs and degrades rather than costing the respondent the form.
+    const identity = await loadFormIdentity(this.systemProvider(), this.systemUser(), outcome.distribution);
     const html = renderRespondentHostPage({
       graphqlUrl: cfg.graphqlUrl,
       widgetBundleUrl: cfg.widgetBundleUrl,
+      pageTitle: identity.name,
+      pageDescription: identity.description,
       defaultSlug: slug,
       token: outcome.token,
       turnstileSiteKey: cfg.turnstileSiteKey,

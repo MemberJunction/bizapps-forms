@@ -64,6 +64,12 @@ export interface RedeemOutcome {
   ok: boolean;
   /** The redeemed anonymous session JWT, on success. */
   token?: string;
+  /**
+   * The distribution row the door resolved the slug to, on success. Handed up so the host page can
+   * name the form (`Form`, the view's joined name column) without a second, identical read of the
+   * hottest unauthenticated path in the product.
+   */
+  distribution?: mjBizAppsFormsFormDistributionEntityType;
   /** Why it failed, on failure. */
   reason?: RedeemFailureReason;
   /** When the link opens — set with `distribution-not-yet-open` only, so the page can say when. */
@@ -378,5 +384,5 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (posted.verdict === 'refused') {
     return { ok: false, reason: 'redeem-failed' };
   }
-  return { ok: true, token: posted.token };
+  return { ok: true, token: posted.token, distribution: dist };
 }
