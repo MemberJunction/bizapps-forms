@@ -259,6 +259,12 @@ function stubResponse(
     __mj_UpdatedAt: submitted ?? started,
     Form: MOCK_FORM.name,
     RespondentPerson: i % 5 === 0 ? `Sample Person ${i}` : null,
+    // Null for the same reason a legacy row's is: the sample data predates the link column
+    // V202609031200 added, so these rows came through no distribution and are not resumable.
+    // Nothing in the dashboard reads either field yet; when something does, this is where the
+    // mock starts carrying a link.
+    FormDistributionID: null,
+    FormDistribution: null,
   };
 }
 
