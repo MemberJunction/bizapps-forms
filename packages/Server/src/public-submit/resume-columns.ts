@@ -1,5 +1,5 @@
 /**
- * The three touch-points of the two columns `V202609031200__v0.12.x__Resume_Own_Response.sql` adds:
+ * The three touch-points of the two columns `V202609091600__v0.12.x__Resume_Own_Response.sql` adds:
  * `FormResponse.FormDistributionID` and `FormDistribution.AllowDeviceResume`.
  *
  * They stay together in one module because they are one rule seen from three sides — which link a

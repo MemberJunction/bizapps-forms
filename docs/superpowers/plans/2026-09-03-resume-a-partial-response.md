@@ -55,7 +55,7 @@ Every task's requirements implicitly include this section.
 
 | File | Responsibility |
 |---|---|
-| `migrations/V202609031200__v0.12.x__Resume_Own_Response.sql` | two columns, two new RLS filters, two extended filters, the read grants, postconditions |
+| `migrations/V202609091600__v0.12.x__Resume_Own_Response.sql` | two columns, two new RLS filters, two extended filters, the read grants, postconditions |
 | `packages/Entities/src/contracts/resume.ts` | the `ResumeSnapshot` wire shape both ends parse |
 | `packages/Entities/src/contracts/answer-date.ts` (modify) | `answerTextFromInstant` — the inverse of `dateAnswerInstant`, for prefill |
 | `packages/Server/src/public-submit/scope-response.service.ts` | what the untyped scope claim names (fixed-order, ≤1 read) |
@@ -76,7 +76,7 @@ Every task's requirements implicitly include this section.
 ## Task 1: Migration — the two columns, the row filters, the read grants
 
 **Files:**
-- Create: `migrations/V202609031200__v0.12.x__Resume_Own_Response.sql`
+- Create: `migrations/V202609091600__v0.12.x__Resume_Own_Response.sql`
 - Read first: `migrations/V202608131600__v0.10.x__Respondent_Grant_Hardening.sql` (the filter/grant idiom this file continues), `migrations/V202608252340__v0.12.x__Rules_And_Branching.sql` (the ADD COLUMN + extended property idiom)
 
 **Interfaces:**
@@ -210,7 +210,7 @@ every save.
 
 ```bash
 cd packages/Entities && pnpm run build && cd ../..
-git add migrations/V202609031200__v0.12.x__Resume_Own_Response.sql packages/Entities/src/generated
+git add migrations/V202609091600__v0.12.x__Resume_Own_Response.sql packages/Entities/src/generated
 git commit -m "feat(migration): a response knows its distribution, and a scoped session may read its own draft"
 ```
 

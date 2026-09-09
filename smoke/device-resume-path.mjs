@@ -3,7 +3,7 @@
  * Same-device resume, end to end (#138): a draft, a pointer, a new session, the same row.
  *
  * ⚠️ NEVER EXECUTED. Written alongside the feature but not run: the migration it depends on
- * (`V202609031200__v0.12.x__Resume_Own_Response.sql`) has not been applied to any database, so the
+ * (`V202609091600__v0.12.x__Resume_Own_Response.sql`) has not been applied to any database, so the
  * two columns and the row filters this exercises do not exist yet, and same-device resume is
  * inactive by construction until they do. Expect to fix things in here on its first real run — that
  * is normal for a smoke script, and it is the reason this notice is at the top rather than in a
