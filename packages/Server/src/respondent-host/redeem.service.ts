@@ -41,6 +41,11 @@ export interface RedeemRunViewProvider {
 /** Minimal shape of core's `RedeemMagicLinkResult` JSON (the fields this flow reads). */
 export interface RedeemMagicLinkJsonResult {
   success: boolean;
+  /**
+   * The HTTP status core answered with. Carried because `errorCode` is ambiguous on its own:
+   * core sends `'invalid'` both for a dead invite (410) and for its redeem rate limit (429).
+   */
+  status?: number;
   /** The minted RS256 anonymous session JWT (present only on success). */
   token?: string;
   error?: string;
@@ -258,7 +263,7 @@ async function postRedeem(
   }
   try {
     const parsed: unknown = await response.json();
-    return isRedeemResult(parsed) ? parsed : undefined;
+    return isRedeemResult(parsed) ? { ...parsed, status: response.status } : undefined;
   } catch {
     return undefined;
   }

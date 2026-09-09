@@ -29,7 +29,7 @@ interface DepsConfig {
   response?: Partial<ResumeResponseRow> | null;
   /** The response a second, differently-scoped lookup returns (the cookie-conflict case). */
   otherResponse?: Partial<ResumeResponseRow> | null;
-  redeem?: { ok?: boolean; errorCode?: string };
+  redeem?: { ok?: boolean; errorCode?: string; status?: number };
   mintFails?: boolean;
   inviteResourceId?: string;
   scopeOf?: string;
@@ -71,8 +71,8 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
     redeem: async (token) => {
       rec.redeems.push(token);
       const r = config.redeem ?? {};
-      return r.ok === false || r.errorCode
-        ? { ok: false, errorCode: r.errorCode }
+      return r.ok === false || r.errorCode || r.status
+        ? { ok: false, errorCode: r.errorCode, status: r.status }
         : { ok: true, token: 'JWT-2' };
     },
     mint: async ({ responseId }) => {
@@ -150,10 +150,36 @@ describe('runResume', () => {
     expect(out.setCookie).toBeUndefined();
   });
 
+  it('does NOT clear the cookie when core REFUSED THE REDEEM FOR RATE LIMITING', async () => {
+    // Core answers its redeem rate limit with HTTP 429 and body
+    // `{ success:false, errorCode:'invalid', error:'Too many redemption attempts...' }`
+    // (MJServer/src/auth/magicLink/MagicLinkRouter.ts). `invalid` is OVERLOADED — core also sends
+    // it, at 410, for a malformed, unknown or revoked invite. Only the STATUS separates them, and
+    // clearing on the transient one destroys the browser's single pointer to a live draft because
+    // of a refusal that clears itself in sixty seconds.
+    const { deps } = makeDeps({ redeem: { ok: false, errorCode: 'invalid', status: 429 } });
+
+    const out = await runResume(deps, { slug: SLUG, cookieToken: TOKEN });
+
+    expect(out.reason).toBe('rate-limited');
+    expect(out.setCookie).toBeUndefined();
+  });
+
+  it('does NOT clear the cookie when the redeem failed for a reason that may not last', async () => {
+    // 5xx and a transport failure are the same shape of mistake as the rate limit: the pointer has
+    // not been shown to be dead, so destroying it is a guess in the destructive direction. Only a
+    // refusal that PROVES the pointer is dead may clear it.
+    const { deps } = makeDeps({ redeem: { ok: false, errorCode: 'server_error', status: 500 } });
+
+    const out = await runResume(deps, { slug: SLUG, cookieToken: TOKEN });
+
+    expect(out.setCookie).toBeUndefined();
+  });
+
   it.each(['expired', 'revoked', 'not-found', undefined])(
     'clears the cookie when the pointer is genuinely dead (%s)',
     async (errorCode) => {
-      const { deps } = makeDeps({ redeem: { ok: false, errorCode } });
+      const { deps } = makeDeps({ redeem: { ok: false, errorCode, status: 410 } });
 
       const out = await runResume(deps, { slug: SLUG, cookieToken: TOKEN });
 

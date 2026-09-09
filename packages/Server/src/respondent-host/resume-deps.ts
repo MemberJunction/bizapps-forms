@@ -50,7 +50,7 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
         rawToken,
       );
       if (!result || !result.success || !result.token) {
-        return { ok: false, errorCode: result?.errorCode };
+        return { ok: false, errorCode: result?.errorCode, status: result?.status };
       }
       return { ok: true, token: result.token };
     },

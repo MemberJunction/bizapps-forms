@@ -63,8 +63,15 @@ export interface DeviceResumeDeps {
   loadDistribution(slug: string): Promise<ResumeDistribution | undefined>;
   /** The stored draft, for the `/remember` ownership checks. */
   loadResponse(responseId: string): Promise<ResumeResponseRow | undefined>;
-  /** Redeem a raw token through core, returning the session JWT it mints. */
-  redeem(rawToken: string): Promise<{ ok: boolean; token?: string; errorCode?: string }>;
+  /**
+   * Redeem a raw token through core, returning the session JWT it mints.
+   *
+   * `status` is the HTTP status core answered with, and it is NOT redundant beside `errorCode`:
+   * core sends `errorCode: 'invalid'` for a malformed, unknown or revoked invite at 410 AND for a
+   * rate limit at 429. The code alone cannot tell a dead pointer from a busy minute.
+   * `undefined` means we never got an answer at all (transport or parse failure).
+   */
+  redeem(rawToken: string): Promise<{ ok: boolean; token?: string; errorCode?: string; status?: number }>;
   /** Mint a device invite for a response, returning its raw token and expiry. */
   mint(args: { responseId: string; closeAt?: Date | null }): Promise<{ ok: boolean; rawToken?: string; expiresAt?: Date }>;
   /** Retire invites for a response. `deviceOnly` is a security decision — see the service. */
@@ -121,7 +128,7 @@ export async function runResume(deps: DeviceResumeDeps, args: ResumeArgs): Promi
 
   const redeemed = await deps.redeem(rawToken);
   if (!redeemed.ok || !redeemed.token) {
-    return refusedRedeem(deps, redeemed.errorCode);
+    return refusedRedeem(deps, redeemed.errorCode, redeemed.status);
   }
 
   const responseId = deps.scopeOf(redeemed.token);
@@ -161,9 +168,28 @@ export async function runResume(deps: DeviceResumeDeps, args: ResumeArgs): Promi
  * copy, while genuine theft still shows up exactly as the design intends — as a failure the owner
  * sees at their next reopen.
  */
-function refusedRedeem(deps: DeviceResumeDeps, errorCode: string | undefined): ResumeRouteOutcome {
+function refusedRedeem(
+  deps: DeviceResumeDeps,
+  errorCode: string | undefined,
+  status: number | undefined,
+): ResumeRouteOutcome {
   if (errorCode === 'consumed') {
     return { status: 410, reason: 'open-elsewhere' };
+  }
+  if (status === 429) {
+    // Core's redeem limiter (20/60s, keyed by IP — and EVERY `/f/:slug` load spends one, so a
+    // NAT'd office shares the bucket). It answers 429 with `errorCode: 'invalid'`, the same code it
+    // sends at 410 for a genuinely dead invite, so the STATUS is the only thing that separates
+    // them. Clearing here would destroy the browser's one pointer to a live draft over a refusal
+    // that expires in a minute.
+    return { status: 429, reason: 'rate-limited' };
+  }
+  if (status !== 410) {
+    // A 5xx, or no answer at all. DESTROYING THE POINTER REQUIRES PROOF THAT IT IS DEAD, and an
+    // unreachable or broken server is not proof of anything about the token. The old default ran
+    // the other way — anything that was not `consumed` was treated as permanent — which is how a
+    // transient failure became an unrecoverable one.
+    return { status: 410, reason: 'redeem-failed' };
   }
   return { status: 410, reason: 'dead-pointer', setCookie: deps.clearCookie() };
 }
