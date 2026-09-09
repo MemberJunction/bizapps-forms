@@ -44,7 +44,7 @@
     "install:deps": "pnpm install",
     "setup": "echo 'Please run: pnpm run mj:migrate && pnpm run mj:codegen && pnpm run build'",
     "change": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && node scripts/sync-app-version.mjs",
     "commitpush": "node ci/commit_push.mjs",
     "mergemain": "node ci/merge_main.mjs",
     "mergemain:update-lock": "node ci/merge_main_and_update_lock.mjs",
