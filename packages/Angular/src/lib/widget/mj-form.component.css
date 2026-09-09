@@ -410,3 +410,125 @@
     50% { opacity: 0.35; }
   }
 }
+
+/*
+  Resume surfaces (#138). All three sit above the phase switch, so they are styled as page-level
+  notices rather than as part of any one screen — a resumed respondent sees them on the questions,
+  and (for the notice) on a fresh form the page could not reopen a draft for.
+
+  Every colour is a --mjf-* / --mj-* token: the widget renders inside a shadow root on somebody
+  else's page, and a literal here would be the one thing a form's theme could not repaint.
+*/
+.mjf-resume-notice {
+  margin: 0 0 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--mjf-page-ink-muted);
+}
+
+.mjf-resume-notice--warn {
+  color: var(--mjf-page-ink);
+}
+
+.mjf-resume-bar {
+  margin: 0 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--mjf-page-ink-muted);
+}
+
+.mjf-resume-bar__text {
+  flex: 1 1 auto;
+}
+
+/*
+  A real <button>, not a link: it performs an action rather than navigating, and a respondent
+  reaching it by keyboard has to be able to fire it with Space as well as Enter. Sized to the 44px
+  tap target the mobile-first bar requires, with the padding doing the work so the label still sits
+  on the same line as the sentence beside it.
+*/
+.mjf-resume-bar__action {
+  flex: 0 0 auto;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--mjf-input-border);
+  border-radius: var(--mjf-btn-radius);
+  background: transparent;
+  color: var(--mjf-page-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mjf-resume-bar__action:hover {
+  background: var(--mjf-page-sunken);
+}
+
+.mjf-resume-bar__action:focus-visible {
+  outline: 2px solid var(--mjf-accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ expired */
+
+/* The expired-session notice. Same anchoring as the sending scrim, for the same reason: it has to
+   be where the respondent's eyes are, not centred in a 4000px form. Same scrim too — the answers
+   stay faintly visible so the page reads as stopped, not gone — but the message sits on a card,
+   because unlike the wait it has to be READ, not just noticed, and text over dimmed form text is
+   not legible. `--mjf-lift-shadow` rather than the card's resting shadow: this is the one thing on
+   the page that is not part of the form, and it should sit above it. */
+.mjf-expired {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--mjf-page-bg) 82%, transparent);
+  backdrop-filter: blur(1px);
+}
+
+.mjf-expired__card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--mjf-gap, 16px);
+  width: min(100%, 28rem);
+  padding: 1.5rem;
+  color: var(--mjf-page-ink);
+  background: var(--mjf-card-bg);
+  border: 1px solid var(--mjf-card-border);
+  border-radius: var(--mjf-card-radius);
+  box-shadow: var(--mjf-lift-shadow);
+}
+
+.mjf-expired__title {
+  margin: 0;
+  font-family: var(--mjf-font-display);
+  font-size: 1.25rem;
+  line-height: 1.3;
+}
+
+.mjf-expired__msg {
+  margin: 0;
+  font-size: var(--mjf-body-size, 1rem);
+  line-height: 1.5;
+  color: var(--mjf-page-ink-soft);
+}
+
+/* Full-width on a phone, where a 44px-tall button that is also easy to hit sideways matters. */
+.mjf-expired__action {
+  width: 100%;
+}
+
+@container mjf (min-width: 30rem) {
+  .mjf-expired__action {
+    width: auto;
+  }
+}

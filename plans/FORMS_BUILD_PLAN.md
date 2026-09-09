@@ -646,7 +646,16 @@ native entities. This is the reporting differentiator no incumbent has.
 - [ ] Advanced question types (Matrix, Ranking, Address→bizapps-common, Signature, Payment).
 - [ ] LLM-judge scoring pipeline on free-text answers (ScoringConfig).
 - [ ] Review/approve-before-publish routing via **bizapps-tasks** (FormVersion status state machine + a "Form Approval" TaskType whose OnComplete/OnReject hooks call Forms actions).
-- [ ] Partial-response resume, advanced quotas, richer conditional logic.
+- [~] **Partial-response resume — same-device half BUILT** (PR #152, branch
+      `feat/138-resume-a-partial-response`, migration `V202609091600`). A respondent reopens
+      their own draft on the same device via an `HttpOnly` pointer cookie holding a
+      response-scoped `MagicLinkInvite`; ownership moved off the replayable `x-session-id`
+      header onto the JWT scope claim. Plan and per-task state:
+      `docs/superpowers/plans/2026-09-03-resume-a-partial-response.md`.
+      **Still open:** the emailed cross-device link (that plan's Task 12 — no `RequestResumeLink`,
+      no template, no interstitial), `smoke/resume-link-path.mjs`, and the bounded invite prune.
+      Five defects shipped knowingly, filed as #189-#193. Issue #138 stays open for the rest.
+- [ ] Advanced quotas, richer conditional logic.
 
 ---
 
@@ -2210,3 +2219,35 @@ native entities. This is the reporting differentiator no incumbent has.
 
   **Verification:** 1,971 unit tests (296 / 26 / 142 / 1006 / 501). Build clean, widget 1199.1 kB;
   `lint:ui`, `lint:distribution` + 72 mutants, `lint:generated` and `lint:migrations` all pass.
+
+- **2026-09-09 — a respondent can reopen their own draft, and the plan files said none of it
+  existed.** PR #152 (branch `feat/138-resume-a-partial-response`, commit `90fec2d`) ships
+  Tasks 1-11 of `docs/superpowers/plans/2026-09-03-resume-a-partial-response.md`: two columns
+  (`FormResponse.FormDistributionID`, `FormDistribution.AllowDeviceResume`), four row filters, the
+  first READ grant the anonymous `Form Respondent` role has ever held, a response-scoped
+  `MagicLinkInvite` as the resume credential, three host routes
+  (`POST /f/:slug/{resume,remember,forget}`), an `HttpOnly; SameSite=Lax; Path=/f/<slug>` pointer
+  cookie, and widget prefill with a "Not you? Start over" escape hatch.
+
+  **Ownership stopped being forgeable.** `responseIsOurs` took the `x-session-id` header — which
+  the caller picks — so naming somebody else's `responseId` while replaying their session id
+  overwrote their answers. It now takes a caller identity whose scope comes from
+  `UserInfo.MagicLinkScope.ResourceID`, and the database applies the same predicate as a row
+  filter, so the read gate and the write gate cannot drift.
+
+  **Verified live on 2026-09-09** against `MJ_PR152_ATS` (a clone of `MJ_ATS_Dev` with the
+  migration and CodeGen applied; `MJ_ATS_Dev` itself was never migrated): device-resume smoke
+  29/29 on two forms against both hosts, `respondent`/`ownership`/`scope`/`errors` green, and a
+  browser round trip — type, "Progress saved", reopen, answers restored, console clean.
+
+  **Not built, and worth naming because the plan's checkboxes claimed nothing was:** the emailed
+  cross-device channel (Task 12) in full, `smoke/resume-link-path.mjs`, and the bounded invite
+  prune. Task 6 step 1's question is now answered — `FK_MagicLinkRedemption_Invite` means a spent
+  invite cannot be deleted, so a prune must log rather than delete.
+
+  **Two process notes.** Every one of that plan's 80 checkboxes was still unticked while the work
+  was merged-ready; they were ticked retroactively on 2026-09-09, and this Progress Log had no
+  entry for the work at all. And finding 6 was verified for the first time on 2026-09-09: 25
+  page loads in a minute from one client return **20 x 200 and 5 x 502**, because
+  `redeem.service.ts` sends no client address on its loopback redeem POST, so every respondent
+  shares one rate-limit bucket. Pre-existing on `next`, not caused by #152.
