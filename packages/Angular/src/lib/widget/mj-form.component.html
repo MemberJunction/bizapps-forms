@@ -73,7 +73,7 @@
   -->
   @if (resumeNotice()) {
     <p class="mjf-resume-notice" role="status">
-      <i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ resumeNotice() }}
+      <mjf-icon name="circle-info" /> {{ resumeNotice() }}
     </p>
   }
   @if (resumed() && phase() === 'ready') {
@@ -84,7 +84,7 @@
   }
   @if (resumeDropped().length > 0) {
     <p class="mjf-resume-notice mjf-resume-notice--warn" role="status">
-      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <mjf-icon name="triangle-exclamation" />
       This form has changed since you saved. {{ resumeDropped().length }} of your answers need
       answering again.
     </p>
