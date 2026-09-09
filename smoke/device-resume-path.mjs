@@ -118,14 +118,21 @@ function cookiePair(setCookie) {
   return value ? `mjf_resume=${value}` : undefined;
 }
 
-/** A partial submission carrying whatever answers this form's fixture provides. */
-function partialInput(versionId, responseId) {
+/**
+ * A partial submission carrying whatever answers this form's fixture provides.
+ *
+ * `questions` is threaded in rather than read from a module-level global: the published definition
+ * is not loaded until `run()` is under way, and `buildAnswers` iterates what it is handed, so a
+ * missing argument is not a defaulted empty list — it throws "questions is not iterable" on the
+ * first submit, before any resume behaviour is reached.
+ */
+function partialInput(questions, versionId, responseId) {
   return {
     distributionSlug: SLUG,
     formVersionId: versionId,
     partial: true,
     responseId,
-    answers: buildAnswers(),
+    answers: buildAnswers(questions, { email: 'smoke@example.com' }),
   };
 }
 
@@ -137,10 +144,13 @@ async function run() {
   check(first.hasDraft === false, 'a browser with no cookie is not told there is a draft');
   const definition = JSON.parse((await gql(first.token, undefined, PUBLISHED, { slug: SLUG })).PublishedForm.definitionJSON);
   const versionId = definition.formVersionId;
+  // Same flattening the other smoke scripts use; the published definition nests questions per page.
+  const questions = (definition.pages ?? []).flatMap((p) => p.questions ?? []);
+  check(questions.length > 0, `published definition loads (${questions.length} question(s))`);
 
   const S1 = randomUUID();
   const R1 = randomUUID();
-  const saved = await gql(first.token, S1, SUBMIT, { input: partialInput(versionId, R1) });
+  const saved = await gql(first.token, S1, SUBMIT, { input: partialInput(questions, versionId, R1) });
   check(saved.SubmitFormResponse.success === true, 'the first partial save succeeds');
   const responseId = saved.SubmitFormResponse.responseId;
   created.responseIds.push(responseId);
@@ -207,7 +217,7 @@ async function run() {
 
   section('continuing writes the SAME row');
   const S2 = randomUUID();
-  const continued = await gql(resumedToken, S2, SUBMIT, { input: partialInput(versionId, responseId) });
+  const continued = await gql(resumedToken, S2, SUBMIT, { input: partialInput(questions, versionId, responseId) });
   check(continued.SubmitFormResponse.success === true, 'a save from the resumed session succeeds');
   check(continued.SubmitFormResponse.responseId?.toLowerCase() === responseId.toLowerCase(), 'it lands on the original row');
 
