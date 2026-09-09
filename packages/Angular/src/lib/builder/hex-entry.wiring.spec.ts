@@ -67,4 +67,31 @@ describe('the hex field sanitises while typing and expands only on commit', () =
     expect(source).toMatch(/\(keydown\.enter\)="commitHexEntry\(\)"/);
     expect(source).not.toMatch(/onHexBlur/);
   });
+  it('leaving a field that already holds the current colour is not a new choice', () => {
+    // Regression for the commit path this fix added. `commitHexEntry` routes an already-complete,
+    // UNCHANGED draft into `acceptHex`, whose whole meaning is "a new colour was chosen" — so a
+    // blur that typed nothing emitted valueChange again (restarting the consumer's debounced
+    // save) and re-derived `hue` from the colour. Re-deriving hue is the one thing the hue signal
+    // exists to prevent: a grey has no hue to recover, so the slider snaps to red and the author
+    // loses the hue they were half-way through choosing.
+    const body = methodBody(picker(), 'private acceptHex(hex: string): void {');
+    const guardAt = body.indexOf('hex === this.value()');
+    const hueAt = body.indexOf('this.hue.set(');
+    const emitAt = body.indexOf('this.valueChange.emit(');
+    expect(guardAt).toBeGreaterThan(-1);
+    // Order is the guard again: the comparison has to come before BOTH announcements, or it
+    // gates nothing.
+    expect(guardAt).toBeLessThan(hueAt);
+    expect(guardAt).toBeLessThan(emitAt);
+  });
+
+  it('the box is still corrected when the finished entry resolves to the colour already set', () => {
+    // The guard must not swallow the display update: typing '#abc' when the colour is already
+    // '#aabbcc' changes nothing to announce, but the box must still stop reading '#abc'.
+    const body = methodBody(picker(), 'private acceptHex(hex: string): void {');
+    const draftAt = body.indexOf('this.draft.set(hex)');
+    const guardAt = body.indexOf('hex === this.value()');
+    expect(draftAt).toBeGreaterThan(-1);
+    expect(draftAt).toBeLessThan(guardAt);
+  });
 });

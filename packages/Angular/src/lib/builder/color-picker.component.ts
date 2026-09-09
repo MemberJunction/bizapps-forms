@@ -312,10 +312,23 @@ export class ColorPickerComponent {
     this.acceptHex(finished);
   }
 
-  /** A finished colour: the box, the hue slider and the caller all end up agreeing on it. */
+  /**
+   * A finished colour: the box, the hue slider and the caller all end up agreeing on it.
+   *
+   * The box is corrected either way — `#abc` has to stop reading `#abc` once it resolves. The
+   * colour is only ANNOUNCED when it is genuinely different, because both callers can arrive
+   * here holding the colour that is already set: blur and Enter reach `commitHexEntry` whether
+   * or not anything was typed. Announcing it again would restart the consumer's debounced save
+   * for a colour nobody changed, and re-deriving `hue` would discard the hue the author is still
+   * working with — a grey has none to recover, so the slider would snap back to red, which is
+   * the exact thing the `hue` signal exists to prevent.
+   */
   private acceptHex(hex: string): void {
-    this.hue.set(hexToHsv(hex).h);
     this.draft.set(hex);
+    if (hex === this.value()) {
+      return;
+    }
+    this.hue.set(hexToHsv(hex).h);
     this.valueChange.emit(hex);
   }
 
