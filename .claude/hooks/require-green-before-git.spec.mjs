@@ -167,6 +167,16 @@ test('a red commit is denied, and the reason names the failure', () => {
     assert.match(result.reason, /#6366f1/);
 });
 
+// The accepted false positive (#178) is only acceptable if it can explain itself. The message is
+// this hook's entire user interface: a grep denied on a red tree otherwise shows a wall of
+// typecheck output about a commit the developer was never making.
+test('a deny says a non-git command may have been matched on purpose', () => {
+    const result = decisionFor({ command: 'grep -rn "git commit" docs/', runChecks: red });
+    assert.equal(result.decision, 'deny');
+    assert.match(result.reason, /quote/i);
+    assert.match(result.reason, /178/);
+});
+
 // The whole point of the hook is that a check nobody can run must not read as a check that passed.
 test('checks that cannot run ask rather than silently allowing', () => {
     const result = decisionFor({ command: 'git commit -m x', runChecks: unrunnable });

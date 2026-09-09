@@ -146,7 +146,11 @@ export function decisionFor({ command, runChecks }) {
             'This tree fails a check that is now REQUIRED to merge (#173), so committing it only ' +
             'moves the failure to CI. Fix it first:\n\n' +
             detail +
-            '\n\nRe-run with `npm run lint:ui` and `npm run typecheck`.',
+            '\n\nRe-run with `npm run lint:ui` and `npm run typecheck`.' +
+            '\n\nIf this command was not actually a git write — a grep for the phrase, or prose ' +
+            'quoting it — the gate cannot tell the difference: a quote character counts as a ' +
+            'command start on purpose (#178), because missing a real nested-shell invocation is ' +
+            'the worse error. Nothing was written; run the command again once the tree is green.',
     };
 }
 
