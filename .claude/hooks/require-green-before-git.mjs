@@ -162,18 +162,34 @@ const CHECK_TIMEOUT_MS = 120_000;
  * plain Node that ends in `PASS`/`FAIL`. Matching turbo's format alone would turn every real
  * UI-gate failure into `ask`, which is the same bug pointed the other way.
  *
- * Deliberately asked only of a NON-ZERO exit. A `--filter` glob that matches no package exits 0 and
- * still prints ` Tasks:    0 successful, 0 total`, so the marker cannot catch a run that passed
- * without checking anything; that hole needs a different signal and is tracked separately. Asking
- * here anyway would add a way for a green commit to start prompting without closing it.
+ * ── AND A PASS MUST HAVE COVERED SOMETHING (#196) ───────────────────────────────────────────────
+ * The same question, asked of the other arm. A non-zero exit is a claim of FAILURE, so before
+ * believing it, require proof the checker judged the tree. A zero exit is a claim of SUCCESS, so
+ * before believing that, require proof the success covered any work — `coveredWorkPattern`.
  *
- * Matching a printed marker is a heuristic, and it fails SAFE in both directions: a wording change
- * in turbo turns real failures into `ask` (a human looks) rather than into silence. Prefer it to
- * string-matching the error text, which is what changes between releases.
+ * It is not the same evidence, which is why it is not the same pattern. `--filter=@mj-biz-apps/
+ * forms-*` is a hardcoded npm-scope glob, and a scope rename or a package moved out of `packages/*`
+ * makes it match nothing; turbo does not call that an error, it exits 0 and prints
+ * ` Tasks:    0 successful, 0 total` — which still contains the `Tasks:` marker, so the check above
+ * cannot catch it. The distinguishing evidence is the COUNT. `lint:ui` fails the same way for a
+ * moved `packages/Angular/src`, because its `walk()` swallows a missing directory and reports
+ * `Scanned 0 file(s)`; its count lives in a different line entirely.
+ *
+ * This arm is the one every green commit takes, so a wrong pattern here prompts on every commit.
+ * That is the cost worth paying rather than the reverse: a pattern that stopped matching would
+ * silently reopen the hole, and this file's whole argument is that silence is the failure that
+ * cannot be noticed. A wrong `ask` announces itself and gets fixed; a wrong `allow` does not.
+ *
+ * Matching printed output is a heuristic, and both of these fail toward `ask` — a human looks —
+ * rather than toward silence. Prefer that to string-matching error text, which is what changes
+ * between releases.
  */
-export function classifyCheckResult({ name, verdictPattern }, result) {
+export function classifyCheckResult({ name, verdictPattern, coveredWorkPattern }, result) {
     if (!(verdictPattern instanceof RegExp)) {
         throw new Error(`${name} has no verdictPattern, so nothing can say whether it ran.`);
+    }
+    if (!(coveredWorkPattern instanceof RegExp)) {
+        throw new Error(`${name} has no coveredWorkPattern, so nothing can say what it covered.`);
     }
     if (result.error) throw new Error(`${name} could not be spawned: ${result.error.message}`);
     if (result.signal) {
@@ -185,21 +201,34 @@ export function classifyCheckResult({ name, verdictPattern }, result) {
     if (typeof result.status !== 'number') {
         throw new Error(`${name} did not run to completion, so this tree is unverified.`);
     }
-    if (result.status === 0) return null;
     const combined = `${result.stdout || ''}${result.stderr || ''}`;
+    // Lazy: only the two throws below need it, and `combined` runs to maxBuffer (32MB) in the worst
+    // case, so the everyday green commit should not pay to split it.
+    const tail = () => combined.trim().split('\n').slice(-5).join(' ').slice(0, 300);
+
+    if (result.status === 0) {
+        if (!coveredWorkPattern.test(combined)) {
+            throw new Error(
+                `${name} passed without covering anything, so nothing was actually checked — most ` +
+                `likely its filter or scan root no longer matches this repo. It reported: ${tail()}`,
+            );
+        }
+        return null;
+    }
+
     if (!verdictPattern.test(combined)) {
         throw new Error(
             `${name} exited ${result.status} without ever reaching a verdict, so this is a broken ` +
-            'checker rather than a failing tree — most likely an incomplete install. It reported: ' +
-            combined.trim().split('\n').slice(-5).join(' ').slice(0, 300),
+            `checker rather than a failing tree — most likely an incomplete install. It reported: ${tail()}`,
         );
     }
     return { name, output: combined.split('\n').slice(-40).join('\n') };
 }
 
 /**
- * Runs the real checks. Throws — never reports "clean" — when a checker is missing, or when one
- * ran and never reached a verdict. Each entry carries the marker that proves it got that far.
+ * Runs the real checks. Throws — never reports "clean" — when a checker is missing, when one ran
+ * and never reached a verdict, and when one passed without covering any work. Each entry carries
+ * the two patterns that prove it got that far and that its verdict was about something.
  */
 function runChecks() {
     const turbo = path.join(PROJECT_DIR, 'node_modules', 'turbo', 'bin', 'turbo');
@@ -209,13 +238,23 @@ function runChecks() {
     }
 
     const invocations = [
-        { name: 'lint:ui', argv: [uiGate], verdictPattern: /^(?:PASS|FAIL)\b/m },
+        {
+            name: 'lint:ui',
+            argv: [uiGate],
+            verdictPattern: /^(?:PASS|FAIL)\b/m,
+            // `Scanned 197 file(s) under: packages/Angular/src`. Zero means the scan root moved and
+            // the colour gate is checking nothing — which it reports as a PASS.
+            coveredWorkPattern: /^Scanned [1-9]\d* file\(s\)/m,
+        },
         {
             name: 'typecheck',
             argv: [turbo, 'typecheck', '--filter=@mj-biz-apps/forms-*'],
             // Leading whitespace is load-bearing: turbo prints ` Tasks:    9 successful, 9 total`,
             // so `/^Tasks:/m` matches nothing and would send every commit to `ask`.
             verdictPattern: /^\s*Tasks:\s/m,
+            // Same line, but the COUNT: an empty run prints ` Tasks:    0 successful, 0 total` and
+            // exits 0, so the marker above is present and proves nothing.
+            coveredWorkPattern: /^\s*Tasks:\s+\d+ successful,\s+[1-9]\d* total/m,
         },
     ];
 

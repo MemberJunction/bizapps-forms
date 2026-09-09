@@ -144,8 +144,21 @@ test('checks that cannot run ask rather than silently allowing', () => {
 // task failure (exit 2, `0 successful, 1 total`) and fully-cached alike — and prints nothing of the
 // sort when it never resolved its platform binary. `check-ui-tokens.mjs` is plain Node and ends
 // with `PASS — …` or `FAIL — N UI gate violation(s).`.
-const TYPECHECK = { name: 'typecheck', verdictPattern: /^\s*Tasks:\s/m };
-const LINT_UI = { name: 'lint:ui', verdictPattern: /^(?:PASS|FAIL)\b/m };
+//
+// `coveredWorkPattern` is the same question asked of the OTHER arm: a zero exit claims success, and
+// this is the proof the success covered anything. Both are positive and both are measured — turbo
+// prints ` Tasks:    9 successful, 9 total`, and `check-ui-tokens.mjs` prints
+// `Scanned 197 file(s) under: packages/Angular/src`.
+const TYPECHECK = {
+    name: 'typecheck',
+    verdictPattern: /^\s*Tasks:\s/m,
+    coveredWorkPattern: /^\s*Tasks:\s+\d+ successful,\s+[1-9]\d* total/m,
+};
+const LINT_UI = {
+    name: 'lint:ui',
+    verdictPattern: /^(?:PASS|FAIL)\b/m,
+    coveredWorkPattern: /^Scanned [1-9]\d* file\(s\)/m,
+};
 
 test('a check that passed is not a failure', () => {
     assert.equal(
@@ -257,5 +270,82 @@ test('a check descriptor with no verdict pattern is a programming error, not a v
     assert.throws(
         () => classifyCheckResult({ name: 'typecheck' }, { status: 1, stdout: '', stderr: '' }),
         /verdictPattern/,
+    );
+});
+
+// ── A PASS THAT JUDGED NOTHING IS NOT A GREEN TREE (#196) ────────────────────────────────────
+// The same hole as #179, reached from the success side, where it is SILENT rather than merely wrong.
+// `--filter=@mj-biz-apps/forms-*` is a hardcoded npm-scope glob; a scope rename, a package moved out
+// of `packages/*`, or a `pnpm-workspace.yaml` edit each make it match nothing. turbo does not treat
+// that as an error — it exits 0 and prints ` Tasks:    0 successful, 0 total`. `lint:ui` behaves the
+// same way for a moved `packages/Angular/src`, because its `walk()` swallows a missing directory and
+// reports `Scanned 0 file(s)`. Either way the hook wrote nothing, and writing nothing is `allow`.
+//
+// Note the trap for anyone re-deriving this: the empty run STILL PRINTS a `Tasks:` line, so the
+// marker #179 added does not catch it. The distinguishing evidence is the count, not the marker.
+test('a turbo pass that ran no tasks at all throws rather than reporting the tree clean', () => {
+    const nothingMatchedTheFilter = {
+        status: 0,
+        signal: null,
+        stdout: ' WARNING  No tasks were executed as part of this run.\n\n' +
+            ' Tasks:    0 successful, 0 total\nCached:    0 cached, 0 total\n  Time:    9ms',
+        stderr: '',
+    };
+    assert.throws(() => classifyCheckResult(TYPECHECK, nothingMatchedTheFilter), /typecheck/);
+});
+
+// The pair below is what stops "throw on every zero exit" passing as a fix. Both are real output.
+test('an ordinary green run is still a pass', () => {
+    assert.equal(
+        classifyCheckResult(TYPECHECK, {
+            status: 0,
+            stdout: ' Tasks:    9 successful, 9 total\nCached:    0 cached, 9 total',
+            stderr: '',
+        }),
+        null,
+    );
+});
+
+test('a fully cached green run is still a pass', () => {
+    // `>>> FULL TURBO` is the everyday case: the hook fires on every commit and turbo caches.
+    assert.equal(
+        classifyCheckResult(TYPECHECK, {
+            status: 0,
+            stdout: ' Tasks:    9 successful, 9 total\nCached:    9 cached, 9 total\n' +
+                '  Time:    11ms >>> FULL TURBO',
+            stderr: '',
+        }),
+        null,
+    );
+});
+
+// Not turbo-shaped only, on this arm either. `lint:ui`'s empty run has no `Tasks:` line to count.
+test('a ui gate that scanned no files throws rather than reporting the tree clean', () => {
+    const scanRootMoved = {
+        status: 0,
+        signal: null,
+        stdout: 'UI token gate\n-------------\nScanned 0 file(s) under: packages/Angular/src\n\n' +
+            '[color] hardcoded-color gate: 0 violation(s)\n\nPASS — no UI gate violations.',
+        stderr: '',
+    };
+    assert.throws(() => classifyCheckResult(LINT_UI, scanRootMoved), /lint:ui/);
+});
+
+test('a ui gate that scanned files and found none is still a pass', () => {
+    assert.equal(
+        classifyCheckResult(LINT_UI, {
+            status: 0,
+            stdout: 'UI token gate\n-------------\nScanned 197 file(s) under: packages/Angular/src\n\n' +
+                'PASS — no UI gate violations.',
+            stderr: '',
+        }),
+        null,
+    );
+});
+
+test('a check descriptor with no covered-work pattern is a programming error, not a verdict', () => {
+    assert.throws(
+        () => classifyCheckResult({ name: 'lint:ui', verdictPattern: /x/ }, { status: 0, stdout: '', stderr: '' }),
+        /coveredWorkPattern/,
     );
 });

@@ -427,11 +427,38 @@ git commit -m "fix(hooks): a checker that never ran is not a tree that failed"
 - [ ] Verify by: the repro yields `ask` naming the install problem, while a real failure still
       yields `deny` — Steps 6 and 7.
 
-## Out of scope — file, do not fix
+## Task 2: a pass that judged nothing is not a green tree (#196)
 
-`turbo typecheck --filter='@nope/*'` exits **0** and prints ` Tasks:    0 successful, 0 total`. The
-hook reads that as green, so if the `@mj-biz-apps/forms-*` filter ever stops matching (a scope
-rename, a packages move), `typecheck` silently checks nothing and the hook says the tree is clean —
-the same "a check nobody ran reads as a check that passed" hole this file exists to close, reached
-from the success side. It needs a different signal (the `N total` count, not the marker), so it is a
-separate issue rather than a widened one here.
+Folded in on request after #179 landed on the branch. The measurement that had justified deferring
+it is the same one that shapes it: `turbo typecheck --filter='@nope/*'` exits **0** and prints
+` Tasks:    0 successful, 0 total`, so `verdictPattern` is present and proves nothing — the
+distinguishing evidence is the **count**. `lint:ui` fails the same way for a moved scan root
+(`walk()` swallows a missing directory), reporting `Scanned 0 file(s)` and then `PASS`.
+
+So each check gains a second pattern, `coveredWorkPattern`, asked only of a **zero** exit:
+
+| Check | `verdictPattern` (non-zero arm) | `coveredWorkPattern` (zero arm) |
+|---|---|---|
+| `typecheck` | `/^\s*Tasks:\s/m` | `/^\s*Tasks:\s+\d+ successful,\s+[1-9]\d* total/m` |
+| `lint:ui` | `/^(?:PASS\|FAIL)\b/m` | `/^Scanned [1-9]\d* file\(s\)/m` |
+
+Both are positive and both fail toward `ask`. That direction is deliberate and is the one judgement
+call here: this arm is the one every green commit takes, so a wrong pattern prompts on every commit.
+That is the cost worth paying, because a pattern that stopped matching would silently reopen the
+hole, and a wrong `ask` announces itself while a wrong `allow` does not.
+
+Six tests pin it — three that must throw (turbo empty run, `lint:ui` empty scan, a descriptor
+missing the field) and three that must still pass (an ordinary green run, a fully-cached
+`>>> FULL TURBO` run, a `lint:ui` run that scanned files and found nothing). The second trio is what
+stops "throw on every zero exit" passing as a fix.
+
+### Verified from real checker output, not synthetic results
+
+| Invocation | exit | decision |
+|---|---|---|
+| `turbo typecheck --filter='@nope/does-not-exist-*'` | 0 | **ask** — "passed without covering anything" |
+| `check-ui-tokens.mjs` copied where its scan root does not exist | 0 | **ask** — same |
+| turbo with its platform binary unresolvable (#179) | 1 | **ask** — "without ever reaching a verdict" |
+| `turbo typecheck --filter='@mj-biz-apps/forms-*'` (control) | 0 | **allow** |
+
+Plus the real hook end to end: a green tree writes nothing, and a hardcoded `#6366f1` still denies.
