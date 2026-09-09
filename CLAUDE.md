@@ -59,6 +59,7 @@ several details in the originals are wrong here, and each file says where and wh
 | `.claude/rules/testing.md` | tests | Vitest conventions **here** (`.spec.ts`, no `test-utils`), and what unit tests structurally cannot catch |
 | `.claude/rules/design-tokens.md` | `**/*.css` | No hardcoded colours; `--mj-*` / `--mjf-*` tokens; the shadow-root constraint |
 | `.claude/rules/changesets.md` | `.changeset/*.md` | **`patch` unless the change ships a migration or metadata.** Why the fixed group makes the level a release-wide decision, not a local one |
+| `.claude/rules/generated-code.md` | `packages/*/src/**/generated/**` | **Never hand-edit CodeGen output** — why the rule survived being followed-in-spirit, and what the durable check would be. Enforced by `.claude/hooks/block-generated-edits.mjs` |
 | `.claude/skills/mj-upgrade/` | on request | Full MJ version-upgrade runbook, including the core `__mj` migration that the pin bump alone does **not** do |
 
 Known corrections applied during the port, so nobody re-derives them: this repo uses `.spec.ts` not
@@ -107,6 +108,28 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 - Cut feature branches **from `next`**, push, open a PR → `next`. A single coordinating PR promotes `next` → `main`.
 - **Feature branches MUST track the same-named remote** (`origin/<branch>`), never `origin/next` or `origin/main`. Verify with `git branch -vv` before every push.
 - Never commit directly to `main`. Never hand-author the `chore: Update package-lock.json` commit — the publish workflow creates it.
+- **CI is blocking (since #173).** Both rulesets require these seven **job** names — `build-and-test`,
+  `changes_and_migrations`, `codegen-append-gate`, `distribution-gate`, `generated-scope-gate`,
+  `migration-order-gate`, `ui-token-gate` — with "branch must be up to date with base" on, so a stale
+  branch must be updated before it can merge. **Nobody can bypass it, including repo admins**
+  (`current_user_can_bypass: never`, `bypass_actors: []`).
+- **Every gate reports on every PR, by design.** Path filtering lives in a job- or step-level `if:`
+  fed by `scripts/check-paths-touched.mjs` — **never** in `on: paths:` (`distribution-gate.yml` is
+  the one gate that filters at the step level rather than the job level, since only its 7-minute
+  mutant suite is expensive enough to be worth the condition). A workflow skipped by `on: paths:`
+  creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
+  Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
+  Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
+- **Known follow-up, and it will bite the next release:** the publish pipeline pushes *directly* to
+  `main` (`ci/commit_push.mjs`, the `Version Packages [skip ci]` commit) and to `next`
+  (`ci/merge_main_and_update_lock.mjs`). Required status checks reject direct pushes outright.
+  `[skip ci]` is part of why no check can ever report on that commit, but it is not the deciding
+  fact: `changes.yml` carries only a `pull_request` trigger and no `push` trigger at all, so
+  `changes_and_migrations` could never report on a direct push even with `[skip ci]` removed. The
+  natural fix, a GitHub Actions bypass actor, is refused at repo level (`422 — Actor GitHub Actions
+  integration must be part of the ruleset source or owner organization`) and needs an org owner.
+  Until that is resolved, either add the bypass at org level or route those two pushes through pull
+  requests (tracked in #177).
 
 ## Build & dev commands
 - `pnpm install` (repo root only — never inside a package dir)
@@ -120,11 +143,12 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 - **Builder / admin UI in Explorer, or `forms-ng` components** → **MJ's host**: `cd ../MJ && pnpm start` (Explorer `:4201`, API `:4000`) — MJ is checked out beside this repo under a shared workspace parent, with this repo linked in via `mj dev workspace`. There is no Explorer in this repo. Caliber and ATS use the same host; one serves all three.
 
 ## CodeGen
-- Generated code lives in `packages/*/src/generated/` (entities, actions, resolvers, Angular forms). **Never hand-edit generated files.** Run `npm run mj:codegen` after any schema change. Write TypeScript against generated types **only after** CodeGen runs.
+- **Running CodeGen, `mj migrate`, or an MJ upgrade → [`docs/database-operations.md`](docs/database-operations.md).** It covers the three commands whose failure modes report success: which `mj migrate` targets core vs this app's schema, what `--skipfiles`/`--skipdb` really do, the ordering trap on a fresh database, the `IsHierarchy` opt-in for self-referencing FKs, and the clean-room build.
+- Generated code lives in `packages/*/src/**/generated/` (entities, actions, resolvers, Angular forms — Angular's is under `src/lib/generated/`, and at MJ 6.1 the entity and GraphQL output moved into per-schema modules with a barrel left behind). **Never hand-edit generated files** — `.claude/hooks/block-generated-edits.mjs` now refuses it, and `.claude/rules/generated-code.md` explains why a hand edit that produces byte-identical *lines* is still wrong. Run `npm run mj:codegen` after any schema change, against a clean-room database rather than the shared one ([`docs/database-operations.md`](docs/database-operations.md)). Write TypeScript against generated types **only after** CodeGen runs.
 - The scaffold ships **placeholder** `generated/` files so the packages compile before the first CodeGen run; CodeGen overwrites them.
 
 ## Migrations
-- Highest `migrations/` version folder; `VYYYYMMDDHHMM__v<ver>__<Description>.sql`; hardcoded UUIDs; no `__mj_*` timestamp columns (CodeGen adds them); no FK indexes (CodeGen adds them); `sp_addextendedproperty` on every business column; single multi-`ADD` `ALTER`s; new tables in schema `__mj_BizAppsForms`; use the `${flyway:defaultSchema}` placeholder.
+- **`migrations/` is flat** — there are no `vN/` era subfolders here (MJ core has them; we do not, and `migrations/codegen/` is gitignored CodeGen staging, not a migration folder). `VYYYYMMDDHHMM__v<ver>__<Description>.sql`; hardcoded UUIDs; no `__mj_*` timestamp columns (CodeGen adds them); no FK indexes (CodeGen adds them); `sp_addextendedproperty` on every business column; single multi-`ADD` `ALTER`s; new tables in schema `__mj_BizAppsForms`; use the `${flyway:defaultSchema}` placeholder.
 - **`migrations/` is the only thing that ships.** `mj-app.json`'s `metadata.directory` is a dev-time pointer MJ's install engine **never reads** (it says so in `manifest-schema.ts`); seeding happens exclusively through migrations. So a `mj sync push` whose result exists only in your dev DB is an **unshipped change**.
 - **Metadata seeding is release work, not PR work** (MJ's model — `MJ/metadata/CLAUDE.md` §1b and §10). A feature PR contributes **only** the declarative JSON under `metadata/`: fields, `@lookup`/`@file`/`@parent` references, a `primaryKey` UUID from `uuidgen`, **no `sync` block, and no `*__Metadata_Sync.sql`**. The build engineer generates **one consolidated `Metadata_Sync` per release** against a clean database — recipe in `migrations/README.md`; it is not a plain re-push, the generator's output needs documented schema substitutions. Two release-readiness checks run in `publish.yml`, not on PRs: `npm run check:release-seed` (every declared `primaryKey` appears in a shipped migration) and `npm run check:seed-cadence` (**one consolidated `Metadata_Sync` per release**: at most one unreleased seed — one not in any release tag has reached no host, so it is not append-only history — and **not zero when `metadata/` moved since the last tag**, which is the only check that sees an *edited* record, since coverage compares ids and an edit keeps its id). `npm run lint:distribution` is a different thing and covers only the shipped-SQL hazards, including the placeholder rule below.
 - **Only `${flyway:defaultSchema}` and `${mjSchema}` may appear in shipped SQL** (teardown scripts: `${mjSchema}` only). `mj migrate` builds its placeholder map from *this* repo's `mj.config.cjs`, but `mj app install` builds it from the *host's* — and Skyway leaves an unknown `${…}` untouched instead of failing, so a third placeholder ships as a literal string and fails silently on someone else's database.
@@ -142,7 +166,7 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
 - Net-new server work is the **public-write hardening layer**: Cloudflare Turnstile (per-form toggle) + rate-limit + quota + dedupe + IP-hash/UA capture, then Save response/answers and fire on-submit Actions/Agents.
 
 ## UI / design tokens
-- All component CSS uses semantic `--mj-*` design tokens — **no hardcoded colors** (breaks dark mode). Use `@memberjunction/ng-ui-components` + AG Grid + `angular-split` + `<mj-loading>`. Dialog buttons: confirm LEFT, cancel RIGHT. Font Awesome for icons. **Mobile-first or it doesn't ship** — hold every respondent-facing surface to the plan's §2 UX Quality Bar (WCAG AA, per-field mobile keyboards, large tap targets, progress signal).
+- All component CSS uses semantic `--mj-*` design tokens — **no hardcoded colors** (breaks dark mode). Use `@memberjunction/ng-ui-components` + AG Grid + `angular-split` + `<mj-loading>`. Dialog buttons: confirm LEFT, cancel RIGHT. Font Awesome for icons in Explorer-hosted surfaces (builder, dashboards); the **respondent widget draws its own inline SVG via `<mjf-icon name="…">`** (`packages/Angular/src/lib/widget/components/icon-glyphs.ts`) because its host page loads no icon font — a `fa-*` class there renders 0 × 0 (#115), and `icon.spec.ts` fails `pnpm test` on one. **Mobile-first or it doesn't ship** — hold every respondent-facing surface to the plan's §2 UX Quality Bar (WCAG AA, per-field mobile keyboards, large tap targets, progress signal).
 
 ## Functional decomposition
 - Small, focused functions (~30–40 lines max). Decompose complex logic. DRY via base classes/shared utilities.

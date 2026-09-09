@@ -26,7 +26,13 @@
     "lint:guard-mutants": "node scripts/check-guard-mutants.mjs",
     "lint:guard-mutants:test": "node --test scripts/check-guard-mutants.spec.mjs",
     "lint:codegen-compat": "node scripts/check-generated-api-compat.mjs",
+    "lint:codegen-compat:test": "node --test scripts/check-generated-api-compat.spec.mjs",
     "lint:migrations": "node scripts/check-migration-order.mjs",
+    "lint:codegen-append": "node scripts/check-codegen-append.mjs",
+    "lint:hook-guard:test": "node --test .claude/hooks/block-generated-edits.spec.mjs",
+    "lint:git-gate:test": "node --test .claude/hooks/require-green-before-git.spec.mjs",
+  "lint:codegen-append:test": "node --test scripts/check-codegen-append.spec.mjs",
+    "lint:paths-touched:test": "node --test scripts/check-paths-touched.spec.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs",
     "check:seed-cadence": "node scripts/check-release-seed-cadence.mjs",
     "smoke:respondent": "node smoke/respondent-path.mjs",
@@ -59,7 +65,7 @@
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
-    "@memberjunction/cli": "6.1.0-edge.2",
+    "@memberjunction/cli": "6.1.0-edge.5",
     "beasties": "0.3.5",
     "mrmime": "2.0.1",
     "pg": "^8.22.0",
@@ -88,8 +94,8 @@
       "@angular/platform-browser-dynamic": "21.1.3",
       "@angular/router": "21.1.3",
       "@angular-devkit/build-angular": "21.1.3",
-      "@memberjunction/core": "6.1.0-edge.2",
-      "@memberjunction/global": "6.1.0-edge.2"
+      "@memberjunction/core": "6.1.0-edge.5",
+      "@memberjunction/global": "6.1.0-edge.5"
     }
   },
   "engines": {

@@ -27,6 +27,7 @@ import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } fro
 import { toAnswerInputs } from './input-mapping';
 import { respondentSafe } from './respondent-safe';
 import { currentRequestIdentity } from '../http/request-identity';
+import { publicFormPayload } from './public-form-payload';
 
 @Resolver()
 export class PublicFormResolver extends ResolverBase {
@@ -61,15 +62,16 @@ export class PublicFormResolver extends ResolverBase {
         scope && !scopeNamesDistribution(scope, loaded.value.distribution.ID)
           ? await loadResumeSnapshot(provider, scope, contextUser)
           : undefined;
-      return Object.assign(new PublishedFormType(), {
-        formId: definition.formId,
-        formVersionId: definition.formVersionId,
-        name: definition.name,
-        description: definition.description,
-        renderMode: definition.renderMode,
-        settingsJSON: JSON.stringify(definition.settings),
-        styleTokensJSON: JSON.stringify(definition.styleTokens),
-        definitionJSON: JSON.stringify(definition),
+      // What an anonymous caller may see — including the `automations` narrowing — is decided by
+      // `publicFormPayload`, which is pure and asserted whole in `public-form-payload.spec.ts`.
+      // Inline here it was a contract narrowing nothing could test, and therefore one that could
+      // be deleted with the suite green.
+      //
+      // `resumeJSON` is layered on top rather than moved inside it: it is a property of THIS
+      // SESSION's scope claim, not of the published definition, and `publicFormPayload` is pure in
+      // the definition alone. Folding a per-caller field into it would make the payload spec's
+      // whole-object assertion impossible to keep.
+      return Object.assign(new PublishedFormType(), publicFormPayload(definition), {
         resumeJSON: resume ? JSON.stringify(resume) : undefined,
       });
     });

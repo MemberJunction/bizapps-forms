@@ -2,12 +2,22 @@ name: UI Token Gate
 
 on:
   workflow_dispatch:
+  # No `paths:` filter, and that is the point. A workflow skipped by an `on: paths:` filter creates
+  # NO check run, so a required check sits at "Expected — Waiting for status" and the pull request
+  # can never be merged. This gate costs 0.2s; buying that back was never worth a filter, and once
+  # `ui-token-gate` is a required check the filter is actively a deadlock. See #173.
+  #
+  # `push:` is new. Not because of an admin push or the release workflow's own direct push to
+  # `next`/`main` — CLAUDE.md now records that neither can land un-checked at all: required status
+  # checks reject direct pushes outright, and nobody can bypass them
+  # (`current_user_can_bypass: never`). The trigger earns its place for a plainer reason: the MERGE
+  # commit GitHub creates on `next`/`main` when a pull request lands is a different SHA from the one
+  # the PR's own `pull_request` run checked, and until now that merge commit never got a UI-token
+  # verdict of its own.
+  push:
+    branches: [next, main]
   pull_request:
     branches: [next, main]
-    paths:
-      - 'packages/Angular/**'
-      - 'scripts/check-ui-tokens.mjs'
-      - '.github/workflows/ui-gate.yml'
 
 concurrency:
   group: ui-gate-${{ github.ref }}

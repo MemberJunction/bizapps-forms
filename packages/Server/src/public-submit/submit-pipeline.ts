@@ -18,6 +18,7 @@ import type { DatabaseProviderBase, UserInfo } from '@memberjunction/core';
 import { getPublicSubmitConfig } from './config';
 import { createStageTimer, formatTimings } from './stage-timer';
 import {
+  CAPTCHA_NOT_CONFIGURED_MESSAGE,
   endingMessage,
   endingRedirectUrl,
   hasUnreachableAutomations,
@@ -68,7 +69,7 @@ import {
   saveCeilingKey,
   warnOnceIfAbuseKeyingDegraded,
 } from './source-metadata.service';
-import { captchaRequired, verifyTurnstile } from './turnstile.service';
+import { captchaRequired, TURNSTILE_NOT_CONFIGURED, verifyTurnstile } from './turnstile.service';
 import { buildAnswerMap, validateSubmission, type ValidationMode } from './validation.service';
 import {
   evaluateProvenance,
@@ -164,8 +165,8 @@ export interface PipelineContext {
   fetchImpl?: typeof fetch;
   /**
    * Injectable hook firing for tests; defaults to the real ActionEngine path. Hooks run under
-   * the system user (resolved inside {@link fireOnSubmitHooks}), NOT the anonymous respondent,
-   * so no context user is threaded here.
+   * the scoped automation principal (resolved inside {@link fireOnSubmitHooks}, fail-closed),
+   * NOT the anonymous respondent, so no context user is threaded here.
    */
   fireHooks?: (
     ctx: { responseId: string; formId: string; formVersionId: string; distributionId: string },
@@ -278,6 +279,42 @@ function scoreFor(resolved: ResolvedDefinition, answers: ReadonlyMap<string, Ans
   return computeScore(resolveVisibleQuestions(resolved.definition.pages, answers), answers);
 }
 
+/**
+ * An author-configured redirect URL, or `undefined` when its scheme cannot be trusted.
+ *
+ * The widget follows the echoed URL with `window.location.assign` on whatever site embeds it, so
+ * a `javascript:` (or `data:`) URL here is script injection into the embedding page's origin.
+ * The widget validates too, but a bespoke client consuming the mutation directly gets only this
+ * check — so any URL that names a scheme must name http(s). A RELATIVE URL (no scheme) is passed
+ * through: it cannot smuggle a scheme, and only the client knows the base to resolve it against.
+ */
+function safeRedirectUrl(raw: string | undefined): string | undefined {
+  const url = raw?.trim();
+  if (!url) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      console.warn(`[forms] dropping an ending-screen redirect URL with a disallowed scheme (${parsed.protocol}).`);
+      return undefined;
+    }
+  } catch {
+    // No absolute scheme — a relative URL. The WHATWG parser strips tabs/newlines and lowercases
+    // the scheme before this throw, so anything scheme-bearing lands in the branch above.
+    //
+    // THIS IS DELIBERATELY MORE PERMISSIVE THAN THE WIDGET, and the asymmetry is not an oversight.
+    // The widget parses WITH the page as base, so it can judge a relative URL and refuses anything
+    // that still fails to parse. The server has no base to resolve against — only the client knows
+    // what page the widget is embedded in — so "did not parse" here means "relative", and the only
+    // safe reading of an unparseable relative URL is to pass it on and let the client, which CAN
+    // resolve it, make the call. The consequence is real and bounded: a string like `http://[`
+    // is echoed by the server and refused by the widget. It cannot name a scheme (that is the
+    // branch above), so it cannot execute; the worst case is a client that fails to navigate.
+  }
+  return url;
+}
+
 function confirmationFields(
   resolved: ResolvedDefinition,
   answers?: ReadonlyMap<string, AnswerValue>,
@@ -285,7 +322,7 @@ function confirmationFields(
   const { settings, endScreens } = resolved.definition;
   const map = answers ?? new Map<string, AnswerValue>();
   const ending = resolveEndingScreen(endScreens ?? [], map, { score: scoreFor(resolved, map) });
-  const redirectUrl = endingRedirectUrl(ending, settings);
+  const redirectUrl = safeRedirectUrl(endingRedirectUrl(ending, settings));
   return {
     // A redirect and a confirmation message are alternatives, not companions: sending both lets
     // a client that ignores the redirect show a message meant for a page nobody lands on.
@@ -466,6 +503,20 @@ async function runSubmitPipelineInner(
   const needCaptcha =
     complete && captchaRequired(resolved.definition.settings.captchaRequired, resolved.distribution.CaptchaRequired);
   const turnstile = await verifyTurnstile(needCaptcha, submission.turnstileToken, ctx.fetchImpl);
+  if (!turnstile.success && turnstile.errorCode === TURNSTILE_NOT_CONFIGURED) {
+    // The one refusal here that is not the respondent's doing: this form or link asks for a
+    // captcha and the host never configured Turnstile. Said as such — to them, without blame,
+    // and to the operator, by setting name. The boot-time readiness check reports the same
+    // condition for whatever required a captcha at startup; this catches what was published
+    // after it. Same shape as every other refusal (a result, not a throw) so the widget renders
+    // it rather than a blank screen (#122).
+    LogError(
+      `[Forms] submit to '${submission.distributionSlug}' requires a captcha but FORMS_TURNSTILE_SECRET is ` +
+        `not set on this host. Set FORMS_TURNSTILE_SECRET and FORMS_TURNSTILE_SITE_KEY, or turn the captcha ` +
+        `off on that form or link. Refusing as a server misconfiguration.`,
+    );
+    return report(fail(CAPTCHA_NOT_CONFIGURED_MESSAGE));
+  }
   if (!turnstile.success) {
     return report(fail(`Captcha verification failed (${turnstile.errorCode}).`));
   }
@@ -746,7 +797,7 @@ function terminalRepeatFields(
 function disqualificationFields(
   screen: PublishedFormScreen,
 ): Pick<FormSubmissionResult, 'confirmationMessage' | 'redirectUrl'> {
-  const redirectUrl = screen.redirectURL?.trim() || undefined;
+  const redirectUrl = safeRedirectUrl(screen.redirectURL);
   const copy = [screen.title, screen.body].filter((t) => !!t?.trim()).join('\n\n');
   return {
     confirmationMessage: redirectUrl ? undefined : copy || SCREENED_OUT_MESSAGE,
@@ -1104,8 +1155,9 @@ async function fireHooksSafely(ctx: PipelineContext, resolved: ResolvedDefinitio
     );
   }
 
-  // Default firer runs under the system user internally; the anonymous ctx.contextUser is
-  // intentionally NOT passed (on-submit automations are privileged — see fireOnSubmitHooks).
+  // Default firer resolves the scoped automation principal internally (fail-closed, like
+  // `runConfiguredAutomations`); the anonymous ctx.contextUser is intentionally NOT passed
+  // (on-submit automations are privileged — see fireOnSubmitHooks).
   const fire = ctx.fireHooks ?? ((hookCtx) => fireOnSubmitHooks(hookCtx));
   try {
     await fire({

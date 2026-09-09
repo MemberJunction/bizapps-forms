@@ -22,10 +22,10 @@ import { createHash } from 'node:crypto';
 import { LogStatus } from '@memberjunction/core';
 import type { ClientMeta, JSONObject } from '@mj-biz-apps/forms-entities';
 
-/** Salt for the one-way session hash; overridable via env, with a stable default. */
-function sessionHashSalt(): string {
-  return process.env.FORMS_SESSION_HASH_SALT?.trim() || 'mj-forms-source-metadata-v1';
-}
+// The salt BOTH privacy hashes share lives in the transport layer rather than here. `http/` is
+// already imported by this module (and by submit-pipeline), so defining a fact both layers need
+// in the feature layer inverted that edge and put a cycle one edit away.
+import { sessionHashSalt } from '../http/hash-salt.js';
 
 /**
  * One-way SHA-256 of the anonymous session id (never store the raw id).
@@ -203,6 +203,23 @@ export function knockoutCeilingKey(distributionId: string, identity: string): st
 }
 
 /**
+ * Ceiling on one client-supplied metadata string (userAgent, referrer) before storage.
+ *
+ * Both arrive verbatim from `ClientMeta` — a payload any caller writes — and land in the
+ * `SourceMetadata` JSON blob on every response row. Real values are a few hundred characters;
+ * without a cap a hostile caller could pad each row with megabytes of "user agent". Truncated
+ * rather than rejected because the metadata is diagnostic, never load-bearing: a clipped value
+ * still identifies the browser, and refusing the whole submission over it would cost answers.
+ */
+export const MAX_CLIENT_META_CHARS = 2048;
+
+/** Trimmed and capped at {@link MAX_CLIENT_META_CHARS}; undefined when empty. */
+function cappedClientMeta(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  return value ? value.slice(0, MAX_CLIENT_META_CHARS) : undefined;
+}
+
+/**
  * Assemble the structured `SourceMetadata` payload persisted on the FormResponse.
  * Only non-empty fields are included so the stored JSON stays compact.
  */
@@ -219,11 +236,11 @@ export function buildSourceMetadata(inputs: SourceMetadataInputs): JSONObject {
   if (disqualifiedByScreenId) {
     meta.disqualifiedByScreenId = disqualifiedByScreenId;
   }
-  const ua = inputs.clientMeta?.userAgent?.trim();
+  const ua = cappedClientMeta(inputs.clientMeta?.userAgent);
   if (ua) {
     meta.userAgent = ua;
   }
-  const referrer = inputs.clientMeta?.referrer?.trim();
+  const referrer = cappedClientMeta(inputs.clientMeta?.referrer);
   if (referrer) {
     meta.referrer = referrer;
   }

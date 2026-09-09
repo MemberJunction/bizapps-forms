@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { redeemFailureToView, respondentErrorResponse } from '../error-view';
 
 describe('redeemFailureToView', () => {
@@ -29,6 +29,21 @@ describe('redeemFailureToView', () => {
   // that opens on schedule. 503 + Retry-After is "not now, and here is when" (bizapps-forms#118).
   describe('distribution-not-yet-open', () => {
     const opensAt = new Date('2026-09-08T18:41:58Z');
+    // The clock is frozen, because the assertions below name a specific date and time and the
+    // production guard only names an opening time that is still AHEAD of now ("an opening time
+    // that is not in the future", below). Against the real clock this block passed until
+    // 2026-09-08T18:41:58Z and has failed on every run since — a date literal written in the
+    // future is a test that expires. Frozen a day before, `opensAt` is always ahead of now, so
+    // the literal expectations stay meaningful instead of being derived from the code they check.
+    // Same pattern as redeem.service.spec.ts in this directory.
+    const NOW = new Date('2026-09-07T00:00:00Z');
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
     it('is a temporary 503, never the 410 that closed links get', () => {
       expect(redeemFailureToView('distribution-not-yet-open', opensAt).status).toBe(503);

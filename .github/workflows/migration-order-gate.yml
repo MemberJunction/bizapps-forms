@@ -21,22 +21,13 @@ on:
   workflow_dispatch:
   # `push` as well as `pull_request`: the PR trigger alone would let a direct commit to next/main
   # land a broken chain without the gate ever running.
+  # No `paths:` filter: this gate is a required check, and a workflow skipped by `on: paths:`
+  # creates no check run at all, which hangs the pull request on "Expected" forever. It costs 0.4s
+  # to simply always run. See #173.
   push:
     branches: [next, main]
-    paths:
-      - 'migrations/**'
-      - 'scripts/check-migration-order.mjs'
-      # The gate's own tests. `npm test` is Vitest and never executes a plain-Node .mjs spec, so
-      # without this entry a PR that weakened a case would run neither step.
-      - 'scripts/check-migration-order.spec.mjs'
-      - '.github/workflows/migration-order-gate.yml'
   pull_request:
     branches: [next, main]
-    paths:
-      - 'migrations/**'
-      - 'scripts/check-migration-order.mjs'
-      - 'scripts/check-migration-order.spec.mjs'
-      - '.github/workflows/migration-order-gate.yml'
 
 jobs:
   migration-order-gate:

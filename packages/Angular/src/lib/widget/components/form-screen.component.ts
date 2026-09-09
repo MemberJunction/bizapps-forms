@@ -13,6 +13,8 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { socialPlatform, type PublishedFormScreen } from '@mj-biz-apps/forms-entities';
 
+import { IconComponent } from './icon.component';
+
 const FORM_SCREEN_CSS = /* css */ `
 /* A welcome or ending screen is a HERO, not a paragraph: it owns the whole surface and centres
    in it. It used to be a short content-height block pinned to the top, which on a full-window
@@ -202,6 +204,7 @@ const FORM_SCREEN_CSS = /* css */ `
 @Component({
   selector: 'mjf-form-screen',
   standalone: true,
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [FORM_SCREEN_CSS],
   template: `
@@ -219,7 +222,7 @@ const FORM_SCREEN_CSS = /* css */ `
       @if (s.mediaURL) {
         <img class="mjf-screen__media" [src]="s.mediaURL" alt="" />
       } @else if (!isWelcome()) {
-        <i class="fa-solid fa-circle-check mjf-screen__done-icon" aria-hidden="true"></i>
+        <mjf-icon name="circle-check" class="mjf-screen__done-icon" />
       }
 
       <h1 class="mjf-screen__title">{{ s.title }}</h1>

@@ -22,6 +22,7 @@ import {
   viewChild,
 } from '@angular/core';
 import {
+  CAPTCHA_NOT_CONFIGURED_MESSAGE,
   computeScore,
   endingMessage,
   endingRedirectUrl,
@@ -38,7 +39,7 @@ import {
   type ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities';
 
-import { FORMS_API_SERVICE } from './api/forms-api.interface';
+import { FORMS_API_SERVICE, SessionExpiredError } from './api/forms-api.interface';
 import { FORMS_API_CONFIG } from './api/forms-api.config';
 import { submitWaitMessage } from './core/submit-progress';
 import { applyStyleTokens } from './core/theming';
@@ -61,7 +62,9 @@ import { FormScreenComponent } from './components/form-screen.component';
 import { FormScrollComponent } from './components/form-scroll.component';
 import { FormOneQuestionComponent } from './components/form-one-question.component';
 import { TurnstileChallengeComponent } from './components/turnstile-challenge.component';
+import { IconComponent } from './components/icon.component';
 import type { WidgetPhase } from './core/submit-phase';
+import { judgeRedirect, redirectRefusalMessage } from './core/safe-redirect';
 
 @Component({
   selector: 'mj-form',
@@ -72,6 +75,7 @@ import type { WidgetPhase } from './core/submit-phase';
     FormScrollComponent,
     FormOneQuestionComponent,
     TurnstileChallengeComponent,
+    IconComponent,
   ],
   templateUrl: './mj-form.component.html',
   styleUrls: ['./mj-form.component.css'],
@@ -251,9 +255,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     isConfigGap(this.definition(), this.siteKey),
   );
 
-  /** Whether the final submit is allowed given the current captcha state. */
-  protected readonly submitAllowed = computed(() =>
-    canSubmit(this.definition(), this.siteKey, this.turnstileToken()),
+  /**
+   * Whether the final submit is allowed: the captcha state permits it AND the session is alive.
+   *
+   * Fed to the children as `submitDisabled`, which is what makes an expired session withdraw
+   * the Submit control and the "You can submit now." line without this component reaching into
+   * either renderer. Before the phase was folded in, a form whose every request could only ever
+   * be refused went on announcing that it was ready to send.
+   */
+  protected readonly submitAllowed = computed(
+    () => this.phase() !== 'expired' && canSubmit(this.definition(), this.siteKey, this.turnstileToken()),
   );
 
   /**
@@ -343,6 +354,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
       this.endingEarly = false;
       this.phase.set(this.adoptResume(loaded.resume, def, runtime) ?? initialPhaseFor(def));
     } catch (err) {
+      // A load can meet an expired session too — the error page's "Try again" re-fetches with
+      // the same token, and after eight hours that is a 401 with a retry button that loops.
+      if (this.endSessionIfExpired(err)) {
+        return;
+      }
       this.fail(err instanceof Error ? err.message : 'Failed to load the form.');
     }
   }
@@ -570,6 +586,16 @@ export class MjFormComponent implements OnInit, OnDestroy {
     // `clientResponseId` — the primary-key collision the submit path guards the same way.
     await this.autosave?.settle();
     await this.sealEarlyEnd();
+    // Both awaits above can END THE FILL for a different reason: either writes through
+    // `savePartial`, which answers a lapsed session by setting the terminal `expired` phase. This
+    // method's ending is not the one that then applies. Without this re-read the unconditional
+    // `phase.set('done')` below tore the notice back down, un-inerted the form, and showed a
+    // knockout screen — with a redirect, if the screen carried one — for an outcome the server
+    // refused and never recorded. The write below predates the `expired` phase and was correct
+    // when `done` was the only terminal state; it is this feature that gave it something to clobber.
+    if (this.phase() === 'expired') {
+      return;
+    }
     // Disqualifying or not, the client does the SAME thing here: seal a completion and show the
     // screen. Which status gets written is the server's call, from the same shared outcome — an
     // ending jump to an unflagged screen is an ordinary completion (quota counts it, automations
@@ -635,6 +661,12 @@ export class MjFormComponent implements OnInit, OnDestroy {
       console.warn(`[mj-form] the disqualification could not be recorded: ${why || 'refused'}`);
       return false;
     } catch (err) {
+      // A fourth request that can DISCOVER an expiry, and the first one to do so on a choice
+      // knockout: `endEarly` calls `settle()` beforehand, which cancels the pending debounce
+      // without firing it, so no autosave is in flight when this is sent. Routed through the same
+      // single decision as the other three rather than swallowed here — the log line below stays
+      // for every other refusal, which really is fail-soft background work.
+      this.endSessionIfExpired(err);
       console.warn(`[mj-form] the disqualification could not be recorded: ${String(err)}`);
       return false;
     }
@@ -729,6 +761,11 @@ export class MjFormComponent implements OnInit, OnDestroy {
     } catch (err) {
       this.logSubmitTiming(startedAt, false);
       this.result.set(null);
+      // Not a failure to retry from: the session is over, and `ready` would put the respondent
+      // back in front of a Submit that can only ever be refused again.
+      if (this.endSessionIfExpired(err)) {
+        return;
+      }
       this.phase.set('ready');
       const message = err instanceof Error ? err.message : 'Submission failed. Please try again.';
       this.errorText.set(message);
@@ -905,9 +942,15 @@ export class MjFormComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * The config-gap half is the SHARED constant, not a second spelling of it. The server says the
+   * same sentence when its own half of Turnstile is missing, and `isTurnstileError` matches that
+   * sentence by identity — so a reworded duplicate here would silently stop the challenge being
+   * reset after a server-side refusal (#122).
+   */
   private captchaBlockedMessage(): string {
     return this.captchaConfigGap()
-      ? 'This form requires a security challenge, but it is not configured. Please contact the form owner.'
+      ? CAPTCHA_NOT_CONFIGURED_MESSAGE
       : 'Please complete the security challenge before submitting.';
   }
 
@@ -930,10 +973,17 @@ export class MjFormComponent implements OnInit, OnDestroy {
     if (this.phase() !== 'ready') {
       return this.responseTarget();
     }
-    const res = await this.api.submitResponse(
-      this.buildSubmission(def, rt, true),
-      this.responseTarget(),
-    );
+    let res: FormSubmissionResult;
+    try {
+      res = await this.api.submitResponse(this.buildSubmission(def, rt, true), this.responseTarget());
+    } catch (err) {
+      // The autosave is the request most likely to DISCOVER an expiry: it fires on every edit,
+      // long before the respondent reaches Submit. Left to the controller alone the failure is
+      // swallowed by design, and the respondent goes on typing into a form that is saving nothing
+      // and will refuse the final send. Still rethrown, so the controller records the failure.
+      this.endSessionIfExpired(err);
+      throw err;
+    }
     if (res.success && res.responseId) {
       this.responseId = res.responseId;
       this.announceFirstPartial(res.responseId);
@@ -1052,14 +1102,68 @@ export class MjFormComponent implements OnInit, OnDestroy {
     void this.load();
   }
 
+  /**
+   * End the fill if `err` says the anonymous session has expired. True when it did.
+   *
+   * The ONE place the widget decides what an expired session means, reached from every request
+   * that can discover one — submit, autosave, load — so whichever happens to see the 401 first,
+   * the outcome is the same. The session JWT is dead and MJ issues no refresh tokens, so this is
+   * terminal: the autosave is disposed outright (a disposed controller never re-arms, and its
+   * next flush would otherwise report "Progress saved" for a save the phase guard skipped), the
+   * phase withdraws submit and makes the form inert, and focus moves into the notice — with the
+   * shell inert it would otherwise fall to <body>, leaving a keyboard or screen-reader user an
+   * announcement and nowhere to go.
+   */
+  private endSessionIfExpired(err: unknown): boolean {
+    if (!(err instanceof SessionExpiredError)) {
+      return false;
+    }
+    this.autosave?.dispose();
+    this.phase.set('expired');
+    afterNextRender(
+      () => this.hostRef.nativeElement.querySelector<HTMLElement>('.mjf-expired__action')?.focus(),
+      { injector: this.injector },
+    );
+    return true;
+  }
+
+  /**
+   * The one recovery from an expired session: a new page.
+   *
+   * `GET /f/:slug` mints a fresh anonymous session on every fetch, so the host page IS the
+   * re-mint — nothing in the widget can obtain a token, and nothing should: the operator's
+   * session TTL is a bound, not an inconvenience to route around. A reload rather than {@link load}
+   * because `load` would re-fetch with the same dead token and land straight back here.
+   */
+  protected startAgain(): void {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  }
+
   private fail(message: string): void {
     this.errorText.set(message);
     this.phase.set('error');
   }
 
+  /**
+   * Navigate to an author-configured (or server-echoed) redirect URL — http(s) ONLY.
+   *
+   * The URL is author-controlled content rendered on an EMBEDDING site, so passing it to
+   * `window.location.assign` unvalidated let a `javascript:` (or `data:`) URL execute in the
+   * host page's origin — script injection on whatever site embeds the widget. The judgement
+   * itself lives in {@link judgeRedirect}, as a pure function: it is a security guard, and a
+   * private method on a component this heavy is a guard nothing can test.
+   */
   private redirect(url: string): void {
-    if (typeof window !== 'undefined') {
-      window.location.assign(url);
+    if (typeof window === 'undefined') {
+      return;
     }
+    const refusal = judgeRedirect(url, window.location.href);
+    if (refusal) {
+      console.warn(redirectRefusalMessage(url, refusal));
+      return;
+    }
+    window.location.assign(url);
   }
 }

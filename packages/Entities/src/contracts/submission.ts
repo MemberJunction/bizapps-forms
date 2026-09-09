@@ -79,6 +79,26 @@ export interface FieldError {
  */
 export const NOTHING_TO_SUBMIT_MESSAGE = 'Please answer at least one question before submitting.';
 
+/**
+ * What a respondent is told when a captcha is required and this host cannot complete one (#122).
+ *
+ * Here for the same reason as {@link NOTHING_TO_SUBMIT_MESSAGE}, and with one extra job. Both sides
+ * say it: the widget when captcha is on but no site key was supplied, so it refuses to render a
+ * challenge it cannot produce a token for; the server when a submit arrives needing verification
+ * and `FORMS_TURNSTILE_SECRET` is unset. Two halves of one misconfiguration, and nothing the
+ * respondent did — so neither sentence blames them.
+ *
+ * The extra job is that the widget also classifies this refusal. `isTurnstileError` decides whether
+ * to clear the spent single-use token and re-arm the challenge, and it decides from the message,
+ * because the transport carries no code. While each side spelled the sentence itself, that
+ * classification held only by the accident of both spellings containing the word "captcha" — and it
+ * broke the moment the server's copy was rewritten to stop blaming the respondent. One constant
+ * makes the two sentences the same by construction, so the classifier can match it exactly instead
+ * of sniffing for a word that any rewording may drop.
+ */
+export const CAPTCHA_NOT_CONFIGURED_MESSAGE =
+  'This form requires a security check that has not been set up on this server. Please contact the form owner.';
+
 /** The result returned by the S1 `SubmitFormResponse` mutation. */
 export interface FormSubmissionResult {
   success: boolean;
