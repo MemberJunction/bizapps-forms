@@ -61,7 +61,9 @@ export function trustedProxyHops(): number {
  * WHY THIS IS EXPORTED. MJServer collects `GetPreAuthMiddleware()` into an array at
  * `index.ts:800` but does not `app.use` it until `index.ts:1143`. In the SAME collection loop it
  * calls each middleware's `ConfigureExpressApp` (`index.ts:809`), which is where the respondent
- * host, widget-bundle and asset routes register themselves. Express dispatches layers in
+ * host and asset routes register themselves. (The widget-bundle routes were in that set too until
+ * #121 moved them to `GetPreAuthMiddleware` to get behind MJ's `compression()`; they are now in
+ * the "need nothing" group below.) Express dispatches layers in
  * registration order, so every route added through `ConfigureExpressApp` is already in the stack
  * before the pre-auth handlers arrive and NEVER sees them — `currentRequestIdentity()` inside such
  * a route returns undefined, and any abuse ceiling keyed on it silently admits everyone. A route

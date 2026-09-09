@@ -26,8 +26,18 @@ export interface RespondentHostPageOptions {
    * `registerMjFormElement()`). The element is registered by this script tag.
    */
   widgetBundleUrl: string;
-  /** Optional page title shown in the browser tab before the form name loads. */
+  /**
+   * The form's name. It is the tab title AND the `og:title` a link unfurler (Slack, Teams, iMessage)
+   * shows on the preview card — nothing client-side ever updates it, so what is baked in here is
+   * what a respondent sees before deciding to trust the link. Defaults to a generic "Form".
+   */
   pageTitle?: string;
+  /**
+   * The form's description, for `og:description` / `<meta name="description">` — the second line of
+   * the unfurl card. Omitted (no tags at all) when the form has none: a title-only card renders
+   * fine everywhere, whereas an invented subtitle would be the "generic card" defect in new clothes.
+   */
+  pageDescription?: string;
   /**
    * Distribution slug from the route path (`/f/:slug`), baked in as the default. The page
    * still also reads a `?slug=` query param, so this may be empty for direct `?slug=` use.
@@ -46,6 +56,14 @@ export interface RespondentHostPageOptions {
    * Omitted when unconfigured (the widget then shows its config-gap message on a captcha-on form).
    */
   turnstileSiteKey?: string;
+  /**
+   * Whether this browser presented a resume pointer — PRESENCE ONLY, never the pointer itself.
+   *
+   * The GET that renders this page must stay side-effect-free (a mail scanner, a link preview or a
+   * browser prefetch would otherwise spend one of a single-use invite's uses before its owner ever
+   * clicked), so the page only learns that a cookie was there. The boot script POSTs to redeem it.
+   */
+  hasDraft?: boolean;
 }
 
 /**
@@ -53,7 +71,16 @@ export interface RespondentHostPageOptions {
  * string, so it is trivially unit-testable.
  */
 export function renderRespondentHostPage(options: RespondentHostPageOptions): string {
-  const title = escapeHtml(options.pageTitle ?? 'Form');
+  const pageTitle = options.pageTitle ?? 'Form';
+  const title = escapeHtml(pageTitle);
+  // The name and description are AUTHOR-controlled text landing in attributes, so they go through
+  // escapeAttr like every other per-request value on this page.
+  const ogTitle = escapeAttr(pageTitle);
+  const description = options.pageDescription ? escapeAttr(options.pageDescription) : '';
+  const descriptionMeta = description
+    ? `\n  <meta name="description" content="${description}" />` +
+      `\n  <meta property="og:description" content="${description}" />`
+    : '';
   // The slug (and graphql url) reach the boot script via HTML-escaped data-* attributes,
   // NOT by interpolation into the inline <script>. The slug comes from the URL path
   // (attacker-controlled); routing it through escapeAttr — and reading it with
@@ -70,6 +97,8 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
   const siteKeyAttr = options.turnstileSiteKey
     ? ` data-turnstile-site-key="${escapeAttr(options.turnstileSiteKey)}"`
     : '';
+  // A flag, not a value: the cookie is HttpOnly and its token never reaches this page.
+  const draftAttr = options.hasDraft ? ' data-has-draft="1"' : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -77,6 +106,7 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="robots" content="noindex" />
   <title>${title}</title>
+  <meta property="og:title" content="${ogTitle}" />${descriptionMeta}
   <style>${PAGE_CSS}</style>
 </head>
 <body>
@@ -84,7 +114,7 @@ export function renderRespondentHostPage(options: RespondentHostPageOptions): st
     class="mjf-host"
     id="mjf-host"
     data-graphql-url="${graphqlUrl}"
-    data-default-slug="${defaultSlug}"${tokenAttr}${siteKeyAttr}
+    data-default-slug="${defaultSlug}"${tokenAttr}${siteKeyAttr}${draftAttr}
   >
     <div class="mjf-host__loading" role="status" aria-live="polite">Loading…</div>
   </main>
@@ -227,6 +257,15 @@ const BOOT_SCRIPT = `
   var slug = DEFAULT_SLUG || readParam('slug');
   // Token: the server-redeemed JWT wins; #fragment / ?token= remain a manual-testing fallback.
   var token = SERVER_TOKEN || readParam('token');
+  // Resume (#138). The page knows only that a pointer was PRESENT — the cookie is HttpOnly and
+  // nothing here can read it. Everything cookie-shaped happens on the host routes below; the
+  // widget never learns any of it exists, which is why an embedded widget (a page without this
+  // script) simply makes none of these calls.
+  var HAS_DRAFT = host.getAttribute('data-has-draft') === '1';
+  var RESUME_NOTICE =
+    "We couldn't reopen your saved answers on this device. Start fresh, or request a link by email.";
+  var OPEN_ELSEWHERE_NOTICE = 'This form is already open in another tab. Continue there, or start fresh here.';
+  var resumeNotice = '';
 
   if (!slug) {
     showError('This form link is missing its form reference. Please check the link and try again.');
@@ -244,12 +283,73 @@ const BOOT_SCRIPT = `
     el.setAttribute('api-url', GRAPHQL_URL);
     if (token) { el.setAttribute('token', token); }
     if (TURNSTILE_SITE_KEY) { el.setAttribute('turnstile-site-key', TURNSTILE_SITE_KEY); }
+    if (resumeNotice) { el.setAttribute('resume-notice', resumeNotice); }
+    wireResumeEvents(el);
     host.appendChild(el);
+  }
+
+  // Same-origin so the path-scoped cookie rides; the page can never read it either way.
+  function postHost(action, body) {
+    return fetch('/f/' + encodeURIComponent(slug) + '/' + action, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headersFor(body),
+      body: body ? JSON.stringify(body) : undefined
+    });
+  }
+
+  // The widget's own two correlators travel with /remember: the JWT it is mounted with, and the
+  // x-session-id it sends on every GraphQL call. Both are needed there — the route has to prove the
+  // draft belongs to this caller before it mints a credential for it, and on a first sitting the
+  // header is the only proof that exists.
+  function headersFor(body) {
+    var h = { 'content-type': 'application/json' };
+    if (token) { h['Authorization'] = 'Bearer ' + token; }
+    if (body && body.sessionId) { h['x-session-id'] = body.sessionId; }
+    return h;
+  }
+
+  function wireResumeEvents(el) {
+    el.addEventListener('mjf-partial-saved', function (e) {
+      var d = (e && e.detail) || {};
+      if (!d.responseId || !d.sessionId) { return; }
+      postHost('remember', { responseId: d.responseId, sessionId: d.sessionId }).catch(function () {});
+    });
+    el.addEventListener('mjf-submitted', function () {
+      postHost('forget', null).catch(function () {});
+    });
+    el.addEventListener('mjf-start-over', function () {
+      // The reload is the point: under a response-scoped session the pipeline would UPDATE the
+      // scoped row rather than create a new one, so a genuine start-over needs a fresh
+      // distribution session — and only a new page load mints one.
+      postHost('forget', null).then(reload, reload);
+    });
+  }
+
+  function reload() { window.location.reload(); }
+
+  // Reopen before mounting, so the widget is built once, with the right session. On ANY failure the
+  // respondent still gets a form — with the distribution token they already have — because a
+  // resume that cannot happen is not a reason to show somebody an error page.
+  function resumeThenMount() {
+    if (!HAS_DRAFT) { mount(); return; }
+    postHost('resume', null).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (b) { noticed(b && b.reason); });
+      }
+      return res.json().then(function (b) { if (b && b.token) { token = b.token; } });
+    }).catch(function () {
+      noticed('network');
+    }).then(mount, mount);
+  }
+
+  function noticed(reason) {
+    resumeNotice = reason === 'open-elsewhere' ? OPEN_ELSEWHERE_NOTICE : RESUME_NOTICE;
   }
 
   // The bundle registers <mj-form>. Wait for the custom element to be defined, then mount.
   if (window.customElements && customElements.whenDefined) {
-    customElements.whenDefined('mj-form').then(mount);
+    customElements.whenDefined('mj-form').then(resumeThenMount);
     // Safety timeout: if the element never registers (bundle missing/old), show an error.
     setTimeout(function () {
       if (!customElements.get('mj-form')) { window.__mjFormBundleError(); }
