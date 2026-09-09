@@ -239,13 +239,40 @@ async function hasPublishedVersion(
 }
 
 /**
- * POST the raw token to core's redeem endpoint with `format=json` and return the parsed result.
- * Returns `undefined` on any transport/parse failure so the caller can fail-safe to an error page.
+ * The answer from core's redeem endpoint, reduced to the only thing the caller must decide on:
+ * the minted token, or the typed reason there is none.
+ *
+ * A STRING discriminant, like {@link DistributionRowVerdict} above and for the same reason spelled
+ * out there: this package compiles without `strictNullChecks`, and TypeScript narrows a
+ * boolean-literal discriminant only under it.
+ */
+type PostRedeemOutcome =
+  | { outcome: 'ok'; token: string }
+  | { outcome: 'failed'; reason: RedeemFailureReason };
+
+/**
+ * POST the raw token to core's redeem endpoint with `format=json` and judge the answer.
+ *
+ * Every way this can fail is logged HERE, once, with the slug and the endpoint that was called —
+ * this is the last frame that still holds both. `/f/:slug` is the anonymous public entry point, so
+ * a production failure arrives with no reproduction steps and no user to interview: the log line is
+ * the whole diagnosis. Both catches used to be bare and a refusal body was discarded unread, which
+ * made an unreachable API, an HTML error page, a revoked token and a tripped rate limit the same
+ * silent 502 — and core had already sent the sentence explaining which (bizapps-forms#140).
+ *
+ * Never logs `rawToken` or the minted JWT. Both are credentials, and a log line is durable, shipped
+ * onward, and outlives the session; the slug is the safe handle, and it is already in the URL the
+ * operator is looking at.
+ *
+ * Returning the reason rather than `undefined` is what lets the caller stop guessing: it used to
+ * re-derive the failure from three separate falsy checks on a value that had already thrown its
+ * evidence away.
  */
 async function postRedeem(
   deps: RedeemDeps,
   rawToken: string,
-): Promise<RedeemMagicLinkJsonResult | undefined> {
+  slug: string,
+): Promise<PostRedeemOutcome> {
   // Core reads `format` from the query string only; the body carries `{ token }` as JSON.
   // POST only — a GET with format=json is 405 by design.
   const url = `${deps.redeemUrl}?format=json`;
@@ -256,15 +283,46 @@ async function postRedeem(
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ token: rawToken }),
     });
-  } catch {
-    return undefined;
+  } catch (e: unknown) {
+    LogError(
+      `[Forms] Redeem transport failure for distribution '${slug}' (POST ${url}): ` +
+        `${e instanceof Error ? e.message : String(e)}`,
+    );
+    return { outcome: 'failed', reason: 'redeem-unreachable' };
   }
+  let parsed: unknown;
   try {
-    const parsed: unknown = await response.json();
-    return isRedeemResult(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
+    parsed = await response.json();
+  } catch (e: unknown) {
+    LogError(
+      `[Forms] Redeem response was not readable JSON for distribution '${slug}' ` +
+        `(POST ${url}, HTTP ${response.status}): ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return { outcome: 'failed', reason: 'redeem-unreachable' };
   }
+  if (!isRedeemResult(parsed)) {
+    // Readable JSON of the wrong shape almost always means the URL points somewhere that is not
+    // core's redeem endpoint, so name the configured value rather than only the failure.
+    LogError(
+      `[Forms] Redeem response was JSON but not a redeem result for distribution '${slug}' ` +
+        `(POST ${url}, HTTP ${response.status}). Check that FORMS_MAGICLINK_REDEEM_URL ` +
+        `('${deps.redeemUrl}') is core's magic-link redeem endpoint.`,
+    );
+    return { outcome: 'failed', reason: 'redeem-unreachable' };
+  }
+  if (!parsed.success || !parsed.token) {
+    // Core's own words, verbatim. "success without a token" is folded in here rather than given a
+    // reason of its own: from this side it is the same event — the endpoint answered and we hold
+    // no session — and it is a core bug, which the trailing clause says so an operator does not go
+    // looking for a revoked link.
+    LogError(
+      `[Forms] Redeem refused for distribution '${slug}' (POST ${url}, HTTP ${response.status}): ` +
+        `errorCode=${parsed.errorCode || 'none'} error=${parsed.error || 'none'}` +
+        (parsed.success ? ' — core reported success but returned no token' : ''),
+    );
+    return { outcome: 'failed', reason: 'redeem-refused' };
+  }
+  return { outcome: 'ok', token: parsed.token };
 }
 
 /** Narrow an unknown JSON body to the redeem-result shape without an unsafe cast. */
@@ -279,7 +337,8 @@ function isRedeemResult(value: unknown): value is RedeemMagicLinkJsonResult {
 /**
  * Resolve a distribution slug to a redeemed anonymous session JWT, doing the magic-link redeem
  * server-side. Never throws — every failure maps to a typed {@link RedeemFailureReason} so the
- * route can render the matching error page and stay fail-safe.
+ * route can render the matching error page and stay fail-safe. Each failure is logged where it
+ * happens, by the frame that still holds the context; nothing is discarded on the way up.
  */
 export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise<RedeemOutcome> {
   if (!slug) {
@@ -303,9 +362,9 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!published) {
     return { ok: false, reason: 'form-unpublished' };
   }
-  const result = await postRedeem(deps, judged.rawToken);
-  if (!result || !result.success || !result.token) {
-    return { ok: false, reason: 'redeem-failed' };
+  const redeemed = await postRedeem(deps, judged.rawToken, slug);
+  if (redeemed.outcome === 'failed') {
+    return { ok: false, reason: redeemed.reason };
   }
-  return { ok: true, token: result.token, distribution: dist };
+  return { ok: true, token: redeemed.token, distribution: dist };
 }

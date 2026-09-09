@@ -7,6 +7,22 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 import { publishedVersionFilter } from '../../public-submit/definition-loader.service';
+
+/**
+ * `LogError` is captured with `vi.mock` + `vi.hoisted`, NOT `vi.spyOn(core, 'LogError')`. A spy on
+ * a module export passes here and fails in CI, and the difference is invisible from this file: in
+ * this dev workspace `@memberjunction/core` resolves to MJ's linked source, which Vitest transforms
+ * into a redefinable namespace; on a clean install it resolves to the published tarball,
+ * externalised as real ESM, whose namespace object is frozen — `Cannot redefine property:
+ * LogError`. See `default-salt-warning.spec.ts` for the same reasoning at length.
+ */
+const { logError } = vi.hoisted(() => ({ logError: vi.fn() }));
+
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: logError,
+}));
+
 import {
   redeemSlugToToken,
   type RedeemDeps,
@@ -78,14 +94,20 @@ function fakeProvider(opts: {
   return { provider, calls };
 }
 
-/** A `fetch` stub returning the given JSON body + ok status. */
-function fakeFetch(body: unknown, init: { ok?: boolean } = {}): typeof fetch {
+/** A `fetch` stub returning the given JSON body + ok/status. */
+function fakeFetch(body: unknown, init: { ok?: boolean; status?: number } = {}): typeof fetch {
   return vi.fn(async () => {
     return {
       ok: init.ok ?? true,
+      status: init.status ?? (init.ok === false ? 500 : 200),
       json: async () => body,
     } as Response;
   }) as unknown as typeof fetch;
+}
+
+/** Every line `LogError` was handed, joined — for asserting what a log does and does not contain. */
+function loggedLines(): string {
+  return logError.mock.calls.map((c) => String(c[0])).join('\n');
 }
 
 /** A `fetch` stub that rejects (network failure). */
@@ -106,6 +128,10 @@ function deps(over: Partial<RedeemDeps>): RedeemDeps {
 }
 
 describe('redeemSlugToToken', () => {
+  beforeEach(() => {
+    logError.mockClear();
+  });
+
   it('returns distribution-not-found for an empty slug (no DB read)', async () => {
     const out = await redeemSlugToToken(deps({}), '');
     expect(out.ok).toBe(false);
@@ -337,31 +363,139 @@ describe('redeemSlugToToken', () => {
     expect(JSON.parse(String(init.body))).toEqual({ token: 'raw-public-token' });
   });
 
-  it('returns redeem-failed when core reports success=false', async () => {
+  it('returns redeem-refused when core reports success=false', async () => {
     const fetchImpl = fakeFetch({ success: false, errorCode: 'expired' });
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-refused');
   });
 
-  it('returns redeem-failed when core succeeds but returns no token', async () => {
+  it('returns redeem-refused when core succeeds but returns no token', async () => {
     const fetchImpl = fakeFetch({ success: true });
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-refused');
   });
 
-  it('returns redeem-failed when fetch throws (network down — fail-safe)', async () => {
+  it('returns redeem-unreachable when fetch throws (network down — fail-safe)', async () => {
     const out = await redeemSlugToToken(deps({ fetchImpl: throwingFetch() }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-unreachable');
   });
 
-  it('returns redeem-failed when the response body is not the expected shape', async () => {
+  it('returns redeem-unreachable when the response body is not the expected shape', async () => {
     const fetchImpl = fakeFetch('not-an-object');
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-unreachable');
+  });
+
+  // bizapps-forms#140. `/f/:slug` is the anonymous public entry point: a production failure has no
+  // reproduction steps and no user to interview, so the log line IS the diagnosis. These assert
+  // that one is emitted and what it carries — never that the source contains a `LogError` call.
+  describe('says why the redeem failed', () => {
+    /** A `fetch` stub that rejects the way a connect failure actually arrives. */
+    function refusingFetch(): typeof fetch {
+      return vi.fn(async () => {
+        throw new Error('fetch failed: ECONNREFUSED 127.0.0.1:4121');
+      }) as unknown as typeof fetch;
+    }
+
+    /** A `fetch` stub whose body is not JSON — a proxy's HTML error page, say. */
+    function unparseableFetch(): typeof fetch {
+      return vi.fn(async () => {
+        return {
+          ok: false,
+          status: 502,
+          json: async () => {
+            throw new SyntaxError('Unexpected token < in JSON at position 0');
+          },
+        } as Response;
+      }) as unknown as typeof fetch;
+    }
+
+    it('logs the slug, the endpoint and the error when the transport fails', async () => {
+      const out = await redeemSlugToToken(deps({ fetchImpl: refusingFetch() }), 'customer-survey');
+      expect(out.reason).toBe('redeem-unreachable');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('http://localhost:4121/magic-link/redeem');
+      expect(logged).toContain('ECONNREFUSED');
+    });
+
+    it('logs the slug, the endpoint and the parse error when the body is not JSON', async () => {
+      const out = await redeemSlugToToken(deps({ fetchImpl: unparseableFetch() }), 'customer-survey');
+      expect(out.reason).toBe('redeem-unreachable');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('http://localhost:4121/magic-link/redeem');
+      expect(logged).toContain('Unexpected token <');
+    });
+
+    it('logs the slug and the endpoint when the body is JSON of some other shape', async () => {
+      const out = await redeemSlugToToken(
+        deps({ fetchImpl: fakeFetch({ notARedeemResult: true }) }),
+        'customer-survey',
+      );
+      expect(out.reason).toBe('redeem-unreachable');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('http://localhost:4121/magic-link/redeem');
+    });
+
+    // The line whose absence cost a two-repository source read to learn that the answer had been
+    // "Too many redemption attempts. Try again later." all along. Core sends the sentence; the door
+    // threw it away unread.
+    it("logs core's own errorCode and message when the endpoint refuses", async () => {
+      const out = await redeemSlugToToken(
+        deps({
+          fetchImpl: fakeFetch(
+            { success: false, errorCode: 'rate_limited', error: 'Too many redemption attempts. Try again later.' },
+            { status: 429 },
+          ),
+        }),
+        'customer-survey',
+      );
+      expect(out.reason).toBe('redeem-refused');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('rate_limited');
+      expect(logged).toContain('Too many redemption attempts. Try again later.');
+    });
+
+    it('logs the refusal when core reports success with no token', async () => {
+      const out = await redeemSlugToToken(deps({ fetchImpl: fakeFetch({ success: true }) }), 'customer-survey');
+      expect(out.reason).toBe('redeem-refused');
+      expect(loggedLines()).toContain('customer-survey');
+    });
+
+    it('distinguishes an unreachable endpoint from a refusal', async () => {
+      const unreachable = await redeemSlugToToken(deps({ fetchImpl: refusingFetch() }), 'customer-survey');
+      const refused = await redeemSlugToToken(
+        deps({ fetchImpl: fakeFetch({ success: false, errorCode: 'revoked', error: 'Revoked.' }) }),
+        'customer-survey',
+      );
+      expect(unreachable.reason).not.toBe(refused.reason);
+    });
+
+    // Both are credentials. A log line is durable, is shipped to aggregators, and outlives the
+    // session — the one place a magic-link token must never be written.
+    it('never writes the raw PublicLinkToken or the minted JWT to the log', async () => {
+      const shapes: Array<typeof fetch> = [
+        refusingFetch(),
+        unparseableFetch(),
+        fakeFetch({ notARedeemResult: true }),
+        fakeFetch({ success: false, errorCode: 'revoked', error: 'This link has been revoked.' }),
+        fakeFetch({ success: true }),
+        fakeFetch({ success: true, token: 'minted-session-jwt' }),
+      ];
+      for (const fetchImpl of shapes) {
+        await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      }
+      const logged = loggedLines();
+      expect(logged).not.toContain('raw-public-token');
+      expect(logged).not.toContain('minted-session-jwt');
+    });
   });
 });
 
