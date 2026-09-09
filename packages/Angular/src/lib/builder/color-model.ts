@@ -104,12 +104,36 @@ export function hsvToHex({ h, s, v }: Hsv): string {
 }
 
 /**
- * What the hex field should hold for what the author typed.
+ * What the field should hold for what has just been typed. Tidies; never decides.
  *
- * Deliberately tolerant and deliberately NON-committal: it tidies (adds the `#`, lowercases,
- * expands `#abc`, drops characters that cannot appear in a hex code) but hands back partial
- * entries untouched. Rewriting the box on every keystroke is what makes a hex field impossible
- * to type into, so completeness is a separate question — see {@link isCompleteHex}.
+ * It adds the `#`, lowercases, drops characters that cannot appear in a hex code and stops at six
+ * digits — and it hands every partial entry straight back, including a three-character one. That
+ * last clause is the whole point: `#1a2` is a prefix of `#1a2b3c` as often as it is shorthand for
+ * `#11aa22`, and nothing in the string says which. Only the caller knows whether the author is
+ * still typing, so expansion belongs to {@link normalizeHexInput} at commit time.
+ *
+ * An empty field answers empty rather than `#`. Putting the `#` back is not tidying — it is
+ * re-inserting a character the author just deleted, and the next one they type makes `##`.
+ */
+export function sanitizeHexInput(value: string): string {
+  const raw = value.trim();
+  if (raw === '') {
+    return '';
+  }
+  const digits = raw.replace(/^#/, '').replace(/[^0-9a-f]/gi, '').slice(0, 6).toLowerCase();
+  return `#${digits}`;
+}
+
+/**
+ * The colour a FINISHED entry means — for blur and Enter, never for a keystroke.
+ *
+ * Same tidying as {@link sanitizeHexInput}, plus the one thing that function must not do: it
+ * expands three digits to six, so `#abc` deliberately becomes `#aabbcc`. Running this while the
+ * author is typing is what made a six-digit code impossible to enter (#154), because the third
+ * character was rewritten into a complete colour and the rest were dropped by the six-digit cap.
+ *
+ * A partial it cannot finish comes back still partial, so completeness stays a separate question —
+ * see {@link isCompleteHex}. Also used by {@link hexToHsv} to be tolerant of its input.
  */
 export function normalizeHexInput(value: string): string {
   const digits = value.trim().replace(/^#/, '').replace(/[^0-9a-f]/gi, '').slice(0, 6).toLowerCase();
