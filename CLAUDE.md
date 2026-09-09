@@ -120,16 +120,23 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
   creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
   Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
   Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
-- **Known follow-up, and it will bite the next release:** the publish pipeline pushes *directly* to
-  `main` (`ci/commit_push.mjs`, the `Version Packages [skip ci]` commit) and to `next`
-  (`ci/merge_main_and_update_lock.mjs`). Required status checks reject direct pushes outright.
-  `[skip ci]` is part of why no check can ever report on that commit, but it is not the deciding
-  fact: `changes.yml` carries only a `pull_request` trigger and no `push` trigger at all, so
-  `changes_and_migrations` could never report on a direct push even with `[skip ci]` removed. The
-  natural fix, a GitHub Actions bypass actor, is refused at repo level (`422 — Actor GitHub Actions
-  integration must be part of the ruleset source or owner organization`) and needs an org owner.
-  Until that is resolved, either add the bypass at org level or route those two pushes through pull
-  requests (tracked in #177).
+- **The release is human-driven by construction, and that is the fix rather than a workaround**
+  (#177). Required status checks are evaluated against the check runs present on the SHA being
+  *introduced*, so a direct push — which introduces a SHA the remote has never seen — can never
+  satisfy them; no retry wins that race. The publish pipeline therefore pushes no branch at all.
+  The version bump rides the `next` → `main` release PR (where all seven checks run normally), and
+  `publish.yml` only builds, publishes to npm and pushes a **tag** — tags are outside both rulesets,
+  which are `target: branch`. A second, manual PR carries `main` back into `next` afterwards,
+  because `strict: true` blocks the following release PR until it lands. Runbook:
+  [`docs/release.md`](docs/release.md). `npm run lint:release-pushes` (inside `build-and-test`)
+  fails any workflow or script that reintroduces a push to `main` or `next`.
+  - The two remedies #177 originally listed both need a permission this repo does not have. A
+    GitHub Actions bypass actor is refused at repo level (`422 — Actor GitHub Actions integration
+    must be part of the ruleset source or owner organization`) and needs an org owner; routing the
+    pushes through workflow-opened PRs needs a PAT or App token, because GitHub does not start
+    workflow runs from `GITHUB_TOKEN`-authored events, so the required contexts would never report
+    on such a PR either. Neither is a prerequisite for anything now — they would only buy back
+    automation the release does not need.
 
 ## Build & dev commands
 - `pnpm install` (repo root only — never inside a package dir)
