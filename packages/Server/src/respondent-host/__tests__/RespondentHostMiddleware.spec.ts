@@ -118,6 +118,19 @@ describe('GET /f/:slug — the link carries the form\'s identity', () => {
     });
   });
 
+  // The door reports success and the row together or not at all, so this state is one
+  // `redeemSlugToToken` cannot produce today. It is pinned because the GUARD that makes it
+  // unreachable is what lets `loadFormIdentity` take a non-optional row — delete the guard and
+  // this is a TypeError on `source.FormID`, i.e. a 500 with a stack, on the anonymous path.
+  it('renders the ordinary error page when the door reports success without the row it resolved', async () => {
+    redeemOutcome = { ok: true, token: 'session-jwt' };
+    await withServer(async (get) => {
+      const res = await get('/f/customer-survey');
+      expect(res.status).toBe(502);
+      expect(await res.text()).toContain('We could not open this form right now');
+    });
+  });
+
   it('keeps the session token and noindex on the identified page', async () => {
     await withServer(async (get) => {
       const html = await (await get('/f/customer-survey')).text();

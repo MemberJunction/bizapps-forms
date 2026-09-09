@@ -77,6 +77,18 @@ const EVERY_KIND: ConditionalSourceKind[] = [
   'score',
 ];
 
+/**
+ * `toConditionalSource` returns `undefined` for a question that cannot be a condition source; every
+ * case below that reads `.options` is asserting about a question that CAN be, so the narrowing is
+ * itself an assertion rather than a cast.
+ */
+function definedSource(...args: Parameters<typeof toConditionalSource>): NonNullable<ReturnType<typeof toConditionalSource>> {
+  const source = toConditionalSource(...args);
+  expect(source).toBeDefined();
+  if (!source) throw new Error('unreachable: asserted defined');
+  return source;
+}
+
 describe('toConditionalSource', () => {
   describe('happy', () => {
     it('carries published option identities for a choice question', () => {
@@ -97,18 +109,18 @@ describe('toConditionalSource', () => {
     });
 
     it('offers no options for free-input questions', () => {
-      expect(toConditionalSource(question('ShortText'), []).options).toBeUndefined();
+      expect(definedSource(question('ShortText'), []).options).toBeUndefined();
     });
 
     it('PictureChoice (images mode) is option-driven too', () => {
-      const source = toConditionalSource(question('PictureChoice'), [option('Cat', 'cat', 0)]);
+      const source = definedSource(question('PictureChoice'), [option('Cat', 'cat', 0)]);
       expect(source.options).toEqual([{ label: 'Cat', value: 'cat' }]);
     });
   });
 
   describe('edge', () => {
     it('uniquifies duplicate values exactly like the publish path', () => {
-      const source = toConditionalSource(question('Dropdown'), [
+      const source = definedSource(question('Dropdown'), [
         option('Other (top)', 'Other', 0),
         option('Other (bottom)', 'Other', 1),
       ]);
@@ -116,7 +128,7 @@ describe('toConditionalSource', () => {
     });
 
     it('orders options by DisplayOrder, not array order', () => {
-      const source = toConditionalSource(question('SingleChoice'), [
+      const source = definedSource(question('SingleChoice'), [
         option('B', 'b', 2),
         option('A', 'a', 1),
       ]);
@@ -124,7 +136,7 @@ describe('toConditionalSource', () => {
     });
 
     it('Matrix options are axes, never comparison values', () => {
-      expect(toConditionalSource(question('Matrix'), [option('Row 1', 'r1', 0)]).options).toBeUndefined();
+      expect(definedSource(question('Matrix'), [option('Row 1', 'r1', 0)]).options).toBeUndefined();
     });
   });
 
@@ -138,11 +150,11 @@ describe('toConditionalSource', () => {
     });
 
     it('prototype-chain names are not question types', () => {
-      expect(toConditionalSource(question('toString'), [option('x', 'x', 0)]).options).toBeUndefined();
+      expect(definedSource(question('toString'), [option('x', 'x', 0)]).options).toBeUndefined();
     });
 
     it('a choice question with zero options omits the list rather than offering an empty picker', () => {
-      expect(toConditionalSource(question('SingleChoice'), []).options).toBeUndefined();
+      expect(definedSource(question('SingleChoice'), []).options).toBeUndefined();
     });
   });
 });

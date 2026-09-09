@@ -13,6 +13,14 @@
       "dependsOn": ["^build"],
       "persistent": false
     },
+    "typecheck": {
+      // Specs import sibling packages by their dist types, so this needs the same upstream builds
+      // `test` does.
+      "outputs": [],
+      "cache": true,
+      "dependsOn": ["^build"],
+      "persistent": false
+    },
     "start": {
       "cache": false,
       "persistent": true,

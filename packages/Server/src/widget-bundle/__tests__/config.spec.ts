@@ -1,7 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// Only `LogError` is replaced — the gate's "never swallow a bad value" contract is asserted through
+// it — and everything else in core is the real thing.
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: vi.fn(),
+  LogStatus: vi.fn(),
+}));
+
 import { writeFileSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { LogError, LogStatus } from '@memberjunction/core';
 import {
   getWidgetBundleConfig,
   resetWidgetBundleConfigForTests,
@@ -9,11 +19,28 @@ import {
   WIDGET_SOURCEMAP_ROUTE,
 } from '../config';
 
+const originalNodeEnv = process.env.NODE_ENV;
+
 afterEach(() => {
   delete process.env.FORMS_WIDGET_BUNDLE_ENABLED;
   delete process.env.FORMS_WIDGET_BUNDLE_PATH;
+  delete process.env.FORMS_WIDGET_SOURCEMAP_ENABLED;
+  process.env.NODE_ENV = originalNodeEnv;
+  vi.mocked(LogError).mockClear();
+  vi.mocked(LogStatus).mockClear();
   resetWidgetBundleConfigForTests();
 });
+
+/** Stage a bundle WITH a sourcemap beside it and point the config at it; returns the map's path. */
+function stageBundleWithMap(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mjf-widget-map-gate-'));
+  const bundle = join(dir, 'mj-form.js');
+  writeFileSync(bundle, '// bundle');
+  writeFileSync(`${bundle}.map`, '{"version":3}');
+  process.env.FORMS_WIDGET_BUNDLE_PATH = bundle;
+  resetWidgetBundleConfigForTests();
+  return `${bundle}.map`;
+}
 
 describe('getWidgetBundleConfig', () => {
   it('serves the bundle at the route the host page references', () => {
@@ -112,5 +139,88 @@ describe('widget sourcemap', () => {
     process.env.FORMS_WIDGET_BUNDLE_PATH = bundle;
     resetWidgetBundleConfigForTests();
     expect(getWidgetBundleConfig().sourcemapPath).toBeUndefined();
+  });
+});
+
+describe('widget sourcemap gate (#121)', () => {
+  // The route is public and unauthenticated, so on a production host it publishes the widget's
+  // full annotated source (8.5 MB) to anyone who opens devtools on a form. Off by default there.
+  // `NODE_ENV` is the switch this host already uses for the same class of decision (Apollo
+  // stack traces), so no second notion of "production" is introduced.
+  it('withholds the sourcemap under NODE_ENV=production unless explicitly enabled', () => {
+    stageBundleWithMap();
+    process.env.NODE_ENV = 'production';
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(false);
+    expect(cfg.sourcemapPath).toBeUndefined();
+  });
+
+  it('serves the sourcemap under NODE_ENV=production when FORMS_WIDGET_SOURCEMAP_ENABLED=true', () => {
+    const map = stageBundleWithMap();
+    process.env.NODE_ENV = 'production';
+    process.env.FORMS_WIDGET_SOURCEMAP_ENABLED = 'true';
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(true);
+    expect(cfg.sourcemapPath).toBe(map);
+  });
+
+  it('serves the sourcemap by default outside production', () => {
+    const map = stageBundleWithMap();
+    process.env.NODE_ENV = 'development';
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(true);
+    expect(cfg.sourcemapPath).toBe(map);
+  });
+
+  it('withholds the sourcemap outside production when FORMS_WIDGET_SOURCEMAP_ENABLED=false', () => {
+    stageBundleWithMap();
+    process.env.NODE_ENV = 'development';
+    process.env.FORMS_WIDGET_SOURCEMAP_ENABLED = 'false';
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(false);
+    expect(cfg.sourcemapPath).toBeUndefined();
+  });
+
+  // The fail-open direction has to be AUDIBLE. `NODE_ENV` unset is the default for
+  // `node server.mjs` (the path docs/local-host.md documents) and nothing in this repo sets it,
+  // so a deploy that never exported it serves the map and would otherwise say nothing at all.
+  // Same posture as `warnOnceIfDefaultHashSalt` in http/hash-salt.ts: an insecure-by-omission
+  // default is allowed, but it announces itself once at boot.
+  it('warns that the map is public when nothing told the host whether it is production', () => {
+    stageBundleWithMap();
+    delete process.env.NODE_ENV;
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(true);
+    expect(vi.mocked(LogStatus)).toHaveBeenCalledWith(
+      expect.stringContaining('FORMS_WIDGET_SOURCEMAP_ENABLED'),
+    );
+  });
+
+  // ...but a host that HAS said what it is gets no warning: the operator answered the question,
+  // and a line printed on every boot everywhere is a line nobody reads.
+  it('does not warn when the host has declared its environment', () => {
+    stageBundleWithMap();
+    process.env.NODE_ENV = 'development';
+    resetWidgetBundleConfigForTests();
+    getWidgetBundleConfig();
+    expect(vi.mocked(LogStatus)).not.toHaveBeenCalled();
+  });
+
+  // A typo must not be silently read as either answer. The default for the environment applies
+  // and the rejection is logged, so an operator who set the variable on purpose can see it was
+  // not honoured — the same posture `FORMS_WIDGET_BUNDLE_PATH` takes for a bad path.
+  it('logs an unrecognised FORMS_WIDGET_SOURCEMAP_ENABLED value and applies the default', () => {
+    stageBundleWithMap();
+    process.env.NODE_ENV = 'production';
+    process.env.FORMS_WIDGET_SOURCEMAP_ENABLED = 'yes';
+    resetWidgetBundleConfigForTests();
+    const cfg = getWidgetBundleConfig();
+    expect(cfg.sourcemapEnabled).toBe(false);
+    expect(vi.mocked(LogError)).toHaveBeenCalledWith(expect.stringContaining('FORMS_WIDGET_SOURCEMAP_ENABLED'));
   });
 });

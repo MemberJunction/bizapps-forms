@@ -1,6 +1,6 @@
 @let q = question();
 
-<div class="mjf-question" [class.mjf-question--error]="!!errorMessage()">
+<div class="mjf-question" [id]="focusTargetId()" tabindex="-1" [class.mjf-question--error]="!!errorMessage()">
   @if (!isAnswerable()) {
     <div class="mjf-statement" role="note">
       <h3 class="mjf-statement__title">{{ q.prompt }}</h3>
@@ -9,7 +9,7 @@
       }
     </div>
   } @else {
-    <label class="mjf-question__label" [attr.for]="inputId()">
+    <label class="mjf-question__label" [id]="labelId()" [attr.for]="inputId()">
       <span class="mjf-question__prompt">{{ q.prompt }}</span>
       @if (q.isRequired) {
         <span class="mjf-question__required" aria-hidden="true">*</span>
@@ -50,7 +50,7 @@
           />
         }
         @case ('SingleChoice') {
-          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-choices" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -68,7 +68,7 @@
         }
         @case ('MultiChoice') {
           <p class="mjf-choices__hint">Choose as many as you like.</p>
-          <div class="mjf-choices" role="group" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-choices" role="group" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -101,7 +101,7 @@
           </select>
         }
         @case ('Rating') {
-          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-rating" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (star of ratingScale(); track star) {
               <button
                 type="button"
@@ -112,13 +112,13 @@
                 [attr.aria-label]="star + ' of ' + ratingMax()"
                 (click)="onRating(star)"
               >
-                <i class="fa-solid fa-star" aria-hidden="true"></i>
+                <mjf-icon name="star" />
               </button>
             }
           </div>
         }
         @case ('NPS') {
-          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-nps" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (n of npsScale; track n) {
               <button
                 type="button"
@@ -133,7 +133,7 @@
           </div>
         }
         @case ('YesNo') {
-          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
               [class.mjf-choice--selected]="booleanValue() === true"
               [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">Yes</button>
@@ -173,7 +173,7 @@
               (change)="onFile(fileInput)"
             />
             <label class="mjf-file__pick" [attr.for]="inputId()" aria-hidden="true">
-              <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+              <mjf-icon name="paperclip" />
               {{ uploadFileName() || answerRecorded() ? 'Choose a different file' : 'Choose a file' }}
             </label>
           </div>
@@ -199,13 +199,13 @@
             @switch (uploadStatus()) {
               @case ('uploading') {
                 <span>
-                  <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                  <mjf-icon name="spinner" spin />
                   Uploading {{ uploadFileName() }}@if (uploadPercent() !== null) { — {{ uploadPercent() }}% }…
                 </span>
               }
               @case ('done') {
                 <span class="mjf-file__ok">
-                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  <mjf-icon name="circle-check" />
                   {{ uploadFileName() }} uploaded
                 </span>
               }
@@ -215,7 +215,7 @@
                      here renders an empty-looking control over a stored answer. -->
                 @if (answerRecorded()) {
                   <span class="mjf-file__ok">
-                    <i class="fa-solid fa-paperclip" aria-hidden="true"></i>
+                    <mjf-icon name="paperclip" />
                     A file is attached to this answer.
                   </span>
                 }
@@ -225,16 +225,16 @@
 
           @if (uploadStatus() === 'error') {
             <p class="mjf-file__error" role="alert">
-              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <mjf-icon name="triangle-exclamation" />
               {{ uploadError() }}
             </p>
             <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry upload
+              <mjf-icon name="rotate-right" /> Retry upload
             </button>
           }
         }
         @case ('PictureChoice') {
-          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+          <div class="mjf-pics" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
             @for (opt of q.options; track opt.id) {
               <button
                 type="button"
@@ -248,7 +248,7 @@
                   <img class="mjf-pic__img" [src]="opt.imageURL" [alt]="opt.label" loading="lazy" />
                 } @else {
                   <span class="mjf-pic__img mjf-pic__img--empty" aria-hidden="true">
-                    <i class="fa-regular fa-image"></i>
+                    <mjf-icon name="image" />
                   </span>
                 }
                 <span class="mjf-pic__label">
@@ -261,7 +261,7 @@
         }
         @case ('OpinionScale') {
           <div class="mjf-scale">
-            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-scale__row" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               @for (point of scalePoints(); track point) {
                 <button
                   type="button"
@@ -309,18 +309,18 @@
                 <div class="mjf-rank__ghost" *cdkDragPlaceholder></div>
 
                 <span class="mjf-rank__grip" cdkDragHandle aria-hidden="true">
-                  <i class="fa-solid fa-grip-vertical"></i>
+                  <mjf-icon name="grip-vertical" />
                 </span>
                 <span class="mjf-rank__pos" aria-hidden="true">{{ i + 1 }}</span>
                 <span class="mjf-rank__label">{{ opt.label }}</span>
                 <span class="mjf-rank__moves">
                   <button type="button" class="mjf-rank__move" [disabled]="first"
                     [attr.aria-label]="'Move ' + opt.label + ' up'" (click)="moveRank(i, -1)">
-                    <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+                    <mjf-icon name="chevron-up" />
                   </button>
                   <button type="button" class="mjf-rank__move" [disabled]="last"
                     [attr.aria-label]="'Move ' + opt.label + ' down'" (click)="moveRank(i, 1)">
-                    <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+                    <mjf-icon name="chevron-down" />
                   </button>
                 </span>
               </li>
@@ -385,7 +385,7 @@
                 {{ legalTerms() }}
               </div>
             }
-            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="inputId()" [attr.aria-describedby]="describedBy()">
+            <div class="mjf-yesno" role="radiogroup" [attr.aria-labelledby]="labelId()" [attr.aria-describedby]="describedBy()">
               <button type="button" role="radio" class="mjf-choice mjf-yesno__btn"
                 [class.mjf-choice--selected]="booleanValue() === true"
                 [attr.aria-checked]="booleanValue() === true" (click)="onYesNo(true)">I accept</button>
@@ -417,16 +417,16 @@
           />
           @if (uploadStatus() === 'uploading') {
             <p class="mjf-file__status" aria-live="polite">
-              <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Saving drawing…
+              <mjf-icon name="spinner" spin /> Saving drawing…
             </p>
           }
           @if (uploadStatus() === 'error') {
             <p class="mjf-file__error" role="alert">
-              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              <mjf-icon name="triangle-exclamation" />
               {{ uploadError() }}
             </p>
             <button type="button" class="mjf-file__retry" (click)="retryUpload()">
-              <i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Retry
+              <mjf-icon name="rotate-right" /> Retry
             </button>
           }
         }

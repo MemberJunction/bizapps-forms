@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { ClassProvider } from '@angular/core';
 
 import { normalizeApiConfig } from './api/forms-api.config';
 import { FORMS_API_SERVICE } from './api/forms-api.interface';
@@ -11,9 +12,11 @@ import { formsWidgetProviders } from './widget-providers';
 
 /** The class bound to `token` by these providers. */
 function boundTo(config: Parameters<typeof formsWidgetProviders>[0], token: unknown): unknown {
+  // `Provider` is a union; `useClass` is the key only its ClassProvider arm carries, so the `in`
+  // check narrows to Angular's own type rather than to a hand-written lookalike.
   const entry = formsWidgetProviders(config).find(
-    (p): p is { provide: unknown; useClass: unknown } =>
-      typeof p === 'object' && p !== null && 'provide' in p && p.provide === token,
+    (p): p is ClassProvider =>
+      typeof p === 'object' && p !== null && !Array.isArray(p) && 'useClass' in p && p.provide === token,
   );
   return entry?.useClass;
 }

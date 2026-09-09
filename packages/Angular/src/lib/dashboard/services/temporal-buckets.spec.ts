@@ -11,41 +11,114 @@ import { answer } from '../../shared/testing/entity-row-fixtures';
 
 const on = (iso: string) => answer('r', 'q', { DateValue: new Date(iso) });
 
+/**
+ * Both bucket readers exist to be timezone-independent, and a test that runs in one zone cannot
+ * show that. Worse, it cannot even show the BUG: under `TZ=UTC` — which is what `ubuntu-latest`
+ * gives CI — `getMonth()` and `getUTCMonth()` return the same number and `toLocaleDateString`
+ * renders the same string with or without `timeZone: 'UTC'`, so the pre-fix implementations
+ * satisfy their own regression tests. Verified: reverting either `monthOf` or `bandOf` to local
+ * fields passes 11/11 under `TZ=UTC` and fails only on a non-UTC machine. The guard existed on
+ * one laptop.
+ *
+ * So the assertion is the actual property — the same answer in every zone — swept across a set
+ * that spans the globe. Whatever zone the runner is in, this set contains one that disagrees with
+ * it, so the mutation is caught on CI and on any developer's machine alike.
+ */
+const ZONES = ['UTC', 'America/Chicago', 'Asia/Tokyo', 'Pacific/Kiritimati', 'Pacific/Niue'] as const;
+
+function inEveryZone<T>(read: () => T): { zone: string; value: T }[] {
+  const previous = process.env.TZ;
+  try {
+    return ZONES.map((zone) => {
+      process.env.TZ = zone;
+      return { zone, value: read() };
+    });
+  } finally {
+    process.env.TZ = previous;
+  }
+}
+
+/** Assert one reading is identical in every zone, naming the zone that broke ranks. */
+function sameInEveryZone<T>(read: () => T, expected: T): void {
+  for (const { zone, value } of inEveryZone(read)) {
+    expect(value, `timezone ${zone}`).toEqual(expected);
+  }
+}
+
 describe('Date questions group by month', () => {
+  // A stored Date is UTC MIDNIGHT of the day the respondent picked, so these fixtures carry the
+  // `Z` — the same correction the Time block below already needed. Without it the fixture is
+  // parsed as LOCAL midnight, which is a different instant in every timezone and, worse, one the
+  // local and UTC readings agree about: `new Date('2026-01-15T00:00:00')` is 06:00Z in Chicago,
+  // still 15 January either way. Such a fixture cannot tell a correct implementation from a
+  // broken one, which is why the first-of-the-month cases below exist.
   it('stays in chronological order even when a later month is the biggest', () => {
     const buckets = temporalBuckets('Date', [
-      on('2026-01-15T00:00:00'),
-      on('2026-03-02T00:00:00'),
-      on('2026-03-09T00:00:00'),
-      on('2026-03-20T00:00:00'),
+      on('2026-01-15T00:00:00Z'),
+      on('2026-03-02T00:00:00Z'),
+      on('2026-03-09T00:00:00Z'),
+      on('2026-03-20T00:00:00Z'),
     ]);
     expect(buckets.map((b) => b.count)).toEqual([1, 3]);
     expect(buckets[0].label).toMatch(/Jan/);
     expect(buckets[1].label).toMatch(/Mar/);
   });
 
+  it('files the first of a month under THAT month, not the one before it', () => {
+    // The only day that discriminates. Every stored Date reads as the previous DAY for a viewer
+    // west of Greenwich, but only the 1st crosses a month boundary — so the bug is invisible on
+    // 29 days in 30 and silently wrong on the 30th. In Chicago `2026-03-01T00:00:00Z` is
+    // 28 February 18:00, and the answer landed under "Feb 2026".
+    sameInEveryZone(() => temporalBuckets('Date', [on('2026-03-01T00:00:00Z')]).map((b) => b.label), [
+      'Mar 2026',
+    ]);
+  });
+
+  it('keeps the sort key and the label agreeing about which month it is', () => {
+    // `monthOf` derives the key and the label by two different mechanisms — `getUTCMonth()` and
+    // `toLocaleDateString`. Correcting only one leaves a card that SORTS under September and is
+    // CAPTIONED "Aug 2026". Two answers a fortnight apart either side of a month boundary must
+    // therefore produce two buckets with two distinct labels, in order.
+    sameInEveryZone(
+      () => temporalBuckets('Date', [on('2026-09-01T00:00:00Z'), on('2026-08-15T00:00:00Z')]).map((b) => [b.label, b.count]),
+      [
+        ['Aug 2026', 1],
+        ['Sep 2026', 1],
+      ],
+    );
+  });
+
   it('spans a year boundary in the right direction', () => {
-    const buckets = temporalBuckets('Date', [on('2027-01-05T00:00:00'), on('2026-12-05T00:00:00')]);
+    const buckets = temporalBuckets('Date', [on('2027-01-05T00:00:00Z'), on('2026-12-05T00:00:00Z')]);
     expect(buckets.map((b) => b.label)).toEqual([
       expect.stringMatching(/Dec 2026/),
       expect.stringMatching(/Jan 2027/),
     ]);
   });
 
+  it('puts New Year\u2019s Day in the new year', () => {
+    // The year-boundary form of the same bug: 1 January reads as 31 December of the year before.
+    sameInEveryZone(() => temporalBuckets('Date', [on('2027-01-01T00:00:00Z')]).map((b) => b.label), ['Jan 2027']);
+  });
+
   it('makes fractions add up across the answers that had a date', () => {
-    const buckets = temporalBuckets('Date', [on('2026-01-15T00:00:00'), on('2026-02-15T00:00:00')]);
+    const buckets = temporalBuckets('Date', [on('2026-01-15T00:00:00Z'), on('2026-02-15T00:00:00Z')]);
     expect(buckets.map((b) => b.fraction)).toEqual([0.5, 0.5]);
   });
 });
 
 describe('Time questions group into parts of the day', () => {
+  // A stored Time is the clock reading on the epoch date in UTC — `14:30` is
+  // `1970-01-01T14:30:00Z` — and the contract says the UTC fields ARE the answer. These fixtures
+  // therefore carry the `Z`, and the assertions hold in any timezone; a band read off the
+  // viewer's local clock would file a 14:30 answer under "Morning" in Chicago.
   it('bands the clock rather than counting distinct times', () => {
     // Per-minute buckets on a form with forty answers is a list of ones, which is why the
     // raw values were never analysable.
     const buckets = temporalBuckets('Time', [
-      on('2026-01-01T09:30:00'),
-      on('2026-01-01T10:15:00'),
-      on('2026-01-01T19:00:00'),
+      on('1970-01-01T09:30:00Z'),
+      on('1970-01-01T10:15:00Z'),
+      on('1970-01-01T19:00:00Z'),
     ]);
     expect(buckets.map((b) => [b.label, b.count])).toEqual([
       ['Morning (6am–12pm)', 2],
@@ -53,8 +126,16 @@ describe('Time questions group into parts of the day', () => {
     ]);
   });
 
+  it('reads the stored clock, not the viewer’s local one', () => {
+    // 14:30Z is an afternoon wherever the report is opened; 23:30Z is a night, not tomorrow's
+    // early morning. Any non-UTC viewer gets at least one of these wrong from local hours.
+    sameInEveryZone(() => temporalBuckets('Time', [on('1970-01-01T14:30:00Z')])[0].label, 'Afternoon (12–5pm)');
+    sameInEveryZone(() => temporalBuckets('Time', [on('1970-01-01T23:30:00Z')])[0].label, 'Night (9pm–midnight)');
+    sameInEveryZone(() => temporalBuckets('Time', [on('1970-01-01T00:10:00Z')])[0].label, 'Early (before 6am)');
+  });
+
   it('puts midnight in the early band, not past the end of the day', () => {
-    expect(temporalBuckets('Time', [on('2026-01-01T00:10:00')])[0].label).toMatch(/Early/);
+    expect(temporalBuckets('Time', [on('1970-01-01T00:10:00Z')])[0].label).toMatch(/Early/);
   });
 });
 
@@ -62,7 +143,7 @@ describe('answers without a usable date', () => {
   it('are left out rather than inventing a bucket', () => {
     const buckets = temporalBuckets('Date', [
       answer('r', 'q', { DateValue: null }),
-      on('2026-01-15T00:00:00'),
+      on('2026-01-15T00:00:00Z'),
     ]);
     expect(buckets).toHaveLength(1);
     expect(buckets[0].count).toBe(1);

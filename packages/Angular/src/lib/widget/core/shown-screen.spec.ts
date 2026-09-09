@@ -13,7 +13,7 @@ function definition(overrides: Partial<PublishedFormDefinition> = {}): Published
     formVersionId: 'v1',
     name: 'Test form',
     renderMode: 'Scroll',
-    settings: {},
+    settings: { anonymousAllowed: true, captchaRequired: false },
     styleTokens: { cssVariables: {} },
     pages: [],
     automations: [],
@@ -91,6 +91,12 @@ describe('shownScreenFor', () => {
   it('reports the questions while submitting, which still shows them', () => {
     expect(shownScreenFor('ready', undefined)).toEqual({ kind: 'questions' });
     expect(shownScreenFor('submitting', undefined)).toEqual({ kind: 'questions' });
+  });
+
+  it('reports the questions once the session has expired, which stay on screen under the notice', () => {
+    // Like `submitting`: the expiry notice is an overlay over the still-mounted form, not a
+    // surface of its own — a host strip that blanked on expiry would misreport where the widget is.
+    expect(shownScreenFor('expired', undefined)).toEqual({ kind: 'questions' });
   });
 
   it('reports the resolved ending once done', () => {

@@ -54,6 +54,45 @@ export function trustedProxyHops(): number {
   return hops;
 }
 
+/**
+ * The identity handler itself, mountable anywhere — globally by {@link RequestIdentityMiddleware},
+ * or directly on a route that MJ registers too early to see the global one.
+ *
+ * WHY THIS IS EXPORTED. MJServer collects `GetPreAuthMiddleware()` into an array at
+ * `index.ts:800` but does not `app.use` it until `index.ts:1143`. In the SAME collection loop it
+ * calls each middleware's `ConfigureExpressApp` (`index.ts:809`), which is where the respondent
+ * host and asset routes register themselves. (The widget-bundle routes were in that set too until
+ * #121 moved them to `GetPreAuthMiddleware` to get behind MJ's `compression()`; they are now in
+ * the "need nothing" group below.) Express dispatches layers in
+ * registration order, so every route added through `ConfigureExpressApp` is already in the stack
+ * before the pre-auth handlers arrive and NEVER sees them — `currentRequestIdentity()` inside such
+ * a route returns undefined, and any abuse ceiling keyed on it silently admits everyone. A route
+ * in that position has to carry the handler itself:
+ *
+ *     app.get(ROUTE, requestIdentityHandler(), (req, res) => { ... });
+ *
+ * Mounting it twice for one request is harmless: `AsyncLocalStorage.run` simply nests, and the
+ * inner store wins for the code inside it. Routes reached through `GetPostAuthMiddleware` (the
+ * upload endpoint) or the Apollo handler are mounted after `index.ts:1143` and need nothing.
+ *
+ * `hops` is resolved once at REGISTRATION time, not per request, matching the reasoning on
+ * {@link trustedProxyHops}: it describes deployment topology, which does not change while the
+ * process runs.
+ */
+export function requestIdentityHandler(hops: number = trustedProxyHops()): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction): void => {
+    const ip = resolveClientIp(req, hops);
+    if (!ip) {
+      // No peer address at all (a socket already gone). Nothing to key on, so the request
+      // continues under the session-derived fallback rather than being refused here — the
+      // routes decide what an unidentifiable caller may do, not this middleware.
+      next();
+      return;
+    }
+    runWithRequestIdentity({ ipHash: hashClientIp(ip) }, next);
+  };
+}
+
 @RegisterClass(BaseServerMiddleware, 'mj:formsRequestIdentity')
 export class RequestIdentityMiddleware extends BaseServerMiddleware {
   public get Label(): string {
@@ -79,18 +118,6 @@ export class RequestIdentityMiddleware extends BaseServerMiddleware {
       `[Forms] Request identity established pre-auth (trusted proxy hops: ${hops}).` +
         (hops === 0 ? ' Set FORMS_TRUSTED_PROXY_HOPS if a load balancer fronts this API.' : ''),
     );
-    return [
-      (req: Request, _res: Response, next: NextFunction): void => {
-        const ip = resolveClientIp(req, hops);
-        if (!ip) {
-          // No peer address at all (a socket already gone). Nothing to key on, so the request
-          // continues under the session-derived fallback rather than being refused here — the
-          // routes decide what an unidentifiable caller may do, not this middleware.
-          next();
-          return;
-        }
-        runWithRequestIdentity({ ipHash: hashClientIp(ip) }, next);
-      },
-    ];
+    return [requestIdentityHandler(hops)];
   }
 }

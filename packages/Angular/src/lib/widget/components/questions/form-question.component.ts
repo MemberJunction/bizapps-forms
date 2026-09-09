@@ -54,6 +54,7 @@ import {
   inputTypeFor,
 } from './input-mode';
 import { DoodlePadComponent, type DoodleCapture } from './doodle-pad.component';
+import { IconComponent } from '../icon.component';
 import { flipDeltas, rankAnnouncement } from './rank-motion';
 
 /** How long a reordered row takes to travel to its new place. */
@@ -83,7 +84,7 @@ type UploadStatus = 'idle' | 'uploading' | 'done' | 'error';
   selector: 'mjf-form-question',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgTemplateOutlet, DoodlePadComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
+  imports: [NgTemplateOutlet, DoodlePadComponent, IconComponent, CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder],
   templateUrl: './form-question.component.html',
   styleUrls: ['./form-question.component.css'],
 })
@@ -166,6 +167,28 @@ export class FormQuestionComponent {
   });
 
   protected readonly inputId = computed(() => `mjf-q-${this.question().id}`);
+  /**
+   * The id of the question's `<label>`, which is what the grouped controls are named by.
+   *
+   * A native control is named by `<label for>` pointing at {@link inputId}, which it carries
+   * itself. A group of buttons (`role="radiogroup"` / `role="group"`) has no element carrying
+   * that id, so it names itself the other way round — `aria-labelledby` pointing at the label —
+   * and the reference has to land on the element holding the prompt text. Pointing it at
+   * `inputId()` instead left every grouped question unnamed to a screen reader (#117).
+   */
+  protected readonly labelId = computed(() => `${this.inputId()}-label`);
+
+  /**
+   * The id of the question's outer container — where focus lands when the control cannot take it.
+   *
+   * A renderer moving focus to the question that failed validation asks the DOM for
+   * {@link inputId}, and only the native branches bind that id on an element. A group of buttons
+   * binds it nowhere, and neither do Ranking, Matrix, Doodle or the composites, so the lookup
+   * found nothing for thirteen of the twenty-five types and focus stayed on the Next button —
+   * the same fact as #117, one layer up: the id names a control a grouped question does not have.
+   * This container always renders, so there is always somewhere to land.
+   */
+  protected readonly focusTargetId = computed(() => `${this.inputId()}-question`);
 
   /**
    * The A/B/C badge for the option at this position.

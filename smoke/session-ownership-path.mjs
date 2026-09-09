@@ -37,8 +37,9 @@
 import { randomUUID } from 'node:crypto';
 import { resolveSlug, buildAnswers } from './lib/fixture.mjs';
 import { requireDbEnv, sql } from './lib/sqlcmd.mjs';
+import { smokeBaseUrl } from './lib/target.mjs';
 
-const BASE = (process.env.FORMS_SMOKE_URL || 'http://localhost:4121').replace(/\/$/, '');
+const BASE = smokeBaseUrl();
 
 /**
  * The database is not optional here, unlike in respondent-path. Every meaningful assertion in this

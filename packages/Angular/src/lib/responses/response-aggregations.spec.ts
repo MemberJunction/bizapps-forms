@@ -107,6 +107,33 @@ describe('renderAnswer / buildResponseDetail', () => {
     expect(detail.answers[0]).toMatchObject({ prompt: 'Prompt qc', displayValue: 'Red' });
   });
 
+  it('renders a Time answer as the clock the respondent entered, from the stored UTC instant', () => {
+    // Stored as the clock on the epoch date in UTC (#116). The reader has to give back `14:30`,
+    // not `1970-01-01T14:30:00.000Z` — the epoch date is an anchor, not part of the answer.
+    const time = q('qt', 'Time', 2);
+    expect(renderAnswer(time, answer('r1', 'qt', { DateValue: new Date('1970-01-01T14:30:00.000Z') }))).toBe('14:30');
+    // Over GraphQL the column arrives as a string; the same reading applies.
+    expect(renderAnswer(time, answer('r1', 'qt', { DateValue: '1970-01-01T09:05:00Z' as unknown as Date }))).toBe('09:05');
+    expect(renderAnswer(time, answer('r1', 'qt', { DateValue: null }))).toBe('');
+  });
+
+  it('renders a Date answer as the calendar day the respondent picked, not a raw instant', () => {
+    // The other half of the same column. A stored Date is UTC midnight of the chosen day, and
+    // `2026-09-01T00:00:00.000Z` on a detail page or in a CSV cell is not what anybody picked.
+    // Read through the same contract the Time half uses, so one column renders one way.
+    const date = q('qd', 'Date', 3);
+    expect(renderAnswer(date, answer('r1', 'qd', { DateValue: new Date('2026-09-01T00:00:00.000Z') }))).toBe('2026-09-01');
+    expect(renderAnswer(date, answer('r1', 'qd', { DateValue: '2026-03-07T00:00:00Z' as unknown as Date }))).toBe('2026-03-07');
+    expect(renderAnswer(date, answer('r1', 'qd', { DateValue: null }))).toBe('');
+  });
+
+  it('does not shift a Date answer for a viewer west of UTC', () => {
+    // `toLocaleDateString()` on UTC midnight renders the PREVIOUS day in the Americas — the same
+    // skew `bandOf` was fixed for. This is why the reader is UTC-based rather than localised.
+    const date = q('qd', 'Date', 3);
+    expect(renderAnswer(date, answer('r1', 'qd', { DateValue: new Date('2026-01-01T00:00:00.000Z') }))).toBe('2026-01-01');
+  });
+
   it('reports how many answers it could not label, so the loss is never silent', () => {
     const detail = buildResponseDetail(
       detailInput({

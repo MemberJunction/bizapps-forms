@@ -19,20 +19,39 @@
  * settable properties of each generated entity class, minus an EXPLICIT exclusion list that has
  * to state why. A new column fails this spec until it is either copied or deliberately excluded.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const CLONE_SERVICE = readFileSync(join(__dirname, 'form-clone.service.ts'), 'utf8');
+
+/** Every `.ts` file under a directory, at any depth, as one string. */
+function readTreeAsOneString(dir: string): string {
+  return readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return [readTreeAsOneString(path)];
+      return entry.name.endsWith('.ts') ? [readFileSync(path, 'utf8')] : [];
+    })
+    .join('\n');
+}
+
 /**
  * The ORM layer, read from the sibling package's SOURCE rather than its build output: this
  * guard's whole point is to notice a column the moment CodeGen emits it, and `dist/` may be
- * stale or absent. `.claude/rules/data-access.md` names this file as the ground truth for
- * schema — deriving the guard from anything else would just be a second list to forget.
+ * stale or absent. `.claude/rules/data-access.md` names the generated entities as the ground
+ * truth for schema — deriving the guard from anything else would just be a second list to forget.
+ *
+ * Read as a DIRECTORY TREE rather than as one named file, because the file that holds the classes
+ * is CodeGen's to move and it has moved: at MJ 6.1.0-edge.5 `entity_subclasses.ts` became a
+ * five-line barrel re-exporting `generated/entities/<schema>.ts`, and this guard — which had
+ * hardcoded that path — went from checking seven entities to finding none. It still reported
+ * failure rather than passing vacuously, which is the only reason it was not a silent hole; but a
+ * guard that has to be re-pointed on every relayout will eventually be re-pointed wrongly. The
+ * tree is the stable thing.
  */
-const ENTITY_SUBCLASSES = readFileSync(
-  join(__dirname, '..', '..', '..', '..', 'Entities', 'src', 'generated', 'entity_subclasses.ts'),
-  'utf8',
+const ENTITY_SUBCLASSES = readTreeAsOneString(
+  join(__dirname, '..', '..', '..', '..', 'Entities', 'src', 'generated'),
 );
 
 /**

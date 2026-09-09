@@ -95,6 +95,7 @@ function context() {
     answers: new CanonicalAnswers([]),
     principal: { Name: 'Forms Automation Service' } as unknown as UserInfo,
     allowedEntities: null,
+    questionTypes: new Map(),
   };
 }
 

@@ -238,6 +238,10 @@ export const DISTRIBUTION_STYLES = /* css */ `
 .dm-setting-label { font-size: var(--mjf-body); font-weight: 600; color: var(--mj-text-primary); }
 .dm-setting-hint { max-width: 62ch; font-size: var(--mjf-label); line-height: 1.5; color: var(--mj-text-muted); }
 .dm-setting-control { flex: none; display: flex; align-items: center; gap: var(--mjf-gap-sm); }
+/* A control that grows a confirmation beside it. On a phone the two buttons and the
+   consequence sentence do not fit one line, so they wrap and stay left-aligned rather
+   than being squeezed to a width that truncates the warning. */
+.dm-setting-control--stack { flex-wrap: wrap; max-width: 100%; }
 .dm-num { width: 7rem; }
 .dm-date { width: 15rem; max-width: 100%; }
 

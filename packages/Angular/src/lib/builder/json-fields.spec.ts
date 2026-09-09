@@ -37,7 +37,7 @@ describe('conditional rule round-trip', () => {
     // author added a jump and no show rule therefore serialized to `null`: the jump was
     // discarded on save and no respondent ever skipped anything.
     const rule: ConditionalRule = {
-      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, toPageId: 'p3' }],
+      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p3' } }],
     };
     expect(parseConditionalRule(serializeConditionalRule(rule))).toEqual(rule);
   });
@@ -47,7 +47,7 @@ describe('conditional rule round-trip', () => {
     // verbs, and the serializer then threw them away because `show` was gone.
     const rule: ConditionalRule = {
       show: { all: [{ questionId: 'q1', op: 'isAnswered' }] },
-      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, toPageId: 'p3' }],
+      jump: [{ when: { all: [{ questionId: 'q1', op: 'equals', value: 'skip' }] }, target: { kind: 'page', id: 'p3' } }],
     };
     const withoutShow = withVerbGroup(rule, 'show', undefined);
     expect(parseConditionalRule(serializeConditionalRule(withoutShow))).toEqual({ jump: rule.jump });

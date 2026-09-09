@@ -111,7 +111,19 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
   paused: {
     label: 'Paused',
     tone: 'neutral',
-    detail: 'Turned off. Anyone opening it is told the form is not taking responses.',
+    // Deliberately does NOT say the token "has been withdrawn". That is the usual case and it is
+    // the one thing this state cannot see: a `Draft` row (the column's own default, so anything
+    // creating a distribution outside the builder starts there) never held a token to withdraw,
+    // and a link the host could never mint for never had one either. Asserting the withdrawal
+    // would be a confident claim about a fail-soft server action, from facts that do not contain
+    // it — the failure mode this whole module exists to prevent. What IS true in every case is
+    // that a paused link holds no working token, and that reopening asks for a fresh one.
+    detail:
+      'Turned off. Anyone opening it is told the form is not taking responses, and it holds no ' +
+      'working access token while it is off. Turning it back on issues a fresh one at the same ' +
+      'web address.',
+    // NOTE: that sentence is true only when the withdrawal actually landed, which is why
+    // {@link pausedDetail} replaces it when the record says otherwise.
     accepting: false,
     fix: 'Turn it back on',
   },
@@ -146,26 +158,132 @@ const STATES: Record<ShareStateKind, Omit<ShareState, 'kind'>> = {
 };
 
 /**
+ * Is this link open to responses — the thing the Distribute tab's switch is labelled with?
+ *
+ * ONE definition, exported, because there were three and two disagreed with the server.
+ * "Open to responses" is `Status='Active'` AND `IsActive`: that is the pair
+ * `decideProvisioning` requires before it warrants a credential, and the pair
+ * `DistributionService.openForResponses` writes. Reading either half alone answers a
+ * different question while wearing the same label.
+ *
+ * The cost of the duplicate was not theoretical. The switch rendered its on/off state from
+ * `Status` alone, so a row at `Status='Active', IsActive=0` — the exact shape
+ * `openForResponses` exists to repair — drew the switch ON next to a "Paused" badge, and its
+ * click handler, reading the same half-predicate, concluded the link was already open and
+ * CLOSED it. A control that misreports its state and then does the opposite of what it offers.
+ *
+ * Kept here rather than on the component because {@link stateKind} needs the same sentence
+ * for its `paused` branch, and a predicate the badge and the control derive separately is a
+ * predicate they can drift apart on.
+ */
+export function isOpenToResponses(facts: Pick<ShareLinkFacts, 'Status' | 'IsActive'>): boolean {
+  return facts.IsActive && facts.Status === 'Active';
+}
+
+/**
+ * Does this link's record still advertise an access token it is no longer entitled to?
+ *
+ * The signature a fail-soft revocation leaves behind. When a link stops being open to
+ * responses the server revokes its invite and clears BOTH credential columns — but only
+ * after the revoke succeeds; a revoke that failed leaves the pair in place deliberately, so
+ * the next save retries it. So a link that is off and still carrying a `PublicLinkToken` is
+ * the server saying, in the only channel it has, that the credential was not withdrawn.
+ *
+ * Named once and shared, because two surfaces need the same answer and had reached opposite
+ * ones: the badge asserted the token was withdrawn, and the switch that withdrew it reported
+ * nothing at all. Both now ask this.
+ *
+ * It is deliberately not "the token is definitely still redeemable" — the record cannot see
+ * the invite. It is "nothing here proves it was withdrawn", which is the claim the author
+ * needs and the strongest one these facts support.
+ */
+export function credentialMayStillRedeem(
+  facts: Pick<ShareLinkFacts, 'Status' | 'IsActive' | 'PublicLinkToken'>,
+): boolean {
+  return !isOpenToResponses(facts) && !!facts.PublicLinkToken;
+}
+
+/**
+ * What to tell the author about a paused link's access token.
+ *
+ * The static `paused` copy asserts the credential was withdrawn. That is the usual case and
+ * it is not a safe thing to assert, because the withdrawal is FAIL-SOFT on the server:
+ * `FormDistributionEntityServer.Save()` logs a revoke that failed and still returns true, so
+ * a green save and a still-redeemable token are the same outcome from the client's side.
+ *
+ * That used to be the GUARANTEED outcome for a whole class of deployment: the write ran as
+ * whoever saved the distribution, and a host whose form authors are not Developers grants them
+ * nothing on `MJ: Magic Link Invites` (bizapps-forms#114). It no longer does — the credential is
+ * written under the host's provisioning identity — so what remains here is an ordinary failure: a
+ * database error, an invite repointed at another link, a host with no provisioning identity at
+ * all. Rarer, still real, and still indistinguishable from success at this end.
+ *
+ * The record carries as much of the answer as it can, and carries it because the server wants it
+ * to: a failed revoke leaves the credential LINKED so the next save retries, and the pair is
+ * cleared together only after a revoke succeeds. So an empty `PublicLinkToken` on a paused link
+ * IS the server reporting the credential dead.
+ *
+ * A token still sitting there is weaker evidence, and the wording has to respect that. It covers
+ * `revoke-failed` (the invite is untouched and the token really does still redeem), BUT ALSO
+ * `unlink-failed` (the revoke LANDED — the invite is `Revoked`, the token is dead — and only the
+ * record's copy is stale), and a link not yet saved since the upgrade, where nothing has tried.
+ * Those leave IDENTICAL columns and mean opposite things, so no sentence built on these facts may
+ * assert that the token still redeems. What they support is "its withdrawal is not confirmed",
+ * which is the claim worth making: it sends the author to look, and it is true in every case.
+ *
+ * This is the same rule the rest of the module follows: never assert something the facts do not
+ * contain. Asserting withdrawal here would be the module's own failure mode, on the one flow
+ * whose entire purpose is stopping a link being redeemed.
+ */
+function pausedDetail(facts: ShareLinkFacts): string | null {
+  if (facts.Status === 'Draft' && !facts.PublicLinkToken) {
+    // Never on, nothing withdrawn: the column's default, where an Action or an import lands. The
+    // static paused copy says "while it is off" and "turning it back on", which is false here.
+    return 'This link has not been turned on yet. Turn it on to issue its web address.';
+  }
+  if (!credentialMayStillRedeem(facts)) {
+    return null;
+  }
+  return (
+    'Turned off. Anyone opening it is told the form is not taking responses. This link still ' +
+    'has an access token on record, though, so its withdrawal is not confirmed — treat the old ' +
+    'web address as possibly still working until it clears. The server retries on the next save ' +
+    'of this link. Turning it back on issues a fresh token at the same web address.'
+  );
+}
+
+/**
  * The state of a share link at `now`.
  *
- * Order is deliberate, and it is "most fundamental problem first" rather than the order
- * the server happens to check in: a link with no token is broken no matter what else is
- * true, and telling someone their link is "Scheduled" when it was never issued sends
- * them to fix the wrong thing. Below that, an explicit human decision (paused) outranks
- * a calendar one, and a calendar one outranks the cap — because that is the order in
- * which they can act on it.
+ * Order is deliberate, and it is "the thing the author can act on first" rather than the
+ * order the server happens to check in: an explicit human decision (paused) outranks a
+ * missing token, which outranks a calendar reason, which outranks the cap.
+ *
+ * Paused leads because of bizapps-forms#104: pausing a link now REVOKES its magic-link
+ * credential and clears `PublicLinkToken`, so a paused link legitimately has no token.
+ * The two used to be the other way round, on the reasoning that a link with no token is
+ * broken however else it looks — true while a token was minted once and never withdrawn,
+ * and wrong now, because it would badge every deliberately-paused link "Not ready" and
+ * offer "Issue the link" as the cure for a switch the author had turned off themselves.
+ * `pending` still leads the rest: it means the host could not mint, and telling someone
+ * that link is merely "Scheduled" sends them to edit a date that is not the problem.
  */
 export function shareState(facts: ShareLinkFacts, now: Date): ShareState {
   const kind = stateKind(facts, now);
-  return { kind, ...STATES[kind] };
+  const state = { kind, ...STATES[kind] };
+  // One state, two sentences. `paused` stays a single kind because both cases wear the same
+  // badge, refuse the same submissions and are cured by the same click — only the claim about
+  // the access token differs, and that is what `detail` is for.
+  const detail = kind === 'paused' ? pausedDetail(facts) : null;
+  return detail ? { ...state, detail } : state;
 }
 
 function stateKind(facts: ShareLinkFacts, now: Date): ShareStateKind {
+  if (!isOpenToResponses(facts)) {
+    return 'paused';
+  }
   if (!facts.PublicLinkToken) {
     return 'pending';
-  }
-  if (!facts.IsActive || facts.Status !== 'Active') {
-    return 'paused';
   }
   const closeAt = toDate(facts.CloseAt);
   if (closeAt && closeAt.getTime() < now.getTime()) {
