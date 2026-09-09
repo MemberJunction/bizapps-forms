@@ -147,8 +147,34 @@ const CHECK_TIMEOUT_MS = 120_000;
  * nobody can run must never read as a check that passed". Before this existed, only a MISSING
  * checker and a failed spawn reached `ask`; a killed or timed-out one had no path at all, and the
  * absence of a path meant silence.
+ *
+ * ── WHY A NON-ZERO EXIT IS NOT ENOUGH TO BLAME THE TREE (#179) ──────────────────────────────────
+ * The three signals above are all NEGATIVE — they detect a checker that failed to start or to
+ * finish. A checker can do neither and still never judge anything: `node_modules/turbo/bin/turbo`
+ * is a JavaScript shim that execs a platform-specific optional dependency, and when that dependency
+ * is missing or unlinked the shim exists, spawns cleanly, and exits 1 with a resolution error. No
+ * negative signal fires, so a green tree was denied under the heading `typecheck` and the human was
+ * sent to `npm run typecheck`, which fails identically for the same unrelated reason.
+ *
+ * So the last question is asked POSITIVELY: did this checker get far enough to reach a verdict?
+ * Each check answers for itself via `verdictPattern`, because the evidence is not the same shape
+ * for both — turbo prints a `Tasks:` summary on every completed run, and `check-ui-tokens.mjs` is
+ * plain Node that ends in `PASS`/`FAIL`. Matching turbo's format alone would turn every real
+ * UI-gate failure into `ask`, which is the same bug pointed the other way.
+ *
+ * Deliberately asked only of a NON-ZERO exit. A `--filter` glob that matches no package exits 0 and
+ * still prints ` Tasks:    0 successful, 0 total`, so the marker cannot catch a run that passed
+ * without checking anything; that hole needs a different signal and is tracked separately. Asking
+ * here anyway would add a way for a green commit to start prompting without closing it.
+ *
+ * Matching a printed marker is a heuristic, and it fails SAFE in both directions: a wording change
+ * in turbo turns real failures into `ask` (a human looks) rather than into silence. Prefer it to
+ * string-matching the error text, which is what changes between releases.
  */
-export function classifyCheckResult(name, result) {
+export function classifyCheckResult({ name, verdictPattern }, result) {
+    if (!(verdictPattern instanceof RegExp)) {
+        throw new Error(`${name} has no verdictPattern, so nothing can say whether it ran.`);
+    }
     if (result.error) throw new Error(`${name} could not be spawned: ${result.error.message}`);
     if (result.signal) {
         throw new Error(
@@ -161,10 +187,20 @@ export function classifyCheckResult(name, result) {
     }
     if (result.status === 0) return null;
     const combined = `${result.stdout || ''}${result.stderr || ''}`;
+    if (!verdictPattern.test(combined)) {
+        throw new Error(
+            `${name} exited ${result.status} without ever reaching a verdict, so this is a broken ` +
+            'checker rather than a failing tree — most likely an incomplete install. It reported: ' +
+            combined.trim().split('\n').slice(-5).join(' ').slice(0, 300),
+        );
+    }
     return { name, output: combined.split('\n').slice(-40).join('\n') };
 }
 
-/** Runs the real checks. Throws when a checker is missing rather than reporting it as clean. */
+/**
+ * Runs the real checks. Throws — never reports "clean" — when a checker is missing, or when one
+ * ran and never reached a verdict. Each entry carries the marker that proves it got that far.
+ */
 function runChecks() {
     const turbo = path.join(PROJECT_DIR, 'node_modules', 'turbo', 'bin', 'turbo');
     const uiGate = path.join(PROJECT_DIR, 'scripts', 'check-ui-tokens.mjs');
@@ -173,20 +209,26 @@ function runChecks() {
     }
 
     const invocations = [
-        { name: 'lint:ui', argv: [uiGate] },
-        { name: 'typecheck', argv: [turbo, 'typecheck', '--filter=@mj-biz-apps/forms-*'] },
+        { name: 'lint:ui', argv: [uiGate], verdictPattern: /^(?:PASS|FAIL)\b/m },
+        {
+            name: 'typecheck',
+            argv: [turbo, 'typecheck', '--filter=@mj-biz-apps/forms-*'],
+            // Leading whitespace is load-bearing: turbo prints ` Tasks:    9 successful, 9 total`,
+            // so `/^Tasks:/m` matches nothing and would send every commit to `ask`.
+            verdictPattern: /^\s*Tasks:\s/m,
+        },
     ];
 
     const failures = [];
-    for (const { name, argv } of invocations) {
-        const result = spawnSync(process.execPath, argv, {
+    for (const check of invocations) {
+        const result = spawnSync(process.execPath, check.argv, {
             cwd: PROJECT_DIR,
             encoding: 'utf8',
             shell: false,
             maxBuffer: 32 * 1024 * 1024,
             timeout: CHECK_TIMEOUT_MS,
         });
-        const failure = classifyCheckResult(name, result);
+        const failure = classifyCheckResult(check, result);
         if (failure) failures.push(failure);
     }
     return failures;

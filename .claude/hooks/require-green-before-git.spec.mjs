@@ -138,19 +138,35 @@ test('checks that cannot run ask rather than silently allowing', () => {
 // `turbo.json` gives `typecheck` `dependsOn: ["^build"]`, and the hook fires on `git commit`, which
 // by construction happens after source changed. Measured on this repo: 217 ms with nothing changed,
 // 6931 ms after touching one leaf source file, 6507 ms cold. Not the 13 ms the comment claims.
+//
+// Each check declares the pattern it prints once it has REACHED A VERDICT. Measured, not guessed:
+// turbo prints ` Tasks:    N successful, M total` on every completed run — success (9 successful),
+// task failure (exit 2, `0 successful, 1 total`) and fully-cached alike — and prints nothing of the
+// sort when it never resolved its platform binary. `check-ui-tokens.mjs` is plain Node and ends
+// with `PASS — …` or `FAIL — N UI gate violation(s).`.
+const TYPECHECK = { name: 'typecheck', verdictPattern: /^\s*Tasks:\s/m };
+const LINT_UI = { name: 'lint:ui', verdictPattern: /^(?:PASS|FAIL)\b/m };
+
 test('a check that passed is not a failure', () => {
-    assert.equal(classifyCheckResult('typecheck', { status: 0, stdout: '', stderr: '' }), null);
+    assert.equal(
+        classifyCheckResult(TYPECHECK, { status: 0, stdout: ' Tasks:    9 successful, 9 total', stderr: '' }),
+        null,
+    );
 });
 
 test('a check that ran and failed is reported with its output', () => {
-    const f = classifyCheckResult('lint:ui', { status: 1, stdout: 'hardcoded color', stderr: '' });
+    const f = classifyCheckResult(LINT_UI, {
+        status: 1,
+        stdout: 'hardcoded color\n\nFAIL — 1 UI gate violation(s).',
+        stderr: '',
+    });
     assert.equal(f.name, 'lint:ui');
     assert.match(f.output, /hardcoded color/);
 });
 
 test('a check that could not be spawned throws, so the decision becomes ask', () => {
     assert.throws(
-        () => classifyCheckResult('typecheck', { error: new Error('ENOENT'), status: null }),
+        () => classifyCheckResult(TYPECHECK, { error: new Error('ENOENT'), status: null }),
         /typecheck/,
     );
 });
@@ -159,11 +175,87 @@ test('a check killed before it finished throws rather than reporting a failure',
     // spawnSync surfaces a timeout as signal SIGTERM. Reporting that as `deny` would blame the
     // tree for the harness; reporting it as a pass would be the silence this hook exists to stop.
     assert.throws(
-        () => classifyCheckResult('typecheck', { status: null, signal: 'SIGTERM', stdout: '', stderr: '' }),
+        () => classifyCheckResult(TYPECHECK, { status: null, signal: 'SIGTERM', stdout: '', stderr: '' }),
         /SIGTERM|finish/i,
     );
 });
 
 test('a check with no exit status at all throws', () => {
-    assert.throws(() => classifyCheckResult('lint:ui', { status: null, stdout: '', stderr: '' }), /lint:ui/);
+    assert.throws(() => classifyCheckResult(LINT_UI, { status: null, stdout: '', stderr: '' }), /lint:ui/);
+});
+
+// ── A checker that EXITED non-zero without ever running is not a red tree (#179) ─────────────────
+// `node_modules/turbo/bin/turbo` is a JavaScript shim that resolves and execs a platform-specific
+// optional dependency (`@turbo/darwin-arm64`, `@turbo/linux-64`, …). When that dependency is missing
+// or a stale postinstall left it unlinked, the shim EXISTS (so runChecks' existsSync guard passes),
+// SPAWNS CLEANLY (so `result.error` is unset) and EXITS 1 with a resolution error. Every negative
+// signal classifyCheckResult had was absent, so a perfectly green tree was denied under the heading
+// `typecheck` and the human was pointed at `npm run typecheck`, which fails the same way for the
+// same unrelated reason. That is the mirror image of the bug `ask` exists to prevent: the header
+// spends a section establishing that a check nobody can run must never read as a check that passed,
+// and the same distinction is what makes a deny honest.
+test('a checker that exited non-zero without reaching a verdict throws rather than blaming the tree', () => {
+    const turboCouldNotStart = {
+        status: 1,
+        signal: null,
+        stdout: '',
+        stderr: [
+            'Turborepo failed to start.',
+            'Turborepo detected that you are running:\ndarwin arm64',
+            'We did not find any binaries on this system.',
+            'This can happen if you run installation with the --no-optional flag.',
+        ].join('\n'),
+    };
+    assert.throws(() => classifyCheckResult(TYPECHECK, turboCouldNotStart), /typecheck/);
+});
+
+// The pair above and below is the point: "throw on everything non-zero" would satisfy the first
+// test and break this one, so a future fix cannot pass by collapsing the distinction the other way.
+test('a genuine type error still reports a failure, so the decision stays deny', () => {
+    const realTypeError = {
+        status: 2,
+        signal: null,
+        stdout: '@mj-biz-apps/forms-ng:typecheck: src/a.ts(3,5): error TS2307: Cannot find module x\n' +
+            ' Tasks:    0 successful, 1 total\nFailed:    @mj-biz-apps/forms-ng#typecheck',
+        stderr: '',
+    };
+    const f = classifyCheckResult(TYPECHECK, realTypeError);
+    assert.equal(f.name, 'typecheck');
+    assert.match(f.output, /error TS2307/);
+});
+
+// The signal must not be turbo-shaped only. `lint:ui` is plain Node and never prints a `Tasks:`
+// line, so a fix that hardcoded turbo's summary would turn every real UI-gate failure into `ask`
+// and quietly stop blocking the hardcoded colours that #167 merged.
+test('a plain-Node checker reaches a verdict without a turbo summary line', () => {
+    const uiGateFailed = {
+        status: 1,
+        signal: null,
+        stdout: 'UI token gate\n[color] hardcoded-color gate: 1 violation(s)\n' +
+            "  packages/Angular/src/a.css:1  color: #6366f1;\n\nFAIL — 1 UI gate violation(s).",
+        stderr: '',
+    };
+    const f = classifyCheckResult(LINT_UI, uiGateFailed);
+    assert.equal(f.name, 'lint:ui');
+    assert.match(f.output, /#6366f1/);
+});
+
+test('a plain-Node checker that crashed before its verdict throws', () => {
+    const uiGateCrashed = {
+        status: 1,
+        signal: null,
+        stdout: 'UI token gate\n',
+        stderr: "TypeError: Cannot read properties of undefined (reading 'length')\n    at walk (...)",
+    };
+    assert.throws(() => classifyCheckResult(LINT_UI, uiGateCrashed), /lint:ui/);
+});
+
+// A descriptor with no pattern must not decide anything. Without this guard an added check that
+// forgot the field would silently classify every non-zero exit as unrunnable, and every commit
+// would `ask` — the check would still be dead, just noisily rather than quietly.
+test('a check descriptor with no verdict pattern is a programming error, not a verdict', () => {
+    assert.throws(
+        () => classifyCheckResult({ name: 'typecheck' }, { status: 1, stdout: '', stderr: '' }),
+        /verdictPattern/,
+    );
 });
