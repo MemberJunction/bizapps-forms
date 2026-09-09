@@ -190,7 +190,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     );
 
     if (!outcome.ok) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome.opensAt));
+      // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
+      // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
+      // decision rather than a second one made here and kept in step by hand.
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome));
       return;
     }
 

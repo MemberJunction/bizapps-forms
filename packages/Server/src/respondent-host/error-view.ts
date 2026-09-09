@@ -31,16 +31,25 @@ export interface RedeemErrorView {
 export type RespondentErrorTone = 'error' | 'notice';
 
 /**
+ * The reason-specific facts a view may name. One named bag rather than a growing positional list:
+ * each field belongs to exactly one reason, and `RedeemOutcome` satisfies this shape structurally,
+ * so the route hands over the whole outcome instead of picking fields out of it.
+ */
+export interface RedeemFailureDetails {
+  /** When the link opens — `distribution-not-yet-open` only. */
+  opensAt?: Date;
+}
+
+/**
  * Map a typed redeem failure to a friendly message + the right HTTP status.
  *
- * @param opensAt When the link opens — meaningful for `distribution-not-yet-open` only, where it
- *   names the time in the copy and becomes the `Retry-After` header.
+ * @param details The reason-specific facts this refusal can name. A `RedeemOutcome` satisfies it.
  * @param now Injected rather than read inside, so "is this opening time still ahead of us" is a
  *   testable decision instead of a hidden clock.
  */
 export function redeemFailureToView(
   reason: RedeemFailureReason,
-  opensAt?: Date,
+  details: RedeemFailureDetails = {},
   now: Date = new Date(),
 ): RedeemErrorView {
   switch (reason) {
@@ -51,7 +60,7 @@ export function redeemFailureToView(
     // is the standard "not now, and here is when" — a monitor records a temporary condition, and
     // the copy names the time so the person can actually come back.
     case 'distribution-not-yet-open':
-      return notYetOpenView(opensAt, now);
+      return notYetOpenView(details.opensAt, now);
     case 'distribution-closed':
       return { status: 410, message: 'This form is no longer accepting responses.' };
     // Same 410 as 'closed' — the resource really is gone either way — but a different sentence.

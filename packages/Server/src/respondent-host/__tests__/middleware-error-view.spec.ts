@@ -46,22 +46,22 @@ describe('redeemFailureToView', () => {
     });
 
     it('is a temporary 503, never the 410 that closed links get', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', opensAt).status).toBe(503);
+      expect(redeemFailureToView('distribution-not-yet-open', { opensAt }).status).toBe(503);
     });
 
     it('sends Retry-After as the HTTP-date of the opening time', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', opensAt).retryAfter).toBe(opensAt.toUTCString());
+      expect(redeemFailureToView('distribution-not-yet-open', { opensAt }).retryAfter).toBe(opensAt.toUTCString());
     });
 
     it('names when the form opens, in UTC, and says so', () => {
-      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt);
+      const { message } = redeemFailureToView('distribution-not-yet-open', { opensAt });
       expect(message).toContain('September 8, 2026');
       expect(message).toContain('6:41 PM');
       expect(message).toContain('UTC');
     });
 
     it('does not tell the holder the form is "no longer" taking responses', () => {
-      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt);
+      const { message } = redeemFailureToView('distribution-not-yet-open', { opensAt });
       expect(message).not.toBe(redeemFailureToView('distribution-closed').message);
       expect(message.toLowerCase()).not.toContain('no longer');
     });
@@ -85,19 +85,19 @@ describe('redeemFailureToView', () => {
   // "it opens on X" is that X is still ahead of us; anything else is a missing value wearing a date.
   describe('an opening time that is not in the future', () => {
     it('refuses without naming a time rather than announcing the epoch', () => {
-      const view = redeemFailureToView('distribution-not-yet-open', new Date(0));
+      const view = redeemFailureToView('distribution-not-yet-open', { opensAt: new Date(0) });
       expect(view.status).toBe(503);
       expect(view.message).not.toContain('1970');
       expect(view.message).toBe("This form isn't open yet. Please check back later.");
     });
 
     it('sends no Retry-After for a time it will not name', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', new Date(0)).retryAfter).toBeUndefined();
+      expect(redeemFailureToView('distribution-not-yet-open', { opensAt: new Date(0) }).retryAfter).toBeUndefined();
     });
 
     it('still names a genuinely future opening time', () => {
       const soon = new Date(Date.now() + 60 * 60 * 1000);
-      const view = redeemFailureToView('distribution-not-yet-open', soon);
+      const view = redeemFailureToView('distribution-not-yet-open', { opensAt: soon });
       expect(view.retryAfter).toBe(soon.toUTCString());
       expect(view.message).toContain('It opens on');
     });
@@ -108,7 +108,7 @@ describe('redeemFailureToView', () => {
   // week has not been made unavailable, and one awaiting publication is not gone either.
   describe('page title', () => {
     it('does not call a scheduled form unavailable', () => {
-      const view = redeemFailureToView('distribution-not-yet-open', new Date(Date.now() + 60_000));
+      const view = redeemFailureToView('distribution-not-yet-open', { opensAt: new Date(Date.now() + 60_000) });
       expect(view.title).toBe('Form opens later');
     });
 
@@ -179,7 +179,7 @@ describe('respondentErrorResponse', () => {
   const soon = new Date(Date.now() + 60 * 60 * 1000);
 
   it('puts Retry-After on the wire for a link that opens later', () => {
-    const res = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', soon));
+    const res = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', { opensAt: soon }));
     expect(res.status).toBe(503);
     expect(res.headers['Retry-After']).toBe(soon.toUTCString());
   });
@@ -207,7 +207,7 @@ describe('respondentErrorResponse', () => {
   // A page whose title says "opens later" must not paint its one sentence in error red and
   // announce it assertively. The two states that are not failures render as a notice.
   it('renders a not-yet-open page as a notice, not an error', () => {
-    const html = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', soon)).html;
+    const html = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', { opensAt: soon })).html;
     expect(html).toContain('class="mjf-host__notice" role="status"');
     // Not a bare `not.toContain('mjf-host__error')`: the inlined stylesheet defines BOTH classes on
     // every page, so that assertion can only ever fail. What must be absent is the error PARAGRAPH.
