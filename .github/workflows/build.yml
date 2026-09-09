@@ -30,9 +30,17 @@ jobs:
   # reasons each entry earns its place are unchanged too:
   #   - apps/**   the MJAPI dev harness is a workspace member, so its package.json participates in
   #               the lockfile and its code is what a developer's live verification actually runs.
-  #   - .github/scripts/** and this file: the gates themselves live here, and a PR editing only a
-  #               gate script must still run the gate. Four releases shipped without the widget
-  #               bundle because it did not.
+  #   - .github/scripts/** and .github/workflows/**: the gates themselves live here, and a PR
+  #               editing only a gate must still run the gate. Four releases shipped without the
+  #               widget bundle because it did not. Widened from just this file to the whole
+  #               directory by #177: check-release-pushes.mjs reads EVERY workflow, so a push to a
+  #               ruleset-protected branch reintroduced in any of them must fail a check that
+  #               actually ran. The cost is that a workflow-only PR now runs the full job; that is
+  #               the intended side of the trade, because the alternative is a green required check
+  #               over a gate that never executed.
+  #   - ci/       the release scripts that pushed straight to `main` and `next` lived here (#177).
+  #               The directory is gone; the entry is not, because it is a pattern for a directory
+  #               that must fail the gate if it ever comes back. An absent path is inert.
   #   - migrations/  NOT only the migration gates' business. packages/Entities/src/contracts/
   #               question-types.spec.ts reads every file in migrations/, extracts the last
   #               CK_FormQuestion_QuestionType CHECK, and asserts it equals the hand-written
@@ -104,7 +112,8 @@ jobs:
             migrations/ \
             .github/scripts/ \
             .claude/ \
-            .github/workflows/build.yml)
+            .github/workflows/ \
+            ci/)
           echo "relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
           echo "build-and-test relevant: $RELEVANT"
 
@@ -200,6 +209,21 @@ jobs:
       # allow-cases in the spec are what stop a future "deny everything" from passing as a fix.
       - name: Commit-gate hook tests
         run: npm run lint:git-gate:test
+
+      # #177. Stdlib-only, like the gate specs above. The defect it guards is invisible until a
+      # release: a push to `main` or `next` reintroduced in any workflow or script breaks nothing in
+      # the pull request that adds it, and then stops the next release with GH013 — months later, in
+      # someone else's change. Its own spec runs first, and carries the allow-cases (tag pushes,
+      # unprotected branches, commented-out history) that stop a future "deny everything" passing as
+      # a fix.
+      - name: Release-push gate
+        run: npm run lint:release-pushes:test && npm run lint:release-pushes
+
+      # Same shape: mj-app.json's version and mjVersionRange are derived, not typed, and publish.yml
+      # only CHECKS them now (#177) rather than writing them. Drift caught here is a one-line fix;
+      # caught at release it is a red publish run.
+      - name: App version derivation tests
+        run: node --test scripts/sync-app-version.spec.mjs
 
       # Duplicated deliberately. The `scope` job above also runs this spec, but `scope` is not
       # itself a required context — a PR that weakened it would show a red X there that blocks
