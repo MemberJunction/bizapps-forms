@@ -47,15 +47,33 @@ export interface RedeemMagicLinkJsonResult {
   errorCode?: string;
 }
 
+/**
+ * Every reason a slug can fail to become a redeemed session token — as a VALUE, with the union
+ * derived from it. One list, not two: `error-view.ts` proves at compile time that it handles each
+ * member, and its spec iterates this array, so a new reason cannot be added without both a view
+ * and a test. Three hand-maintained copies of this list used to live in that spec, and nothing
+ * failed when one of them fell out of step.
+ */
+export const REDEEM_FAILURE_REASONS = [
+  'distribution-not-found',
+  'distribution-not-yet-open',
+  'distribution-closed',
+  'distribution-full',
+  'form-unpublished',
+  'no-token',
+  // The door's own pre-redeem read failed — a database problem, not a redeem one. Logged by
+  // `hasPublishedVersion`, which is the frame that knows what it was reading.
+  'redeem-failed',
+  // The two below the redeem endpoint: we asked and never got a usable answer (connect refused,
+  // DNS, TLS, a truncated body, an HTML error page from a proxy, a JSON body of some other shape).
+  'redeem-unreachable',
+  // Core answered and said no — a revoked token, an exhausted invite, a tripped rate limit — or
+  // answered "success" while returning no token, which is the same thing from here.
+  'redeem-refused',
+] as const;
+
 /** Why a slug could not be turned into a redeemed session token. */
-export type RedeemFailureReason =
-  | 'distribution-not-found'
-  | 'distribution-not-yet-open'
-  | 'distribution-closed'
-  | 'distribution-full'
-  | 'form-unpublished'
-  | 'no-token'
-  | 'redeem-failed';
+export type RedeemFailureReason = (typeof REDEEM_FAILURE_REASONS)[number];
 
 /** Outcome of {@link redeemSlugToToken}. Flat (non-discriminated) shape to match the package's
  * non-`strictNullChecks` compile, like the public-submit services. */

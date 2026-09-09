@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { redeemFailureToView, respondentErrorResponse } from '../error-view';
+import { REDEEM_FAILURE_REASONS } from '../redeem.service';
 
 describe('redeemFailureToView', () => {
   it('maps distribution-not-found to 404', () => {
@@ -117,10 +118,33 @@ describe('redeemFailureToView', () => {
     });
 
     it('leaves the states it does not speak for on the default title', () => {
-      for (const reason of ['distribution-closed', 'distribution-full', 'distribution-not-found', 'no-token', 'redeem-failed'] as const) {
+      // Derived, not listed: a reason added later lands here automatically and must either have a
+      // title of its own (add it to the exclusion) or prove it wants the default.
+      const speaksForItself = new Set(['distribution-not-yet-open', 'form-unpublished']);
+      for (const reason of REDEEM_FAILURE_REASONS.filter((r) => !speaksForItself.has(r))) {
         expect(redeemFailureToView(reason).title).toBeUndefined();
       }
     });
+  });
+
+  // Every reason must reach a deliberate arm of the switch. The `default` answers 502 at runtime
+  // for a value from outside the union, so a NEW member silently inheriting 502 is exactly the
+  // failure this pins — the compile-time assert cannot see a member that was never added here.
+  it('gives every declared reason a view, including the two redeem outcomes', () => {
+    expect(REDEEM_FAILURE_REASONS).toContain('redeem-unreachable');
+    expect(REDEEM_FAILURE_REASONS).toContain('redeem-refused');
+    for (const reason of REDEEM_FAILURE_REASONS) {
+      const view = redeemFailureToView(reason);
+      expect(view.message.length).toBeGreaterThan(0);
+      expect(view.status).toBeGreaterThanOrEqual(400);
+    }
+  });
+
+  it('keeps both new redeem reasons on the generic 502 (#139 splits the page, not this change)', () => {
+    expect(redeemFailureToView('redeem-unreachable').status).toBe(502);
+    expect(redeemFailureToView('redeem-refused').status).toBe(502);
+    expect(redeemFailureToView('redeem-unreachable').message).toBe(redeemFailureToView('redeem-failed').message);
+    expect(redeemFailureToView('redeem-refused').message).toBe(redeemFailureToView('redeem-failed').message);
   });
 
   // The `default` arm must keep answering 502 at runtime — the compile-time guard added alongside
@@ -144,30 +168,14 @@ describe('redeemFailureToView', () => {
   });
 
   it('sets no Retry-After on any reason but not-yet-open', () => {
-    for (const reason of [
-      'distribution-not-found',
-      'distribution-closed',
-      'distribution-full',
-      'form-unpublished',
-      'no-token',
-      'redeem-failed',
-    ] as const) {
+    for (const reason of REDEEM_FAILURE_REASONS.filter((r) => r !== 'distribution-not-yet-open')) {
       expect(redeemFailureToView(reason).retryAfter).toBeUndefined();
     }
   });
 
   it('returns a non-empty respondent-facing message for every reason', () => {
-    for (const reason of [
-      'distribution-not-found',
-      'distribution-not-yet-open',
-      'distribution-closed',
-      'distribution-full',
-      'form-unpublished',
-      'no-token',
-      'redeem-failed',
-    ] as const) {
-      const view = redeemFailureToView(reason);
-      expect(view.message.length).toBeGreaterThan(0);
+    for (const reason of REDEEM_FAILURE_REASONS) {
+      expect(redeemFailureToView(reason).message.length).toBeGreaterThan(0);
     }
   });
 });

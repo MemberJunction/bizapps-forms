@@ -73,7 +73,14 @@ export function redeemFailureToView(
       };
     case 'no-token':
       return { status: 409, message: 'This form link is not ready yet. Please try again later.' };
+    // All three keep the generic 502 the single reason had. The pair exists so the operator's LOG
+    // can tell an unreachable endpoint from a refusal (bizapps-forms#140); telling the RESPONDENT
+    // apart is a separate decision, and bizapps-forms#139 makes it for the refusal case — someone
+    // who tripped the redeem rate limit should hear 429 "try again", not "we are broken". Two
+    // changes on purpose: this one is not user-visible, so it cannot regress a respondent.
     case 'redeem-failed':
+    case 'redeem-unreachable':
+    case 'redeem-refused':
       return redeemFailedView();
     default:
       // A reason with no `case` above is a decision nobody made. The assignment fails the BUILD so
@@ -85,7 +92,7 @@ export function redeemFailureToView(
   }
 }
 
-/** The generic failure view, shared by `redeem-failed` and the unreachable default. */
+/** The generic failure view, shared by the three failure reasons and the unreachable default. */
 function redeemFailedView(): RedeemErrorView {
   return { status: 502, message: 'We could not open this form right now. Please try again later.' };
 }
