@@ -65,6 +65,24 @@ test('a quoted nested shell does not hide a git write', () => {
     assert.equal(isGitWriteCommand('ssh host "git push"'), true);
 });
 
+// `/` is not a boundary character and never should be — it is the middle of a path, not the start
+// of a command. The fix is a path PREFIX arm before `git`, not another boundary. An absolute path
+// is how git is invoked from a script that cannot trust PATH, and how Homebrew's git is reached.
+test('a path-qualified git is still a git write', () => {
+    assert.equal(isGitWriteCommand('/usr/bin/git commit -m x'), true);
+    assert.equal(isGitWriteCommand('/opt/homebrew/bin/git push origin next'), true);
+    assert.equal(isGitWriteCommand('./bin/git commit -m x'), true);
+    assert.equal(isGitWriteCommand('../tools/git push'), true);
+});
+
+// The prefix must not swallow a word that merely ENDS in git, or a path with no subcommand after
+// it. Without these, "match any path-ish blob before the word" would pass as a fix.
+test('a path that merely ends in git is not a git write', () => {
+    assert.equal(isGitWriteCommand('ls -l /usr/bin/git'), false);
+    assert.equal(isGitWriteCommand('cat /var/log/legit commit'), false);
+    assert.equal(isGitWriteCommand('cat digit push.txt'), false);
+});
+
 // macOS and Windows both mount case-insensitive, so `Git commit` really runs git — the same
 // bypass block-generated-edits.mjs was bitten by.
 test('a shifted capital does not hide a git write', () => {
@@ -104,6 +122,17 @@ test('the matcher stays linear on pathological input', () => {
     isGitWriteCommand(evil);
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
     assert.ok(ms < 50, `isGitWriteCommand took ${ms.toFixed(1)}ms on 64 options — backtracking blow-up`);
+});
+
+// Same reasoning as the test above, for the path prefix added in #178: a long path-shaped string is
+// non-matching input that the matcher must reject cheaply, on every Bash tool call.
+test('the path prefix stays linear on pathological input', () => {
+    for (const evil of [`${'a/'.repeat(200)}x`, `${'/'.repeat(400)}x`]) {
+        const start = process.hrtime.bigint();
+        isGitWriteCommand(evil);
+        const ms = Number(process.hrtime.bigint() - start) / 1e6;
+        assert.ok(ms < 50, `isGitWriteCommand took ${ms.toFixed(1)}ms on ${evil.length} chars`);
+    }
 });
 
 // A subcommand that is not commit/push must stay allowed even behind global options, so the

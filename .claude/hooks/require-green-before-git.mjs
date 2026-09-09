@@ -92,6 +92,12 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   it is a new way for the gate to be silently wrong, so it was weighed and rejected rather than
  *   missed. The deny message names this over-match, so a grep denied on a red tree can explain
  *   itself.
+ * - An optional PATH PREFIX, `(?:[\w.\/-]*\/)?`, sits before `git`. `/` is deliberately NOT in the
+ *   boundary class — it is the middle of a path, not the start of a command — so `/usr/bin/git
+ *   commit` and `/opt/homebrew/bin/git push` matched nothing at all before (#178). The class must
+ *   END in a slash, so a word that merely ends in `git` (`/var/log/legit commit`, `digit push.txt`)
+ *   still does not match. One flat greedy class also keeps this arm linear, where the tempting
+ *   `(?:[\w.-]*\/)+` is the nested-quantifier shape the paragraph above warns about.
  * - `/i` makes the match case-insensitive. macOS and Windows both mount case-insensitive, so
  *   `Git commit` and `GIT PUSH` really invoke `git` on this machine — the identical bug class
  *   `block-generated-edits.mjs`'s header records being bitten by ("the path pattern was
@@ -104,7 +110,7 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   hyphen, so the lookahead fails and `commit`/`push` never matches as its own subcommand).
  */
 const GIT_WRITE =
-    /(?:^|[\s;&|(`'"])\s*git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
+    /(?:^|[\s;&|(`'"])\s*(?:[\w.\/-]*\/)?git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
 
 export function isGitWriteCommand(command) {
     return typeof command === 'string' && GIT_WRITE.test(command);
