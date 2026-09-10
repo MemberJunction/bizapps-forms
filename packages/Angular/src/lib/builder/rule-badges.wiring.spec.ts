@@ -33,11 +33,21 @@ const builderHtml = (): string => stripped('form-builder.component.html');
 /** Where the rule sentences — and the one source-list definition — actually live. */
 const inventory = (): string => stripped('rules-inventory.ts');
 
-/** Just the shared reorder path, so a guard about it cannot be satisfied by another method. */
+/**
+ * Just the shared reorder path, so a guard about it cannot be satisfied by another method.
+ *
+ * Bounded by the method's OWN closing brace rather than by whatever symbol follows it. Slicing to
+ * the next declaration is only isolation while nothing is ever inserted between the two, and #149
+ * inserted `moveQuestionAcrossPages` exactly there — which quietly doubled this slice and let the
+ * busy-flag guard below be satisfied by that method's try/finally instead of this one's. The
+ * damage runs one way only: assertions that MATCH get easier as the haystack grows, so the slice
+ * widening produces no failure to notice. `\n  }` is the same bound `crossPageMethod` and
+ * `undoMethod` use, and the test directly below pins it.
+ */
 const reorderMethod = (): string => {
   const source = builder();
   const start = source.indexOf('private async reorderQuestion(');
-  const end = source.indexOf('protected reorderNotice', start);
+  const end = source.indexOf('\n  }', start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
@@ -182,6 +192,19 @@ describe('a reorder that breaks a rule says so at the drag', () => {
       /undoReorderMove\(\s*notice,\s*current\.entity\.ID,\s*this\.questionIds\(current\),\s*this\.questionIds\(home\),\s*\)/,
     );
     expect(source).toMatch(/private questionIds\(page: PageNode\): string\[\] \{/);
+  });
+
+  it('slices ONE method, so a guard about the reorder path cannot be met by another', () => {
+    // `reorderMethod`'s docstring promises this isolation, and the promise held only while the
+    // symbol it slices TO was the next thing in the file. #149 inserted `moveQuestionAcrossPages`
+    // between the two markers, and the guard below silently started matching THAT method's
+    // try/finally: a `reorderQuestion` that sets `busy` and never releases it passed all three
+    // of its assertions. An assertion that MATCHES only gets easier as the haystack grows, so
+    // the boundary has to be asserted too and not just the contents.
+    const method = reorderMethod();
+    expect(method).toMatch(/private async reorderQuestion\(/);
+    expect(method).not.toMatch(/private async moveQuestionAcrossPages\(/);
+    expect(method.match(/this\.busy = true/g) ?? []).toHaveLength(1);
   });
 
   it('holds the busy flag across the write it awaits', () => {
