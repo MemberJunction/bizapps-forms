@@ -615,6 +615,74 @@ export class BuilderStateService {
     return ok;
   }
 
+  /**
+   * Move a question to another page and renumber BOTH pages (issue #149).
+   *
+   * The caller has already moved it in the in-memory tree — this persists that, it does not
+   * decide it. The preconditions are asserted rather than assumed because getting them wrong is
+   * silent: renumbering a page the question is still in writes the collision it exists to avoid.
+   *
+   * THE ORDER IS THE INTEGRITY STORY. There is no transaction — this is one `PageID` write plus
+   * up to N+M `DisplayOrder` writes, one row at a time, and `persistQuestionOrder` already
+   * documents that it can fail halfway. So the order is chosen so that every prefix of it leaves
+   * a tree that reloads consistently:
+   *
+   *   1. the moved question's `PageID` AND its final `DisplayOrder`, in ONE `Save()`;
+   *   2. the destination's remaining rows;
+   *   3. the source's remaining rows.
+   *
+   * Membership goes first and alone because it is the only write that cannot be re-derived from
+   * what is on screen — a wrong `DisplayOrder` is corrected by the next reorder or a reload; a
+   * lost `PageID` is not. And because `PageID` is one column on one row written by one `Save()`,
+   * the question belongs to exactly one page at every instant: "orphaned between sections" is
+   * unrepresentable, and the worst a partial failure can do is leave the order within one page
+   * wrong. Failing at (1) leaves the pre-move state untouched; failing inside (2) or (3) leaves
+   * duplicate or gapped `DisplayOrder` values, which `loadTree`'s sort tolerates.
+   *
+   * NOTHING IS ROLLED BACK, matching `reorderQuestion`: the screen goes on showing what the
+   * author did, `lastFailure()` says the database refused, and a reload re-asserts the truth. A
+   * rollback needs writes of its own, which can fail in turn, and would be a second answer to a
+   * question this file already answers one way.
+   *
+   * The moved row is not written twice: step 1 sets its `DisplayOrder` to its final value, so
+   * step 2's `persistQuestionOrder` skips it.
+   */
+  public async persistCrossPageMove(
+    node: QuestionNode,
+    source: PageNode,
+    destination: PageNode,
+  ): Promise<boolean> {
+    if (source.entity.ID === destination.entity.ID) {
+      throw new Error(
+        `persistCrossPageMove: source and destination are the same page (${source.entity.ID}); ` +
+          'an in-page reorder is persistQuestionOrder.',
+      );
+    }
+    const index = destination.questions.indexOf(node);
+    if (index < 0) {
+      throw new Error(
+        `persistCrossPageMove: question ${node.entity.ID} is not in destination page ` +
+          `${destination.entity.ID}; the caller moves it in memory first.`,
+      );
+    }
+    if (source.questions.includes(node)) {
+      throw new Error(
+        `persistCrossPageMove: question ${node.entity.ID} is still in source page ` +
+          `${source.entity.ID}; renumbering it there would write the collision this avoids.`,
+      );
+    }
+
+    node.entity.PageID = destination.entity.ID;
+    node.entity.DisplayOrder = index;
+    if (!(await this.saveChecked(node.entity, 'move question to another section'))) {
+      return false;
+    }
+
+    const destinationOk = await this.persistQuestionOrder(destination);
+    const sourceOk = await this.persistQuestionOrder(source);
+    return destinationOk && sourceOk;
+  }
+
   /** Renumber + persist DisplayOrder on a question's options to match array order. */
   public async persistOptionOrder(node: QuestionNode): Promise<boolean> {
     let ok = true;
