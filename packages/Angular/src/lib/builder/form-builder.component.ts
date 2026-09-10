@@ -3,10 +3,12 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   CdkDropList,
+  CdkDropListGroup,
   CdkDrag,
   CdkDragHandle,
   CdkDragPreview,
   moveItemInArray,
+  transferArrayItem,
   type CdkDragDrop,
 } from '@angular/cdk/drag-drop';
 import { BaseEntity, CompositeKey, LogError } from '@memberjunction/core';
@@ -87,12 +89,14 @@ import {
 } from './publish-fingerprint';
 import {
   damageKeys,
+  isValidCrossPageMove,
   isValidReorder,
   newlyBrokenRules,
   noticeStillTrue,
   reorderNoticeText,
   undoReorderMove,
   type ReorderNotice,
+  type UndoMove,
 } from './reorder';
 import { nextOptionLabel } from './option-labels';
 import {
@@ -108,6 +112,7 @@ import {
   selectScreen as screenSelection,
   type BuilderSelection,
 } from './builder-selection';
+import { targetPageFor, type NewQuestionTarget } from './new-question-target';
 
 /**
  * Which workspace tab is showing.
@@ -155,6 +160,7 @@ const FINGERPRINT_VERSION_ID = 'draft-fingerprint';
     CommonModule,
     FormsModule,
     CdkDropList,
+    CdkDropListGroup,
     CdkDrag,
     CdkDragHandle,
     CdkDragPreview,
@@ -521,14 +527,14 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree || this.busy) {
       return;
     }
-    const page = this.targetPageForNewQuestion();
-    if (!page) {
+    const target = targetPageFor(this.selection, this.pages);
+    if (!target) {
       return;
     }
     this.busy = true;
-    const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type));
+    const node = await this.state.addQuestion(this.tree, target.page, type, this.defaultPrompt(type));
     if (node) {
-      page.questions.push(node);
+      target.page.questions.push(node);
       // Selecting the new question is what clears any screen selection. The author asked for a
       // question; the pane has to show them the question they just got.
       this.selection = questionSelection(node.entity.ID);
@@ -628,27 +634,12 @@ export class FormBuilderComponent extends BaseFormComponent {
     const labels = this.itemLabels;
     this.reorderNotice = {
       text: reorderNoticeText({ id, label }, broken, (other) => labels.get(other) ?? 'another question'),
-      pageId: page.entity.ID,
+      // An insert lands on the page the author clicked; it has not come from anywhere else.
+      fromPageId: page.entity.ID,
       questionId: id,
       wasBefore: null,
       damage: damageKeys(broken),
     };
-  }
-
-  /** Add to the page holding the selected question, else the last page. */
-  private targetPageForNewQuestion(): PageNode | undefined {
-    if (!this.tree || this.tree.pages.length === 0) {
-      return undefined;
-    }
-    if (this.selectedQuestionId) {
-      const owner = this.tree.pages.find((p) =>
-        p.questions.some((q) => q.entity.ID === this.selectedQuestionId),
-      );
-      if (owner) {
-        return owner;
-      }
-    }
-    return this.tree.pages[this.tree.pages.length - 1];
   }
 
   private defaultPrompt(type: FormQuestionType): string {
@@ -659,6 +650,17 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected get pages(): PageNode[] {
     return this.tree?.pages ?? [];
+  }
+
+  /**
+   * The section a palette click would write to, and what its header should say about it.
+   *
+   * Read ONCE per change-detection pass through the template's `@let`, not once per header: the
+   * answer is the same for every section, and the header that matches is the one that announces
+   * it. Null on a form with no sections, where a palette click does nothing.
+   */
+  protected get addingHere(): NewQuestionTarget | null {
+    return targetPageFor(this.selection, this.pages);
   }
 
   protected async setPageTitle(page: PageNode, title: string): Promise<void> {
@@ -1313,8 +1315,14 @@ export class FormBuilderComponent extends BaseFormComponent {
    * second copy of that decision, free to drift from the one that actually decides — and the
    * symptom of the drift is either a dead control or a question that cannot be moved at all.
    *
-   * The boundary is the PAGE's, because that is the only boundary reordering has: every path
-   * here indexes `page.questions`, and nothing moves a question to another section.
+   * The boundary is the PAGE's — every path through this method indexes `page.questions`, and
+   * the arrows deliberately stop there even though the DRAG no longer does (#149). A drag is a
+   * gesture with a visible target; an arrow that silently teleported a question into the next
+   * section would be a control whose result the author cannot predict before pressing it.
+   *
+   * KNOWN CONSEQUENCE, and it is a real gap: keyboard and touch users have no way to move a
+   * question between sections at all. Tracked as a follow-up rather than solved here, because
+   * the answer is a different control (a "move to section" menu), not a wider arrow.
    */
   protected canMoveQuestion(page: PageNode, node: QuestionNode, delta: number): boolean {
     const index = page.questions.indexOf(node);
@@ -1326,9 +1334,26 @@ export class FormBuilderComponent extends BaseFormComponent {
     await this.reorderQuestion(page, index, index + delta);
   }
 
-  /** Pointer/touch drag-drop reorder within a page (mirrors {@link moveQuestion}). */
-  protected async dropQuestion(page: PageNode, event: CdkDragDrop<QuestionNode[]>): Promise<void> {
-    await this.reorderQuestion(page, event.previousIndex, event.currentIndex);
+  /**
+   * Pointer/touch drag-drop. Within a section this mirrors {@link moveQuestion}; across two
+   * sections it is {@link moveQuestionAcrossPages} (#149).
+   *
+   * Branching on container IDENTITY rather than on page ids: CDK is the thing that knows which
+   * list the drag started in, and `event.previousContainer.data` is that list's own `PageNode`.
+   * Re-deriving the source page by searching the tree for the array the drag came out of would
+   * be a second answer to a question CDK has already answered.
+   */
+  protected async dropQuestion(page: PageNode, event: CdkDragDrop<PageNode>): Promise<void> {
+    if (event.previousContainer === event.container) {
+      await this.reorderQuestion(page, event.previousIndex, event.currentIndex);
+      return;
+    }
+    await this.moveQuestionAcrossPages(
+      event.previousContainer.data,
+      page,
+      event.previousIndex,
+      event.currentIndex,
+    );
   }
 
   /**
@@ -1378,7 +1403,7 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (text.length > 0) {
       this.reorderNotice = {
         text,
-        pageId: page.entity.ID,
+        fromPageId: page.entity.ID,
         questionId: moved.entity.ID,
         wasBefore,
         damage: damageKeys(broken),
@@ -1410,6 +1435,87 @@ export class FormBuilderComponent extends BaseFormComponent {
     this.markDirty();
   }
 
+  /**
+   * Move a question into another section, persist both sections, and say what the move cost
+   * (issue #149).
+   *
+   * THE SAME SHAPE AS {@link reorderQuestion} AND THE SAME BAND, deliberately: one gesture keeps
+   * one behaviour. The drop is never refused because of rules — every position in every section
+   * is a legal target — and if the move breaks one, the author reads it in the band the in-page
+   * drag already raises. Publish is what refuses a broken form (`publish.service.ts`), and it
+   * still does.
+   *
+   * It DISCHARGES the obligation {@link reorderQuestion} records. That method claims to be the
+   * only write path that can invert a pair of surviving questions, and says that if a move to
+   * another section ever ships, "the diff has to wrap the new write too". This is that write,
+   * and this is the diff wrapping it. `newlyBrokenRules` is a set difference over
+   * `collectRuleEntries` across the WHOLE tree, so it already reports breakage on the source
+   * section, the destination section and every rule downstream of either — nothing here has to
+   * know that.
+   *
+   * `wasBefore` is read out of the SOURCE page before the transfer, and the notice records both
+   * page ids, because Undo has to put the question back in its section and not merely at its
+   * index. `transferArrayItem` accepts `to === length`, which is how a drop below the last
+   * question is expressed.
+   */
+  private async moveQuestionAcrossPages(
+    source: PageNode,
+    destination: PageNode,
+    from: number,
+    to: number,
+  ): Promise<void> {
+    if (
+      this.busy ||
+      !isValidCrossPageMove(from, source.questions.length, to, destination.questions.length)
+    ) {
+      return;
+    }
+    const moved = source.questions[from];
+    // Read BEFORE the transfer, out of the page it is LEAVING — that is the page Undo returns it
+    // to, so the anchor has to be one of that page's questions. `null` when it was last there.
+    const wasBefore = source.questions[from + 1]?.entity.ID ?? null;
+    const before = this.ruleEntries;
+    transferArrayItem(source.questions, destination.questions, from, to);
+
+    const labels = this.itemLabels;
+    const broken = newlyBrokenRules(before, this.ruleEntries);
+    const text = reorderNoticeText(
+      { id: moved.entity.ID, label: moved.entity.Prompt },
+      broken,
+      (id) => labels.get(id) ?? 'another question',
+    );
+    // A move that breaks nothing LEAVES A STANDING BAND ALONE — see the note in
+    // `reorderQuestion` about the unrelated nudge that used to take away a live Undo.
+    if (text.length > 0) {
+      this.reorderNotice = {
+        text,
+        fromPageId: source.entity.ID,
+        questionId: moved.entity.ID,
+        wasBefore,
+        damage: damageKeys(broken),
+      };
+    }
+
+    this.busy = true;
+    try {
+      // Checked rather than discarded, exactly as the in-page reorder does.
+      // `persistCrossPageMove` orders its writes so no partial failure can put the question in
+      // two sections or none, but it CAN leave an order within one page wrong, and the author
+      // has to be able to find that out. `state.lastFailure()` says so on screen; this says so
+      // in the log for afterwards.
+      if (!(await this.state.persistCrossPageMove(moved, source, destination))) {
+        LogError(
+          `Move of "${moved.entity.Prompt}" from page ${source.entity.ID} to page ` +
+            `${destination.entity.ID} was not fully persisted; DisplayOrder on one of the two ` +
+            'pages may not match the order on screen.',
+        );
+      }
+    } finally {
+      this.busy = false;
+    }
+    this.markDirty();
+  }
+
   // -- the reorder notice (issue #73) ---------------------------------------
 
   /**
@@ -1424,26 +1530,54 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * Put the moved question back where it came from.
    *
-   * `moveItemInArray(a, from, to)` is inverted exactly by moving the same element back, so this
-   * re-enters {@link reorderQuestion}, which re-runs the diff, finds nothing newly broken and
-   * clears its own notice. No command stack, and no second definition of what "undone" means.
+   * A move is inverted by making the opposite move, so this re-enters the same write path the
+   * move used — {@link reorderQuestion} in-page, {@link moveQuestionAcrossPages} across sections
+   * — which re-runs the diff and lets `retireStaleNotice` drop the band once the rules it named
+   * are sound again. No command stack, and no second definition of what "undone" means.
+   *
+   * THE SECTION THE QUESTION IS IN IS FOUND, NOT REMEMBERED. The band records where it came
+   * from; where it is now is read off the tree here, by question id, at click time — the same
+   * way the question and its anchor are resolved. A band stands until it is undone, dismissed or
+   * replaced, and since #149 a move that breaks nothing new can carry its question into another
+   * section without replacing it, so a remembered page can name a section the question has left.
+   * Resolving it here means that state is unrepresentable rather than handled, and it is what
+   * makes the refusal below honest: reaching it now really does mean something was deleted.
    */
   protected async undoReorder(): Promise<void> {
     const notice = this.reorderNotice;
     if (!notice) {
       return;
     }
-    const page = this.tree?.pages.find((p) => p.entity.ID === notice.pageId);
-    const move = page
-      ? undoReorderMove(notice, page.questions.map((q) => q.entity.ID))
-      : null;
-    if (!page || !move) {
-      // The question or its section was deleted while the band stood. A band offering a move
-      // that cannot happen is worse than no band.
+    const current = this.tree?.pages.find((p) =>
+      p.questions.some((q) => q.entity.ID === notice.questionId),
+    );
+    const home = this.tree?.pages.find((p) => p.entity.ID === notice.fromPageId);
+    const move: UndoMove | null =
+      current && home
+        ? undoReorderMove(
+            notice,
+            current.entity.ID,
+            this.questionIds(current),
+            this.questionIds(home),
+          )
+        : null;
+    if (!current || !home || !move) {
+      // Nothing to put back. `current` is missing only when no section holds the question at
+      // all, so it means the question itself is gone; `home` when the section it came from was
+      // deleted; `move` when the anchor it sat in front of was deleted, or when it is already
+      // back where it started. A band offering a move that cannot happen is worse than no band.
       this.dismissReorderNotice();
       return;
     }
-    await this.reorderQuestion(page, move.from, move.to);
+    if (move.toPageId === current.entity.ID) {
+      await this.reorderQuestion(current, move.from, move.to);
+      return;
+    }
+    await this.moveQuestionAcrossPages(current, home, move.from, move.to);
+  }
+
+  private questionIds(page: PageNode): string[] {
+    return page.questions.map((q) => q.entity.ID);
   }
 
   protected dismissReorderNotice(): void {

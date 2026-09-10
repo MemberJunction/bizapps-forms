@@ -7,6 +7,20 @@
   gap: 0.5rem;
 }
 
+/* Focus target for a question that failed validation (see focusTargetId). Whether a ring appears
+   is `:focus-visible`, so it follows the respondent's last input modality rather than the fact
+   that focus was moved by script: advancing with the mouse lands here with no ring (verified
+   `matches(':focus-visible') === false`), advancing with Enter on the button shows one. Same
+   treatment, for the same reason, as .mjf-page and .mjf-oneq__card. */
+.mjf-question:focus {
+  outline: none;
+}
+
+.mjf-question:focus-visible {
+  outline: none;
+  box-shadow: var(--mjf-focus-ring);
+}
+
 .mjf-question__label {
   display: flex;
   align-items: baseline;

@@ -383,6 +383,18 @@ const LAYOUT_CSS = /* css */ `
   background: var(--mj-brand-primary);
   color: var(--mj-brand-on-primary, var(--mj-text-inverse));
 }
+/* The section a palette click writes to. Quiet on purpose — it confirms a destination, it does
+   not compete with the selection highlight it usually sits beside. */
+.fb-page-head.is-add-target { border-bottom-color: var(--mj-brand-primary); }
+.fb-page-target {
+  flex: none;
+  font-size: var(--mjf-label);
+  color: var(--mj-brand-primary);
+  background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface));
+  border-radius: var(--mjf-radius-sm);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
 .fb-page-num {
   flex: none;
   display: flex;
@@ -524,7 +536,11 @@ const LAYOUT_CSS = /* css */ `
 .fb-canvas-head h2 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: var(--mj-tracking-tight, -0.01em); color: var(--mj-text-primary); }
 .fb-canvas-head p { margin: 0; max-width: 60ch; font-size: var(--mjf-body); line-height: 1.55; color: var(--mj-text-secondary); }
 
-.fb-q-list { display: flex; flex-direction: column; gap: 10px; }
+/* The min-height is not decoration: an empty section's list is ZERO pixels tall, so CDK can never
+   register a pointer as being over it and a drop into an empty section is refused even with the
+   lists connected (#149). The empty-state prompt renders above the list, not inside it, so it
+   does not fill this. One question row's worth is enough to aim at. */
+.fb-q-list { display: flex; flex-direction: column; gap: 10px; min-height: 48px; }
 
 /* One question. Previously this was ~120px tall for a one-line question, because the
    three actions were stacked in a fixed column down the right edge. They are a row

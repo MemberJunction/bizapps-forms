@@ -302,7 +302,10 @@
 
       <!-- CENTER: canvas -->
       <section class="fb-pane fb-pane--center" aria-label="Form canvas">
-        <div class="fb-canvas">
+        <!-- Every section's question list is one connected group, which is what lets a question
+             be dragged from one section into another (issue #149). Without it CDK has no candidate
+             target outside the list the drag started in and the drop is silently refused. -->
+        <div class="fb-canvas" cdkDropListGroup>
           <div class="fb-canvas-head">
             <h2>{{ record.Name }}</h2>
             @if (record.Description) {
@@ -355,6 +358,10 @@
                that can least afford it. -->
           @let badges = ruleBadges;
 
+          <!-- One read for the whole loop: the section a palette click writes to, and the words
+               for it. A getter per header would ask the same question once per section. -->
+          @let addTarget = addingHere;
+
           @for (page of pages; track page.entity.ID) {
             <!-- Pages were invisible on the canvas: a multi-page form rendered as one
                  undifferentiated question list, and there was nowhere to put a page-level
@@ -364,6 +371,7 @@
               <div
                 class="fb-page-head"
                 [class.is-selected]="selectedPageId === page.entity.ID"
+                [class.is-add-target]="addTarget?.notice && addTarget?.page?.entity?.ID === page.entity.ID"
                 (click)="selectPage(page)"
               >
                 <span class="fb-page-num">{{ $index + 1 }}</span>
@@ -376,6 +384,12 @@
                   [attr.aria-label]="'Title for page ' + ($index + 1)"
                   (change)="setPageTitle(page, pageTitle.value)"
                 />
+                <!-- Where the next palette click lands. The destination used to be invisible
+                     state — the canvas highlighted one section and the question appeared in
+                     another — so the section that will take it says so itself (issue 148). -->
+                @if (addTarget?.notice && addTarget?.page?.entity?.ID === page.entity.ID) {
+                  <span class="fb-page-target">{{ addTarget?.notice }}</span>
+                }
                 <label class="fb-page-flag">
                   <button
                     type="button"
@@ -457,7 +471,7 @@
             <div
               class="fb-q-list"
               cdkDropList
-              [cdkDropListData]="page.questions"
+              [cdkDropListData]="page"
               (cdkDropListDropped)="dropQuestion(page, $event)"
             >
             @for (node of page.questions; track node.entity.ID) {

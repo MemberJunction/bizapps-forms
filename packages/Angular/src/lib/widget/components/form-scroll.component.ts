@@ -319,9 +319,20 @@ export class FormScrollComponent {
 
   private focusFirstInvalidIn(questions: readonly PublishedFormQuestion[]): void {
     const first = questions.find((question) => this.runtime().errorFor(question));
-    if (first) {
-      this.hostRef.nativeElement.querySelector<HTMLElement>(`#mjf-q-${first.id}`)?.focus();
+    if (!first) {
+      return;
     }
+    // The control first, then the question container. Only the native branches of the question
+    // switch put `inputId()` on an element: a grouped question renders a role="radiogroup" /
+    // role="group" div of buttons, and Ranking, Matrix, Doodle and the composites bind it nowhere
+    // either. So the control lookup returned null for thirteen of the twenty-five types and focus
+    // stayed on the Next button — exactly the "refuses to submit with no visible reason" this
+    // path exists to prevent. The container always renders; see FormQuestionComponent.
+    const host = this.hostRef.nativeElement;
+    const target =
+      host.querySelector<HTMLElement>(`#mjf-q-${first.id}`) ??
+      host.querySelector<HTMLElement>(`#mjf-q-${first.id}-question`);
+    target?.focus();
   }
 
   /** Move the cursor, clamped to the currently-valid range. */
