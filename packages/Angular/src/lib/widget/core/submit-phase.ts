@@ -15,8 +15,14 @@ import type { FormSubmissionResult, PublishedFormDefinition } from '@mj-biz-apps
  * intake actually lives: a welcome screen is not a page, not a question and not a step in the
  * form — it is a phase the shell is in before the form exists to the respondent at all. The
  * intake components are not even constructed while it is showing.
+ *
+ * `expired` is terminal, like `done`, and unlike `error`: the anonymous session JWT has lapsed,
+ * MJ issues no refresh tokens, and every request this widget could still make is a certain 401.
+ * The form stays mounted underneath the notice (it is not an `@case` of its own), but every
+ * guard that reads `ready` — autosave, knockouts, checkpoints, submit — now refuses, which is
+ * the whole reason this is a phase and not a flag beside one.
  */
-export type WidgetPhase = 'loading' | 'welcome' | 'ready' | 'submitting' | 'done' | 'error';
+export type WidgetPhase = 'loading' | 'welcome' | 'ready' | 'submitting' | 'done' | 'error' | 'expired';
 
 /**
  * The phase a freshly-loaded definition starts in.
@@ -29,12 +35,13 @@ export function initialPhaseFor(definition: Pick<PublishedFormDefinition, 'welco
 }
 
 /**
- * Whether a submit attempt should be IGNORED as re-entrant. A submit is ignored while one is
- * already in flight ('submitting') or the widget has already confirmed ('done') — the
- * double-submit guard. From any other phase the submit proceeds.
+ * Whether a submit attempt should be IGNORED. A submit is ignored while one is already in
+ * flight ('submitting'), once the widget has confirmed ('done') — the double-submit guard — and
+ * once the session has expired ('expired'), where it would not be a retry but a guaranteed
+ * refusal. From any other phase the submit proceeds.
  */
 export function shouldIgnoreSubmit(phase: WidgetPhase): boolean {
-  return phase === 'submitting' || phase === 'done';
+  return phase === 'submitting' || phase === 'done' || phase === 'expired';
 }
 
 /** The phase a submit result maps to, plus whether the widget should redirect. */
@@ -55,4 +62,21 @@ export function outcomeForResult(result: FormSubmissionResult): SubmitOutcome {
     return { phase: 'ready', redirect: false };
   }
   return { phase: 'done', redirect: Boolean(result.redirectUrl) };
+}
+
+/**
+ * The phase a RESUMED draft opens in, from the status the server reported for it.
+ *
+ * A sealed row goes straight to `done` — the confirmation phase — and that is the whole of "decide
+ * sealed at MOUNT". It matters because the widget cannot learn it later: `savePartial` ignores the
+ * result's status, and the pipeline answers a partial against a sealed row with `success: true`, so
+ * a respondent who was allowed to start typing would type into a row that will never accept another
+ * answer. Reaching `done` also makes `shouldIgnoreSubmit` true, so no submit can be issued from
+ * that screen at all.
+ *
+ * `Partial` is the only resumable status, and it opens where a fresh load would — never on the
+ * welcome screen, because somebody who is coming BACK has already been welcomed.
+ */
+export function resumedPhaseFor(status: FormSubmissionResult['status']): WidgetPhase {
+  return status === 'Partial' ? 'ready' : 'done';
 }

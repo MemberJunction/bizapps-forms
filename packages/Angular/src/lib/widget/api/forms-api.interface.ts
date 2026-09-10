@@ -15,9 +15,26 @@ import type {
   PublishedFormDefinition,
   FormSubmissionInput,
   FormSubmissionResult,
+  ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities';
 
 import { InjectionToken } from '@angular/core';
+
+/**
+ * What one `PublishedForm` call returns: the definition, and — when the session's magic-link scope
+ * names a Form Response — the draft it may continue.
+ *
+ * The two travel TOGETHER rather than in a second call, deliberately. They are decided by the same
+ * session: whether there is a draft to resume is a property of the JWT the widget is mounted with,
+ * and a second round trip could observe a different one (a token rotated in between, a session
+ * expired). It also means the widget knows at MOUNT whether it is resuming, which is what lets a
+ * sealed draft show its screen before the autosave controller is ever wired.
+ */
+export interface PublishedFormLoad {
+  definition: PublishedFormDefinition;
+  /** Absent for an ordinary public-link session, which is every first sitting. */
+  resume?: ResumeSnapshot;
+}
 
 /**
  * The transport contract for the respondent widget. Method signatures mirror the S1
@@ -28,10 +45,11 @@ import { InjectionToken } from '@angular/core';
  */
 export interface IFormsApiService {
   /**
-   * Load a published form by its distribution slug. Resolves to `null` when the slug
-   * is unknown, the form is closed, or quota is exhausted (server decides).
+   * Load a published form by its distribution slug, plus any draft this session may continue.
+   * Resolves to `null` when the slug is unknown, the form is closed, or quota is exhausted
+   * (server decides).
    */
-  loadPublishedForm(distributionSlug: string): Promise<PublishedFormDefinition | null>;
+  loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null>;
 
   /**
    * Submit (or partial-save) a response. The server re-validates before persisting.
@@ -45,6 +63,37 @@ export interface IFormsApiService {
     input: FormSubmissionInput,
     existingResponseId?: string,
   ): Promise<FormSubmissionResult>;
+
+  /**
+   * The `x-session-id` this service sends — the OWNERSHIP RECORD for every row it writes.
+   *
+   * Part of the contract rather than a private field because the hosting page needs it: asking the
+   * server to remember a draft means proving the draft is this caller's, and on a first sitting the
+   * header is the only proof there is. Without this the page would be asking for a credential on a
+   * bare response id, which is exactly the replay weakness the feature closes.
+   *
+   * It is a correlator, never a credential: it is already sent on every request in clear, and
+   * knowing it grants nothing that sending it does not.
+   */
+  sessionCorrelator(): string;
+}
+
+/**
+ * The one failure an {@link IFormsApiService} reports by TYPE rather than by message: the
+ * anonymous session this widget was minted with has expired.
+ *
+ * Part of the seam, not of the GraphQL transport, because the widget has to react to it — and it
+ * reacts differently from every other failure. A network blip or a refused submission returns the
+ * respondent to the form to try again; an expired session cannot be retried at all. The token is
+ * dead, MJ issues no refresh tokens, and the only way to a new one is a new page. A string cannot
+ * carry that distinction to the component without the component parsing server copy, which is
+ * what left it showing `HTTP 401` to a member of the public (bizapps-forms#123).
+ */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('The anonymous session has expired; a new page is needed to mint a new one.');
+    this.name = 'SessionExpiredError';
+  }
 }
 
 /**

@@ -14,17 +14,39 @@ import type {
   PublishedFormDefinition,
   FormSubmissionInput,
   FormSubmissionResult,
+  ResumeSnapshot,
 } from '@mj-biz-apps/forms-entities';
 
-import type { IFormsApiService } from './forms-api.interface';
+import { SessionExpiredError, type IFormsApiService, type PublishedFormLoad } from './forms-api.interface';
 import { FORMS_API_CONFIG } from './forms-api.config';
 import { generateClientResponseId } from '../core/client-id';
 import { toInputType } from './submission-mapping';
 
-/** Shape of a GraphQL HTTP response envelope. */
+/**
+ * Shape of a GraphQL HTTP response envelope.
+ *
+ * `extensions.code` is the one typed thing a failure carries. MJ's auth middleware answers an
+ * expired session JWT with HTTP 401 and this same envelope shape — `{ errors: [{ message:
+ * 'Token expired', extensions: { code: 'JWT_EXPIRED' } }] }` — so the code, not the message, is
+ * what {@link isSessionExpired} reads.
+ */
 interface GraphQLEnvelope<TData> {
   data?: TData;
-  errors?: Array<{ message: string }>;
+  errors?: Array<{ message: string; extensions?: { code?: string } }>;
+}
+
+/** The code MJ's auth middleware attaches when the bearer JWT's `exp` has passed. */
+const JWT_EXPIRED_CODE = 'JWT_EXPIRED';
+
+/**
+ * Whether a response body says the anonymous session has expired.
+ *
+ * Judged on the typed code alone, never on the status: a 401 also answers a missing or forged
+ * token, and those are not a session that ran out — a preview embed with no token would otherwise
+ * be told its "session timed out" when it never had one.
+ */
+export function isSessionExpired(body: GraphQLEnvelope<unknown> | undefined): boolean {
+  return body?.errors?.some((e) => e.extensions?.code === JWT_EXPIRED_CODE) ?? false;
 }
 
 /**
@@ -34,6 +56,8 @@ interface GraphQLEnvelope<TData> {
  */
 interface PublishedFormType {
   definitionJSON: string;
+  /** Present only for a session whose scope names a Form Response — see `PublishedFormLoad`. */
+  resumeJSON?: string | null;
 }
 
 /** Result wrapper for the `PublishedForm` query. */
@@ -50,6 +74,7 @@ const PUBLISHED_FORM_QUERY = `
   query PublishedForm($distributionSlug: String!) {
     PublishedForm(distributionSlug: $distributionSlug) {
       definitionJSON
+      resumeJSON
     }
   }
 `;
@@ -90,9 +115,11 @@ export class FormsGraphQLApiService implements IFormsApiService {
    */
   private readonly sessionId = generateClientResponseId();
 
-  public async loadPublishedForm(
-    distributionSlug: string,
-  ): Promise<PublishedFormDefinition | null> {
+  public sessionCorrelator(): string {
+    return this.sessionId;
+  }
+
+  public async loadPublishedForm(distributionSlug: string): Promise<PublishedFormLoad | null> {
     const data = await this.execute<PublishedFormQueryData>(PUBLISHED_FORM_QUERY, {
       distributionSlug,
     });
@@ -101,7 +128,10 @@ export class FormsGraphQLApiService implements IFormsApiService {
     }
     // The full nested pages/questions/options graph is delivered as a JSON string in
     // `definitionJSON`; parse it into the contract's PublishedFormDefinition.
-    return JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition;
+    return {
+      definition: JSON.parse(data.PublishedForm.definitionJSON) as PublishedFormDefinition,
+      resume: parseResume(data.PublishedForm.resumeJSON),
+    };
   }
 
   public async submitResponse(
@@ -135,16 +165,57 @@ export class FormsGraphQLApiService implements IFormsApiService {
       headers,
       body: JSON.stringify({ query, variables }),
     });
+    // Read the body BEFORE judging the status. An expired session arrives as a 401 whose body
+    // carries the one code the widget must be able to act on; throwing on `!ok` first is how that
+    // code was thrown away and a respondent came to be shown `HTTP 401`. Only a JSON body is read —
+    // a proxy's HTML error page falls through to the status check below, unparsed.
+    const envelope = await readEnvelope<TData>(response);
+    if (isSessionExpired(envelope)) {
+      throw new SessionExpiredError();
+    }
     if (!response.ok) {
       throw new Error(`Forms API request failed: HTTP ${response.status}`);
     }
-    const envelope = (await response.json()) as GraphQLEnvelope<TData>;
-    if (envelope.errors && envelope.errors.length > 0) {
+    if (envelope?.errors && envelope.errors.length > 0) {
       throw new Error(envelope.errors.map((e) => e.message).join('; '));
     }
-    if (!envelope.data) {
+    if (!envelope?.data) {
       throw new Error('Forms API returned no data');
     }
     return envelope.data;
   }
+}
+
+/**
+ * Read the resume snapshot back, or nothing.
+ *
+ * Guarded rather than trusted: this is the one field on the read path whose absence is ORDINARY
+ * (every first sitting), so a parse failure must be indistinguishable from absence — a respondent
+ * whose draft cannot be understood gets a blank form, not an error page. The alternative, letting
+ * the throw escape, would take down `load()` for the commonest case in the product.
+ */
+function parseResume(json: string | null | undefined): ResumeSnapshot | undefined {
+  if (!json) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(json) as ResumeSnapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The response's JSON envelope, or `undefined` when the server did not send JSON at all.
+ *
+ * Decided by the declared content type rather than by trying to parse and catching: a body that
+ * CLAIMS to be JSON and is not is a real defect, and its parse error should surface as such. A body
+ * that never claimed to be JSON (a gateway's HTML 502 page) is simply not an envelope.
+ */
+async function readEnvelope<TData>(response: Response): Promise<GraphQLEnvelope<TData> | undefined> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return undefined;
+  }
+  return (await response.json()) as GraphQLEnvelope<TData>;
 }

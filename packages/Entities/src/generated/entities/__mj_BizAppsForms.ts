@@ -326,7 +326,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Default Value: newsequentialid()`),
     FormID: z.string().describe(`
         * * Field Name: FormID
-        * * Display Name: Form
+        * * Display Name: Form ID
         * * SQL Data Type: uniqueidentifier
         * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)`),
     Name: z.string().describe(`
@@ -385,7 +385,7 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Description: Running count of responses received through this distribution`),
     MagicLinkInviteID: z.string().nullable().describe(`
         * * Field Name: MagicLinkInviteID
-        * * Display Name: Magic Link Invite
+        * * Display Name: Magic Link Invite ID
         * * SQL Data Type: uniqueidentifier
         * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.`),
     CaptchaRequired: z.boolean().describe(`
@@ -415,9 +415,15 @@ export const mjBizAppsFormsFormDistributionSchema = z.object({
         * * Display Name: Public Link Token
         * * SQL Data Type: nvarchar(255)
         * * Description: Raw redeemable magic-link token for this distribution's public URL. A public link is low-secrecy by design (the URL is shared), so the raw token is persisted here to build the redeem URL (/magic-link/redeem?token=<token>); the invite row stores only its SHA-256 hash. Written when the link is provisioned and cleared when its credential is revoked, so NULL means this link holds no working credential. Clearing it on an otherwise-live link is a REISSUE REQUEST: the server-side lifecycle hook revokes the linked invite and mints a replacement, leaving Slug (and therefore every shared URL) unchanged.`),
+    AllowDeviceResume: z.boolean().describe(`
+        * * Field Name: AllowDeviceResume
+        * * Display Name: Allow Device Resume
+        * * SQL Data Type: bit
+        * * Default Value: 1
+        * * Description: Owner switch for same-device resume on this link. When 1 (the default) the respondent host mints a single-use device invite after the first partial save and holds its raw token in an HttpOnly cookie scoped to that form's route, so reopening the link in the same browser restores the draft; every resume rotates the token. Set 0 for kiosks and shared devices: no device invite is minted, and any cookie a browser still holds is cleared without being redeemed. It does not affect the emailed resume link, which works on any device.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
         * * SQL Data Type: nvarchar(255)`),
 });
 
@@ -948,14 +954,24 @@ export const mjBizAppsFormsFormResponseSchema = z.object({
         * * Display Name: Updated At
         * * SQL Data Type: datetimeoffset
         * * Default Value: getutcdate()`),
+    FormDistributionID: z.string().nullable().describe(`
+        * * Field Name: FormDistributionID
+        * * Display Name: Form Distribution ID
+        * * SQL Data Type: uniqueidentifier
+        * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Distributions (vwFormDistributions.ID)
+        * * Description: The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel.`),
     Form: z.string().describe(`
         * * Field Name: Form
-        * * Display Name: Form Name
+        * * Display Name: Form
         * * SQL Data Type: nvarchar(255)`),
     RespondentPerson: z.string().nullable().describe(`
         * * Field Name: RespondentPerson
         * * Display Name: Respondent Person
         * * SQL Data Type: nvarchar(201)`),
+    FormDistribution: z.string().nullable().describe(`
+        * * Field Name: FormDistribution
+        * * Display Name: Form Distribution
+        * * SQL Data Type: nvarchar(255)`),
 });
 
 export type mjBizAppsFormsFormResponseEntityType = z.infer<typeof mjBizAppsFormsFormResponseSchema>;
@@ -2242,7 +2258,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: FormID
-    * * Display Name: Form
+    * * Display Name: Form ID
     * * SQL Data Type: uniqueidentifier
     * * Related Entity/Foreign Key: MJ_BizApps_Forms: Forms (vwForms.ID)
     */
@@ -2373,7 +2389,7 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
 
     /**
     * * Field Name: MagicLinkInviteID
-    * * Display Name: Magic Link Invite
+    * * Display Name: Magic Link Invite ID
     * * SQL Data Type: uniqueidentifier
     * * Description: ID of the anonymous, multi-use, scoped MJ magic-link invite backing this distribution. Set while the distribution is a live, linkable public channel and cleared once that invite has been revoked, so this column and PublicLinkToken are written and cleared together as one credential.
     */
@@ -2446,8 +2462,22 @@ export class mjBizAppsFormsFormDistributionEntity extends BaseEntity<mjBizAppsFo
     }
 
     /**
+    * * Field Name: AllowDeviceResume
+    * * Display Name: Allow Device Resume
+    * * SQL Data Type: bit
+    * * Default Value: 1
+    * * Description: Owner switch for same-device resume on this link. When 1 (the default) the respondent host mints a single-use device invite after the first partial save and holds its raw token in an HttpOnly cookie scoped to that form's route, so reopening the link in the same browser restores the draft; every resume rotates the token. Set 0 for kiosks and shared devices: no device invite is minted, and any cookie a browser still holds is cleared without being redeemed. It does not affect the emailed resume link, which works on any device.
+    */
+    get AllowDeviceResume(): boolean {
+        return this.Get('AllowDeviceResume');
+    }
+    set AllowDeviceResume(value: boolean) {
+        this.Set('AllowDeviceResume', value);
+    }
+
+    /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -3769,8 +3799,22 @@ export class mjBizAppsFormsFormResponseEntity extends BaseEntity<mjBizAppsFormsF
     }
 
     /**
+    * * Field Name: FormDistributionID
+    * * Display Name: Form Distribution ID
+    * * SQL Data Type: uniqueidentifier
+    * * Related Entity/Foreign Key: MJ_BizApps_Forms: Form Distributions (vwFormDistributions.ID)
+    * * Description: The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel.
+    */
+    get FormDistributionID(): string | null {
+        return this.Get('FormDistributionID');
+    }
+    set FormDistributionID(value: string | null) {
+        this.Set('FormDistributionID', value);
+    }
+
+    /**
     * * Field Name: Form
-    * * Display Name: Form Name
+    * * Display Name: Form
     * * SQL Data Type: nvarchar(255)
     */
     get Form(): string {
@@ -3784,6 +3828,15 @@ export class mjBizAppsFormsFormResponseEntity extends BaseEntity<mjBizAppsFormsF
     */
     get RespondentPerson(): string | null {
         return this.Get('RespondentPerson');
+    }
+
+    /**
+    * * Field Name: FormDistribution
+    * * Display Name: Form Distribution
+    * * SQL Data Type: nvarchar(255)
+    */
+    get FormDistribution(): string | null {
+        return this.Get('FormDistribution');
     }
 }
 
@@ -4627,30 +4680,30 @@ export class mjBizAppsFormsFormEntity extends BaseEntity<mjBizAppsFormsFormEntit
 
     /**
     * Validate() method override for MJ_BizApps_Forms: Forms entity. This is an auto-generated method that invokes the generated validators for this entity for the following fields:
-    * * Table-Level: Templates cannot be published. The 'Published' status is only allowed for standard, non-template items.
+    * * Table-Level: Templates cannot have a 'Published' status. This ensures that master templates are not accidentally published as active, live forms.
     * @public
     * @method
     * @override
     */
     public override Validate(): ValidationResult {
         const result = super.Validate();
-        this.ValidateStatusForTemplates(result);
+        this.ValidateTemplateNotPublished(result);
         result.Success = result.Success && (result.Errors.length === 0);
 
         return result;
     }
 
     /**
-    * Templates cannot be published. The 'Published' status is only allowed for standard, non-template items.
+    * Templates cannot have a 'Published' status. This ensures that master templates are not accidentally published as active, live forms.
     * @param result - the ValidationResult object to add any errors or warnings to
     * @public
     * @method
     */
-    public ValidateStatusForTemplates(result: ValidationResult) {
+    public ValidateTemplateNotPublished(result: ValidationResult) {
     	if (this.IsTemplate && this.Status === "Published") {
     		result.Errors.push(new ValidationErrorInfo(
     			"Status",
-    			"A template cannot have a 'Published' status.",
+    			"A template cannot be published. Please change the status or disable the template option.",
     			this.Status,
     			ValidationErrorType.Failure
     		));

@@ -20,6 +20,39 @@ export function isValidReorder(from: number, to: number, length: number): boolea
   );
 }
 
+/**
+ * Whether a proposed move BETWEEN two pages is a real, in-bounds move (issue #149).
+ *
+ * Deliberately not {@link isValidReorder}, and the difference is not cosmetic. That one's two
+ * indices address ONE list, so it rejects `from === to` and requires `to < length`. Here they
+ * address different lists:
+ *
+ *  - `from` indexes the SOURCE page as it stands.
+ *  - `to` indexes the DESTINATION page AFTER the removal from the source, so `to === length` is
+ *    legal and is the only way to express "drop below the last question". Reusing
+ *    `isValidReorder` would make appending to a section impossible.
+ *  - `from === to` carries no meaning at all across two lists, so it is not a refusal.
+ *
+ * The PAGES being different is the caller's business — it branched on
+ * `event.previousContainer === event.container` to get here — and asserting it again from index
+ * arithmetic that cannot see a page id would be a guard that only looks like one.
+ */
+export function isValidCrossPageMove(
+  from: number,
+  sourceLength: number,
+  to: number,
+  destinationLength: number,
+): boolean {
+  return (
+    Number.isInteger(from) &&
+    Number.isInteger(to) &&
+    from >= 0 &&
+    from < sourceLength &&
+    to >= 0 &&
+    to <= destinationLength
+  );
+}
+
 // ---------------------------------------------------------------------------
 // What a move COSTS (issue #73)
 // ---------------------------------------------------------------------------
@@ -111,7 +144,22 @@ export function reorderNoticeText(
 export interface ReorderNotice {
   /** What the author reads — see {@link reorderNoticeText}. */
   readonly text: string;
-  readonly pageId: string;
+  /**
+   * The page the question came FROM, and so the page Undo must put it back on (issue #149).
+   *
+   * Without it, Undo resolved `wasBefore` inside the destination section and put the question
+   * back at the right index in the WRONG section — the anchor is on the source page, so in
+   * practice the undo simply refused and the band lapsed with the move still standing.
+   *
+   * THIS IS THE ONLY PAGE THE BAND REMEMBERS, and it is the only one it safely can. Where the
+   * question came from is history and cannot stop being true. Where it IS is not: a move that
+   * breaks nothing new deliberately leaves a standing band alone, and since #149 such a move can
+   * change the question's page — so a remembered "it is on page X" can name a section the
+   * question has since left while every id on the band still exists. {@link undoReorderMove}
+   * therefore takes the current page from its caller, which resolves it against the tree at click
+   * time, exactly as the question and its anchor are already resolved.
+   */
+  readonly fromPageId: string;
   readonly questionId: string;
   /**
    * The question this one used to sit immediately BEFORE, or `null` when it was last on its page.
@@ -159,6 +207,15 @@ export function noticeStillTrue(
   return notice.damage.some((key) => live.has(key));
 }
 
+/** Where an Undo puts the question back. `toPageId` is the page it came from. */
+export interface UndoMove {
+  /** Its index in the page it is on NOW. */
+  readonly from: number;
+  /** Its index in `toPageId`'s list, after the removal — so `length` means "at the end". */
+  readonly to: number;
+  readonly toPageId: string;
+}
+
 /**
  * The move that undoes a reorder, or `null` when there is nothing to put back.
  *
@@ -169,33 +226,54 @@ export function noticeStillTrue(
  * Undo for reasons that have nothing to do with the author. Resolving both the question and where
  * it goes by id at click time needs nothing to have held still.
  *
- * `currentQuestionIds` is the notice's page as it stands NOW; a page that no longer exists
- * arrives as an empty list, which resolves to "not there" through the same path as a deleted
- * question rather than through a second branch.
+ * `currentPageId` and `currentQuestionIds` describe the page the question is on NOW, as the
+ * caller finds it at click time; `homeQuestionIds` is the page it has to go back to, which is the
+ * same list for an in-page undo and a different one once a move can cross a section (issue #149).
+ * Either page having been deleted arrives as an empty list, which resolves to "not there" through
+ * the same path as a deleted question rather than a second branch.
+ *
+ * The current page is a PARAMETER rather than a field on the notice because the notice outlives
+ * moves that do not replace it, and since #149 one of those can change the question's page — see
+ * {@link ReorderNotice.fromPageId}.
  */
 export function undoReorderMove(
-  notice: Pick<ReorderNotice, 'questionId' | 'wasBefore'>,
+  notice: Pick<ReorderNotice, 'questionId' | 'wasBefore' | 'fromPageId'>,
+  currentPageId: string,
   currentQuestionIds: readonly string[],
-): { readonly from: number; readonly to: number } | null {
+  homeQuestionIds: readonly string[],
+): UndoMove | null {
   const from = currentQuestionIds.indexOf(notice.questionId);
   if (from < 0) {
     return null;
   }
-  const to = destination(notice.wasBefore, from, currentQuestionIds);
-  return to === null || to === from ? null : { from, to };
+  const crossed = currentPageId !== notice.fromPageId;
+  const to = destination(notice.wasBefore, from, homeQuestionIds, crossed);
+  if (to === null || (!crossed && to === from)) {
+    return null;
+  }
+  return { from, to, toPageId: notice.fromPageId };
 }
 
 /**
  * Where the moved question has to land to sit immediately before its anchor again, or `null`
  * when there is no such place.
  *
- * `moveItemInArray` splices OUT and then IN, so the anchor has already shifted down by one by
- * the time the insert happens if it sat after the question. That off-by-one is the whole of the
- * arithmetic, and it is why this is a named function rather than an expression inline.
+ * `homeQuestionIds` is the page it is going BACK to — the same list as the one it is on now for
+ * an in-page undo, a different one for a cross-section undo.
+ *
+ * THE SPLICE-OUT CORRECTION IS IN-PAGE ONLY, and that is the whole of the arithmetic here.
+ * `moveItemInArray` splices OUT and then IN of one array, so an anchor that sat after the
+ * question has already shifted down by one by the time the insert happens. `transferArrayItem`
+ * splices out of the OTHER array, so the home page's indices do not move at all: correcting
+ * there lands the question one position too early, on every form whose anchor sat after it.
+ *
+ * The same split governs `wasBefore === null`. In-page, "the end" is `length - 1` because the
+ * array shrank on removal; across pages it is `length`, which `transferArrayItem` accepts.
  *
  * A DELETED anchor refuses rather than falling back to an index. Undo is a promise to put one
  * thing back exactly; where "before a question that is gone" is cannot be worked out, and
- * guessing is how a band ends up moving the right question to the wrong place.
+ * guessing is how a band ends up moving the right question to the wrong place. A HOME PAGE that
+ * has been deleted arrives as an empty list and refuses through this same path.
  *
  * KNOWN LIMIT: an anchor that has itself been MOVED is resolved against where it now sits. No
  * neighbour survives that — undoing one move while a second has reordered the same pair has no
@@ -206,17 +284,21 @@ export function undoReorderMove(
 function destination(
   wasBefore: string | null,
   from: number,
-  currentQuestionIds: readonly string[],
+  homeQuestionIds: readonly string[],
+  crossed: boolean,
 ): number | null {
   if (wasBefore === null) {
     // Nothing followed it. The end of the page is still the end of the page: every write path
     // other than a reorder APPENDS (plan §1.5), so anything added since was added after it, and
     // "last among everything that existed at the time" is where it was.
-    return currentQuestionIds.length - 1;
+    return crossed ? homeQuestionIds.length : homeQuestionIds.length - 1;
   }
-  const anchor = currentQuestionIds.indexOf(wasBefore);
+  const anchor = homeQuestionIds.indexOf(wasBefore);
   if (anchor < 0) {
     return null;
+  }
+  if (crossed) {
+    return anchor;
   }
   return anchor > from ? anchor - 1 : anchor;
 }

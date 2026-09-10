@@ -34,6 +34,58 @@ describe('renderRespondentHostPage', () => {
     expect(html()).toContain('name="robots" content="noindex"');
   });
 
+  // A distribution link is pasted into Slack / Teams / email / SMS, and every one of those builds
+  // its preview card from og:title / og:description without running any script. So the identity
+  // must be in the server-rendered <head>, not set later by the widget (bizapps-forms#120).
+  describe('link identity (title + Open Graph)', () => {
+    const identified = () =>
+      renderRespondentHostPage({
+        graphqlUrl: 'http://localhost:4121/',
+        widgetBundleUrl: '/forms/widget/mj-form.js',
+        pageTitle: 'Customer Satisfaction Survey',
+        pageDescription: 'Tell us how we did. Takes two minutes.',
+      });
+
+    it('puts the form name in the tab title AND og:title', () => {
+      const out = identified();
+      expect(out).toContain('<title>Customer Satisfaction Survey</title>');
+      expect(out).toContain('<meta property="og:title" content="Customer Satisfaction Survey" />');
+    });
+
+    it('emits og:description and a plain description from the form description', () => {
+      const out = identified();
+      expect(out).toContain('<meta property="og:description" content="Tell us how we did. Takes two minutes." />');
+      expect(out).toContain('<meta name="description" content="Tell us how we did. Takes two minutes." />');
+    });
+
+    it('still emits og:title, but no description tags, for a form with no description', () => {
+      const out = renderRespondentHostPage({
+        graphqlUrl: 'http://localhost:4121/',
+        widgetBundleUrl: '/forms/widget/mj-form.js',
+        pageTitle: 'Untitled Survey',
+      });
+      expect(out).toContain('<meta property="og:title" content="Untitled Survey" />');
+      expect(out).not.toContain('og:description');
+      expect(out).not.toContain('name="description"');
+    });
+
+    it('keeps noindex alongside the Open Graph tags (unfurlers are not search indexes)', () => {
+      expect(identified()).toContain('name="robots" content="noindex"');
+    });
+
+    it('escapes an author-controlled name and description in the meta attributes (XSS regression)', () => {
+      const out = renderRespondentHostPage({
+        graphqlUrl: 'http://localhost:4121/',
+        widgetBundleUrl: '/forms/widget/mj-form.js',
+        pageTitle: '"><script>alert(1)</script>',
+        pageDescription: 'a"b<c>&d',
+      });
+      expect(out).not.toContain('"><script>alert(1)');
+      expect(out).toContain('content="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;"');
+      expect(out).toContain('content="a&quot;b&lt;c&gt;&amp;d"');
+    });
+  });
+
   it('reads both the query string and the fragment for slug + token', () => {
     const out = html();
     expect(out).toContain('window.location.search');
