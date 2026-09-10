@@ -35,6 +35,8 @@ import { describe, expect, it } from 'vitest';
 const read = (file: string): string => readFileSync(join(__dirname, file), 'utf8');
 const html = (): string => read('form-builder.component.html').replace(/<!--[\s\S]*?-->/g, '');
 const css = (): string => read('form-builder.styles.ts').replace(/\/\*[\s\S]*?\*\//g, '');
+const componentTs = (): string =>
+  read('form-builder.component.ts').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
 describe('the add-content bar belongs to the selected question', () => {
   it('is offered only while that question is selected', () => {
@@ -175,5 +177,139 @@ describe('the type picker takes focus when it opens', () => {
     // It is focused to receive keys, not because the author aimed at it; a ring around the whole
     // dialog reads as a selection they made.
     expect(picker()).toMatch(/\.qtp:focus[^{]*\{[^}]*outline:\s*none/);
+  });
+});
+
+describe('an empty section can add its first question', () => {
+  /**
+   * The empty state, comment-stripped, from its own div up to the question list that follows it.
+   * Sliced to the NEXT LANDMARK rather than to `</div>`, so a later nested element inside the
+   * block cannot silently shrink what these assertions read.
+   */
+  const emptyState = (): string => {
+    const source = html();
+    const start = source.indexOf('class="fb-canvas-empty"');
+    expect(start).toBeGreaterThan(-1);
+    const end = source.indexOf('class="fb-q-list"', start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
+  it('offers an add-content control, so the canvas can serve the one request it exists for', () => {
+    // The defect this replaced: the ONLY add-content button lived inside the question loop behind
+    // a selection gate, so a section with no questions had none — reproduced live on a new form
+    // and on a section whose last question was deleted (0 buttons in both).
+    const block = emptyState();
+    expect(block).toMatch(/<button/);
+    expect(block).toMatch(/class="fb-screen-add"/);
+  });
+
+  it('seams at index 0, the only seam an empty section has', () => {
+    // insertQuestionAt clamps with Math.min(seam.index, page.questions.length), so 0 on an empty
+    // page is exact rather than merely safe. Index 0 is also unreachable from the per-question
+    // bar, which always opens $index + 1 — the two openers cannot collide.
+    const block = emptyState();
+    expect(block).toMatch(/openTypePicker\(page,\s*0\)/);
+    expect(block).toMatch(/isPickerOpen\(page,\s*0\)/);
+    expect(block).toMatch(/<mjf-question-type-picker/);
+    expect(block).toMatch(/\(Picked\)="insertQuestionAt\(\$event\)"/);
+  });
+
+  it('no longer tells the author the palette is the only route', () => {
+    // The copy was a redirect to a different pane: the canvas could not do the thing it is for.
+    expect(emptyState()).not.toMatch(/Pick a question type from the left to start/);
+  });
+
+  it('does not put a dashed box inside a dashed box', () => {
+    // .fb-screen-add IS the dashed treatment. The empty state's own dashed frame was standing in
+    // for "nothing here yet"; with a real control inside, the frame is a second border 14px from
+    // the first and says nothing the control does not.
+    const rule = /\.fb-canvas-empty \{([^}]*)\}/.exec(css())?.[1] ?? '';
+    expect(rule).not.toMatch(/border:/);
+  });
+});
+
+describe('the empty state reads as one composition', () => {
+  /**
+   * The control is `.fb-screen-add` and nothing else, so it inherits that class's left-aligned
+   * layout — correct for the three canvas buttons, which start a list. Inside `.fb-canvas-empty`
+   * it sits under a CENTRED icon and a CENTRED paragraph, and a label hugging the left edge of a
+   * full-width box breaks that column. Measured before changing anything: all three canvas
+   * buttons compute `justify-content: normal` and put their icon 18px from the left, so this is a
+   * deliberate departure for this one context, not a correction of a mistake.
+   */
+  it('centres the control, because here it closes a centred column rather than starting a list', () => {
+    const rule = /\.fb-canvas-empty \.fb-screen-add \{([^}]*)\}/.exec(css())?.[1] ?? '';
+    expect(rule).toMatch(/justify-content:\s*center/);
+    // and it keeps the margin override it already had, for the reason recorded there
+    expect(rule).toMatch(/margin-bottom:\s*0/);
+  });
+});
+
+describe('an insert leaves focus on the question it created', () => {
+  /**
+   * The picker restores focus to whatever opened it. On EVERY insert path that opener is gone by
+   * the time the restore runs — the empty state unmounts once the section is no longer empty, and
+   * a per-question bar unmounts once selection moves to the new question — and `focus()` on a
+   * detached node is a silent no-op, so focus fell to `<body>`.
+   *
+   * Verified identical on BOTH openers before this was treated as a defect, so it is not something
+   * the empty-state control introduced. The fix belongs in the canvas rather than the picker: the
+   * picker cannot know where focus should go, and the canvas already knows, because it just
+   * selected the new question.
+   */
+  it('gives every question card an identity that is not a styling class', () => {
+    // Keyed on the question id, so the focus target survives a rename of `.is-selected`.
+    expect(html()).toMatch(/\[attr\.data-question-id\]="node\.entity\.ID"/);
+  });
+
+  it('focuses that card after the insert, not the opener the insert removed', () => {
+    const source = componentTs();
+    const insert = source.indexOf('async insertQuestionAt');
+    expect(insert).toBeGreaterThan(-1);
+    const body = source.slice(insert, source.indexOf('\n  }', insert));
+    expect(body).toMatch(/focusQuestionCard\(node\.entity\.ID\)/);
+  });
+
+  it('waits for the render that creates the card before reaching for it', () => {
+    // The card does not exist yet when insertQuestionAt returns; querying for it synchronously
+    // would find nothing and fail exactly as silently as the bug being fixed.
+    const source = componentTs();
+    const method = source.indexOf('private focusQuestionCard');
+    expect(method).toBeGreaterThan(-1);
+    const body = source.slice(method, source.indexOf('\n  }', method));
+    expect(body).toMatch(/afterNextRender\(/);
+    expect(body).toMatch(/data-question-id="\$\{questionId\}"/);
+  });
+});
+
+describe('the empty state styles its own illustration, not whatever is nested in it', () => {
+  /**
+   * `.fb-canvas-empty i` and `.fb-canvas-empty p` were written when the block held exactly one
+   * icon and one paragraph and nothing else, so "any descendant" and "my own illustration" were
+   * the same set. Putting a control inside the block ends that: the button's own
+   * `<i class="fa-solid fa-plus">` is a descendant too, and a rule that TARGETS an element beats a
+   * value it would otherwise INHERIT, whatever the specificity. The plus rendered at 1.5rem in
+   * `--mj-text-disabled` — the token reserved for things you cannot click — on an enabled control,
+   * 8px taller than the identical button two rows below it, and it did not follow the button's
+   * hover colour, because its own colour was pinned.
+   *
+   * The child combinator says what the rules always meant. `p` is scoped for the same reason
+   * rather than left as the next instance of the same trap.
+   */
+  it('scopes the illustration to the block\'s own child, so a nested control keeps its glyph', () => {
+    expect(css()).toMatch(/\.fb-canvas-empty > i \{/);
+    expect(css()).not.toMatch(/\.fb-canvas-empty i \{/);
+  });
+
+  it('scopes the copy the same way, so the trap is gone rather than moved', () => {
+    expect(css()).toMatch(/\.fb-canvas-empty > p \{/);
+    expect(css()).not.toMatch(/\.fb-canvas-empty p \{/);
+  });
+
+  it('leaves the control itself reaching the button, which is what that rule is for', () => {
+    // The one descendant rule that SHOULD stay a descendant rule: it targets a class, not an
+    // element type, so it cannot capture something that merely happens to be nested.
+    expect(css()).toMatch(/\.fb-canvas-empty \.fb-screen-add \{/);
   });
 });
