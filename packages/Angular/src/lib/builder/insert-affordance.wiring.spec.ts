@@ -226,3 +226,50 @@ describe('an empty section can add its first question', () => {
     expect(rule).not.toMatch(/border:/);
   });
 });
+
+describe('the empty state reads as one composition', () => {
+  /**
+   * The control is `.fb-screen-add` and nothing else, so it inherits that class's left-aligned
+   * layout — correct for the three canvas buttons, which start a list. Inside `.fb-canvas-empty`
+   * it sits under a CENTRED icon and a CENTRED paragraph, and a label hugging the left edge of a
+   * full-width box breaks that column. Measured before changing anything: all three canvas
+   * buttons compute `justify-content: normal` and put their icon 18px from the left, so this is a
+   * deliberate departure for this one context, not a correction of a mistake.
+   */
+  it('centres the control, because here it closes a centred column rather than starting a list', () => {
+    const rule = /\.fb-canvas-empty \.fb-screen-add \{([^}]*)\}/.exec(css())?.[1] ?? '';
+    expect(rule).toMatch(/justify-content:\s*center/);
+    // and it keeps the margin override it already had, for the reason recorded there
+    expect(rule).toMatch(/margin-bottom:\s*0/);
+  });
+});
+describe('the empty state styles its own illustration, not whatever is nested in it', () => {
+  /**
+   * `.fb-canvas-empty i` and `.fb-canvas-empty p` were written when the block held exactly one
+   * icon and one paragraph and nothing else, so "any descendant" and "my own illustration" were
+   * the same set. Putting a control inside the block ends that: the button's own
+   * `<i class="fa-solid fa-plus">` is a descendant too, and a rule that TARGETS an element beats a
+   * value it would otherwise INHERIT, whatever the specificity. The plus rendered at 1.5rem in
+   * `--mj-text-disabled` — the token reserved for things you cannot click — on an enabled control,
+   * 8px taller than the identical button two rows below it, and it did not follow the button's
+   * hover colour, because its own colour was pinned.
+   *
+   * The child combinator says what the rules always meant. `p` is scoped for the same reason
+   * rather than left as the next instance of the same trap.
+   */
+  it('scopes the illustration to the block\'s own child, so a nested control keeps its glyph', () => {
+    expect(css()).toMatch(/\.fb-canvas-empty > i \{/);
+    expect(css()).not.toMatch(/\.fb-canvas-empty i \{/);
+  });
+
+  it('scopes the copy the same way, so the trap is gone rather than moved', () => {
+    expect(css()).toMatch(/\.fb-canvas-empty > p \{/);
+    expect(css()).not.toMatch(/\.fb-canvas-empty p \{/);
+  });
+
+  it('leaves the control itself reaching the button, which is what that rule is for', () => {
+    // The one descendant rule that SHOULD stay a descendant rule: it targets a class, not an
+    // element type, so it cannot capture something that merely happens to be nested.
+    expect(css()).toMatch(/\.fb-canvas-empty \.fb-screen-add \{/);
+  });
+});

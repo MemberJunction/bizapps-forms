@@ -733,10 +733,28 @@ const LAYOUT_CSS = /* css */ `
   color: var(--mj-text-secondary);
 }
 /* The stacking margin every canvas add-button carries is wrong for the last child of a flex column
-   that already has a gap — the same override .fb-q-add-btn makes, for the same reason. */
-.fb-canvas-empty .fb-screen-add { margin-bottom: 0; }
-.fb-canvas-empty i { font-size: 1.5rem; color: var(--mj-text-disabled); }
-.fb-canvas-empty p { margin: 0; font-size: var(--mjf-meta); }
+   that already has a gap — the same override .fb-q-add-btn makes, for the same reason.
+
+   CENTRED for the same kind of reason .fb-q-add-btn is, and not the same reason. That one is
+   centred because it spans a card; this one closes a CENTRED COLUMN — the icon and the copy above
+   it are both centred, and a label hugging the left edge of a full-width box breaks that column.
+   Measured before it was changed: all three canvas add-buttons compute justify-content: normal
+   and put their icon 18px from the left, so this is a deliberate departure for this one context,
+   not a correction. The three canvas buttons keep their left alignment, because they start a list
+   rather than close a composition. */
+.fb-canvas-empty .fb-screen-add { justify-content: center; margin-bottom: 0; }
+/* ITS OWN CHILDREN, and not whatever is nested inside it. These two were written when the block
+   held one icon and one paragraph and nothing else, so "any descendant" and "my own illustration"
+   named the same set. A control in the block ends that: the button's own plus glyph is a
+   descendant too, and a rule that TARGETS an element beats a value it would otherwise INHERIT,
+   whatever the specificity — so the plus rendered at 1.5rem in --mj-text-disabled, the token
+   reserved for things you cannot click, on an enabled control 8px taller than the identical button
+   two rows below it, and it did not follow the button's hover colour because its own was pinned.
+   The p is scoped for the same reason rather than left as the next instance of the same trap.
+   The .fb-screen-add rule above stays a descendant rule on purpose: it targets a CLASS, so it
+   cannot capture something that merely happens to be nested here. */
+.fb-canvas-empty > i { font-size: 1.5rem; color: var(--mj-text-disabled); }
+.fb-canvas-empty > p { margin: 0; font-size: var(--mjf-meta); }
 
 /* ------------------------------------------------------- non-Build tab panes */
 
