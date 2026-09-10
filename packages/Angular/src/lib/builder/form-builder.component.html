@@ -480,6 +480,7 @@
                 cdkDrag
                 [cdkDragData]="node"
                 [class.is-selected]="node.entity.ID === selectedQuestionId"
+                [attr.data-question-id]="node.entity.ID"
                 tabindex="0"
                 (click)="selectQuestion(node)"
                 (keydown.enter)="selectQuestion(node)"

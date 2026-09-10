@@ -35,6 +35,8 @@ import { describe, expect, it } from 'vitest';
 const read = (file: string): string => readFileSync(join(__dirname, file), 'utf8');
 const html = (): string => read('form-builder.component.html').replace(/<!--[\s\S]*?-->/g, '');
 const css = (): string => read('form-builder.styles.ts').replace(/\/\*[\s\S]*?\*\//g, '');
+const componentTs = (): string =>
+  read('form-builder.component.ts').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
 describe('the add-content bar belongs to the selected question', () => {
   it('is offered only while that question is selected', () => {
@@ -243,6 +245,44 @@ describe('the empty state reads as one composition', () => {
     expect(rule).toMatch(/margin-bottom:\s*0/);
   });
 });
+
+describe('an insert leaves focus on the question it created', () => {
+  /**
+   * The picker restores focus to whatever opened it. On EVERY insert path that opener is gone by
+   * the time the restore runs — the empty state unmounts once the section is no longer empty, and
+   * a per-question bar unmounts once selection moves to the new question — and `focus()` on a
+   * detached node is a silent no-op, so focus fell to `<body>`.
+   *
+   * Verified identical on BOTH openers before this was treated as a defect, so it is not something
+   * the empty-state control introduced. The fix belongs in the canvas rather than the picker: the
+   * picker cannot know where focus should go, and the canvas already knows, because it just
+   * selected the new question.
+   */
+  it('gives every question card an identity that is not a styling class', () => {
+    // Keyed on the question id, so the focus target survives a rename of `.is-selected`.
+    expect(html()).toMatch(/\[attr\.data-question-id\]="node\.entity\.ID"/);
+  });
+
+  it('focuses that card after the insert, not the opener the insert removed', () => {
+    const source = componentTs();
+    const insert = source.indexOf('async insertQuestionAt');
+    expect(insert).toBeGreaterThan(-1);
+    const body = source.slice(insert, source.indexOf('\n  }', insert));
+    expect(body).toMatch(/focusQuestionCard\(node\.entity\.ID\)/);
+  });
+
+  it('waits for the render that creates the card before reaching for it', () => {
+    // The card does not exist yet when insertQuestionAt returns; querying for it synchronously
+    // would find nothing and fail exactly as silently as the bug being fixed.
+    const source = componentTs();
+    const method = source.indexOf('private focusQuestionCard');
+    expect(method).toBeGreaterThan(-1);
+    const body = source.slice(method, source.indexOf('\n  }', method));
+    expect(body).toMatch(/afterNextRender\(/);
+    expect(body).toMatch(/data-question-id="\$\{questionId\}"/);
+  });
+});
+
 describe('the empty state styles its own illustration, not whatever is nested in it', () => {
   /**
    * `.fb-canvas-empty i` and `.fb-canvas-empty p` were written when the block held exactly one
