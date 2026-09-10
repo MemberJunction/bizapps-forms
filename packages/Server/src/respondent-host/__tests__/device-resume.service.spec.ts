@@ -352,6 +352,56 @@ describe('runRemember', () => {
     expect(out.status).toBe(204);
     expect(out.setCookie).toBeUndefined();
   });
+
+  it('mints a pointer for a RESUMED session, whose JWT names the row rather than the link', async () => {
+    // #193. After `/resume` the page swaps in the RESPONSE-scoped session, and the widget mints a
+    // new `x-session-id` on every page load — so on the ordinary happy path NEITHER of the old
+    // clauses could match, and a completely normal fill was logged as an ownership violation once
+    // per resumed sitting.
+    const { deps, rec } = makeDeps();
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
+
+  it("mints nothing for a session scoped to somebody ELSE's row", async () => {
+    // The refusal that has to survive #193: a verified scope is only ever proof about the row it
+    // names, so naming a different row is exactly as foreign as naming none.
+    const { deps, rec } = makeDeps();
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: OTHER_ROW_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('still refuses a DISTRIBUTION-scoped caller whose link does not match the row', async () => {
+    // Unchanged by #193, and restated beside it: widening the rule for a response-scoped caller
+    // must not widen it for the link-scoped one the design review's finding 2 was about.
+    const { deps, rec } = makeDeps({ response: { formDistributionId: 'another-link' } });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: DIST_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('folds the case of the scoped id, which SQL Server hands back uppercased', async () => {
+    // MJ mints primary keys client-side in lowercase and SQL Server returns them uppercased, so a
+    // case-sensitive comparison would pass here and refuse every resumed fill on a real host.
+    const { deps, rec } = makeDeps();
+
+    const out = await runRemember(deps, {
+      ...args,
+      sessionId: 'sess-second',
+      scopeId: ROW_ID.toUpperCase(),
+    });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
 });
 
 describe('runForget', () => {

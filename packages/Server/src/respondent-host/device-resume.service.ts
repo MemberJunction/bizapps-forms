@@ -13,6 +13,8 @@
  */
 import { LogError, LogStatus } from '@memberjunction/core';
 
+import { foldId, responseIsOurs, scopeNamesResponse } from '../public-submit/persistence.service';
+
 /** Why a resume could not happen. The page maps these to copy; the respondent sees no code. */
 export type ResumeRefusal =
   | 'no-pointer'
@@ -261,23 +263,32 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
 /**
  * Whether the caller may be given a pointer to this row.
  *
- * Two independent facts, both required. The session id is the caller's own claim on the row — the
- * same rule `responseIsOurs` applies at the write, restated here because this route writes no
- * response and therefore never reaches that gate. The distribution match is the review's addition:
- * a JWT scoped to link A must not be able to mint a pointer to a draft submitted through link B,
- * even one the caller genuinely owns, because the pointer it mints would resume into a form the
- * caller's session was never admitted to.
+ * TWO QUESTIONS, and the first one is not answered here. `responseIsOurs` is THE ownership rule, so
+ * this route CALLS it rather than restating it. It used to restate it — minus the scope clause —
+ * while its comment claimed the two were the same rule, and #193 is what that cost: after a
+ * `/resume` the caller's JWT names the RESPONSE, and the row's owner column still names the first
+ * sitting's session, so an ordinary resumed fill matched neither half and was refused as a stranger
+ * once per sitting. A doc comment asserting equivalence is what hid the omission; the call enforces
+ * it instead.
  *
- * An UNKNOWN distribution on the row is a refusal, never a pass.
+ * The second question is this route's own, and it is the design review's finding 2: which LINK is
+ * this caller admitted to? A distribution-scoped JWT must match the link the row came through, or
+ * the pointer it mints would resume into a form its session was never let into — and an UNKNOWN
+ * link on the row is a refusal, never a pass. A response-scoped caller needs no such match: their
+ * session was minted from an invite naming this very row, which is strictly stronger evidence than
+ * a link comparison, and demanding a link as well would refuse the very sitting it was issued for.
  */
 function ownsDraft(response: ResumeResponseRow, args: RememberArgs): boolean {
-  const owner = (response.anonymousSessionId ?? '').trim().toLowerCase();
-  const caller = args.sessionId.trim().toLowerCase();
-  if (owner !== '' && owner !== caller) {
+  const row = { ID: response.id, AnonymousSessionID: response.anonymousSessionId };
+  const caller = { sessionId: args.sessionId, scopedResponseId: args.scopeId };
+  if (!responseIsOurs(row, caller)) {
     return false;
   }
-  const rowLink = (response.formDistributionId ?? '').trim().toLowerCase();
-  return rowLink !== '' && rowLink === args.scopeId.trim().toLowerCase();
+  if (scopeNamesResponse(row, caller)) {
+    return true;
+  }
+  const rowLink = foldId(response.formDistributionId);
+  return rowLink !== '' && rowLink === foldId(args.scopeId);
 }
 
 /**
