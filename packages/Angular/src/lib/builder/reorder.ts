@@ -145,21 +145,19 @@ export interface ReorderNotice {
   /** What the author reads — see {@link reorderNoticeText}. */
   readonly text: string;
   /**
-   * The page the question is on NOW — the destination, when the move crossed a section.
-   *
-   * `pageId` and `fromPageId` are equal for every in-page move, which is what {@link
-   * undoReorderMove} reads to decide whether the splice-out correction applies. Storing the pair
-   * rather than a boolean means the band can also FIND both pages when Undo is clicked, without
-   * a second lookup that could disagree.
-   */
-  readonly pageId: string;
-  /**
    * The page the question came FROM, and so the page Undo must put it back on (issue #149).
    *
-   * Equal to `pageId` for an in-page move. Without it, Undo resolved `wasBefore` inside the
-   * destination section and put the question back at the right index in the WRONG section — the
-   * anchor is on the source page, so in practice the undo simply refused and the band lapsed
-   * with the move still standing.
+   * Without it, Undo resolved `wasBefore` inside the destination section and put the question
+   * back at the right index in the WRONG section — the anchor is on the source page, so in
+   * practice the undo simply refused and the band lapsed with the move still standing.
+   *
+   * THIS IS THE ONLY PAGE THE BAND REMEMBERS, and it is the only one it safely can. Where the
+   * question came from is history and cannot stop being true. Where it IS is not: a move that
+   * breaks nothing new deliberately leaves a standing band alone, and since #149 such a move can
+   * change the question's page — so a remembered "it is on page X" can name a section the
+   * question has since left while every id on the band still exists. {@link undoReorderMove}
+   * therefore takes the current page from its caller, which resolves it against the tree at click
+   * time, exactly as the question and its anchor are already resolved.
    */
   readonly fromPageId: string;
   readonly questionId: string;
@@ -228,13 +226,19 @@ export interface UndoMove {
  * Undo for reasons that have nothing to do with the author. Resolving both the question and where
  * it goes by id at click time needs nothing to have held still.
  *
- * `currentQuestionIds` is the page the question is on NOW; `homeQuestionIds` is the page it has
- * to go back to, which is the same list for an in-page undo and a different one once a move can
- * cross a section (issue #149). Either page having been deleted arrives as an empty list, which
- * resolves to "not there" through the same path as a deleted question rather than a second branch.
+ * `currentPageId` and `currentQuestionIds` describe the page the question is on NOW, as the
+ * caller finds it at click time; `homeQuestionIds` is the page it has to go back to, which is the
+ * same list for an in-page undo and a different one once a move can cross a section (issue #149).
+ * Either page having been deleted arrives as an empty list, which resolves to "not there" through
+ * the same path as a deleted question rather than a second branch.
+ *
+ * The current page is a PARAMETER rather than a field on the notice because the notice outlives
+ * moves that do not replace it, and since #149 one of those can change the question's page — see
+ * {@link ReorderNotice.fromPageId}.
  */
 export function undoReorderMove(
-  notice: Pick<ReorderNotice, 'questionId' | 'wasBefore' | 'pageId' | 'fromPageId'>,
+  notice: Pick<ReorderNotice, 'questionId' | 'wasBefore' | 'fromPageId'>,
+  currentPageId: string,
   currentQuestionIds: readonly string[],
   homeQuestionIds: readonly string[],
 ): UndoMove | null {
@@ -242,7 +246,7 @@ export function undoReorderMove(
   if (from < 0) {
     return null;
   }
-  const crossed = notice.pageId !== notice.fromPageId;
+  const crossed = currentPageId !== notice.fromPageId;
   const to = destination(notice.wasBefore, from, homeQuestionIds, crossed);
   if (to === null || (!crossed && to === from)) {
     return null;

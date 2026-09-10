@@ -633,7 +633,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     const labels = this.itemLabels;
     this.reorderNotice = {
       text: reorderNoticeText({ id, label }, broken, (other) => labels.get(other) ?? 'another question'),
-      pageId: page.entity.ID,
       // An insert lands on the page the author clicked; it has not come from anywhere else.
       fromPageId: page.entity.ID,
       questionId: id,
@@ -1408,7 +1407,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (text.length > 0) {
       this.reorderNotice = {
         text,
-        pageId: page.entity.ID,
         fromPageId: page.entity.ID,
         questionId: moved.entity.ID,
         wasBefore,
@@ -1495,7 +1493,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (text.length > 0) {
       this.reorderNotice = {
         text,
-        pageId: destination.entity.ID,
         fromPageId: source.entity.ID,
         questionId: moved.entity.ID,
         wasBefore,
@@ -1537,24 +1534,42 @@ export class FormBuilderComponent extends BaseFormComponent {
   /**
    * Put the moved question back where it came from.
    *
-   * `moveItemInArray(a, from, to)` is inverted exactly by moving the same element back, so this
-   * re-enters {@link reorderQuestion}, which re-runs the diff, finds nothing newly broken and
-   * clears its own notice. No command stack, and no second definition of what "undone" means.
+   * A move is inverted by making the opposite move, so this re-enters the same write path the
+   * move used — {@link reorderQuestion} in-page, {@link moveQuestionAcrossPages} across sections
+   * — which re-runs the diff and lets `retireStaleNotice` drop the band once the rules it named
+   * are sound again. No command stack, and no second definition of what "undone" means.
+   *
+   * THE SECTION THE QUESTION IS IN IS FOUND, NOT REMEMBERED. The band records where it came
+   * from; where it is now is read off the tree here, by question id, at click time — the same
+   * way the question and its anchor are resolved. A band stands until it is undone, dismissed or
+   * replaced, and since #149 a move that breaks nothing new can carry its question into another
+   * section without replacing it, so a remembered page can name a section the question has left.
+   * Resolving it here means that state is unrepresentable rather than handled, and it is what
+   * makes the refusal below honest: reaching it now really does mean something was deleted.
    */
   protected async undoReorder(): Promise<void> {
     const notice = this.reorderNotice;
     if (!notice) {
       return;
     }
-    const current = this.tree?.pages.find((p) => p.entity.ID === notice.pageId);
+    const current = this.tree?.pages.find((p) =>
+      p.questions.some((q) => q.entity.ID === notice.questionId),
+    );
     const home = this.tree?.pages.find((p) => p.entity.ID === notice.fromPageId);
     const move: UndoMove | null =
       current && home
-        ? undoReorderMove(notice, this.questionIds(current), this.questionIds(home))
+        ? undoReorderMove(
+            notice,
+            current.entity.ID,
+            this.questionIds(current),
+            this.questionIds(home),
+          )
         : null;
     if (!current || !home || !move) {
-      // The question, the section it is on, or the section it came from was deleted while the
-      // band stood. A band offering a move that cannot happen is worse than no band.
+      // Nothing to put back. `current` is missing only when no section holds the question at
+      // all, so it means the question itself is gone; `home` when the section it came from was
+      // deleted; `move` when the anchor it sat in front of was deleted, or when it is already
+      // back where it started. A band offering a move that cannot happen is worse than no band.
       this.dismissReorderNotice();
       return;
     }

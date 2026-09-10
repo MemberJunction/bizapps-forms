@@ -169,12 +169,17 @@ describe('a reorder that breaks a rule says so at the drag', () => {
     //
     // The call now takes TWO id lists (#149): the page the question is on, and the page it has
     // to go home to. They are the same page for an in-page undo and different ones once a move
-    // can cross a section — which is the whole reason the second argument exists, since the
-    // anchor `wasBefore` names a question on the page it LEFT.
+    // can cross a section — which is the whole reason the second list exists, since the anchor
+    // `wasBefore` names a question on the page it LEFT.
+    //
+    // It also takes the CURRENT PAGE'S ID, and passing `current.entity.ID` is the point: that
+    // page was found by looking for the question, so the id and the list beside it are the same
+    // page by construction. Passing an id from anywhere else — the band, a variable resolved
+    // earlier — is how the two come apart.
     const source = builder();
     expect(source).toMatch(/questionId: moved\.entity\.ID/);
     expect(source).toMatch(
-      /undoReorderMove\(notice, this\.questionIds\(current\), this\.questionIds\(home\)\)/,
+      /undoReorderMove\(\s*notice,\s*current\.entity\.ID,\s*this\.questionIds\(current\),\s*this\.questionIds\(home\),\s*\)/,
     );
     expect(source).toMatch(/private questionIds\(page: PageNode\): string\[\] \{/);
   });
@@ -241,6 +246,16 @@ describe('every write that can invert a pair is watched', () => {
     return source.slice(start, end);
   };
 
+  /** Just the Undo handler, so a guard about it cannot be satisfied by another method. */
+  const undoMethod = (): string => {
+    const source = builder();
+    const start = source.indexOf('protected async undoReorder(');
+    expect(start, 'no undoReorder in the builder').toBeGreaterThan(-1);
+    const end = source.indexOf('\n  }', start);
+    expect(end).toBeGreaterThan(start);
+    return source.slice(start, end);
+  };
+
   it('runs the damage diff over the cross-section write, not just the in-page one', () => {
     // WHAT THIS REPLACED. This block used to BAN transferArrayItem and cdkDropListConnectedTo
     // outright, as a tripwire: `reorderQuestion` claimed to be the only path that can invert a
@@ -264,9 +279,24 @@ describe('every write that can invert a pair is watched', () => {
     expect(crossPageMethod()).toMatch(/transferArrayItem\(/);
   });
 
-  it('records BOTH pages on the band, so Undo returns the question to its section', () => {
+  it('records the section the question came FROM, so Undo returns it there', () => {
+    // Only the SOURCE page is recorded. Where the question is NOW is deliberately not on the
+    // band — see the guard below.
     expect(crossPageMethod()).toMatch(/fromPageId: source\.entity\.ID/);
-    expect(crossPageMethod()).toMatch(/pageId: destination\.entity\.ID/);
+  });
+
+  it('does not remember where the question IS, because that can stop being true', () => {
+    // A move that breaks nothing new leaves a standing band alone, on purpose. Since #149 such
+    // a move can also change the question's PAGE — so a page id stored on the band when it was
+    // raised can name a section the question has since left, while every id on it still exists.
+    // Reproduced: the band's Undo then resolved the question inside a section it was no longer
+    // in, found nothing, and took the "it must have been deleted" branch — silently dropping a
+    // warning whose rule was still broken.
+    //
+    // The fix is to resolve it the way everything else on this band is already resolved: by id,
+    // at click time, against the tree. These two guards are what stop the cache coming back.
+    expect(undoMethod()).not.toMatch(/notice\.pageId/);
+    expect(undoMethod()).toMatch(/q\.entity\.ID === notice\.questionId/);
   });
 
   it('renumbers both sections through the one method that orders the writes', () => {
