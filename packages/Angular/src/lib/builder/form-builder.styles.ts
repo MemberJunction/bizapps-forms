@@ -383,6 +383,18 @@ const LAYOUT_CSS = /* css */ `
   background: var(--mj-brand-primary);
   color: var(--mj-brand-on-primary, var(--mj-text-inverse));
 }
+/* The section a palette click writes to. Quiet on purpose — it confirms a destination, it does
+   not compete with the selection highlight it usually sits beside. */
+.fb-page-head.is-add-target { border-bottom-color: var(--mj-brand-primary); }
+.fb-page-target {
+  flex: none;
+  font-size: var(--mjf-label);
+  color: var(--mj-brand-primary);
+  background: color-mix(in srgb, var(--mj-brand-primary) 12%, var(--mj-bg-surface));
+  border-radius: var(--mjf-radius-sm);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
 .fb-page-num {
   flex: none;
   display: flex;
