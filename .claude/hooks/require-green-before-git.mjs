@@ -48,13 +48,48 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
-const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+/**
+ * The working tree whose commit is being judged — which is NOT necessarily the checkout the
+ * session started in.
+ *
+ * `CLAUDE_PROJECT_DIR` names the directory the session was launched from and keeps naming it after
+ * the session enters a git worktree, so a hook that trusted it alone ran both checks against the
+ * MAIN checkout while the commit it was gating happened in the worktree. That is wrong in both
+ * directions and silently so: a worktree whose tree is broken commits anyway because the main
+ * checkout is green, and a worktree whose tree is green is refused because someone's half-finished
+ * edit sits in the main checkout — which is what happened, and which blocks every worktree session
+ * on unrelated work it must not touch.
+ *
+ * `git rev-parse --show-toplevel` answers the only question that matters here: which tree is
+ * `git commit` about to write from. It reports the worktree's own root inside a linked worktree and
+ * the checkout root outside one, so the ordinary single-checkout case is unchanged.
+ *
+ * Spawned the same way as the checks below — `shell: false`, no PATH assumption beyond `git`
+ * itself. Falls back rather than throwing: a hook that cannot locate git must still gate something,
+ * and the old behaviour is the right floor.
+ */
+export function gitToplevelOf(cwd) {
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd,
+        encoding: 'utf8',
+        shell: false,
+        timeout: 5000,
+    });
+    if (result.error || result.status !== 0) return null;
+    const top = (result.stdout || '').trim();
+    return top.length > 0 ? top : null;
+}
+
+const PROJECT_DIR = gitToplevelOf(process.cwd()) || process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
 /**
  * `commit` or `push` as a git SUBCOMMAND, not as a substring.
  *
- * The leading boundary makes `npm run commitpush` and `grep -rn "git commit" docs/` allow — the
- * first because `commitpush` is one word, the second because the match must begin a command.
+ * The leading boundary makes `npm run commitpush` allow, because `commitpush` is one word.
+ * (`commitpush` was a real script here until #177 deleted it; it stays as the example because the
+ * boundary it exercises is what matters, not whether the script exists.) It no longer makes
+ * `grep -rn "git commit" docs/` allow — see the QUOTE bullet below, which explains why that trade
+ * was taken, and the spec case that pins it deliberately.
  * The middle segment covers GLOBAL OPTIONS between `git` and the subcommand, which are otherwise a
  * straight bypass. It describes their SHAPE rather than naming them: an earlier version enumerated
  * `-C` and `-c` only, so `git --no-pager commit`, `git -P commit`, `git --git-dir=… commit` and
@@ -67,7 +102,9 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  * optional inside a `*` backtracks exponentially on non-matching input (measured: 0.02ms at 15
  * options, 0.25ms at 20, 1.65ms at 24). This pattern runs on EVERY Bash tool call, so that is a
  * ReDoS in a hot path — strictly worse than the bug it would fix. The form below stays flat.
- * Over-inclusiveness is cheap here (a needless check is 13ms warm) and under-inclusiveness is the
+ * Over-inclusiveness is cheap here (a needless check costs one measured run — 217 ms warm, ~6.9 s
+ * when a leaf source file changed, per the header above; the "13ms" this sentence used to quote was
+ * the same stale figure the header already corrects) and under-inclusiveness is the
  * bug, so `&&`, `;`, `|` and newlines all count as command starts — and so do the pieces below,
  * each closing a real bypass found in review rather than a hypothetical one:
  *
@@ -77,6 +114,24 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   (`(git commit -m x)`) and command substitution (`out=$(git commit -m "x" 2>&1)`, `` `git
  *   push` ``) both put `git` right after them — an ordinary way to capture commit output, not an
  *   exotic one.
+ * - The class also includes both QUOTE characters. A nested shell — `bash -c "git commit -m x"`,
+ *   `sh -lc 'git push'`, `ssh host "git push"` — always puts `git` immediately after a quote, so
+ *   without them every quoted invocation returned `allow` with neither checker spawned (#178).
+ *   This is the one boundary that costs a REAL false positive: `grep -rn "git commit" docs/` is
+ *   structurally identical to `bash -c "git commit -m x"` — both put `git commit` right after a
+ *   double quote — and it is now checked too. The difference between them is which program is being
+ *   invoked, and no character class can see it. Parsing the command instead of matching it could
+ *   tell them apart; a shell tokeniser handling nested quoting, escapes, `--` terminators and
+ *   per-shell `-c` placement is far more machinery than the rest of this hook, and every corner of
+ *   it is a new way for the gate to be silently wrong, so it was weighed and rejected rather than
+ *   missed. The deny message names this over-match, so a grep denied on a red tree can explain
+ *   itself.
+ * - An optional PATH PREFIX, `(?:[\w.\/-]*\/)?`, sits before `git`. `/` is deliberately NOT in the
+ *   boundary class — it is the middle of a path, not the start of a command — so `/usr/bin/git
+ *   commit` and `/opt/homebrew/bin/git push` matched nothing at all before (#178). The class must
+ *   END in a slash, so a word that merely ends in `git` (`/var/log/legit commit`, `digit push.txt`)
+ *   still does not match. One flat greedy class also keeps this arm linear, where the tempting
+ *   `(?:[\w.-]*\/)+` is the nested-quantifier shape the paragraph above warns about.
  * - `/i` makes the match case-insensitive. macOS and Windows both mount case-insensitive, so
  *   `Git commit` and `GIT PUSH` really invoke `git` on this machine — the identical bug class
  *   `block-generated-edits.mjs`'s header records being bitten by ("the path pattern was
@@ -89,7 +144,7 @@ const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
  *   hyphen, so the lookahead fails and `commit`/`push` never matches as its own subcommand).
  */
 const GIT_WRITE =
-    /(?:^|[\s;&|(`])\s*git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
+    /(?:^|[\s;&|(`'"])\s*(?:[\w.\/-]*\/)?git\s+(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*(?:commit|push)(?![\w-])/i;
 
 export function isGitWriteCommand(command) {
     return typeof command === 'string' && GIT_WRITE.test(command);
@@ -125,7 +180,11 @@ export function decisionFor({ command, runChecks }) {
             'This tree fails a check that is now REQUIRED to merge (#173), so committing it only ' +
             'moves the failure to CI. Fix it first:\n\n' +
             detail +
-            '\n\nRe-run with `npm run lint:ui` and `npm run typecheck`.',
+            '\n\nRe-run with `npm run lint:ui` and `npm run typecheck`.' +
+            '\n\nIf this command was not actually a git write — a grep for the phrase, or prose ' +
+            'quoting it — the gate cannot tell the difference: a quote character counts as a ' +
+            'command start on purpose (#178), because missing a real nested-shell invocation is ' +
+            'the worse error. Nothing was written; run the command again once the tree is green.',
     };
 }
 

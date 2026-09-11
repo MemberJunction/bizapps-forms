@@ -44,6 +44,17 @@ export class PublishedFormType {
 
   @Field({ description: 'JSON-encoded full PublishedFormDefinition (pages -> questions -> options).' })
   definitionJSON!: string;
+
+  /**
+   * The draft this session may continue, when its magic-link scope names a Form Response.
+   *
+   * Null for an ordinary public-link session — whose scope is a distribution id, and therefore
+   * matches no response row under the read filter — so its presence IS the signal that this is a
+   * resumed session. Carried as a JSON string for the same reason `definitionJSON` is: the schema
+   * does not duplicate, and then drift from, a TypeScript contract.
+   */
+  @Field({ nullable: true, description: 'JSON-encoded ResumeSnapshot for a session scoped to one Form Response.' })
+  resumeJSON?: string;
 }
 
 // --- SubmitFormResponse (write) --------------------------------------------
