@@ -7,8 +7,26 @@ import {
 } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 import { publishedVersionFilter } from '../../public-submit/definition-loader.service';
+
+/**
+ * `LogError` is captured with `vi.mock` + `vi.hoisted`, NOT `vi.spyOn(core, 'LogError')`. A spy on
+ * a module export passes here and fails in CI, and the difference is invisible from this file: in
+ * this dev workspace `@memberjunction/core` resolves to MJ's linked source, which Vitest transforms
+ * into a redefinable namespace; on a clean install it resolves to the published tarball,
+ * externalised as real ESM, whose namespace object is frozen — `Cannot redefine property:
+ * LogError`. See `default-salt-warning.spec.ts` for the same reasoning at length.
+ */
+const { logError, logStatus } = vi.hoisted(() => ({ logError: vi.fn(), logStatus: vi.fn() }));
+
+vi.mock('@memberjunction/core', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@memberjunction/core')>()),
+  LogError: logError,
+  LogStatus: logStatus,
+}));
+
 import {
   redeemSlugToToken,
+  redeemRawToken,
   type RedeemDeps,
   type RedeemRunViewProvider,
 } from '../redeem.service';
@@ -100,6 +118,16 @@ function fakeFetch(
   }) as unknown as typeof fetch;
 }
 
+/** Every line `LogError` was handed, joined — for asserting what a log does and does not contain. */
+function loggedLines(): string {
+  return logError.mock.calls.map((c) => String(c[0])).join('\n');
+}
+
+/** Every line `LogStatus` was handed, joined. Severity is asserted, not just presence. */
+function statusLines(): string {
+  return logStatus.mock.calls.map((c) => String(c[0])).join('\n');
+}
+
 /**
  * A `fetch` stub whose body is RAW TEXT, so `response.json()` rejects the way it does against a
  * hop that answered with its own HTML page. `fakeFetch` above always hands back parseable JSON and
@@ -138,6 +166,11 @@ function deps(over: Partial<RedeemDeps>): RedeemDeps {
 }
 
 describe('redeemSlugToToken', () => {
+  beforeEach(() => {
+    logError.mockClear();
+    logStatus.mockClear();
+  });
+
   it('returns distribution-not-found for an empty slug (no DB read)', async () => {
     const out = await redeemSlugToToken(deps({}), '');
     expect(out.ok).toBe(false);
@@ -150,13 +183,37 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-not-found');
   });
 
-  it('returns distribution-not-found when the RunView fails (fail-safe, no throw)', async () => {
+  // bizapps-forms#194 review, F3. A failed READ is not a negative answer. `hasPublishedVersion`
+  // ten lines below already documents this decision — "that is a database problem, not an
+  // unpublished form, and the caller must not report it as one" — and logs where the context is.
+  // `loadDistribution` was the lone holdout of the four `!result.Success` sites in this directory.
+  it('reports a failed distribution read as a read failure, not as a missing link', async () => {
     const out = await redeemSlugToToken(
       deps({ provider: fakeProvider({ success: false }).provider }),
       'customer-survey',
     );
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('distribution-not-found');
+    // NOT distribution-not-found: that tells the holder of a perfectly good link to check it.
+    expect(out.reason).toBe('redeem-failed');
+  });
+
+  it('logs a failed distribution read with the slug, in the frame that holds it', async () => {
+    await redeemSlugToToken(deps({ provider: fakeProvider({ success: false }).provider }), 'customer-survey');
+    expect(loggedLines()).toContain('customer-survey');
+  });
+
+  // Was `returns distribution-not-found when the RunView fails`. That expectation pinned the defect
+  // the two tests above now fix: it asserted that a failed READ is reported as a missing link. The
+  // half worth keeping is the fail-safe contract — this path must never throw, whatever it returns —
+  // so that is what it pins now, with the reason asserted by the tests above (bizapps-forms#194).
+  it('never throws when the distribution RunView fails, whatever reason it returns', async () => {
+    const out = await redeemSlugToToken(
+      deps({ provider: fakeProvider({ success: false }).provider }),
+      'customer-survey',
+    );
+    expect(out.ok).toBe(false);
+    expect(out.token).toBeUndefined();
+    expect(out.reason).toBeDefined();
   });
 
   it('returns distribution-closed for a Closed distribution', async () => {
@@ -369,31 +426,210 @@ describe('redeemSlugToToken', () => {
     expect(JSON.parse(String(init.body))).toEqual({ token: 'raw-public-token' });
   });
 
-  it('returns redeem-failed when core reports success=false', async () => {
+  it('returns redeem-refused when core reports success=false', async () => {
     const fetchImpl = fakeFetch({ success: false, errorCode: 'expired' });
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-refused');
   });
 
-  it('returns redeem-failed when core succeeds but returns no token', async () => {
+  it('returns redeem-refused when core succeeds but returns no token', async () => {
     const fetchImpl = fakeFetch({ success: true });
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-refused');
   });
 
-  it('returns redeem-failed when fetch throws (network down — fail-safe)', async () => {
+  it('returns redeem-unreachable when fetch throws (network down — fail-safe)', async () => {
     const out = await redeemSlugToToken(deps({ fetchImpl: throwingFetch() }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-unreachable');
   });
 
-  it('returns redeem-failed when the response body is not the expected shape', async () => {
+  it('returns redeem-unreachable when the response body is not the expected shape', async () => {
     const fetchImpl = fakeFetch('not-an-object');
     const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('redeem-failed');
+    expect(out.reason).toBe('redeem-unreachable');
+  });
+
+  // bizapps-forms#140. `/f/:slug` is the anonymous public entry point: a production failure has no
+  // reproduction steps and no user to interview, so the log line IS the diagnosis. These assert
+  // that one is emitted and what it carries — never that the source contains a `LogError` call.
+  describe('says why the redeem failed', () => {
+    /** A `fetch` stub that rejects the way a connect failure actually arrives. */
+    function refusingFetch(): typeof fetch {
+      return vi.fn(async () => {
+        throw new Error('fetch failed: ECONNREFUSED 127.0.0.1:4121');
+      }) as unknown as typeof fetch;
+    }
+
+    it('logs the slug, the endpoint and the error when the transport fails', async () => {
+      const out = await redeemSlugToToken(deps({ fetchImpl: refusingFetch() }), 'customer-survey');
+      expect(out.reason).toBe('redeem-unreachable');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('http://localhost:4121/magic-link/redeem');
+      expect(logged).toContain('ECONNREFUSED');
+    });
+
+    it('logs the slug, the endpoint and the parse error when the body is not JSON', async () => {
+      const out = await redeemSlugToToken(
+        deps({ fetchImpl: fakeFetchRaw('<html>502 Bad Gateway</html>', { status: 502 }) }),
+        'customer-survey',
+      );
+      expect(out.reason).toBe('redeem-unreachable');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('http://localhost:4121/magic-link/redeem');
+      // The parser's own words, not a fixed sentence: Node has spelled this two ways across
+      // versions ("Unexpected token < in JSON at position 0" and "Unexpected token '<', ..."),
+      // and pinning either makes this test a Node-version assertion instead of a logging one.
+      expect(logged).toContain('Unexpected token');
+    });
+
+    it('logs the slug and the endpoint when the body is JSON of some other shape', async () => {
+      const out = await redeemSlugToToken(
+        deps({ fetchImpl: fakeFetch({ notARedeemResult: true }) }),
+        'customer-survey',
+      );
+      expect(out.reason).toBe('redeem-unreachable');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('http://localhost:4121/magic-link/redeem');
+    });
+
+    // The line whose absence cost a two-repository source read to learn that the answer had been
+    // "Too many redemption attempts. Try again later." all along. Core sends the sentence; the door
+    // threw it away unread.
+    //
+    // Since bizapps-forms#139 landed, THIS shape is the `rate-limited` reason rather than a plain
+    // refusal — the respondent now gets a 429 with a wait instead of a 502. That does not retire
+    // the log line: a door being throttled is a capacity signal the operator still needs, and it
+    // is the only place core's own words appear. The refusal case gets its own test below.
+    it("logs core's own errorCode and message when the redeem is rate-limited", async () => {
+      const out = await redeemSlugToToken(
+        deps({
+          fetchImpl: fakeFetch(
+            { success: false, errorCode: 'rate_limited', error: 'Too many redemption attempts. Try again later.' },
+            { status: 429 },
+          ),
+        }),
+        'customer-survey',
+      );
+      expect(out.reason).toBe('rate-limited');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('rate_limited');
+      expect(logged).toContain('Too many redemption attempts. Try again later.');
+    });
+
+    it("logs core's own errorCode and message when the endpoint refuses on the token's merits", async () => {
+      const out = await redeemSlugToToken(
+        deps({
+          fetchImpl: fakeFetch(
+            { success: false, errorCode: 'invalid', error: 'This link has been revoked.' },
+            { status: 410 },
+          ),
+        }),
+        'customer-survey',
+      );
+      expect(out.reason).toBe('redeem-refused');
+      const logged = loggedLines();
+      expect(logged).toContain('customer-survey');
+      expect(logged).toContain('invalid');
+      expect(logged).toContain('This link has been revoked.');
+      expect(logged).toContain('410');
+    });
+
+    it('logs the refusal when core reports success with no token', async () => {
+      const out = await redeemSlugToToken(deps({ fetchImpl: fakeFetch({ success: true }) }), 'customer-survey');
+      expect(out.reason).toBe('redeem-refused');
+      expect(loggedLines()).toContain('customer-survey');
+    });
+
+    it('distinguishes an unreachable endpoint from a refusal', async () => {
+      const unreachable = await redeemSlugToToken(deps({ fetchImpl: refusingFetch() }), 'customer-survey');
+      const refused = await redeemSlugToToken(
+        deps({ fetchImpl: fakeFetch({ success: false, errorCode: 'revoked', error: 'Revoked.' }) }),
+        'customer-survey',
+      );
+      expect(unreachable.reason).not.toBe(refused.reason);
+    });
+
+    // bizapps-forms#194 review, F4. Severity is a property of the CALLER's expectation, and
+    // `postRedeem` is a shared frame that cannot see which caller it serves. A resume pointer is
+    // SINGLE-USE, so core answering `consumed` is the designed two-tab / restored-tab outcome, which
+    // `refusedRedeem` handles as a benign 'open-elsewhere'. The door's PublicLinkToken is multi-use,
+    // so `consumed` there is genuinely anomalous. The two must not share a severity.
+    describe('a refusal the caller expects is news, not an error', () => {
+      it('logs a consumed resume pointer at status level, never as an error', async () => {
+        const fetchImpl = fakeFetch(
+          { success: false, errorCode: 'consumed', error: 'Invite already redeemed or expired.' },
+          { status: 410 },
+        );
+        const out = await redeemRawToken(
+          { redeemUrl: 'http://localhost:4121/magic-link/redeem', fetchImpl },
+          'raw-resume-pointer',
+          'customer-survey',
+        );
+        // The contract its own callers judge is unchanged: they read errorCode and status.
+        expect(out?.errorCode).toBe('consumed');
+        expect(out?.status).toBe(410);
+        // Still logged — losing the line would re-open bizapps-forms#140 on this path.
+        expect(statusLines()).toContain('customer-survey');
+        expect(statusLines()).toContain('consumed');
+        // But not as an error. This is the whole assertion.
+        expect(loggedLines()).not.toContain('consumed');
+        expect(logError).not.toHaveBeenCalled();
+      });
+
+      it('still logs a refusal the caller does NOT expect as an error', async () => {
+        const fetchImpl = fakeFetch(
+          { success: false, errorCode: 'invalid', error: 'This link has been revoked.' },
+          { status: 410 },
+        );
+        await redeemRawToken(
+          { redeemUrl: 'http://localhost:4121/magic-link/redeem', fetchImpl },
+          'raw-resume-pointer',
+          'customer-survey',
+        );
+        expect(loggedLines()).toContain('invalid');
+        expect(loggedLines()).toContain('This link has been revoked.');
+      });
+
+      it('keeps consumed an ERROR on the door, whose link is multi-use', async () => {
+        const fetchImpl = fakeFetch(
+          { success: false, errorCode: 'consumed', error: 'Invite already redeemed or expired.' },
+          { status: 410 },
+        );
+        const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+        expect(out.reason).toBe('redeem-refused');
+        expect(loggedLines()).toContain('consumed');
+      });
+    });
+
+    // Both are credentials. A log line is durable, is shipped to aggregators, and outlives the
+    // session — the one place a magic-link token must never be written.
+    it('never writes the raw PublicLinkToken or the minted JWT to the log', async () => {
+      const shapes: Array<typeof fetch> = [
+        refusingFetch(),
+        fakeFetchRaw('<html>502 Bad Gateway</html>', { status: 502 }),
+        fakeFetch({ notARedeemResult: true }),
+        fakeFetch({ success: false, errorCode: 'revoked', error: 'This link has been revoked.' }),
+        fakeFetch({ success: true }),
+        fakeFetch({ success: true, token: 'minted-session-jwt' }),
+      ];
+      for (const fetchImpl of shapes) {
+        await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      }
+      const logged = loggedLines();
+      // First that there is a log at all: two `not.toContain` on an empty string pass for the
+      // wrong reason, and this assertion is the whole point of the change above it.
+      expect(logged.length).toBeGreaterThan(0);
+      expect(logged).not.toContain('raw-public-token');
+      expect(logged).not.toContain('minted-session-jwt');
+    });
   });
 
   // bizapps-forms#139. Core rate-limits `/magic-link/redeem` by IP (20/min) and says so precisely:
@@ -471,7 +707,9 @@ describe('redeemSlugToToken', () => {
     it.each([500, 200, 410])('leaves an unreadable body on the generic failure at status %i', async (status) => {
       const fetchImpl = fakeFetchRaw('<html>not json</html>', { status });
       const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
-      expect(out.reason).toBe('redeem-failed');
+      // `redeem-unreachable` since bizapps-forms#140 split the single reason: we asked and never
+      // got a usable answer. It renders the same 502 page, which is what this test is about.
+      expect(out.reason).toBe('redeem-unreachable');
     });
 
     // The trap: `errorCode: 'invalid'` is ALSO what core sends for a malformed token, an unknown or
@@ -483,12 +721,14 @@ describe('redeemSlugToToken', () => {
         { status: 410 },
       );
       const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
-      expect(out.reason).toBe('redeem-failed');
+      // `redeem-refused` since bizapps-forms#140: core answered and said no. Still the 502 page,
+      // still not the rate-limit page, which is the distinction this test defends.
+      expect(out.reason).toBe('redeem-refused');
     });
 
     it('leaves an unreachable endpoint on the generic failure', async () => {
       const out = await redeemSlugToToken(deps({ fetchImpl: throwingFetch() }), 'customer-survey');
-      expect(out.reason).toBe('redeem-failed');
+      expect(out.reason).toBe('redeem-unreachable');
     });
 
     // An upstream that ACCEPTS the connection and then says nothing is not the same failure as one

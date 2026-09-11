@@ -90,7 +90,14 @@ export function redeemFailureToView(
     // 429 + Retry-After is what browsers, CDNs, monitors and humans already understand.
     case 'rate-limited':
       return rateLimitedView(details.retryAfterSeconds);
+    // All three keep the generic 502. They are apart so the operator's LOG can tell an unreachable
+    // endpoint from a refusal (bizapps-forms#140) — telling the RESPONDENT apart is a separate
+    // decision, and the one case where it was worth making is the `rate-limited` arm above, which
+    // was split out on its own evidence. Nothing below is something a respondent can act on: the
+    // door could not ask, or core said no. Same sentence, same status, three different log lines.
     case 'redeem-failed':
+    case 'redeem-unreachable':
+    case 'redeem-refused':
       return redeemFailedView();
     default:
       // A reason with no `case` above is a decision nobody made. The assignment fails the BUILD so
@@ -102,7 +109,7 @@ export function redeemFailureToView(
   }
 }
 
-/** The generic failure view, shared by `redeem-failed` and the unreachable default. */
+/** The generic failure view, shared by the three 502 reasons and the unreachable default. */
 function redeemFailedView(): RedeemErrorView {
   return { status: 502, message: 'We could not open this form right now. Please try again later.' };
 }
