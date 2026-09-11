@@ -254,6 +254,23 @@ async function hasPublishedVersion(
  */
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
+/**
+ * How long the door will wait on core's redeem before giving up, in milliseconds.
+ *
+ * Not a tuning knob — a bound on a SHARED resource. `handleMetered` holds one of
+ * `FORMS_REDEEM_MAX_IN_FLIGHT` process-wide slots for the whole request, so without a deadline here
+ * it is the UPSTREAM's latency, not this door's policy, that decides how long a slot is held. An
+ * upstream that accepts the connection and then says nothing never rejects, so every such request
+ * parks a slot until Node's own 300-second header timeout; a handful of them exhaust the cap and
+ * the door starts answering "This form is receiving a lot of traffic right now" — reporting a
+ * wedged dependency as its own load, which is the same class of lie as the 502 this change removes.
+ *
+ * Ten seconds is far longer than a healthy redeem (one indexed lookup, a provision, a JWT mint) and
+ * far shorter than a respondent's patience. Crossing it fails safe through the existing `catch`:
+ * the request becomes `'redeem-failed'` and renders the 502, which is the honest answer when the
+ * door genuinely could not ask.
+ */
+const REDEEM_TIMEOUT_MS = 10_000;
 
 /**
  * Redeem ANY raw magic-link token through core, not just a distribution's public one.
@@ -291,6 +308,9 @@ async function postRedeem(
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ token: rawToken }),
+      // Covers the body read below as well as the request: an upstream can also stall midway
+      // through streaming a response, which holds the slot just as effectively.
+      signal: AbortSignal.timeout(REDEEM_TIMEOUT_MS),
     });
   } catch {
     return undefined;

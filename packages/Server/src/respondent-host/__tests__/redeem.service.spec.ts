@@ -491,6 +491,31 @@ describe('redeemSlugToToken', () => {
       expect(out.reason).toBe('redeem-failed');
     });
 
+    // An upstream that ACCEPTS the connection and then says nothing is not the same failure as one
+    // that refuses it: the first never rejects, so the door waits on it. `handleMetered` holds one
+    // of `FORMS_REDEEM_MAX_IN_FLIGHT` process-wide slots for the whole request, so without a
+    // deadline here the UPSTREAM's latency decides how long a slot is held — and a wedged core
+    // turns a bounded resource into an exhausted one, which the door then reports as its own load
+    // ("This form is receiving a lot of traffic right now"). Deleting the signal must fail a test.
+    it('gives the redeem POST a deadline, so a stalled upstream cannot hold an in-flight slot', async () => {
+      let seen: RequestInit | undefined;
+      const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+        seen = init;
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({ success: true, token: 'redeemed-jwt' }),
+        } as Response;
+      }) as unknown as typeof fetch;
+
+      await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+
+      expect(seen?.signal).toBeInstanceOf(AbortSignal);
+      // Armed rather than already spent: a signal that arrives aborted would refuse every redeem.
+      expect(seen?.signal?.aborted).toBe(false);
+    });
+
     // A wait the door cannot stand behind is worse than none: `Retry-After: 0` invites an immediate
     // retry that refuses again, the header also permits an HTTP-date, and an absurd value would be
     // echoed onto the wire and park a monitor for the rest of the day.
