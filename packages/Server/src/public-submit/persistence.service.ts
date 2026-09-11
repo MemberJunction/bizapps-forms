@@ -42,6 +42,7 @@ import {
   FORM_RESPONSE_ENTITY,
 } from './entity-names';
 import { isTerminalResponseStatus } from './response-status';
+import { stampFormDistribution } from './resume-columns';
 import type { ValidatedAnswer } from './validation.service';
 
 /** Everything the persistence step needs from the resolved/validated submission. */
@@ -74,6 +75,18 @@ export interface PersistenceInputs {
    * PK is used).
    */
   clientResponseId?: string;
+  /**
+   * The response this request's magic-link session is scoped to, when it is a resume session.
+   *
+   * NEVER taken from the request body — it is copied off the verified JWT claim by the pipeline. A
+   * caller who could name their own scope would have re-invented the header replay #138 closes.
+   */
+  scopedResponseId?: string;
+}
+
+/** The caller identity these inputs describe. One place builds it, so no call site can forget half. */
+function callerOf(inputs: PersistenceInputs): ResponseCaller {
+  return { sessionId: inputs.sessionId, scopedResponseId: inputs.scopedResponseId };
 }
 
 /**
@@ -245,12 +258,33 @@ function foldSessionId(value: string | null | undefined): string {
 }
 
 /**
- * May a caller identified by `callerSessionId` ACT on `response`?
+ * WHO is asking, in the two credentials a respondent can carry.
+ *
+ * They are not equals, and the difference is the whole of #138. `sessionId` is the `x-session-id`
+ * header: a value the CALLER chooses, which is why replaying one alongside a response id used to
+ * overwrite somebody else's answers. `scopedResponseId` comes off the verified magic-link session
+ * (`UserInfo.MagicLinkScope.ResourceID`) — the server minted it from an invite whose `ResourceID`
+ * is that row, so it names exactly one response and a browser cannot forge it.
+ *
+ * An OBJECT rather than two string parameters, for the reason {@link responseIsOurs} takes the row
+ * rather than its owner column: two strings are interchangeable to the compiler, and transposing
+ * them inverts the gate silently.
+ */
+export interface ResponseCaller {
+  /** The `x-session-id` header, as `UserPayload.sessionId`. Blank for a client that omits it. */
+  readonly sessionId: string;
+  /** The response this caller's JWT is scoped to, when their session is a resume session. */
+  readonly scopedResponseId?: string;
+}
+
+/**
+ * May `caller` ACT on `response`?
  *
  * Yes when the row has no owner (the genuinely headerless flow, where the 122-bit client id in
- * `SourceMetadata` is the only capability there is), or when the caller IS the owner. No
- * otherwise — and "no" covers the absent header exactly as it covers a forged one, which is the
- * whole point: an absent credential must never be more permissive than a wrong one.
+ * `SourceMetadata` is the only capability there is), when the caller IS the owner, or when the
+ * caller's verified session scope NAMES this row. No otherwise — and "no" covers the absent
+ * credential exactly as it covers a forged one, which is the whole point: an absent credential must
+ * never be more permissive than a wrong one.
  *
  * THE ONE OWNERSHIP RULE, which is why it is exported rather than inlined. It read as a WRITE rule
  * — it was called `sessionMayAdopt` — and #100/#101 showed the question is not really about
@@ -259,15 +293,33 @@ function foldSessionId(value: string | null | undefined): string {
  * bolted onto a lookup's SQL, say) would be two rules free to drift, which is the split-brain
  * issue #78 was; callers ASK this one instead.
  *
- * It takes the ROW rather than its owner column so the two arguments cannot be transposed. As two
- * strings they were interchangeable to the compiler, and swapping them inverts the gate silently.
+ * THE SCOPE CLAUSE is what makes resume possible at all. A second sitting mints a NEW
+ * `x-session-id`, so the row's owner column names a session that no longer exists anywhere; without
+ * this clause every resumed save is refused as a takeover. It is also what lets the READ filter and
+ * this WRITE rule test the same fact — the row filter in the database matches
+ * `ID = {{ScopeResourceID}}`, and so, here, does this.
+ *
+ * It takes the ROW rather than its owner column so the two arguments cannot be transposed, and it
+ * now needs the row's `ID` as well for the same reason: reading it off a second argument would let
+ * a caller's own id stand in for the row's.
  */
 export function responseIsOurs(
-  response: Pick<mjBizAppsFormsFormResponseEntityType, 'AnonymousSessionID'>,
-  callerSessionId: string,
+  response: Pick<mjBizAppsFormsFormResponseEntityType, 'ID' | 'AnonymousSessionID'>,
+  caller: ResponseCaller,
 ): boolean {
   const owner = foldSessionId(response.AnonymousSessionID);
-  return owner === '' || owner === foldSessionId(callerSessionId);
+  if (owner === '' || owner === foldSessionId(caller.sessionId)) {
+    return true;
+  }
+  // Folded exactly as the session ids are, and for a sharper reason: MJ mints a primary key
+  // client-side (lowercase) while SQL Server hands the same GUID back uppercased, so a
+  // case-sensitive comparison would refuse every resumed save. That skew already rejected every
+  // anonymous submission once, as `version-mismatch`.
+  //
+  // The blank guard is not redundant with the fold: an empty scope folds to `''`, and so would a
+  // row that somehow arrived without an id — matching them would admit every caller to that row.
+  const scope = foldSessionId(caller.scopedResponseId);
+  return scope !== '' && scope === foldSessionId(response.ID);
 }
 
 /**
@@ -276,7 +328,7 @@ export function responseIsOurs(
  * refusal cannot be used to tell those cases apart. It also says nothing about the row: naming
  * the owner, or admitting one exists, would hand back more than the caller arrived with.
  */
-const FOREIGN_RESPONSE_MESSAGE = 'This response could not be saved. Please reload the form and try again.';
+export const FOREIGN_RESPONSE_MESSAGE = 'This response could not be saved. Please reload the form and try again.';
 
 /**
  * The outcome of applying the identity columns: applied, or refused with a caller-safe message.
@@ -314,7 +366,7 @@ function refuseIfNotOurs(
   response: mjBizAppsFormsFormResponseEntity,
   inputs: PersistenceInputs,
 ): IdentityResult | undefined {
-  if (responseIsOurs(response, inputs.sessionId)) {
+  if (responseIsOurs(response, callerOf(inputs))) {
     return undefined;
   }
   // Logged with the row and version, never with either session id: the operator needs to know
@@ -373,11 +425,23 @@ function applyResponseIdentity(
   // remember to trim.
   if (foldSessionId(response.AnonymousSessionID) === '') {
     response.AnonymousSessionID = foldSessionId(inputs.sessionId);
+    // WRITE-ONCE TOO, and for a reason that only became visible once a row could outlive its
+    // session (#138). These used to be rewritten on EVERY save, which was harmless while every
+    // save came from the sitting that created the row. After a resume it is not: the owner column
+    // names the first sitting while the metadata would name the second, and `StartedAt` would walk
+    // forward to whenever the respondent came back — so a form's "time to complete" measured the
+    // last sitting rather than the whole fill.
+    //
+    // Stamped inside the SAME guard as the owner, deliberately: "this row has no owner yet" is
+    // exactly "this is the first write", and deriving it twice would be two conditions free to
+    // disagree. The `clientResponseId` proof in `SourceMetadata` stays correct because the widget
+    // adopts the row id on resume, which IS the first sitting's client id.
+    if (inputs.startedAt) {
+      response.StartedAt = new Date(inputs.startedAt);
+    }
+    response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
   }
-  if (inputs.startedAt) {
-    response.StartedAt = new Date(inputs.startedAt);
-  }
-  response.SourceMetadata = JSON.stringify(inputs.sourceMetadata);
+  stampFormDistribution(response, inputs.distributionId);
   return { ok: true };
 }
 

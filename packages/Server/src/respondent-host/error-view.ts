@@ -31,16 +31,27 @@ export interface RedeemErrorView {
 export type RespondentErrorTone = 'error' | 'notice';
 
 /**
+ * The reason-specific facts a view may name. One named bag rather than a growing positional list:
+ * each field belongs to exactly one reason, and `RedeemOutcome` satisfies this shape structurally,
+ * so the route hands over the whole outcome instead of picking fields out of it.
+ */
+export interface RedeemFailureDetails {
+  /** When the link opens — `distribution-not-yet-open` only. */
+  opensAt?: Date;
+  /** Seconds until the caller's budget refills — `rate-limited` only. */
+  retryAfterSeconds?: number;
+}
+
+/**
  * Map a typed redeem failure to a friendly message + the right HTTP status.
  *
- * @param opensAt When the link opens — meaningful for `distribution-not-yet-open` only, where it
- *   names the time in the copy and becomes the `Retry-After` header.
+ * @param details The reason-specific facts this refusal can name. A `RedeemOutcome` satisfies it.
  * @param now Injected rather than read inside, so "is this opening time still ahead of us" is a
  *   testable decision instead of a hidden clock.
  */
 export function redeemFailureToView(
   reason: RedeemFailureReason,
-  opensAt?: Date,
+  details: RedeemFailureDetails = {},
   now: Date = new Date(),
 ): RedeemErrorView {
   switch (reason) {
@@ -51,7 +62,7 @@ export function redeemFailureToView(
     // is the standard "not now, and here is when" — a monitor records a temporary condition, and
     // the copy names the time so the person can actually come back.
     case 'distribution-not-yet-open':
-      return notYetOpenView(opensAt, now);
+      return notYetOpenView(details.opensAt, now);
     case 'distribution-closed':
       return { status: 410, message: 'This form is no longer accepting responses.' };
     // Same 410 as 'closed' — the resource really is gone either way — but a different sentence.
@@ -73,11 +84,17 @@ export function redeemFailureToView(
       };
     case 'no-token':
       return { status: 409, message: 'This form link is not ready yet. Please try again later.' };
-    // All three keep the generic 502 the single reason had. The pair exists so the operator's LOG
-    // can tell an unreachable endpoint from a refusal (bizapps-forms#140); telling the RESPONDENT
-    // apart is a separate decision, and bizapps-forms#139 makes it for the refusal case — someone
-    // who tripped the redeem rate limit should hear 429 "try again", not "we are broken". Two
-    // changes on purpose: this one is not user-visible, so it cannot regress a respondent.
+    // 502 says "the upstream server is broken". The truth is "this network asked more times in a
+    // minute than the cap allows" — and the cap is keyed by IP, so the people who hit it are a
+    // classroom, an office behind NAT or a conference wifi, not attackers (bizapps-forms#139).
+    // 429 + Retry-After is what browsers, CDNs, monitors and humans already understand.
+    case 'rate-limited':
+      return rateLimitedView(details.retryAfterSeconds);
+    // All three keep the generic 502. They are apart so the operator's LOG can tell an unreachable
+    // endpoint from a refusal (bizapps-forms#140) — telling the RESPONDENT apart is a separate
+    // decision, and the one case where it was worth making is the `rate-limited` arm above, which
+    // was split out on its own evidence. Nothing below is something a respondent can act on: the
+    // door could not ask, or core said no. Same sentence, same status, three different log lines.
     case 'redeem-failed':
     case 'redeem-unreachable':
     case 'redeem-refused':
@@ -92,9 +109,40 @@ export function redeemFailureToView(
   }
 }
 
-/** The generic failure view, shared by the three failure reasons and the unreachable default. */
+/** The generic failure view, shared by the three 502 reasons and the unreachable default. */
 function redeemFailedView(): RedeemErrorView {
   return { status: 502, message: 'We could not open this form right now. Please try again later.' };
+}
+
+/**
+ * The over-budget view. Names the wait when the refusal carried one and hedges to the window the
+ * cap actually uses (a minute) when it did not — the same knows-when/doesn't-know-when shape
+ * {@link notYetOpenView} uses, for the same reason: a number the door cannot stand behind is worse
+ * than no number at all. `tone` stays the default `'error'`: unlike a form awaiting its opening
+ * date, this refusal IS a failure of the request, and the respondent has to act on it.
+ */
+function rateLimitedView(retryAfterSeconds: number | undefined): RedeemErrorView {
+  const opening = 'Too many attempts from this network.';
+  if (retryAfterSeconds === undefined) {
+    return { status: 429, message: `${opening} Please try again in a minute.` };
+  }
+  return {
+    status: 429,
+    message: `${opening} Please try again in about ${formatWait(retryAfterSeconds)}.`,
+    // Delta-seconds, the form `express-rate-limit` itself sends. `Retry-After` accepts either that
+    // or an HTTP-date; the not-yet-open view above sends a date because it names an absolute
+    // instant, whereas this is a countdown and a date would go stale in a proxy cache.
+    retryAfter: String(retryAfterSeconds),
+  };
+}
+
+/** "45 seconds" / "3 minutes" — seconds stop being readable past a minute, and `Retry-After` carries the exact value regardless. */
+function formatWait(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
 }
 
 /**

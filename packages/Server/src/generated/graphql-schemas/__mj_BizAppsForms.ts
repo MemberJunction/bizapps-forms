@@ -817,6 +817,9 @@ export class mjBizAppsFormsFormDistribution_ {
     @MaxLength(255)
     PublicLinkToken?: string;
         
+    @Field(() => Boolean, {description: `Owner switch for same-device resume on this link. When 1 (the default) the respondent host mints a single-use device invite after the first partial save and holds its raw token in an HttpOnly cookie scoped to that form's route, so reopening the link in the same browser restores the draft; every resume rotates the token. Set 0 for kiosks and shared devices: no device invite is minted, and any cookie a browser still holds is cleared without being redeemed. It does not affect the emailed resume link, which works on any device.`}) 
+    AllowDeviceResume: boolean;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -870,6 +873,9 @@ export class CreatemjBizAppsFormsFormDistributionInput {
     @Field({ nullable: true })
     PublicLinkToken: string | null;
 
+    @Field(() => Boolean, { nullable: true })
+    AllowDeviceResume?: boolean;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -921,6 +927,9 @@ export class UpdatemjBizAppsFormsFormDistributionInput {
 
     @Field({ nullable: true })
     PublicLinkToken?: string | null;
+
+    @Field(() => Boolean, { nullable: true })
+    AllowDeviceResume?: boolean;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];
@@ -2337,6 +2346,10 @@ export class mjBizAppsFormsFormResponse_ {
     @Field() 
     _mj__UpdatedAt: Date;
         
+    @Field({nullable: true, description: `The distribution this response was submitted through, stamped once when the row is created and never rewritten. A resume session is scoped to one FormResponse, and it must still be able to load the definition of the link it came through — so the row-level-security filter that permits that read needs a real column to name. Putting it on JSON_VALUE(SourceMetadata) instead would make a free-form JSON blob the authorization key. NULL on rows created before resume shipped; those rows are not resumable by either channel.`}) 
+    @MaxLength(36)
+    FormDistributionID?: string;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -2344,6 +2357,10 @@ export class mjBizAppsFormsFormResponse_ {
     @Field({nullable: true}) 
     @MaxLength(201)
     RespondentPerson?: string;
+        
+    @Field({nullable: true}) 
+    @MaxLength(255)
+    FormDistribution?: string;
         
 }
 
@@ -2378,6 +2395,9 @@ export class CreatemjBizAppsFormsFormResponseInput {
 
     @Field({ nullable: true })
     SourceMetadata: string | null;
+
+    @Field({ nullable: true })
+    FormDistributionID: string | null;
 
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
@@ -2415,6 +2435,9 @@ export class UpdatemjBizAppsFormsFormResponseInput {
 
     @Field({ nullable: true })
     SourceMetadata?: string | null;
+
+    @Field({ nullable: true })
+    FormDistributionID?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

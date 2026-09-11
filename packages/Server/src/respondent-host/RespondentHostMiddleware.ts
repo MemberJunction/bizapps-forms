@@ -45,7 +45,7 @@
  * provider, exactly as other server-side-only MJ code does. Reads are the slug lookup plus one
  * primary-key read of the form's description for the page's `<head>` (see {@link loadFormIdentity}).
  */
-import type { Application, Request, Response } from 'express';
+import type { Application, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
@@ -60,12 +60,32 @@ import { loadFormIdentity } from './form-identity.js';
 import { assessRespondentReadiness } from './host-readiness.js';
 import { readCaptchaDemand, type CaptchaDemandProvider } from './captcha-demand.js';
 import { redeemFailureToView, respondentErrorResponse, type RedeemErrorView } from './error-view.js';
+import { runForget, runRemember, runResume, type ResumeRouteOutcome } from './device-resume.service.js';
+import { makeDeviceResumeDeps } from './resume-deps.js';
+import { readResumeCookie } from './resume-cookie.js';
+import { matchResumeRoute } from './resume-routes.js';
+import { readCappedBody, sendJsonError, userPayloadOf } from '../http/request-body.js';
 import { checkRedeemRateLimit, redeemInFlightLimiter } from './redeem-rate-limit.js';
 import { currentRequestIdentity } from '../http/request-identity.js';
 import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
+
+/**
+ * The pre-auth resume route.
+ *
+ * `/resume` is the one route here that has NO session yet — the cookie is the credential, and the
+ * redeem is what mints a session — so it registers beside the page route, before MJ's auth
+ * middleware. Its two siblings do the opposite: `/remember` and `/forget` carry the distribution
+ * JWT the widget is already running under, and identity is their whole gate, so they register
+ * POST-auth where `req.userPayload` is verified. That is the same split `UploadMiddleware` makes,
+ * for the same reason.
+ */
+export const RESPONDENT_RESUME_ROUTE = '/f/:slug/resume';
+
+/** A resume request body is two UUIDs at most; anything larger is not one. */
+const RESUME_BODY_CAP_BYTES = 2048;
 
 /**
  * Every browser asks the ORIGIN for this on every page, and a link unfurler may too. MJAPI serves no
@@ -98,10 +118,23 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       // Slug arrives on the path (`/f/:slug`). The page also accepts `?slug=` as a fallback,
       // so the baked-in value is just a default.
       const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
+      // PRESENCE of the pointer only. This route stays side-effect-free — a mail scanner or a
+      // browser prefetch must not be able to spend a single-use invite — so nothing is redeemed
+      // here and the token is never read.
+      const hasDraft = readResumeCookie(req.headers.cookie) !== undefined;
       // Never let an unexpected error crash the route — always render a page.
-      void this.handleMetered(slug, res).catch((e: unknown) => {
+      void this.handleMetered(slug, hasDraft, res).catch((e: unknown) => {
         LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
         this.sendError(res, { status: 500, message: 'We could not open this form right now. Please try again later.' });
+      });
+    });
+
+    // Pre-auth, like the page above it: this route's caller has no session — obtaining one is what
+    // it is for.
+    app.post(RESPONDENT_RESUME_ROUTE, (req: Request, res: Response) => {
+      void this.handleResumeRoute(req, res).catch((e: unknown) => {
+        LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
+        sendJsonError(res, 500, 'Could not reopen your saved answers. Please try again.');
       });
     });
 
@@ -116,6 +149,11 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     LogStatus(
       `[Forms] Respondent host page served at ${RESPONDENT_HOST_ROUTE} ` +
         `(graphql: ${cfg.graphqlUrl}, widget: ${cfg.widgetBundleUrl}, redeem: ${cfg.magicLinkRedeemUrl})`,
+    );
+    LogStatus(
+      `[Forms] Same-device resume routes registered at POST ${RESPONDENT_RESUME_ROUTE}, ` +
+        `/f/:slug/remember and /f/:slug/forget ` +
+        `(device resume ${cfg.deviceResumeEnabled ? 'enabled' : 'DISABLED'} host-wide)`,
     );
 
     // Surfaced at boot, not at first publish or first submit. The magic-link minter's gate is
@@ -170,7 +208,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
    * The in-flight cap goes FIRST so a request shed for load is never charged to anyone's window,
    * and the slot wraps the whole request in a `finally` so it releases on every exit path.
    */
-  private async handleMetered(slug: string, res: Response): Promise<void> {
+  private async handleMetered(slug: string, hasDraft: boolean, res: Response): Promise<void> {
     if (!redeemInFlightLimiter().TryEnter()) {
       // 503 (load), not 429 (over budget): this clears the instant in-flight work drains.
       LogStatus('[Forms] Respondent host refused: too many redeems in flight. Clears as work drains.');
@@ -180,22 +218,25 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     try {
       const limit = checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
       if (!limit.allowed) {
-        const retryAfterSeconds = Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000));
-        this.sendError(res, {
-          status: 429,
-          message: `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'} and try again.`,
-          retryAfter: String(retryAfterSeconds),
-        });
+        // This door's own per-IP meter and core's redeem meter are different budgets, but they are
+        // the SAME fact to the respondent — "this network, too many times" — so they get the same
+        // sentence from the same place rather than a second spelling written here (#139).
+        this.sendError(
+          res,
+          redeemFailureToView('rate-limited', {
+            retryAfterSeconds: Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000)),
+          }),
+        );
         return;
       }
-      await this.handleRequest(slug, res);
+      await this.handleRequest(slug, hasDraft, res);
     } finally {
       redeemInFlightLimiter().Exit();
     }
   }
 
   /** Resolve the slug, do the server-side redeem, and render the host page or a friendly error. */
-  private async handleRequest(slug: string, res: Response): Promise<void> {
+  private async handleRequest(slug: string, hasDraft: boolean, res: Response): Promise<void> {
     const cfg = getRespondentHostConfig();
     const outcome = await redeemSlugToToken(
       {
@@ -214,7 +255,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // guard that keeps `loadFormIdentity` taking a row it can rely on, and without it a success
     // carrying no row is a TypeError on `source.FormID`: a 500 with a stack, on the anonymous path.
     if (!outcome.ok || !outcome.distribution) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome.opensAt));
+      // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
+      // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
+      // decision rather than a second one made here and kept in step by hand.
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome));
       return;
     }
 
@@ -230,6 +274,7 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       defaultSlug: slug,
       token: outcome.token,
       turnstileSiteKey: cfg.turnstileSiteKey,
+      hasDraft,
     });
     res
       .status(200)
@@ -237,6 +282,132 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       // The page carries a per-respondent session JWT now — must NOT be shared-cached.
       .set('Cache-Control', 'no-store')
       .send(html);
+  }
+
+  /**
+   * Contribute `/remember` and `/forget` as POST-AUTH middleware, so `req.userPayload` is already
+   * verified when they run. A no-op for every request except those two.
+   */
+  public override GetPostAuthMiddleware(): RequestHandler[] {
+    return [
+      (req: Request, res: Response, next: (err?: unknown) => void): void => {
+        const match = matchResumeRoute(req.method, req.path);
+        if (!match || match.action === 'resume') {
+          // `/resume` is handled pre-auth; everything else here is somebody else's request.
+          next();
+          return;
+        }
+        void this.handleAuthedResumeRoute(match.action, match.slug, req, res).catch((e: unknown) => {
+          LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
+          sendJsonError(res, 500, 'Could not save this device preference. Please try again.');
+        });
+      },
+    ];
+  }
+
+  /** `POST /f/:slug/resume` — the pre-auth route: a pointer in, a session out. */
+  private async handleResumeRoute(req: Request, res: Response): Promise<void> {
+    const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
+    if (!slug) {
+      sendJsonError(res, 404, 'Unknown form.');
+      return;
+    }
+    const body = await this.readResumeBody(req, res);
+    if (body === undefined) {
+      return;
+    }
+    const outcome = await runResume(this.resumeDeps(slug), {
+      slug,
+      cookieToken: readResumeCookie(req.headers.cookie),
+      // The emailed link's interstitial hands its token over here rather than through a route of
+      // its own, so both channels share one redeem — and one rotation.
+      bodyToken: typeof body.token === 'string' ? body.token : undefined,
+    });
+    this.sendResumeOutcome(res, outcome);
+  }
+
+  /** `POST /f/:slug/remember` and `/forget` — the post-auth routes, where identity is the gate. */
+  private async handleAuthedResumeRoute(
+    action: 'remember' | 'forget',
+    slug: string,
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    const payload = userPayloadOf<{ userRecord?: UserInfo; sessionId?: string }>(req);
+    const contextUser = payload?.userRecord;
+    if (!contextUser) {
+      // Should not happen — unified auth would have refused — but fail closed rather than mint a
+      // credential for a caller we cannot identify.
+      sendJsonError(res, 401, 'This form session has expired. Please reload the page.');
+      return;
+    }
+    const body = await this.readResumeBody(req, res);
+    if (body === undefined) {
+      return;
+    }
+    const deps = this.resumeDeps(slug);
+    const cookieToken = readResumeCookie(req.headers.cookie);
+    const outcome =
+      action === 'forget'
+        ? await runForget(deps, { slug, cookieToken })
+        : await runRemember(deps, {
+            slug,
+            responseId: typeof body.responseId === 'string' ? body.responseId : '',
+            // The widget's own header, forwarded by the page. It is the ONLY ownership proof a
+            // first sitting has, which is why `/remember` refuses without it.
+            sessionId: typeof body.sessionId === 'string' ? body.sessionId : (payload?.sessionId ?? ''),
+            scopeId: contextUser.MagicLinkScope?.ResourceID ?? '',
+            cookieToken,
+          });
+    this.sendResumeOutcome(res, outcome);
+  }
+
+  /** Read a small JSON body, or answer the caller and return `undefined`. */
+  private async readResumeBody(req: Request, res: Response): Promise<Record<string, unknown> | undefined> {
+    const read = await readCappedBody(req, RESUME_BODY_CAP_BYTES, 'That request was too large.');
+    if (!read.ok) {
+      sendJsonError(res, read.status ?? 400, read.error ?? 'Malformed request.');
+      return undefined;
+    }
+    if (!read.body || read.body.length === 0) {
+      // No body is ordinary: `/resume` and `/forget` carry none.
+      return {};
+    }
+    try {
+      const parsed: unknown = JSON.parse(read.body.toString('utf8'));
+      return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      sendJsonError(res, 400, 'Malformed request.');
+      return undefined;
+    }
+  }
+
+  /** Apply one route outcome. Never caches, and never puts a token anywhere but the cookie. */
+  private sendResumeOutcome(res: Response, outcome: ResumeRouteOutcome): void {
+    if (res.headersSent) {
+      return;
+    }
+    if (outcome.setCookie) {
+      res.append('Set-Cookie', outcome.setCookie);
+    }
+    res.status(outcome.status).set('Cache-Control', 'no-store');
+    if (outcome.status === 204) {
+      res.end();
+      return;
+    }
+    res.json({ ...(outcome.body ?? {}), ...(outcome.reason ? { reason: outcome.reason } : {}) });
+  }
+
+  /** The dependency set one resume request runs on. */
+  private resumeDeps(slug: string) {
+    return makeDeviceResumeDeps({
+      systemUser: this.systemUser(),
+      slug,
+      // The resolved peer, never a header the caller chose. Absent (no middleware mounted) falls
+      // back to the slug, which bounds the route per FORM rather than per caller — coarse, but a
+      // bound, and the same trade `rateLimitGatesFor` makes when it has no address.
+      callerKey: currentRequestIdentity()?.ipHash ?? `slug:${slug}`,
+    });
   }
 
   /** Render a friendly, shell-free error page with the matching HTTP status. */

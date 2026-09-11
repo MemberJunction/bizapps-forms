@@ -57,6 +57,10 @@ export function response(
     __mj_UpdatedAt: submitted ?? new Date(),
     Form: 'Test Form',
     RespondentPerson: null,
+    // Null like a legacy row's: a fixture response came through no distribution, so it is not
+    // resumable by either channel. Override it in the tests that care which link a row came from.
+    FormDistributionID: null,
+    FormDistribution: null,
     ...overrides,
   };
 }

@@ -271,6 +271,37 @@
               </span>
             </div>
 
+            <!-- Captcha. Beside "Open to responses" because it is the same kind of decision — who
+                 gets to answer — but its hint is longer than its neighbours' on purpose. Turnstile
+                 is fail-closed, so this switch can make a working link refuse every submission,
+                 and nothing visible from the builder says whether the host has keys. The hint
+                 states that cost rather than describing the feature.
+
+                 `dm-captcha-label`, not `dm-cap-label`: that one is the RESPONSE LIMIT row below,
+                 and two controls sharing an id announce as one control. -->
+            <div class="dm-setting">
+              <span class="dm-setting-text">
+                <span class="dm-setting-label" id="dm-captcha-label">Require a captcha</span>
+                <span class="dm-setting-hint">
+                  Ask each respondent to pass a Cloudflare Turnstile check before submitting. This
+                  needs Turnstile keys configured on the server — without them, every submission
+                  through this link is refused.
+                </span>
+              </span>
+              <span class="dm-setting-control">
+                <button
+                  type="button"
+                  class="mjf-switch"
+                  role="switch"
+                  [class.is-on]="link.CaptchaRequired"
+                  [attr.aria-checked]="link.CaptchaRequired"
+                  aria-labelledby="dm-captcha-label"
+                  [disabled]="busy"
+                  (click)="toggleCaptcha()"
+                ></button>
+              </span>
+            </div>
+
             <div class="dm-setting">
               <span class="dm-setting-text">
                 <span class="dm-setting-label" id="dm-cap-label">Response limit</span>

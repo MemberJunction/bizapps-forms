@@ -191,6 +191,53 @@ export async function countPartialResponses(
   return { ok: true, count: result.TotalRowCount };
 }
 
+/**
+ * Load the response a session's magic-link scope NAMES, in any version, if it is still resumable.
+ *
+ * The two things this deliberately does NOT filter on are the whole point:
+ *
+ *   - **No `FormVersionID`.** Every other lookup here pins the version, which is right when the
+ *     caller is claiming a row by an id they invented. This caller is not: the server minted their
+ *     session from an invite whose `ResourceID` IS this row. A draft whose form was republished
+ *     underneath it must still be found — re-stamping the current version on the next save is what
+ *     keeps a typo-fix republish from stranding every open draft, and it cannot happen if the
+ *     lookup that finds the row filters it out first.
+ *   - **No `SourceMetadata` client-id proof.** That proof exists to stop a GUESSED primary key
+ *     matching a row, because the id alone is a capability there. Here the JWT is the proof, and it
+ *     is a stronger one — the browser cannot mint it.
+ *
+ * Resumable statuses only, so a sealed row is not offered as something to keep writing to; the
+ * caller learns its terminal status through `resumeJSON` instead, and shows the sealed screen.
+ *
+ * Like its neighbours, this decides NOTHING about ownership — `responseIsOurs` does, at the write.
+ * A row returned here still passes through that gate.
+ */
+export async function findScopedResponse(
+  provider: DefinitionRunViewProvider,
+  key: { responseId: string },
+  contextUser: UserInfo,
+): Promise<ResponseLookupResult> {
+  if (!key.responseId) {
+    return { ok: true, response: undefined };
+  }
+  const result = await provider.RunView<mjBizAppsFormsFormResponseEntityType>(
+    {
+      EntityName: FORM_RESPONSE_ENTITY,
+      ExtraFilter:
+        `ID=${quoteSqlString(key.responseId)} ` +
+        `AND Status IN (${RESUMABLE_RESPONSE_STATUSES.map(quoteSqlString).join(', ')})`,
+      OrderBy: '__mj_CreatedAt DESC',
+      ResultType: 'entity_object',
+      MaxRows: 1,
+    },
+    contextUser,
+  );
+  if (!result.Success) {
+    return { ok: false };
+  }
+  return { ok: true, response: result.Results[0] };
+}
+
 /** Identity for adopting a client-supplied response id: the id PLUS its required owner/version. */
 export interface OwnedResponseLookupKey {
   responseId: string;

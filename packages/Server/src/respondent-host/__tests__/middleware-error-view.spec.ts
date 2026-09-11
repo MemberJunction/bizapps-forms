@@ -47,22 +47,22 @@ describe('redeemFailureToView', () => {
     });
 
     it('is a temporary 503, never the 410 that closed links get', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', opensAt).status).toBe(503);
+      expect(redeemFailureToView('distribution-not-yet-open', { opensAt }).status).toBe(503);
     });
 
     it('sends Retry-After as the HTTP-date of the opening time', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', opensAt).retryAfter).toBe(opensAt.toUTCString());
+      expect(redeemFailureToView('distribution-not-yet-open', { opensAt }).retryAfter).toBe(opensAt.toUTCString());
     });
 
     it('names when the form opens, in UTC, and says so', () => {
-      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt);
+      const { message } = redeemFailureToView('distribution-not-yet-open', { opensAt });
       expect(message).toContain('September 8, 2026');
       expect(message).toContain('6:41 PM');
       expect(message).toContain('UTC');
     });
 
     it('does not tell the holder the form is "no longer" taking responses', () => {
-      const { message } = redeemFailureToView('distribution-not-yet-open', opensAt);
+      const { message } = redeemFailureToView('distribution-not-yet-open', { opensAt });
       expect(message).not.toBe(redeemFailureToView('distribution-closed').message);
       expect(message.toLowerCase()).not.toContain('no longer');
     });
@@ -86,19 +86,19 @@ describe('redeemFailureToView', () => {
   // "it opens on X" is that X is still ahead of us; anything else is a missing value wearing a date.
   describe('an opening time that is not in the future', () => {
     it('refuses without naming a time rather than announcing the epoch', () => {
-      const view = redeemFailureToView('distribution-not-yet-open', new Date(0));
+      const view = redeemFailureToView('distribution-not-yet-open', { opensAt: new Date(0) });
       expect(view.status).toBe(503);
       expect(view.message).not.toContain('1970');
       expect(view.message).toBe("This form isn't open yet. Please check back later.");
     });
 
     it('sends no Retry-After for a time it will not name', () => {
-      expect(redeemFailureToView('distribution-not-yet-open', new Date(0)).retryAfter).toBeUndefined();
+      expect(redeemFailureToView('distribution-not-yet-open', { opensAt: new Date(0) }).retryAfter).toBeUndefined();
     });
 
     it('still names a genuinely future opening time', () => {
       const soon = new Date(Date.now() + 60 * 60 * 1000);
-      const view = redeemFailureToView('distribution-not-yet-open', soon);
+      const view = redeemFailureToView('distribution-not-yet-open', { opensAt: soon });
       expect(view.retryAfter).toBe(soon.toUTCString());
       expect(view.message).toContain('It opens on');
     });
@@ -109,7 +109,7 @@ describe('redeemFailureToView', () => {
   // week has not been made unavailable, and one awaiting publication is not gone either.
   describe('page title', () => {
     it('does not call a scheduled form unavailable', () => {
-      const view = redeemFailureToView('distribution-not-yet-open', new Date(Date.now() + 60_000));
+      const view = redeemFailureToView('distribution-not-yet-open', { opensAt: new Date(Date.now() + 60_000) });
       expect(view.title).toBe('Form opens later');
     });
 
@@ -167,8 +167,62 @@ describe('redeemFailureToView', () => {
     });
   });
 
-  it('sets no Retry-After on any reason but not-yet-open', () => {
-    for (const reason of REDEEM_FAILURE_REASONS.filter((r) => r !== 'distribution-not-yet-open')) {
+  // bizapps-forms#139. 502 says "the upstream server is broken". The truth is "this network asked
+  // more times in a minute than the cap allows" — and because the cap is keyed by IP, the people
+  // who hit it are a classroom, an office behind NAT or a conference wifi, not attackers. 429 with
+  // a retry hint is what browsers, CDNs, monitors and humans already understand.
+  describe('rate-limited', () => {
+    it('is a 429, never the 502 that means the server is broken', () => {
+      const view = redeemFailureToView('rate-limited');
+      expect(view.status).toBe(429);
+      expect(view.status).not.toBe(redeemFailureToView('redeem-failed').status);
+    });
+
+    it('blames the network, not the form, and promises a retry', () => {
+      const { message } = redeemFailureToView('rate-limited');
+      expect(message).toBe('Too many attempts from this network. Please try again in a minute.');
+    });
+
+    it('names the wait, and sends it as Retry-After, when the refusal said how long', () => {
+      const view = redeemFailureToView('rate-limited', { retryAfterSeconds: 54 });
+      expect(view.message).toContain('54 seconds');
+      expect(view.retryAfter).toBe('54');
+    });
+
+    it('rounds a longer wait to whole minutes rather than reciting seconds', () => {
+      const view = redeemFailureToView('rate-limited', { retryAfterSeconds: 150 });
+      expect(view.message).toContain('3 minutes');
+      expect(view.retryAfter).toBe('150');
+    });
+
+    it('says "1 second" and "1 minute", not "1 seconds"', () => {
+      expect(redeemFailureToView('rate-limited', { retryAfterSeconds: 1 }).message).toContain('1 second.');
+      expect(redeemFailureToView('rate-limited', { retryAfterSeconds: 60 }).message).toContain('1 minute.');
+    });
+
+    it('is a failure the page states plainly, not a quiet notice', () => {
+      const res = respondentErrorResponse(redeemFailureToView('rate-limited', { retryAfterSeconds: 54 }));
+      expect(res.status).toBe(429);
+      expect(res.headers['Retry-After']).toBe('54');
+      expect(res.html).toContain('class="mjf-host__error" role="alert"');
+    });
+  });
+
+  // The other half of #139: the two cases must stay distinguishable in the response. A genuinely
+  // broken redeem — revoked token, endpoint unreachable — is still the 502 it always was.
+  it('leaves a genuinely broken redeem on 502', () => {
+    const view = redeemFailureToView('redeem-failed');
+    expect(view.status).toBe(502);
+    expect(view.retryAfter).toBeUndefined();
+    expect(view.message).toBe('We could not open this form right now. Please try again later.');
+  });
+
+  // Derived, not listed. The two reasons that DO name a wait are named here and everything else
+  // must not: a reason added later with an accidental `retryAfter` fails this without anyone
+  // remembering to extend a list. `rate-limited` joined the exclusion when #139 gave it a wait.
+  it('sets no Retry-After on the reasons that cannot name one', () => {
+    const namesAWait = new Set(['distribution-not-yet-open', 'rate-limited']);
+    for (const reason of REDEEM_FAILURE_REASONS.filter((r) => !namesAWait.has(r))) {
       expect(redeemFailureToView(reason).retryAfter).toBeUndefined();
     }
   });
@@ -187,7 +241,7 @@ describe('respondentErrorResponse', () => {
   const soon = new Date(Date.now() + 60 * 60 * 1000);
 
   it('puts Retry-After on the wire for a link that opens later', () => {
-    const res = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', soon));
+    const res = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', { opensAt: soon }));
     expect(res.status).toBe(503);
     expect(res.headers['Retry-After']).toBe(soon.toUTCString());
   });
@@ -215,7 +269,7 @@ describe('respondentErrorResponse', () => {
   // A page whose title says "opens later" must not paint its one sentence in error red and
   // announce it assertively. The two states that are not failures render as a notice.
   it('renders a not-yet-open page as a notice, not an error', () => {
-    const html = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', soon)).html;
+    const html = respondentErrorResponse(redeemFailureToView('distribution-not-yet-open', { opensAt: soon })).html;
     expect(html).toContain('class="mjf-host__notice" role="status"');
     // Not a bare `not.toContain('mjf-host__error')`: the inlined stylesheet defines BOTH classes on
     // every page, so that assertion can only ever fail. What must be absent is the error PARAGRAPH.

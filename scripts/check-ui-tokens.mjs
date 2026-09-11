@@ -173,6 +173,20 @@ function isAllowedColorLine(line) {
 }
 
 /**
+ * Block-comment delimiters this gate understands.
+ *
+ * HTML is here because `.html` is in COLOR_GATE_EXTS and Angular templates carry prose comments
+ * like every other file in this repo. It was missing, and the omission was invisible for as long
+ * as it was: an issue number is only a hex colour once it reaches THREE digits, so
+ * `<!-- (issue #73) -->` passed and `<!-- (issue #149) -->` did not. The gate failed on the
+ * comment explaining the change rather than on anything it changed.
+ */
+const BLOCK_COMMENTS = [
+  { open: '/*', close: '*/' },
+  { open: '<!--', close: '-->' },
+];
+
+/**
  * Blank out comments so PROSE about colour is not read as colour.
  *
  * The gate used to flag its own documentation — a sentence explaining which colours failed a
@@ -181,28 +195,37 @@ function isAllowedColorLine(line) {
  * people to stop reading it.
  */
 function stripComments(lines) {
-  let inBlock = false;
+  /** The delimiter we are inside, or null — a comment can open on one line and close on another. */
+  let closing = null;
   return lines.map((line) => {
     let out = '';
     let i = 0;
     while (i < line.length) {
-      if (inBlock) {
-        const end = line.indexOf('*/', i);
+      if (closing) {
+        const end = line.indexOf(closing, i);
         if (end === -1) return out;
-        inBlock = false;
-        i = end + 2;
+        i = end + closing.length;
+        closing = null;
         continue;
       }
-      const start = line.indexOf('/*', i);
+      // The EARLIEST opener wins, so a `/*` sitting inside an HTML comment cannot open a block
+      // that then swallows the rest of the file.
+      let opener = null;
+      for (const { open, close } of BLOCK_COMMENTS) {
+        const at = line.indexOf(open, i);
+        if (at !== -1 && (opener === null || at < opener.at)) {
+          opener = { at, open, close };
+        }
+      }
       // `//` only when it opens the line's remaining content — never inside a URL.
       const slash = /^\s*\/\//.test(line.slice(i)) ? line.indexOf('//', i) : -1;
-      if (slash !== -1 && (start === -1 || slash < start)) {
+      if (slash !== -1 && (opener === null || slash < opener.at)) {
         return out + line.slice(i, slash);
       }
-      if (start === -1) return out + line.slice(i);
-      out += line.slice(i, start);
-      inBlock = true;
-      i = start + 2;
+      if (opener === null) return out + line.slice(i);
+      out += line.slice(i, opener.at);
+      closing = opener.close;
+      i = opener.at + opener.open.length;
     }
     return out;
   });
@@ -303,16 +326,27 @@ function main() {
     const bad = '  color: #ff0000;';
     const good = '  --mj-text-primary: #1a1d21;';
     const fallback = '  color: var(--mj-text-primary, #000);';
+    // An HTML comment is prose. `#149` is a valid three-digit hex colour, so an Angular template
+    // citing a three-digit issue number used to fail this gate while a two-digit one passed.
+    const htmlProse = stripComments(['  <!-- connects the lists (issue #149). -->'])[0];
+    const spanning = stripComments(['  <!-- opens here', '  #149 is still prose', '  closes -->']);
+    const afterComment = stripComments(['  <!-- prose -->', '  color: #ff0000;'])[1];
     const ok =
       hasRawColorLiteral(bad) &&
       !isAllowedColorLine(bad) === true &&
       isAllowedColorLine(good) &&
-      isAllowedColorLine(fallback);
+      isAllowedColorLine(fallback) &&
+      !hasRawColorLiteral(htmlProse) &&
+      !hasRawColorLiteral(spanning[1]) &&
+      // Not over-stripping: a real literal AFTER a closed comment is still caught.
+      hasRawColorLiteral(afterComment);
     if (!ok) {
       console.error('SELF-TEST FAILED');
       process.exit(2);
     }
-    console.log('SELF-TEST PASS: literal flagged, token-def + var() fallback allowed.');
+    console.log(
+      'SELF-TEST PASS: literal flagged, token-def + var() fallback allowed, comment prose ignored.',
+    );
     process.exit(0);
   }
 
