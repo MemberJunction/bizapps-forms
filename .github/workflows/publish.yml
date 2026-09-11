@@ -75,41 +75,31 @@ jobs:
       #   > 0                | —              | the release PR never ran `pnpm run version` — FAIL
       #   0                  | yes            | already released; nothing to do
       #   0                  | no             | publish and tag
-      - name: What is there to release?
-        id: release_check
+      - name: The bump has to have happened before this branch was merged
         run: |
           PENDING=$(find .changeset -name "*.md" -not -name "README.md" 2>/dev/null | wc -l | tr -d ' ')
-          VERSION=$(jq -r .version packages/Entities/package.json)
-          PKG=$(jq -r .name packages/Entities/package.json)
-          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-
           if [ "$PENDING" -ne 0 ]; then
+            VERSION=$(jq -r .version packages/Entities/package.json)
             echo "::error::$PENDING changeset(s) are still on this branch, so the version was never bumped. Publishing now would republish $VERSION. Cut the release on a branch off next with 'pnpm run version' and open the release PR — see docs/release.md."
             exit 1
           fi
 
-          # `npm view` exits non-zero for a version that is not published, which is the answer we
-          # want rather than an error — but a registry outage exits non-zero too, and would read as
-          # "not published". So the version list is fetched once and matched exactly: an empty list
-          # from a reachable registry is a real first publish, an unreachable registry fails here.
-          if ! VERSIONS=$(npm view "$PKG" versions --json); then
-            echo "::error::could not reach the npm registry to ask whether $PKG@$VERSION is published"
-            exit 1
-          fi
-          if echo "$VERSIONS" | jq -e --arg v "$VERSION" 'index($v)' >/dev/null; then
-            echo "$PKG@$VERSION is already on npm — nothing to release"
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "$PKG@$VERSION is not on npm — this run releases it"
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-          fi
+      # Answers `publish` and `tag` SEPARATELY. They used to be one output derived from a single
+      # question — is packages/Entities' version on npm? — which reads a partially published release
+      # as a finished one: `changeset publish` publishes concurrently, so one package landing while a
+      # sibling fails is a state it produces by design and expects a retry to finish. That retry
+      # skipped publish AND tag and reported success. See scripts/release-plan.mjs for the whole
+      # argument; its spec pins the three states, and both run in build-and-test.
+      - name: What is there to release?
+        id: release_check
+        run: node scripts/release-plan.mjs
 
       # The derivation used to happen here, in bash, and was persisted by the push #177 removed.
       # It happens on the release PR now (`pnpm run version`), so this end only verifies — a
       # hand-edited mj-app.json, or a release PR that skipped the script, stops the release before
       # anything reaches npm.
       - name: mj-app.json agrees with the packages being published
-        if: steps.release_check.outputs.publish == 'true'
+        if: steps.release_check.outputs.work == 'true'
         run: node scripts/sync-app-version.mjs --check
 
       # A migration is a schema change, so it must not ship as a patch. changes.yml enforces the
@@ -126,7 +116,7 @@ jobs:
       # at all: the changesets are gone by this point, and a gate that reads a file which is always
       # empty is a gate that always passes.
       - name: Enforce schema-change version policy
-        if: steps.release_check.outputs.publish == 'true'
+        if: steps.release_check.outputs.work == 'true'
         env:
           VERSION: ${{ steps.release_check.outputs.VERSION }}
         run: |
@@ -170,7 +160,7 @@ jobs:
       # how its predecessor went green over a record that shipped nowhere (#105). Node stdlib only,
       # so neither needs anything installed.
       - name: Release readiness (every metadata record is in the shipped seed)
-        if: steps.release_check.outputs.publish == 'true'
+        if: steps.release_check.outputs.work == 'true'
         run: |
           node scripts/check-release-seed-coverage.spec.mjs
           npm run check:release-seed
@@ -185,7 +175,7 @@ jobs:
       # check is deliberately pure-fs so it runs on any checkout — `fetch-depth: 0` and
       # `fetch-tags: true` on this job's checkout are what make the tags available here.
       - name: Release readiness (one consolidated seed, not per-PR deltas)
-        if: steps.release_check.outputs.publish == 'true'
+        if: steps.release_check.outputs.work == 'true'
         run: |
           node scripts/check-release-seed-cadence.spec.mjs
           npm run check:seed-cadence
@@ -211,8 +201,13 @@ jobs:
       # `changeset publish` has already created its own per-package tags locally; this adds the
       # single repo-wide `v<version>` that the release-readiness checks and the schema-policy gate
       # above both read, and pushes only that one.
+      #
+      # Gated on `tag`, NOT on `publish`. The two are different questions and a release can fail
+      # between them: if every package published and only the tag push failed, `publish` is false on
+      # the retry while the tag is still missing — and check-release-seed-cadence.mjs reads the
+      # newest `v*` tag to decide what has shipped, so the missing tag would fail the NEXT release.
       - name: Tag the release
-        if: steps.release_check.outputs.publish == 'true'
+        if: steps.release_check.outputs.tag == 'true'
         env:
           VERSION: ${{ steps.release_check.outputs.VERSION }}
         run: |

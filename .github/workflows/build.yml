@@ -225,6 +225,13 @@ jobs:
       - name: App version derivation tests
         run: node --test scripts/sync-app-version.spec.mjs
 
+      # Same shape again, and the same reason it is a script at all: the release plan decides whether
+      # a run publishes and whether it tags, and a decision that only ever executes inside a release
+      # cannot be proven by running a release. Its spec pins the partial-publish and missing-tag
+      # states that made a retry a silent green no-op.
+      - name: Release plan tests
+        run: npm run lint:release-plan:test
+
       # Duplicated deliberately. The `scope` job above also runs this spec, but `scope` is not
       # itself a required context — a PR that weakened it would show a red X there that blocks
       # nothing. This copy runs inside `build-and-test`, which IS required, so a weakened spec here

@@ -36,9 +36,13 @@ checks, publishes to npm, and pushes the tag `vX.Y.Z`. It writes nothing else to
 Every gate sits before `Publish to npm`, so a failure costs a re-run and nothing has been published.
 Two of them are worth knowing by name:
 
-- **`What is there to release?`** fails if any `.changeset/*.md` is still present, because that means
-  step 1 never ran and publishing would try to republish the current version. It exits green and
-  does nothing if the version is already on npm.
+- **`What is there to release?`** asks two questions separately — is any package missing this version
+  from npm, and is the `vX.Y.Z` tag absent — and each gates its own step. So **re-running the
+  workflow after a partial failure finishes the job** rather than reporting a green no-op: if some
+  packages published and others did not, the re-run publishes the rest; if everything published and
+  only the tag failed, the re-run tags. It does nothing, and says so, only when the version is fully
+  published *and* tagged. A separate step before it fails if any `.changeset/*.md` is still present,
+  because that means step 1 never ran and publishing would republish the current version.
 - **`Enforce schema-change version policy`** fails if `migrations/` changed since the last `v*` tag
   but the version only moved by a patch. Fix it by redoing step 1 with a `minor` changeset.
 

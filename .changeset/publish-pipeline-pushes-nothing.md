@@ -20,6 +20,14 @@ move since the last tag, and did the version move by more than a patch?) rather 
 that are gone by the time a release runs.
 
 `scripts/check-release-pushes.mjs` fails any workflow or script that reintroduces a protected-branch
-push — a defect that is otherwise invisible until the next release.
+push — a defect that is otherwise invisible until the next release. It scans `.github/workflows/`,
+`.github/scripts/`, `scripts/` and `ci/`, and recognises the shell and simple-git spellings a real
+one takes, quoted and force refspecs and git global options included.
+
+A release run is also now re-runnable. `scripts/release-plan.mjs` asks separately whether any
+package is missing from npm and whether the `vX.Y.Z` tag is absent, and each answer gates its own
+step — so a re-run after a partial failure publishes the remaining packages, or tags a version that
+published but never got its tag, instead of reading one package's presence on npm as "released" and
+reporting a green no-op.
 
 Fixes #177.
