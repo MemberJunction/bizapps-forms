@@ -254,6 +254,7 @@ async function hasPublishedVersion(
  */
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
+
 /**
  * Redeem ANY raw magic-link token through core, not just a distribution's public one.
  *
@@ -294,26 +295,37 @@ async function postRedeem(
   } catch {
     return undefined;
   }
+  // A body we cannot read is not the end of the enquiry: the STATUS LINE has already been received,
+  // and for the one refusal a respondent can act on it is sufficient on its own. Giving up here
+  // would throw away a 429 the door has already been told about — see the rate-limit check below.
   let parsed: unknown;
   try {
     parsed = await response.json();
   } catch {
+    parsed = undefined;
+  }
+  const result = isRedeemResult(parsed) ? parsed : undefined;
+  // Before the "no usable body" exit, not after it. `isRateLimitRefusal` is written to answer
+  // without a body precisely because a hop that refuses on its own account — a CDN, an nginx, an
+  // API gateway — sends ITS page, not core's JSON, so the status survives and the body does not.
+  if (isRateLimitRefusal(response.status, result)) {
+    return {
+      // `success: false` before the spread, so a body that carried one still wins. Without a body
+      // this is the status line's own assertion, not a fabrication: 429 IS a refusal.
+      success: false,
+      ...result,
+      status: response.status,
+      rateLimited: true,
+      retryAfterSeconds: retryAfterSecondsFrom(response.headers),
+    };
+  }
+  if (!result) {
+    // Every OTHER unreadable answer stays `undefined`. A 500, a 200 or a 410 with a body we cannot
+    // parse proves nothing about the token, and inventing a refusal from one would be this same
+    // mistake pointing the other way.
     return undefined;
   }
-  if (!isRedeemResult(parsed)) {
-    return undefined;
-  }
-  const answered: RedeemMagicLinkJsonResult = { ...parsed, status: response.status };
-  if (!isRateLimitRefusal(response.status, answered)) {
-    return answered;
-  }
-  // Judged once, here, so `redeemSlugToToken` reads a fact instead of re-deriving it, and the
-  // resume path — which reads only `status` and `errorCode` — is unaffected either way.
-  return {
-    ...answered,
-    rateLimited: true,
-    retryAfterSeconds: retryAfterSecondsFrom(response.headers),
-  };
+  return { ...result, status: response.status };
 }
 
 /**

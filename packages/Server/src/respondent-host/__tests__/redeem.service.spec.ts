@@ -100,6 +100,26 @@ function fakeFetch(
   }) as unknown as typeof fetch;
 }
 
+/**
+ * A `fetch` stub whose body is RAW TEXT, so `response.json()` rejects the way it does against a
+ * hop that answered with its own HTML page. `fakeFetch` above always hands back parseable JSON and
+ * therefore cannot reach the door's body-parse failure path at all.
+ */
+function fakeFetchRaw(
+  body: string,
+  init: { status?: number; headers?: Record<string, string> } = {},
+): typeof fetch {
+  const status = init.status ?? 200;
+  return vi.fn(async () => {
+    return {
+      ok: status < 400,
+      status,
+      headers: new Headers(init.headers ?? {}),
+      json: async () => JSON.parse(body),
+    } as Response;
+  }) as unknown as typeof fetch;
+}
+
 /** A `fetch` stub that rejects (network failure). */
 function throwingFetch(): typeof fetch {
   return vi.fn(async () => {
@@ -421,6 +441,37 @@ describe('redeemSlugToToken', () => {
       const fetchImpl = fakeFetch(RATE_LIMIT_BODY, { status: 200 });
       const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
       expect(out.reason).toBe('rate-limited');
+    });
+
+    // The mirror of the case above, and the likelier hop of the two. A CDN, an nginx or an API
+    // gateway that refuses on its own account answers 429 with ITS OWN page — HTML, or JSON of a
+    // different shape — so the STATUS is intact and the body is gone. Reading the body FIRST and
+    // giving up when it will not parse threw away a refusal the door had already been told about,
+    // and the respondent landed back on the 502 outage page this whole change exists to remove.
+    it('reads the refusal from the status when the BODY did not survive the hop', async () => {
+      const fetchImpl = fakeFetchRaw('<html><body>429 Too Many Requests</body></html>', {
+        status: 429,
+        headers: { 'Retry-After': '54' },
+      });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.reason).toBe('rate-limited');
+      expect(out.retryAfterSeconds).toBe(54);
+    });
+
+    // Same hop, a body that IS json but is the gateway's shape rather than core's.
+    it('reads the refusal from the status when the body is JSON of the wrong shape', async () => {
+      const fetchImpl = fakeFetch({ message: 'rate limit exceeded' }, { status: 429 });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.reason).toBe('rate-limited');
+    });
+
+    // The other half of the rule, and the reason this cannot simply be "trust the status". An
+    // unreadable body with a status that proves NOTHING must stay the generic failure: fabricating
+    // a refusal out of a 500 or a 200 would be the same mistake in the opposite direction.
+    it.each([500, 200, 410])('leaves an unreadable body on the generic failure at status %i', async (status) => {
+      const fetchImpl = fakeFetchRaw('<html>not json</html>', { status });
+      const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+      expect(out.reason).toBe('redeem-failed');
     });
 
     // The trap: `errorCode: 'invalid'` is ALSO what core sends for a malformed token, an unknown or
