@@ -149,6 +149,24 @@ describe('withDistributionCaptcha', () => {
     expect(definition.settings.captchaRequired).toBe(false);
   });
 
+  it('returns the argument itself when there is nothing to change, and says so in its doc', () => {
+    // The contract is NON-MUTATION, not a fresh reference — unlike `publicDefinition`, which
+    // spreads unconditionally. The doc used to claim parity with it; this pins the real behaviour
+    // so the two cannot drift apart again without a test noticing.
+    const unchanged = definitionWithAutomations();
+
+    expect(withDistributionCaptcha(unchanged, false)).toBe(unchanged);
+  });
+
+  it('returns a NEW object on the path that does change the flag', () => {
+    const widened = definitionWithAutomations();
+
+    const out = withDistributionCaptcha(widened, true);
+
+    expect(out).not.toBe(widened);
+    expect(out.settings).not.toBe(widened.settings);
+  });
+
   it('leaves every other setting untouched', () => {
     const projected = withDistributionCaptcha(definitionWithAutomations(), true);
 

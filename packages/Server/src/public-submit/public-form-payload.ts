@@ -49,9 +49,15 @@ export interface PublicFormPayload {
  * Applied BEFORE serialization, and to the definition rather than to `settings` alone, because
  * the widget's transport selects `definitionJSON` and parses THAT into the whole definition
  * (`forms-api.graphql.service.ts`) — writing the flag onto `settingsJSON` only would have
- * satisfied a shape check and changed nothing the respondent sees. Returned as a new object for
- * the same reason {@link publicDefinition} is: the submit pipeline re-resolves this snapshot, so
- * writing through would turn a read into a silent write.
+ * satisfied a shape check and changed nothing the respondent sees.
+ *
+ * NEVER WRITES THROUGH — but it is not unconditionally a new object, and the difference matters to
+ * anyone extending this. When the flag changes it returns a fresh object; when it does not, there
+ * is nothing to change and it returns the argument itself. So the guarantee here is NON-MUTATION,
+ * which {@link publicDefinition} also gives but by the stronger route of always spreading. Do not
+ * read the two as interchangeable, and do not mutate what this returns: on the unchanged path —
+ * which is both of the common states, neither side asking for a captcha or the form already
+ * asking — that object is the caller's own.
  */
 export function withDistributionCaptcha(
   definition: PublishedFormDefinition,
