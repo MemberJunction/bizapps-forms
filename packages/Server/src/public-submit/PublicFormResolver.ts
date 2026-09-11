@@ -53,27 +53,32 @@ export class PublicFormResolver extends ResolverBase {
       if (!loaded.ok || !loaded.value) {
         return null;
       }
-      const { definition } = loaded.value;
+      const { definition, distribution } = loaded.value;
       // A resume session and a public-link session reach this resolver identically; the only
       // difference is what their scope claim names. Only a claim that is NOT this distribution can
       // name a response, so an ordinary public link pays for no read here at all.
       const scope = contextUser.MagicLinkScope?.ResourceID;
       const resume =
-        scope && !scopeNamesDistribution(scope, loaded.value.distribution.ID)
+        scope && !scopeNamesDistribution(scope, distribution.ID)
           ? await loadResumeSnapshot(provider, scope, contextUser)
           : undefined;
-      // What an anonymous caller may see — including the `automations` narrowing — is decided by
-      // `publicFormPayload`, which is pure and asserted whole in `public-form-payload.spec.ts`.
-      // Inline here it was a contract narrowing nothing could test, and therefore one that could
-      // be deleted with the suite green.
+      // What an anonymous caller may see — the `automations` narrowing, and the distribution's
+      // captcha flag folded into the definition — is decided by `publicFormPayload`, which is pure
+      // and asserted whole in `public-form-payload.spec.ts`. Inline here it was a contract
+      // narrowing nothing could test, and therefore one that could be deleted with the suite green.
+      //
+      // `CaptchaRequired` is passed because the SUBMIT gate reads it and this query did not, so a
+      // link with it on demanded a token from a widget that was never told to collect one (#151).
       //
       // `resumeJSON` is layered on top rather than moved inside it: it is a property of THIS
       // SESSION's scope claim, not of the published definition, and `publicFormPayload` is pure in
-      // the definition alone. Folding a per-caller field into it would make the payload spec's
-      // whole-object assertion impossible to keep.
-      return Object.assign(new PublishedFormType(), publicFormPayload(definition), {
-        resumeJSON: resume ? JSON.stringify(resume) : undefined,
-      });
+      // the definition and the link's captcha column alone. Folding a per-caller field into it
+      // would make the payload spec's whole-object assertion impossible to keep.
+      return Object.assign(
+        new PublishedFormType(),
+        publicFormPayload(definition, distribution.CaptchaRequired),
+        { resumeJSON: resume ? JSON.stringify(resume) : undefined },
+      );
     });
   }
 
