@@ -31,9 +31,19 @@ test('reads are not git writes', () => {
 });
 
 test('a word merely containing commit or push is not a git write', () => {
-    assert.equal(isGitWriteCommand('grep -rn "git commit" docs/'), false);
     assert.equal(isGitWriteCommand('echo pushing'), false);
     assert.equal(isGitWriteCommand('npm run commitpush'), false);
+});
+
+// DELIBERATE FALSE POSITIVE (#178), and the reason it is the right way round.
+// `grep -rn "git commit" docs/` used to be allowed BECAUSE quotes were not boundaries — the same
+// property that let `bash -c "git commit -m x"` through. To a regex the two are identical: both put
+// `git commit` immediately after a double quote. The difference is which program is being invoked,
+// and no character class can see it. Under-inclusiveness ships a red tree; over-inclusiveness costs
+// one check run (217 ms warm) and, on a red tree, one confusing deny — which is why the deny
+// message names this case. Changing this expectation back re-opens the bypass.
+test('a quoted phrase that only looks like a git write is checked anyway', () => {
+    assert.equal(isGitWriteCommand('grep -rn "git commit" docs/'), true);
 });
 
 test('an unrelated command is not a git write', () => {
@@ -44,6 +54,33 @@ test('command substitution does not hide a git write', () => {
     assert.equal(isGitWriteCommand('out=$(git commit -m "x" 2>&1)'), true);
     assert.equal(isGitWriteCommand('(git commit -m x)'), true);
     assert.equal(isGitWriteCommand('`git push`'), true);
+});
+
+// A nested shell is the most ordinary way to run git from a script, and its payload always begins
+// right after a quote. The boundary class had no quote characters, so `decisionFor` returned
+// `allow` without calling `runChecks` at all — not a bypass an agent chose, just shell it wrote.
+test('a quoted nested shell does not hide a git write', () => {
+    assert.equal(isGitWriteCommand('bash -c "git commit -m x"'), true);
+    assert.equal(isGitWriteCommand("sh -lc 'git push'"), true);
+    assert.equal(isGitWriteCommand('ssh host "git push"'), true);
+});
+
+// `/` is not a boundary character and never should be — it is the middle of a path, not the start
+// of a command. The fix is a path PREFIX arm before `git`, not another boundary. An absolute path
+// is how git is invoked from a script that cannot trust PATH, and how Homebrew's git is reached.
+test('a path-qualified git is still a git write', () => {
+    assert.equal(isGitWriteCommand('/usr/bin/git commit -m x'), true);
+    assert.equal(isGitWriteCommand('/opt/homebrew/bin/git push origin next'), true);
+    assert.equal(isGitWriteCommand('./bin/git commit -m x'), true);
+    assert.equal(isGitWriteCommand('../tools/git push'), true);
+});
+
+// The prefix must not swallow a word that merely ENDS in git, or a path with no subcommand after
+// it. Without these, "match any path-ish blob before the word" would pass as a fix.
+test('a path that merely ends in git is not a git write', () => {
+    assert.equal(isGitWriteCommand('ls -l /usr/bin/git'), false);
+    assert.equal(isGitWriteCommand('cat /var/log/legit commit'), false);
+    assert.equal(isGitWriteCommand('cat digit push.txt'), false);
 });
 
 // macOS and Windows both mount case-insensitive, so `Git commit` really runs git — the same
@@ -87,6 +124,17 @@ test('the matcher stays linear on pathological input', () => {
     assert.ok(ms < 50, `isGitWriteCommand took ${ms.toFixed(1)}ms on 64 options — backtracking blow-up`);
 });
 
+// Same reasoning as the test above, for the path prefix added in #178: a long path-shaped string is
+// non-matching input that the matcher must reject cheaply, on every Bash tool call.
+test('the path prefix stays linear on pathological input', () => {
+    for (const evil of [`${'a/'.repeat(200)}x`, `${'/'.repeat(400)}x`]) {
+        const start = process.hrtime.bigint();
+        isGitWriteCommand(evil);
+        const ms = Number(process.hrtime.bigint() - start) / 1e6;
+        assert.ok(ms < 50, `isGitWriteCommand took ${ms.toFixed(1)}ms on ${evil.length} chars`);
+    }
+});
+
 // A subcommand that is not commit/push must stay allowed even behind global options, so the
 // broadened middle does not turn every read into a check.
 test('global options do not turn a read into a git write', () => {
@@ -117,6 +165,16 @@ test('a red commit is denied, and the reason names the failure', () => {
     assert.equal(result.decision, 'deny');
     assert.match(result.reason, /lint:ui/);
     assert.match(result.reason, /#6366f1/);
+});
+
+// The accepted false positive (#178) is only acceptable if it can explain itself. The message is
+// this hook's entire user interface: a grep denied on a red tree otherwise shows a wall of
+// typecheck output about a commit the developer was never making.
+test('a deny says a non-git command may have been matched on purpose', () => {
+    const result = decisionFor({ command: 'grep -rn "git commit" docs/', runChecks: red });
+    assert.equal(result.decision, 'deny');
+    assert.match(result.reason, /quote/i);
+    assert.match(result.reason, /178/);
 });
 
 // The whole point of the hook is that a check nobody can run must not read as a check that passed.
