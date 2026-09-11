@@ -132,6 +132,14 @@
             [EditMode]="EditMode"
             [FormContext]="formContext"
         ></mj-form-field>
+        <mj-form-field 
+            [Record]="record"
+            [ShowLabel]="true"
+            FieldName="AllowDeviceResume"
+            Type="checkbox"
+            [EditMode]="EditMode"
+            [FormContext]="formContext"
+        ></mj-form-field>
 
     </mj-collapsible-panel>
 
@@ -186,6 +194,31 @@
                 [ShowToolbar]="true"
                 (Navigate)="OnFormNavigate($event)"
                 (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormUploads', $event.totalRowCount)"
+                >
+            </mj-explorer-entity-data-grid>
+        </div>
+        }
+    </mj-collapsible-panel>
+
+    <!-- Form Responses Section -->
+    <mj-collapsible-panel
+        SectionKey="mJBizAppsFormsFormResponses"
+        SectionName="Form Responses"
+        Icon="fa fa-file-signature"
+        Variant="related-entity"
+        [Form]="this"
+        [FormContext]="formContext"
+        [BadgeCount]="GetSectionRowCount('mJBizAppsFormsFormResponses')"
+        [DefaultExpanded]="false">
+        @if (record.IsSaved) {
+        <div>
+            <mj-explorer-entity-data-grid
+                [Params]="BuildRelationshipViewParamsByEntityName('MJ_BizApps_Forms: Form Responses','FormDistributionID')"
+                [NewRecordValues]="NewRecordValues('MJ_BizApps_Forms: Form Responses','FormDistributionID')"
+                [AllowLoad]="IsSectionExpanded('mJBizAppsFormsFormResponses')"
+                [ShowToolbar]="true"
+                (Navigate)="OnFormNavigate($event)"
+                (AfterDataLoad)="SetSectionRowCount('mJBizAppsFormsFormResponses', $event.totalRowCount)"
                 >
             </mj-explorer-entity-data-grid>
         </div>

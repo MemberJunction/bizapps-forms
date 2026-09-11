@@ -38,9 +38,30 @@ export interface RedeemRunViewProvider {
   ): Promise<RunViewResult<T>>;
 }
 
-/** Minimal shape of core's `RedeemMagicLinkResult` JSON (the fields this flow reads). */
+/**
+ * Core's `RedeemMagicLinkResult` JSON (the fields this flow reads), plus what the RESPONSE itself
+ * said about it. The three fields after `success` are not part of core’s body and are named as
+ * such below: `errorCode` alone cannot tell the refusals apart, so the door has to keep what the
+ * status and headers carried.
+ */
 export interface RedeemMagicLinkJsonResult {
   success: boolean;
+  /**
+   * The HTTP status core answered with. Carried because `errorCode` is ambiguous on its own:
+   * core sends `'invalid'` both for a dead invite (410) and for its redeem rate limit (429).
+   */
+  status?: number;
+  /**
+   * Whether this refusal is core's per-IP redeem cap rather than a verdict about the token —
+   * {@link isRateLimitRefusal}'s answer, kept so no caller has to repeat that judgement
+   * (bizapps-forms#139).
+   */
+  rateLimited?: boolean;
+  /**
+   * Seconds until the caller's budget refills, from the refusal's own headers, and only when they
+   * carried a usable one. Set with `rateLimited` only.
+   */
+  retryAfterSeconds?: number;
   /** The minted RS256 anonymous session JWT (present only on success). */
   token?: string;
   error?: string;
@@ -227,21 +248,6 @@ async function hasPublishedVersion(
 }
 
 /**
- * What core's redeem endpoint answered, in this door's vocabulary.
- *
- * String discriminant, like {@link DistributionRowVerdict} and for the same reason: this package
- * compiles without `strictNullChecks`, under which TypeScript does not narrow a boolean-literal one.
- *
- * `'refused'` is deliberately ONE member covering a transport failure, a non-JSON body, and an
- * explicit `success: false` for any reason but the rate limit. Splitting it — and logging what was
- * discarded on the way — is bizapps-forms#140; this adds only the branch a respondent can act on.
- */
-type RedeemPostVerdict =
-  | { verdict: 'redeemed'; token: string }
-  | { verdict: 'rate-limited'; retryAfterSeconds?: number }
-  | { verdict: 'refused' };
-
-/**
  * The longest wait this door will repeat to a respondent, in seconds. Core's own window is 60s; a
  * far larger number is a misconfigured or hostile upstream, and echoing it back as `Retry-After`
  * would park a monitor for the rest of the day on the strength of one header.
@@ -249,13 +255,32 @@ type RedeemPostVerdict =
 const MAX_RETRY_AFTER_SECONDS = 3600;
 
 /**
- * POST the raw token to core's redeem endpoint with `format=json` and say what came back.
+ * Redeem ANY raw magic-link token through core, not just a distribution's public one.
  *
- * Never throws: a transport or parse failure is `'refused'`, so the caller stays fail-safe. The
- * knowledge that core spells "you are over budget" as an HTTP status plus two headers lives here
- * and nowhere else — the caller only maps a verdict.
+ * Exported because the resume routes redeem a token whose resource is a FormResponse rather than a
+ * distribution — the same endpoint, the same POST, the same JSON contract, and deliberately the
+ * same function: a second spelling of this call is a second place for the `format=json` / POST-only
+ * details to drift, and the failure that produces is a 405 nobody attributes to a redeem.
  */
-async function postRedeem(deps: RedeemDeps, rawToken: string): Promise<RedeemPostVerdict> {
+export async function redeemRawToken(
+  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
+  rawToken: string,
+): Promise<RedeemMagicLinkJsonResult | undefined> {
+  return postRedeem(deps, rawToken);
+}
+
+/**
+ * POST the raw token to core's redeem endpoint with `format=json` and return the parsed result.
+ * Returns `undefined` on any transport/parse failure so the caller can fail-safe to an error page.
+ *
+ * Everything the door knows about how core spells a refusal lives HERE and nowhere else: the
+ * status, and — for the one refusal a respondent can act on — the two headers that carry the wait
+ * (bizapps-forms#139). Callers read `rateLimited` / `retryAfterSeconds` and never touch a header.
+ */
+async function postRedeem(
+  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
+  rawToken: string,
+): Promise<RedeemMagicLinkJsonResult | undefined> {
   // Core reads `format` from the query string only; the body carries `{ token }` as JSON.
   // POST only — a GET with format=json is 405 by design.
   const url = `${deps.redeemUrl}?format=json`;
@@ -267,22 +292,28 @@ async function postRedeem(deps: RedeemDeps, rawToken: string): Promise<RedeemPos
       body: JSON.stringify({ token: rawToken }),
     });
   } catch {
-    return { verdict: 'refused' };
+    return undefined;
   }
   let parsed: unknown;
   try {
     parsed = await response.json();
   } catch {
-    return { verdict: 'refused' };
+    return undefined;
   }
-  const result = isRedeemResult(parsed) ? parsed : undefined;
-  if (isRateLimitRefusal(response.status, result)) {
-    return { verdict: 'rate-limited', retryAfterSeconds: retryAfterSecondsFrom(response.headers) };
+  if (!isRedeemResult(parsed)) {
+    return undefined;
   }
-  if (!result || !result.success || !result.token) {
-    return { verdict: 'refused' };
+  const answered: RedeemMagicLinkJsonResult = { ...parsed, status: response.status };
+  if (!isRateLimitRefusal(response.status, answered)) {
+    return answered;
   }
-  return { verdict: 'redeemed', token: result.token };
+  // Judged once, here, so `redeemSlugToToken` reads a fact instead of re-deriving it, and the
+  // resume path — which reads only `status` and `errorCode` — is unaffected either way.
+  return {
+    ...answered,
+    rateLimited: true,
+    retryAfterSeconds: retryAfterSecondsFrom(response.headers),
+  };
 }
 
 /**
@@ -374,15 +405,16 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!published) {
     return { ok: false, reason: 'form-unpublished' };
   }
-  const posted = await postRedeem(deps, judged.rawToken);
+  const result = await postRedeem(deps, judged.rawToken);
   // Over-budget is not a broken redeem, and the two must not arrive at the page as one reason: the
   // cap is keyed by IP, so the respondent who hits it is behind a shared connection, not at fault
-  // and not looking at an outage (bizapps-forms#139).
-  if (posted.verdict === 'rate-limited') {
-    return { ok: false, reason: 'rate-limited', retryAfterSeconds: posted.retryAfterSeconds };
+  // and not looking at an outage (bizapps-forms#139). `postRedeem` has already made that judgement
+  // from the status and the body; this only routes it.
+  if (result && result.rateLimited) {
+    return { ok: false, reason: 'rate-limited', retryAfterSeconds: result.retryAfterSeconds };
   }
-  if (posted.verdict === 'refused') {
+  if (!result || !result.success || !result.token) {
     return { ok: false, reason: 'redeem-failed' };
   }
-  return { ok: true, token: posted.token, distribution: dist };
+  return { ok: true, token: result.token, distribution: dist };
 }

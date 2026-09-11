@@ -12,7 +12,9 @@ rules live in [`CLAUDE.md`](CLAUDE.md) and `.claude/rules/`.
 - **`main`** is the release branch — it publishes on push.
 
 Cut feature branches **from `next`**, push, and open a PR **into `next`**. A single
-coordinating PR promotes `next` → `main`.
+coordinating PR promotes `next` → `main`; that PR is also the one that carries the version bump,
+and cutting a release is two pull requests with no direct pushes at any point —
+[`docs/release.md`](docs/release.md).
 
 - Feature branches **must track the same-named remote** (`origin/<branch>`), never
   `origin/next` or `origin/main`. Verify with `git branch -vv` before every push.

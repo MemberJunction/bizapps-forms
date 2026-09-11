@@ -320,6 +320,26 @@ export class DistributionService {
     return this.saveDist(dist, 'reissue this link');
   }
 
+  /**
+   * Turn this link's captcha requirement on or off.
+   *
+   * One column, one save, in the shape of {@link setName} — but the cost is not symmetric with
+   * its neighbours, which is why the switch's hint says more than theirs do. Turnstile is
+   * fail-closed: with this on and no server-side Turnstile secret configured, every completed
+   * submission through this link is refused, and nothing visible from the builder says whether
+   * the host has keys.
+   *
+   * The server ORs this with the form's own `settings.captchaRequired`, so turning it OFF here
+   * does not turn a captcha off for a form that asks for one itself.
+   */
+  public async setCaptchaRequired(
+    dist: mjBizAppsFormsFormDistributionEntity,
+    required: boolean,
+  ): Promise<MutationOutcome> {
+    dist.CaptchaRequired = required;
+    return this.saveDist(dist, required ? 'turn on the captcha' : 'turn off the captcha');
+  }
+
   /** Rename a distribution. The caller is responsible for trimming and rejecting blanks. */
   public async setName(
     dist: mjBizAppsFormsFormDistributionEntity,

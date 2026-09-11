@@ -17,6 +17,7 @@ import {
   hsvToHex,
   isCompleteHex,
   normalizeHexInput,
+  sanitizeHexInput,
 } from './color-model';
 import { COLOR_PICKER_STYLES } from './color-picker.styles';
 
@@ -99,7 +100,8 @@ const AA_BODY = 4.5;
             placeholder="#RRGGBB"
             [value]="draft()"
             (input)="onHexInput($event)"
-            (blur)="onHexBlur()"
+            (blur)="commitHexEntry()"
+            (keydown.enter)="commitHexEntry()"
           />
         </div>
 
@@ -120,7 +122,7 @@ const AA_BODY = 4.5;
               [attr.aria-label]="p"
               [attr.aria-pressed]="p === value()"
               [attr.title]="p"
-              (click)="commit(p)"
+              (click)="acceptHex(p)"
             ></button>
           }
         </div>
@@ -281,21 +283,63 @@ export class ColorPickerComponent {
   }
 
   protected onHexInput(event: Event): void {
-    const typed = normalizeHexInput((event.target as HTMLInputElement).value);
+    const el = event.target as HTMLInputElement;
+    const typed = sanitizeHexInput(el.value);
+    // Correct the element, not just the signal. `[value]="draft()"` cannot put the box right when
+    // the sanitised text equals what draft already holds — setting a signal to its current value
+    // re-renders nothing — so a dropped character would stay on screen looking accepted.
+    if (el.value !== typed) {
+      el.value = typed;
+    }
     this.draft.set(typed);
     if (isCompleteHex(typed)) {
-      this.hue.set(hexToHsv(typed).h);
-      this.valueChange.emit(typed);
+      this.acceptHex(typed);
     }
   }
 
-  /** An abandoned partial entry snaps back rather than sitting there looking like a value. */
-  protected onHexBlur(): void {
-    if (!isCompleteHex(this.draft())) {
+  /**
+   * Blur and Enter: the two gestures that finish an entry, and the only place shorthand resolves.
+   *
+   * Expansion has to be attempted BEFORE the snap-back decision, or a deliberate `#abc` would be
+   * thrown away as though it were an abandoned partial.
+   */
+  protected commitHexEntry(): void {
+    const finished = normalizeHexInput(this.draft());
+    if (!isCompleteHex(finished)) {
       this.draft.set(this.value());
+      return;
     }
+    this.acceptHex(finished);
   }
 
+  /**
+   * A finished colour: the box, the hue slider and the caller all end up agreeing on it.
+   *
+   * The box is corrected either way — `#abc` has to stop reading `#abc` once it resolves. The
+   * colour is only ANNOUNCED when it is genuinely different, because both callers can arrive
+   * here holding the colour that is already set: blur and Enter reach `commitHexEntry` whether
+   * or not anything was typed. Announcing it again would restart the consumer's debounced save
+   * for a colour nobody changed, and re-deriving `hue` would discard the hue the author is still
+   * working with — a grey has none to recover, so the slider would snap back to red, which is
+   * the exact thing the `hue` signal exists to prevent.
+   */
+  protected acceptHex(hex: string): void {
+    this.draft.set(hex);
+    if (hex === this.value()) {
+      return;
+    }
+    this.hue.set(hexToHsv(hex).h);
+    this.valueChange.emit(hex);
+  }
+
+  /**
+   * A colour the hue system itself produced — the slider, a plane drag, an arrow nudge.
+   *
+   * Deliberately does NOT touch `hue`: these gestures already own it, and re-deriving it from
+   * their own output would snap the slider back to red the moment a drag reached near-black,
+   * which is the whole reason `hue` is held separately. A colour arriving from OUTSIDE that
+   * system — a typed hex, a preset — goes through {@link acceptHex} instead, which re-seeds it.
+   */
   protected commit(hex: string): void {
     this.draft.set(hex);
     this.valueChange.emit(hex);
