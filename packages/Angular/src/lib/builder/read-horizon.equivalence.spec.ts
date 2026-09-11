@@ -169,4 +169,73 @@ describe('readHorizon reproduces the four source getters it replaced', () => {
       expect(newPageJump(empty, 'p1')).toEqual([]);
     });
   });
+
+  /**
+   * The horizons after a question changes SECTION (issue #149).
+   *
+   * `readHorizon` runs over the whole form's question sequence, not one page, so a cross-section
+   * move shifts the horizon of every rule downstream of BOTH ends of it. Nothing in the function
+   * had to change for that — which is the claim worth freezing, because "nothing had to change"
+   * is indistinguishable from "nobody checked" a year from now.
+   *
+   * Both directions of the awkward case are covered: a move that EMPTIES a section (the `+ 1` in
+   * the page arm of the show horizon is invisible unless a section can be empty) and a move INTO
+   * the one that already is.
+   */
+  describe('after a question is moved to another section', () => {
+    /** `TREE` with one question lifted out of `fromPage` and dropped into `toPage` at `at`. */
+    const afterMove = (fromPage: string, index: number, toPage: string, at: number): OraclePage[] => {
+      const lifted = TREE.find((p) => p.id === fromPage)!.questions[index];
+      return TREE.map((page) => {
+        if (page.id === fromPage) {
+          return { ...page, questions: page.questions.filter((q) => q !== lifted) };
+        }
+        if (page.id === toPage) {
+          const questions = [...page.questions];
+          questions.splice(at, 0, lifted);
+          return { ...page, questions };
+        }
+        return { ...page, questions: [...page.questions] };
+      });
+    };
+
+    /** The whole equivalence, re-run over an arbitrary tree. */
+    const agreesEverywhere = (tree: OraclePage[]): void => {
+      tree.forEach((page, index) => {
+        expect(newPageShow(tree, page.id)).toEqual(oldPageConditionalSources(tree, index));
+        expect(newPageJump(tree, page.id)).toEqual(oldPageJumpConditionSources(tree, index));
+      });
+      for (const id of tree.flatMap((page) => page.questions.map((q) => q.id))) {
+        expect(newQuestionShow(tree, id)).toEqual(oldConditionalSources(tree, id));
+        expect(newQuestionJump(tree, id)).toEqual(oldQuestionJumpSources(tree, id));
+      }
+    };
+
+    it('agrees with the oracle when a question moves forward into a later section', () => {
+      agreesEverywhere(afterMove('p1', 0, 'p3', 1));
+    });
+
+    it('agrees with the oracle when a question moves backward into an earlier section', () => {
+      agreesEverywhere(afterMove('p4', 0, 'p1', 0));
+    });
+
+    it('agrees with the oracle when the move fills the EMPTY section', () => {
+      agreesEverywhere(afterMove('p3', 0, 'p2', 0));
+    });
+
+    it('agrees with the oracle when the move EMPTIES a section', () => {
+      // p4 holds exactly one question; moving it out leaves a second empty section, which is the
+      // shape the `+ 1` in the page arm of the show horizon exists for.
+      const emptied = afterMove('p4', 0, 'p1', 0);
+      expect(emptied.find((p) => p.id === 'p4')!.questions).toEqual([]);
+      agreesEverywhere(emptied);
+    });
+
+    it('actually moves the horizon, so the agreement is not vacuous', () => {
+      // Before: q4 (first of p3) can read q1 and q3. Move q1 to the end of p4 and it can read
+      // neither q1 (now behind it in the walk) nor anything new.
+      expect(newQuestionShow(TREE, 'q4')).toEqual(['q1', 'q3']);
+      expect(newQuestionShow(afterMove('p1', 0, 'p4', 1), 'q4')).toEqual(['q3']);
+    });
+  });
 });

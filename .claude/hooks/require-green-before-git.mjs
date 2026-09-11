@@ -48,7 +48,39 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
-const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+/**
+ * The working tree whose commit is being judged — which is NOT necessarily the checkout the
+ * session started in.
+ *
+ * `CLAUDE_PROJECT_DIR` names the directory the session was launched from and keeps naming it after
+ * the session enters a git worktree, so a hook that trusted it alone ran both checks against the
+ * MAIN checkout while the commit it was gating happened in the worktree. That is wrong in both
+ * directions and silently so: a worktree whose tree is broken commits anyway because the main
+ * checkout is green, and a worktree whose tree is green is refused because someone's half-finished
+ * edit sits in the main checkout — which is what happened, and which blocks every worktree session
+ * on unrelated work it must not touch.
+ *
+ * `git rev-parse --show-toplevel` answers the only question that matters here: which tree is
+ * `git commit` about to write from. It reports the worktree's own root inside a linked worktree and
+ * the checkout root outside one, so the ordinary single-checkout case is unchanged.
+ *
+ * Spawned the same way as the checks below — `shell: false`, no PATH assumption beyond `git`
+ * itself. Falls back rather than throwing: a hook that cannot locate git must still gate something,
+ * and the old behaviour is the right floor.
+ */
+export function gitToplevelOf(cwd) {
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd,
+        encoding: 'utf8',
+        shell: false,
+        timeout: 5000,
+    });
+    if (result.error || result.status !== 0) return null;
+    const top = (result.stdout || '').trim();
+    return top.length > 0 ? top : null;
+}
+
+const PROJECT_DIR = gitToplevelOf(process.cwd()) || process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
 /**
  * `commit` or `push` as a git SUBCOMMAND, not as a substring.

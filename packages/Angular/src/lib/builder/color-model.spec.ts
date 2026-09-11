@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { PRESET_SWATCHES, hexToHsv, hsvToHex, isCompleteHex, normalizeHexInput } from './color-model';
+import {
+  PRESET_SWATCHES,
+  hexToHsv,
+  hsvToHex,
+  isCompleteHex,
+  normalizeHexInput,
+  sanitizeHexInput,
+} from './color-model';
 
 describe('hexToHsv / hsvToHex', () => {
   it('round-trips every preset the picker offers', () => {
@@ -29,16 +36,60 @@ describe('hexToHsv / hsvToHex', () => {
   });
 });
 
-describe('normalizeHexInput', () => {
+describe('sanitizeHexInput', () => {
+  it('keeps a partial entry as typed so the field does not fight the typist', () => {
+    // Every six-digit code passes through five incomplete prefixes on the way. Rewriting the
+    // box mid-keystroke is what makes a hex field impossible to type into.
+    expect(sanitizeHexInput('#15')).toBe('#15');
+    // Three characters is the prefix that used to be rewritten: '#1a2' became '#11aa22', which
+    // was emitted as a colour and then swallowed the three keystrokes still to come. A prefix is
+    // not shorthand while it is still being typed — only the caller knows which one it is.
+    expect(sanitizeHexInput('#1a2')).toBe('#1a2');
+    expect(isCompleteHex('#1a2')).toBe(false);
+  });
+
+  it('lets a six-digit code be typed one character at a time', () => {
+    // Issue #154's reproduction table, as an assertion. The box must read back exactly what was
+    // typed at every keystroke, and the colour must leave exactly once, at the sixth digit.
+    const keystrokes = ['#', '#1', '#1a', '#1a2', '#1a2b', '#1a2b3', '#1a2b3c'];
+    expect(keystrokes.map(sanitizeHexInput)).toEqual(keystrokes);
+
+    const emitted = keystrokes.map(sanitizeHexInput).filter(isCompleteHex);
+    // Typing and pasting land on the same colour — the whole point of the split.
+    expect(emitted).toEqual([normalizeHexInput('#1a2b3c')]);
+  });
+
+  it('leaves an emptied field empty instead of putting the # back', () => {
+    // normalizeHexInput answers '#' here, so clearing the box re-inserted a character the author
+    // had just deleted, and the next '#' they typed made '##'.
+    expect(sanitizeHexInput('')).toBe('');
+    expect(sanitizeHexInput('   ')).toBe('');
+    expect(sanitizeHexInput('#')).toBe('#');
+    expect(sanitizeHexInput('##')).toBe('#');
+  });
+
+  it('drops what cannot be part of a hex code, and stops at six digits', () => {
+    expect(sanitizeHexInput('#12zz34')).toBe('#1234');
+    expect(sanitizeHexInput('152A63')).toBe('#152a63');
+    expect(sanitizeHexInput('#1a2b3c4d')).toBe('#1a2b3c');
+  });
+});
+
+describe('normalizeHexInput — the commit-time half', () => {
   it('accepts what people actually type', () => {
     expect(normalizeHexInput('152A63')).toBe('#152a63');
     expect(normalizeHexInput('#152A63')).toBe('#152a63');
     expect(normalizeHexInput('  #abc  ')).toBe('#aabbcc');
   });
 
-  it('keeps a partial entry as typed so the field does not fight the typist', () => {
-    // Every six-digit code passes through five incomplete prefixes on the way. Rewriting the
-    // box mid-keystroke is what makes a hex field impossible to type into.
+  it('resolves shorthand, which is why it may only run once the entry is finished', () => {
+    // The same three characters, two meanings. This is the fork the old single function could not
+    // see, because the answer is not in the string — it is in which caller is asking.
+    expect(sanitizeHexInput('#abc')).toBe('#abc');
+    expect(normalizeHexInput('#abc')).toBe('#aabbcc');
+  });
+
+  it('leaves an unfinishable partial incomplete, so the caller can snap it back', () => {
     expect(normalizeHexInput('#15')).toBe('#15');
     expect(isCompleteHex('#15')).toBe(false);
     expect(isCompleteHex('#152a63')).toBe(true);
