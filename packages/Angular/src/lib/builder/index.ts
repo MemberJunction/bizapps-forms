@@ -20,6 +20,7 @@ export {
   hsvToHex,
   isCompleteHex,
   normalizeHexInput,
+  sanitizeHexInput,
   type Hsv,
 } from './color-model';
 export { DesignStateService, type BrandEdit } from './design-state.service';

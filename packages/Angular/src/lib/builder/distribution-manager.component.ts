@@ -316,6 +316,21 @@ export class DistributionManagerComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Flip this link's captcha requirement.
+   *
+   * `run()`, not `runCredentialWrite()` like its neighbour above: this writes one column and
+   * touches neither `PublicLinkToken` nor `MagicLinkInviteID`, so there is nothing a re-read could
+   * discover, and skipping it keeps the panel's scroll position and selection where they were.
+   */
+  protected async toggleCaptcha(): Promise<void> {
+    const link = this.selected;
+    if (!link || this.busy) {
+      return;
+    }
+    await this.run(() => this.service.setCaptchaRequired(link, !link.CaptchaRequired));
+  }
+
+  /**
    * Say so when turning a link OFF did not actually take its access token away.
    *
    * The mirror of {@link warnIfStillUnissued}, and a separate method because the evidence is
