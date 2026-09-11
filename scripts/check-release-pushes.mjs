@@ -21,7 +21,7 @@
  * must be runnable in CI without installing anything.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { join, relative, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -34,10 +34,29 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const PROTECTED_BRANCHES = Object.freeze(['main', 'next']);
 
 /**
- * Where release automation lives. Deliberately whole directories rather than the three files that
- * happen to be guilty today — the point is that a *new* file cannot reintroduce the push.
+ * Where release automation lives. Deliberately whole directories rather than the files that happen
+ * to be guilty today — the point is that a *new* file cannot reintroduce the push.
+ *
+ * `scripts/` earns its place from this change itself: #177 deletes `ci/` and moves the release
+ * derivation into `scripts/sync-app-version.mjs`, which `publish.yml` runs with `--check` and which
+ * the root `version` script runs on the release pull request. A list that omitted it would have
+ * guarded the directory release automation just LEFT while ignoring the one it moved to.
+ *
+ * `ci/` stays although the directory is gone. `filesUnder` returns [] for ENOENT, so an absent path
+ * is inert, and the entry is a tripwire for a directory that must fail this gate if it comes back.
  */
-export const SCANNED_DIRS = Object.freeze(['.github/workflows', '.github/scripts', 'ci']);
+export const SCANNED_DIRS = Object.freeze(['.github/workflows', '.github/scripts', 'scripts', 'ci']);
+
+/**
+ * The one file allowed to contain protected-branch push strings: this gate's own spec, where they
+ * are the fixtures that prove the recogniser works.
+ *
+ * Excluded BY NAME, not by a `*.spec.mjs` rule. A class rule would let a real push hide in any spec
+ * file — precisely the bypass this gate exists to close — whereas a named file fails loudly if it is
+ * ever renamed, which is the failure direction to prefer. It is deliberately a list of one; a second
+ * entry should have to justify itself here.
+ */
+export const EXCLUDED_FILES = Object.freeze(['scripts/check-release-pushes.spec.mjs']);
 
 const PROTECTED_ALTERNATION = PROTECTED_BRANCHES.join('|');
 
@@ -46,23 +65,80 @@ const PROTECTED_ALTERNATION = PROTECTED_BRANCHES.join('|');
  *
  * The trailing boundary is load-bearing twice over: `mainline` and `next-steps` are ordinary
  * feature branches, and a name that merely begins with a protected one is not that branch.
+ *
+ * The quote class after `refs/heads/` is for the shell's other concatenation point: a refspec can
+ * be quoted as a whole (`"refs/heads/main"`, handled by `REFSPEC_PREFIX`) or only in part
+ * (`refs/heads/"main"`). Over-inclusiveness costs nothing here — a needless match is one line a
+ * human reads — while under-inclusiveness is the entire bug this gate exists to prevent.
  */
-const PROTECTED_TARGET = String.raw`(?:refs\/heads\/)?(${PROTECTED_ALTERNATION})(?![\w./-])`;
+const PROTECTED_TARGET = String.raw`(?:refs\/heads\/['"\`]*)?(${PROTECTED_ALTERNATION})(?![\w./-])`;
+
+/**
+ * Where a command can BEGIN. Line start, or any character that ends the command before it.
+ *
+ * This deliberately does not anchor to the start of the line. An earlier version did — allowing
+ * only leading whitespace, a YAML list dash and a `run: ` prefix — which meant a push was invisible
+ * unless it was the first token on its line, so `git checkout next && git push origin next`,
+ * `git config user.name x; git push origin main` and `execSync('git push origin HEAD:main')` all
+ * walked past. The last one matters most: BOTH of #177's pushes lived in Node scripts, and the
+ * deleted `ci/merge_main_and_update_lock.mjs` already shelled out through `execSync`, so that is
+ * the likeliest spelling a reintroduction would take.
+ *
+ * Keeping prose and commented-out history out — of which this repo has a great deal, on purpose —
+ * was the anchor's stated job, but `isCommentary` already does it and is the only thing that needs
+ * to. Quotes are command starts because a shelled-out command is a string literal.
+ */
+const COMMAND_START = String.raw`(?:^|[\s;&|(\`'"])\s*`;
+
+/**
+ * git's GLOBAL OPTIONS, between `git` and the subcommand. Without this segment they are a straight
+ * bypass: `git -c user.email=x push origin main` is ordinary CI, and this repository's publish
+ * workflow already runs a separate `git config --global user.email` step that an author could fold
+ * into the push exactly that way.
+ *
+ * Lifted verbatim in shape from `.claude/hooks/require-green-before-git.mjs`, which found and fixed
+ * this same under-inclusiveness first; its docstring is the reasoning. Two arms, because `-C <dir>`
+ * and friends put their value in a SEPARATE word and would otherwise break the chain, while the
+ * general `-\S+\s+` arm means an unknown option can never cause a miss. The flat form is also
+ * deliberate: the obvious `(?:-\S+(?:\s+\S+)?\s+)*` backtracks exponentially on non-matching input.
+ */
+const GIT_GLOBAL_OPTS =
+    String.raw`(?:(?:-[Cc]|--(?:git-dir|work-tree|exec-path|namespace|config-env|attr-source))[=\s]\S+\s+|-\S+\s+)*`;
 
 /**
  * `git push … <protected>` in shell, with or without a `HEAD:` / `<local>:` prefix and any flags.
  *
- * Anchored to the start of a line (allowing leading whitespace, a YAML list dash, and a `run: `
- * prefix) so that prose and commented-out history — of which this repo has a great deal, on
- * purpose — do not register. `isCommentary` is what separates the two.
+ * `\s+\S+\s+` between `push` and the target is the REMOTE, and requiring it is what keeps
+ * `git push main` — which pushes to a remote *named* main — and a bare `git push` out. Neither
+ * names a protected branch; a bare push's destination is its upstream, which no static reader can
+ * know. Case-insensitive because macOS and Windows both mount case-insensitively, so `Git push`
+ * really does invoke git here.
+ *
+ * `REFSPEC_PREFIX` is what a refspec may carry before the branch name. Quotes are the reason it
+ * exists: `git push origin "HEAD:main"` used to match, but only by accident — the `(?:\S*:)?` group
+ * exists to skip a `<local>:` prefix, and on its way to the colon it happened to swallow the
+ * opening quote too. A BARE quoted branch has no colon, so that group matched empty and the quote
+ * landed exactly where the branch name had to start. The colon form working is precisely what hid
+ * the bare form failing, and quoting the refspec is this repository's own house style — the one
+ * surviving push in publish.yml is written `git push origin "refs/tags/v$VERSION"`. `\+` is the
+ * ordinary force-push shorthand, `git push origin +main`.
  */
+const REFSPEC_PREFIX = String.raw`['"\`]*\+?(?:\S*:)?`;
+
 const SHELL_PUSH = new RegExp(
-    String.raw`^[ \t-]*(?:run:\s*)?git\s+push\b(?:\s+-{1,2}[\w-]+)*\s+\S+\s+(?:\S*:)?` + PROTECTED_TARGET,
+    COMMAND_START + String.raw`git\s+` + GIT_GLOBAL_OPTS +
+        String.raw`push\b(?:\s+-{1,2}[\w-]+)*\s+\S+\s+` + REFSPEC_PREFIX + PROTECTED_TARGET,
+    'i',
 );
 
-/** simple-git's spelling of the same operation: `git.push('origin', 'HEAD:main')`. */
+/**
+ * simple-git's spelling of the same operation: `git.push('origin', 'HEAD:main')`.
+ *
+ * The optional `[` covers simple-git's array form, `git.push(['origin', 'HEAD:main'])`, which it
+ * accepts identically.
+ */
 const METHOD_PUSH = new RegExp(
-    String.raw`\.push\(\s*['"\`][^'"\`]+['"\`]\s*,\s*['"\`](?:\S*:)?` + PROTECTED_TARGET + String.raw`['"\`]`,
+    String.raw`\.push\(\s*\[?\s*['"\`][^'"\`]+['"\`]\s*,\s*['"\`]\+?(?:\S*:)?` + PROTECTED_TARGET + String.raw`['"\`]`,
 );
 
 /** True when the line is commented out — history and prose, not an instruction. */
@@ -113,8 +189,12 @@ function filesUnder(dir) {
 /** Violations across the whole release path, as printable strings. */
 export function runCheck(root) {
     const violations = [];
+    const exempt = new Set(EXCLUDED_FILES);
     for (const dir of SCANNED_DIRS) {
         for (const file of filesUnder(join(root, dir))) {
+            if (exempt.has(relative(root, file).split(sep).join('/'))) {
+                continue;
+            }
             for (const hit of findProtectedPushes(readFileSync(file, 'utf8'))) {
                 violations.push(
                     `${relative(root, file)}:${hit.line}: pushes to '${hit.ref}', which carries required ` +
