@@ -13,4 +13,6 @@ The Distribute settings panel gains a captcha switch per share link, beside "Ope
 
 Turning the switch off does not turn a captcha off for a form that requires one itself; the server still ORs the two.
 
+`.env.example` now documents `FORMS_TURNSTILE_SITE_KEY` alongside the secret. It listed only the secret, which is the half that verifies a token — not the half that lets the widget draw a challenge to produce one. An operator who set only the secret got a form that showed every respondent the configuration message instead of a submit, and the entry that would have told them why was missing. The surrounding note also called Turnstile per-distribution; it is demanded by the form's own setting OR the link's, which is the OR this change finally honours on both sides.
+
 `patch`: no migration and no metadata. The column default was already corrected to `0` in `V202609011500__v0.12.x__Captcha_Opt_In_By_Default.sql`, which named this gap as the remaining half. Closes #151.
