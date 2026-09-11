@@ -218,12 +218,15 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     try {
       const limit = checkRedeemRateLimit(currentRequestIdentity()?.ipHash);
       if (!limit.allowed) {
-        const retryAfterSeconds = Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000));
-        this.sendError(res, {
-          status: 429,
-          message: `Too many requests. Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'} and try again.`,
-          retryAfter: String(retryAfterSeconds),
-        });
+        // This door's own per-IP meter and core's redeem meter are different budgets, but they are
+        // the SAME fact to the respondent — "this network, too many times" — so they get the same
+        // sentence from the same place rather than a second spelling written here (#139).
+        this.sendError(
+          res,
+          redeemFailureToView('rate-limited', {
+            retryAfterSeconds: Math.max(1, Math.ceil((limit.retryAfterMs ?? 0) / 1000)),
+          }),
+        );
         return;
       }
       await this.handleRequest(slug, hasDraft, res);
@@ -252,7 +255,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // guard that keeps `loadFormIdentity` taking a row it can rely on, and without it a success
     // carrying no row is a TypeError on `source.FormID`: a 500 with a stack, on the anonymous path.
     if (!outcome.ok || !outcome.distribution) {
-      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome.opensAt));
+      // The whole outcome, not a field picked out of it: `RedeemOutcome` satisfies
+      // `RedeemFailureDetails` structurally, so which facts a refusal may name is the view's
+      // decision rather than a second one made here and kept in step by hand.
+      this.sendError(res, redeemFailureToView(outcome.reason ?? 'redeem-failed', outcome));
       return;
     }
 

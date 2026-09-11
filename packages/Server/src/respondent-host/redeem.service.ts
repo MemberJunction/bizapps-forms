@@ -38,7 +38,12 @@ export interface RedeemRunViewProvider {
   ): Promise<RunViewResult<T>>;
 }
 
-/** Minimal shape of core's `RedeemMagicLinkResult` JSON (the fields this flow reads). */
+/**
+ * Core's `RedeemMagicLinkResult` JSON (the fields this flow reads), plus what the RESPONSE itself
+ * said about it. The three fields after `success` are not part of core’s body and are named as
+ * such below: `errorCode` alone cannot tell the refusals apart, so the door has to keep what the
+ * status and headers carried.
+ */
 export interface RedeemMagicLinkJsonResult {
   success: boolean;
   /**
@@ -46,6 +51,17 @@ export interface RedeemMagicLinkJsonResult {
    * core sends `'invalid'` both for a dead invite (410) and for its redeem rate limit (429).
    */
   status?: number;
+  /**
+   * Whether this refusal is core's per-IP redeem cap rather than a verdict about the token —
+   * {@link isRateLimitRefusal}'s answer, kept so no caller has to repeat that judgement
+   * (bizapps-forms#139).
+   */
+  rateLimited?: boolean;
+  /**
+   * Seconds until the caller's budget refills, from the refusal's own headers, and only when they
+   * carried a usable one. Set with `rateLimited` only.
+   */
+  retryAfterSeconds?: number;
   /** The minted RS256 anonymous session JWT (present only on success). */
   token?: string;
   error?: string;
@@ -60,6 +76,7 @@ export type RedeemFailureReason =
   | 'distribution-full'
   | 'form-unpublished'
   | 'no-token'
+  | 'rate-limited'
   | 'redeem-failed';
 
 /** Outcome of {@link redeemSlugToToken}. Flat (non-discriminated) shape to match the package's
@@ -78,6 +95,11 @@ export interface RedeemOutcome {
   reason?: RedeemFailureReason;
   /** When the link opens — set with `distribution-not-yet-open` only, so the page can say when. */
   opensAt?: Date;
+  /**
+   * Seconds until the caller's redeem budget refills — set with `rate-limited` only, and only when
+   * the refusal's own headers carried a usable one, so the page can say roughly when to come back.
+   */
+  retryAfterSeconds?: number;
 }
 
 /**
@@ -226,6 +248,31 @@ async function hasPublishedVersion(
 }
 
 /**
+ * The longest wait this door will repeat to a respondent, in seconds. Core's own window is 60s; a
+ * far larger number is a misconfigured or hostile upstream, and echoing it back as `Retry-After`
+ * would park a monitor for the rest of the day on the strength of one header.
+ */
+const MAX_RETRY_AFTER_SECONDS = 3600;
+
+/**
+ * How long the door will wait on core's redeem before giving up, in milliseconds.
+ *
+ * Not a tuning knob — a bound on a SHARED resource. `handleMetered` holds one of
+ * `FORMS_REDEEM_MAX_IN_FLIGHT` process-wide slots for the whole request, so without a deadline here
+ * it is the UPSTREAM's latency, not this door's policy, that decides how long a slot is held. An
+ * upstream that accepts the connection and then says nothing never rejects, so every such request
+ * parks a slot until Node's own 300-second header timeout; a handful of them exhaust the cap and
+ * the door starts answering "This form is receiving a lot of traffic right now" — reporting a
+ * wedged dependency as its own load, which is the same class of lie as the 502 this change removes.
+ *
+ * Ten seconds is far longer than a healthy redeem (one indexed lookup, a provision, a JWT mint) and
+ * far shorter than a respondent's patience. Crossing it fails safe through the existing `catch`:
+ * the request becomes `'redeem-failed'` and renders the 502, which is the honest answer when the
+ * door genuinely could not ask.
+ */
+const REDEEM_TIMEOUT_MS = 10_000;
+
+/**
  * Redeem ANY raw magic-link token through core, not just a distribution's public one.
  *
  * Exported because the resume routes redeem a token whose resource is a FormResponse rather than a
@@ -243,6 +290,10 @@ export async function redeemRawToken(
 /**
  * POST the raw token to core's redeem endpoint with `format=json` and return the parsed result.
  * Returns `undefined` on any transport/parse failure so the caller can fail-safe to an error page.
+ *
+ * Everything the door knows about how core spells a refusal lives HERE and nowhere else: the
+ * status, and — for the one refusal a respondent can act on — the two headers that carry the wait
+ * (bizapps-forms#139). Callers read `rateLimited` / `retryAfterSeconds` and never touch a header.
  */
 async function postRedeem(
   deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
@@ -257,16 +308,97 @@ async function postRedeem(
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ token: rawToken }),
+      // Covers the body read below as well as the request: an upstream can also stall midway
+      // through streaming a response, which holds the slot just as effectively.
+      signal: AbortSignal.timeout(REDEEM_TIMEOUT_MS),
     });
   } catch {
     return undefined;
   }
+  // A body we cannot read is not the end of the enquiry: the STATUS LINE has already been received,
+  // and for the one refusal a respondent can act on it is sufficient on its own. Giving up here
+  // would throw away a 429 the door has already been told about — see the rate-limit check below.
+  let parsed: unknown;
   try {
-    const parsed: unknown = await response.json();
-    return isRedeemResult(parsed) ? { ...parsed, status: response.status } : undefined;
+    parsed = await response.json();
   } catch {
+    parsed = undefined;
+  }
+  const result = isRedeemResult(parsed) ? parsed : undefined;
+  // Before the "no usable body" exit, not after it. `isRateLimitRefusal` is written to answer
+  // without a body precisely because a hop that refuses on its own account — a CDN, an nginx, an
+  // API gateway — sends ITS page, not core's JSON, so the status survives and the body does not.
+  if (isRateLimitRefusal(response.status, result)) {
+    return {
+      // `success: false` before the spread, so a body that carried one still wins. Without a body
+      // this is the status line's own assertion, not a fabrication: 429 IS a refusal.
+      success: false,
+      ...result,
+      status: response.status,
+      rateLimited: true,
+      retryAfterSeconds: retryAfterSecondsFrom(response.headers),
+    };
+  }
+  if (!result) {
+    // Every OTHER unreadable answer stays `undefined`. A 500, a 200 or a 410 with a body we cannot
+    // parse proves nothing about the token, and inventing a refusal from one would be this same
+    // mistake pointing the other way.
     return undefined;
   }
+  return { ...result, status: response.status };
+}
+
+/**
+ * Whether core refused this because the caller is over its per-IP redeem budget.
+ *
+ * The STATUS is the signal — `express-rate-limit` answers 429 and core does not override it. The
+ * body is only a fallback for a hop that rewrote the status, and it takes BOTH halves: `errorCode:
+ * 'invalid'` alone is also what core sends for a malformed token, an unknown or revoked invite and
+ * an inactive issuing user (`MagicLinkService.ts:197,246`, `magicLinkCore.ts:104`) — all HTTP 410.
+ * Reading the code alone would tell someone holding a revoked link to wait a minute and try again.
+ */
+function isRateLimitRefusal(status: number, result: RedeemMagicLinkJsonResult | undefined): boolean {
+  if (status === 429) {
+    return true;
+  }
+  if (!result || result.success || result.errorCode !== 'invalid') {
+    return false;
+  }
+  return (result.error ?? '').toLowerCase().includes('too many');
+}
+
+/**
+ * How long until the caller's budget refills, from the refusal's own headers.
+ *
+ * `Retry-After` first (`express-rate-limit` sets it in whole seconds on every refusal), then the
+ * draft-7 `RateLimit: limit=…, remaining=…, reset=…` core configures, which carries the same number
+ * and is the one a proxy is least likely to drop.
+ */
+function retryAfterSecondsFrom(headers: Headers): number | undefined {
+  const direct = usableRetrySeconds(headers.get('retry-after'));
+  if (direct !== undefined) {
+    return direct;
+  }
+  const reset = /(?:^|[;,\s])reset\s*=\s*(-?\d+)/i.exec(headers.get('ratelimit') ?? '');
+  return usableRetrySeconds(reset?.[1]);
+}
+
+/**
+ * A retry hint this door is willing to repeat: whole seconds, still ahead of us, not absurd.
+ *
+ * Anything else is treated as UNKNOWN rather than passed on. `Retry-After` also permits an
+ * HTTP-date, and a `0` or a negative would invite an immediate retry that refuses again — a wait
+ * the door cannot stand behind is worse than naming none.
+ */
+function usableRetrySeconds(raw: string | null | undefined): number | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const seconds = Number(raw.trim());
+  if (!Number.isInteger(seconds) || seconds <= 0 || seconds > MAX_RETRY_AFTER_SECONDS) {
+    return undefined;
+  }
+  return seconds;
 }
 
 /** Narrow an unknown JSON body to the redeem-result shape without an unsafe cast. */
@@ -306,6 +438,13 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
     return { ok: false, reason: 'form-unpublished' };
   }
   const result = await postRedeem(deps, judged.rawToken);
+  // Over-budget is not a broken redeem, and the two must not arrive at the page as one reason: the
+  // cap is keyed by IP, so the respondent who hits it is behind a shared connection, not at fault
+  // and not looking at an outage (bizapps-forms#139). `postRedeem` has already made that judgement
+  // from the status and the body; this only routes it.
+  if (result && result.rateLimited) {
+    return { ok: false, reason: 'rate-limited', retryAfterSeconds: result.retryAfterSeconds };
+  }
   if (!result || !result.success || !result.token) {
     return { ok: false, reason: 'redeem-failed' };
   }
