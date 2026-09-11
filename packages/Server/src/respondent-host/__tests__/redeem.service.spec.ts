@@ -16,15 +16,17 @@ import { publishedVersionFilter } from '../../public-submit/definition-loader.se
  * externalised as real ESM, whose namespace object is frozen — `Cannot redefine property:
  * LogError`. See `default-salt-warning.spec.ts` for the same reasoning at length.
  */
-const { logError } = vi.hoisted(() => ({ logError: vi.fn() }));
+const { logError, logStatus } = vi.hoisted(() => ({ logError: vi.fn(), logStatus: vi.fn() }));
 
 vi.mock('@memberjunction/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@memberjunction/core')>()),
   LogError: logError,
+  LogStatus: logStatus,
 }));
 
 import {
   redeemSlugToToken,
+  redeemRawToken,
   type RedeemDeps,
   type RedeemRunViewProvider,
 } from '../redeem.service';
@@ -121,6 +123,11 @@ function loggedLines(): string {
   return logError.mock.calls.map((c) => String(c[0])).join('\n');
 }
 
+/** Every line `LogStatus` was handed, joined. Severity is asserted, not just presence. */
+function statusLines(): string {
+  return logStatus.mock.calls.map((c) => String(c[0])).join('\n');
+}
+
 /**
  * A `fetch` stub whose body is RAW TEXT, so `response.json()` rejects the way it does against a
  * hop that answered with its own HTML page. `fakeFetch` above always hands back parseable JSON and
@@ -161,6 +168,7 @@ function deps(over: Partial<RedeemDeps>): RedeemDeps {
 describe('redeemSlugToToken', () => {
   beforeEach(() => {
     logError.mockClear();
+    logStatus.mockClear();
   });
 
   it('returns distribution-not-found for an empty slug (no DB read)', async () => {
@@ -175,13 +183,37 @@ describe('redeemSlugToToken', () => {
     expect(out.reason).toBe('distribution-not-found');
   });
 
-  it('returns distribution-not-found when the RunView fails (fail-safe, no throw)', async () => {
+  // bizapps-forms#194 review, F3. A failed READ is not a negative answer. `hasPublishedVersion`
+  // ten lines below already documents this decision — "that is a database problem, not an
+  // unpublished form, and the caller must not report it as one" — and logs where the context is.
+  // `loadDistribution` was the lone holdout of the four `!result.Success` sites in this directory.
+  it('reports a failed distribution read as a read failure, not as a missing link', async () => {
     const out = await redeemSlugToToken(
       deps({ provider: fakeProvider({ success: false }).provider }),
       'customer-survey',
     );
     expect(out.ok).toBe(false);
-    expect(out.reason).toBe('distribution-not-found');
+    // NOT distribution-not-found: that tells the holder of a perfectly good link to check it.
+    expect(out.reason).toBe('redeem-failed');
+  });
+
+  it('logs a failed distribution read with the slug, in the frame that holds it', async () => {
+    await redeemSlugToToken(deps({ provider: fakeProvider({ success: false }).provider }), 'customer-survey');
+    expect(loggedLines()).toContain('customer-survey');
+  });
+
+  // Was `returns distribution-not-found when the RunView fails`. That expectation pinned the defect
+  // the two tests above now fix: it asserted that a failed READ is reported as a missing link. The
+  // half worth keeping is the fail-safe contract — this path must never throw, whatever it returns —
+  // so that is what it pins now, with the reason asserted by the tests above (bizapps-forms#194).
+  it('never throws when the distribution RunView fails, whatever reason it returns', async () => {
+    const out = await redeemSlugToToken(
+      deps({ provider: fakeProvider({ success: false }).provider }),
+      'customer-survey',
+    );
+    expect(out.ok).toBe(false);
+    expect(out.token).toBeUndefined();
+    expect(out.reason).toBeDefined();
   });
 
   it('returns distribution-closed for a Closed distribution', async () => {
@@ -523,6 +555,58 @@ describe('redeemSlugToToken', () => {
         'customer-survey',
       );
       expect(unreachable.reason).not.toBe(refused.reason);
+    });
+
+    // bizapps-forms#194 review, F4. Severity is a property of the CALLER's expectation, and
+    // `postRedeem` is a shared frame that cannot see which caller it serves. A resume pointer is
+    // SINGLE-USE, so core answering `consumed` is the designed two-tab / restored-tab outcome, which
+    // `refusedRedeem` handles as a benign 'open-elsewhere'. The door's PublicLinkToken is multi-use,
+    // so `consumed` there is genuinely anomalous. The two must not share a severity.
+    describe('a refusal the caller expects is news, not an error', () => {
+      it('logs a consumed resume pointer at status level, never as an error', async () => {
+        const fetchImpl = fakeFetch(
+          { success: false, errorCode: 'consumed', error: 'Invite already redeemed or expired.' },
+          { status: 410 },
+        );
+        const out = await redeemRawToken(
+          { redeemUrl: 'http://localhost:4121/magic-link/redeem', fetchImpl },
+          'raw-resume-pointer',
+          'customer-survey',
+        );
+        // The contract its own callers judge is unchanged: they read errorCode and status.
+        expect(out?.errorCode).toBe('consumed');
+        expect(out?.status).toBe(410);
+        // Still logged — losing the line would re-open bizapps-forms#140 on this path.
+        expect(statusLines()).toContain('customer-survey');
+        expect(statusLines()).toContain('consumed');
+        // But not as an error. This is the whole assertion.
+        expect(loggedLines()).not.toContain('consumed');
+        expect(logError).not.toHaveBeenCalled();
+      });
+
+      it('still logs a refusal the caller does NOT expect as an error', async () => {
+        const fetchImpl = fakeFetch(
+          { success: false, errorCode: 'invalid', error: 'This link has been revoked.' },
+          { status: 410 },
+        );
+        await redeemRawToken(
+          { redeemUrl: 'http://localhost:4121/magic-link/redeem', fetchImpl },
+          'raw-resume-pointer',
+          'customer-survey',
+        );
+        expect(loggedLines()).toContain('invalid');
+        expect(loggedLines()).toContain('This link has been revoked.');
+      });
+
+      it('keeps consumed an ERROR on the door, whose link is multi-use', async () => {
+        const fetchImpl = fakeFetch(
+          { success: false, errorCode: 'consumed', error: 'Invite already redeemed or expired.' },
+          { status: 410 },
+        );
+        const out = await redeemSlugToToken(deps({ fetchImpl }), 'customer-survey');
+        expect(out.reason).toBe('redeem-refused');
+        expect(loggedLines()).toContain('consumed');
+      });
     });
 
     // Both are credentials. A log line is durable, is shipped to aggregators, and outlives the

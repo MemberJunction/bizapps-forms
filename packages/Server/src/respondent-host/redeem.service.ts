@@ -17,7 +17,7 @@
  * Everything that touches the network or the DB is injected ({@link RedeemDeps}) so the flow is
  * unit-testable without a live server: tests pass a fake distribution loader and a stub `fetch`.
  */
-import { LogError, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
+import { LogError, LogStatus, type RunViewParams, type RunViewResult, type UserInfo } from '@memberjunction/core';
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
@@ -213,11 +213,27 @@ function judgeDistributionRow(
   return { verdict: 'proceed', rawToken };
 }
 
+/**
+ * The three distinct things a slug lookup can find, kept apart because two of them used to be one.
+ *
+ * `absent` and `unreadable` both returned `undefined`, so a database problem reached the respondent
+ * as "This form link was not found. Please check the link and try again." — advice that cannot help
+ * and is not true — while the frame holding the slug logged nothing (bizapps-forms#194 review).
+ * `hasPublishedVersion` below had already made the opposite decision for the same condition.
+ *
+ * A string discriminant, like {@link DistributionRowVerdict} and {@link PostRedeemOutcome}, for the
+ * reason spelled out on those: this package compiles without `strictNullChecks`.
+ */
+type DistributionLookup =
+  | { lookup: 'found'; row: mjBizAppsFormsFormDistributionEntityType }
+  | { lookup: 'absent' }
+  | { lookup: 'unreadable' };
+
 /** Load the distribution row for a slug, or `undefined` if the read fails / no row matches. */
 async function loadDistribution(
   deps: RedeemDeps,
   slug: string,
-): Promise<mjBizAppsFormsFormDistributionEntityType | undefined> {
+): Promise<DistributionLookup> {
   const result = await deps.provider.RunView<mjBizAppsFormsFormDistributionEntityType>(
     {
       EntityName: FORM_DISTRIBUTION_ENTITY,
@@ -227,11 +243,15 @@ async function loadDistribution(
     },
     deps.contextUser,
   );
-  // RunView never throws — check Success.
+  // RunView never throws — check Success. A failed READ is not a negative answer: reporting it as
+  // "no such slug" tells the holder of a perfectly good link to go and check the link, and tells the
+  // operator nothing at all. Same decision, and same wording, as `hasPublishedVersion` below.
   if (!result.Success) {
-    return undefined;
+    LogError(`[Forms] Distribution read failed for slug '${slug}': ${result.ErrorMessage}`);
+    return { lookup: 'unreadable' };
   }
-  return result.Results[0];
+  const row = result.Results[0];
+  return row ? { lookup: 'found', row } : { lookup: 'absent' };
 }
 
 /**
@@ -315,6 +335,23 @@ type PostRedeemOutcome =
   | { outcome: 'unreachable' };
 
 /**
+ * Refusals that are ORDINARY for the tokens {@link redeemRawToken} redeems, so they are logged as
+ * news rather than as errors.
+ *
+ * This function exists for single-use response invites (the resume routes), and a single-use token
+ * already being spent is the two-tab / restored-tab race — `refusedRedeem` in
+ * `device-resume.service.ts` calls it "the COMMON case for this refusal, not the exotic one" and
+ * answers `open-elsewhere` without even clearing the cookie. An error-level line for an everyday
+ * outcome dilutes the signal this file exists to create (bizapps-forms#194 review).
+ *
+ * It lives HERE rather than as a parameter the caller passes because it is a property of what this
+ * function redeems, not of anyone's taste: the door's own `PublicLinkToken` is MULTI-use, so
+ * `consumed` there is genuinely anomalous — and `redeemSlugToToken` reaches {@link postRedeem}
+ * directly, so it never picks this list up. A parameter would be one more piece of wiring to forget.
+ */
+const RESUME_ROUTINE_REFUSALS = ['consumed'] as const;
+
+/**
  * Redeem ANY raw magic-link token through core, not just a distribution's public one.
  *
  * Exported because the resume routes redeem a token whose resource is a FormResponse rather than a
@@ -337,7 +374,7 @@ export async function redeemRawToken(
   rawToken: string,
   slug: string,
 ): Promise<RedeemMagicLinkJsonResult | undefined> {
-  const redeemed = await postRedeem(deps, rawToken, slug);
+  const redeemed = await postRedeem(deps, rawToken, slug, RESUME_ROUTINE_REFUSALS);
   return redeemed.outcome === 'answered' ? redeemed.result : undefined;
 }
 
@@ -363,6 +400,7 @@ async function postRedeem(
   deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
   rawToken: string,
   slug: string,
+  routineRefusalCodes: readonly string[] = [],
 ): Promise<PostRedeemOutcome> {
   // Core reads `format` from the query string only; the body carries `{ token }` as JSON.
   // POST only — a GET with format=json is 405 by design.
@@ -445,11 +483,19 @@ async function postRedeem(
     // reason of its own: from this side it is the same event — the endpoint answered and we hold
     // no session — and it is a core bug, which the trailing clause says so an operator does not go
     // looking for a revoked link.
-    LogError(
+    const line =
       `[Forms] Redeem refused for distribution '${slug}' (POST ${url}, HTTP ${response.status}): ` +
-        `errorCode=${result.errorCode || 'none'} error=${result.error || 'none'}` +
-        (result.success ? ' — core reported success but returned no token' : ''),
-    );
+      `errorCode=${result.errorCode || 'none'} error=${result.error || 'none'}` +
+      (result.success ? ' — core reported success but returned no token' : '');
+    // Severity belongs to the CALLER's expectation, and this frame is shared by two of them. A
+    // refusal the caller has a designed answer to is news; one it does not is an error. Still
+    // logged either way — dropping the line would re-open bizapps-forms#140 on that path — but an
+    // error-level line for an everyday outcome dilutes the very signal this file exists to create.
+    if (result.errorCode && routineRefusalCodes.includes(result.errorCode)) {
+      LogStatus(line);
+    } else {
+      LogError(line);
+    }
   }
   return { outcome: 'answered', result: { ...result, status: response.status } };
 }
@@ -526,10 +572,16 @@ export async function redeemSlugToToken(deps: RedeemDeps, slug: string): Promise
   if (!slug) {
     return { ok: false, reason: 'distribution-not-found' };
   }
-  const dist = await loadDistribution(deps, slug);
-  if (!dist) {
+  const found = await loadDistribution(deps, slug);
+  // A read we could not perform is a database problem, not a link that does not exist. It renders
+  // the same 502 "try again later" as every other read failure here, which is the honest answer.
+  if (found.lookup === 'unreadable') {
+    return { ok: false, reason: 'redeem-failed' };
+  }
+  if (found.lookup === 'absent') {
     return { ok: false, reason: 'distribution-not-found' };
   }
+  const dist = found.row;
   const judged = judgeDistributionRow(dist, new Date());
   if (judged.verdict === 'refuse') {
     return { ok: false, reason: judged.reason, opensAt: judged.opensAt };
