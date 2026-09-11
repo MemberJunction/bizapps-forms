@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Written 2026-09-09, against a base that has since moved.** This plan was made at branch point
+> `ed26f16`, where a tripped redemption rate limit genuinely was `redeem-failed` and a 502. #139
+> shipped in #188 on 2026-09-11 and is now in this branch's base, so that one shape already answers
+> the respondent 429 with a retry hint, and `postRedeem` gained a 10s deadline. What this plan still
+> describes correctly is everything else; where it says splitting the page is "#139's decision, not
+> this one", read that as done rather than pending. The plan is left as written — it is the record of
+> a decision made on a date, not a description of the merged result.
+
 **Goal:** Make every way `/f/:slug` can fail to redeem a magic link say so in the API log and in its returned reason, instead of collapsing four unrelated causes into one silent `redeem-failed`.
 
 **Architecture:** `postRedeem` in `packages/Server/src/respondent-host/redeem.service.ts` stops returning `RedeemMagicLinkJsonResult | undefined` and starts returning a string-discriminated `PostRedeemOutcome` — either the minted token, or the typed reason there is none. Every failure branch inside it emits one `LogError` carrying the slug, the endpoint, and whatever core actually said, and never the raw `PublicLinkToken` or the minted JWT. `RedeemFailureReason` gains two members — `redeem-unreachable` (we never got a usable answer) and `redeem-refused` (core answered and said no) — so `error-view.ts` has something to branch on; both keep today's 502 view, because splitting the *page* is bizapps-forms#139's decision, not this one.
