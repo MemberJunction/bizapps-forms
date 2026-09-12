@@ -140,6 +140,35 @@ export interface RevokeSummary {
  * Best-effort and never throws: it runs after a row is already written, so reporting a failure
  * would tell a respondent their submission failed when it did not.
  */
+/**
+ * Retire ONE invite, named by id — the credential a fresh mint has just superseded.
+ *
+ * Deliberately not expressed as {@link revokeResponseInvites} with a narrower filter. That one
+ * revokes every Active device invite of a response, which is right for `/forget` and wrong for a
+ * re-mint: the invite minted moments earlier is Active against the same ResourceID and would be
+ * retired along with the old one, handing the browser a cookie that is already dead.
+ *
+ * `responseId` is passed to the minter alongside the id, not used to search — the minter takes both
+ * so it can refuse a revoke whose invite does not belong to the resource the caller claims.
+ *
+ * Best-effort and never throws, for the same reason as its sibling: it runs after the new pointer
+ * is already minted, and failing the request here would report a broken save that did not happen.
+ */
+export async function revokeInviteById(
+  inviteId: string,
+  responseId: string,
+  contextUser: UserInfo,
+): Promise<void> {
+  const minter = MagicLinkMinterRegistry.Instance.Minter;
+  if (!minter || !inviteId || !responseId) {
+    return;
+  }
+  const outcome = await minter.RevokeAnonymousInvite({ inviteId, resourceId: responseId }, contextUser);
+  if (!outcome.success) {
+    LogError(`[Forms] could not retire superseded resume invite ${inviteId} of response ${responseId}: ${outcome.message}`);
+  }
+}
+
 export async function revokeResponseInvites(
   responseId: string,
   options: { deviceOnly: boolean },

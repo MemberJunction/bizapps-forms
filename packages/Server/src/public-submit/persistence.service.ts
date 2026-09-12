@@ -252,8 +252,13 @@ function countsCompletion(inputs: PersistenceInputs): boolean {
  * SECOND QUESTION IS A SECURITY DECISION here — folding to `''` is what makes a row unowned and
  * therefore adoptable. A shared helper would offer both call sites a normalization whose blank
  * case means something different on each side.
+ *
+ * Named for IDS rather than for sessions because it folds both, and always has: a session
+ * correlator reaches it here, a response primary key reaches it in {@link scopeNamesResponse}, and
+ * #193 added a third caller that folds a distribution id. Exported for that third one — the
+ * `/remember` guard has to fold exactly as this rule does or the two disagree on a GUID's casing.
  */
-function foldSessionId(value: string | null | undefined): string {
+export function foldId(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase();
 }
 
@@ -307,19 +312,36 @@ export function responseIsOurs(
   response: Pick<mjBizAppsFormsFormResponseEntityType, 'ID' | 'AnonymousSessionID'>,
   caller: ResponseCaller,
 ): boolean {
-  const owner = foldSessionId(response.AnonymousSessionID);
-  if (owner === '' || owner === foldSessionId(caller.sessionId)) {
+  const owner = foldId(response.AnonymousSessionID);
+  if (owner === '' || owner === foldId(caller.sessionId)) {
     return true;
   }
-  // Folded exactly as the session ids are, and for a sharper reason: MJ mints a primary key
-  // client-side (lowercase) while SQL Server hands the same GUID back uppercased, so a
-  // case-sensitive comparison would refuse every resumed save. That skew already rejected every
-  // anonymous submission once, as `version-mismatch`.
-  //
-  // The blank guard is not redundant with the fold: an empty scope folds to `''`, and so would a
-  // row that somehow arrived without an id — matching them would admit every caller to that row.
-  const scope = foldSessionId(caller.scopedResponseId);
-  return scope !== '' && scope === foldSessionId(response.ID);
+  return scopeNamesResponse(response, caller);
+}
+
+/**
+ * Does this caller's VERIFIED session scope name this very row?
+ *
+ * Split out of {@link responseIsOurs} for #193, where a second guard needed the same clause and had
+ * been given a second spelling of it instead: `/remember`'s `ownsDraft` restated the ownership rule
+ * MINUS this clause, so every resumed fill — whose JWT names the response and whose `x-session-id`
+ * is a fresh one — was refused as a stranger and logged as an ownership violation. A clause two
+ * guards share is a clause that must exist once.
+ *
+ * Folded exactly as the session ids are, and for a sharper reason: MJ mints a primary key
+ * client-side (lowercase) while SQL Server hands the same GUID back uppercased, so a
+ * case-sensitive comparison would refuse every resumed save. That skew already rejected every
+ * anonymous submission once, as `version-mismatch`.
+ *
+ * The blank guard is not redundant with the fold: an empty scope folds to `''`, and so would a
+ * row that somehow arrived without an id — matching them would admit every caller to that row.
+ */
+export function scopeNamesResponse(
+  response: Pick<mjBizAppsFormsFormResponseEntityType, 'ID'>,
+  caller: ResponseCaller,
+): boolean {
+  const scope = foldId(caller.scopedResponseId);
+  return scope !== '' && scope === foldId(response.ID);
 }
 
 /**
@@ -419,12 +441,12 @@ function applyResponseIdentity(
   // takeover into a permanent one the real respondent could never resume.
   //
   // Normalized: storing the RAW header let the column hold a value that does not mean what it
-  // looks like. `x-session-id: '   '` stored three spaces, which `foldSessionId` reads back as
+  // looks like. `x-session-id: '   '` stored three spaces, which `foldId` reads back as
   // "no owner" — a row that appears owned, is not, and is adoptable by anyone holding its id.
   // Storing what we compare removes the gap rather than adding a second place that has to
   // remember to trim.
-  if (foldSessionId(response.AnonymousSessionID) === '') {
-    response.AnonymousSessionID = foldSessionId(inputs.sessionId);
+  if (foldId(response.AnonymousSessionID) === '') {
+    response.AnonymousSessionID = foldId(inputs.sessionId);
     // WRITE-ONCE TOO, and for a reason that only became visible once a row could outlive its
     // session (#138). These used to be rewritten on EVERY save, which was harmless while every
     // save came from the sitting that created the row. After a resume it is not: the owner column

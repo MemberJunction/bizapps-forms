@@ -13,6 +13,8 @@
  */
 import { LogError, LogStatus } from '@memberjunction/core';
 
+import { foldId, responseIsOurs, scopeNamesResponse } from '../public-submit/persistence.service';
+
 /** Why a resume could not happen. The page maps these to copy; the respondent sees no code. */
 export type ResumeRefusal =
   | 'no-pointer'
@@ -77,7 +79,15 @@ export interface DeviceResumeDeps {
   /** Retire invites for a response. `deviceOnly` is a security decision — see the service. */
   revoke(args: { responseId: string; deviceOnly: boolean }): Promise<void>;
   /** What response a raw token opens, without spending it. */
-  inviteFor(rawToken: string): Promise<{ ok: boolean; resourceId?: string }>;
+  inviteFor(rawToken: string): Promise<{ ok: boolean; resourceId?: string; inviteId?: string }>;
+  /**
+   * Retire ONE invite by id — the credential a fresh mint has just superseded.
+   *
+   * Separate from {@link revoke}, which retires every device invite of a response and is what
+   * `/forget` wants. Re-minting must not use that: it would retire the invite minted moments
+   * earlier, since both are Active against the same ResourceID.
+   */
+  revokeInvite(args: { inviteId: string; responseId: string }): Promise<void>;
   /** The response a session JWT is scoped to, read from the token this redeem just minted. */
   scopeOf(sessionToken: string): string | undefined;
   /** False when this caller has spent their budget for these routes. */
@@ -200,7 +210,15 @@ export interface RememberArgs {
   responseId: string;
   /** The caller's `x-session-id`. The ONLY ownership proof a first sitting has. */
   sessionId: string;
-  /** The distribution the caller's JWT is scoped to. */
+  /**
+   * The resource the caller's VERIFIED session scope names — `MagicLinkScope.ResourceID`.
+   *
+   * Which KIND of resource depends on how the caller got here, and #193 is what reading it as one
+   * kind cost: a first sitting arrives on a public link, so this is a DISTRIBUTION id; after a
+   * `/resume` the page swaps in the response-scoped session, so it is a RESPONSE id. `ownsDraft`
+   * has to admit both, which is why it hands this to `scopedResponseId` and compares it against
+   * the row's link only when the first reading fails.
+   */
   scopeId: string;
   /** The pointer this browser already holds, if any. */
   cookieToken?: string;
@@ -234,17 +252,17 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
     // that can no longer change.
     return { status: 409 };
   }
-  if (!ownsDraft(response, args)) {
+  if (!ownsDraft(response, args, distribution)) {
     LogError(`[Forms] refused to remember response ${args.responseId}: the caller does not own it.`);
     return { status: 403 };
   }
 
-  const replacing = await pointerConflict(deps, args);
-  if (replacing) {
+  const held = await heldPointer(deps, args);
+  if (held.conflict) {
     // THE SECOND HALF OF THE TWO-TAB FIX. The loser tab's first autosave arrives holding the
     // winner's rotated pointer; overwriting it would point this jar at the loser's new draft and
     // abandon the real one. Refuse, and leave the cookie exactly as it is.
-    LogStatus(`[Forms] not replacing a live pointer to response ${replacing} with one to ${args.responseId}.`);
+    LogStatus(`[Forms] not replacing a live pointer to response ${held.conflict} with one to ${args.responseId}.`);
     return { status: 409 };
   }
 
@@ -255,53 +273,104 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
     LogError(`[Forms] could not mint a device pointer for response ${args.responseId}.`);
     return { status: 204 };
   }
+  if (held.supersededInviteId) {
+    // AFTER the mint, never before: the failure path above deliberately leaves the old pointer
+    // alive so a failed re-mint costs the device nothing. Retiring first would strand it on a dead
+    // cookie exactly when minting is already broken.
+    await deps.revokeInvite({ inviteId: held.supersededInviteId, responseId: args.responseId });
+  }
   return { status: 204, setCookie: deps.cookieFor(minted.rawToken, secondsUntil(minted.expiresAt)) };
 }
 
 /**
  * Whether the caller may be given a pointer to this row.
  *
- * Two independent facts, both required. The session id is the caller's own claim on the row — the
- * same rule `responseIsOurs` applies at the write, restated here because this route writes no
- * response and therefore never reaches that gate. The distribution match is the review's addition:
- * a JWT scoped to link A must not be able to mint a pointer to a draft submitted through link B,
- * even one the caller genuinely owns, because the pointer it mints would resume into a form the
- * caller's session was never admitted to.
+ * TWO QUESTIONS, and the first one is not answered here. `responseIsOurs` is THE ownership rule, so
+ * this route CALLS it rather than restating it. It used to restate it — minus the scope clause —
+ * while its comment claimed the two were the same rule, and #193 is what that cost: after a
+ * `/resume` the caller's JWT names the RESPONSE, and the row's owner column still names the first
+ * sitting's session, so an ordinary resumed fill matched neither half and was refused as a stranger
+ * once per sitting. A doc comment asserting equivalence is what hid the omission; the call enforces
+ * it instead.
  *
- * An UNKNOWN distribution on the row is a refusal, never a pass.
+ * THE SECOND QUESTION IS WHICH FORM THIS IS, and it has two halves that are easy to conflate.
+ *
+ * (a) Does the row belong to the link whose page this is? `runRemember` resolves its distribution
+ *     from the URL SLUG and uses it for two decisions — `allowDeviceResume` and the invite's
+ *     `closeAt` — but nothing upstream binds a caller's JWT scope to the slug they arrived at
+ *     (`matchResumeRoute` reads the path; the scope comes off the verified token). So without this
+ *     check a draft belonging to link A, reached at link B's URL, was minted under B's switch and
+ *     B's expiry: A's `AllowDeviceResume=0` bypassed, and a credential outliving A's close.
+ *     It binds the row to the DISTRIBUTION IN HAND, which is the thing those two decisions came
+ *     from — comparing against the caller's scope, as this did before, reconciles nothing.
+ *
+ *     Only when the row's link is KNOWN. `FormDistributionID` is nullable and arrived with the #138
+ *     migration, so every draft older than it has none — the overwhelming majority of existing rows.
+ *     Demanding a match from those would refuse nearly every draft in flight and re-break #193 far
+ *     more widely than the bug it fixed. An unknown link keeps exactly its old meaning: a refusal
+ *     for a link-scoped caller, no obstacle to one the row itself names.
+ *
+ * (b) Is this caller admitted to that link? The design review's finding 2. A distribution-scoped
+ *     JWT must match the link the row came through. A response-scoped caller needs no such match:
+ *     their session was minted from an invite naming this very row, which is strictly stronger
+ *     evidence than a link comparison, and demanding a link as well would refuse the very sitting
+ *     it was issued for. That exemption is about WHICH SESSION may act — it never exempted them
+ *     from (a), which is about which form they are standing in front of.
  */
-function ownsDraft(response: ResumeResponseRow, args: RememberArgs): boolean {
-  const owner = (response.anonymousSessionId ?? '').trim().toLowerCase();
-  const caller = args.sessionId.trim().toLowerCase();
-  if (owner !== '' && owner !== caller) {
+function ownsDraft(
+  response: ResumeResponseRow,
+  args: RememberArgs,
+  distribution: ResumeDistribution,
+): boolean {
+  const row = { ID: response.id, AnonymousSessionID: response.anonymousSessionId };
+  const caller = { sessionId: args.sessionId, scopedResponseId: args.scopeId };
+  if (!responseIsOurs(row, caller)) {
     return false;
   }
-  const rowLink = (response.formDistributionId ?? '').trim().toLowerCase();
-  return rowLink !== '' && rowLink === args.scopeId.trim().toLowerCase();
+  const rowLink = foldId(response.formDistributionId);
+  if (rowLink !== '' && rowLink !== foldId(distribution.id)) {
+    return false;
+  }
+  if (scopeNamesResponse(row, caller)) {
+    return true;
+  }
+  return rowLink !== '' && rowLink === foldId(args.scopeId);
+}
+
+/** What the cookie this device already holds turns out to be. */
+interface HeldPointer {
+  /** A DIFFERENT live draft the cookie names. Replacing it would abandon that draft. */
+  conflict?: string;
+  /** The invite the cookie holds for THIS draft, which a successful re-mint supersedes. */
+  supersededInviteId?: string;
 }
 
 /**
- * The response a live pointer already names, when replacing it would abandon a draft.
+ * What this device's cookie already points at — the two facts `/remember` needs from it.
  *
- * Returns the OTHER response's id, or undefined when there is nothing to protect: no cookie, an
- * unreadable one, or one that names this very draft (the ordinary re-mint).
+ * It used to answer only the first, returning the other response's id and `undefined` for
+ * everything else. `undefined` covered two situations that want opposite handling, and the one it
+ * hid is the expensive one: a cookie naming THIS draft is "the ordinary re-mint", and the invite id
+ * it just resolved is exactly the credential the imminent mint is about to supersede. Discarding it
+ * left that invite Active, single-use and unspent — a live pointer the owner never redeems again,
+ * so a copy of it opens the draft silently instead of failing visibly at the owner's next reopen,
+ * which is the whole point of rotating (see `resume-deps.ts`).
  */
-async function pointerConflict(deps: DeviceResumeDeps, args: RememberArgs): Promise<string | undefined> {
+async function heldPointer(deps: DeviceResumeDeps, args: RememberArgs): Promise<HeldPointer> {
   if (!args.cookieToken) {
-    return undefined;
+    return {};
   }
   const invite = await deps.inviteFor(args.cookieToken);
   if (!invite.ok || !invite.resourceId) {
-    return undefined;
+    return {};
   }
-  const held = invite.resourceId.trim().toLowerCase();
-  if (held === args.responseId.trim().toLowerCase()) {
-    return undefined;
+  if (foldId(invite.resourceId) === foldId(args.responseId)) {
+    return { supersededInviteId: invite.inviteId };
   }
   const other = await deps.loadResponse(invite.resourceId);
   // Only a still-live draft is worth protecting. A sealed or vanished one is not something the
   // respondent can come back to, so the new pointer is strictly better.
-  return other && other.status === 'Partial' ? invite.resourceId : undefined;
+  return other && other.status === 'Partial' ? { conflict: invite.resourceId } : {};
 }
 
 /** `POST /f/:slug/forget` — drop the pointer, and only the pointers this device holds. */
