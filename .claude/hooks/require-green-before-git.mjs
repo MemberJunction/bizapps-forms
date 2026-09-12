@@ -285,41 +285,55 @@ export function classifyCheckResult({ name, verdictPattern, coveredWorkPattern }
 }
 
 /**
+ * The checks this hook runs, and the evidence each one prints. EXPORTED, and that is the point:
+ * these descriptors used to be a local `const` inside `runChecks`, reachable by nothing, so the
+ * spec kept private copies and asserted those. Every shipped pattern could therefore be broken
+ * without a single test failing — measured on this file: four such mutations survived the whole
+ * suite, including `/^\s*Tasks:\s/m` -> `/^Tasks:/m`, which the comment below says would send
+ * every commit to `ask`. A pattern nothing tests is a pattern nobody can trust.
+ *
+ * `entryPoint` is relative because the absolute path depends on `PROJECT_DIR`, which is resolved
+ * per invocation; `label` is what a missing checker is called in the throw.
+ */
+export const CHECKS = [
+    {
+        name: 'lint:ui',
+        label: 'scripts/check-ui-tokens.mjs',
+        entryPoint: ['scripts', 'check-ui-tokens.mjs'],
+        args: [],
+        verdictPattern: /^(?:PASS|FAIL)\b/m,
+        // `Scanned 197 file(s) under: packages/Angular/src`. Zero means the scan root moved and
+        // the colour gate is checking nothing — which it reports as a PASS.
+        coveredWorkPattern: /^Scanned [1-9]\d* file\(s\)/m,
+    },
+    {
+        name: 'typecheck',
+        label: 'turbo entry point',
+        entryPoint: ['node_modules', 'turbo', 'bin', 'turbo'],
+        args: ['typecheck', '--filter=@mj-biz-apps/forms-*'],
+        // Leading whitespace is load-bearing: turbo prints ` Tasks:    9 successful, 9 total`,
+        // so `/^Tasks:/m` matches nothing and would send every commit to `ask`.
+        verdictPattern: /^\s*Tasks:\s/m,
+        // Same line, but the COUNT: an empty run prints ` Tasks:    0 successful, 0 total` and
+        // exits 0, so the marker above is present and proves nothing.
+        coveredWorkPattern: /^\s*Tasks:\s+\d+ successful,\s+[1-9]\d* total/m,
+    },
+];
+
+/**
  * Runs the real checks. Throws — never reports "clean" — when a checker is missing, when one ran
  * and never reached a verdict, and when one passed without covering any work. Each entry carries
  * the two patterns that prove it got that far and that its verdict was about something.
  */
 function runChecks() {
-    const turbo = path.join(PROJECT_DIR, 'node_modules', 'turbo', 'bin', 'turbo');
-    const uiGate = path.join(PROJECT_DIR, 'scripts', 'check-ui-tokens.mjs');
-    for (const [label, entry] of [['scripts/check-ui-tokens.mjs', uiGate], ['turbo entry point', turbo]]) {
+    const resolved = CHECKS.map((check) => ({ ...check, entry: path.join(PROJECT_DIR, ...check.entryPoint) }));
+    for (const { label, entry } of resolved) {
         if (!existsSync(entry)) throw new Error(`${label} not found at ${entry}`);
     }
 
-    const invocations = [
-        {
-            name: 'lint:ui',
-            argv: [uiGate],
-            verdictPattern: /^(?:PASS|FAIL)\b/m,
-            // `Scanned 197 file(s) under: packages/Angular/src`. Zero means the scan root moved and
-            // the colour gate is checking nothing — which it reports as a PASS.
-            coveredWorkPattern: /^Scanned [1-9]\d* file\(s\)/m,
-        },
-        {
-            name: 'typecheck',
-            argv: [turbo, 'typecheck', '--filter=@mj-biz-apps/forms-*'],
-            // Leading whitespace is load-bearing: turbo prints ` Tasks:    9 successful, 9 total`,
-            // so `/^Tasks:/m` matches nothing and would send every commit to `ask`.
-            verdictPattern: /^\s*Tasks:\s/m,
-            // Same line, but the COUNT: an empty run prints ` Tasks:    0 successful, 0 total` and
-            // exits 0, so the marker above is present and proves nothing.
-            coveredWorkPattern: /^\s*Tasks:\s+\d+ successful,\s+[1-9]\d* total/m,
-        },
-    ];
-
     const failures = [];
-    for (const check of invocations) {
-        const result = spawnSync(process.execPath, check.argv, {
+    for (const check of resolved) {
+        const result = spawnSync(process.execPath, [check.entry, ...check.args], {
             cwd: PROJECT_DIR,
             encoding: 'utf8',
             shell: false,

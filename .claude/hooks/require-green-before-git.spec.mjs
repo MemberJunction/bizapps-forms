@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf } from './require-green-before-git.mjs';
+import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf, CHECKS } from './require-green-before-git.mjs';
 
 const green = () => [];
 const red = () => [{ name: 'lint:ui', output: "hardcoded color: DefaultColor: '#6366f1'," }];
@@ -428,4 +428,62 @@ test('resolves the worktree root, not the checkout the session started in', () =
 test('answers null outside a repository, so the caller can fall back rather than crash', () => {
     // A hook that threw here would break every Bash call in a non-repo cwd.
     assert.equal(gitToplevelOf('/'), null);
+});
+
+// ── THE DESCRIPTORS THAT ACTUALLY SHIP ──────────────────────────────────────────────────────────
+// Every test above drives `classifyCheckResult` with TYPECHECK / LINT_UI declared HERE. Those are
+// copies. The descriptors the hook really uses lived inside `runChecks`' body, reachable by nothing,
+// so a mutation to any shipped pattern changed what the hook does while the whole suite stayed
+// green — measured: four such mutants survived, including `/^\s*Tasks:\s/m` -> `/^Tasks:/m`, which
+// this file's own comment says would send every commit to `ask`.
+//
+// So the shipped descriptors are exported and asserted against REAL captured output. The strings
+// below are verbatim captures from this repo, not hand-written approximations.
+const REAL_OUTPUT = {
+    'typecheck': {
+        green: ' Tasks:    9 successful, 9 total\nCached:    9 cached, 9 total\n  Time:    10ms >>> FULL TURBO\n',
+        judgedNothing: ' WARNING  No tasks were executed as part of this run.\n\n Tasks:    0 successful, 0 total\nCached:    0 cached, 0 total\n  Time:    9ms\n',
+        failed: ' Tasks:    0 successful, 1 total\nCached:    0 cached, 1 total\nFailed:    @rc/a#typecheck\n',
+    },
+    'lint:ui': {
+        green: 'UI token gate\n-------------\nScanned 198 file(s) under: packages/Angular/src\n\n[color] hardcoded-color gate: 0 violation(s)\n\nPASS — no UI gate violations.\n',
+        judgedNothing: 'UI token gate\n-------------\nScanned 0 file(s) under: packages/Angular/src\n\n[color] hardcoded-color gate: 0 violation(s)\n\nPASS — no UI gate violations.\n',
+        failed: 'UI token gate\n-------------\nScanned 198 file(s) under: packages/Angular/src\n\n[color] hardcoded-color gate: 1 violation(s)\n  packages/Angular/src/a.css:1  color: #6366f1;\n\nFAIL — 1 UI gate violation(s).\n',
+    },
+};
+
+test('every shipped check declares both patterns', () => {
+    assert.ok(Array.isArray(CHECKS) && CHECKS.length > 0, 'CHECKS must be exported and non-empty');
+    for (const check of CHECKS) {
+        assert.ok(check.verdictPattern instanceof RegExp, `${check.name} has no verdictPattern`);
+        assert.ok(check.coveredWorkPattern instanceof RegExp, `${check.name} has no coveredWorkPattern`);
+        assert.ok(REAL_OUTPUT[check.name], `no captured real output for shipped check ${check.name}`);
+    }
+});
+
+test('each shipped descriptor calls its checker\'s real green output a pass', () => {
+    for (const check of CHECKS) {
+        assert.equal(
+            classifyCheckResult(check, { status: 0, stdout: REAL_OUTPUT[check.name].green, stderr: '' }),
+            null,
+            `${check.name} should pass on its real green output`,
+        );
+    }
+});
+
+test('each shipped descriptor throws when its checker judged nothing', () => {
+    for (const check of CHECKS) {
+        assert.throws(
+            () => classifyCheckResult(check, { status: 0, stdout: REAL_OUTPUT[check.name].judgedNothing, stderr: '' }),
+            new RegExp(check.name.replace(':', ':')),
+            `${check.name} should refuse a pass that covered nothing`,
+        );
+    }
+});
+
+test('each shipped descriptor still reports its checker\'s real failure as a failure', () => {
+    for (const check of CHECKS) {
+        const f = classifyCheckResult(check, { status: 1, stdout: REAL_OUTPUT[check.name].failed, stderr: '' });
+        assert.equal(f?.name, check.name, `${check.name} should deny on its real failing output`);
+    }
 });
