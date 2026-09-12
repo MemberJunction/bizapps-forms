@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, ElementRef, Injector, afterNextRender, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
@@ -112,6 +112,7 @@ import {
   selectScreen as screenSelection,
   type BuilderSelection,
 } from './builder-selection';
+import { targetPageFor, type NewQuestionTarget } from './new-question-target';
 
 /**
  * Which workspace tab is showing.
@@ -195,6 +196,12 @@ export class FormBuilderComponent extends BaseFormComponent {
   private readonly distributions = inject(DistributionService);
   private readonly clone = inject(FormCloneService);
   private readonly templates = inject(FormTemplatesService);
+
+  /** The canvas's own root, so a focus lookup cannot reach outside this builder instance. */
+  private readonly host: ElementRef<HTMLElement> = inject(ElementRef);
+
+  /** afterNextRender is called from an async handler, i.e. outside the injection context. */
+  private readonly injector = inject(Injector);
 
   protected readonly paletteGroups = QUESTION_PALETTE_GROUPS;
   protected tree: FormTree | null = null;
@@ -526,14 +533,14 @@ export class FormBuilderComponent extends BaseFormComponent {
     if (!this.tree || this.busy) {
       return;
     }
-    const page = this.targetPageForNewQuestion();
-    if (!page) {
+    const target = targetPageFor(this.selection, this.pages);
+    if (!target) {
       return;
     }
     this.busy = true;
-    const node = await this.state.addQuestion(this.tree, page, type, this.defaultPrompt(type));
+    const node = await this.state.addQuestion(this.tree, target.page, type, this.defaultPrompt(type));
     if (node) {
-      page.questions.push(node);
+      target.page.questions.push(node);
       // Selecting the new question is what clears any screen selection. The author asked for a
       // question; the pane has to show them the question they just got.
       this.selection = questionSelection(node.entity.ID);
@@ -612,10 +619,44 @@ export class FormBuilderComponent extends BaseFormComponent {
       this.noteAnyDamage(before, node.entity.ID, node.entity.Prompt, page);
       this.selection = questionSelection(node.entity.ID);
       this.markDirty();
+      this.focusQuestionCard(node.entity.ID);
     } finally {
       this.busy = false;
       this.cdr.markForCheck();
     }
+  }
+
+  /**
+   * Put focus on the question the insert just created.
+   *
+   * WHY THE CANVAS AND NOT THE PICKER. `QuestionTypePickerComponent` captures whatever had focus
+   * when it opened and restores it in `ngOnDestroy`, which is right for a DISMISSAL — Escape, the
+   * backdrop and the close button all land back on the opener, because an empty section stays
+   * empty and the button survives. It cannot be right for an INSERT: every insert path removes its
+   * own opener. The empty state unmounts once `page.questions.length === 0` stops holding, and a
+   * per-question bar unmounts once selection moves to the new question. `focus()` on a detached
+   * node is a silent no-op, so focus fell to `<body>` and a keyboard author restarted from the top
+   * of the page. Measured on BOTH openers before this was called a defect, so it is not something
+   * the empty-state control introduced; the picker stays opener-independent and is not touched.
+   *
+   * The card is the right destination rather than a re-created opener: the insert has already
+   * selected it, it already carries `tabindex="0"` for exactly this, and it is what the author
+   * came here to edit.
+   *
+   * Keyed on the question id rather than on `.is-selected`, so the focus target does not depend on
+   * a class that exists to paint something — and `afterNextRender` because the card does not exist
+   * yet when this is called; querying for it synchronously would find nothing and fail exactly as
+   * silently as the bug it replaces.
+   */
+  private focusQuestionCard(questionId: string): void {
+    afterNextRender(
+      () => {
+        this.host.nativeElement
+          .querySelector<HTMLElement>(`.fb-q[data-question-id="${questionId}"]`)
+          ?.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   /**
@@ -641,22 +682,6 @@ export class FormBuilderComponent extends BaseFormComponent {
     };
   }
 
-  /** Add to the page holding the selected question, else the last page. */
-  private targetPageForNewQuestion(): PageNode | undefined {
-    if (!this.tree || this.tree.pages.length === 0) {
-      return undefined;
-    }
-    if (this.selectedQuestionId) {
-      const owner = this.tree.pages.find((p) =>
-        p.questions.some((q) => q.entity.ID === this.selectedQuestionId),
-      );
-      if (owner) {
-        return owner;
-      }
-    }
-    return this.tree.pages[this.tree.pages.length - 1];
-  }
-
   private defaultPrompt(type: FormQuestionType): string {
     return type === 'Statement' ? 'Add your statement text here' : `Untitled ${questionTypeMeta(type).label} question`;
   }
@@ -665,6 +690,17 @@ export class FormBuilderComponent extends BaseFormComponent {
 
   protected get pages(): PageNode[] {
     return this.tree?.pages ?? [];
+  }
+
+  /**
+   * The section a palette click would write to, and what its header should say about it.
+   *
+   * Read ONCE per change-detection pass through the template's `@let`, not once per header: the
+   * answer is the same for every section, and the header that matches is the one that announces
+   * it. Null on a form with no sections, where a palette click does nothing.
+   */
+  protected get addingHere(): NewQuestionTarget | null {
+    return targetPageFor(this.selection, this.pages);
   }
 
   protected async setPageTitle(page: PageNode, title: string): Promise<void> {

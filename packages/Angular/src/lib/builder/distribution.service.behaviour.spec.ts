@@ -17,6 +17,7 @@ interface FakeDistribution {
   PublicLinkToken: string | null;
   MagicLinkInviteID: string | null;
   MaxResponses: number | null;
+  CaptchaRequired: boolean;
   LatestResult: { CompleteMessage: string } | null;
   writes: Record<string, unknown>;
   savedWith: EntitySaveOptions | undefined;
@@ -33,6 +34,7 @@ function fakeDistribution(overrides: Partial<FakeDistribution> = {}): FakeDistri
     PublicLinkToken: 'mj_ml_old',
     MagicLinkInviteID: 'invite-old',
     MaxResponses: null,
+    CaptchaRequired: false,
     LatestResult: null,
     writes: {},
     savedWith: undefined,
@@ -96,5 +98,43 @@ describe('DistributionService — a refused save', () => {
     const out = await new DistributionService().setMaxResponses(asEntity(d), 99_999_999);
     expect(out).toEqual({ ok: false, error: expect.stringContaining('too big') });
     expect(d.reverted).toBe(true);
+  });
+});
+
+/**
+ * The captcha switch writes the column the SUBMIT gate reads.
+ *
+ * `submit-pipeline` stage 4 ORs this column with the form's own `settings.captchaRequired`, and
+ * until #151 nothing in the builder could see or set it — the only surfaces that could were a raw
+ * entity form and a direct write.
+ */
+describe('DistributionService — the captcha switch', () => {
+  it('writes the column, and nothing else', async () => {
+    const d = fakeDistribution({ CaptchaRequired: false });
+
+    const out = await new DistributionService().setCaptchaRequired(asEntity(d), true);
+
+    expect(out.ok).toBe(true);
+    expect(d.writes).toEqual({ CaptchaRequired: true });
+  });
+
+  it('turns it back off', async () => {
+    const d = fakeDistribution({ CaptchaRequired: true });
+
+    await new DistributionService().setCaptchaRequired(asEntity(d), false);
+
+    expect(d.writes).toEqual({ CaptchaRequired: false });
+  });
+
+  it('reports a refused save rather than claiming success', async () => {
+    // Turning a captcha on is exactly the write an author must not be told succeeded when it did
+    // not: they would go on believing the link is protected.
+    const d = fakeDistribution({ CaptchaRequired: false });
+    d.LatestResult = { CompleteMessage: 'nope' };
+    d.Save = async () => false;
+
+    const out = await new DistributionService().setCaptchaRequired(asEntity(d), true);
+
+    expect(out.ok).toBe(false);
   });
 });

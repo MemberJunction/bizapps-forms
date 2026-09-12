@@ -48,6 +48,7 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
       const result = await redeemRawToken(
         { redeemUrl: config.magicLinkRedeemUrl, fetchImpl: fetch },
         rawToken,
+        ctx.slug,
       );
       if (!result || !result.success || !result.token) {
         return { ok: false, errorCode: result?.errorCode, status: result?.status };
