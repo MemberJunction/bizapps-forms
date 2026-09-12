@@ -23,10 +23,28 @@ spec both run without `node_modules`.
 
 ---
 
+> **Scope changed twice after this plan was written. Read this before the constraints below.**
+> A plan is a map of what was intended, and two later decisions moved the territory. Both are
+> recorded here because the constraints and File Structure sections are what a reader uses to
+> predict the diff, and leaving them as written would describe a file that does not exist.
+>
+> 1. **#196 was folded in**, on request, after #179 landed on the branch — so the third constraint
+>    below ("file it, do not fix it here") no longer holds. Task 2 implements it.
+> 2. **The PR gauntlet's review added two further changes** to the same file, neither of which this
+>    plan anticipated: checker output is normalised (`ANSI_SGR`) and spawned with colour off
+>    (`CHECKER_ENV`), because both new patterns are anchored at a line start and a session exporting
+>    `FORCE_COLOR` made turbo prefix its summary with an escape byte — which sent a green tree to
+>    `ask` and, worse, downgraded a genuinely red one from `deny` to `ask`; and the check descriptors
+>    were hoisted out of `runChecks` into an exported `CHECKS`, because nothing outside that function
+>    could reach them, so the spec asserted private copies and every shipped pattern could be broken
+>    with the suite still green. This supersedes the first constraint's "spawn options" clause and
+>    the File Structure section's "Nothing else in the file changes".
+
 ## Global Constraints
 
-- **Do not touch `runChecks`'s spawn options, `CHECK_TIMEOUT_MS`, `GIT_WRITE`, or `decisionFor`.**
-  The blast radius of this issue is `classifyCheckResult` and the check descriptors that feed it.
+- **Do not touch `CHECK_TIMEOUT_MS`, `GIT_WRITE`, or `decisionFor`.** The blast radius of this issue
+  is `classifyCheckResult` and the check descriptors that feed it. (`runChecks`'s spawn options were
+  in this list and were later changed deliberately — see the scope note above.)
 - **The signal must not be turbo-shaped only.** `lint:ui` is plain Node with no `Tasks:` line; a fix
   that hardcodes turbo's summary format breaks it. Each check carries its own pattern.
 - **Only the non-zero arm gets the new requirement.** Verified below: a turbo `--filter` glob that
@@ -63,8 +81,10 @@ Two shapes to note, because a careless regex misses both:
 ## File Structure
 
 - **Modify** `.claude/hooks/require-green-before-git.mjs` — `classifyCheckResult` gains a check
-  descriptor instead of a bare name; `runChecks`'s `invocations` array gains the `verdictPattern`
-  field. Nothing else in the file changes.
+  descriptor instead of a bare name; the check descriptors gain the `verdictPattern` field (and,
+  per Task 2, `coveredWorkPattern`). Per the scope note above, the file also gained `ANSI_SGR`, an
+  exported `CHECKER_ENV` used in `runChecks`'s spawn options, and an exported `CHECKS` replacing the
+  private `invocations` array.
 - **Modify** `.claude/hooks/require-green-before-git.spec.mjs` — the five existing
   `classifyCheckResult` tests move to the new call shape; five new tests pin the new behaviour.
 - **Create** `.changeset/unrunnable-checker-asks.md` — `patch`.
