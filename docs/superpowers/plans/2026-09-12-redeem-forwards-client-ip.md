@@ -387,8 +387,9 @@ Add this function immediately after `postRedeem`, before `isRateLimitRefusal`:
  * (`http/RequestIdentityMiddleware.ts` `ConfigureExpressApp`), so core honours this without any
  * change in MJ — but only at a hop count of 1 or more. At 0, Express ignores the header entirely
  * and the bucket stays global; that is forms#202's precondition, not a second defect here. Sending
- * it anyway at 0 is measured harmless: express-rate-limit logs ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
- * once and keeps counting, so there is no conditional worth writing.
+ * it anyway at 0 is measured harmless — though not via the validator this line once named: the
+ * ERR_ERL_UNEXPECTED_X_FORWARDED_FOR check tests `trust proxy === false` and Forms always sets a
+ * NUMBER, so it never fires. Express simply ignores the header at 0 (corrected, gauntlet #207 F4).
  *
  * No address means no header. An empty or invented value would be worse than silence, because
  * Express would parse it and core would bucket and audit the fiction.

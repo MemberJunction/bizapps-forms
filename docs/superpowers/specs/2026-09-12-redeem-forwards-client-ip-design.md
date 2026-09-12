@@ -63,12 +63,32 @@ trust-proxy setting admits. Hitting core's endpoint directly isolates it:
    `req.ip` resolves to that entry at `trust proxy` 1, 2 and 3 alike — Express's `proxy-addr`
    clamps to the left-most available address rather than falling back to the socket. So the
    redeem call does not have to pad the header to match `FORMS_TRUSTED_PROXY_HOPS`.
-2. **Sending it at hop count 0 is harmless.** `express-rate-limit` v8 raises
-   `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` once and keeps counting normally (19→18→17→16). It
-   does **not** fail open. So no conditional is needed around the header.
+2. **Sending it at hop count 0 is harmless — but not for the reason first written here.**
+   Corrected after review (gauntlet #207, F4): the original text claimed `express-rate-limit`
+   raises `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` once and keeps counting. **It never fires at
+   all.** That validator tests `request.app.get('trust proxy') === false`
+   (`express-rate-limit@8.2.1/dist/index.cjs:365`, the copy `@memberjunction/server`'s `^8.2.1`
+   pin resolves), and Forms always calls `app.set('trust proxy', <number>)` — at zero hops the
+   value is the **number** `0`, and `0 === false` is false. Express stores a numeric setting
+   verbatim (`express@5.2.1/lib/application.js`), so nothing coerces it. What actually makes it
+   harmless is simpler: **Express ignores the header entirely at `trust proxy` 0**, so core keeps
+   counting on its own peer. Verified by probe against the resolved versions, and by a live
+   hops=0 run with zero `ERR_ERL_*` lines. The conclusion stands — no conditional is needed
+   around the header — but the mechanism above is the real one.
 3. **Calling core in-process is not available.** `MagicLinkService` is not re-exported from
    `@memberjunction/server`'s public entry and the package's `exports` map exposes only
    `"."`. Bypassing HTTP would need an MJ change; forwarding the header does not.
+4. **The redeem must not be addressed to the public origin.** Added after review (gauntlet #207,
+   F2). `magicLinkRedeemUrl` defaulted to `MJAPI_PUBLIC_URL + /magic-link/redeem`, and that
+   variable *must* stay externally reachable because `resolveGraphqlUrl()` derives from it and
+   the value is handed to the respondent's browser. Behind a real proxy the redeem therefore left
+   the perimeter and came back in, the proxy appended MJAPI's egress to the header this design
+   sets, and `proxy-addr` at `trust proxy = 1` returned that **right-most** entry — so core saw
+   one constant address for the whole deployment and the fix was inert in exactly the topology it
+   targets. Only a loopback harness, where no hop appends, could show it working. The default is
+   now `http://127.0.0.1:${GRAPHQL_PORT}/magic-link/redeem`: core's router is mounted on this very
+   app, so the call never leaves the host and no hop can be appended. Constraint 1 is unaffected —
+   it still describes what core does with the one entry we send.
 
 ## Decision
 
