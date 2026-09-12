@@ -151,6 +151,15 @@ export interface RedeemDeps {
   redeemUrl: string;
   /** The `fetch` implementation (Node global by default; injected in tests). */
   fetchImpl: typeof fetch;
+  /**
+   * The respondent's resolved client address, forwarded to core so its per-IP redeem cap applies
+   * per respondent rather than once per deployment (bizapps-forms register row 29).
+   *
+   * Optional because "no address" is a real state, not a misconfiguration: a socket already gone,
+   * or a unit test. Absent means the header is omitted and core buckets on its own peer, which is
+   * the behaviour this field replaces — a degradation, never an invention.
+   */
+  clientIp?: string;
 }
 
 /**
@@ -370,7 +379,7 @@ const RESUME_ROUTINE_REFUSALS = ['consumed'] as const;
  * does act on it.
  */
 export async function redeemRawToken(
-  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
+  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl' | 'clientIp'>,
   rawToken: string,
   slug: string,
 ): Promise<RedeemMagicLinkJsonResult | undefined> {
@@ -397,7 +406,7 @@ export async function redeemRawToken(
  * operator is looking at.
  */
 async function postRedeem(
-  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl'>,
+  deps: Pick<RedeemDeps, 'redeemUrl' | 'fetchImpl' | 'clientIp'>,
   rawToken: string,
   slug: string,
   routineRefusalCodes: readonly string[] = [],
@@ -409,7 +418,7 @@ async function postRedeem(
   try {
     response = await deps.fetchImpl(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      headers: forwardedHeaders(deps.clientIp),
       body: JSON.stringify({ token: rawToken }),
       // Covers the body read below as well as the request: an upstream can also stall midway
       // through streaming a response, which holds the slot just as effectively.
@@ -498,6 +507,43 @@ async function postRedeem(
     }
   }
   return { outcome: 'answered', result: { ...result, status: response.status } };
+}
+
+/**
+ * The headers this POST carries, including the one that says WHICH respondent is asking.
+ *
+ * Core keys its magic-link redeem cap on `req.ip`, and this request is made by the MJAPI process
+ * itself — so with nothing forwarded, `req.ip` is the same loopback peer for every respondent in
+ * the deployment and a 20-per-minute abuse control becomes a 20-per-minute ceiling on form opens
+ * for the whole install (bizapps-forms register row 29). Core also writes `req.ip` to the
+ * magic-link redemption audit trail, which until now recorded the loopback address every time.
+ *
+ * EXACTLY ONE entry, never appended to an inbound header. Express's `proxy-addr` clamps to the
+ * left-most address available, so a single entry resolves to `req.ip` identically at every
+ * `trust proxy` setting of 1 or more; appending would make the answer depend on the hop count
+ * matching a chain this internal call never travelled. Forms sets `trust proxy` itself
+ * (`http/RequestIdentityMiddleware.ts` `ConfigureExpressApp`), so core honours this without any
+ * change in MJ — but only at a hop count of 1 or more. At 0, Express ignores the header entirely
+ * and the bucket stays global; that is forms#202's precondition, not a second defect here. Sending
+ * it anyway at 0 is measured harmless, though not for the reason it looks like: express-rate-limit's
+ * own-IP validator only warns when `request.app.get('trust proxy') === false`
+ * (express-rate-limit@8.2.1/dist/index.cjs:365), and Forms always calls
+ * `app.set('trust proxy', <number>)` — so at zero hops the value is the NUMBER 0, not `false`, and
+ * that validator never fires at all. No `ERR_ERL_UNEXPECTED_X_FORWARDED_FOR` warning is emitted
+ * either way; Express simply ignores the header and core keeps counting on its own peer.
+ *
+ * No address means no header. An empty or invented value would be worse than silence, because
+ * Express would parse it and core would bucket and audit the fiction.
+ */
+function forwardedHeaders(clientIp: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
+  if (clientIp) {
+    headers['x-forwarded-for'] = clientIp;
+  }
+  return headers;
 }
 
 /**
