@@ -13,7 +13,7 @@
  * `ConfigureExpressApp` remains a supported hook in 5.51.0 and both routes work through it, so
  * the move is a behaviour-preserving refactor that belongs in its own commit.
  *
- * It adds a GET route (`/f/:slug`) through {@link ConfigureExpressApp}; the route runs
+ * It contributes a GET route (`/f/:slug`) through {@link GetPreAuthMiddleware}; the route runs
  * BEFORE auth (it is just static HTML), so an anonymous respondent reaches it without a
  * login. The path matches the Forms `publicUrl()` / embed-snippet convention
  * (`${base}/f/${slug}`). The page reads the distribution `slug` (from the path, and as a
@@ -45,13 +45,14 @@
  * provider, exactly as other server-side-only MJ code does. Reads are the slug lookup plus one
  * primary-key read of the form's description for the page's `<head>` (see {@link loadFormIdentity}).
  */
-import type { Application, Request, RequestHandler, Response } from 'express';
+import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
 
+import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
 import { getRespondentHostConfig } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
 import { renderRespondentHostPage } from './host-page.js';
@@ -71,6 +72,15 @@ import { requestIdentityHandler } from '../http/RequestIdentityMiddleware.js';
 
 /** Route the respondent host page is served from (matches the Forms `publicUrl()` shape). */
 export const RESPONDENT_HOST_ROUTE = '/f/:slug';
+
+/**
+ * The literal half of {@link RESPONDENT_HOST_ROUTE}.
+ *
+ * The page is contributed as a pre-auth handler rather than an `app.get`, so there is no
+ * path-to-regexp to split the path for us — {@link matchSingleSegmentRoute} does it, and this is
+ * what it matches against.
+ */
+export const RESPONDENT_HOST_PREFIX = '/f';
 
 /**
  * The pre-auth resume route.
@@ -105,45 +115,25 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     return getRespondentHostConfig().enabled;
   }
 
+  /**
+   * The one route that still registers here, and the boot-time readiness report.
+   *
+   * `POST /f/:slug/resume` stays in this hook deliberately (#181). Its body is a few hundred bytes
+   * of JSON — under MJ's 1 KB compression threshold — so it gains nothing from the pre-auth slot,
+   * while moving it would mean matching its path by hand and taking a case-sensitivity decision on
+   * `matchResumeRoute`, which claims `/f/:slug/{remember,forget}` too. That belongs to its own
+   * change. The page and the favicon moved because they DID gain: see {@link GetPreAuthMiddleware}.
+   */
   public override async ConfigureExpressApp(app: Application): Promise<void> {
     const cfg = getRespondentHostConfig();
 
-    // `requestIdentityHandler()` is mounted ON THE ROUTE, not relied on globally. MJServer calls
-    // this method at `index.ts:809` — inside the loop that merely COLLECTS pre-auth handlers — and
-    // does not `app.use` them until `index.ts:1143`. Express dispatches in registration order, so
-    // the globally mounted copy is added after this route and never runs for it: without this
-    // argument `currentRequestIdentity()` below is always undefined and the per-IP meter admits
-    // every caller at any `FORMS_REDEEM_IP_MAX`. See `requestIdentityHandler`'s own note.
-    app.get(RESPONDENT_HOST_ROUTE, requestIdentityHandler(), (req: Request, res: Response) => {
-      // Slug arrives on the path (`/f/:slug`). The page also accepts `?slug=` as a fallback,
-      // so the baked-in value is just a default.
-      const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
-      // PRESENCE of the pointer only. This route stays side-effect-free — a mail scanner or a
-      // browser prefetch must not be able to spend a single-use invite — so nothing is redeemed
-      // here and the token is never read.
-      const hasDraft = readResumeCookie(req.headers.cookie) !== undefined;
-      // Never let an unexpected error crash the route — always render a page.
-      void this.handleMetered(slug, hasDraft, res).catch((e: unknown) => {
-        LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
-        this.sendError(res, { status: 500, message: 'We could not open this form right now. Please try again later.' });
-      });
-    });
-
-    // Pre-auth, like the page above it: this route's caller has no session — obtaining one is what
-    // it is for.
+    // Pre-auth, like the page: this route's caller has no session — obtaining one is what it is
+    // for.
     app.post(RESPONDENT_RESUME_ROUTE, (req: Request, res: Response) => {
       void this.handleResumeRoute(req, res).catch((e: unknown) => {
         LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
         sendJsonError(res, 500, 'Could not reopen your saved answers. Please try again.');
       });
-    });
-
-    // An explicit "nothing to show" rather than an icon: there is no Forms icon asset to serve, and
-    // 204 is the answer every browser and fetcher treats as "no icon" without logging an error.
-    // Origin-wide by nature of the path; registered with the host page so disabling the page
-    // (FORMS_RESPONDENT_HOST_ENABLED=false) takes this with it.
-    app.get(FAVICON_ROUTE, (_req: Request, res: Response) => {
-      res.status(204).end();
     });
 
     LogStatus(
@@ -161,6 +151,84 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // the captcha gate fails closed at submit — so a misconfigured host stays quiet until a
     // respondent pays for it, by which time nobody connects it to an install-time setting.
     await this.reportReadiness();
+  }
+
+  /**
+   * The public page and the origin's favicon, in the slot that sits BEHIND MJ's `compression()`.
+   *
+   * ── Why these are pre-auth middleware and not `ConfigureExpressApp` routes (#181) ─────────────
+   * Both hooks run before auth; they differ in where the route lands in Express's stack. `serve()`
+   * calls `ConfigureExpressApp` while it is still collecting middleware contributions
+   * (`index.ts:824`), BEFORE it mounts its own `compression()` (`index.ts:1129`) — so an `app.get`
+   * registered there finishes its response before compression ever wraps `res.write`, and ~9 KB of
+   * HTML went out uncompressed to every respondent who opened a shared link, on the phones and
+   * cellular connections this product is built for. `GetPreAuthMiddleware` is documented by the
+   * base class as running "after compression but before OAuth/REST/GraphQL routes". Same
+   * negotiation, threshold and level as everything else MJAPI serves; nothing compression-specific
+   * lives here. This is the move #121 made for the widget bundle, finished.
+   *
+   * WHAT ELSE MOVING SLOTS DOES, ON PURPOSE. Pre-auth contributions are mounted as ONE ordered
+   * `app.use` chain, so these routes are no longer ahead of every other pre-auth handler — they are
+   * behind them. That includes MJ's own `RateLimitMiddleware`, a global IP-keyed limiter
+   * (`enabled: false` by default). A host that switches rate limiting on will see the page counted
+   * and eventually answer 429, where before it was exempt. That is the right trade for a public
+   * unauthenticated route, but the failure mode is worth knowing: a respondent refused there gets
+   * MJ's rate-limit response, not this middleware's error page.
+   *
+   * Forms cannot pick its position in that chain anyway — the order comes from ClassFactory
+   * registration order across every middleware the host loads, which is why the page carries its
+   * own identity handler rather than trusting the global one to have been mounted first (see
+   * {@link hostPageHandler}).
+   */
+  public override GetPreAuthMiddleware(): RequestHandler[] {
+    return [this.hostPageHandler(), faviconHandler()];
+  }
+
+  /**
+   * `GET /f/:slug` as a handler that claims exactly the URLs `app.get('/f/:slug')` claimed.
+   *
+   * GET and HEAD, like the `app.get` this replaced (Express routes HEAD to GET handlers). Anything
+   * else passes through untouched. What "exactly the URLs" means — one optional trailing slash, a
+   * case-insensitive `/f`, a percent-decoded single segment — lives in {@link matchSingleSegmentRoute},
+   * with the parity table it was probed against.
+   *
+   * WHY THE IDENTITY HANDLER IS STILL MOUNTED HERE. It is no longer for the reason it was: this
+   * route now sits in the same `app.use` chain as `RequestIdentityMiddleware`'s global copy, and
+   * that copy is mounted first today because `packages/Server/src/index.ts` imports it first. But
+   * "today" is the problem — that ordering is module import order in a barrel file, and if it ever
+   * changes, `currentRequestIdentity()` returns undefined, `checkRedeemRateLimit` takes its
+   * deliberate "cannot identify the caller, admit everything" branch, and the per-IP meter reports
+   * itself installed while admitting every caller at any `FORMS_REDEEM_IP_MAX`. Mounting it twice
+   * is documented harmless — `AsyncLocalStorage.run` nests and the inner store wins — so the cheap
+   * copy stays and the ordering assumption is pinned by a test rather than trusted
+   * (`redeem-rate-limit.spec.ts`, "even when the global identity handler is mounted after it").
+   */
+  private hostPageHandler(): RequestHandler {
+    const withIdentity = requestIdentityHandler();
+    return (req: Request, res: Response, next: NextFunction): void => {
+      const slug =
+        req.method === 'GET' || req.method === 'HEAD'
+          ? matchSingleSegmentRoute(req.path, RESPONDENT_HOST_PREFIX)
+          : undefined;
+      if (slug === undefined) {
+        next();
+        return;
+      }
+      withIdentity(req, res, () => {
+        // PRESENCE of the pointer only. This route stays side-effect-free — a mail scanner or a
+        // browser prefetch must not be able to spend a single-use invite — so nothing is redeemed
+        // here and the token is never read.
+        const hasDraft = readResumeCookie(req.headers.cookie) !== undefined;
+        // Never let an unexpected error crash the route — always render a page.
+        void this.handleMetered(slug, hasDraft, res).catch((e: unknown) => {
+          LogError(`[Forms] Respondent host route error: ${e instanceof Error ? e.message : String(e)}`);
+          this.sendError(res, {
+            status: 500,
+            message: 'We could not open this form right now. Please try again later.',
+          });
+        });
+      });
+    };
   }
 
   /**
@@ -435,4 +503,21 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   private systemProvider(): RedeemRunViewProvider & CaptchaDemandProvider {
     return new RunView();
   }
+}
+
+/**
+ * `GET /favicon.ico` — an explicit "nothing to show" rather than an icon.
+ *
+ * There is no Forms icon asset to serve, and 204 is the answer every browser and fetcher treats as
+ * "no icon" without logging an error. Origin-wide by nature of the path; contributed with the host
+ * page so disabling the page (`FORMS_RESPONDENT_HOST_ENABLED=false`) takes this with it.
+ */
+function faviconHandler(): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if ((req.method !== 'GET' && req.method !== 'HEAD') || !matchesExactRoute(req.path, FAVICON_ROUTE)) {
+      next();
+      return;
+    }
+    res.status(204).end();
+  };
 }

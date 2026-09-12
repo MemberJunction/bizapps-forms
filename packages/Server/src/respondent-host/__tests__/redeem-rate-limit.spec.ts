@@ -208,33 +208,38 @@ describe('redeemRateLimitMax', () => {
 
 
 describe('RespondentHostMiddleware wiring', () => {
-  it('mounts the identity handler ON the route it registers', async () => {
-    // The behavioural test above proves `requestIdentityHandler` WORKS in MJ's ordering. This one
-    // proves the respondent host route actually USES it — the wiring, which is the half that was
-    // missing and the half a guard-mutation run showed nothing else covers. Without this, deleting
-    // the argument from `app.get(...)` leaves every other test in this file green.
-    const { RespondentHostMiddleware, RESPONDENT_HOST_ROUTE } = await import('../RespondentHostMiddleware');
+  // The route used to be an `app.get` layer and this test used to count the handlers on it. It is
+  // a pre-auth handler now, so there is no layer to inspect — and the structural assertion was
+  // always a proxy for the thing that matters: that the per-IP meter can SEE a caller. A guard
+  // mutation run showed nothing else covers the wiring, so it is asserted here behaviourally:
+  // drop the ceiling to 1 and the second request from the same peer must be refused. With no
+  // identity, `checkRedeemRateLimit(undefined)` admits everything and both come back 200-or-5xx.
+  it('meters the page per caller, which needs the identity the route establishes', async () => {
+    process.env.FORMS_REDEEM_IP_MAX = '1';
+    FormsRateLimiter.Instance.resetForTests();
+    const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
 
     const app = express();
     await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
-    // Mounted the way MJServer does it: too late to help the route.
+    // Mounted the way MJServer does it — and, for this test, the way that would NOT help.
     for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
       app.use(handler);
     }
-    // Read the identity the route established, without doing the route's own redeem work.
-    app.get('/probe', (_req, res) => res.json({ ipHash: currentRequestIdentity()?.ipHash ?? null }));
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const first = await fetch(`${base}/f/anything`);
+      const second = await fetch(`${base}/f/anything`);
 
-    const layers = (app as unknown as { _router?: { stack: Array<{ route?: { path: string; stack: unknown[] } }> } })
-      ._router?.stack ?? (app as unknown as { router: { stack: Array<{ route?: { path: string; stack: unknown[] } }> } }).router.stack;
-    const hostLayer = layers.find((l) => l.route?.path === RESPONDENT_HOST_ROUTE);
-
-    expect(hostLayer, `no layer registered for ${RESPONDENT_HOST_ROUTE}`).toBeDefined();
-    // Two handlers, not one: the identity handler and the route body. One means the identity
-    // argument was dropped and `currentRequestIdentity()` inside the route is undefined forever.
-    expect(hostLayer!.route!.stack.length).toBe(2);
+      expect(first.status).not.toBe(429);
+      expect(second.status).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
-
 
 describe('the process-wide in-flight cap', () => {
   it('defaults to 25', () => {
