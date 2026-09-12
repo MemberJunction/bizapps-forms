@@ -9,7 +9,9 @@
  * types — importable from the server, the builder and a unit test alike. The server-side half of
  * the verdict (composing this policy with the API's OWN origin, which is what a real `<iframe>`
  * embed reports) deliberately does NOT live here: that is a deployment fact, and it lives in
- * `forms-server`'s `http/embed-origin.ts`.
+ * `forms-server`'s `http/embed-origin.ts`. What DOES live here is how any origin — authored or
+ * merely reported — is read ({@link normalizeOrigin} / {@link normalizeReportedOrigin}), because
+ * the two sides of a comparison have to agree even when only one of them was authored.
  *
  * WHAT IT IS NOT. Defense in depth BEHIND the magic link, never a replacement for it. A
  * distribution's link is anonymous and multi-use by construction, so a leaked link is replayable
@@ -40,11 +42,43 @@
 
 import type { JSONValue } from './json-value';
 
-/** Schemes an embed may use. `http` is permitted only for loopback — see {@link normalizeOrigin}. */
-const ALLOWED_SCHEMES = ['https:', 'http:'] as const;
-
 /** Hosts for which plain `http` is accepted, so local development is authorable without a proxy. */
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'] as const;
+
+/**
+ * The shape of an origin a browser can actually put in an `Origin` header: `http` or `https`, a
+ * host, an optional port, and nothing else. This is the one screening rule in the module, shared
+ * by {@link normalizeOrigin} (what an author may type) and {@link normalizeReportedOrigin} (what a
+ * browser or a deployment reports), so the two cannot drift into disagreeing about which
+ * characters a host may contain.
+ *
+ * WHY A CHARACTER SCREEN IS LOAD-BEARING AND NOT BELT-AND-BRACES. `;` is not a forbidden host code
+ * point, so `new URL('https://acme.com;sandbox')` parses happily and reports that host verbatim. A
+ * serialized `Content-Security-Policy` is a SEMICOLON-DELIMITED list of directives, and
+ * {@link frameAncestorsDirective} interpolates these values straight into one — so a single stored
+ * `;` appends a SECOND directive of the author's choosing. `;sandbox` is the worst of them: a
+ * valueless sandbox with no `allow-scripts` stops the custom element running, so the form renders
+ * blank on every site including the authorised one, while the builder reports success and the
+ * symptom points nowhere near the textarea that caused it. `;form-action`,
+ * `;upgrade-insecure-requests` and `;block-all-mixed-content` are reachable the same way, and `'`,
+ * `"`, `(` and friends reach the host by the same route. CR/LF/tab/NUL and `,` are already refused
+ * by the URL parser itself; these are the ones that get through it.
+ *
+ * SCREENED ON THE COMPOSED RESULT, NEVER ON THE RAW INPUT. The parser normalises several spellings
+ * into one output (case, IDNA, default ports, percent-encoding), so a check on the input can be
+ * satisfied by a spelling the parser then rewrites, while a check on the output holds for every
+ * spelling that can reach it.
+ *
+ * The two host alternatives are a DNS or punycode name — `xn--cme-5cd.com` is plain ASCII letters,
+ * digits and hyphens, so it needs no special case — and a bracketed IPv6 literal, which the parser
+ * only ever emits for an address it has already validated, so the brackets are re-checked here for
+ * shape rather than re-parsed for correctness. The character set is deliberately CSP's own
+ * `host-char` (ALPHA / DIGIT / "-") plus the dots between labels: a host outside it, an underscore
+ * being the realistic example, is neither a resolvable DNS name nor expressible as a CSP
+ * host-source, so admitting it here would only move the failure somewhere quieter.
+ */
+const BROWSER_SENDABLE_ORIGIN =
+  /^https?:\/\/(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::\d{1,5})?$/;
 
 /**
  * The one description of what a usable entry looks like.
@@ -69,7 +103,14 @@ export const ALLOWED_ORIGIN_GRAMMAR =
  * Refused, deliberately: a path, query or fragment (the author wrote a page, and honouring it
  * would silently match every page on the host); a wildcard anywhere; `http` on a non-loopback
  * host (a plaintext embed host cannot be authenticated, so the entry would be satisfiable by any
- * network attacker); and credentials, which no `Origin` header ever carries.
+ * network attacker); credentials, which no `Origin` header ever carries; and any host outside
+ * {@link BROWSER_SENDABLE_ORIGIN}'s character set, which is the rule that keeps a `;` out of the
+ * CSP header this value is interpolated into.
+ *
+ * The rules ABOVE the delegation are the authoring-only ones — the ones that exist because a human
+ * typed this. Everything below it (the scheme set, the character screen, the browser's own
+ * spelling) is shared with {@link normalizeReportedOrigin}, which is what keeps both sides of
+ * every comparison agreeing about what an origin is.
  */
 export function normalizeOrigin(raw: string): string | null {
   const trimmed = raw.trim();
@@ -84,9 +125,6 @@ export function normalizeOrigin(raw: string): string | null {
     // in its refusal reason, the builder shows it back to the author — so nothing is swallowed.
     return null;
   }
-  if (!(ALLOWED_SCHEMES as readonly string[]).includes(url.protocol)) {
-    return null;
-  }
   if (url.username.length > 0 || url.password.length > 0) {
     return null;
   }
@@ -95,12 +133,49 @@ export function normalizeOrigin(raw: string): string | null {
   if (url.pathname !== '/' || url.search.length > 0 || url.hash.length > 0) {
     return null;
   }
-  const host = url.hostname.toLowerCase();
-  if (url.protocol === 'http:' && !(LOOPBACK_HOSTS as readonly string[]).includes(host)) {
+  if (url.protocol === 'http:' && !(LOOPBACK_HOSTS as readonly string[]).includes(url.hostname.toLowerCase())) {
     return null;
   }
-  // `url.host` keeps a non-default port and drops a default one — exactly the browser's rule.
-  return `${url.protocol}//${url.host.toLowerCase()}`;
+  // `url.origin` is `scheme://host[:port]` with a default port dropped — exactly the browser's own
+  // spelling, and exactly what the screen below is written against.
+  return normalizeReportedOrigin(url.origin);
+}
+
+/**
+ * Canonicalises an origin REPORTED to us — by a browser in an `Origin` header, or by a deployment
+ * in its own configuration — as opposed to one an author typed, which is {@link normalizeOrigin}'s
+ * job. Returns the browser's spelling, or `null` when the value is not something a browser could
+ * have sent.
+ *
+ * WHY THIS IS A SECOND FUNCTION AND NOT A FLAG. What separates them is provenance, not strictness,
+ * and every rule they differ on exists only because a person typed the value: the authoring grammar
+ * refuses `http` on a non-loopback host, because an author naming a plaintext embed host is naming
+ * something no one can authenticate, and refuses a path, because an author who wrote a page meant a
+ * page. Neither reason survives contact with a value nobody authored. `MJAPI_PUBLIC_URL` is a deployment fact —
+ * self-hosted, docker-compose and LAN installs are routinely reached at `http://10.0.0.5:4000`,
+ * and an API mounted under `https://host/forms/` legitimately carries a path — so holding it to an
+ * authoring rule refused real deployments, and named a remedy the builder would refuse in turn.
+ *
+ * What does NOT relax is the character screen: whatever this admits is compared against an inbound
+ * `Origin` header, so it still has to be a string a browser could put there. That rule is
+ * {@link BROWSER_SENDABLE_ORIGIN}, shared verbatim with the authoring path.
+ */
+export function normalizeReportedOrigin(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  let reduced: string;
+  try {
+    // `.origin` discards any path, query, fragment and credentials rather than refusing them, and
+    // lowercases scheme and host on the way — the reduction a browser performs for itself before
+    // it ever writes an `Origin` header. An opaque origin (`Origin: null`, a non-hierarchical
+    // scheme) either throws here or fails the screen below; both mean "unusable", correctly.
+    reduced = new URL(trimmed).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+  return BROWSER_SENDABLE_ORIGIN.test(reduced) ? reduced : null;
 }
 
 /** What a distribution's `AllowedOrigins` column means for one request. */
@@ -198,10 +273,13 @@ export function isOriginAdmitted(
 /**
  * The `Content-Security-Policy` value the respondent host page sends, or `undefined` for none.
  *
- * `'self'` is ALWAYS in the list. Our own surfaces frame this page — the builder's preview and
- * anything else served same-origin — and an author naming their careers site is not asking for
- * our own preview to go blank. `'self'` costs nothing they did not already have: a page can
- * always frame itself.
+ * `'self'` is ALWAYS in the list, and it is about SAME-ORIGIN framing rather than about any
+ * surface this product happens to ship. An allowlist exists to name OTHER people's sites; a page
+ * served from the protected page's own origin is already us, so refusing to let us frame ourselves
+ * would be a restriction the author did not ask for and could not have meant. Saying it in CSP's
+ * own vocabulary — `'self'`, which the browser resolves against the protected resource's origin —
+ * is also what lets this directive be composed without knowing the deployment's own URL, so it
+ * stays correct whether or not `MJAPI_PUBLIC_URL` is set and on every host that ships it.
  *
  * No `X-Frame-Options` is emitted here or anywhere else, and that is a decision rather than an
  * oversight. It cannot express a list — `ALLOW-FROM` is unsupported in every current browser —

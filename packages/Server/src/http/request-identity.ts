@@ -210,9 +210,11 @@ export interface RequestIdentity {
    * page lie about its own origin, and a non-browser client that forges one still has to pass
    * every other gate on the public path.
    *
-   * Left unnormalised on purpose. `normalizeOrigin` runs at the point of comparison instead, so
-   * this field and the header the caller actually sent are the same string when one reaches a log
-   * line — the difference between a refusal an operator can act on and one they have to guess at.
+   * Left unnormalised on purpose. Normalisation runs at the point of comparison instead —
+   * `normalizeOrigin` against the author's list, `normalizeReportedOrigin` against this API's own
+   * origin — so this field and the header the caller actually sent are the same string when one
+   * reaches a log line, which is the difference between a refusal an operator can act on and one
+   * they have to guess at.
    */
   origin?: string;
 }

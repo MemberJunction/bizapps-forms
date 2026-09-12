@@ -284,11 +284,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     // us. `frame-ancestors` is the exception: the BROWSER evaluates it against the framing
     // ancestor, which is exactly the fact the author authorised.
     //
-    // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`. Our
-    // own surfaces are expressed as CSP `'self'`, which the browser resolves from the page's own
-    // origin — so the same-origin preview keeps working whether or not `MJAPI_PUBLIC_URL` is set.
-    // Routing this through the API-side verdict would have made a framing decision depend on an
-    // environment variable it has no need of.
+    // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`.
+    // Same-origin framing is covered by CSP `'self'`, which the browser resolves against this
+    // page's own origin: a page served from our origin is already us, and an allowlist naming
+    // other people's sites was never meant to say anything about that. Because `'self'` is
+    // resolved by the browser rather than composed by us, the directive needs no knowledge of the
+    // deployment's own URL — routing this through the API-side verdict would instead have made a
+    // framing decision depend on `MJAPI_PUBLIC_URL`, an environment variable it has no need of.
     //
     // Deliberately no `X-Frame-Options` beside it: it cannot express a list (`ALLOW-FROM` is
     // unsupported in every current browser), and `SAMEORIGIN` would refuse the very embeds this

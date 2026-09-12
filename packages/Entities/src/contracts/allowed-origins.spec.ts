@@ -11,6 +11,7 @@ import {
   frameAncestorsDirective,
   isOriginAdmitted,
   normalizeOrigin,
+  normalizeReportedOrigin,
   parseAllowedOrigins,
   serializeAllowedOrigins,
 } from './allowed-origins';
@@ -50,6 +51,53 @@ describe('normalizeOrigin — canonicalises to the browser\'s own spelling', () 
   it('refuses credentials, empty strings and non-URLs', () => {
     for (const v of ['https://u:p@acme.com', '', '   ', 'acme.com', 'not a url']) {
       expect(normalizeOrigin(v)).toBeNull();
+    }
+  });
+
+  it('refuses a host carrying a character no browser could send', () => {
+    // None of these is a forbidden host code point, so the WHATWG parser passes them straight
+    // through and reports them verbatim as the host. `;` is the one that matters most: a
+    // serialized CSP is a semicolon-delimited list of DIRECTIVES, so a stored `;` appends a
+    // second directive of the author's choosing to the header this value ends up in.
+    for (const v of [
+      'https://acme.com;sandbox',
+      'https://ac;me.com',
+      'https://acme.com;form-action',
+      "https://acme.com'",
+      'https://acme.com"',
+      'https://ac me.com',
+      'https://acme.com(',
+    ]) {
+      expect(normalizeOrigin(v)).toBeNull();
+    }
+  });
+
+  it('still accepts every host a browser really does send — the screen is a shape, not a blocklist', () => {
+    // Punycode is plain ASCII letters, digits and hyphens, so it needs no special case; an IPv6
+    // literal arrives bracketed and is only ever emitted for an address the parser validated.
+    expect(normalizeOrigin('https://xn--cme-5cd.com')).toBe('https://xn--cme-5cd.com');
+    expect(normalizeOrigin('https://[::1]:8443')).toBe('https://[::1]:8443');
+    expect(normalizeOrigin('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000');
+    expect(normalizeOrigin('http://localhost:4200')).toBe('http://localhost:4200');
+    expect(normalizeOrigin('https://careers.acme.com:8443')).toBe('https://careers.acme.com:8443');
+  });
+});
+
+describe('normalizeReportedOrigin — what a browser or a deployment says, not what an author typed', () => {
+  it('accepts plain http on any host, because a deployment is a fact and not a choice', () => {
+    // The authoring rule (http only for loopback) exists to stop an AUTHOR naming a plaintext
+    // embed host. MJAPI_PUBLIC_URL and an inbound `Origin` header are not authored values.
+    expect(normalizeReportedOrigin('http://10.0.0.5:4000')).toBe('http://10.0.0.5:4000');
+    expect(normalizeReportedOrigin('http://mjapi.internal:4000')).toBe('http://mjapi.internal:4000');
+  });
+
+  it('reduces a path away rather than refusing it — an API mounted under a base path is normal', () => {
+    expect(normalizeReportedOrigin('https://forms.ourhost.test/some/base/')).toBe('https://forms.ourhost.test');
+  });
+
+  it('applies the same character screen, so neither side can carry a CSP delimiter', () => {
+    for (const v of ['https://acme.com;sandbox', "https://acme.com'", 'https://acme.com(', 'ftp://acme.com', 'null', '']) {
+      expect(normalizeReportedOrigin(v)).toBeNull();
     }
   });
 });
@@ -132,6 +180,24 @@ describe('frameAncestorsDirective — what the host page sends', () => {
 
   it('refuses all framing when the policy is closed', () => {
     expect(frameAncestorsDirective(parseAllowedOrigins('["*.acme.com"]'))).toBe("frame-ancestors 'none'");
+  });
+
+  it('can never emit a `;`, whatever the column holds', () => {
+    // The header this returns is a semicolon-delimited list of directives, so one `;` surviving
+    // from the column would append a second directive nobody authored — `;sandbox` with no
+    // `allow-scripts` blanks the form on every site, including the authorised one. The guarantee
+    // has to hold for the value as STORED, because the column is also writable outside the
+    // builder; a `;` entry is dropped on the way in, and a list of nothing else goes closed.
+    for (const column of [
+      '["https://acme.com;sandbox"]',
+      '["https://acme.com;sandbox", "https://ok.example"]',
+      '["https://ac;me.com"]',
+      '["https://ok.example", "https://acme.com;upgrade-insecure-requests"]',
+    ]) {
+      expect(frameAncestorsDirective(parseAllowedOrigins(column)) ?? '').not.toContain(';');
+    }
+    expect(frameAncestorsDirective(parseAllowedOrigins('["https://acme.com;sandbox", "https://ok.example"]')))
+      .toBe("frame-ancestors 'self' https://ok.example");
   });
 });
 

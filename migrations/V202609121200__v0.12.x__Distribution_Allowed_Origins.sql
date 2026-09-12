@@ -95,10 +95,17 @@ GO
 -- specified". The gate names both procedures by the LAST migration that defined them, which is
 -- why the fix belongs here and not as an edit to V202609091600.
 --
--- The three `spUpdate…FromSchema` calls come first because they are what mints the `EntityField`
--- row on a host that has only ever run migrations. CodeGen does this locally; another host runs
--- `mj app install`, which runs migrations and nothing else, so the metadata has to travel in the
--- shipped SQL. This is the shape V202609091600 established for exactly the same reason.
+-- THE THREE `spUpdate…FromSchema` CALLS DO NOT RUN TOGETHER, and the split is deliberate.
+-- `spUpdateExistingEntitiesFromSchema` runs FIRST, before the INSERT block, so the entity rows
+-- exist and an `EntityID` resolves. The explicit `EntityField` INSERTs come next, and THEY are
+-- what mints the field rows on a host that has only ever run migrations. The other two —
+-- `spUpdateExistingEntityFieldsFromSchema` and `spUpdateSchemaInfoFromDatabase` — run AFTER the
+-- INSERTs, because they only refresh rows that already exist and create none; the comment above
+-- them says the same thing at length, and it is the sentence to trust if these two ever disagree.
+-- CodeGen mints the missing rows locally; another host runs `mj app install`, which runs migrations
+-- and nothing else, so the metadata has to travel in the shipped SQL. Shipping the regenerated
+-- CodeGen half inside the column's own migration is the shape V202609091600 established, for
+-- exactly the same reason; the ORDER within it is V202606301305's.
 --
 -- Everything below the EXECs is `mj codegen`'s own output for this one entity, taken verbatim from
 -- the run that produced this release's generated TypeScript, against a clean-room database built

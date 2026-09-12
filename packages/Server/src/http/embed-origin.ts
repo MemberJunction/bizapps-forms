@@ -35,7 +35,7 @@ import { LogError, LogStatus } from '@memberjunction/core';
 import {
   ALLOWED_ORIGIN_GRAMMAR,
   isOriginAdmitted,
-  normalizeOrigin,
+  normalizeReportedOrigin,
   parseAllowedOrigins,
   type EmbedOriginPolicy,
 } from '@mj-biz-apps/forms-entities';
@@ -98,8 +98,15 @@ export function checkEmbedOrigin(
   if (isOriginAdmitted(requestOrigin, policy)) {
     return { allowed: true, policy };
   }
+  // Both sides of THIS comparison are reported origins, never authored ones: the left is an
+  // inbound `Origin` header and the right is `MJAPI_PUBLIC_URL`, so both go through
+  // `normalizeReportedOrigin`. The author-list match a few lines above keeps using the authoring
+  // grammar on purpose — a caller can only match an entry an author was able to write, so holding
+  // it to the same grammar that produced those entries is what makes the comparison total.
+  // Running the header through the AUTHORING grammar here instead would re-refuse a plain-http
+  // deployment on the way in, undoing the resolver's whole point (see `resolveOwnOrigin`).
   const own = apiOwnOrigin();
-  if (own !== undefined && typeof requestOrigin === 'string' && normalizeOrigin(requestOrigin) === own) {
+  if (own !== undefined && typeof requestOrigin === 'string' && normalizeReportedOrigin(requestOrigin) === own) {
     return { allowed: true, policy };
   }
   return {
@@ -120,44 +127,61 @@ export function resetEmbedOriginConfigForTests(): void {
 /**
  * Read `MJAPI_PUBLIC_URL` down to a bare origin, announcing loudly when it cannot be.
  *
- * Reduced with `URL.origin` BEFORE `normalizeOrigin` because the two answer different questions.
- * `MJAPI_PUBLIC_URL` legitimately carries a path — an API mounted under `https://host/forms/` is a
- * normal deployment — and `normalizeOrigin` refuses a path on purpose, since in an AUTHORED
- * allowlist entry a path means the author wrote a page rather than an origin. Here it means no
- * such thing, so the path is discarded first and only the origin is held to the grammar. That
- * keeps one grammar for both sides of the comparison while letting this side accept a URL the
- * other side never would.
+ * THIS IS THE ONE PLACE THAT DIVERGES FROM THE AUTHORING GRAMMAR, and the divergence is the whole
+ * reason `normalizeReportedOrigin` exists beside `normalizeOrigin`. `MJAPI_PUBLIC_URL` is a
+ * deployment fact, not something a person chose from a list of embed hosts, so the two rules the
+ * authoring grammar adds do not apply to it:
+ *
+ *   - A PATH is discarded rather than refused. An API mounted under `https://host/forms/` is a
+ *     normal deployment; in an authored allowlist entry the same path would mean the author wrote
+ *     a page and meant every page on the host.
+ *   - PLAIN HTTP is accepted on any host, not just loopback. The authoring rule exists to stop an
+ *     author naming a plaintext embed host nobody can authenticate. Applying it here instead broke
+ *     self-hosted, docker-compose and LAN installs — `http://10.0.0.5:4000`, `http://mjapi.internal:4000`
+ *     — where this resolver returned `undefined` and every distribution with an allowlist then
+ *     refused its OWN embedded widget. Worse, the refusal was unrepairable: the log line told the
+ *     operator to list the origin their host page is served from, and `authorAllowedOrigins`
+ *     refused that same value, so the builder rejected the only entry that would have fixed it.
+ *
+ * What does NOT relax is the character screen — whatever is returned here is compared against an
+ * inbound `Origin` header, so it must be a string a browser could have sent. `normalizeReportedOrigin`
+ * applies exactly the screen the authoring path applies, from the same constant.
  */
 function resolveOwnOrigin(): string | undefined {
   const raw = process.env.MJAPI_PUBLIC_URL?.trim();
   if (!raw) {
     LogStatus(
       '[Forms] MJAPI_PUBLIC_URL is not set, so this API cannot recognise its own browser origin. '
-        + 'Any distribution that authors AllowedOrigins must then list the origin its own host page '
-        + 'is served from, or its embedded widget will be refused. Set MJAPI_PUBLIC_URL.',
+        + 'Any distribution that authors AllowedOrigins will then refuse its own embedded widget, '
+        + 'because that widget calls us from inside our own iframe and reports our origin, not the '
+        + 'customer\'s. Set MJAPI_PUBLIC_URL to the URL this API is reached at. (Listing that origin '
+        + 'in the allowlist instead only works where the authoring grammar accepts it — https '
+        + 'anywhere, http only on loopback — so it is not a remedy on a plain-http deployment.)',
     );
     return undefined;
   }
-  let bareOrigin: string;
+  let reduced: string;
   try {
-    bareOrigin = new URL(raw).origin;
+    reduced = new URL(raw).origin;
   } catch {
     // Not a URL at all — a hostname with no scheme is the usual mistake. Named rather than
     // swallowed, because the consequence (our own widget refused by any restricted link) shows up
-    // far from here.
+    // far from here. Kept separate from the refusal below so the two mistakes read differently.
     LogError(
       `[Forms] MJAPI_PUBLIC_URL is not a URL ("${raw}"), so this API cannot recognise its own origin. `
-        + `Expected ${ALLOWED_ORIGIN_GRAMMAR}`,
+        + 'Expected the full URL this API is reached at in a browser, e.g. https://forms.acme.com '
+        + 'or http://10.0.0.5:4000.',
     );
     return undefined;
   }
-  const normalized = normalizeOrigin(bareOrigin);
-  if (normalized === null) {
+  const own = normalizeReportedOrigin(reduced);
+  if (own === null) {
     LogError(
-      `[Forms] MJAPI_PUBLIC_URL is not a usable origin ("${raw}"), so this API cannot recognise its own. `
-        + `Expected ${ALLOWED_ORIGIN_GRAMMAR}`,
+      `[Forms] MJAPI_PUBLIC_URL is not an origin a browser could report ("${raw}"), so this API cannot `
+        + 'recognise its own. Expected an http or https URL whose host is a hostname, an IPv4 address '
+        + 'or a bracketed IPv6 literal, with an optional port.',
     );
     return undefined;
   }
-  return normalized;
+  return own;
 }
