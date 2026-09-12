@@ -239,6 +239,30 @@
                 <p class="dm-note">
                   Paste this into your own page's HTML to show the form inside your site.
                 </p>
+
+                <!-- Under the snippet on purpose. This is the one screen where the author is
+                     already holding an <iframe> they are about to paste into somebody else's
+                     page, so "and who may show this?" is a question they are already asking.
+                     Phrased as sites, never as the column: nobody came here to author an
+                     origin allowlist. -->
+                <div class="dm-origins">
+                  <label class="dm-setting-label" for="dm-origins">Sites allowed to show this form</label>
+                  <textarea
+                    #originsBox
+                    id="dm-origins"
+                    class="mjf-textarea dm-origins-input"
+                    rows="3"
+                    placeholder="https://careers.acme.com&#10;https://www.acme.com"
+                    [disabled]="busy"
+                    [value]="authoredOrigins(link)"
+                    (change)="saveOrigins(originsBox)"
+                  ></textarea>
+                  <p class="dm-setting-hint">
+                    One address per line. Leave this empty to let the form be shown on any site.
+                    Once you list a site, the form only opens inside the sites you list — anywhere
+                    else it stops loading, including pages it is already on.
+                  </p>
+                </div>
               }
             }
           </div>

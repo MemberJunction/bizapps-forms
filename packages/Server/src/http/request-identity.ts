@@ -192,8 +192,29 @@ function zeroHextets(count: number): string[] {
 
 /** What the public routes know about a caller, independent of anything the caller told us. */
 export interface RequestIdentity {
-  /** Salted one-way hash of the resolved client IP (IPv6 reduced to its /64). */
-  ipHash: string;
+  /**
+   * Salted one-way hash of the resolved client IP (IPv6 reduced to its /64).
+   *
+   * Optional because the peer address can already be gone by the time the handler runs. When it
+   * is, the abuse ceilings simply drop for that request rather than re-keying onto something
+   * weaker — a header the caller writes would be worse than no ceiling, since it is a ceiling the
+   * caller controls.
+   */
+  ipHash?: string;
+  /**
+   * The caller's `Origin` header, VERBATIM and unnormalised.
+   *
+   * The caller DID choose this, unlike `ipHash` beside it — so nothing keys an abuse ceiling on
+   * it, and nothing here treats it as identity. What makes a caller-supplied value load-bearing
+   * anyway is that it is checked against a list the form's AUTHOR wrote: a browser will not let a
+   * page lie about its own origin, and a non-browser client that forges one still has to pass
+   * every other gate on the public path.
+   *
+   * Left unnormalised on purpose. `normalizeOrigin` runs at the point of comparison instead, so
+   * this field and the header the caller actually sent are the same string when one reaches a log
+   * line — the difference between a refusal an operator can act on and one they have to guess at.
+   */
+  origin?: string;
 }
 
 const identityStorage = new AsyncLocalStorage<RequestIdentity>();

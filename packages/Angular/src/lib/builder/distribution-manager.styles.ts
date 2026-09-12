@@ -184,6 +184,24 @@ export const DISTRIBUTION_STYLES = /* css */ `
   overflow-x: auto;
 }
 
+/* The allowlist editor, directly under the snippet. Full width rather than a settings row: it
+   holds web addresses, and an address wrapped mid-host is unreadable. The text above and below it
+   reuses .dm-setting-label / .dm-setting-hint — they are the type styles for "what this is" and
+   "what it costs you", and this control is asking exactly those two things of the author.
+
+   resize: none for the same reason .dm-embed has it, one rule up: Chrome paints the native grab
+   handle as an opaque light square that ignores the page's colours, so on a dark theme it shows
+   as a white notch. A long list scrolls instead. */
+.dm-origins { display: flex; flex-direction: column; gap: var(--mjf-gap-sm); margin-top: var(--mjf-stack); }
+.dm-origins-input {
+  min-height: 0;
+  height: 5.5rem;
+  resize: none;
+  font-family: var(--mj-font-family-mono, monospace);
+  font-size: var(--mjf-meta);
+  background: var(--mj-bg-surface-sunken);
+}
+
 /* The QR plate is deliberately NOT theme-reactive: a QR is dark-on-light by spec, and
    inverting it in dark mode produces a code many scanners reject. These two are the only
    fixed colours in the file and they are token definitions, which is the sanctioned place
