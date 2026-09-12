@@ -5,11 +5,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { runMutant, parseSuiteSummary, MUTANTS } from './check-guard-mutants.mjs';
+import { runMutant, parseSuiteSummary, killFilesFor, MUTANTS } from './check-guard-mutants.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -19,7 +19,7 @@ function tree(source) {
   writeFileSync(join(root, 'pkg', 'src', 'a.ts'), source);
   return root;
 }
-const entry = { name: 'x', behaviour: 'y', file: 'pkg/src/a.ts', find: 'if (guard)', replace: 'if (true)', suite: 'pkg' };
+const entry = { name: 'x', behaviour: 'y', file: 'pkg/src/a.ts', find: 'if (guard)', replace: 'if (true)', suite: 'pkg', killedBy: ['src/a.spec.ts'] };
 
 test('a suite that fails under the mutation is KILLED, and the source is restored', () => {
   const root = tree('if (guard) { a(); }');
@@ -55,6 +55,58 @@ test('the source is restored even when the suite runner throws', () => {
   const root = tree('if (guard) { a(); }');
   assert.throws(() => runMutant(entry, { repoRoot: root, run: () => { throw new Error('boom'); } }));
   assert.equal(readFileSync(join(root, 'pkg/src/a.ts'), 'utf-8'), 'if (guard) { a(); }');
+});
+
+test('a mutant runs ONLY the spec files it names — never the whole package suite', () => {
+  // The defect this pins: the gate used to hand `run` a directory and nothing else, so every
+  // mutant paid for collecting all 78 of packages/Server's spec files to observe an edit to one
+  // source file. That is 37.5s per mutant on a CI runner, 15 mutants deep, and it is why
+  // `build-and-test` ran for fifteen minutes.
+  const root = tree('if (guard) { a(); }');
+  let seenFiles = 'never called';
+  runMutant(entry, {
+    repoRoot: root,
+    run: (_cwd, files) => { seenFiles = files; return { crashed: false, failed: 1, passed: 1 }; },
+  });
+  assert.deepEqual(seenFiles, ['src/a.spec.ts']);
+});
+
+test('an entry with no killedBy is refused by name — never run against the whole suite', () => {
+  // The failure mode this change introduces: someone adds a mutant and forgets the field. Falling
+  // back to the full suite would be the slow-and-silent answer, and spreading an undefined into
+  // the argv would be a TypeError naming neither the entry nor the field.
+  const never = () => { throw new Error('the suite must not run for an entry with no killedBy'); };
+  const { killedBy, ...bare } = entry;
+  assert.throws(
+    () => runMutant(bare, { repoRoot: tree('if (guard) { a(); }'), run: never }),
+    /x: killedBy must name at least one spec file/,
+  );
+});
+
+test('every manifest entry names the spec file(s) that prove its guard, and each one exists', () => {
+  // A `killedBy` is not a hint — it IS the instrument. An entry without one would silently fall
+  // back to the whole suite; one naming a moved spec matches no test file, which vitest reports
+  // as a failed run with no summary, i.e. CRASHED. Both are caught here, at PR time, for free.
+  for (const m of MUTANTS) {
+    assert.ok(Array.isArray(m.killedBy) && m.killedBy.length > 0, `${m.name}: needs killedBy`);
+    for (const spec of m.killedBy) {
+      assert.match(spec, /\.spec\.ts$/, `${m.name}: killedBy must name spec files — got ${spec}`);
+      assert.ok(existsSync(join(REPO_ROOT, m.suite, spec)), `${m.name}: no such spec ${spec}`);
+    }
+  }
+});
+
+test('a suite baseline runs exactly the spec files that suite\'s mutants will be judged by', () => {
+  // The baseline exists so a suite that is red for an unrelated reason cannot report every mutant
+  // as KILLED. Tests no mutant ever runs cannot do that, so the baseline is the union of what the
+  // mutants use — the instrument, proven green, and nothing else.
+  const mutants = [
+    { suite: 'pkg', killedBy: ['src/b.spec.ts', 'src/a.spec.ts'] },
+    { suite: 'pkg', killedBy: ['src/a.spec.ts'] },
+    { suite: 'other', killedBy: ['src/z.spec.ts'] },
+  ];
+  assert.deepEqual(killFilesFor(mutants, 'pkg'), ['src/a.spec.ts', 'src/b.spec.ts']);
+  assert.deepEqual(killFilesFor(mutants, 'other'), ['src/z.spec.ts']);
 });
 
 test('every manifest entry names a file that exists and a find that matches exactly once', () => {
