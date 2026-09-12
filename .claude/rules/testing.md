@@ -18,7 +18,7 @@ npm run test:packages       # the five @mj-biz-apps/forms-* packages only
 cd packages/Server && npx vitest run     # one package
 cd packages/Server && npx vitest         # watch mode
 npm run typecheck           # tsc --noEmit per package WITH specs included — nothing else compiles a test file
-npm run lint:guard-mutants  # neutralise each declared load-bearing guard; its package suite must go red
+npm run lint:guard-mutants  # neutralise each declared load-bearing guard; its named spec must go red
 ```
 
 > `npm test` did not exist until 2026-07-30. Every package had a `test` script but `turbo.json`
@@ -123,8 +123,10 @@ queried from the database, because those two spellings of the same GUID differ i
   could be deleted with the suite green, every one behind a `readFileSync` spec. If the class can be
   instantiated — `vi.mock` the generated base; `runInInjectionContext(Injector.create(...))` for a
   component with field `inject()`; bare `new` for a service without constructor injection — test the
-  behaviour and add the guard to `scripts/check-guard-mutants.mjs`. Reserve source-text for template
-  text and for the cheap "the call still exists" smoke, and title it as exactly that.
+  behaviour and add the guard to `scripts/check-guard-mutants.mjs` — including the `killedBy` spec
+  file(s) the mutation actually fails, which the gate runs *instead of* the whole package suite and
+  which its own spec refuses to let you omit. Reserve source-text for template text and for the
+  cheap "the call still exists" smoke, and title it as exactly that.
 - **Specs are type-checked** (`npm run typecheck`, and in CI). A spec calling a signature that no
   longer exists used to compile, run and pass for the wrong reason; seventy such errors were found the
   day the gate was added, two of them in specs written that morning.
