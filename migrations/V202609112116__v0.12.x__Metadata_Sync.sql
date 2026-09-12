@@ -182,6 +182,31 @@ SET
 
 GO
 
+-- HAND-PORTED FROM THE RETIRED V202608182130, WHICH WROTE TWO RECORDS AND NOT ONE. Besides the
+-- TemplateContent text above, that delta corrected the Template's own Description, which still
+-- advertised the Phase-1 taxonomy. `mj sync push` could not re-emit this one: the generation
+-- database is the chain MINUS that delta, so it held the original text, and
+-- metadata/templates/.forms-form-designer-template.json declared the same original text -- two
+-- equal stale sides produce no diff, and a push emits nothing for a record it sees no difference
+-- on. Retiring the delta therefore removed the ONLY writer of the corrected string from the chain
+-- (V202608081700's spCreateTemplate is the only other one, and it writes the superseded text), so
+-- every fresh install ended with a Description naming the Phase-1 taxonomy on a Template whose
+-- prompt body enumerates the full 25-type one, Doodle included.
+--
+-- The declaration is corrected in the same change, which is the rule this file's README addition
+-- states: metadata/ is the authority for every record it declares, so a migration that writes such
+-- a record must update metadata/ too or the NEXT seed reverts it. With both sides now saying
+-- "full", a regeneration sees no difference here and emits nothing -- the same settled state the
+-- EntityPermission rows reach, and the reason this block should not reappear in a future seed.
+IF EXISTS (SELECT 1 FROM [${mjSchema}].[Template] WHERE ID = '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61')
+BEGIN
+    UPDATE [${mjSchema}].[Template]
+    SET Description = N'System + user prompt for the Forms AI authoring Designer. Turns a natural-language brief (the {{ Brief }} parameter) into a structured FormBlueprint JSON object validated against the full question taxonomy. Used by the ''Forms: Form Designer'' AI Prompt.'
+    WHERE ID = '7E0A1B2C-3D4E-4F50-8A61-9B2C3D4E5F61';
+END
+
+GO
+
 -- Save MJ: Template Params (core SP call only)
 DECLARE @TemplateID_9f7b66ce5ee0 UNIQUEIDENTIFIER,
 @Name_9f7b66ce5ee0 NVARCHAR(255),

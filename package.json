@@ -35,6 +35,7 @@
     "lint:hook-guard:test": "node --test .claude/hooks/block-generated-edits.spec.mjs",
     "lint:git-gate:test": "node --test .claude/hooks/require-green-before-git.spec.mjs",
     "lint:codegen-append:test": "node --test scripts/check-codegen-append.spec.mjs",
+    "lint:designer-template:test": "node --test scripts/check-designer-template-description.spec.mjs",
     "lint:paths-touched:test": "node --test scripts/check-paths-touched.spec.mjs",
     "check:release-seed": "node scripts/check-release-seed-coverage.mjs",
     "check:seed-cadence": "node scripts/check-release-seed-cadence.mjs",

@@ -1,7 +1,7 @@
 {
   "fields": {
     "Name": "MJ_BizApps_Forms: Form Designer",
-    "Description": "System + user prompt for the Forms AI authoring Designer. Turns a natural-language brief (the {{ Brief }} parameter) into a structured FormBlueprint JSON object validated against the Phase-1 question taxonomy. Used by the 'Forms: Form Designer' AI Prompt.",
+    "Description": "System + user prompt for the Forms AI authoring Designer. Turns a natural-language brief (the {{ Brief }} parameter) into a structured FormBlueprint JSON object validated against the full question taxonomy. Used by the 'Forms: Form Designer' AI Prompt.",
     "UserID": "@lookup:MJ: Users.Name=System",
     "IsActive": true
   },

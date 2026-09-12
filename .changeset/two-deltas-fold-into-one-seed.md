@@ -11,6 +11,6 @@ The AI Designer stops proposing a question type the database rejects, and the re
 
 **Two unreleased deltas are folded in and deleted.** `V202608182130` and `V202608241800` appear in no release tag, so neither reached a host and neither was append-only history yet. They are replaced by a single `Metadata_Sync` generated against the shipped chain — the cadence #105 established, and what `check:seed-cadence` has been red on.
 
-**Operators should expect this**: applying this migration corrects the Designer prompt in place and adds the four `OnSubmit` `ActionParam` records. No form data is touched, and `V202608301200` already migrated any stored `Signature` questions to `Doodle`.
+**Operators should expect this**: applying this migration corrects the Designer prompt in place, restores the Designer Template's own `Description` (it still advertised the Phase-1 taxonomy, which the prompt body it owns has not matched since #97), and adds the four `OnSubmit` `ActionParam` records. No form data is touched, and `V202608301200` already migrated any stored `Signature` questions to `Doodle`.
 
 Closes #111.
