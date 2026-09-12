@@ -239,6 +239,33 @@ describe('RespondentHostMiddleware wiring', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  // The reason the route carries its own identity handler even though it is pre-auth now. The
+  // global copy's position in the chain is ClassFactory registration order, which is module import
+  // order in `packages/Server/src/index.ts` — it happens to be first today. This mounts it LAST,
+  // the order that would leave a trusting route unmetered, and the meter must still bite.
+  it('meters per caller even when the global identity handler is mounted after it', async () => {
+    process.env.FORMS_REDEEM_IP_MAX = '1';
+    FormsRateLimiter.Instance.resetForTests();
+    const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
+
+    const app = express();
+    // Deliberately inverted: the host's pre-auth handlers first, the identity middleware after.
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
+    for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
+      app.use(handler);
+    }
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      await fetch(`${base}/f/anything`);
+      expect((await fetch(`${base}/f/anything`)).status).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe('the process-wide in-flight cap', () => {
