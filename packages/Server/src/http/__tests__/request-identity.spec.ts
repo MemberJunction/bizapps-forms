@@ -93,8 +93,8 @@ describe('runWithRequestIdentity', () => {
     };
 
     const [slow, fast] = await Promise.all([
-      runWithRequestIdentity({ ipHash: 'hash-slow' }, () => observe(20)),
-      runWithRequestIdentity({ ipHash: 'hash-fast' }, () => observe(1)),
+      runWithRequestIdentity({ ip: '203.0.113.20', ipHash: 'hash-slow' }, () => observe(20)),
+      runWithRequestIdentity({ ip: '203.0.113.1', ipHash: 'hash-fast' }, () => observe(1)),
     ]);
 
     expect(slow).toBe('hash-slow');
@@ -103,6 +103,17 @@ describe('runWithRequestIdentity', () => {
 
   it('reports no identity outside a request', () => {
     expect(currentRequestIdentity()).toBeUndefined();
+  });
+
+  it('carries the resolved address as well as its hash', () => {
+    // The hash is what buckets and log lines may keep. The address itself is needed for exactly
+    // one thing — the `X-Forwarded-For` on the server-side redeem, which is how core learns which
+    // respondent is asking (bizapps-forms register row 29). Request-scoped, never persisted.
+    const seen = runWithRequestIdentity({ ip: '203.0.113.7', ipHash: 'hash-7' }, () =>
+      currentRequestIdentity(),
+    );
+
+    expect(seen).toEqual({ ip: '203.0.113.7', ipHash: 'hash-7' });
   });
 });
 

@@ -192,6 +192,22 @@ function zeroHextets(count: number): string[] {
 
 /** What the public routes know about a caller, independent of anything the caller told us. */
 export interface RequestIdentity {
+  /**
+   * The resolved client address itself, request-scoped and never persisted by Forms.
+   *
+   * Kept alongside the hash for ONE reason: the server-side redeem in `respondent-host/
+   * redeem.service.ts` POSTs to core from inside this process, so without an address forwarded
+   * on it core keys its per-IP redeem cap on the loopback peer — one bucket for every respondent
+   * in the deployment (bizapps-forms register row 29). A hash cannot be forwarded: core reads the
+   * value as an address, writes it to the magic-link redemption audit trail, and Express has to
+   * parse it before `req.ip` exists at all.
+   *
+   * Everything that STORES or BUCKETS still uses `ipHash`. This field must not leak into a Forms
+   * log line, bucket key or database column of Forms' own — see `hashClientIp` for why that rule
+   * exists. Core's magic-link redemption audit trail, above, is the one place this address is
+   * written on purpose; that write is core's, not Forms'.
+   */
+  ip: string;
   /** Salted one-way hash of the resolved client IP (IPv6 reduced to its /64). */
   ipHash: string;
 }
