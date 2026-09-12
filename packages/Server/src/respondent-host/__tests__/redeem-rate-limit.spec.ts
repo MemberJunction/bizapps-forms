@@ -21,7 +21,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@memberjunction/server', () => ({
-  BaseServerMiddleware: class {},
+  BaseServerMiddleware: class {
+    GetPreAuthMiddleware(): unknown[] {
+      return [];
+    }
+  },
   configInfo: { magicLink: {}, userHandling: {} },
 }));
 
@@ -53,6 +57,10 @@ import {
   resetRedeemInFlightForTests,
 } from '../redeem-rate-limit';
 import { FormsRateLimiter } from '../../public-submit/rate-limit.service';
+// Type only: the class itself is imported dynamically inside the tests that need it, so that
+// `vi.mock` is in place before the module is evaluated. `import type` is erased at compile time
+// and does not load the module, so it cannot defeat that.
+import type { RespondentHostMiddleware } from '../RespondentHostMiddleware';
 
 afterEach(() => {
   delete process.env.FORMS_REDEEM_IP_MAX;
@@ -83,6 +91,14 @@ async function withMjOrderedApp(
     await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+/** MJServer's order — see the note in `RespondentHostMiddleware.spec.ts`. */
+async function mountRespondentHostLikeMJServer(app: Application, middleware: RespondentHostMiddleware): Promise<void> {
+  await middleware.ConfigureExpressApp?.(app);
+  for (const handler of middleware.GetPreAuthMiddleware()) {
+    app.use(handler);
   }
 }
 
@@ -200,7 +216,7 @@ describe('RespondentHostMiddleware wiring', () => {
     const { RespondentHostMiddleware, RESPONDENT_HOST_ROUTE } = await import('../RespondentHostMiddleware');
 
     const app = express();
-    await new RespondentHostMiddleware().ConfigureExpressApp(app);
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
     // Mounted the way MJServer does it: too late to help the route.
     for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
       app.use(handler);
@@ -259,7 +275,7 @@ describe('the process-wide in-flight cap', () => {
     const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
 
     const app = express();
-    await new RespondentHostMiddleware().ConfigureExpressApp(app);
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
     const server: Server = await new Promise((resolve) => {
       const s = app.listen(0, '127.0.0.1', () => resolve(s));
     });
