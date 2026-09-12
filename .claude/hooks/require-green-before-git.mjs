@@ -198,6 +198,39 @@ export function decisionFor({ command, runChecks }) {
 const CHECK_TIMEOUT_MS = 120_000;
 
 /**
+ * ANSI SGR escapes, stripped before any pattern is matched against a checker's output.
+ *
+ * Every pattern below anchors at a LINE START and every one was measured against output captured
+ * WITHOUT colour. `runChecks` passed no `env`, so a checker inherited the session's — and
+ * `FORCE_COLOR`, which plenty of people export, makes turbo colour its summary even through a pipe:
+ *
+ *     plain          " Tasks:    9 successful, 9 total"
+ *     FORCE_COLOR=1  "\x1b[1m Tasks:    \x1b[32m\x1b[1m9 successful\x1b[0m, 9 total\x1b[0m"
+ *
+ * The line now begins with the escape byte, which is not in `\s`, so NEITHER pattern matches
+ * anywhere. A green tree asked on every commit, and — the direction that matters — a genuinely red
+ * one was downgraded from `deny` to `ask` under a message blaming the install rather than the code.
+ * That is #179 reintroduced through a different door.
+ *
+ * `scripts/check-guard-mutants.mjs` met this exact bug first and its comment records the fix this
+ * repo settled on: strip the escapes AND ask the child not to emit them. Both, and here is why the
+ * pair is not accidental duplication — measured on turbo 2.10.9:
+ *
+ *   - `NO_COLOR=1` alone does NOT suppress turbo's colour when `FORCE_COLOR` is set. Only
+ *     `FORCE_COLOR=0` does. So the env half depends on each checker honouring a convention that
+ *     the checker we actually run partly ignores; the strip does not depend on cooperation at all.
+ *   - The strip only understands SGR. A checker that emitted cursor control would walk past it,
+ *     and the env half is what stops those being produced in the first place.
+ *
+ * Stripping once, where output becomes evidence, also means the text quoted back in a `deny` is
+ * plain — that message is read as JSON-embedded text, where escapes are noise.
+ */
+const ANSI_SGR = /\x1b\[[0-9;]*m/g;
+
+/** Colour off at the source. See ANSI_SGR above for why this is paired with the strip. */
+export const CHECKER_ENV = { NO_COLOR: '1', FORCE_COLOR: '0' };
+
+/**
  * Pure. Decides what one finished check MEANT: `null` if it passed, a failure record if it ran and
  * failed, and a throw if it did not run to completion.
  *
@@ -206,8 +239,50 @@ const CHECK_TIMEOUT_MS = 120_000;
  * nobody can run must never read as a check that passed". Before this existed, only a MISSING
  * checker and a failed spawn reached `ask`; a killed or timed-out one had no path at all, and the
  * absence of a path meant silence.
+ *
+ * ── WHY A NON-ZERO EXIT IS NOT ENOUGH TO BLAME THE TREE (#179) ──────────────────────────────────
+ * The three signals above are all NEGATIVE — they detect a checker that failed to start or to
+ * finish. A checker can do neither and still never judge anything: `node_modules/turbo/bin/turbo`
+ * is a JavaScript shim that execs a platform-specific optional dependency, and when that dependency
+ * is missing or unlinked the shim exists, spawns cleanly, and exits 1 with a resolution error. No
+ * negative signal fires, so a green tree was denied under the heading `typecheck` and the human was
+ * sent to `npm run typecheck`, which fails identically for the same unrelated reason.
+ *
+ * So the last question is asked POSITIVELY: did this checker get far enough to reach a verdict?
+ * Each check answers for itself via `verdictPattern`, because the evidence is not the same shape
+ * for both — turbo prints a `Tasks:` summary on every completed run, and `check-ui-tokens.mjs` is
+ * plain Node that ends in `PASS`/`FAIL`. Matching turbo's format alone would turn every real
+ * UI-gate failure into `ask`, which is the same bug pointed the other way.
+ *
+ * ── AND A PASS MUST HAVE COVERED SOMETHING (#196) ───────────────────────────────────────────────
+ * The same question, asked of the other arm. A non-zero exit is a claim of FAILURE, so before
+ * believing it, require proof the checker judged the tree. A zero exit is a claim of SUCCESS, so
+ * before believing that, require proof the success covered any work — `coveredWorkPattern`.
+ *
+ * It is not the same evidence, which is why it is not the same pattern. `--filter=@mj-biz-apps/
+ * forms-*` is a hardcoded npm-scope glob, and a scope rename or a package moved out of `packages/*`
+ * makes it match nothing; turbo does not call that an error, it exits 0 and prints
+ * ` Tasks:    0 successful, 0 total` — which still contains the `Tasks:` marker, so the check above
+ * cannot catch it. The distinguishing evidence is the COUNT. `lint:ui` fails the same way for a
+ * moved `packages/Angular/src`, because its `walk()` swallows a missing directory and reports
+ * `Scanned 0 file(s)`; its count lives in a different line entirely.
+ *
+ * This arm is the one every green commit takes, so a wrong pattern here prompts on every commit.
+ * That is the cost worth paying rather than the reverse: a pattern that stopped matching would
+ * silently reopen the hole, and this file's whole argument is that silence is the failure that
+ * cannot be noticed. A wrong `ask` announces itself and gets fixed; a wrong `allow` does not.
+ *
+ * Matching printed output is a heuristic, and both of these fail toward `ask` — a human looks —
+ * rather than toward silence. Prefer that to string-matching error text, which is what changes
+ * between releases.
  */
-export function classifyCheckResult(name, result) {
+export function classifyCheckResult({ name, verdictPattern, coveredWorkPattern }, result) {
+    if (!(verdictPattern instanceof RegExp)) {
+        throw new Error(`${name} has no verdictPattern, so nothing can say whether it ran.`);
+    }
+    if (!(coveredWorkPattern instanceof RegExp)) {
+        throw new Error(`${name} has no coveredWorkPattern, so nothing can say what it covered.`);
+    }
     if (result.error) throw new Error(`${name} could not be spawned: ${result.error.message}`);
     if (result.signal) {
         throw new Error(
@@ -218,37 +293,138 @@ export function classifyCheckResult(name, result) {
     if (typeof result.status !== 'number') {
         throw new Error(`${name} did not run to completion, so this tree is unverified.`);
     }
-    if (result.status === 0) return null;
-    const combined = `${result.stdout || ''}${result.stderr || ''}`;
+    // Colour is stripped HERE, where output becomes evidence, so every pattern below and the text
+    // quoted back to the human all read the same plain shape. See ANSI_SGR.
+    const combined = `${result.stdout || ''}${result.stderr || ''}`.replace(ANSI_SGR, '');
+    // Lazy: only the two throws below need it, and `combined` runs to maxBuffer (32MB) in the worst
+    // case, so the everyday green commit should not pay to split it.
+    const tail = () => combined.trim().split('\n').slice(-5).join(' ').slice(0, 300);
+
+    if (result.status === 0) {
+        if (!coveredWorkPattern.test(combined)) {
+            throw new Error(
+                `${name} passed without covering anything, so nothing was actually checked — most ` +
+                `likely its filter or scan root no longer matches this repo. It reported: ${tail()}`,
+            );
+        }
+        return null;
+    }
+
+    if (!verdictPattern.test(combined)) {
+        throw new Error(
+            `${name} exited ${result.status} without ever reaching a verdict, so this is a broken ` +
+            `checker rather than a failing tree — most likely an incomplete install. It reported: ${tail()}`,
+        );
+    }
     return { name, output: combined.split('\n').slice(-40).join('\n') };
 }
 
-/** Runs the real checks. Throws when a checker is missing rather than reporting it as clean. */
+/**
+ * The checks this hook runs, and the evidence each one prints. EXPORTED, and that is the point:
+ * these descriptors used to be a local `const` inside `runChecks`, reachable by nothing, so the
+ * spec kept private copies and asserted those. Every shipped pattern could therefore be broken
+ * without a single test failing — measured on this file: four such mutations survived the whole
+ * suite, including `/^\s*Tasks:\s/m` -> `/^Tasks:/m`, which the comment below says would send
+ * every commit to `ask`. A pattern nothing tests is a pattern nobody can trust.
+ *
+ * `entryPoint` is relative because the absolute path depends on `PROJECT_DIR`, which is resolved
+ * per invocation; `label` is what a missing checker is called in the throw.
+ */
+export const CHECKS = [
+    {
+        name: 'lint:ui',
+        label: 'scripts/check-ui-tokens.mjs',
+        entryPoint: ['scripts', 'check-ui-tokens.mjs'],
+        args: [],
+        verdictPattern: /^(?:PASS|FAIL)\b/m,
+        // `Scanned 197 file(s) under: packages/Angular/src`. Zero means the scan root moved and
+        // the colour gate is checking nothing — which it reports as a PASS.
+        coveredWorkPattern: /^Scanned [1-9]\d* file\(s\)/m,
+    },
+    {
+        name: 'typecheck',
+        label: 'turbo entry point',
+        entryPoint: ['node_modules', 'turbo', 'bin', 'turbo'],
+        args: ['typecheck', '--filter=@mj-biz-apps/forms-*'],
+        // Leading whitespace is load-bearing: turbo prints ` Tasks:    9 successful, 9 total`,
+        // so `/^Tasks:/m` matches nothing and would send every commit to `ask`.
+        verdictPattern: /^\s*Tasks:\s/m,
+        // Same line, but the COUNT: an empty run prints ` Tasks:    0 successful, 0 total` and
+        // exits 0, so the marker above is present and proves nothing.
+        coveredWorkPattern: /^\s*Tasks:\s+\d+ successful,\s+[1-9]\d* total/m,
+    },
+];
+
+/**
+ * Runs the real checks. Throws — never reports "clean" — when a checker is missing, when one ran
+ * and never reached a verdict, and when one passed without covering any work. Each entry carries
+ * the two patterns that prove it got that far and that its verdict was about something.
+ */
 function runChecks() {
-    const turbo = path.join(PROJECT_DIR, 'node_modules', 'turbo', 'bin', 'turbo');
-    const uiGate = path.join(PROJECT_DIR, 'scripts', 'check-ui-tokens.mjs');
-    for (const [label, entry] of [['scripts/check-ui-tokens.mjs', uiGate], ['turbo entry point', turbo]]) {
+    const resolved = CHECKS.map((check) => ({ ...check, entry: path.join(PROJECT_DIR, ...check.entryPoint) }));
+    for (const { label, entry } of resolved) {
         if (!existsSync(entry)) throw new Error(`${label} not found at ${entry}`);
     }
 
-    const invocations = [
-        { name: 'lint:ui', argv: [uiGate] },
-        { name: 'typecheck', argv: [turbo, 'typecheck', '--filter=@mj-biz-apps/forms-*'] },
-    ];
+    return collectFailures(resolved, (check) => spawnSync(process.execPath, [check.entry, ...check.args], {
+        cwd: PROJECT_DIR,
+        encoding: 'utf8',
+        shell: false,
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: CHECK_TIMEOUT_MS,
+        env: { ...process.env, ...CHECKER_ENV },
+    }));
+}
 
+/**
+ * What a whole RUN of checks meant, given a way to run one. Exported, and separated from
+ * `runChecks` deliberately.
+ *
+ * ── WHY A THROW MUST NOT DISCARD WHAT IS ALREADY PROVEN ─────────────────────────────────────────
+ * This loop used to live inline in `runChecks`, pushing into a local array with no `catch`. Any
+ * throw from `classifyCheckResult` propagated straight out, so the array — and every violation
+ * already proven — died with the stack frame, and `decisionFor` built its `ask` from the thrown
+ * message alone. With a hardcoded colour in the tree AND a turbo that cannot resolve its platform
+ * binary, the answer was `ask`, naming only the broken checker and never mentioning the colour.
+ * A definitively red tree stopped being refused.
+ *
+ * The two throws added for #179 and #196 are what made that reachable: before them a throw meant a
+ * rare spawn-level failure, and one of them now fires on precisely the #179 incident — the moment a
+ * developer is most likely to ALSO be holding a red tree.
+ *
+ * So the two questions are kept apart. "Did anything fail?" is answered from evidence that survives;
+ * "could everything be checked?" is answered separately. A proven failure outranks an unrunnable
+ * checker, because the tree is known-red either way and `deny` says so with the proof attached,
+ * while `ask` throws the proof away. The unrunnable checker is still reported — under its own name,
+ * marked NOT RUN, so a partial verdict is never dressed up as a complete one.
+ *
+ * With nothing proven, the original error is RETHROWN rather than summarised, so the `ask` a broken
+ * install produces is byte-identical to what it was before this function existed.
+ *
+ * It is exported because nothing could test this: `runChecks` is not exported, so the suite could
+ * only stub it wholly green, wholly red or wholly unrunnable, and the mixed run had no seam to
+ * reach. That is the same shape as the untested check descriptors above — a thing that ships,
+ * asserted by nothing.
+ */
+export function collectFailures(checks, runOne) {
     const failures = [];
-    for (const { name, argv } of invocations) {
-        const result = spawnSync(process.execPath, argv, {
-            cwd: PROJECT_DIR,
-            encoding: 'utf8',
-            shell: false,
-            maxBuffer: 32 * 1024 * 1024,
-            timeout: CHECK_TIMEOUT_MS,
-        });
-        const failure = classifyCheckResult(name, result);
-        if (failure) failures.push(failure);
+    const unrunnable = [];
+    for (const check of checks) {
+        try {
+            const failure = classifyCheckResult(check, runOne(check));
+            if (failure) failures.push(failure);
+        } catch (error) {
+            unrunnable.push({ name: check.name, error });
+        }
     }
-    return failures;
+    if (failures.length > 0) {
+        return [
+            ...failures,
+            ...unrunnable.map(({ name, error }) => ({ name, output: `NOT RUN — ${error.message}` })),
+        ];
+    }
+    if (unrunnable.length > 0) throw unrunnable[0].error;
+    return [];
 }
 
 // Same argv comparison the other gates use rather than `import.meta.main`, which is Node 24+.
