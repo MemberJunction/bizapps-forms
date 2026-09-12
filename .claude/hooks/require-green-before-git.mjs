@@ -198,6 +198,39 @@ export function decisionFor({ command, runChecks }) {
 const CHECK_TIMEOUT_MS = 120_000;
 
 /**
+ * ANSI SGR escapes, stripped before any pattern is matched against a checker's output.
+ *
+ * Every pattern below anchors at a LINE START and every one was measured against output captured
+ * WITHOUT colour. `runChecks` passed no `env`, so a checker inherited the session's — and
+ * `FORCE_COLOR`, which plenty of people export, makes turbo colour its summary even through a pipe:
+ *
+ *     plain          " Tasks:    9 successful, 9 total"
+ *     FORCE_COLOR=1  "\x1b[1m Tasks:    \x1b[32m\x1b[1m9 successful\x1b[0m, 9 total\x1b[0m"
+ *
+ * The line now begins with the escape byte, which is not in `\s`, so NEITHER pattern matches
+ * anywhere. A green tree asked on every commit, and — the direction that matters — a genuinely red
+ * one was downgraded from `deny` to `ask` under a message blaming the install rather than the code.
+ * That is #179 reintroduced through a different door.
+ *
+ * `scripts/check-guard-mutants.mjs` met this exact bug first and its comment records the fix this
+ * repo settled on: strip the escapes AND ask the child not to emit them. Both, and here is why the
+ * pair is not accidental duplication — measured on turbo 2.10.9:
+ *
+ *   - `NO_COLOR=1` alone does NOT suppress turbo's colour when `FORCE_COLOR` is set. Only
+ *     `FORCE_COLOR=0` does. So the env half depends on each checker honouring a convention that
+ *     the checker we actually run partly ignores; the strip does not depend on cooperation at all.
+ *   - The strip only understands SGR. A checker that emitted cursor control would walk past it,
+ *     and the env half is what stops those being produced in the first place.
+ *
+ * Stripping once, where output becomes evidence, also means the text quoted back in a `deny` is
+ * plain — that message is read as JSON-embedded text, where escapes are noise.
+ */
+const ANSI_SGR = /\x1b\[[0-9;]*m/g;
+
+/** Colour off at the source. See ANSI_SGR above for why this is paired with the strip. */
+export const CHECKER_ENV = { NO_COLOR: '1', FORCE_COLOR: '0' };
+
+/**
  * Pure. Decides what one finished check MEANT: `null` if it passed, a failure record if it ran and
  * failed, and a throw if it did not run to completion.
  *
@@ -260,7 +293,9 @@ export function classifyCheckResult({ name, verdictPattern, coveredWorkPattern }
     if (typeof result.status !== 'number') {
         throw new Error(`${name} did not run to completion, so this tree is unverified.`);
     }
-    const combined = `${result.stdout || ''}${result.stderr || ''}`;
+    // Colour is stripped HERE, where output becomes evidence, so every pattern below and the text
+    // quoted back to the human all read the same plain shape. See ANSI_SGR.
+    const combined = `${result.stdout || ''}${result.stderr || ''}`.replace(ANSI_SGR, '');
     // Lazy: only the two throws below need it, and `combined` runs to maxBuffer (32MB) in the worst
     // case, so the everyday green commit should not pay to split it.
     const tail = () => combined.trim().split('\n').slice(-5).join(' ').slice(0, 300);
@@ -339,6 +374,7 @@ function runChecks() {
             shell: false,
             maxBuffer: 32 * 1024 * 1024,
             timeout: CHECK_TIMEOUT_MS,
+            env: { ...process.env, ...CHECKER_ENV },
         });
         const failure = classifyCheckResult(check, result);
         if (failure) failures.push(failure);

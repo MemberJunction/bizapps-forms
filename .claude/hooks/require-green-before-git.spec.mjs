@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf, CHECKS } from './require-green-before-git.mjs';
+import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf, CHECKS, CHECKER_ENV } from './require-green-before-git.mjs';
 
 const green = () => [];
 const red = () => [{ name: 'lint:ui', output: "hardcoded color: DefaultColor: '#6366f1'," }];
@@ -430,6 +430,52 @@ test('answers null outside a repository, so the caller can fall back rather than
     assert.equal(gitToplevelOf('/'), null);
 });
 
+// ── A CHECKER'S OUTPUT IS FORMATTED FOR A HUMAN; THE PATTERNS READ IT AS A SIGNAL ────────────────
+// Found by the PR gauntlet on #197. Both patterns above are anchored `^\s*`, and both were measured
+// against output captured WITHOUT colour. `runChecks` spawns its checkers with no `env`, so they
+// inherit the session's, and `FORCE_COLOR` — a commonplace thing to export — makes turbo emit SGR
+// escapes even through a pipe. Its summary line then starts with the escape byte rather than a
+// space, and 0x1B is not in `\s`, so NEITHER pattern matches anywhere:
+//
+//   plain         " Tasks:    9 successful, 9 total"
+//   FORCE_COLOR=1 "\x1b[1m Tasks:    \x1b[32m\x1b[1m9 successful\x1b[0m, 9 total\x1b[0m"
+//
+// A green tree then asks on every commit, and — the direction that matters — a genuinely RED tree
+// is downgraded from `deny` to `ask`, under a message blaming the install rather than the code.
+// That is the #179 defect reintroduced through a different door.
+//
+// `scripts/check-guard-mutants.mjs` already met this exact bug (its comment records a green suite
+// reported as BASELINE FAILED in CI, because Actions enables colour while a local spawnSync has no
+// TTY and never shows it) and settled the fix for this repo: strip the escapes AND ask the child not
+// to emit them. Measured on turbo: `NO_COLOR=1` alone does NOT suppress it when `FORCE_COLOR` is
+// set, which is exactly why the pair is not redundant.
+const COLOURED_GREEN_TURBO =
+    '\x1b[1m Tasks:    \x1b[32m\x1b[1m9 successful\x1b[0m, 9 total\x1b[0m\n' +
+    '\x1b[1mCached:    \x1b[0m9 cached, 9 total\n';
+const COLOURED_FAILING_TURBO =
+    '@mj-biz-apps/forms-ng:typecheck: src/a.ts(3,5): \x1b[31merror TS2307\x1b[0m: Cannot find module\n' +
+    '\x1b[1m Tasks:    \x1b[31m\x1b[1m0 successful\x1b[0m, 1 total\x1b[0m\n';
+
+test('a coloured green run is still a pass, so a FORCE_COLOR session does not ask on every commit', () => {
+    assert.equal(
+        classifyCheckResult(TYPECHECK, { status: 0, stdout: COLOURED_GREEN_TURBO, stderr: '' }),
+        null,
+    );
+});
+
+// The pair: colour must not be able to turn a real failure into `ask` either. This is the arm where
+// getting it wrong un-blocks a broken tree rather than merely nagging about a good one.
+test('a coloured failing run is still a deny, not a broken checker', () => {
+    const f = classifyCheckResult(TYPECHECK, { status: 2, stdout: COLOURED_FAILING_TURBO, stderr: '' });
+    assert.equal(f.name, 'typecheck');
+    assert.match(f.output, /error TS2307/);
+});
+
+test('the output quoted back to the human carries no escape sequences', () => {
+    const f = classifyCheckResult(TYPECHECK, { status: 2, stdout: COLOURED_FAILING_TURBO, stderr: '' });
+    assert.ok(!f.output.includes('\x1b'), `escape bytes survived into the deny message: ${JSON.stringify(f.output)}`);
+});
+
 // ── THE DESCRIPTORS THAT ACTUALLY SHIP ──────────────────────────────────────────────────────────
 // Every test above drives `classifyCheckResult` with TYPECHECK / LINT_UI declared HERE. Those are
 // copies. The descriptors the hook really uses lived inside `runChecks`' body, reachable by nothing,
@@ -486,4 +532,11 @@ test('each shipped descriptor still reports its checker\'s real failure as a fai
         const f = classifyCheckResult(check, { status: 1, stdout: REAL_OUTPUT[check.name].failed, stderr: '' });
         assert.equal(f?.name, check.name, `${check.name} should deny on its real failing output`);
     }
+});
+
+// The env half of the pair. Removing either key here is a silent re-opening of the hole for any
+// checker whose escapes the strip does not cover, so it is pinned rather than left to a comment.
+test('checkers are spawned with colour turned off at the source', () => {
+    assert.equal(CHECKER_ENV.FORCE_COLOR, '0', 'FORCE_COLOR=0 is what actually suppresses turbo');
+    assert.equal(CHECKER_ENV.NO_COLOR, '1', 'NO_COLOR is the convention other checkers honour');
 });
