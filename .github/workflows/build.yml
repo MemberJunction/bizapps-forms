@@ -239,6 +239,15 @@ jobs:
       - name: Path decider spec (required-job copy)
         run: npm run lint:paths-touched:test
 
+      # Stdlib-only and databaseless. Pins the ONE metadata record that the v0.12 consolidation
+      # silently dropped (#111): the retired V202608182130 corrected the Designer Template's
+      # Description as well as its prompt body, and a push cannot re-emit a correction when BOTH
+      # the generation database and metadata/ still hold the superseded text — two equal stale
+      # sides produce no diff. README says no general gate can catch that class; this pins the
+      # instance, so a future regeneration cannot drop the correction again without going red.
+      - name: Designer template description tests
+        run: npm run lint:designer-template:test
+
       # Stdlib-only and databaseless, like the two gate specs under scripts/. It guards the check
       # that stops a smoke suite mutating a seeded fixture on a form that does not run it — a
       # failure whose whole character is that the run still looks like it passed.
