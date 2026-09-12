@@ -175,13 +175,24 @@ describe('checkRedeemRateLimit', () => {
 });
 
 describe('redeemRateLimitMax', () => {
-  it('defaults to 30', () => {
-    expect(redeemRateLimitMax()).toBe(30);
+  // Core caps /magic-link/redeem at 20 per 60s per IP, and this gate sits in front of it ON THE
+  // PAGE ROUTE: every `/f/:slug` open that gets past here spends a DB read and an outbound POST
+  // to core's redeem, one-for-one. A default above core's made that route's meter unreachable —
+  // core refused at 21 first, after the work was already done, so the friendlier 429 this door
+  // composes could never fire on its own account.
+  //
+  // NOTE: this does not hold for a returning respondent. The host page auto-POSTs `/resume`
+  // whenever a resume cookie is present, and that leg does a SECOND core redeem charged to its
+  // own `resume:` bucket rather than to this meter — so for that caller core's cap binds first,
+  // at half the opens this default implies (see `redeemRateLimitMax`'s docstring). This test only
+  // pins the default value, not the "fronts core's" framing for that caller.
+  it("defaults to core's own redeem cap", () => {
+    expect(redeemRateLimitMax()).toBe(20);
   });
 
-  it.each(['', '   ', '0', '-5', 'abc'])('falls back to 30 for %j', (raw) => {
+  it.each(['', '   ', '0', '-5', 'abc'])('falls back to 20 for %j', (raw) => {
     process.env.FORMS_REDEEM_IP_MAX = raw;
-    expect(redeemRateLimitMax()).toBe(30);
+    expect(redeemRateLimitMax()).toBe(20);
   });
 
   it('honours a valid override', () => {

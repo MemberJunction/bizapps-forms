@@ -177,6 +177,8 @@ republished so the snapshot carries it.
 | `FORMS_RATELIMIT_IP_MAX` | Submissions per minute per client IP/distribution (default 120). The ceiling a caller cannot rotate away from — raise it for load runs too. |
 | `FORMS_COMPLETION_MAX` | **Completed** submissions per minute per client IP/distribution (default 20). |
 | `FORMS_TRUSTED_PROXY_HOPS` | Proxies you operate in front of MJAPI (default 0). Governs which `X-Forwarded-For` entry is believed; see `.env.example`. |
+| `FORMS_REDEEM_IP_MAX` | `/f/:slug` opens per window per client IP (default 20 — core's own redeem cap, which this gate fronts). |
+| `FORMS_REDEEM_MAX_IN_FLIGHT` | Simultaneous server-side redeems, process-wide (default 25). |
 
 **The service principal fails closed.** If the configured user does not exist or is inactive, *no
 automations run at all* and a log line says so. There is deliberately no fallback to the system
