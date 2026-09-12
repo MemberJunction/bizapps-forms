@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf, CHECKS, CHECKER_ENV } from './require-green-before-git.mjs';
+import { isGitWriteCommand, decisionFor, classifyCheckResult, gitToplevelOf, CHECKS, CHECKER_ENV, collectFailures } from './require-green-before-git.mjs';
 
 const green = () => [];
 const red = () => [{ name: 'lint:ui', output: "hardcoded color: DefaultColor: '#6366f1'," }];
@@ -539,4 +539,80 @@ test('each shipped descriptor still reports its checker\'s real failure as a fai
 test('checkers are spawned with colour turned off at the source', () => {
     assert.equal(CHECKER_ENV.FORCE_COLOR, '0', 'FORCE_COLOR=0 is what actually suppresses turbo');
     assert.equal(CHECKER_ENV.NO_COLOR, '1', 'NO_COLOR is the convention other checkers honour');
+});
+
+// ── A PROVEN FAILURE MUST SURVIVE A LATER CHECKER THAT COULD NOT RUN ─────────────────────────────
+// Found by the PR gauntlet's adversarial review on #197, then reproduced against the real hook.
+//
+// `runChecks` walks the checks in order and pushes each failure into a local array. Any throw from
+// `classifyCheckResult` propagated straight out of that loop, so the array — and every violation
+// already proven — died with the stack frame, and `decisionFor`'s catch built its `ask` from the
+// thrown message alone. With a hardcoded colour in the tree AND a turbo that cannot resolve its
+// platform binary, the base returned `deny` quoting `#6366f1`; the branch returned `ask` and never
+// mentioned the colour at all. A definitively red tree stopped being refused.
+//
+// The two new throws this PR adds are what made it reachable: before them a throw meant a rare
+// spawn-level failure, and one of them now fires on exactly the #179 incident — the moment a
+// developer is most likely to also be holding a red tree.
+//
+// Nothing could test this before: `runChecks` is not exported, so the suite could only stub it as
+// wholly green, wholly red or wholly unrunnable, and the mixed run had no seam to reach. That is
+// why `collectFailures` exists — the accumulation across checks is now its own named thing.
+const MIXED = {
+    'lint:ui': {
+        status: 1,
+        stdout: 'UI token gate\nScanned 198 file(s) under: packages/Angular/src\n\n' +
+            '[color] hardcoded-color gate: 1 violation(s)\n' +
+            '  packages/Angular/src/a.css:1  color: #6366f1;\n\nFAIL — 1 UI gate violation(s).',
+        stderr: '',
+    },
+    'typecheck': {
+        status: 1,
+        stdout: '',
+        stderr: 'Turborepo failed to start.\nWe did not find any binaries on this system that match.',
+    },
+};
+
+test('a proven failure survives a later checker that could not run', () => {
+    const failures = collectFailures(CHECKS, (check) => MIXED[check.name]);
+    assert.equal(failures.length, 2, 'both the proven failure and the unrunnable checker are reported');
+    assert.match(failures.find((f) => f.name === 'lint:ui').output, /#6366f1/);
+    assert.match(failures.find((f) => f.name === 'typecheck').output, /NOT RUN/);
+});
+
+test('a tree with a proven violation is denied even when another checker could not run', () => {
+    const { decision, reason } = decisionFor({
+        command: 'git commit -m x',
+        runChecks: () => collectFailures(CHECKS, (check) => MIXED[check.name]),
+    });
+    assert.equal(decision, 'deny', 'a known-red tree is refused, not merely queried');
+    assert.match(reason, /#6366f1/, 'the proof of redness reaches the human');
+});
+
+// The pair: "return the failures instead of throwing" must not become "never ask again". With
+// NOTHING proven, an unrunnable checker still throws, and the ask message is unchanged — the
+// original error object is rethrown rather than a summary of it.
+test('an unrunnable checker with nothing else failing still throws, so the decision stays ask', () => {
+    const greenThenBroken = {
+        'lint:ui': { status: 0, stdout: 'Scanned 198 file(s) under: x\nPASS — no UI gate violations.', stderr: '' },
+        'typecheck': MIXED['typecheck'],
+    };
+    assert.throws(
+        () => collectFailures(CHECKS, (check) => greenThenBroken[check.name]),
+        /without ever reaching a verdict/,
+    );
+    const { decision, reason } = decisionFor({
+        command: 'git commit -m x',
+        runChecks: () => collectFailures(CHECKS, (check) => greenThenBroken[check.name]),
+    });
+    assert.equal(decision, 'ask');
+    assert.match(reason, /Could not run the pre-commit checks/);
+});
+
+test('an all-green run is still an empty failure list', () => {
+    const allGreen = {
+        'lint:ui': { status: 0, stdout: 'Scanned 198 file(s) under: x\nPASS — no UI gate violations.', stderr: '' },
+        'typecheck': { status: 0, stdout: ' Tasks:    9 successful, 9 total', stderr: '' },
+    };
+    assert.deepEqual(collectFailures(CHECKS, (check) => allGreen[check.name]), []);
 });

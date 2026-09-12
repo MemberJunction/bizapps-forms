@@ -366,20 +366,65 @@ function runChecks() {
         if (!existsSync(entry)) throw new Error(`${label} not found at ${entry}`);
     }
 
+    return collectFailures(resolved, (check) => spawnSync(process.execPath, [check.entry, ...check.args], {
+        cwd: PROJECT_DIR,
+        encoding: 'utf8',
+        shell: false,
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: CHECK_TIMEOUT_MS,
+        env: { ...process.env, ...CHECKER_ENV },
+    }));
+}
+
+/**
+ * What a whole RUN of checks meant, given a way to run one. Exported, and separated from
+ * `runChecks` deliberately.
+ *
+ * ── WHY A THROW MUST NOT DISCARD WHAT IS ALREADY PROVEN ─────────────────────────────────────────
+ * This loop used to live inline in `runChecks`, pushing into a local array with no `catch`. Any
+ * throw from `classifyCheckResult` propagated straight out, so the array — and every violation
+ * already proven — died with the stack frame, and `decisionFor` built its `ask` from the thrown
+ * message alone. With a hardcoded colour in the tree AND a turbo that cannot resolve its platform
+ * binary, the answer was `ask`, naming only the broken checker and never mentioning the colour.
+ * A definitively red tree stopped being refused.
+ *
+ * The two throws added for #179 and #196 are what made that reachable: before them a throw meant a
+ * rare spawn-level failure, and one of them now fires on precisely the #179 incident — the moment a
+ * developer is most likely to ALSO be holding a red tree.
+ *
+ * So the two questions are kept apart. "Did anything fail?" is answered from evidence that survives;
+ * "could everything be checked?" is answered separately. A proven failure outranks an unrunnable
+ * checker, because the tree is known-red either way and `deny` says so with the proof attached,
+ * while `ask` throws the proof away. The unrunnable checker is still reported — under its own name,
+ * marked NOT RUN, so a partial verdict is never dressed up as a complete one.
+ *
+ * With nothing proven, the original error is RETHROWN rather than summarised, so the `ask` a broken
+ * install produces is byte-identical to what it was before this function existed.
+ *
+ * It is exported because nothing could test this: `runChecks` is not exported, so the suite could
+ * only stub it wholly green, wholly red or wholly unrunnable, and the mixed run had no seam to
+ * reach. That is the same shape as the untested check descriptors above — a thing that ships,
+ * asserted by nothing.
+ */
+export function collectFailures(checks, runOne) {
     const failures = [];
-    for (const check of resolved) {
-        const result = spawnSync(process.execPath, [check.entry, ...check.args], {
-            cwd: PROJECT_DIR,
-            encoding: 'utf8',
-            shell: false,
-            maxBuffer: 32 * 1024 * 1024,
-            timeout: CHECK_TIMEOUT_MS,
-            env: { ...process.env, ...CHECKER_ENV },
-        });
-        const failure = classifyCheckResult(check, result);
-        if (failure) failures.push(failure);
+    const unrunnable = [];
+    for (const check of checks) {
+        try {
+            const failure = classifyCheckResult(check, runOne(check));
+            if (failure) failures.push(failure);
+        } catch (error) {
+            unrunnable.push({ name: check.name, error });
+        }
     }
-    return failures;
+    if (failures.length > 0) {
+        return [
+            ...failures,
+            ...unrunnable.map(({ name, error }) => ({ name, output: `NOT RUN — ${error.message}` })),
+        ];
+    }
+    if (unrunnable.length > 0) throw unrunnable[0].error;
+    return [];
 }
 
 // Same argv comparison the other gates use rather than `import.meta.main`, which is Node 24+.
