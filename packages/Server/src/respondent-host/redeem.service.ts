@@ -21,6 +21,7 @@ import { LogError, LogStatus, type RunViewParams, type RunViewResult, type UserI
 import { quoteSqlString } from '@mj-biz-apps/forms-entities';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
+import { forwardableAddress } from '../http/request-identity.js';
 import { publishedVersionFilter } from '../public-submit/definition-loader.service.js';
 import { distributionWindowRefusal } from '../public-submit/distribution-window.js';
 import { FORM_DISTRIBUTION_ENTITY, FORM_VERSION_ENTITY } from '../public-submit/entity-names.js';
@@ -533,15 +534,23 @@ async function postRedeem(
  * either way; Express simply ignores the header and core keeps counting on its own peer.
  *
  * No address means no header. An empty or invented value would be worse than silence, because
- * Express would parse it and core would bucket and audit the fiction.
+ * Express would parse it and core would bucket and audit the fiction — and that promise is only
+ * kept because {@link forwardableAddress} decides what counts as an address here. A truthiness
+ * check alone let two shapes through that a bucket key absorbs harmlessly and a REAL address
+ * cannot: a proxy-appended source port, which gives one caller a fresh bucket in core's limiter on
+ * every connection; and anything over 64 characters, which core's `NVARCHAR(64)` audit column
+ * rejects on a best-effort write, so the redemption is minted with no audit row at all. The
+ * resolved peer is still hashed and bucketed by Forms exactly as before — this guard governs only
+ * what we are willing to ASSERT to another service.
  */
 function forwardedHeaders(clientIp: string | undefined): Record<string, string> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     accept: 'application/json',
   };
-  if (clientIp) {
-    headers['x-forwarded-for'] = clientIp;
+  const address = forwardableAddress(clientIp);
+  if (address) {
+    headers['x-forwarded-for'] = address;
   }
   return headers;
 }

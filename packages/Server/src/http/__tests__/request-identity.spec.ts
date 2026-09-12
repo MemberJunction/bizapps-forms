@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   currentRequestIdentity,
+  forwardableAddress,
   hashClientIp,
   resolveClientIp,
   runWithRequestIdentity,
@@ -114,6 +115,73 @@ describe('runWithRequestIdentity', () => {
     );
 
     expect(seen).toEqual({ ip: '203.0.113.7', ipHash: 'hash-7' });
+  });
+});
+
+// C-A (gauntlet #207, F3 + F1). `resolveClientIp` returns the X-Forwarded-For entry with `.trim()`
+// only: every sanitiser this module owns — `stripSourcePort`, IPv6 zone removal, octet
+// canonicalisation, unparseable handling — lives inside `normalizeIpForKeying`, which is reachable
+// only from `hashClientIp`. That asymmetry was inert while the raw value never left the middleware.
+// It does not leave it any more: the redeem forwards it to core AS AN ADDRESS, where it becomes a
+// rate-limit key and an audited column. Two measured consequences of the one missing guard:
+//   F3  `203.0.113.7:52431` -> core buckets per SOURCE PORT, so its 20/min cap never accumulates
+//       (verified against express-rate-limit's real default key generator)
+//   F1  a >64-character value -> core's `NVARCHAR(64)` audit write fails and the redemption row is
+//       silently never written, while the session is still minted
+describe('forwardableAddress — what may be sent to core as an address', () => {
+  it('passes an ordinary IPv4 address through', () => {
+    expect(forwardableAddress('198.51.100.7')).toBe('198.51.100.7');
+  });
+
+  it('passes an ordinary IPv6 address through', () => {
+    expect(forwardableAddress('2001:db8::1')).toBe('2001:db8::1');
+  });
+
+  it('strips a source port some proxies append, rather than dropping the address', () => {
+    // The address is still good; only the port is noise. Dropping it entirely would throw away a
+    // correct respondent identity on Azure App Service, which writes this shape.
+    expect(forwardableAddress('203.0.113.7:52431')).toBe('203.0.113.7');
+  });
+
+  it('gives the SAME answer whatever ephemeral port is attached', () => {
+    // This is the defect itself: core keys its redeem cap on what we send, so a value that changes
+    // per connection hands one caller an unlimited supply of buckets.
+    expect(forwardableAddress('203.0.113.7:52431')).toBe(forwardableAddress('203.0.113.7:9001'));
+  });
+
+  it('strips an IPv6 zone index, which is local to the sender and meaningless to core', () => {
+    expect(forwardableAddress('fe80::1%eth0')).toBe('fe80::1');
+  });
+
+  it('strips the brackets from a bracketed IPv6 address with a port', () => {
+    expect(forwardableAddress('[2001:db8::1]:443')).toBe('2001:db8::1');
+  });
+
+  it('refuses a value that is not an address at all', () => {
+    expect(forwardableAddress('not-an-address')).toBeUndefined();
+  });
+
+  it('refuses an over-long value, which core cannot store and would drop the audit row for', () => {
+    expect(forwardableAddress('x'.repeat(300))).toBeUndefined();
+  });
+
+  it('refuses punctuation and a lone dot', () => {
+    expect(forwardableAddress('abc;def=ghi')).toBeUndefined();
+    expect(forwardableAddress('.')).toBeUndefined();
+  });
+
+  it('refuses an absent or empty value without inventing one', () => {
+    expect(forwardableAddress(undefined)).toBeUndefined();
+    expect(forwardableAddress('   ')).toBeUndefined();
+  });
+
+  it('never returns a value longer than core\'s NVARCHAR(64) audit column', () => {
+    // A postcondition on the whole function rather than on one input: whatever it lets through is
+    // storable, so the F1 shape cannot come back through some other spelling.
+    for (const raw of ['198.51.100.7', '2001:db8::1', '203.0.113.7:52431', 'fe80::1%eth0', '[2001:db8::1]:443']) {
+      const out = forwardableAddress(raw);
+      expect(out && out.length).toBeLessThanOrEqual(64);
+    }
   });
 });
 

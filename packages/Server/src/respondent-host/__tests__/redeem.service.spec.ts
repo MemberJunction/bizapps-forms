@@ -913,3 +913,58 @@ describe('the address the door forwards to core', () => {
     expect(sent[0].headers['x-forwarded-for']).toBe('198.51.100.9');
   });
 });
+
+// C-A (gauntlet #207). The door's own docstring promises that "an empty or invented value would be
+// worse than silence, because Express would parse it and core would bucket and audit the fiction".
+// Until now only the EMPTY half was enforced (`if (clientIp)`), so a value that was not an address
+// went straight through. These pin the other half, on the wire, where core would read it.
+describe('the door never hands core something that is not an address', () => {
+  it('strips a source port before forwarding, keeping the address', async () => {
+    // Core's limiter takes req.ip verbatim, so a port would give one caller a fresh bucket per
+    // connection — the bypass `stripSourcePort` exists to close, one layer down.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '203.0.113.7:52431' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('203.0.113.7');
+  });
+
+  it('omits the header for an over-long value rather than costing core its audit row', async () => {
+    // MagicLinkRedemption.IPAddress is NVARCHAR(64) and core's audit write is best-effort: it logs
+    // the rejection and mints the session anyway, so the redemption leaves NO row at all.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: 'x'.repeat(300) }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('omits the header for a value that is not an address at all', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: 'not-an-address' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('still forwards a clean address, so the fix it exists for keeps working', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('198.51.100.7');
+  });
+
+  it('applies the same guard on the RESUME leg — one door, one rule', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemRawToken(
+      { redeemUrl: 'http://127.0.0.1:4000/magic-link/redeem', fetchImpl, clientIp: '203.0.113.7:52431' },
+      'mj_ml_raw',
+      'customer-survey',
+    );
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('203.0.113.7');
+  });
+});
+

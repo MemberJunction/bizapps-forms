@@ -20,6 +20,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 
 import { sessionHashSalt } from './hash-salt.js';
 
@@ -72,6 +73,41 @@ function forwardedForEntries(raw: string | string[] | undefined): string[] {
  */
 export function hashClientIp(ip: string): string {
   return createHash('sha256').update(`${ipHashSalt()}:ip:${normalizeIpForKeying(ip)}`).digest('hex');
+}
+
+/**
+ * The address we are willing to hand to ANOTHER SERVICE as an address, or nothing.
+ *
+ * `resolveClientIp` returns an `X-Forwarded-For` entry trimmed and otherwise untouched, because
+ * for its original purpose that was enough: the value went straight into {@link hashClientIp},
+ * whose {@link normalizeIpForKeying} does all the cleaning, and an unparseable entry still keys a
+ * perfectly good bucket. Nothing else ever saw it.
+ *
+ * The server-side redeem changed that. It forwards the resolved peer to core, which parses it as
+ * an address, buckets its per-IP redeem cap on it and writes it to `MagicLinkRedemption.IPAddress`.
+ * Along that path the value is no longer an opaque key — it is a claim about the world, and two
+ * shapes that a bucket key absorbs harmlessly do real damage:
+ *
+ *  - **A source port.** Some proxies append one (see {@link stripSourcePort}). Core's limiter takes
+ *    `req.ip` verbatim, so `203.0.113.7:52431` is a DIFFERENT bucket on every connection — one
+ *    caller with an unlimited supply of them. That is the exact bypass this module already exists
+ *    to close, reproduced one layer down in somebody else's limiter.
+ *  - **Anything over 64 characters.** `MagicLinkRedemption.IPAddress` is `NVARCHAR(64)`; core's
+ *    audit write is best-effort, so it logs the rejection and mints the session anyway — the
+ *    redemption simply leaves no audit row at all.
+ *
+ * So this is the guard at the boundary, and it is the ONLY one: `ipHash` deliberately still keys on
+ * whatever was seen, because refusing to bucket an unparseable caller would hand them free traffic
+ * in the name of tidiness. Returning `undefined` means the header is omitted and core falls back to
+ * its own peer for that one request — a degradation, never an invented value.
+ */
+export function forwardableAddress(rawIp: string | undefined): string | undefined {
+  const trimmed = rawIp?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const candidate = stripSourcePort(trimmed).split('%')[0];
+  return isIP(candidate) ? candidate : undefined;
 }
 
 /**
