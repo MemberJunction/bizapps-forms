@@ -101,6 +101,14 @@ export const MUTANTS = [
     suite: 'packages/Server',
   },
   {
+    name: 'resume/cross-link-draft-admitted',
+    behaviour: 'a draft whose KNOWN link is not the slug in hand is refused a pointer',
+    file: 'packages/Server/src/respondent-host/device-resume.service.ts',
+    find: "  if (rowLink !== '' && rowLink !== foldId(distribution.id)) {",
+    replace: "  if (false && rowLink !== '' && rowLink !== foldId(distribution.id)) {",
+    suite: 'packages/Server',
+  },
+  {
     name: 'snapshot/malformed-question-dropped-instead-of-failing',
     behaviour: 'one malformed QUESTION fails the whole snapshot rather than silently vanishing from the form',
     file: 'packages/Server/src/public-submit/snapshot-parser.ts',

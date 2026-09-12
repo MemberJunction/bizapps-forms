@@ -412,6 +412,48 @@ describe('runRemember', () => {
     expect(rec.mints).toEqual([ROW_ID]);
   });
 
+  it('refuses a draft that came through a DIFFERENT link than the slug in the URL', async () => {
+    // The slug's distribution decides two things — `allowDeviceResume` and the invite's `closeAt` —
+    // while the only link check compared the row against the caller's JWT scope, never against the
+    // distribution actually in hand. Nothing upstream binds the JWT's scope to the URL's slug, so a
+    // draft belonging to link A, reached at link B's URL with A's own JWT, was minted under B's
+    // switch and B's expiry: A's `AllowDeviceResume=0` bypassed, and a credential outliving A.
+    const { deps, rec } = makeDeps({ distribution: { id: 'a-different-link' } });
+
+    const out = await runRemember(deps, { ...args, scopeId: DIST_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('refuses the cross-link draft even for a RESUMED session, whose scope names the row', async () => {
+    // The response-scoped exemption is about which SESSION may act, not about which FORM this is.
+    // A verified scope proves the caller owns the row; it says nothing about the slug they arrived at.
+    const { deps, rec } = makeDeps({ distribution: { id: 'a-different-link' } });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(403);
+    expect(rec.mints).toHaveLength(0);
+  });
+
+  it('still mints for a resumed session on a row whose link was never recorded', async () => {
+    // NO REGRESSION FOR HISTORICAL ROWS. `FormDistributionID` is nullable and was added by the #138
+    // migration, so every draft created before it has no link at all — 1484 of 1487 rows in the dev
+    // database at the time of writing. Demanding a link match from those would refuse virtually
+    // every existing draft and re-break #193 far more widely than the bug it fixed. An unknown link
+    // stays exactly as it was: refused for a link-scoped caller, allowed for one the row names.
+    const { deps, rec } = makeDeps({
+      distribution: { id: 'a-different-link' },
+      response: { formDistributionId: undefined },
+    });
+
+    const out = await runRemember(deps, { ...args, sessionId: 'sess-second', scopeId: ROW_ID });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+  });
+
   it('retires the pointer it supersedes, leaving ONE live invite per draft', async () => {
     // `pointerConflict` calls the cookie naming THIS draft "the ordinary re-mint" and waves it
     // through — but the mint that follows only ever INSERTED, so the invite the cookie held stayed

@@ -252,7 +252,7 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
     // that can no longer change.
     return { status: 409 };
   }
-  if (!ownsDraft(response, args)) {
+  if (!ownsDraft(response, args, distribution)) {
     LogError(`[Forms] refused to remember response ${args.responseId}: the caller does not own it.`);
     return { status: 403 };
   }
@@ -293,23 +293,47 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
  * once per sitting. A doc comment asserting equivalence is what hid the omission; the call enforces
  * it instead.
  *
- * The second question is this route's own, and it is the design review's finding 2: which LINK is
- * this caller admitted to? A distribution-scoped JWT must match the link the row came through, or
- * the pointer it mints would resume into a form its session was never let into — and an UNKNOWN
- * link on the row is a refusal, never a pass. A response-scoped caller needs no such match: their
- * session was minted from an invite naming this very row, which is strictly stronger evidence than
- * a link comparison, and demanding a link as well would refuse the very sitting it was issued for.
+ * THE SECOND QUESTION IS WHICH FORM THIS IS, and it has two halves that are easy to conflate.
+ *
+ * (a) Does the row belong to the link whose page this is? `runRemember` resolves its distribution
+ *     from the URL SLUG and uses it for two decisions — `allowDeviceResume` and the invite's
+ *     `closeAt` — but nothing upstream binds a caller's JWT scope to the slug they arrived at
+ *     (`matchResumeRoute` reads the path; the scope comes off the verified token). So without this
+ *     check a draft belonging to link A, reached at link B's URL, was minted under B's switch and
+ *     B's expiry: A's `AllowDeviceResume=0` bypassed, and a credential outliving A's close.
+ *     It binds the row to the DISTRIBUTION IN HAND, which is the thing those two decisions came
+ *     from — comparing against the caller's scope, as this did before, reconciles nothing.
+ *
+ *     Only when the row's link is KNOWN. `FormDistributionID` is nullable and arrived with the #138
+ *     migration, so every draft older than it has none — the overwhelming majority of existing rows.
+ *     Demanding a match from those would refuse nearly every draft in flight and re-break #193 far
+ *     more widely than the bug it fixed. An unknown link keeps exactly its old meaning: a refusal
+ *     for a link-scoped caller, no obstacle to one the row itself names.
+ *
+ * (b) Is this caller admitted to that link? The design review's finding 2. A distribution-scoped
+ *     JWT must match the link the row came through. A response-scoped caller needs no such match:
+ *     their session was minted from an invite naming this very row, which is strictly stronger
+ *     evidence than a link comparison, and demanding a link as well would refuse the very sitting
+ *     it was issued for. That exemption is about WHICH SESSION may act — it never exempted them
+ *     from (a), which is about which form they are standing in front of.
  */
-function ownsDraft(response: ResumeResponseRow, args: RememberArgs): boolean {
+function ownsDraft(
+  response: ResumeResponseRow,
+  args: RememberArgs,
+  distribution: ResumeDistribution,
+): boolean {
   const row = { ID: response.id, AnonymousSessionID: response.anonymousSessionId };
   const caller = { sessionId: args.sessionId, scopedResponseId: args.scopeId };
   if (!responseIsOurs(row, caller)) {
     return false;
   }
+  const rowLink = foldId(response.formDistributionId);
+  if (rowLink !== '' && rowLink !== foldId(distribution.id)) {
+    return false;
+  }
   if (scopeNamesResponse(row, caller)) {
     return true;
   }
-  const rowLink = foldId(response.formDistributionId);
   return rowLink !== '' && rowLink === foldId(args.scopeId);
 }
 
