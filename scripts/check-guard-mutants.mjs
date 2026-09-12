@@ -7,21 +7,35 @@
  * asked it of the code the repo ships. Asked, the answer was seventeen survivors, every one in a
  * source-text spec: the client-write refusal on the credential columns deleted outright, the
  * delete/revoke order reversed, both halves of "open" dropped — suite green throughout. This
- * generalises the same instrument: apply one textual mutation to one source file, run that
- * package's vitest suite, restore, and require the run to have FAILED. A mutant that stays green
+ * generalises the same instrument: apply one textual mutation to one source file, run the spec
+ * files that cover it, restore, and require the run to have FAILED. A mutant that stays green
  * fails the gate and names the guard.
  *
  * MANIFEST discipline, inherited from the sibling harness:
  *   - `find` must match the source EXACTLY once. A drifted anchor is NOT APPLIED and fatal —
  *     a silently unapplied mutant reads exactly like a healthy one.
- *   - The package suite must pass unmutated first (BASELINE). A suite that is red for another
- *     reason would report every mutant as killed and measure nothing.
+ *   - `killedBy` must name the spec file(s) that actually fail under the mutation, relative to the
+ *     suite. Deriving it is not guesswork: apply the mutant, run the suite under
+ *     `--reporter=json`, and read back which files failed. A stale entry matches no test file and
+ *     the run CRASHES rather than passing quietly, and check-guard-mutants.spec.mjs asserts every
+ *     one of them still exists at PR time, for free.
+ *   - Those spec files must pass unmutated first (BASELINE). A suite that is red for another
+ *     reason would report every mutant as killed and measure nothing. The baseline covers exactly
+ *     the files the mutants use, because a test no mutant runs cannot skew a verdict either way.
  *   - A run that produces no vitest summary is CRASHED, not killed. A compile error in the
  *     mutated file also reads as a failed run, so every `replace` below is code that COMPILES —
  *     a mutant killed by tsc would be killed for the wrong reason.
  *
- * Cost: one package suite per mutant. CoreEntitiesServer's is ~0.3s, Angular's a few seconds.
- * Serial on purpose — a dozen mutants is about a minute and a worker pool is more harness to own.
+ * Cost: one run of the spec files named by `killedBy` per mutant, serial. Serial is still the
+ * right call — a worker pool is more harness to own, and two mutants cannot share a checkout
+ * anyway because each is an in-place edit to the source tree they both read.
+ *
+ * `killedBy` is what keeps serial affordable, and it was not always there. This gate ran each
+ * mutant against its ENTIRE package suite, which on a CI runner is 37.5s for packages/Server —
+ * 15 mutants and a baseline deep, 600s, two thirds of the whole `build-and-test` job and the
+ * reason it took fifteen minutes. Almost none of that was testing: Server's 996 tests run in
+ * 800ms, and the other ~89s is vitest collecting 78 spec files, of which one or two can possibly
+ * observe an edit to one source file.
  *
  * Node stdlib only and no build step, like its sibling, so CI runs it without an install step of
  * its own — but the package suites it runs DO need the workspace built, since they import each
@@ -49,6 +63,11 @@ export const MUTANTS = [
     find: "  if (owner === '' || owner === foldId(caller.sessionId)) {",
     replace: "  if (true || owner === '' || owner === foldId(caller.sessionId)) {",
     suite: 'packages/Server',
+    killedBy: [
+      'src/public-submit/__tests__/response-scope-ownership.spec.ts',
+      'src/public-submit/__tests__/session-ownership.spec.ts',
+      'src/respondent-host/__tests__/device-resume.service.spec.ts',
+    ],
   },
   {
     name: 'scope/absent-credential-more-permissive-than-a-wrong-one',
@@ -57,6 +76,10 @@ export const MUTANTS = [
     find: "  if (owner === '' || owner === foldId(caller.sessionId)) {",
     replace: "  if (owner === '' || foldId(caller.sessionId) === '' || owner === foldId(caller.sessionId)) {",
     suite: 'packages/Server',
+    killedBy: [
+      'src/public-submit/__tests__/response-scope-ownership.spec.ts',
+      'src/public-submit/__tests__/session-ownership.spec.ts',
+    ],
   },
   {
     name: 'scope/blank-jwt-scope-matches-nothing',
@@ -65,6 +88,7 @@ export const MUTANTS = [
     find: "  return scope !== '' && scope === foldId(response.ID);",
     replace: "  return scope === foldId(response.ID);",
     suite: 'packages/Server',
+    killedBy: ['src/public-submit/__tests__/response-scope-ownership.spec.ts'],
   },
   // --- respondent-host: the two defects the #138 design review found -------------------------
   {
@@ -74,6 +98,7 @@ export const MUTANTS = [
     find: "  if (errorCode === 'consumed') {\n    return { status: 410, reason: 'open-elsewhere' };\n  }",
     replace: "  if (errorCode === 'consumed') {\n    return { status: 410, reason: 'open-elsewhere', setCookie: deps.clearCookie() };\n  }",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/device-resume.service.spec.ts'],
   },
   {
     name: 'resume/remember-requires-the-owning-session-id',
@@ -82,6 +107,7 @@ export const MUTANTS = [
     find: "  if (!args.responseId || !args.sessionId.trim()) {",
     replace: "  if (!args.responseId) {",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/device-resume.service.spec.ts'],
   },
   {
     name: 'resume/pointer-to-a-live-draft-is-not-replaced',
@@ -90,6 +116,7 @@ export const MUTANTS = [
     find: "  const held = await heldPointer(deps, args);\n  if (held.conflict) {",
     replace: "  const held = await heldPointer(deps, args);\n  if (held.conflict && false) {",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/device-resume.service.spec.ts'],
   },
   // --- public-submit: a half-understood snapshot is never served to a respondent ------------
   {
@@ -99,6 +126,7 @@ export const MUTANTS = [
     find: "    await deps.revokeInvite({ inviteId: held.supersededInviteId, responseId: args.responseId });",
     replace: "    void held.supersededInviteId;",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/device-resume.service.spec.ts'],
   },
   {
     name: 'resume/cross-link-draft-admitted',
@@ -107,6 +135,7 @@ export const MUTANTS = [
     find: "  if (rowLink !== '' && rowLink !== foldId(distribution.id)) {",
     replace: "  if (false && rowLink !== '' && rowLink !== foldId(distribution.id)) {",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/device-resume.service.spec.ts'],
   },
   {
     name: 'snapshot/malformed-question-dropped-instead-of-failing',
@@ -115,6 +144,7 @@ export const MUTANTS = [
     find: '    if (!q) {\n      return undefined;\n    }',
     replace: '    if (!q) {\n      continue;\n    }',
     suite: 'packages/Server',
+    killedBy: ['src/public-submit/__tests__/snapshot-parser.spec.ts'],
   },
   // --- respondent-host door: the refusals that happen BEFORE a credential is minted ----------
   {
@@ -124,6 +154,7 @@ export const MUTANTS = [
     find: '  if (published === undefined) {\n    return { ok: false, reason: \'redeem-failed\' };\n  }',
     replace: '  if (false) {\n    return { ok: false, reason: \'redeem-failed\' };\n  }',
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/redeem.service.spec.ts'],
   },
   {
     name: 'door/missing-credential-outranked-by-the-calendar',
@@ -132,6 +163,7 @@ export const MUTANTS = [
     find: "  const rawToken = dist.PublicLinkToken;\n  if (!rawToken) {\n    return { verdict: 'refuse', reason: 'no-token' };\n  }",
     replace: "  const rawToken = dist.PublicLinkToken ?? 'guard-neutralised';",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/redeem.service.spec.ts'],
   },
   {
     name: 'door/opening-time-not-checked-for-being-future',
@@ -140,6 +172,7 @@ export const MUTANTS = [
     find: '  const knowsWhen = opensAt !== undefined && !Number.isNaN(opensAt.getTime()) && opensAt > now;',
     replace: '  const knowsWhen = opensAt !== undefined && !Number.isNaN(opensAt.getTime());',
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/middleware-error-view.spec.ts'],
   },
   {
     name: 'door/retry-after-dropped',
@@ -148,6 +181,7 @@ export const MUTANTS = [
     find: "  if (view.retryAfter) {",
     replace: "  if (false) {",
     suite: 'packages/Server',
+    killedBy: ['src/respondent-host/__tests__/middleware-error-view.spec.ts'],
   },
   // --- FormDistributionEntityServer: the credential columns are server-owned -----------------
   {
@@ -157,6 +191,7 @@ export const MUTANTS = [
     find: '  private refuseClientCredentialWrites(): void {\n    if (this.credentialWriteInFlight) {',
     replace: '  private refuseClientCredentialWrites(): void {\n    if (true) { return; }\n    if (this.credentialWriteInFlight) {',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/token-rule-inverted',
@@ -165,6 +200,7 @@ export const MUTANTS = [
     find: "    if (token?.Dirty && token.Value !== null && token.Value !== '') {",
     replace: "    if (token?.Dirty && (token.Value === null || token.Value === '')) {",
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/invite-id-restored-from-old-value',
@@ -173,6 +209,7 @@ export const MUTANTS = [
     find: '    if (invite?.Dirty) {',
     replace: '    if (invite?.Dirty && !invite.OldValue) {',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/create-strip',
@@ -181,6 +218,7 @@ export const MUTANTS = [
     find: '      if (this.MagicLinkInviteID || this.PublicLinkToken) {',
     replace: '      if (false) {',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/reentrancy-guard-finally',
@@ -189,6 +227,7 @@ export const MUTANTS = [
     find: '    } finally {\n      this.credentialWriteInFlight = false;\n    }',
     replace: '    } finally {\n      /* wedged */\n    }',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/delete-before-revoke',
@@ -199,6 +238,7 @@ export const MUTANTS = [
     find: "        if (!(await super.Delete(options))) {\n          return false;\n        }\n        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);",
     replace: "        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);\n        if (!(await super.Delete(options))) {\n          return false;\n        }",
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/delete-revoke-outside-transaction',
@@ -207,6 +247,7 @@ export const MUTANTS = [
     find: "        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser, host);",
     replace: "        const revoked = await minter.RevokeAnonymousInvite({ inviteId, resourceId: distributionId }, contextUser);",
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/delete-revoke-failure-swallowed',
@@ -215,6 +256,7 @@ export const MUTANTS = [
     find: "        if (!revoked.success) {\n          throw new Error(revoked.message ?? 'unknown error');\n        }",
     replace: "        if (!revoked.success) {\n          LogError(revoked.message ?? 'unknown error');\n        }",
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   // --- FormDistributionEntityServer: a save carries the STORED pair, and writers take turns ------
   {
@@ -224,6 +266,7 @@ export const MUTANTS = [
     find: "  private async adoptStoredCredential(): Promise<void> {\n    if (this.credentialWriteInFlight || !this.IsSaved) {",
     replace: "  private async adoptStoredCredential(): Promise<void> {\n    if (true) { return; }\n    if (this.credentialWriteInFlight || !this.IsSaved) {",
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/adopt-drops-clear',
@@ -232,6 +275,7 @@ export const MUTANTS = [
     find: '    this.PublicLinkToken = clearRequested ? null : stored.PublicLinkToken;',
     replace: '    this.PublicLinkToken = stored.PublicLinkToken;',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/turns-not-taken',
@@ -240,6 +284,7 @@ export const MUTANTS = [
     find: '    return takeTurn(this.ID, () => this.saveAndProvision(options));',
     replace: '    return this.saveAndProvision(options);',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   // --- FormDistributionEntityServer: the context is built from the columns of the same meaning --
   {
@@ -249,6 +294,7 @@ export const MUTANTS = [
     find: '          isActive: this.IsActive,',
     replace: '          isActive: true,',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   {
     name: 'hook/ctx-closeat-dropped',
@@ -257,6 +303,7 @@ export const MUTANTS = [
     find: '          closeAt: this.CloseAt,',
     replace: '          closeAt: null,',
     suite: 'packages/CoreEntitiesServer',
+    killedBy: ['src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts'],
   },
   // --- provision-runner: the reissue is one save ----------------------------------------------
   {
@@ -266,6 +313,10 @@ export const MUTANTS = [
     find: "    const revoked = await revokeInvite(ctx, minter, contextUser);\n    if (revoked !== 'revoked') {\n      return { result: revoked, inviteId: ctx.magicLinkInviteId ?? undefined };\n    }\n    return issueCredential(",
     replace: "    const revoked = await revokeInvite(ctx, minter, contextUser);\n    if (revoked !== 'revoked') {\n      return { result: revoked, inviteId: ctx.magicLinkInviteId ?? undefined };\n    }\n    await persistCredential(null);\n    return issueCredential(",
     suite: 'packages/CoreEntitiesServer',
+    killedBy: [
+      'src/magic-link/__tests__/FormDistributionEntityServer.behaviour.spec.ts',
+      'src/magic-link/__tests__/provision-runner.spec.ts',
+    ],
   },
   // --- distribution.service: "open" is both halves, and forced -------------------------------
   {
@@ -275,6 +326,7 @@ export const MUTANTS = [
     find: "    dist.Status = 'Active';\n    dist.IsActive = true;",
     replace: "    dist.Status = 'Active';",
     suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/distribution.service.behaviour.spec.ts'],
   },
   {
     name: 'service/open-not-forced',
@@ -283,6 +335,10 @@ export const MUTANTS = [
     find: '    options.IgnoreDirtyState = true;\n    return this.saveDist(dist, action, options);',
     replace: '    return this.saveDist(dist, action);',
     suite: 'packages/Angular',
+    killedBy: [
+      'src/lib/builder/distribution-manager.spec.ts',
+      'src/lib/builder/distribution.service.behaviour.spec.ts',
+    ],
   },
   {
     name: 'service/reissue-clears-invite-id',
@@ -291,6 +347,7 @@ export const MUTANTS = [
     find: "    dist.PublicLinkToken = null;\n    return this.saveDist(dist, 'reissue this link');",
     replace: "    dist.PublicLinkToken = null;\n    dist['MagicLinkInviteID'] = null;\n    return this.saveDist(dist, 'reissue this link');",
     suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/distribution.service.behaviour.spec.ts'],
   },
   // --- distribution-manager: the credential writes reload, and the fix button does something --
   {
@@ -300,6 +357,10 @@ export const MUTANTS = [
     find: '    await this.run(write);\n    await this.reload(true);',
     replace: '    await this.run(write);',
     suite: 'packages/Angular',
+    killedBy: [
+      'src/lib/builder/distribution-manager.behaviour.spec.ts',
+      'src/lib/builder/distribution-manager.spec.ts',
+    ],
   },
   {
     name: 'component/paused-fix-noop',
@@ -308,6 +369,7 @@ export const MUTANTS = [
     find: "      case 'paused':\n        // Warns for the same reason `pending` does: reopening asks the server to mint, and the\n        // hook is fail-soft, so \"turned it back on and got no web address\" is a real outcome the\n        // author would otherwise have to notice from the badge alone.\n        await this.runCredentialWrite(() => this.service.open(link));\n        this.warnIfStillUnissued(link.ID, 'issue');\n        return;",
     replace: "      case 'paused':\n        return;",
     suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/distribution-manager.behaviour.spec.ts'],
   },
   {
     name: 'component/warn-clobbers-save-error',
@@ -316,6 +378,7 @@ export const MUTANTS = [
     find: "  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {\n    if (this.actionError !== null) {",
     replace: "  private warnIfStillUnissued(linkId: string, wrote: 'issue' | 'reissue'): void {\n    if (false) {",
     suite: 'packages/Angular',
+    killedBy: ['src/lib/builder/distribution-manager.behaviour.spec.ts'],
   },
   // --- submit-pipeline: a bucket needs a caller, and a knockout row needs its screen ----------
   {
@@ -325,6 +388,7 @@ export const MUTANTS = [
     find: '  if (sessionIdentity(ctx.sessionId) || !identity) {',
     replace: '  if (true) {',
     suite: 'packages/Server',
+    killedBy: ['src/public-submit/__tests__/submit-pipeline.spec.ts'],
   },
   {
     name: 'pipeline/disqualifying-screen-not-recorded',
@@ -333,11 +397,26 @@ export const MUTANTS = [
     find: '        disqualifiedByScreenId: disqualifiedBy?.id,',
     replace: '        disqualifiedByScreenId: undefined,',
     suite: 'packages/Server',
+    killedBy: ['src/public-submit/__tests__/disqualification-gates.spec.ts'],
   },
 ];
 
+/**
+ * The spec files one suite's mutants are judged by, deduplicated — which is also exactly the set
+ * its baseline must prove green. A test no mutant ever runs cannot turn a SURVIVED into a KILLED,
+ * so it has no place in the measurement either way.
+ */
+export function killFilesFor(mutants, suite) {
+  return [...new Set(mutants.filter((m) => m.suite === suite).flatMap((m) => m.killedBy))].sort();
+}
+
 /** Apply `entry` to its file, run its suite, restore. Returns one of the four verdicts. */
 export function runMutant(entry, { repoRoot = REPO_ROOT, run = runSuite } = {}) {
+  if (!Array.isArray(entry.killedBy) || entry.killedBy.length === 0) {
+    // Not a fallback to the whole suite: that is the slow behaviour this field exists to remove,
+    // and it would come back silently on the one entry that forgot it.
+    throw new Error(`${entry.name}: killedBy must name at least one spec file that kills this mutant`);
+  }
   const path = join(repoRoot, entry.file);
   const original = readFileSync(path, 'utf-8');
   const occurrences = original.split(entry.find).length - 1;
@@ -346,7 +425,7 @@ export function runMutant(entry, { repoRoot = REPO_ROOT, run = runSuite } = {}) 
   }
   writeFileSync(path, original.replace(entry.find, entry.replace));
   try {
-    const result = run(join(repoRoot, entry.suite));
+    const result = run(join(repoRoot, entry.suite), entry.killedBy);
     if (result.crashed) return { verdict: 'CRASHED', detail: result.detail };
     return result.failed > 0
       ? { verdict: 'KILLED', detail: `${result.failed} failing` }
@@ -376,9 +455,20 @@ export function parseSuiteSummary(out) {
   return { crashed: false, failed: Number(summary[1] ?? 0), passed: Number(summary[2]) };
 }
 
-/** Run a package's vitest suite and read its summary line. */
-function runSuite(cwd) {
-  const res = spawnSync('npx', ['vitest', 'run', '--reporter=default'], {
+/**
+ * Run the named spec files of a package's vitest suite and read its summary line.
+ *
+ * `files` is not an optimisation bolted onto a full-suite runner — it IS the instrument. Vitest's
+ * per-file cost here is collection, not assertion: packages/Server spends ~90s collecting its 78
+ * spec files and 800ms running the 996 tests inside them. Handing it the one or two files that can
+ * observe the mutated source turns a 37.5s CI run into a ~4s one, and running fewer tests can only
+ * ever turn a KILLED into a SURVIVED — never the reverse — so the gate can only get stricter.
+ *
+ * A `files` entry matching no test file is not silent: vitest exits 1 with "No test files found"
+ * and no summary line, which `parseSuiteSummary` reports as CRASHED.
+ */
+function runSuite(cwd, files) {
+  const res = spawnSync('npx', ['vitest', 'run', '--reporter=default', ...files], {
     cwd,
     encoding: 'utf-8',
     timeout: SUITE_TIMEOUT_MS,
@@ -393,7 +483,7 @@ function runSuite(cwd) {
 function main() {
   const suites = [...new Set(MUTANTS.map((m) => m.suite))];
   for (const suite of suites) {
-    const baseline = runSuite(join(REPO_ROOT, suite));
+    const baseline = runSuite(join(REPO_ROOT, suite), killFilesFor(MUTANTS, suite));
     if (baseline.crashed || baseline.failed > 0) {
       console.error(`BASELINE FAILED for ${suite}: ${baseline.detail ?? `${baseline.failed} failing`} — nothing measured.`);
       process.exit(2);
@@ -424,13 +514,13 @@ function main() {
     }
     if (bad > stale) {
       console.error(
-        `\n❌ ${bad - stale} guard(s) can be neutralised with the suite green. ` +
+        `\n❌ ${bad - stale} guard(s) can be neutralised with their named spec green. ` +
           'Write the behavioural test each entry names.',
       );
     }
     process.exit(1);
   }
-  console.log(`\n✅ Guard-mutation check passed — all ${MUTANTS.length} load-bearing guards are killed by their package suite.`);
+  console.log(`\n✅ Guard-mutation check passed — all ${MUTANTS.length} load-bearing guards are killed by the spec each names.`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main();
