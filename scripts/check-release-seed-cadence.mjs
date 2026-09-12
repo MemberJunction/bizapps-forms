@@ -29,9 +29,11 @@
  *
  * WHY THE SECOND RULE EARNS ITS KEEP, when coverage already reads `metadata/`. Coverage compares
  * declared **ids** against shipped SQL, so it is structurally blind to an EDITED record whose id
- * already ships. That is not hypothetical: `V202608182130` ships the AI Designer prompt saying
- * `Signature`, `metadata/` now says `Doodle` (#97 renamed the type), the id is identical, and
- * coverage is green over it. Drift is the only one of the three checks that sees that.
+ * already ships. That is not hypothetical — it is what #111 was about: `V202608182130` shipped the
+ * AI Designer prompt saying `Signature`, `metadata/` had moved on to `Doodle` (#97 renamed the
+ * type), the id was identical throughout, and coverage stayed green over it. `V202609112116` — the
+ * consolidated seed that resolved #111 and replaced `V202608182130` — is what finally carried the
+ * correction to a host. Drift is the only one of the three checks that sees that class of gap.
  *
  * WHY IT IS NOT THE HASH MANIFEST #105 KILLED. The manifest stored hashes IN THE REPO, so
  * regenerating them was the way to make the gate quiet — and doing that without regenerating the
@@ -158,8 +160,11 @@ export function findUnconsolidatedSeedDeltas(repoRoot = REPO_ROOT, readState = r
             `${unreleased.length} unreleased Metadata_Sync migrations, but a release ships ONE consolidated seed (#105).\n` +
                 unreleased.map((f) => `      ${f}`).join('\n') +
                 `\n\n  None of these is in ${state.tag}, so none has reached a host and none is append-only history yet.\n` +
-                '  Fold them into one consolidated seed generated from a clean database at ' +
-                `${state.tag} (migrations/README.md), delete the per-PR deltas, and re-run.`,
+                '  Fold them into ONE consolidated seed, delete these per-PR deltas, and re-run.\n' +
+                '  Generate against the shipped chain at HEAD but WITHOUT the files listed above.\n' +
+                '  They are already applied on a plain `mj app install`, and a record one of them\n' +
+                '  created matches metadata/ exactly — so the push emits nothing for it, and deleting\n' +
+                '  the delta then strands it with no migration naming it. migrations/README.md.',
         );
     }
     return { problems, tag: state.tag, unreleased };
