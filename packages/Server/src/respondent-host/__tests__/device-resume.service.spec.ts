@@ -17,11 +17,13 @@ const OTHER_ROW_ID = '33910b9e-0000-4000-8000-000000000002';
 const TOKEN = 'mj_ml_cookie';
 const EMAILED_TOKEN = 'mj_ml_emailed';
 const OWNER_SESSION = 'sess-first';
+const HELD_INVITE_ID = 'e7c1b0a2-0000-4000-8000-0000000000aa';
 
 interface Recorder {
   redeems: string[];
   mints: string[];
   revokes: { responseId: string; deviceOnly: boolean }[];
+  revokedInvites: { inviteId: string; responseId: string }[];
 }
 
 interface DepsConfig {
@@ -37,7 +39,7 @@ interface DepsConfig {
 }
 
 function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recorder } {
-  const rec: Recorder = { redeems: [], mints: [], revokes: [] };
+  const rec: Recorder = { redeems: [], mints: [], revokes: [], revokedInvites: [] };
   const distribution: ResumeDistribution | undefined =
     config.distribution === null
       ? undefined
@@ -84,7 +86,14 @@ function makeDeps(config: DepsConfig = {}): { deps: DeviceResumeDeps; rec: Recor
     revoke: async (args) => {
       rec.revokes.push(args);
     },
-    inviteFor: async () => ({ ok: true, resourceId: config.inviteResourceId }),
+    inviteFor: async () => ({
+      ok: true,
+      resourceId: config.inviteResourceId,
+      inviteId: config.inviteResourceId ? HELD_INVITE_ID : undefined,
+    }),
+    revokeInvite: async (args) => {
+      rec.revokedInvites.push(args);
+    },
     scopeOf: () => config.scopeOf ?? ROW_ID,
     allowRequest: () => config.allow !== false,
     cookieFor: (token, maxAge) => `mjf_resume=${token}; Max-Age=${maxAge}`,
@@ -401,6 +410,44 @@ describe('runRemember', () => {
 
     expect(out.status).toBe(204);
     expect(rec.mints).toEqual([ROW_ID]);
+  });
+
+  it('retires the pointer it supersedes, leaving ONE live invite per draft', async () => {
+    // `pointerConflict` calls the cookie naming THIS draft "the ordinary re-mint" and waves it
+    // through — but the mint that follows only ever INSERTED, so the invite the cookie held stayed
+    // Active, UseCount=0, and genuinely redeemable for up to 15 days. The owner never spends it
+    // again, so a copy of it redeems invisibly instead of surfacing as the "visible failure at the
+    // owner's next reopen" that the one-use rotation is supposed to buy (resume-deps.ts:65-67).
+    const { deps, rec } = makeDeps({ inviteResourceId: ROW_ID });
+
+    const out = await runRemember(deps, {
+      ...args,
+      sessionId: 'sess-second',
+      scopeId: ROW_ID,
+      cookieToken: TOKEN,
+    });
+
+    expect(out.status).toBe(204);
+    expect(rec.mints).toEqual([ROW_ID]);
+    expect(rec.revokedInvites).toEqual([{ inviteId: HELD_INVITE_ID, responseId: ROW_ID }]);
+  });
+
+  it('retires nothing when the mint fails, so a failed re-mint cannot strand the device', async () => {
+    // ORDER IS THE SECURITY DECISION. Retiring the held pointer BEFORE minting would, on a mint
+    // failure, leave the browser holding a cookie that is already dead — and the route's existing
+    // fail-soft deliberately keeps the old pointer alive in exactly that case.
+    const { deps, rec } = makeDeps({ inviteResourceId: ROW_ID, mintFails: true });
+
+    const out = await runRemember(deps, {
+      ...args,
+      sessionId: 'sess-second',
+      scopeId: ROW_ID,
+      cookieToken: TOKEN,
+    });
+
+    expect(out.status).toBe(204);
+    expect(out.setCookie).toBeUndefined();
+    expect(rec.revokedInvites).toHaveLength(0);
   });
 });
 

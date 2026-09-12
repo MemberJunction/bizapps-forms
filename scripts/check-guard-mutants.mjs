@@ -87,11 +87,19 @@ export const MUTANTS = [
     name: 'resume/pointer-to-a-live-draft-is-not-replaced',
     behaviour: 'a pointer naming another LIVE draft is never overwritten, so a losing tab cannot abandon the real one',
     file: 'packages/Server/src/respondent-host/device-resume.service.ts',
-    find: "  const replacing = await pointerConflict(deps, args);\n  if (replacing) {",
-    replace: "  const replacing = await pointerConflict(deps, args);\n  if (replacing && false) {",
+    find: "  const held = await heldPointer(deps, args);\n  if (held.conflict) {",
+    replace: "  const held = await heldPointer(deps, args);\n  if (held.conflict && false) {",
     suite: 'packages/Server',
   },
   // --- public-submit: a half-understood snapshot is never served to a respondent ------------
+  {
+    name: 'resume/superseded-pointer-not-retired',
+    behaviour: 'a re-mint retires the invite it supersedes, so one draft never has two live pointers',
+    file: 'packages/Server/src/respondent-host/device-resume.service.ts',
+    find: "    await deps.revokeInvite({ inviteId: held.supersededInviteId, responseId: args.responseId });",
+    replace: "    void held.supersededInviteId;",
+    suite: 'packages/Server',
+  },
   {
     name: 'snapshot/malformed-question-dropped-instead-of-failing',
     behaviour: 'one malformed QUESTION fails the whole snapshot rather than silently vanishing from the form',

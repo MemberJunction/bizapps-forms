@@ -79,7 +79,15 @@ export interface DeviceResumeDeps {
   /** Retire invites for a response. `deviceOnly` is a security decision — see the service. */
   revoke(args: { responseId: string; deviceOnly: boolean }): Promise<void>;
   /** What response a raw token opens, without spending it. */
-  inviteFor(rawToken: string): Promise<{ ok: boolean; resourceId?: string }>;
+  inviteFor(rawToken: string): Promise<{ ok: boolean; resourceId?: string; inviteId?: string }>;
+  /**
+   * Retire ONE invite by id — the credential a fresh mint has just superseded.
+   *
+   * Separate from {@link revoke}, which retires every device invite of a response and is what
+   * `/forget` wants. Re-minting must not use that: it would retire the invite minted moments
+   * earlier, since both are Active against the same ResourceID.
+   */
+  revokeInvite(args: { inviteId: string; responseId: string }): Promise<void>;
   /** The response a session JWT is scoped to, read from the token this redeem just minted. */
   scopeOf(sessionToken: string): string | undefined;
   /** False when this caller has spent their budget for these routes. */
@@ -202,7 +210,15 @@ export interface RememberArgs {
   responseId: string;
   /** The caller's `x-session-id`. The ONLY ownership proof a first sitting has. */
   sessionId: string;
-  /** The distribution the caller's JWT is scoped to. */
+  /**
+   * The resource the caller's VERIFIED session scope names — `MagicLinkScope.ResourceID`.
+   *
+   * Which KIND of resource depends on how the caller got here, and #193 is what reading it as one
+   * kind cost: a first sitting arrives on a public link, so this is a DISTRIBUTION id; after a
+   * `/resume` the page swaps in the response-scoped session, so it is a RESPONSE id. `ownsDraft`
+   * has to admit both, which is why it hands this to `scopedResponseId` and compares it against
+   * the row's link only when the first reading fails.
+   */
   scopeId: string;
   /** The pointer this browser already holds, if any. */
   cookieToken?: string;
@@ -241,12 +257,12 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
     return { status: 403 };
   }
 
-  const replacing = await pointerConflict(deps, args);
-  if (replacing) {
+  const held = await heldPointer(deps, args);
+  if (held.conflict) {
     // THE SECOND HALF OF THE TWO-TAB FIX. The loser tab's first autosave arrives holding the
     // winner's rotated pointer; overwriting it would point this jar at the loser's new draft and
     // abandon the real one. Refuse, and leave the cookie exactly as it is.
-    LogStatus(`[Forms] not replacing a live pointer to response ${replacing} with one to ${args.responseId}.`);
+    LogStatus(`[Forms] not replacing a live pointer to response ${held.conflict} with one to ${args.responseId}.`);
     return { status: 409 };
   }
 
@@ -256,6 +272,12 @@ export async function runRemember(deps: DeviceResumeDeps, args: RememberArgs): P
     // never with a token.
     LogError(`[Forms] could not mint a device pointer for response ${args.responseId}.`);
     return { status: 204 };
+  }
+  if (held.supersededInviteId) {
+    // AFTER the mint, never before: the failure path above deliberately leaves the old pointer
+    // alive so a failed re-mint costs the device nothing. Retiring first would strand it on a dead
+    // cookie exactly when minting is already broken.
+    await deps.revokeInvite({ inviteId: held.supersededInviteId, responseId: args.responseId });
   }
   return { status: 204, setCookie: deps.cookieFor(minted.rawToken, secondsUntil(minted.expiresAt)) };
 }
@@ -291,28 +313,40 @@ function ownsDraft(response: ResumeResponseRow, args: RememberArgs): boolean {
   return rowLink !== '' && rowLink === foldId(args.scopeId);
 }
 
+/** What the cookie this device already holds turns out to be. */
+interface HeldPointer {
+  /** A DIFFERENT live draft the cookie names. Replacing it would abandon that draft. */
+  conflict?: string;
+  /** The invite the cookie holds for THIS draft, which a successful re-mint supersedes. */
+  supersededInviteId?: string;
+}
+
 /**
- * The response a live pointer already names, when replacing it would abandon a draft.
+ * What this device's cookie already points at — the two facts `/remember` needs from it.
  *
- * Returns the OTHER response's id, or undefined when there is nothing to protect: no cookie, an
- * unreadable one, or one that names this very draft (the ordinary re-mint).
+ * It used to answer only the first, returning the other response's id and `undefined` for
+ * everything else. `undefined` covered two situations that want opposite handling, and the one it
+ * hid is the expensive one: a cookie naming THIS draft is "the ordinary re-mint", and the invite id
+ * it just resolved is exactly the credential the imminent mint is about to supersede. Discarding it
+ * left that invite Active, single-use and unspent — a live pointer the owner never redeems again,
+ * so a copy of it opens the draft silently instead of failing visibly at the owner's next reopen,
+ * which is the whole point of rotating (see `resume-deps.ts`).
  */
-async function pointerConflict(deps: DeviceResumeDeps, args: RememberArgs): Promise<string | undefined> {
+async function heldPointer(deps: DeviceResumeDeps, args: RememberArgs): Promise<HeldPointer> {
   if (!args.cookieToken) {
-    return undefined;
+    return {};
   }
   const invite = await deps.inviteFor(args.cookieToken);
   if (!invite.ok || !invite.resourceId) {
-    return undefined;
+    return {};
   }
-  const held = invite.resourceId.trim().toLowerCase();
-  if (held === args.responseId.trim().toLowerCase()) {
-    return undefined;
+  if (foldId(invite.resourceId) === foldId(args.responseId)) {
+    return { supersededInviteId: invite.inviteId };
   }
   const other = await deps.loadResponse(invite.resourceId);
   // Only a still-live draft is worth protecting. A sealed or vanished one is not something the
   // respondent can come back to, so the new pointer is strictly better.
-  return other && other.status === 'Partial' ? invite.resourceId : undefined;
+  return other && other.status === 'Partial' ? { conflict: invite.resourceId } : {};
 }
 
 /** `POST /f/:slug/forget` — drop the pointer, and only the pointers this device holds. */
