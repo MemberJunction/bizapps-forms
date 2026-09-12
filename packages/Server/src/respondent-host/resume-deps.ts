@@ -16,6 +16,7 @@ import type {
 import {
   findInviteByRawToken,
   mintResponseInvite,
+  revokeInviteById,
   revokeResponseInvites,
 } from '../magic-link/resume-invites.service';
 import { distributionQuotaExceeded } from '../public-submit/quota.service';
@@ -75,7 +76,10 @@ export function makeDeviceResumeDeps(ctx: ResumeDepsContext): DeviceResumeDeps {
     },
     inviteFor: async (rawToken) => {
       const found = await findInviteByRawToken(rawToken, ctx.systemUser);
-      return { ok: found.ok, resourceId: found.resourceId };
+      return { ok: found.ok, resourceId: found.resourceId, inviteId: found.inviteId };
+    },
+    revokeInvite: async ({ inviteId, responseId }) => {
+      await revokeInviteById(inviteId, responseId, ctx.systemUser);
     },
     scopeOf: readScopeClaim,
     allowRequest: (key) => FormsRateLimiter.Instance.charge([{ key, max: RESUME_RATE_MAX }]).allowed,
