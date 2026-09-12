@@ -44,6 +44,31 @@ vi.mock('@mj-biz-apps/forms-core-entities-server', () => ({
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
 vi.mock('../host-readiness', () => ({ assessRespondentReadiness: () => [] }));
 
+/** The caller key the resume route built for its rate limiter — the fact under test. */
+let capturedCallerKey: string | undefined;
+
+vi.mock('../resume-deps', () => ({
+  makeDeviceResumeDeps: (ctx: { callerKey: string }) => {
+    capturedCallerKey = ctx.callerKey;
+    // Every member of `DeviceResumeDeps`, read off the interface rather than guessed — the build
+    // typechecks specs, and an incomplete stub fails there rather than here.
+    return {
+      loadDistribution: async () => undefined,
+      loadResponse: async () => undefined,
+      redeem: async () => ({ ok: false }),
+      mint: async () => ({ ok: false }),
+      revoke: async () => undefined,
+      inviteFor: async () => ({ ok: false }),
+      revokeInvite: async () => undefined,
+      scopeOf: () => undefined,
+      allowRequest: () => true,
+      cookieFor: () => '',
+      clearCookie: () => '',
+      callerKey: ctx.callerKey,
+    };
+  },
+}));
+
 import express, { type Application } from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
@@ -319,6 +344,39 @@ describe('the process-wide in-flight cap', () => {
       // Neither is 503: the first request's slot came back before the second asked for one.
       expect(first.status).not.toBe(503);
       expect(second.status).not.toBe(503);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('POST /f/:slug/resume', () => {
+  // Same root cause as #181's compression bug: a route registered through `ConfigureExpressApp`
+  // never sees the globally mounted pre-auth identity handler, so `currentRequestIdentity()` was
+  // always undefined here and the rate-limit key fell back to the slug. That is ONE bucket for the
+  // whole form — one caller could spend every respondent's resume budget.
+  it('keys its rate limit on the caller, not on the form', async () => {
+    capturedCallerKey = undefined;
+    const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
+
+    const app = express();
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
+    for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
+      app.use(handler);
+    }
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      await fetch(`${base}/f/any-slug/resume`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: 'mjf_resume=pointer' },
+        body: '{}',
+      });
+
+      // A 64-hex peer hash, not `slug:any-slug`.
+      expect(capturedCallerKey).toMatch(/^[0-9a-f]{64}$/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

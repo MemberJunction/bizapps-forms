@@ -128,8 +128,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     const cfg = getRespondentHostConfig();
 
     // Pre-auth, like the page: this route's caller has no session — obtaining one is what it is
-    // for.
-    app.post(RESPONDENT_RESUME_ROUTE, (req: Request, res: Response) => {
+    // for. `requestIdentityHandler()` is mounted ON the route because this hook runs inside
+    // MJServer's middleware-COLLECTION loop (`index.ts:824`) while the pre-auth handlers it gathers
+    // are not `app.use`-d until `index.ts:1143`. Express dispatches in registration order, so the
+    // global copy is added after this route and never runs for it. Without this argument
+    // `currentRequestIdentity()` is undefined, `resumeDeps` falls back to keying on the slug, and
+    // the rate limit becomes one bucket for the whole form — which any single caller can spend.
+    app.post(RESPONDENT_RESUME_ROUTE, requestIdentityHandler(), (req: Request, res: Response) => {
       void this.handleResumeRoute(req, res).catch((e: unknown) => {
         LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
         sendJsonError(res, 500, 'Could not reopen your saved answers. Please try again.');
