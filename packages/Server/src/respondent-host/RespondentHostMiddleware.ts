@@ -8,10 +8,11 @@
  * / `ServerExtensionsCore` (PR #2037). That seam was absent when this was written against MJ
  * 5.43.0, so `ConfigureExpressApp(app)` was the only hook available. It is NO LONGER absent:
  * 5.51.0 re-exports `ServerExtensionLoader` and `BaseServerExtension` from
- * `@memberjunction/server-extensions-core`, and `serve()` instantiates the loader. Migrating
- * these two routes is now possible and is deliberately NOT part of this change —
- * `ConfigureExpressApp` remains a supported hook in 5.51.0 and both routes work through it, so
- * the move is a behaviour-preserving refactor that belongs in its own commit.
+ * `@memberjunction/server-extensions-core`, and `serve()` instantiates the loader. That migration
+ * is still outstanding and is a DIFFERENT move from the one #181 made: the page and the favicon
+ * went from `ConfigureExpressApp` to `GetPreAuthMiddleware` to get behind MJ's `compression()`,
+ * which is about where a route sits in Express's stack. `BaseServerExtension` is about which
+ * abstraction declares it at all, and `POST /f/:slug/resume` still registers the old way.
  *
  * It contributes a GET route (`/f/:slug`) through {@link GetPreAuthMiddleware}; the route runs
  * BEFORE auth (it is just static HTML), so an anonymous respondent reaches it without a
