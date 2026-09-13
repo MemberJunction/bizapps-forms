@@ -89,7 +89,7 @@ export function requestIdentityHandler(hops: number = trustedProxyHops()): Reque
       next();
       return;
     }
-    runWithRequestIdentity({ ipHash: hashClientIp(ip) }, next);
+    runWithRequestIdentity({ ip, ipHash: hashClientIp(ip) }, next);
   };
 }
 

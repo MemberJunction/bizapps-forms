@@ -45,8 +45,17 @@ vi.mock('@memberjunction/core', async (importOriginal) => {
 /** The outcome the faked redeem returns; set per test. */
 let redeemOutcome: { ok: boolean; token?: string; distribution?: mjBizAppsFormsFormDistributionEntityType };
 
+/** The deps the route handed the redeem on the last request — the seam for what it forwards. */
+let redeemDeps: { clientIp?: string } | undefined;
+
 vi.mock('../redeem.service', () => ({
-  redeemSlugToToken: async () => redeemOutcome,
+  redeemSlugToToken: async (deps: { clientIp?: string }) => {
+    redeemDeps = deps;
+    return redeemOutcome;
+  },
+  // Unused by any test here (nothing drives the resume route past its `no-pointer` exit), but
+  // `resume-deps.ts` imports it by name — an entirely absent export would fail that import.
+  redeemRawToken: async () => undefined,
 }));
 
 import express from 'express';
@@ -55,6 +64,21 @@ import type { Server } from 'node:http';
 
 import { RespondentHostMiddleware } from '../RespondentHostMiddleware';
 import { resetRespondentHostConfigForTests } from '../config';
+import type { ResumeDepsContext } from '../resume-deps';
+
+/** The ctx the route built for the resume dependency set — the seam for whether identity reached it. */
+let resumeDepsCtx: ResumeDepsContext | undefined;
+
+vi.mock('../resume-deps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../resume-deps')>();
+  return {
+    ...actual,
+    makeDeviceResumeDeps: (ctx: Parameters<typeof actual.makeDeviceResumeDeps>[0]) => {
+      resumeDepsCtx = ctx;
+      return actual.makeDeviceResumeDeps(ctx);
+    },
+  };
+});
 
 const DISTRIBUTION = {
   ID: 'dist-1',
@@ -67,6 +91,8 @@ const DISTRIBUTION = {
 
 beforeEach(() => {
   redeemOutcome = { ok: true, token: 'session-jwt', distribution: DISTRIBUTION };
+  redeemDeps = undefined;
+  resumeDepsCtx = undefined;
   rowsByEntity['MJ_BizApps_Forms: Forms'] = [{ Description: 'Tell us how we did. Takes two minutes.' }];
 });
 
@@ -75,14 +101,16 @@ afterEach(() => {
 });
 
 /** Boot the middleware's routes on a real express server and always close the listener. */
-async function withServer(assertions: (get: (route: string) => Promise<Response>) => Promise<void>): Promise<void> {
+async function withServer(
+  assertions: (get: (route: string, init?: RequestInit) => Promise<Response>) => Promise<void>,
+): Promise<void> {
   const app = express();
   new RespondentHostMiddleware().ConfigureExpressApp(app);
   const server: Server = app.listen(0);
   try {
     await new Promise<void>((resolveListening) => server.once('listening', () => resolveListening()));
     const { port } = server.address() as AddressInfo;
-    await assertions((route) => fetch(`http://127.0.0.1:${port}${route}`));
+    await assertions((route, init) => fetch(`http://127.0.0.1:${port}${route}`, init));
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
@@ -149,6 +177,62 @@ describe('GET /favicon.ico — the respondent origin never answers a public page
       const res = await get('/favicon.ico');
       expect(res.status).toBe(204);
       expect(await res.text()).toBe('');
+    });
+  });
+});
+
+describe('GET /f/:slug — the door tells core which respondent is asking', () => {
+  afterEach(() => {
+    delete process.env.FORMS_TRUSTED_PROXY_HOPS;
+  });
+
+  it('forwards the resolved respondent address to the redeem', async () => {
+    // Core keys its own redeem cap on this. Without it every respondent in the deployment shares
+    // one bucket and the 21st form open per minute is refused for everyone (register row 29).
+    process.env.FORMS_TRUSTED_PROXY_HOPS = '1';
+    await withServer(async (get) => {
+      await get('/f/customer-survey', { headers: { 'x-forwarded-for': '198.51.100.7' } });
+
+      expect(redeemDeps?.clientIp).toBe('198.51.100.7');
+    });
+  });
+
+  it('forwards the socket peer, never an address the caller typed, when no hop is trusted', async () => {
+    // The whole point of keying on a resolved address is that the caller cannot choose it. If the
+    // header could reach core unfiltered, a caller would mint themselves a fresh bucket per
+    // request — the `x-session-id` rotation bypass, rebuilt one layer down.
+    await withServer(async (get) => {
+      await get('/f/customer-survey', { headers: { 'x-forwarded-for': '9.9.9.9' } });
+
+      expect(redeemDeps?.clientIp).not.toBe('9.9.9.9');
+      expect(redeemDeps?.clientIp).toMatch(/^(127\.0\.0\.1|::1|::ffff:127\.0\.0\.1)$/);
+    });
+  });
+});
+
+describe('POST /f/:slug/resume — the pre-auth resume route also needs the resolved caller', () => {
+  afterEach(() => {
+    delete process.env.FORMS_TRUSTED_PROXY_HOPS;
+  });
+
+  // `resumeDeps()` builds `callerKey`/`callerIp` from `currentRequestIdentity()` BEFORE
+  // `runResume` ever inspects the request body, so an empty POST is enough to prove whether the
+  // identity handler is mounted on this route — no live distribution or token needed. Without it
+  // (#191), `callerKey` silently falls back to `slug:${slug}` — one shared bucket per FORM, not
+  // per caller — and `callerIp` is always undefined, so the resume redeem forwards no address to
+  // core either. The GET route's own identity test above cannot catch this: it is a different
+  // route with its own separate `requestIdentityHandler()` mount.
+  it('builds callerKey and callerIp from the resolved peer, not the per-form slug fallback', async () => {
+    process.env.FORMS_TRUSTED_PROXY_HOPS = '1';
+    await withServer(async (get) => {
+      const res = await get('/f/customer-survey/resume', {
+        method: 'POST',
+        headers: { 'x-forwarded-for': '198.51.100.7' },
+      });
+      await res.text();
+
+      expect(resumeDepsCtx?.callerKey).not.toBe('slug:customer-survey');
+      expect(resumeDepsCtx?.callerIp).toBe('198.51.100.7');
     });
   });
 });

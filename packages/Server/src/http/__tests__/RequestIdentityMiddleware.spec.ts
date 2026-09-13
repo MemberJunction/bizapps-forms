@@ -19,7 +19,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
 import { RequestIdentityMiddleware, trustedProxyHops } from '../RequestIdentityMiddleware';
-import { currentRequestIdentity } from '../request-identity';
+import { currentRequestIdentity, hashClientIp } from '../request-identity';
 
 afterEach(() => {
   delete process.env.FORMS_TRUSTED_PROXY_HOPS;
@@ -34,7 +34,7 @@ async function withIdentityRoute(run: (baseUrl: string) => Promise<void>): Promi
     app.use(handler);
   }
   app.get('/whoami', (_req, res) => {
-    res.json({ ipHash: currentRequestIdentity()?.ipHash ?? null });
+    res.json({ ip: currentRequestIdentity()?.ip ?? null, ipHash: currentRequestIdentity()?.ipHash ?? null });
   });
 
   const server: Server = await new Promise((resolve) => {
@@ -48,6 +48,19 @@ async function withIdentityRoute(run: (baseUrl: string) => Promise<void>): Promi
 }
 
 describe('RequestIdentityMiddleware', () => {
+  it('publishes the resolved address it derived the hash from', async () => {
+    // The redeem forwards `.ip` while every bucket keys on `.ipHash`. If those two could come
+    // from different addresses, core's audit trail and Forms' rate limit would disagree about
+    // who the caller was — the exact drift `ConfigureExpressApp`'s trust-proxy line exists to
+    // prevent, restored one layer up.
+    await withIdentityRoute(async (baseUrl) => {
+      const body = await (await fetch(`${baseUrl}/whoami`)).json();
+
+      expect(body.ip).toBeTruthy();
+      expect(body.ipHash).toBe(hashClientIp(body.ip));
+    });
+  });
+
   it('gives a downstream route an identity the caller could not have chosen', async () => {
     await withIdentityRoute(async (baseUrl) => {
       const plain = await (await fetch(`${baseUrl}/whoami`)).json();

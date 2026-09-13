@@ -130,8 +130,15 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     });
 
     // Pre-auth, like the page above it: this route's caller has no session — obtaining one is what
-    // it is for.
-    app.post(RESPONDENT_RESUME_ROUTE, (req: Request, res: Response) => {
+    // it is for. And, like the page above it, `requestIdentityHandler()` is mounted ON THE ROUTE,
+    // not relied on globally, for the same registration-order reason given at the GET route above:
+    // MJServer collects pre-auth handlers at `index.ts:809` but does not `app.use` them until
+    // `index.ts:1143`, and a route registered through `ConfigureExpressApp` is already in the stack
+    // before they arrive. Without this argument `currentRequestIdentity()` inside `resumeDeps()` is
+    // always undefined here — which silently made BOTH the address forwarded to core's redeem
+    // (`callerIp`) and this route's own per-caller rate-limit bucket (`callerKey`) inert, the latter
+    // falling back to one shared bucket per FORM (`slug:${slug}`) rather than per caller (#191).
+    app.post(RESPONDENT_RESUME_ROUTE, requestIdentityHandler(), (req: Request, res: Response) => {
       void this.handleResumeRoute(req, res).catch((e: unknown) => {
         LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
         sendJsonError(res, 500, 'Could not reopen your saved answers. Please try again.');
@@ -244,6 +251,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
         contextUser: this.systemUser(),
         redeemUrl: cfg.magicLinkRedeemUrl,
         fetchImpl: fetch,
+        // The same resolved peer the meter above was charged against — never a header the caller
+        // chose. Core keys its own redeem cap on this; without it every respondent in the
+        // deployment shares one bucket (register row 29).
+        clientIp: currentRequestIdentity()?.ip,
       },
       slug,
     );
@@ -407,6 +418,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       // back to the slug, which bounds the route per FORM rather than per caller — coarse, but a
       // bound, and the same trade `rateLimitGatesFor` makes when it has no address.
       callerKey: currentRequestIdentity()?.ipHash ?? `slug:${slug}`,
+      // Forwarded to core on the resume redeem so its own per-IP cap applies per respondent, same
+      // as the door's `clientIp` above (register row 29). Unlike `callerKey`, this has NO
+      // slug-shaped fallback: core reads this value as an address, so standing in anything else
+      // when identity is absent would be a fiction it audits and buckets on. Absent simply means
+      // the header is omitted (`postRedeem`'s `forwardedHeaders`) and core falls back to its own
+      // peer for that one request — a degradation, never an invented value.
+      callerIp: currentRequestIdentity()?.ip,
     });
   }
 

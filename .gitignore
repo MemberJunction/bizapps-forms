@@ -63,3 +63,6 @@ apps/MJAPI/schema.graphql
 
 # Playwright MCP screenshots
 .playwright-mcp/
+
+# superpowers SDD scratch (ledger, briefs, review packages) — never shipped
+.superpowers/
