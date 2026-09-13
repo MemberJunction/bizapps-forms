@@ -820,6 +820,9 @@ export class mjBizAppsFormsFormDistribution_ {
     @Field(() => Boolean, {description: `Owner switch for same-device resume on this link. When 1 (the default) the respondent host mints a single-use device invite after the first partial save and holds its raw token in an HttpOnly cookie scoped to that form's route, so reopening the link in the same browser restores the draft; every resume rotates the token. Set 0 for kiosks and shared devices: no device invite is minted, and any cookie a browser still holds is cleared without being redeemed. It does not affect the emailed resume link, which works on any device.`}) 
     AllowDeviceResume: boolean;
         
+    @Field({nullable: true, description: `JSON array of the browser ORIGINS permitted to embed this distribution and call the public form API with its link — e.g. ["https://careers.acme.com","https://acme.com:8443"]. Values are full origins exactly as a browser sends them (scheme, host, optional port), matched EXACTLY after case-normalising scheme and host. No wildcards and no subdomain implication: "acme.com" does not admit "https://careers.acme.com", and an author needing three subdomains names three origins — a pattern is refused at authoring time rather than accepted and ignored. Plain http is accepted only for loopback hosts, so a local harness is authorable without a proxy. NULL or an empty array (the default, and every distribution until an author sets one) means UNRESTRICTED, so no existing embed changes behaviour. Once ANY origin is authored the distribution is fail-closed: the respondent host page is served with a Content-Security-Policy frame-ancestors directive naming exactly these origins, and a public API call whose Origin is neither this API's own origin nor one of them is refused. An authored value that parses to nothing usable is a refusal of everything, never a fall back to unrestricted. Defense in depth behind the magic link, not a replacement for it: it bounds where a leaked multi-use link can be replayed. The array container differs deliberately from the keyed object bizapps-caliber uses for Step.AllowedOrigins, which is keyed only because Caliber steps inherit and must tombstone an inherited origin; a Forms distribution is a leaf and inherits from nothing. The per-entry grammar is identical.`}) 
+    AllowedOrigins?: string;
+        
     @Field() 
     @MaxLength(255)
     Form: string;
@@ -876,6 +879,9 @@ export class CreatemjBizAppsFormsFormDistributionInput {
     @Field(() => Boolean, { nullable: true })
     AllowDeviceResume?: boolean;
 
+    @Field({ nullable: true })
+    AllowedOrigins: string | null;
+
     @Field(() => RestoreContextInput, { nullable: true })
     RestoreContext___?: RestoreContextInput;
 }
@@ -930,6 +936,9 @@ export class UpdatemjBizAppsFormsFormDistributionInput {
 
     @Field(() => Boolean, { nullable: true })
     AllowDeviceResume?: boolean;
+
+    @Field({ nullable: true })
+    AllowedOrigins?: string | null;
 
     @Field(() => [KeyValuePairInput], { nullable: true })
     OldValues___?: KeyValuePairInput[];

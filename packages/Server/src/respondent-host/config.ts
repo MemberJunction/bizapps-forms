@@ -99,17 +99,36 @@ export function getRespondentHostConfig(): RespondentHostConfig {
 }
 
 /**
- * Resolve the magic-link redeem endpoint the route POSTs the raw token to. Prefers an explicit
- * `FORMS_MAGICLINK_REDEEM_URL`; otherwise composes it from the API's public URL + the fixed
- * `/magic-link/redeem` mount path (same MJAPI origin the GraphQL endpoint is derived from).
+ * Resolve the magic-link redeem endpoint the route POSTs the raw token to.
+ *
+ * DEFAULTS TO LOOPBACK ON OUR OWN PORT, and that is the whole point of this function. The redeem is
+ * a process-LOCAL call: core mounts its magic-link router on the very same Express app this route
+ * is served from (`MJServer/src/index.ts`, `app.use(MAGIC_LINK_MOUNT_PATH, ...)` at the app root).
+ *
+ * It used to be composed from `MJAPI_PUBLIC_URL`, which is the externally-reachable origin — and
+ * that variable cannot simply be repointed inward, because {@link resolveGraphqlUrl} derives from
+ * it too and that value is handed to the RESPONDENT'S BROWSER in the host page. So behind a real
+ * proxy the call left the perimeter, resolved back to the proxy, and re-entered — and a reverse
+ * proxy APPENDS its peer to `X-Forwarded-For`. `proxy-addr` at `trust proxy = 1` then returns the
+ * right-most entry, which is MJAPI's own egress address: one constant for the whole deployment.
+ * The respondent address the door forwards was overwritten before core ever read it, so the per-IP
+ * bucket this app works to give each respondent silently collapsed back into one — and only in the
+ * deployments that have a proxy at all, never on a loopback dev harness, which is where it is
+ * measured.
+ *
+ * Loopback cannot traverse a proxy, so no hop can be appended and there is nothing left to get
+ * right. The address is NUMERIC rather than `localhost` so no resolver can send it anywhere else.
+ * A split deployment — core genuinely in another process — sets `FORMS_MAGICLINK_REDEEM_URL`, which
+ * is still honoured and is now documented in `.env.example`.
  */
 function resolveMagicLinkRedeemUrl(): string {
   const explicit = process.env.FORMS_MAGICLINK_REDEEM_URL?.trim();
   if (explicit) {
     return explicit;
   }
-  const base = (process.env.MJAPI_PUBLIC_URL?.trim() || 'http://localhost:4121').replace(/\/$/, '');
-  return `${base}${MAGIC_LINK_REDEEM_PATH}`;
+  // The port core actually binds: MJServer reads GRAPHQL_PORT and falls back to 4000.
+  const port = process.env.GRAPHQL_PORT?.trim() || '4000';
+  return `http://127.0.0.1:${port}${MAGIC_LINK_REDEEM_PATH}`;
 }
 
 /**

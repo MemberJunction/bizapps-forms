@@ -239,6 +239,38 @@
                 <p class="dm-note">
                   Paste this into your own page's HTML to show the form inside your site.
                 </p>
+
+                <!-- Under the snippet on purpose. This is the one screen where the author is
+                     already holding an <iframe> they are about to paste into somebody else's
+                     page, so "and who may show this?" is a question they are already asking.
+                     Phrased as sites, never as the column: nobody came here to author an
+                     origin allowlist. -->
+                <div class="dm-origins">
+                  <label class="dm-setting-label" for="dm-origins">Sites allowed to show this form</label>
+                  <textarea
+                    #originsBox
+                    id="dm-origins"
+                    class="mjf-textarea dm-origins-input"
+                    rows="3"
+                    placeholder="https://careers.acme.com&#10;https://www.acme.com"
+                    [disabled]="busy"
+                    [value]="authoredOrigins(link)"
+                    (change)="saveOrigins(originsBox)"
+                  ></textarea>
+                  <!-- Says both halves on purpose. This box controls where the form can be shown
+                       INSIDE someone else's page; it does not control who can open the link. An
+                       author told only the first half believes they locked the form down, which is
+                       the failure this whole feature's design calls worse than having no list at
+                       all — and this is the one screen they read. -->
+                  <p class="dm-setting-hint">
+                    One address per line. Leave this empty to let any site show this form inside its
+                    own pages. Once you list a site, only the sites you list can do that — on any
+                    other page the form stops loading, including pages it is already on. This does
+                    not restrict the link itself: anyone who has this form's link can still open it
+                    on its own and answer, from anywhere. Use "Open to responses", "Response limit"
+                    and "Expires" below for that.
+                  </p>
+                </div>
               }
             }
           </div>

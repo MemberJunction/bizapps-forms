@@ -118,6 +118,39 @@ function fakeFetch(
   }) as unknown as typeof fetch;
 }
 
+/**
+ * A `fetch` stub that also RECORDS what it was called with.
+ *
+ * `fakeFetch` above asserts only on what core answers, which is why the door shipped for months
+ * sending core no client identity at all: every test passed because every test looked the other
+ * way (bizapps-forms register row 29). Anything asserting on the REQUEST uses this.
+ */
+function capturingFetch(
+  body: unknown,
+  init: { status?: number; headers?: Record<string, string> } = {},
+): { fetchImpl: typeof fetch; sent: Array<{ url: string; headers: Record<string, string> }> } {
+  const status = init.status ?? 200;
+  const sent: Array<{ url: string; headers: Record<string, string> }> = [];
+  const fetchImpl = (async (input: RequestInfo | URL, options?: RequestInit) => {
+    // Normalised through `Headers` so a test asserts on the header NAME, not on whichever casing
+    // the caller happened to type. `forEach` rather than `.entries()`/spread: this package's
+    // `lib` set (`tsconfig.server.json`) is `dom` without `dom.iterable`, under which `Headers`
+    // has no iterator — only `forEach` is declared on the base interface.
+    const requestHeaders: Record<string, string> = {};
+    new Headers(options?.headers ?? {}).forEach((value, key) => {
+      requestHeaders[key] = value;
+    });
+    sent.push({ url: String(input), headers: requestHeaders });
+    return {
+      ok: status < 400,
+      status,
+      headers: new Headers(init.headers ?? {}),
+      json: async () => body,
+    } as Response;
+  }) as typeof fetch;
+  return { fetchImpl, sent };
+}
+
 /** Every line `LogError` was handed, joined — for asserting what a log does and does not contain. */
 function loggedLines(): string {
   return logError.mock.calls.map((c) => String(c[0])).join('\n');
@@ -819,3 +852,119 @@ describe('the door follows the shared refusal precedence', () => {
     });
   }
 });
+
+// Core rate-limits /magic-link/redeem per `req.ip`, and this POST is made from inside the MJAPI
+// process — so with no address forwarded, every respondent in the deployment shares one bucket and
+// the 21st form open per minute is refused for everyone (bizapps-forms register row 29). Forms
+// already sets `trust proxy` itself (http/RequestIdentityMiddleware.ts), so core honours what is
+// forwarded here; nothing in MJ has to change.
+describe('the address the door forwards to core', () => {
+  it('sends the resolved respondent address as X-Forwarded-For', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].headers['x-forwarded-for']).toBe('198.51.100.7');
+  });
+
+  it('sends exactly one entry, so the hop arithmetic is the same at every trusted hop count', async () => {
+    // Express's proxy-addr clamps to the LEFT-MOST address available, so a single entry resolves
+    // to `req.ip` at trust-proxy 1, 2 and 3 alike. Appending to an inbound header instead would
+    // make the result depend on FORMS_TRUSTED_PROXY_HOPS matching a chain this call never took.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).not.toContain(',');
+  });
+
+  it('omits the header when the caller could not be identified', async () => {
+    // No address is a real, expected state: a socket already gone, or a deployment that has not
+    // mounted the identity middleware. Forwarding an empty or invented value would be worse than
+    // forwarding nothing — Express would parse it and core would bucket and AUDIT the fiction.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: undefined }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('still sends content-type and accept', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
+
+    expect(sent[0].headers['content-type']).toBe('application/json');
+    expect(sent[0].headers.accept).toBe('application/json');
+  });
+
+  it('forwards the address on the resume path too', async () => {
+    // `redeemRawToken` is the resume routes' redeem and goes through the same `postRedeem`, so it
+    // had the identical defect. One door, one fix.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemRawToken(
+      { redeemUrl: 'http://localhost:4121/magic-link/redeem', fetchImpl, clientIp: '198.51.100.9' },
+      'mj_ml_rawtoken',
+      'customer-survey',
+    );
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('198.51.100.9');
+  });
+});
+
+// C-A (gauntlet #207). The door's own docstring promises that "an empty or invented value would be
+// worse than silence, because Express would parse it and core would bucket and audit the fiction".
+// Until now only the EMPTY half was enforced (`if (clientIp)`), so a value that was not an address
+// went straight through. These pin the other half, on the wire, where core would read it.
+describe('the door never hands core something that is not an address', () => {
+  it('strips a source port before forwarding, keeping the address', async () => {
+    // Core's limiter takes req.ip verbatim, so a port would give one caller a fresh bucket per
+    // connection — the bypass `stripSourcePort` exists to close, one layer down.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '203.0.113.7:52431' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('203.0.113.7');
+  });
+
+  it('omits the header for an over-long value rather than costing core its audit row', async () => {
+    // MagicLinkRedemption.IPAddress is NVARCHAR(64) and core's audit write is best-effort: it logs
+    // the rejection and mints the session anyway, so the redemption leaves NO row at all.
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: 'x'.repeat(300) }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('omits the header for a value that is not an address at all', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: 'not-an-address' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBeUndefined();
+  });
+
+  it('still forwards a clean address, so the fix it exists for keeps working', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemSlugToToken(deps({ fetchImpl, clientIp: '198.51.100.7' }), 'customer-survey');
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('198.51.100.7');
+  });
+
+  it('applies the same guard on the RESUME leg — one door, one rule', async () => {
+    const { fetchImpl, sent } = capturingFetch({ success: true, token: 'redeemed-jwt' });
+
+    await redeemRawToken(
+      { redeemUrl: 'http://127.0.0.1:4000/magic-link/redeem', fetchImpl, clientIp: '203.0.113.7:52431' },
+      'mj_ml_raw',
+      'customer-survey',
+    );
+
+    expect(sent[0].headers['x-forwarded-for']).toBe('203.0.113.7');
+  });
+});
+

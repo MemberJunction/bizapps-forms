@@ -5,9 +5,9 @@
  * fully unit-testable without a GraphQL server.
  *
  * Order (fail-closed at each gate):
- *   scope check -> resolve definition (+ resolve the knockout) -> rate-limit -> Turnstile
- *   -> dedupe -> quota -> server re-validation -> file provenance -> Save response+answers
- *   -> fire on-submit hooks.
+ *   scope check -> resolve definition (+ resolve the knockout) -> embed origin -> rate-limit
+ *   -> Turnstile -> dedupe -> quota -> server re-validation -> file provenance
+ *   -> Save response+answers -> fire on-submit hooks.
  *
  * The knockout is resolved before every gate because it is pure and because three of them — the
  * completion rate ceiling, dedupe and the quota — police COMPLETIONS, which a knockout is not.
@@ -51,6 +51,7 @@ import {
   findSessionResponse,
 } from './response-lookup.service';
 import { InFlightLimiter } from '../http/in-flight-limiter';
+import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { checkRespondentScope } from './scope-check.service';
 import { resolveScopedResponseId } from './scope-response.service';
 import { revokeResponseInvites } from '../magic-link/resume-invites.service';
@@ -147,6 +148,19 @@ export interface PipelineContext {
    * something weaker — see `rateLimitGatesFor`.
    */
   clientIpHash?: string;
+  /**
+   * The caller's `Origin` header, from `RequestIdentityMiddleware` via `currentRequestIdentity()`.
+   *
+   * UNLIKE `clientIpHash` beside it, this IS caller-chosen, so nothing keys an abuse ceiling on
+   * it. What makes it load-bearing anyway is what it is checked against: a list the form's AUTHOR
+   * wrote. A browser will not let a page lie about its own origin, and a non-browser client that
+   * forges one still has to pass every other gate on this path.
+   *
+   * Absent in unit tests, and absent for any client that sends no `Origin` — which is every
+   * non-browser caller. Absent is a REFUSAL once a distribution has authored a list and an
+   * ADMISSION when it has not; `checkEmbedOrigin` owns that asymmetry and the reasoning for it.
+   */
+  requestOrigin?: string;
   /**
    * The `mj_scopes[0].resourceId` claim of the caller's verified magic-link session, copied from
    * `UserInfo.MagicLinkScope.ResourceID`.
@@ -402,7 +416,7 @@ async function runSubmitPipelineInner(
   ctx: PipelineContext,
   submission: PipelineSubmission,
 ): Promise<FormSubmissionResult> {
-  // Timed end to end. "The submit is slow" is a report nobody can act on across eleven
+  // Timed end to end. "The submit is slow" is a report nobody can act on across a dozen-odd
   // stages, and the intuitive culprit (persistence) is often not the one — a captcha round
   // trip or a dedupe query can each outweigh the write. `report` is called on every exit OF THIS
   // FUNCTION, including refusals, because a slow rejection is still a slow request.
@@ -470,6 +484,40 @@ async function runSubmitPipelineInner(
   const terminalCompletion = complete && knockout === undefined;
 
   timer.mark('resolve-form');
+
+  // 2a. Embed origin. A distribution may name the browser origins permitted to use its link; this
+  //     refuses everyone else. NULL — every distribution until an author sets one — is
+  //     unrestricted, so nothing live changes behaviour here.
+  //
+  //     IT CANNOT RUN EARLIER. The policy is a column on the distribution row, and step 2 above is
+  //     what turns the slug into that row. There is nothing to consult before it.
+  //
+  //     IT MUST RUN BEFORE THE RATE LIMITER. The pipeline's standing rule is that a request one
+  //     gate refuses does not eat the respondent's budget in another — the reason `charge` consults
+  //     every bucket before spending any. This gate's verdict is a fact about the LINK, not about
+  //     the caller: nobody in that browser can influence it, and nothing they do will make the next
+  //     attempt land. Charging for it would let one mis-embedded page burn through a real
+  //     respondent's window on refusals neither of them caused.
+  //
+  //     THIS IS ONE OF TWO DOORS, and only one of them can see what an author actually authorised.
+  //     A legitimate embed frames our host page, so the widget's `fetch` reports OUR origin rather
+  //     than the customer's (measured — see `http/embed-origin.ts`). What this door can refuse is a
+  //     caller that is neither us nor a declared origin: a leaked link replayed from somebody
+  //     else's page. The door that judges the customer's own origin is
+  //     `Content-Security-Policy: frame-ancestors` on the respondent host page, which the browser
+  //     evaluates against the framing ancestor. #203 names both.
+  const embedOrigin = checkEmbedOrigin(resolved.distribution.AllowedOrigins, ctx.requestOrigin);
+  if (!embedOrigin.allowed) {
+    // The operator gets which origin, against which list, and why. The respondent gets one
+    // sentence that reads the same for every reason, so a prober cannot map the allowlist by
+    // reading refusals — see `FOREIGN_ORIGIN_MESSAGE`.
+    LogError(
+      `[Forms] submit refused for ${submission.distributionSlug}: ${embedOrigin.reason ?? 'origin not allowed'}`,
+    );
+    return report(fail(FOREIGN_ORIGIN_MESSAGE));
+  }
+
+  timer.mark('embed-origin');
 
   // 3. Rate-limit. `charge` consults every bucket before spending any of them, so a request one
   //    gate refuses does not silently eat the respondent's budget in another.

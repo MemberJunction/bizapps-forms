@@ -20,6 +20,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import { isIP } from 'node:net';
 
 import { sessionHashSalt } from './hash-salt.js';
 
@@ -72,6 +73,41 @@ function forwardedForEntries(raw: string | string[] | undefined): string[] {
  */
 export function hashClientIp(ip: string): string {
   return createHash('sha256').update(`${ipHashSalt()}:ip:${normalizeIpForKeying(ip)}`).digest('hex');
+}
+
+/**
+ * The address we are willing to hand to ANOTHER SERVICE as an address, or nothing.
+ *
+ * `resolveClientIp` returns an `X-Forwarded-For` entry trimmed and otherwise untouched, because
+ * for its original purpose that was enough: the value went straight into {@link hashClientIp},
+ * whose {@link normalizeIpForKeying} does all the cleaning, and an unparseable entry still keys a
+ * perfectly good bucket. Nothing else ever saw it.
+ *
+ * The server-side redeem changed that. It forwards the resolved peer to core, which parses it as
+ * an address, buckets its per-IP redeem cap on it and writes it to `MagicLinkRedemption.IPAddress`.
+ * Along that path the value is no longer an opaque key — it is a claim about the world, and two
+ * shapes that a bucket key absorbs harmlessly do real damage:
+ *
+ *  - **A source port.** Some proxies append one (see {@link stripSourcePort}). Core's limiter takes
+ *    `req.ip` verbatim, so `203.0.113.7:52431` is a DIFFERENT bucket on every connection — one
+ *    caller with an unlimited supply of them. That is the exact bypass this module already exists
+ *    to close, reproduced one layer down in somebody else's limiter.
+ *  - **Anything over 64 characters.** `MagicLinkRedemption.IPAddress` is `NVARCHAR(64)`; core's
+ *    audit write is best-effort, so it logs the rejection and mints the session anyway — the
+ *    redemption simply leaves no audit row at all.
+ *
+ * So this is the guard at the boundary, and it is the ONLY one: `ipHash` deliberately still keys on
+ * whatever was seen, because refusing to bucket an unparseable caller would hand them free traffic
+ * in the name of tidiness. Returning `undefined` means the header is omitted and core falls back to
+ * its own peer for that one request — a degradation, never an invented value.
+ */
+export function forwardableAddress(rawIp: string | undefined): string | undefined {
+  const trimmed = rawIp?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const candidate = stripSourcePort(trimmed).split('%')[0];
+  return isIP(candidate) ? candidate : undefined;
 }
 
 /**
@@ -192,8 +228,53 @@ function zeroHextets(count: number): string[] {
 
 /** What the public routes know about a caller, independent of anything the caller told us. */
 export interface RequestIdentity {
-  /** Salted one-way hash of the resolved client IP (IPv6 reduced to its /64). */
-  ipHash: string;
+  /**
+   * The resolved client address itself, request-scoped and never persisted by Forms.
+   *
+   * Kept alongside the hash for ONE reason: the server-side redeem in `respondent-host/
+   * redeem.service.ts` POSTs to core from inside this process, so without an address forwarded
+   * on it core keys its per-IP redeem cap on the loopback peer — one bucket for every respondent
+   * in the deployment (bizapps-forms register row 29). A hash cannot be forwarded: core reads the
+   * value as an address, writes it to the magic-link redemption audit trail, and Express has to
+   * parse it before `req.ip` exists at all.
+   *
+   * Everything that STORES or BUCKETS still uses `ipHash`. This field must not leak into a Forms
+   * log line, bucket key or database column of Forms' own — see `hashClientIp` for why that rule
+   * exists. Core's magic-link redemption audit trail, above, is the one place this address is
+   * written on purpose; that write is core's, not Forms'.
+   *
+   * Optional for the same reason `ipHash` is, and the reason is the store's, not this field's:
+   * the store is now entered even when no peer address resolved, so that `origin` below still
+   * reaches the embed gate. Every consumer already reads it as `currentRequestIdentity()?.ip`
+   * and `forwardedHeaders` already forwards nothing for an absent address, so an absent `ip`
+   * behaves exactly as an absent store did before.
+   */
+  ip?: string;
+  /**
+   * Salted one-way hash of the resolved client IP (IPv6 reduced to its /64).
+   *
+   * Optional because the peer address can already be gone by the time the handler runs. When it
+   * is, the abuse ceilings simply drop for that request rather than re-keying onto something
+   * weaker — a header the caller writes would be worse than no ceiling, since it is a ceiling the
+   * caller controls.
+   */
+  ipHash?: string;
+  /**
+   * The caller's `Origin` header, VERBATIM and unnormalised.
+   *
+   * The caller DID choose this, unlike `ipHash` beside it — so nothing keys an abuse ceiling on
+   * it, and nothing here treats it as identity. What makes a caller-supplied value load-bearing
+   * anyway is that it is checked against a list the form's AUTHOR wrote: a browser will not let a
+   * page lie about its own origin, and a non-browser client that forges one still has to pass
+   * every other gate on the public path.
+   *
+   * Left unnormalised on purpose. Normalisation runs at the point of comparison instead —
+   * `normalizeOrigin` against the author's list, `normalizeReportedOrigin` against this API's own
+   * origin — so this field and the header the caller actually sent are the same string when one
+   * reaches a log line, which is the difference between a refusal an operator can act on and one
+   * they have to guess at.
+   */
+  origin?: string;
 }
 
 const identityStorage = new AsyncLocalStorage<RequestIdentity>();

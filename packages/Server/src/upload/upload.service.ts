@@ -27,6 +27,7 @@ import type { mjBizAppsFormsFormUploadEntity } from '@mj-biz-apps/forms-entities
 import { FORM_UPLOAD_ENTITY } from '../public-submit/entity-names';
 import { checkRespondentScope, type ScopeMetadataProvider } from '../public-submit/scope-check.service';
 import { resolvePublishedDefinition, type DefinitionRunViewProvider } from '../public-submit/definition-loader.service';
+import { checkEmbedOrigin, FOREIGN_ORIGIN_MESSAGE } from '../http/embed-origin';
 import { contentTypeAllowed, getUploadConfig, uploadTooLargeMessage } from './config';
 import type { ParsedFile } from './multipart';
 
@@ -51,6 +52,19 @@ export interface UploadRequest {
 export interface UploadContext {
   /** The anonymous session's UserInfo (already verified by MJ's unified auth middleware). */
   contextUser: UserInfo;
+  /**
+   * The caller's `Origin` header, from `RequestIdentityMiddleware` via `currentRequestIdentity()`.
+   *
+   * Lives on the CONTEXT rather than on {@link UploadRequest} because that type holds fields parsed
+   * out of the multipart body -- things the caller put in the payload -- and this is a fact about
+   * the HTTP request. It mirrors `PipelineContext.requestOrigin` on the submit path for the same
+   * reason, so the two doors describe the same input the same way.
+   *
+   * Absent in unit tests and absent for any non-browser client. Absent is a REFUSAL once a
+   * distribution has authored a list and an ADMISSION when it has not; `checkEmbedOrigin` owns that
+   * asymmetry and the reasoning for it.
+   */
+  requestOrigin?: string;
   /** Metadata provider for the anonymous-scope check (`EntityByName`/`GetUserPermisions`). */
   metadataProvider: ScopeMetadataProvider;
   /** RunView provider for resolving the distribution slug to its published definition. */
@@ -158,6 +172,53 @@ export async function runUpload(ctx: UploadContext, req: UploadRequest): Promise
     return distCheck;
   }
 
+  // 3a. Embed origin (#203). A distribution may name the browser origins permitted to use its
+  //     link; this refuses everyone else, exactly as the submit pipeline's gate 2a does.
+  //
+  //     THIS IS THE THIRD DOOR, and it was the one the origin gate first missed. `PublishedForm`
+  //     and `SubmitFormResponse` are the two the change reasons about, because enumerating
+  //     `@Query`/`@Mutation` finds them; this route is Express middleware contributed through
+  //     `GetPostAuthMiddleware`, so it is invisible to that enumeration while being reachable by
+  //     the same widget, on the same public path, with the same anonymous session, through the
+  //     same `resolvePublishedDefinition`. Measured before this gate existed: a caller the submit
+  //     refused still stored bytes and minted an `MJ: Files` row here.
+  //
+  //     IT CANNOT RUN EARLIER: the policy is a column on the distribution row, and step 3 above is
+  //     what turns the slug into that row. It runs BEFORE `validateQuestion` and before any byte is
+  //     stored.
+  //
+  //     IT DOES NOT PRECEDE THE RATE LIMITER, AND THAT IS THE ONE PLACE THIS DOOR DIVERGES FROM THE
+  //     SUBMIT PIPELINE -- deliberately, so do not "fix" it by moving this gate earlier. On the
+  //     submit path the whole sequence lives in one function, so `checkEmbedOrigin` genuinely
+  //     precedes `charge` (`submit-pipeline.ts:509` then `:526`) and a refused request spends no
+  //     budget. Here the per-caller window is charged one layer up, in the Express middleware:
+  //     `processUpload` -> `refuseIfRateLimited` (`UploadMiddleware.ts:141`) -> `checkUploadRateLimit`
+  //     -> `FormsRateLimiter.Instance.charge` (`upload-rate-limit.ts:50`), all of it before
+  //     `runUpload` is called at all (`:157`). So an origin refusal here HAS already cost the caller
+  //     one upload slot (of `FORMS_UPLOAD_IP_MAX`, default 30) whenever a peer address resolved --
+  //     `checkUploadRateLimit` no-ops when it cannot derive an identity.
+  //
+  //     That ordering is not an oversight to correct. This gate needs the distribution, the
+  //     distribution comes from the slug, and the slug is a multipart field in the BODY, which is
+  //     not read until `readCappedBody` (`:145`) -- after the charge. Gating on origin first would
+  //     mean buffering and parsing an untrusted body before any frequency control applied, which
+  //     inverts the property that charge point exists to provide: this route's controls were added
+  //     because an authenticated anonymous session could otherwise POST files without bound
+  //     (storage DoS), and even the in-flight cap is ordered so a shed request is charged to nobody
+  //     (`UploadMiddleware.ts:108-116`). Cheap-and-early beats precise-and-late on a door whose
+  //     abuse case is volume.
+  const embedOrigin = checkEmbedOrigin(distCheck.resolved?.allowedOrigins, ctx.requestOrigin);
+  if (!embedOrigin.allowed) {
+    // Operator gets which origin against which list; the respondent gets the one sentence the
+    // submit door already uses, so a prober cannot tell the doors apart and cannot map the
+    // allowlist by reading refusals.
+    LogError(
+      `[Forms] upload refused for ${req.distributionSlug ?? req.distributionId ?? '(no slug)'}: `
+        + `${embedOrigin.reason ?? 'origin not allowed'}`,
+    );
+    return fail(403, FOREIGN_ORIGIN_MESSAGE);
+  }
+
   // 3b. The question must be a real FileUpload question on the published definition. Checked
   // BEFORE any byte is stored: the definition is already in hand from step 3, and validating
   // after storage is how the first live run of this path ended — bytes and an `MJ: Files` row
@@ -245,6 +306,12 @@ export async function writeProvenanceRow(input: ProvenanceRecordInput): Promise<
 interface ResolvedUploadTarget {
   distributionId: string;
   formId: string;
+  /**
+   * The distribution's raw `AllowedOrigins` column, carried out of the resolve so the gate in
+   * {@link runUpload} can read it without a second query. Resolving is a QUERY; deciding who may
+   * act on the result is the orchestrator's job, which is why the verdict is not taken here.
+   */
+  allowedOrigins: string | null | undefined;
   /** Every question on the published definition, flattened across pages. */
   questions: ReadonlyArray<{ id: string; type: string }>;
 }
@@ -272,6 +339,7 @@ async function resolveOpenDistribution(
     resolved: {
       distributionId: loaded.value.distribution.ID,
       formId: loaded.value.definition.formId,
+      allowedOrigins: loaded.value.distribution.AllowedOrigins,
       questions: loaded.value.definition.pages.flatMap((p) => p.questions.map((q) => ({ id: q.id, type: q.type }))),
     },
   };

@@ -52,6 +52,7 @@ import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
+import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 
 import { matchesExactRoute, matchSingleSegmentRoute } from '../http/route-match.js';
 import { getRespondentHostConfig } from './config.js';
@@ -129,12 +130,14 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
     const cfg = getRespondentHostConfig();
 
     // Pre-auth, like the page: this route's caller has no session — obtaining one is what it is
-    // for. `requestIdentityHandler()` is mounted ON the route because this hook runs inside
-    // MJServer's middleware-COLLECTION loop (`index.ts:824`) while the pre-auth handlers it gathers
-    // are not `app.use`-d until `index.ts:1143`. Express dispatches in registration order, so the
-    // global copy is added after this route and never runs for it. Without this argument
-    // `currentRequestIdentity()` is undefined, `resumeDeps` falls back to keying on the slug, and
-    // the rate limit becomes one bucket for the whole form — which any single caller can spend.
+    // for. `requestIdentityHandler()` is mounted ON THE ROUTE, not relied on globally, because this
+    // hook runs inside MJServer's middleware-COLLECTION loop (`index.ts:824`) while the pre-auth
+    // handlers it gathers are not `app.use`-d until `index.ts:1158`. Express dispatches in
+    // registration order, so the global copy is added after this route and never runs for it.
+    // Without this argument `currentRequestIdentity()` inside `resumeDeps()` is always undefined
+    // here, which silently made BOTH the address forwarded to core's redeem (`callerIp`, #191) and
+    // this route's own per-caller rate-limit bucket (`callerKey`, #181) inert — the latter falling
+    // back to one shared bucket per FORM (`slug:${slug}`) that any single caller can spend.
     app.post(RESPONDENT_RESUME_ROUTE, requestIdentityHandler(), (req: Request, res: Response) => {
       void this.handleResumeRoute(req, res).catch((e: unknown) => {
         LogError(`[Forms] Resume route error: ${e instanceof Error ? e.message : String(e)}`);
@@ -318,6 +321,10 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
         contextUser: this.systemUser(),
         redeemUrl: cfg.magicLinkRedeemUrl,
         fetchImpl: fetch,
+        // The same resolved peer the meter above was charged against — never a header the caller
+        // chose. Core keys its own redeem cap on this; without it every respondent in the
+        // deployment shares one bucket (register row 29).
+        clientIp: currentRequestIdentity()?.ip,
       },
       slug,
     );
@@ -350,12 +357,39 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       turnstileSiteKey: cfg.turnstileSiteKey,
       hasDraft,
     });
+    // The embed control that can actually SEE the customer's origin, and therefore the real one
+    // (#203). This product's embed snippet is an `<iframe>` (`distribution.service.ts`
+    // `embedSnippet`), so the framed document's origin is OURS — nothing on the API side can tell a
+    // legitimate embed on the customer's site from one on anybody else's page, because both report
+    // us. `frame-ancestors` is the exception: the BROWSER evaluates it against the framing
+    // ancestor, which is exactly the fact the author authorised.
+    //
+    // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`.
+    // Same-origin framing is covered by CSP `'self'`, which the browser resolves against this
+    // page's own origin: a page served from our origin is already us, and an allowlist naming
+    // other people's sites was never meant to say anything about that. Because `'self'` is
+    // resolved by the browser rather than composed by us, the directive needs no knowledge of the
+    // deployment's own URL — routing this through the API-side verdict would instead have made a
+    // framing decision depend on `MJAPI_PUBLIC_URL`, an environment variable it has no need of.
+    //
+    // Deliberately no `X-Frame-Options` beside it: it cannot express a list (`ALLOW-FROM` is
+    // unsupported in every current browser), and `SAMEORIGIN` would refuse the very embeds this
+    // feature exists to permit. A browser too old for `frame-ancestors` therefore gets no framing
+    // control at all — which is today's behaviour for every link, stated here rather than papered
+    // over with a header that would break the working case to look like protection.
+    const frameAncestors = frameAncestorsDirective(parseAllowedOrigins(outcome.distribution.AllowedOrigins));
     res
       .status(200)
       .type('html')
       // The page carries a per-respondent session JWT now — must NOT be shared-cached.
-      .set('Cache-Control', 'no-store')
-      .send(html);
+      .set('Cache-Control', 'no-store');
+    if (frameAncestors) {
+      // Absent, not permissive, when the link authored nothing: a distribution with no allowlist
+      // must be framable exactly as it is today, and an empty or catch-all directive would be a
+      // behaviour change for every live embed.
+      res.set('Content-Security-Policy', frameAncestors);
+    }
+    res.send(html);
   }
 
   /**
@@ -481,6 +515,13 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       // back to the slug, which bounds the route per FORM rather than per caller — coarse, but a
       // bound, and the same trade `rateLimitGatesFor` makes when it has no address.
       callerKey: currentRequestIdentity()?.ipHash ?? `slug:${slug}`,
+      // Forwarded to core on the resume redeem so its own per-IP cap applies per respondent, same
+      // as the door's `clientIp` above (register row 29). Unlike `callerKey`, this has NO
+      // slug-shaped fallback: core reads this value as an address, so standing in anything else
+      // when identity is absent would be a fiction it audits and buckets on. Absent simply means
+      // the header is omitted (`postRedeem`'s `forwardedHeaders`) and core falls back to its own
+      // peer for that one request — a degradation, never an invented value.
+      callerIp: currentRequestIdentity()?.ip,
     });
   }
 
