@@ -219,6 +219,9 @@ jobs:
       - name: Release-push gate
         run: npm run lint:release-pushes:test && npm run lint:release-pushes
 
+      - name: Peer-range gate
+        run: npm run lint:peer-ranges:test && npm run lint:peer-ranges
+
       # Same shape: mj-app.json's version and mjVersionRange are derived, not typed, and publish.yml
       # only CHECKS them now (#177) rather than writing them. Drift caught here is a one-line fix;
       # caught at release it is a red publish run.
