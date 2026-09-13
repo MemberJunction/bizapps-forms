@@ -85,15 +85,19 @@ export function requestIdentityHandler(hops: number = trustedProxyHops()): Reque
     const rawOrigin = req.headers['origin'];
     const origin = typeof rawOrigin === 'string' && rawOrigin.trim().length > 0 ? rawOrigin.trim() : undefined;
     // The store is now entered UNCONDITIONALLY. It used to be skipped when no peer address
-    // resolved, which was harmless while `ipHash` was its only passenger: a missing hash and a
-    // missing store both read as "no ceiling", so the routes behaved identically either way.
+    // resolved, which was harmless while `ip`/`ipHash` were its only passengers: a missing hash
+    // and a missing store both read as "no ceiling", and every consumer already reads the address
+    // as `currentRequestIdentity()?.ip`, so the routes behaved identically either way.
     // It is NOT harmless for `origin`. A request whose socket had already gone would reach the
     // resolver carrying no origin, and the embed gate reads a missing origin under an unrestricted
     // policy as "admit" — so a caller the author's allowlist should have refused would be let in
-    // by a fact about our socket rather than a fact about them. A store of two optional fields
+    // by a fact about our socket rather than a fact about them. A store of three optional fields
     // cannot make that mistake; an absent store, which no consumer can distinguish from an absent
     // field, can.
-    runWithRequestIdentity({ ipHash: ip ? hashClientIp(ip) : undefined, origin }, next);
+    //
+    // The redeem forward (#207) is unaffected: `forwardedHeaders` already forwards nothing for an
+    // absent address, so an absent `ip` here reaches core exactly as an absent store did.
+    runWithRequestIdentity({ ip, ipHash: ip ? hashClientIp(ip) : undefined, origin }, next);
   };
 }
 

@@ -24,7 +24,10 @@
  *
  * Env vars:
  *  - `FORMS_REDEEM_IP_MAX`            Max `/f/:slug` requests per window per client IP.
- *                                     Default 30 (matches the upload route's per-IP ceiling).
+ *                                     Default 20 — core's own redeem cap, which this gate fronts
+ *                                     on the page route. See `redeemRateLimitMax` below for the
+ *                                     returning-respondent exception, where core's own cap binds
+ *                                     first instead.
  *  - `FORMS_REDEEM_MAX_IN_FLIGHT`     Max simultaneous in-flight redeems (process-wide).
  *                                     Default 25.
  */
@@ -42,9 +45,27 @@ function numberFromEnv(key: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Max `/f/:slug` requests one caller may make per rate-limit window. Read per call (see upload/config). */
+/**
+ * Max `/f/:slug` requests one caller may make per rate-limit window. Read per call (see upload/config).
+ *
+ * The default matches CORE's own `magicLink.redeemRateLimitMax` (20 per 60s), so this gate fronts
+ * core's — ON THE PAGE ROUTE, where one `/f/:slug` open spends exactly one core redeem. A looser
+ * number here made that route's meter unreachable: core refused at 21 first, after the work had
+ * already been done, and the friendlier 429 this door composes could never fire on its own account.
+ * Raising this above core's puts that dead path back; a deployment that wants a higher ceiling has
+ * to raise core's too.
+ *
+ * A RETURNING respondent is the exception to the paragraph above, not covered by it: `host-page.ts`
+ * `resumeThenMount()` auto-POSTs `/f/:slug/resume` whenever a resume cookie is present — no user
+ * action required — and that route performs a SECOND core redeem (`redeemRawToken` → `postRedeem`).
+ * It is charged only to its own `resume:` bucket (`RESUME_RATE_MAX = 30`, `resume-deps.ts`), not to
+ * this meter and not to `redeemInFlightLimiter()` either. So one page open by a returning
+ * respondent spends two of core's 20, and core refuses at the 10th open while this meter still
+ * reads 10-of-20 spent — core's cap binds first, at half the opens this default implies. Closing
+ * that gap means charging the resume redeem to this same meter; this branch does NOT do that.
+ */
 export function redeemRateLimitMax(): number {
-  return numberFromEnv('FORMS_REDEEM_IP_MAX', 30);
+  return numberFromEnv('FORMS_REDEEM_IP_MAX', 20);
 }
 
 /**

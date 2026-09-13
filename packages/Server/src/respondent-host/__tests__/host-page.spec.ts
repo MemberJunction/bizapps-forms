@@ -262,14 +262,24 @@ describe('getRespondentHostConfig', () => {
     expect(getRespondentHostConfig().widgetBundleUrl).toBe('/forms/widget/mj-form.js');
   });
 
-  it('derives the magic-link redeem url from MJAPI_PUBLIC_URL with the fixed mount path', () => {
+  // CHANGED DELIBERATELY (gauntlet #207, F2). These two used to assert that the redeem URL is
+  // derived from MJAPI_PUBLIC_URL — which is the defect, not the contract. That variable is the
+  // PUBLIC origin and has to stay so, because `graphqlUrl` comes from it and is handed to the
+  // respondent's browser; addressing the server-side redeem there sent a process-local call out
+  // through the deployment's proxy and back in, and the proxy appended MJAPI's own egress to the
+  // X-Forwarded-For the door had just set, so core read the egress instead of the respondent. The
+  // redeem now goes to loopback on this host's own port, where no hop can be appended. Full
+  // reasoning and the rest of the contract live in `config.spec.ts`.
+  it('does NOT derive the redeem url from the public origin', () => {
     process.env.MJAPI_PUBLIC_URL = 'https://forms.example.com';
     resetRespondentHostConfigForTests();
-    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('https://forms.example.com/magic-link/redeem');
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).not.toContain('forms.example.com');
   });
 
-  it('defaults the redeem url to the local MJAPI origin', () => {
-    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('http://localhost:4121/magic-link/redeem');
+  it('defaults the redeem url to loopback on this host’s own port', () => {
+    process.env.GRAPHQL_PORT = '4121';
+    resetRespondentHostConfigForTests();
+    expect(getRespondentHostConfig().magicLinkRedeemUrl).toBe('http://127.0.0.1:4121/magic-link/redeem');
   });
 
   it('honors an explicit FORMS_MAGICLINK_REDEEM_URL', () => {
