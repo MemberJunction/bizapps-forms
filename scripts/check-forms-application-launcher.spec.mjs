@@ -70,13 +70,15 @@ test('every application this repo declares is reachable from a host user launche
  * The metadata declaration above is necessary and not sufficient, and the issue that reported this
  * proposed only the declaration.
  *
- * `Application.DefaultForNewUser` is read by exactly two MJ paths, and both are new-user-only:
- * `MJServer/src/auth/newUsers.ts` runs inside new-User-row creation, and the Explorer client
- * self-heal in `base-application/src/lib/application-manager.ts` is gated on
- * `if (userApps.length === 0)`. So on a host that already exists, every user who has ever opened
- * Explorer holds a non-empty list that is never reconsidered. Measured on the upgrade-path
- * rehearsal database: setting the flag alone moved nobody -- `System` (7 rows) and `Anonymous`
- * (2 rows) both stayed without Forms.
+ * `Application.DefaultForNewUser` is read by three MJ paths, not two: two are new-user-only
+ * (`MJServer/src/auth/newUsers.ts`, inside new-User-row creation, and the Explorer client self-heal
+ * in `base-application/src/lib/application-manager.ts`, gated on `if (userApps.length === 0)`), and
+ * the third -- `MJApplicationEntityServer.Save()`'s `CreateUserApplicationsForAllUsers()`, with no
+ * zero-row exclusion -- fires for every existing user on any false→true flip through
+ * `BaseEntity.Save()`, a path this migration's raw `UPDATE` never enters. So on a host that already
+ * exists, every user who has ever opened Explorer holds a non-empty list that is never reconsidered
+ * by either new-user-only path. Measured on the upgrade-path rehearsal database: setting the flag
+ * alone moved nobody -- `System` (7 rows) and `Anonymous` (2 rows) both stayed without Forms.
  *
  * Shipping the flag with no backfill is therefore the mirror image of the mistake
  * bizapps-caliber's V202609021000 documents: correct for users created later, invisible forever to

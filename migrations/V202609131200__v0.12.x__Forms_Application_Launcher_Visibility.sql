@@ -11,9 +11,13 @@
 -- `true`; Forms was the only one of the three that did not.
 --
 -- TWO WRITES, BECAUSE THE FLAG ALONE MOVES ALMOST NOBODY. MJ creates `UserApplication` rows from
--- exactly two places and both are new-user-only: the JWT provisioning path (MJServer
--- `auth/newUsers.ts`, inside new-User-row creation) and the Explorer client self-heal
--- (`base-application/src/lib/application-manager.ts`), which is gated on `userApps.length === 0`.
+-- three places, not two: the JWT provisioning path (MJServer `auth/newUsers.ts`, inside
+-- new-User-row creation) and the Explorer client self-heal
+-- (`base-application/src/lib/application-manager.ts`, gated on `userApps.length === 0`) are
+-- new-user-only, but `MJApplicationEntityServer.Save()` also runs `CreateUserApplicationsForAllUsers()`
+-- — with no zero-row exclusion at all — on any false→true `DefaultForNewUser` flip through
+-- `BaseEntity.Save()`. This migration's raw `UPDATE` deliberately never routes through `Save()`, so
+-- it stays off that third path — a `mj sync push` of the metadata edit would not.
 -- Anyone who has ever opened Explorer holds a non-empty list that is never reconsidered. Measured
 -- on the upgrade-path rehearsal database before writing this file: applying only the flag left
 -- `System` (7 rows) and `Anonymous` (2 rows) exactly as they were.
