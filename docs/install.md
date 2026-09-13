@@ -124,3 +124,51 @@ Beyond the `magicLink` block in the [README](../README.md#-install-into-a-host-a
 builds it from the *host's* — and Skyway leaves an unknown `${…}` untouched instead of failing.
 So a third placeholder ships as a literal string and fails silently on someone else's database.
 `npm run lint:distribution` enforces this.
+
+---
+
+## 7. `Disabled` after a clean install almost never means npm auth
+
+`mj app install` and `mj app upgrade` resolve npm packages *after* their database work, and neither
+stops when that step fails — it records a warning and the remaining steps run anyway. So a failed
+npm step rolls nothing back: they still record the app, still exit **0**, and then finalize the app
+as **Disabled**. The success line you get is a green `✔ Installed <app> v<version>` (or
+`✔ Upgraded <app> to v<version>`); the part worth reading is the summary printed underneath it:
+
+```
+App installed but left DISABLED — npm install failed, so its packages are not resolved.
+package.json and config were updated; log in to npm ('npm login') or fix your .npmrc,
+run 'npm install', then 'mj app enable mj-bizapps-forms'.
+```
+
+That message names npm auth because auth is the *common* cause, not because the CLI diagnosed it.
+A dependency-resolution conflict produces the identical ending. Read the npm output above the
+banner before touching your credentials:
+
+- `npm error code E401` / `E403` / `ENEEDAUTH` — genuinely auth. `npm login`, or fix `.npmrc`.
+- `npm error code ERESOLVE` — a version conflict. Auth is fine; no credential change will help.
+
+An `ERESOLVE` naming a peer of an `@mj-biz-apps/*` package is a packaging defect in the app, and
+worth reporting. Forms shipped one: `forms-ng` declared `@angular/cdk` as an exact peer through
+`0.10.0`, so every host whose CDK was not exactly `21.1.3` — which is most of them, since the CDK
+version line moves independently of `@angular/core` — installed Forms and got `Disabled`
+(MemberJunction/bizapps-forms#211).
+
+**Recovery, whatever the cause:** fix the underlying problem first, then
+
+```bash
+npm install                          # in the host directory; must exit 0 with no flags
+mj app enable mj-bizapps-forms
+```
+
+**Upgrading sets the status, but does not put the app back in service.** A successful
+`mj app upgrade` writes `Active` unconditionally once its npm step succeeds — it never reads the
+status it found. What it does *not* do is switch the host's `dynamicPackages` entries back on; the
+only call that does that lives in `mj app enable`. So an `Active` status after an upgrade is not
+evidence the app loads, and a host that has been sitting at `Disabled` still needs the `enable`.
+
+**Neither `--force` nor `--legacy-peer-deps` is the way past an `ERESOLVE`.** npm offers both, and
+both accept a tree it has just told you is wrong. `--legacy-peer-deps` additionally disables npm's
+peer auto-install for the whole tree, so *other* apps' required peers stop installing with nothing
+reporting it. That surfaces later as a bare module-resolution error during an Explorer build,
+naming a package unrelated to whatever you were installing.

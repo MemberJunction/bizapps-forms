@@ -219,6 +219,22 @@ jobs:
       - name: Release-push gate
         run: npm run lint:release-pushes:test && npm run lint:release-pushes
 
+      # #211. The defect class here is invisible to everything else in this repo: an exact version in
+      # a `peerDependencies` block is a string only the CONSUMING host's npm resolver ever evaluates.
+      # pnpm reads peer ranges here (`auto-install-peers=true`) but never has to CHOOSE on this one:
+      # packages/Angular anchors @angular/cdk at exactly 21.1.3 in devDependencies, which satisfies
+      # the exact peer and the caret alike, so no resolver in this repo can tell them apart and no
+      # unit test can reach the difference. `@angular/cdk` shipped
+      # pinned to one patch in six consecutive releases behind that blind spot, and every host not on
+      # exactly that build installed Forms and got a Disabled app blaming npm auth. Its own spec runs
+      # first, and carries the cases (carets, comparator and hyphen ranges, the documented
+      # type-graphql allowance) that stop a future "flag everything" passing as a fix.
+      #
+      # Scope note: this answers whether a peer is WRITTEN exact, not whether a host's installed
+      # version can satisfy the range — the `^6.1.0-edge.5` MJ peers are where those two diverge.
+      - name: Peer-range gate
+        run: npm run lint:peer-ranges:test && npm run lint:peer-ranges
+
       # Same shape: mj-app.json's version and mjVersionRange are derived, not typed, and publish.yml
       # only CHECKS them now (#177) rather than writing them. Drift caught here is a one-line fix;
       # caught at release it is a red publish run.
