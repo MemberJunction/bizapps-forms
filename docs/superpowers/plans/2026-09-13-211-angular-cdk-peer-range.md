@@ -550,7 +550,7 @@ EOF
 ### Task 2: The fix
 
 **Files:**
-- Modify: `packages/Angular/package.json:30`
+- Modify: `packages/Angular/package.json` -> `peerDependencies["@angular/cdk"]` (named by key, not by line: the entry sits at line 27, and a line number in a manifest that gains an entry points at the wrong dependency the moment it drifts)
 
 **Interfaces:**
 - Consumes: `scripts/check-peer-ranges.mjs` from Task 1 (the gate that must go green).
