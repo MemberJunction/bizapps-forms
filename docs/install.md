@@ -129,9 +129,11 @@ So a third placeholder ships as a literal string and fails silently on someone e
 
 ## 7. `Disabled` after a clean install almost never means npm auth
 
-`mj app install` and `mj app upgrade` do their database work first and resolve npm packages last.
-When the npm step fails they still record the app, still exit **0**, still print
-`✔ Successfully installed`, and then finalize the app as **Disabled** with:
+`mj app install` and `mj app upgrade` resolve npm packages *after* their database work, and neither
+stops when that step fails — it records a warning and the remaining steps run anyway. So a failed
+npm step rolls nothing back: they still record the app, still exit **0**, and then finalize the app
+as **Disabled**. The success line you get is a green `✔ Installed <app> v<version>` (or
+`✔ Upgraded <app> to v<version>`); the part worth reading is the summary printed underneath it:
 
 ```
 App installed but left DISABLED — npm install failed, so its packages are not resolved.
