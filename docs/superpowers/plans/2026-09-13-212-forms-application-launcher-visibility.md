@@ -22,13 +22,19 @@ therefore executes `@DefaultForNewUser_58db7f0b = 0`. Both siblings declare `tru
 (`bizapps-common/metadata/applications/.common-application.json:19`,
 `bizapps-tasks/metadata/applications/.tasks-application.json:20`).
 
-**2. Flipping that flag alone repairs almost nobody.** MJ has exactly two paths that create
-`__mj.UserApplication` rows, and both are new-user-only:
+**2. Flipping that flag alone repairs almost nobody.** MJ creates `__mj.UserApplication` rows from
+three places, not two. The two that matter here are new-user-only; the third cannot be reached from
+a migration at all:
 
 | Path | File | Gate |
 |---|---|---|
 | JWT new-user provisioning | `MJ/packages/MJServer/src/auth/newUsers.ts:88` | runs only inside new-**User**-row creation |
 | Explorer client self-heal | `MJ/packages/Angular/Explorer/base-application/src/lib/application-manager.ts:366` | `if (userApps.length === 0)` |
+| `Save()`-driven bulk provisioning | `MJ/packages/MJCoreEntitiesServer/src/custom/MJApplicationEntityServer.server.ts:44-61` | any false→true `DefaultForNewUser` flip **through `BaseEntity.Save()`** — **no zero-row exclusion at all** |
+
+The third path is why this plan's migration uses a raw `UPDATE`: raw SQL never routes through
+`Save()`, so it stays off that path deliberately. A `mj sync push` of the metadata edit would not —
+it would hand a zero-row user a lone Forms row, the exact failure step 3 below exists to avoid.
 
 Measured on `MJ_HostTest_Upgrade`: `System` holds **7** UserApplication rows and `Anonymous` **2**,
 neither including Forms. Applying *only* `UPDATE __mj.Application SET DefaultForNewUser = 1`
@@ -278,13 +284,15 @@ Append to `scripts/check-forms-application-launcher.spec.mjs`:
  * The metadata declaration above is necessary and not sufficient, and the issue that reported this
  * proposed only the declaration.
  *
- * `Application.DefaultForNewUser` is read by exactly two MJ paths, and both are new-user-only:
- * `MJServer/src/auth/newUsers.ts` runs inside new-User-row creation, and the Explorer client
- * self-heal in `base-application/src/lib/application-manager.ts` is gated on
- * `if (userApps.length === 0)`. So on a host that already exists, every user who has ever opened
- * Explorer holds a non-empty list that is never reconsidered. Measured on the upgrade-path
- * rehearsal database: setting the flag alone moved nobody -- `System` (7 rows) and `Anonymous`
- * (2 rows) both stayed without Forms.
+ * `Application.DefaultForNewUser` is read by three MJ paths, not two: two are new-user-only
+ * (`MJServer/src/auth/newUsers.ts`, inside new-User-row creation, and the Explorer client self-heal
+ * in `base-application/src/lib/application-manager.ts`, gated on `if (userApps.length === 0)`), and
+ * the third -- `MJApplicationEntityServer.Save()`'s `CreateUserApplicationsForAllUsers()`, with no
+ * zero-row exclusion -- fires for every existing user on any false→true flip through
+ * `BaseEntity.Save()`, a path this migration's raw `UPDATE` never enters. So on a host that already
+ * exists, every user who has ever opened Explorer holds a non-empty list that is never reconsidered
+ * by either new-user-only path. Measured on the upgrade-path rehearsal database: setting the flag
+ * alone moved nobody -- `System` (7 rows) and `Anonymous` (2 rows) both stayed without Forms.
  *
  * Shipping the flag with no backfill is therefore the mirror image of the mistake
  * bizapps-caliber's V202609021000 documents: correct for users created later, invisible forever to
@@ -357,9 +365,13 @@ Create `migrations/V202609131200__v0.12.x__Forms_Application_Launcher_Visibility
 -- `true`; Forms was the only one of the three that did not.
 --
 -- TWO WRITES, BECAUSE THE FLAG ALONE MOVES ALMOST NOBODY. MJ creates `UserApplication` rows from
--- exactly two places and both are new-user-only: the JWT provisioning path (MJServer
--- `auth/newUsers.ts`, inside new-User-row creation) and the Explorer client self-heal
--- (`base-application/src/lib/application-manager.ts`), which is gated on `userApps.length === 0`.
+-- three places, not two: the JWT provisioning path (MJServer `auth/newUsers.ts`, inside
+-- new-User-row creation) and the Explorer client self-heal
+-- (`base-application/src/lib/application-manager.ts`, gated on `userApps.length === 0`) are
+-- new-user-only, but `MJApplicationEntityServer.Save()` also runs `CreateUserApplicationsForAllUsers()`
+-- — with no zero-row exclusion at all — on any false→true `DefaultForNewUser` flip through
+-- `BaseEntity.Save()`. This migration's raw `UPDATE` deliberately never routes through `Save()`, so
+-- it stays off that third path — a `mj sync push` of the metadata edit would not.
 -- Anyone who has ever opened Explorer holds a non-empty list that is never reconsidered. Measured
 -- on the upgrade-path rehearsal database before writing this file: applying only the flag left
 -- `System` (7 rows) and `Anonymous` (2 rows) exactly as they were.
