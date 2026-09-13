@@ -302,24 +302,40 @@ Append to `scripts/check-forms-application-launcher.spec.mjs`:
  * than it can see: that a migration writes the flag and a migration backfills the subscription
  * table. Whether the backfill's predicate is right is settled by running it against a host-shaped
  * database, which Step 4 does.
+ *
+ * WHY THE FLAG ASSERTION LOOKS AT THE LAST WRITE, NOT "SOME WRITE" (the #111 class). A bare "some
+ * shipped migration sets it to 1" goes green even when a LATER migration re-emits 0 — exactly what
+ * happens when a future release's consolidated Metadata_Sync is generated against a database that
+ * still holds 0 for Forms (the shared dev DB lags migrations for this very reason, per the module
+ * docblock above) and that new seed sorts after this repair migration in the Flyway chain. The
+ * metadata declaration would still say `true` and a migration would still set `1` somewhere in the
+ * middle of the chain, so both the other checks here would stay green while the regression
+ * re-shipped. Reading every write in apply order and asserting the FINAL one is `1` is the only
+ * form of this check a consolidated-seed regeneration cannot quietly defeat.
  */
 test('a shipped migration repairs hosts that already ran the v0.8 seed', () => {
     const sql = readShippedSql();
 
-    // Scoped to the migration that names the Forms application id, so this cannot be satisfied by
-    // some other migration writing some other application's flag — which is what a bare
-    // /DefaultForNewUser = 1/ over the whole corpus would have done. Several already do.
-    const repairs = readdirSync(MIGRATIONS_DIR)
-        .filter((f) => f.endsWith('.sql'))
-        .map((f) => readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
-        .filter((body) => body.includes(FORMS_APP_ID) && /\[Application\]/i.test(body))
-        .filter((body) => /SET\s+DefaultForNewUser\s*=\s*1/i.test(body));
-
+    const writes = findFormsDefaultForNewUserWrites(readMigrations(REPO_ROOT));
     assert.ok(
-        repairs.length > 0,
-        `No shipped migration sets Application.DefaultForNewUser = 1 for the Forms application ` +
+        writes.length > 0,
+        `No shipped migration sets Application.DefaultForNewUser for the Forms application ` +
             `(${FORMS_APP_ID}). The metadata declaration alone never leaves a dev database, so ` +
             `every host that already ran V202608081700 keeps the 0 that seed wrote (#212).`,
+    );
+
+    const last = writes[writes.length - 1];
+    assert.equal(
+        last.value,
+        true,
+        `${last.file} is the LAST shipped write to the Forms application's DefaultForNewUser flag ` +
+            `in Flyway apply order, and it sets it to 0. A future release's consolidated Metadata_Sync ` +
+            `generated against a database that still holds 0 for Forms (the shared dev DB used to ` +
+            `regenerate metadata lags migrations for exactly this reason) sorts after this repair ` +
+            `migration and re-emits 0, silently re-shipping #212 even though the metadata declaration ` +
+            `still says true and some earlier migration still sets 1 -- this is the #111 class. ` +
+            `Full write order found: ${writes.map((w) => `${w.file}=${w.value ? 1 : 0}`).join(' -> ')}. ` +
+            `Fix: this migration must set DefaultForNewUser back to 1, or must not exist.`,
     );
 
     assert.match(
@@ -417,7 +433,10 @@ GO
 -- UQ_UserApplication_UserID_ApplicationID (core V202512301901), so an unguarded re-run would halt
 -- the chain on a constraint violation rather than no-op. Sequence continues each user's own list,
 -- matching what UserInfoEngine.doCreateDefaultApplications would have written (maxExistingSequence
--- + 1); ISNULL covers a user whose only rows are somehow NULL-sequenced.
+-- + 1). The ISNULL supplies that helper's own empty-set seed: UserInfoEngine.ts:1302 reduces with
+-- an initial -1, so a first row lands at Sequence 0. It is NOT guarding a NULL Sequence — the
+-- column is INT NOT NULL, and the EXISTS below already restricts this to users holding at least
+-- one row, so MAX() over that set cannot be NULL.
 DECLARE @FormsAppID UNIQUEIDENTIFIER = 'BFB97C57-4552-4643-8933-A0B2D76544D8';
 
 INSERT INTO [${mjSchema}].[UserApplication] ([ID], [UserID], [ApplicationID], [Sequence], [IsActive])
@@ -425,6 +444,15 @@ SELECT NEWID(), u.[ID], @FormsAppID,
        ISNULL((SELECT MAX(s.[Sequence]) FROM [${mjSchema}].[UserApplication] s WHERE s.[UserID] = u.[ID]), -1) + 1,
        1
 FROM [${mjSchema}].[User] u
+-- Matches MJ's own bulk provisioner, which filters the same way
+-- (MJApplicationEntityServer.CreateUserApplicationsForAllUsers runs RunViews over 'MJ: Users' with
+-- ExtraFilter `IsActive = <true>`), so a host repaired here and a host repaired through Save() end
+-- up with the same rows. KNOWN GAP, stated rather than left for the next reader to find: a user
+-- deactivated at this moment and reactivated later keeps a non-empty list with no Forms row, and
+-- the client self-heal only fires on an EMPTY list — so they will not gain Forms automatically.
+-- Explorer's own app-config panel lists it under AvailableApps for them to add, and MJ has this
+-- same gap for every default application, so this migration does not invent a Forms-specific
+-- answer to it.
 WHERE u.[IsActive] = 1
   -- Only users MJ can no longer reach. A user with no rows keeps none, so the client self-heal
   -- still provisions their FULL default set on first sign-in — see the header.
@@ -433,22 +461,19 @@ WHERE u.[IsActive] = 1
   -- IsActive = 0 row, and re-adding it would override a choice they made.
   AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[UserApplication] f
                   WHERE f.[UserID] = u.[ID] AND f.[ApplicationID] = @FormsAppID);
-GO
 
--- ── Postconditions ───────────────────────────────────────────────────────────────────────────
--- Assert what the launcher actually reads, so a silently-skipped write (a WHERE that matched
--- nothing, a column renamed under us) fails here rather than surfacing as an app nobody can find
--- and nobody connects back to this file.
-DECLARE @FormsAppID UNIQUEIDENTIFIER = 'BFB97C57-4552-4643-8933-A0B2D76544D8';
-
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Application]
-               WHERE ID = @FormsAppID AND DefaultForNewUser = 1)
-    THROW 51151, 'Forms application DefaultForNewUser was not applied.', 1;
-
--- Deliberately asks whether a ROW EXISTS, not whether it is active — mirroring the INSERT's own
--- guard. A user who has deliberately uninstalled Forms keeps `IsActive = 0`, and this migration
--- must not resurrect that choice; an `AND f.[IsActive] = 1` here would THROW on exactly that host
--- and take its whole chain down for a state the migration is correct to have left alone.
+-- Postcondition for the INSERT above lives in THIS batch, not after a GO, because a `GO` ends the
+-- batch and gives another connection a window to create a user in between (MJAPI's env-configured
+-- `newUsers.ts` branch provisions from a fixed app-name list that need not include Forms) — that
+-- user would then have >= 1 UserApplication row and no Forms row, tripping THROW 51152 for a state
+-- this migration is otherwise content to leave alone and hard-stopping a stranger's entire chain.
+-- A batch is not a transaction, so this NARROWS the window rather than closing it -- with no
+-- BEGIN TRAN / SERIALIZABLE, another connection can still land a user row between this INSERT's
+-- statement and the IF below. Accepted rather than wrapped in a transaction because the residual
+-- window is statement-to-statement, not client-round-trip, and this runs against a host whose API
+-- is down anyway. Same ROW-EXISTS-not-IsActive reasoning as the INSERT's own guard: a user who
+-- deliberately uninstalled Forms keeps an IsActive = 0 row, and this must not treat that choice as
+-- a failure.
 IF EXISTS (
     SELECT 1 FROM [${mjSchema}].[User] u
     WHERE u.[IsActive] = 1
@@ -456,6 +481,17 @@ IF EXISTS (
       AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[UserApplication] f
                       WHERE f.[UserID] = u.[ID] AND f.[ApplicationID] = @FormsAppID))
     THROW 51152, 'At least one active user with an existing application list still has no Forms UserApplication row.', 1;
+GO
+
+-- ── Postcondition for step 1 ─────────────────────────────────────────────────────────────────
+-- Assert what the launcher actually reads for new users, so a silently-skipped write (a WHERE
+-- that matched nothing, a column renamed under us) fails here rather than surfacing as an app
+-- nobody can find and nobody connects back to this file.
+DECLARE @FormsAppID UNIQUEIDENTIFIER = 'BFB97C57-4552-4643-8933-A0B2D76544D8';
+
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Application]
+               WHERE ID = @FormsAppID AND DefaultForNewUser = 1)
+    THROW 51151, 'Forms application DefaultForNewUser was not applied.', 1;
 ```
 
 Note the `DECLARE @FormsAppID` repeated after each `GO`: a batch separator ends variable scope, so

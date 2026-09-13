@@ -63,7 +63,10 @@ GO
 -- UQ_UserApplication_UserID_ApplicationID (core V202512301901), so an unguarded re-run would halt
 -- the chain on a constraint violation rather than no-op. Sequence continues each user's own list,
 -- matching what UserInfoEngine.doCreateDefaultApplications would have written (maxExistingSequence
--- + 1); ISNULL covers a user whose only rows are somehow NULL-sequenced.
+-- + 1). The ISNULL supplies that helper's own empty-set seed: UserInfoEngine.ts:1302 reduces with
+-- an initial -1, so a first row lands at Sequence 0. It is NOT guarding a NULL Sequence — the
+-- column is INT NOT NULL, and the EXISTS below already restricts this to users holding at least
+-- one row, so MAX() over that set cannot be NULL.
 DECLARE @FormsAppID UNIQUEIDENTIFIER = 'BFB97C57-4552-4643-8933-A0B2D76544D8';
 
 INSERT INTO [${mjSchema}].[UserApplication] ([ID], [UserID], [ApplicationID], [Sequence], [IsActive])
@@ -71,6 +74,15 @@ SELECT NEWID(), u.[ID], @FormsAppID,
        ISNULL((SELECT MAX(s.[Sequence]) FROM [${mjSchema}].[UserApplication] s WHERE s.[UserID] = u.[ID]), -1) + 1,
        1
 FROM [${mjSchema}].[User] u
+-- Matches MJ's own bulk provisioner, which filters the same way
+-- (MJApplicationEntityServer.CreateUserApplicationsForAllUsers runs RunViews over 'MJ: Users' with
+-- ExtraFilter `IsActive = <true>`), so a host repaired here and a host repaired through Save() end
+-- up with the same rows. KNOWN GAP, stated rather than left for the next reader to find: a user
+-- deactivated at this moment and reactivated later keeps a non-empty list with no Forms row, and
+-- the client self-heal only fires on an EMPTY list — so they will not gain Forms automatically.
+-- Explorer's own app-config panel lists it under AvailableApps for them to add, and MJ has this
+-- same gap for every default application, so this migration does not invent a Forms-specific
+-- answer to it.
 WHERE u.[IsActive] = 1
   -- Only users MJ can no longer reach. A user with no rows keeps none, so the client self-heal
   -- still provisions their FULL default set on first sign-in — see the header.
