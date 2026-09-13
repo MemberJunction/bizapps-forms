@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
     ALLOWED_EXACT_PEERS,
     SCANNED_DIRS,
@@ -151,6 +151,19 @@ test('an allowlisted peer at a different version is still reported', () => {
 
 // ── The allowlist must not rot ──────────────────────────────────────────────────────────────────
 
+test('an allowance is scoped to its package — another package may not claim the same peer', () => {
+    // The allowance is keyed on package AND peer AND version. The version key is covered above;
+    // without this, dropping `a.package === packageName` would let ANY package inherit
+    // forms-server's type-graphql exception, and the gate would go quiet on a real exact peer.
+    const found = findExactPeers(
+        { name: '@mj-biz-apps/forms-impostor', peerDependencies: { 'type-graphql': '2.0.0-beta.3' } },
+        'packages/Impostor/package.json',
+    );
+    assert.equal(found.length, 1);
+    assert.equal(found[0].package, '@mj-biz-apps/forms-impostor');
+    assert.equal(found[0].peer, 'type-graphql');
+});
+
 test('every allowlist entry carries a reason', () => {
     for (const entry of ALLOWED_EXACT_PEERS) {
         assert.equal(typeof entry.reason, 'string');
@@ -275,15 +288,80 @@ test('runCheck throws a SyntaxError naming the file for invalid JSON', () => {
 });
 
 // ── The CLI ─────────────────────────────────────────────────────────────────────────────────────
-// main() and its exit code were untested, even though the exit code is the whole point of the CI
-// step. REPO_ROOT is computed from the script's own location, not an argument, so main() cannot be
-// driven against a synthetic tree without inventing a root-override mechanism this gate does not
-// have — so only the clean case (this repo, exit 0) is asserted here, following the pattern in
-// scripts/check-codegen-append.spec.mjs.
+// The exit code is the whole point of the CI step: `build-and-test` is a required check on both
+// rulesets with no bypass, so a gate that exits 0 on violations reports PASS forever and says
+// nothing. That failure mode is silence, which is why each case below is driven through the real
+// process rather than through runCheck().
+//
+// main() reads REPO_ROOT from the script's own location (`import.meta.url`), not from an argument
+// — so a synthetic tree is reached by COPYING the script into one, no root-override mechanism
+// required. The gate imports only node builtins, so the copy runs standalone.
+//
+// Pattern: scripts/check-codegen-append.spec.mjs, which asserts both directions — a clean `exits 0`
+// plus `FIRES:` cases wrapping execFileSync in assert.throws and checking err.status.
+
+/** A minimal repo the gate can scan, with the gate itself copied in so REPO_ROOT resolves to it. */
+function syntheticRepo(label, manifests) {
+    const root = mkdtempSync(path.join(tmpdir(), `peer-ranges-${label}-`));
+    mkdirSync(path.join(root, 'scripts'), { recursive: true });
+    copyFileSync(path.join(HERE, 'check-peer-ranges.mjs'), path.join(root, 'scripts/check-peer-ranges.mjs'));
+    for (const [rel, manifest] of Object.entries(manifests)) {
+        mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+        writeFileSync(path.join(root, rel), JSON.stringify(manifest, null, 2));
+    }
+    return root;
+}
+
+/** Runs the gate's CLI in `root` and returns { status, stdout, stderr }, never throwing. */
+function runCli(root) {
+    const r = spawnSync('node', ['scripts/check-peer-ranges.mjs'], { cwd: root, encoding: 'utf8' });
+    return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
 
 test('the CLI exits 0 on this repo and prints the pass line', () => {
     const out = execFileSync('node', ['scripts/check-peer-ranges.mjs'], { cwd: REPO_ROOT, encoding: 'utf8' });
     assert.match(out, /Peer-range gate passed \(packages, apps\)\./);
+});
+
+test('FIRES: the CLI exits 1 and names the offender when a peer is exact', () => {
+    // #211 itself, planted. Without this, `process.exit(1)` could become `exit(0)` — one
+    // character — and the required check would go green over every exact peer forever, with all
+    // the other tests here still passing.
+    const root = syntheticRepo('violation', {
+        'packages/Angular/package.json': { name: '@mj-biz-apps/forms-ng', peerDependencies: { '@angular/cdk': '21.1.3' } },
+        'packages/Server/package.json': { name: '@mj-biz-apps/forms-server', peerDependencies: { 'type-graphql': '2.0.0-beta.3' } },
+    });
+    const { status, stderr } = runCli(root);
+    assert.equal(status, 1, `expected a failing exit code, got ${status}`);
+    assert.match(stderr, /Peer-range gate FAILED/);
+    assert.match(stderr, /packages\/Angular\/package\.json/);
+    assert.match(stderr, /@angular\/cdk/);
+    assert.match(stderr, /1 exact peer\(s\), 0 stale allowance\(s\)\./);
+});
+
+test('FIRES: the CLI exits 1 when the only problem is a stale allowance', () => {
+    // The `|| stale.length > 0` disjunct in main() is the only thing that reaches exit(1) here.
+    // Dropping it leaves a dead exception reading as a considered decision, which is the exact
+    // thing ALLOWED_EXACT_PEERS' own docstring says must not be allowed to sit around.
+    const root = syntheticRepo('stale', {
+        'packages/Server/package.json': { name: '@mj-biz-apps/forms-server', peerDependencies: { 'type-graphql': '^2.0.0-beta.3' } },
+    });
+    const { status, stderr } = runCli(root);
+    assert.equal(status, 1, `a stale allowance alone must fail the gate, got exit ${status}`);
+    assert.match(stderr, /no longer appears in any manifest/);
+    assert.match(stderr, /0 exact peer\(s\), 1 stale allowance\(s\)\./);
+});
+
+test('FIRES: the CLI exits 1 when a documented allowance has expired', () => {
+    // The pin moved and ALLOWED_EXACT_PEERS was not re-argued to follow it. Distinct from the two
+    // cases above because it reports BOTH a violation and a stale allowance for the same entry.
+    const root = syntheticRepo('expired', {
+        'packages/Server/package.json': { name: '@mj-biz-apps/forms-server', peerDependencies: { 'type-graphql': '2.0.0-beta.4' } },
+    });
+    const { status, stderr } = runCli(root);
+    assert.equal(status, 1);
+    assert.match(stderr, /has simply expired, and must be re-argued/);
+    assert.doesNotMatch(stderr, /Write a range/);
 });
 
 // ── The repo itself ─────────────────────────────────────────────────────────────────────────────
