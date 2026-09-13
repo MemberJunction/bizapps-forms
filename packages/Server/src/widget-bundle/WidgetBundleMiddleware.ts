@@ -39,6 +39,7 @@ import { RegisterClass } from '@memberjunction/global';
 import { BaseServerMiddleware } from '@memberjunction/server';
 import { LogStatus, LogError } from '@memberjunction/core';
 
+import { matchesExactRoute } from '../http/route-match.js';
 import { getWidgetBundleConfig, WIDGET_BUNDLE_ROUTE, WIDGET_SOURCEMAP_ROUTE } from './config.js';
 
 @RegisterClass(BaseServerMiddleware, 'mj:formsWidgetBundle')
@@ -117,16 +118,15 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
    * GET and HEAD, like the `app.get` this replaced (Express routes HEAD to GET handlers, and
    * `sendFile` answers HEAD with headers only). Anything else passes through untouched.
    *
-   * "Its own path" means the same set of URLs `app.get` claimed — see {@link matchesRoute}.
+   * "Its own path" means the same set of URLs `app.get` claimed — see {@link matchesExactRoute}.
    *
    * The bundle and its sourcemap differ only in which config property they read, their content
    * type, and whether a missing file deserves a log — so they share this rather than carrying two
    * copies of the same send-with-fallbacks dance.
    */
   private serveStaticAsset(asset: StaticAsset): RequestHandler {
-    const route = asset.route.toLowerCase();
     return (req: Request, res: Response, next: NextFunction): void => {
-      if ((req.method !== 'GET' && req.method !== 'HEAD') || !matchesRoute(req.path, route)) {
+      if ((req.method !== 'GET' && req.method !== 'HEAD') || !matchesExactRoute(req.path, asset.route)) {
         next();
         return;
       }
@@ -177,27 +177,6 @@ export class WidgetBundleMiddleware extends BaseServerMiddleware {
         });
     };
   }
-}
-
-/**
- * Does `requestPath` name `lowercaseRoute`, on the same terms `app.get` used?
- *
- * A plain `!==` is NOT equivalent to the `app.get(ROUTE, ...)` this replaced. That registered an
- * Express Layer, whose path is compiled by path-to-regexp under the app's `case sensitive
- * routing` and `strict routing` settings — both OFF by default — so it also answered
- * `/Forms/Widget/MJ-Form.js` and a single trailing slash. Moving the route to the pre-auth slot
- * was about WHERE it sits relative to compression, and must not quietly narrow WHAT it answers:
- * a mis-cased `FORMS_WIDGET_BUNDLE_URL` would otherwise fall through to MJAPI's authenticated
- * routes and return the same confusing 401 the sourcemap half of #121 exists to eliminate.
- *
- * Deliberately no wider than the router was, which is why this is not a general normaliser:
- * exactly one trailing slash is dropped (`…js//` stays unclaimed, as it was), and nothing is
- * percent-decoded (`…mj-form%2Ejs` stays unclaimed, as it was). Verified against both shapes on
- * live servers across 14 method/URL cases; these two rules are the whole difference.
- */
-function matchesRoute(requestPath: string, lowercaseRoute: string): boolean {
-  const withoutTrailingSlash = requestPath.endsWith('/') ? requestPath.slice(0, -1) : requestPath;
-  return withoutTrailingSlash.toLowerCase() === lowercaseRoute;
 }
 
 /** One unauthenticated static file this middleware serves. */

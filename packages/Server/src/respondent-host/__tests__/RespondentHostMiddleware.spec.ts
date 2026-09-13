@@ -13,7 +13,11 @@ import type { RunViewParams, RunViewResult } from '@memberjunction/core';
 import type { mjBizAppsFormsFormDistributionEntityType } from '@mj-biz-apps/forms-entities';
 
 vi.mock('@memberjunction/server', () => ({
-  BaseServerMiddleware: class {},
+  BaseServerMiddleware: class {
+    GetPreAuthMiddleware(): unknown[] {
+      return [];
+    }
+  },
   configInfo: { magicLink: { enabled: true, grantableRoleNames: ['Form Respondent'] } },
 }));
 
@@ -58,7 +62,8 @@ vi.mock('../redeem.service', () => ({
   redeemRawToken: async () => undefined,
 }));
 
-import express from 'express';
+import express, { type Express } from 'express';
+import compression from 'compression';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
@@ -100,12 +105,40 @@ afterEach(() => {
   resetRespondentHostConfigForTests();
 });
 
+/**
+ * The compression MJServer mounts (`MJServer/src/index.ts`, "Fix #8"): a 1 KB threshold, level 6.
+ * Copied rather than imported because MJServer does not export it; what matters to these tests is
+ * the POSITION it is mounted in, which `mountLikeMJServer` reproduces.
+ */
+const MJ_COMPRESSION_THRESHOLD_BYTES = 1024;
+const MJ_COMPRESSION_LEVEL = 6;
+
+/**
+ * Mount the middleware in the ORDER MJServer's `serve()` does, because the order is the thing this
+ * package keeps getting wrong. `serve()` calls `ConfigureExpressApp` while it is still collecting
+ * middleware contributions (`index.ts:824`), then mounts `compression()` (`index.ts:1129`), then
+ * the pre-auth handlers, and only then its own routes — the ones that answer 401 to anything
+ * unauthenticated. The trailing 401 stands in for those, so "the route fell through" shows up here
+ * as the 401 it really produces rather than as a bare 404 from an empty app.
+ */
+function mountLikeMJServer(app: Express, middleware: RespondentHostMiddleware): Promise<void> {
+  return Promise.resolve(middleware.ConfigureExpressApp?.(app)).then(() => {
+    app.use(compression({ threshold: MJ_COMPRESSION_THRESHOLD_BYTES, level: MJ_COMPRESSION_LEVEL }));
+    for (const handler of middleware.GetPreAuthMiddleware()) {
+      app.use(handler);
+    }
+    app.use((_req, res) => {
+      res.status(401).type('text/plain').send('Unauthorized');
+    });
+  });
+}
+
 /** Boot the middleware's routes on a real express server and always close the listener. */
 async function withServer(
   assertions: (get: (route: string, init?: RequestInit) => Promise<Response>) => Promise<void>,
 ): Promise<void> {
   const app = express();
-  new RespondentHostMiddleware().ConfigureExpressApp(app);
+  await mountLikeMJServer(app, new RespondentHostMiddleware());
   const server: Server = app.listen(0);
   try {
     await new Promise<void>((resolveListening) => server.once('listening', () => resolveListening()));

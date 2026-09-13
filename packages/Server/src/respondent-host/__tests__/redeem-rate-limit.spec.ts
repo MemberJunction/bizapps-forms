@@ -1,12 +1,20 @@
 /**
  * The `/f/:slug` meter — the per-caller half, and the ordering property it silently depends on.
  *
- * The ordering test is the important one. `RequestIdentityMiddleware.spec.ts` already proves the
- * ALS seam works, but it mounts the pre-auth handler and THEN adds the route, which is the
- * opposite of what MJ does: `ConfigureExpressApp` runs inside MJServer's middleware-collection
- * loop (`index.ts:809`), while the pre-auth handlers it gathers are not `app.use`-d until
- * `index.ts:1143`. Express dispatches layers in registration order, so a route contributed
- * through `ConfigureExpressApp` is registered BEFORE the identity middleware and never sees it.
+ * The ordering test is the important one, and since #181 it guards a different thing than it used
+ * to. `GET /f/:slug` no longer registers through `ConfigureExpressApp` — it is contributed by
+ * `GetPreAuthMiddleware`, in the same `app.use` chain as the global identity handler. What makes
+ * the global copy arrive FIRST is only import order in `packages/Server/src/index.ts`, since
+ * ClassFactory order is import order. So the harness below deliberately builds the adverse order —
+ * the route in the stack before the identity handler — and requires the ceiling to bite anyway,
+ * which is what proves the route's own `requestIdentityHandler()` mount is load-bearing rather
+ * than decorative.
+ *
+ * That order is also still literally MJ's for anything left in the old hook: `ConfigureExpressApp`
+ * runs inside MJServer's middleware-collection loop (`index.ts:824`), while the pre-auth handlers
+ * it gathers are not `app.use`-d until `index.ts:1158`. Express dispatches layers in registration
+ * order, so a route contributed through `ConfigureExpressApp` — `POST /f/:slug/resume` is now the
+ * only Forms one — is registered BEFORE the identity middleware and never sees it.
  *
  * That is not a hypothetical: it is why the meter admitted every request at
  * `FORMS_REDEEM_IP_MAX=3`. `currentRequestIdentity()` returned undefined, `abuseIdentity`
@@ -21,7 +29,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@memberjunction/server', () => ({
-  BaseServerMiddleware: class {},
+  BaseServerMiddleware: class {
+    GetPreAuthMiddleware(): unknown[] {
+      return [];
+    }
+  },
   configInfo: { magicLink: {}, userHandling: {} },
 }));
 
@@ -40,6 +52,31 @@ vi.mock('@mj-biz-apps/forms-core-entities-server', () => ({
 vi.mock('../captcha-demand', () => ({ readCaptchaDemand: async () => ({ ok: true, demand: undefined }) }));
 vi.mock('../host-readiness', () => ({ assessRespondentReadiness: () => [] }));
 
+/** The caller key the resume route built for its rate limiter — the fact under test. */
+let capturedCallerKey: string | undefined;
+
+vi.mock('../resume-deps', () => ({
+  makeDeviceResumeDeps: (ctx: { callerKey: string }) => {
+    capturedCallerKey = ctx.callerKey;
+    // Every member of `DeviceResumeDeps`, read off the interface rather than guessed — the build
+    // typechecks specs, and an incomplete stub fails there rather than here.
+    return {
+      loadDistribution: async () => undefined,
+      loadResponse: async () => undefined,
+      redeem: async () => ({ ok: false }),
+      mint: async () => ({ ok: false }),
+      revoke: async () => undefined,
+      inviteFor: async () => ({ ok: false }),
+      revokeInvite: async () => undefined,
+      scopeOf: () => undefined,
+      allowRequest: () => true,
+      cookieFor: () => '',
+      clearCookie: () => '',
+      callerKey: ctx.callerKey,
+    };
+  },
+}));
+
 import express, { type Application } from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
@@ -53,6 +90,10 @@ import {
   resetRedeemInFlightForTests,
 } from '../redeem-rate-limit';
 import { FormsRateLimiter } from '../../public-submit/rate-limit.service';
+// Type only: the class itself is imported dynamically inside the tests that need it, so that
+// `vi.mock` is in place before the module is evaluated. `import type` is erased at compile time
+// and does not load the module, so it cannot defeat that.
+import type { RespondentHostMiddleware } from '../RespondentHostMiddleware';
 
 afterEach(() => {
   delete process.env.FORMS_REDEEM_IP_MAX;
@@ -70,9 +111,9 @@ async function withMjOrderedApp(
   run: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
   const app = express();
-  // 1. MJServer index.ts:809 — inside the collection loop.
+  // 1. MJServer index.ts:824 — inside the collection loop.
   addRoute(app);
-  // 2. MJServer index.ts:1143 — long after every ConfigureExpressApp route already exists.
+  // 2. MJServer index.ts:1158 — long after every ConfigureExpressApp route already exists.
   for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
     app.use(handler);
   }
@@ -83,6 +124,14 @@ async function withMjOrderedApp(
     await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+/** MJServer's order — see the note in `RespondentHostMiddleware.spec.ts`. */
+async function mountRespondentHostLikeMJServer(app: Application, middleware: RespondentHostMiddleware): Promise<void> {
+  await middleware.ConfigureExpressApp?.(app);
+  for (const handler of middleware.GetPreAuthMiddleware()) {
+    app.use(handler);
   }
 }
 
@@ -203,33 +252,65 @@ describe('redeemRateLimitMax', () => {
 
 
 describe('RespondentHostMiddleware wiring', () => {
-  it('mounts the identity handler ON the route it registers', async () => {
-    // The behavioural test above proves `requestIdentityHandler` WORKS in MJ's ordering. This one
-    // proves the respondent host route actually USES it — the wiring, which is the half that was
-    // missing and the half a guard-mutation run showed nothing else covers. Without this, deleting
-    // the argument from `app.get(...)` leaves every other test in this file green.
-    const { RespondentHostMiddleware, RESPONDENT_HOST_ROUTE } = await import('../RespondentHostMiddleware');
+  // The route used to be an `app.get` layer and this test used to count the handlers on it. It is
+  // a pre-auth handler now, so there is no layer to inspect — and the structural assertion was
+  // always a proxy for the thing that matters: that the per-IP meter can SEE a caller. A guard
+  // mutation run showed nothing else covers the wiring, so it is asserted here behaviourally:
+  // drop the ceiling to 1 and the second request from the same peer must be refused. With no
+  // identity, `checkRedeemRateLimit(undefined)` admits everything and both come back 200-or-5xx.
+  it('meters the page per caller, which needs the identity the route establishes', async () => {
+    process.env.FORMS_REDEEM_IP_MAX = '1';
+    FormsRateLimiter.Instance.resetForTests();
+    const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
 
     const app = express();
-    await new RespondentHostMiddleware().ConfigureExpressApp(app);
-    // Mounted the way MJServer does it: too late to help the route.
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
+    // Mounted the way MJServer does it — and, for this test, the way that would NOT help.
     for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
       app.use(handler);
     }
-    // Read the identity the route established, without doing the route's own redeem work.
-    app.get('/probe', (_req, res) => res.json({ ipHash: currentRequestIdentity()?.ipHash ?? null }));
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const first = await fetch(`${base}/f/anything`);
+      const second = await fetch(`${base}/f/anything`);
 
-    const layers = (app as unknown as { _router?: { stack: Array<{ route?: { path: string; stack: unknown[] } }> } })
-      ._router?.stack ?? (app as unknown as { router: { stack: Array<{ route?: { path: string; stack: unknown[] } }> } }).router.stack;
-    const hostLayer = layers.find((l) => l.route?.path === RESPONDENT_HOST_ROUTE);
+      expect(first.status).not.toBe(429);
+      expect(second.status).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 
-    expect(hostLayer, `no layer registered for ${RESPONDENT_HOST_ROUTE}`).toBeDefined();
-    // Two handlers, not one: the identity handler and the route body. One means the identity
-    // argument was dropped and `currentRequestIdentity()` inside the route is undefined forever.
-    expect(hostLayer!.route!.stack.length).toBe(2);
+  // The reason the route carries its own identity handler even though it is pre-auth now. The
+  // global copy's position in the chain is ClassFactory registration order, which is module import
+  // order in `packages/Server/src/index.ts` — it happens to be first today. This mounts it LAST,
+  // the order that would leave a trusting route unmetered, and the meter must still bite.
+  it('meters per caller even when the global identity handler is mounted after it', async () => {
+    process.env.FORMS_REDEEM_IP_MAX = '1';
+    FormsRateLimiter.Instance.resetForTests();
+    const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
+
+    const app = express();
+    // Deliberately inverted: the host's pre-auth handlers first, the identity middleware after.
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
+    for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
+      app.use(handler);
+    }
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      await fetch(`${base}/f/anything`);
+      expect((await fetch(`${base}/f/anything`)).status).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
-
 
 describe('the process-wide in-flight cap', () => {
   it('defaults to 25', () => {
@@ -270,7 +351,7 @@ describe('the process-wide in-flight cap', () => {
     const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
 
     const app = express();
-    await new RespondentHostMiddleware().ConfigureExpressApp(app);
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
     const server: Server = await new Promise((resolve) => {
       const s = app.listen(0, '127.0.0.1', () => resolve(s));
     });
@@ -282,6 +363,39 @@ describe('the process-wide in-flight cap', () => {
       // Neither is 503: the first request's slot came back before the second asked for one.
       expect(first.status).not.toBe(503);
       expect(second.status).not.toBe(503);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('POST /f/:slug/resume', () => {
+  // Same root cause as #181's compression bug: a route registered through `ConfigureExpressApp`
+  // never sees the globally mounted pre-auth identity handler, so `currentRequestIdentity()` was
+  // always undefined here and the rate-limit key fell back to the slug. That is ONE bucket for the
+  // whole form — one caller could spend every respondent's resume budget.
+  it('keys its rate limit on the caller, not on the form', async () => {
+    capturedCallerKey = undefined;
+    const { RespondentHostMiddleware } = await import('../RespondentHostMiddleware');
+
+    const app = express();
+    await mountRespondentHostLikeMJServer(app, new RespondentHostMiddleware());
+    for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
+      app.use(handler);
+    }
+    const server: Server = await new Promise((resolve) => {
+      const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    try {
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      await fetch(`${base}/f/any-slug/resume`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: 'mjf_resume=pointer' },
+        body: '{}',
+      });
+
+      // A 64-hex peer hash, not `slug:any-slug`.
+      expect(capturedCallerKey).toMatch(/^[0-9a-f]{64}$/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
