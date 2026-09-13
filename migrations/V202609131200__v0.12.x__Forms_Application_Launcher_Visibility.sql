@@ -80,13 +80,18 @@ WHERE u.[IsActive] = 1
   AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[UserApplication] f
                   WHERE f.[UserID] = u.[ID] AND f.[ApplicationID] = @FormsAppID);
 
--- Postcondition for the INSERT above lives in THIS batch, not after a GO. A `GO` ends the batch
--- and gives another connection a window to create a user in between (MJAPI's env-configured
+-- Postcondition for the INSERT above lives in THIS batch, not after a GO, because a `GO` ends the
+-- batch and gives another connection a window to create a user in between (MJAPI's env-configured
 -- `newUsers.ts` branch provisions from a fixed app-name list that need not include Forms) — that
 -- user would then have >= 1 UserApplication row and no Forms row, tripping THROW 51152 for a state
 -- this migration is otherwise content to leave alone and hard-stopping a stranger's entire chain.
--- Same ROW-EXISTS-not-IsActive reasoning as the INSERT's own guard: a user who deliberately
--- uninstalled Forms keeps an IsActive = 0 row, and this must not treat that choice as a failure.
+-- A batch is not a transaction, so this NARROWS the window rather than closing it -- with no
+-- BEGIN TRAN / SERIALIZABLE, another connection can still land a user row between this INSERT's
+-- statement and the IF below. Accepted rather than wrapped in a transaction because the residual
+-- window is statement-to-statement, not client-round-trip, and this runs against a host whose API
+-- is down anyway. Same ROW-EXISTS-not-IsActive reasoning as the INSERT's own guard: a user who
+-- deliberately uninstalled Forms keeps an IsActive = 0 row, and this must not treat that choice as
+-- a failure.
 IF EXISTS (
     SELECT 1 FROM [${mjSchema}].[User] u
     WHERE u.[IsActive] = 1

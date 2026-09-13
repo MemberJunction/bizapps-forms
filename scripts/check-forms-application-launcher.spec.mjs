@@ -50,6 +50,14 @@ function findApplicationFiles(dir = APPLICATIONS_DIR) {
     const files = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
+            // Skip dot-directories. `.mj-sync.json` sets "backupBeforeUpdate": true with
+            // "backupDirectory": ".backups", so any `mj sync pull` leaves stale application-JSON
+            // COPIES under `metadata/applications/.backups/`. Those match the `.*.json` glob below
+            // and, left recursed-into, get read as declared applications -- failing this gate on a
+            // backup nobody edited, on every normal workflow. Do not "helpfully" restore this.
+            if (entry.name.startsWith('.')) {
+                continue;
+            }
             files.push(...findApplicationFiles(join(dir, entry.name)));
         } else if (entry.name !== '.mj-sync.json' && /^\..*\.json$/.test(entry.name)) {
             files.push(join(dir, entry.name));
@@ -158,9 +166,13 @@ function findFormsDefaultForNewUserWrites(migrations) {
     // A repair migration that redeclares @FormsAppID once per GO batch (this repo's own idiom --
     // see V202609131200) binds the same name several times in one file, and the unscoped matchers
     // above resolve every one of those bindings to the same statement. Collapsing consecutive
-    // same-file/same-value entries keeps the reported write order one line per actual write
-    // without weakening detection: a file that genuinely writes two different values in sequence
-    // still reports both.
+    // same-file/same-value entries keeps the reported write order one line per actual write. This
+    // does NOT hold for a genuine two-different-values-in-one-file case in the "direct" shape --
+    // directWriteValue takes the first file-wide sql.match, so a single file writing 1 then later
+    // writing 0 to the same variable name would report 1 twice and collapse to one entry. No
+    // shipped file does this, and the shape that matters for the regression this gate guards --
+    // the generated seed's @DefaultForNewUser_<suffix>, each suffix unique per statement -- is
+    // unaffected, so this is accepted rather than fixed.
     return writes.filter((w, i) => i === 0 || w.file !== writes[i - 1].file || w.value !== writes[i - 1].value);
 }
 
