@@ -124,3 +124,45 @@ Beyond the `magicLink` block in the [README](../README.md#-install-into-a-host-a
 builds it from the *host's* — and Skyway leaves an unknown `${…}` untouched instead of failing.
 So a third placeholder ships as a literal string and fails silently on someone else's database.
 `npm run lint:distribution` enforces this.
+
+---
+
+## 7. `Disabled` after a clean install almost never means npm auth
+
+`mj app install` and `mj app upgrade` do their database work first and resolve npm packages last.
+When the npm step fails they still record the app, still exit **0**, still print
+`✔ Successfully installed`, and then finalize the app as **Disabled** with:
+
+```
+App installed but left DISABLED — npm install failed, so its packages are not resolved.
+package.json and config were updated; log in to npm ('npm login') or fix your .npmrc,
+run 'npm install', then 'mj app enable mj-bizapps-forms'.
+```
+
+That message names npm auth because auth is the *common* cause, not because the CLI diagnosed it.
+A dependency-resolution conflict produces the identical ending. Read the npm output above the
+banner before touching your credentials:
+
+- `npm error code E401` / `E403` / `ENEEDAUTH` — genuinely auth. `npm login`, or fix `.npmrc`.
+- `npm error code ERESOLVE` — a version conflict. Auth is fine; no credential change will help.
+
+An `ERESOLVE` naming a peer of an `@mj-biz-apps/*` package is a packaging defect in the app, and
+worth reporting. Forms shipped one: `forms-ng` declared `@angular/cdk` as an exact peer through
+`0.10.0`, so every host whose CDK was not exactly `21.1.3` — which is most of them, since the CDK
+version line moves independently of `@angular/core` — installed Forms and got `Disabled`
+(MemberJunction/bizapps-forms#211).
+
+**Recovery, whatever the cause:** fix the underlying problem first, then
+
+```bash
+npm install                          # in the host directory; must exit 0 with no flags
+mj app enable mj-bizapps-forms
+```
+
+Upgrading does **not** clear a `Disabled` status by itself — it leaves the status where it found
+it — so a host that has been sitting at `Disabled` still needs the `enable` after the upgrade.
+
+**Do not reach for `npm install --legacy-peer-deps` to get past an `ERESOLVE`.** It resolves the
+symptom and disables npm's peer auto-install for the whole tree, so *other* apps' required peers
+stop installing with nothing reporting it. That surfaces later as a bare module-resolution error
+during an Explorer build, naming a package unrelated to whatever you were installing.
