@@ -162,7 +162,8 @@ mj app enable mj-bizapps-forms
 Upgrading does **not** clear a `Disabled` status by itself — it leaves the status where it found
 it — so a host that has been sitting at `Disabled` still needs the `enable` after the upgrade.
 
-**Do not reach for `npm install --legacy-peer-deps` to get past an `ERESOLVE`.** It resolves the
-symptom and disables npm's peer auto-install for the whole tree, so *other* apps' required peers
-stop installing with nothing reporting it. That surfaces later as a bare module-resolution error
-during an Explorer build, naming a package unrelated to whatever you were installing.
+**Neither `--force` nor `--legacy-peer-deps` is the way past an `ERESOLVE`.** npm offers both, and
+both accept a tree it has just told you is wrong. `--legacy-peer-deps` additionally disables npm's
+peer auto-install for the whole tree, so *other* apps' required peers stop installing with nothing
+reporting it. That surfaces later as a bare module-resolution error during an Explorer build,
+naming a package unrelated to whatever you were installing.

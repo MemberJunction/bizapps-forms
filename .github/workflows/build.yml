@@ -219,6 +219,14 @@ jobs:
       - name: Release-push gate
         run: npm run lint:release-pushes:test && npm run lint:release-pushes
 
+      # #211. The defect class here is invisible to everything else in this repo: an exact version in
+      # a `peerDependencies` block is a string only the CONSUMING host's npm resolver ever evaluates.
+      # The pnpm workspace never evaluates it — no `importers:` entry records peerDependencies — so
+      # the lockfile is blind to it, and no unit test can reach it either. `@angular/cdk` shipped
+      # pinned to one patch in six consecutive releases behind that blind spot, and every host not on
+      # exactly that build installed Forms and got a Disabled app blaming npm auth. Its own spec runs
+      # first, and carries the cases (carets, comparator and hyphen ranges, the documented
+      # type-graphql allowance) that stop a future "flag everything" passing as a fix.
       - name: Peer-range gate
         run: npm run lint:peer-ranges:test && npm run lint:peer-ranges
 
