@@ -77,13 +77,13 @@ proved, and this issue exists to finish it rather than to invent a second answer
 | `GET /f/:slug` | `ConfigureExpressApp` | `GetPreAuthMiddleware` | The defect. 9.2 KB of `text/html`, well over the 1 KB threshold. |
 | `GET /favicon.ico` | `ConfigureExpressApp` | `GetPreAuthMiddleware` | Travels with the page (disabling the page must still disable it). Its body is a 204 with nothing in it, so compression is irrelevant — it moves so the middleware has **one** registration slot rather than two, and its matching is the exact-path rule already proved by #130. |
 | `GET /forms/asset/:fileId` | `ConfigureExpressApp` | `GetPreAuthMiddleware` | Same defect, honest accounting in §5. |
-| `POST /f/:slug/resume` | `ConfigureExpressApp` | **stays**, but gains an identity handler (§3.1) | Answers a JSON body of a few hundred bytes — under MJ's 1,024-byte threshold, so compression would skip it in either slot. Moving it would force a case-sensitivity decision on `matchResumeRoute` (§4.3) that belongs to its own change, for zero bytes. |
+| `POST /f/:slug/resume` | `ConfigureExpressApp` | **stays**, but gains an identity handler (§3.1) | Stays for ONE reason, not two. Its refusal bodies are tiny (23 bytes), but its success body is `{ token }` carrying core's RS256 magic-link session JWT — measured at 1,238 chars, so ~1.25 KB, **over** the 1,024-byte threshold; compressing it would save ~320 bytes on every returning-respondent load. The surviving reason is that moving it forces a case-sensitivity decision on `matchResumeRoute` (§4.3), which claims the post-auth `/remember` and `/forget` too, so the decision is not local to this route. That belongs to its own change. |
 | `POST /f/:slug/{remember,forget}` | `GetPostAuthMiddleware` | unchanged | Already post-auth, already behind compression, and identity is their gate. |
 | `POST /forms/asset` | `GetPostAuthMiddleware` | unchanged | Same. |
 
 Because `POST /f/:slug/resume` stays, `RespondentHostMiddleware.ConfigureExpressApp` **survives** —
-smaller, carrying one route and the boot-time readiness report. That is deliberate and is not an
-oversight for a reviewer to flag.
+smaller, carrying one route and the boot-time readiness report. That is deliberate: the hook is kept
+on purpose rather than left behind.
 
 ### 3.1 A second defect of the same root cause, found while auditing the identity mounts
 

@@ -120,11 +120,22 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
   /**
    * The one route that still registers here, and the boot-time readiness report.
    *
-   * `POST /f/:slug/resume` stays in this hook deliberately (#181). Its body is a few hundred bytes
-   * of JSON — under MJ's 1 KB compression threshold — so it gains nothing from the pre-auth slot,
-   * while moving it would mean matching its path by hand and taking a case-sensitivity decision on
-   * `matchResumeRoute`, which claims `/f/:slug/{remember,forget}` too. That belongs to its own
-   * change. The page and the favicon moved because they DID gain: see {@link GetPreAuthMiddleware}.
+   * `POST /f/:slug/resume` stays in this hook deliberately (#181) — but NOT because it is too small
+   * to compress. That was the original reason given here and it was wrong, so the real trade is
+   * recorded instead of the comfortable one.
+   *
+   * Its REFUSAL bodies are tiny (`{"reason":"no-pointer"}` is 23 bytes). Its SUCCESS body is not: all
+   * three `status: 200` exits of `runResume` return `{ token: redeemed.token }`, and that token is
+   * core's magic-link session JWT, signed RS256 — a real one measures 1,238 characters, so the body
+   * is about 1.25 KB, comfortably OVER MJ's 1,024-byte threshold. Compressing it would save roughly
+   * 320 bytes, on the returning-respondent path that `host-page.ts`'s `resumeThenMount()` takes on
+   * every load that finds a resume cookie.
+   *
+   * It stays anyway, for the reason that does survive checking: moving it means matching its path by
+   * hand and taking a case-sensitivity decision on `matchResumeRoute`, which claims
+   * `/f/:slug/{remember,forget}` too — and those two are post-auth, so the decision is not local to
+   * this route. That belongs to its own change. The page and the favicon moved because they gained
+   * far more for no such decision: see {@link GetPreAuthMiddleware}.
    */
   public override async ConfigureExpressApp(app: Application): Promise<void> {
     const cfg = getRespondentHostConfig();

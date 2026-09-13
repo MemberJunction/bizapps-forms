@@ -28,7 +28,18 @@ export type ResumeRefusal =
 /** What a route body decided. The middleware turns this into a response; it decides nothing itself. */
 export interface ResumeRouteOutcome {
   status: number;
-  /** JSON body, when there is one. Never contains a token. */
+  /**
+   * JSON body, when there is one.
+   *
+   * On a REFUSAL this is small — `{"reason":"no-pointer"}` is 23 bytes on the wire. On SUCCESS it
+   * carries the minted session token and nothing else, which is the whole point of the route: the
+   * three `status: 200` exits below all return `{ token: redeemed.token }`, pinned by
+   * `__tests__/device-resume.service.spec.ts` ("expect(out.body).toEqual({ token: 'JWT-2' })").
+   * That token is core's magic-link session JWT, signed RS256, so a real success body measures
+   * about 1.25 KB — NOT "a few hundred bytes". This note previously said the body never contains a
+   * token, and that sentence is what the #181 size rationale was reasoned from; see
+   * {@link RespondentHostMiddleware.ConfigureExpressApp}.
+   */
   body?: Record<string, unknown>;
   /** A `Set-Cookie` header value to apply, when the pointer changed. */
   setCookie?: string;
