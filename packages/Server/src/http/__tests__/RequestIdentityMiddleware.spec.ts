@@ -15,15 +15,26 @@ vi.mock('@memberjunction/server', () => ({
 }));
 
 import express from 'express';
+import type { Request, Response } from 'express';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 
-import { RequestIdentityMiddleware, trustedProxyHops } from '../RequestIdentityMiddleware';
+import { RequestIdentityMiddleware, requestIdentityHandler, trustedProxyHops } from '../RequestIdentityMiddleware';
 import { currentRequestIdentity, hashClientIp } from '../request-identity';
+import type { RequestIdentity } from '../request-identity';
 
 afterEach(() => {
   delete process.env.FORMS_TRUSTED_PROXY_HOPS;
 });
+
+/**
+ * The slice of a request the handler actually reads. `socketIp: undefined` is the case a real
+ * request reaches when its socket has already gone, which no HTTP-level harness can produce on
+ * demand — and it is exactly the case the origin passenger must survive.
+ */
+function requestWith(headers: Record<string, string>, socketIp: string | undefined): Request {
+  return { headers, socket: socketIp ? { remoteAddress: socketIp } : undefined } as unknown as Request;
+}
 
 /** Serve the identity the middleware established, so a test can read it over HTTP. */
 async function withIdentityRoute(run: (baseUrl: string) => Promise<void>): Promise<void> {
@@ -108,6 +119,40 @@ describe('RequestIdentityMiddleware', () => {
     expect(trustedProxyHops()).toBe(0);
     process.env.FORMS_TRUSTED_PROXY_HOPS = '   ';
     expect(trustedProxyHops()).toBe(0);
+  });
+
+  it('carries the request Origin to the resolver, alongside the IP hash', () => {
+    const handler = requestIdentityHandler(0);
+    let seen: RequestIdentity | undefined;
+    handler(
+      requestWith({ origin: 'https://careers.acme.com' }, '203.0.113.7'),
+      {} as Response,
+      () => { seen = currentRequestIdentity(); },
+    );
+    expect(seen?.origin).toBe('https://careers.acme.com');
+    expect(seen?.ipHash).toEqual(expect.any(String));
+  });
+
+  it('still establishes the store when the peer address is gone but an Origin was sent', () => {
+    // The store used to be skipped entirely with no peer IP. Harmless while `ipHash` rode alone —
+    // a missing hash and a missing store both read as "no ceiling" — and NOT harmless for
+    // `origin`: the resolver would see none and admit the caller against a list it never checked.
+    const handler = requestIdentityHandler(0);
+    let seen: RequestIdentity | undefined;
+    handler(
+      requestWith({ origin: 'https://careers.acme.com' }, undefined),
+      {} as Response,
+      () => { seen = currentRequestIdentity(); },
+    );
+    expect(seen?.origin).toBe('https://careers.acme.com');
+    expect(seen?.ipHash).toBeUndefined();
+  });
+
+  it('leaves origin undefined when the caller sent no Origin header', () => {
+    const handler = requestIdentityHandler(0);
+    let seen: RequestIdentity | undefined;
+    handler(requestWith({}, '203.0.113.7'), {} as Response, () => { seen = currentRequestIdentity(); });
+    expect(seen?.origin).toBeUndefined();
   });
 });
 

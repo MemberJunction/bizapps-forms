@@ -11,7 +11,7 @@
  */
 import { Arg, Ctx, Mutation, Query, Resolver } from 'type-graphql';
 import { AppContext, GetReadOnlyProvider, GetReadWriteProvider, ResolverBase } from '@memberjunction/server';
-import type { UserInfo } from '@memberjunction/core';
+import { LogError, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import type { FieldError, FormSubmissionResult } from '@mj-biz-apps/forms-entities';
 import { resolvePublishedDefinition } from './definition-loader.service';
@@ -27,6 +27,7 @@ import { runSubmitPipeline, SUBMIT_FAILED_MESSAGE, type PipelineSubmission } fro
 import { toAnswerInputs } from './input-mapping';
 import { respondentSafe } from './respondent-safe';
 import { currentRequestIdentity } from '../http/request-identity';
+import { checkEmbedOrigin } from '../http/embed-origin';
 import { publicFormPayload } from './public-form-payload';
 
 @Resolver()
@@ -54,6 +55,23 @@ export class PublicFormResolver extends ResolverBase {
         return null;
       }
       const { definition, distribution } = loaded.value;
+      // The same gate the submit runs, at the READ. A widget that will not be allowed to submit
+      // must not be allowed to render either: a foreign page would otherwise show a working-looking
+      // form that only fails at the very end, after the respondent has typed everything — a worse
+      // experience than a refusal — and it would hand that page the full published definition on
+      // the way, which is the thing the allowlist is meant to keep off it.
+      //
+      // `null` is already this field's answer for "no form to show", so a refusal here is
+      // indistinguishable from a closed link to the caller and fully described in the log. That is
+      // exactly the posture `respondentSafe` establishes for this query, reused rather than
+      // reinvented — there is no second failure vocabulary for an anonymous reader to learn from.
+      const embedOrigin = checkEmbedOrigin(distribution.AllowedOrigins, currentRequestIdentity()?.origin);
+      if (!embedOrigin.allowed) {
+        LogError(
+          `[Forms] PublishedForm refused for ${distributionSlug}: ${embedOrigin.reason ?? 'origin not allowed'}`,
+        );
+        return null;
+      }
       // A resume session and a public-link session reach this resolver identically; the only
       // difference is what their scope claim names. Only a claim that is NOT this distribution can
       // name a response, so an ordinary public link pays for no read here at all.
@@ -146,6 +164,11 @@ export class PublicFormResolver extends ResolverBase {
         // header beside it, a browser cannot choose what it says.
         scopeResourceId: contextUser.MagicLinkScope?.ResourceID,
         clientIpHash: currentRequestIdentity()?.ipHash,
+        // Rides the same request-scoped store for the same reason: `AppContext` carries no request
+        // object, so the header is unreachable at the point the decision is made. Unlike the hash
+        // above it, the caller chose this — which is why the pipeline checks it against the
+        // AUTHOR's list rather than keying anything on it.
+        requestOrigin: currentRequestIdentity()?.origin,
       },
       submission,
     );

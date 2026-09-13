@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntityInfo, EntityUserPermissionInfo, RunViewParams, RunViewResult, UserInfo } from '@memberjunction/core';
 import { runUpload, type UploadContext, type UploadRequest, type UploadStorageEngine } from '../upload.service';
 import { resetUploadConfigForTests } from '../config';
+import { FOREIGN_ORIGIN_MESSAGE } from '../../http/embed-origin';
 import type { ParsedFile } from '../multipart';
 import { makeDefinition, makeDistribution, makeVersion } from '../../public-submit/__tests__/fakes';
 
@@ -71,13 +72,13 @@ function makeUploadDefinition() {
 }
 
 /** RunView provider that resolves an open published distribution for slug 'public-1'. */
-function runViewProvider(options: { openDistribution?: boolean } = {}) {
+function runViewProvider(options: { openDistribution?: boolean; allowedOrigins?: string | null } = {}) {
   const open = options.openDistribution ?? true;
   return {
     RunView: async <T>(params: RunViewParams): Promise<RunViewResult<T>> => {
       let rows: unknown[] = [];
       if (params.EntityName === FORM_DISTRIBUTION_ENTITY && open) {
-        rows = [makeDistribution()];
+        rows = [makeDistribution({ AllowedOrigins: options.allowedOrigins ?? null })];
       } else if (params.EntityName === FORM_VERSION_ENTITY && open) {
         rows = [makeVersion(makeUploadDefinition())];
       }
@@ -114,11 +115,14 @@ function context(opts: {
   open?: boolean;
   storage?: UploadStorageEngine;
   provenanceFails?: boolean;
+  allowedOrigins?: string | null;
+  requestOrigin?: string;
 }): UploadContext {
   return {
     contextUser: USER,
+    requestOrigin: opts.requestOrigin,
     metadataProvider: metadataProvider(opts.perms ?? respondentPerms()),
-    runViewProvider: runViewProvider({ openDistribution: opts.open }),
+    runViewProvider: runViewProvider({ openDistribution: opts.open, allowedOrigins: opts.allowedOrigins }),
     storage: opts.storage ?? storageEngine().engine,
     // Stubbed rather than hitting the database. The endpoint fails closed when provenance cannot
     // be recorded, so without a substitute every upload test would fail for the wrong reason.
@@ -348,5 +352,82 @@ describe('runUpload — provenance', () => {
     // breaks their submission.
     expect(result.ok).toBe(false);
     expect(result.failure?.status).toBe(500);
+  });
+
+  /**
+   * #203 closed this door LAST. The embed-origin gate shipped on `PublishedForm` and
+   * `SubmitFormResponse` -- the "two doors" the change reasons about -- while `/forms/upload` is a
+   * third door on the same public path, reached by the same widget with the same anonymous session
+   * and resolved through the SAME `resolvePublishedDefinition`. Measured on a live branch host
+   * before this gate existed: with AllowedOrigins=["https://careers.acme.com"] a caller on
+   * https://evil.example was refused by the submit and still stored bytes plus an `MJ: Files` row
+   * here. A refusal that only covers some of a distribution's doors is not fail-closed.
+   */
+  describe('embed origin (#203)', () => {
+    it('refuses an upload whose Origin is not on the distribution allowlist', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({
+          storage: engine,
+          allowedOrigins: '["https://careers.acme.com"]',
+          requestOrigin: 'https://evil.example',
+        }),
+        request(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failure?.status).toBe(403);
+      // The respondent-facing sentence is the SAME one the submit door uses, so a prober cannot
+      // tell the two apart and a respondent is not taught a second vocabulary.
+      expect(result.failure?.error).toBe(FOREIGN_ORIGIN_MESSAGE);
+      // The point of the gate: nothing was stored.
+      expect(upload).not.toHaveBeenCalled();
+      expect(recordedProvenance).toHaveLength(0);
+    });
+
+    it('refuses an upload that sends no Origin at all once a list is authored', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({ storage: engine, allowedOrigins: '["https://careers.acme.com"]' }),
+        request(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failure?.status).toBe(403);
+      expect(upload).not.toHaveBeenCalled();
+    });
+
+    it('admits an upload from an origin the author listed', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({
+          storage: engine,
+          allowedOrigins: '["https://careers.acme.com"]',
+          requestOrigin: 'https://careers.acme.com',
+        }),
+        request(),
+      );
+      expect(result.ok).toBe(true);
+      expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('admits an upload when the distribution authored nothing, whatever the Origin', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({ storage: engine, allowedOrigins: null, requestOrigin: 'https://evil.example' }),
+        request(),
+      );
+      expect(result.ok).toBe(true);
+      expect(upload).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses everyone when the authored value parses to nothing usable', async () => {
+      const { engine, upload } = storageEngine();
+      const result = await runUpload(
+        context({ storage: engine, allowedOrigins: 'not json', requestOrigin: 'https://careers.acme.com' }),
+        request(),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.failure?.status).toBe(403);
+      expect(upload).not.toHaveBeenCalled();
+    });
   });
 });

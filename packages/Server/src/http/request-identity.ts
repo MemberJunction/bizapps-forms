@@ -242,10 +242,39 @@ export interface RequestIdentity {
    * log line, bucket key or database column of Forms' own — see `hashClientIp` for why that rule
    * exists. Core's magic-link redemption audit trail, above, is the one place this address is
    * written on purpose; that write is core's, not Forms'.
+   *
+   * Optional for the same reason `ipHash` is, and the reason is the store's, not this field's:
+   * the store is now entered even when no peer address resolved, so that `origin` below still
+   * reaches the embed gate. Every consumer already reads it as `currentRequestIdentity()?.ip`
+   * and `forwardedHeaders` already forwards nothing for an absent address, so an absent `ip`
+   * behaves exactly as an absent store did before.
    */
-  ip: string;
-  /** Salted one-way hash of the resolved client IP (IPv6 reduced to its /64). */
-  ipHash: string;
+  ip?: string;
+  /**
+   * Salted one-way hash of the resolved client IP (IPv6 reduced to its /64).
+   *
+   * Optional because the peer address can already be gone by the time the handler runs. When it
+   * is, the abuse ceilings simply drop for that request rather than re-keying onto something
+   * weaker — a header the caller writes would be worse than no ceiling, since it is a ceiling the
+   * caller controls.
+   */
+  ipHash?: string;
+  /**
+   * The caller's `Origin` header, VERBATIM and unnormalised.
+   *
+   * The caller DID choose this, unlike `ipHash` beside it — so nothing keys an abuse ceiling on
+   * it, and nothing here treats it as identity. What makes a caller-supplied value load-bearing
+   * anyway is that it is checked against a list the form's AUTHOR wrote: a browser will not let a
+   * page lie about its own origin, and a non-browser client that forges one still has to pass
+   * every other gate on the public path.
+   *
+   * Left unnormalised on purpose. Normalisation runs at the point of comparison instead —
+   * `normalizeOrigin` against the author's list, `normalizeReportedOrigin` against this API's own
+   * origin — so this field and the header the caller actually sent are the same string when one
+   * reaches a log line, which is the difference between a refusal an operator can act on and one
+   * they have to guess at.
+   */
+  origin?: string;
 }
 
 const identityStorage = new AsyncLocalStorage<RequestIdentity>();

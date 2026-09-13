@@ -51,6 +51,7 @@ import { BaseServerMiddleware, configInfo } from '@memberjunction/server';
 import { LogStatus, LogError, RunView, type UserInfo } from '@memberjunction/core';
 import { UserCache } from '@memberjunction/generic-database-provider';
 import { getMagicLinkProvisioningConfig } from '@mj-biz-apps/forms-core-entities-server';
+import { frameAncestorsDirective, parseAllowedOrigins } from '@mj-biz-apps/forms-entities';
 
 import { getRespondentHostConfig } from './config.js';
 import { getPublicSubmitConfig } from '../public-submit/config.js';
@@ -287,12 +288,39 @@ export class RespondentHostMiddleware extends BaseServerMiddleware {
       turnstileSiteKey: cfg.turnstileSiteKey,
       hasDraft,
     });
+    // The embed control that can actually SEE the customer's origin, and therefore the real one
+    // (#203). This product's embed snippet is an `<iframe>` (`distribution.service.ts`
+    // `embedSnippet`), so the framed document's origin is OURS — nothing on the API side can tell a
+    // legitimate embed on the customer's site from one on anybody else's page, because both report
+    // us. `frame-ancestors` is the exception: the BROWSER evaluates it against the framing
+    // ancestor, which is exactly the fact the author authorised.
+    //
+    // Judged on the author's list alone, via the pure contract rather than `checkEmbedOrigin`.
+    // Same-origin framing is covered by CSP `'self'`, which the browser resolves against this
+    // page's own origin: a page served from our origin is already us, and an allowlist naming
+    // other people's sites was never meant to say anything about that. Because `'self'` is
+    // resolved by the browser rather than composed by us, the directive needs no knowledge of the
+    // deployment's own URL — routing this through the API-side verdict would instead have made a
+    // framing decision depend on `MJAPI_PUBLIC_URL`, an environment variable it has no need of.
+    //
+    // Deliberately no `X-Frame-Options` beside it: it cannot express a list (`ALLOW-FROM` is
+    // unsupported in every current browser), and `SAMEORIGIN` would refuse the very embeds this
+    // feature exists to permit. A browser too old for `frame-ancestors` therefore gets no framing
+    // control at all — which is today's behaviour for every link, stated here rather than papered
+    // over with a header that would break the working case to look like protection.
+    const frameAncestors = frameAncestorsDirective(parseAllowedOrigins(outcome.distribution.AllowedOrigins));
     res
       .status(200)
       .type('html')
       // The page carries a per-respondent session JWT now — must NOT be shared-cached.
-      .set('Cache-Control', 'no-store')
-      .send(html);
+      .set('Cache-Control', 'no-store');
+    if (frameAncestors) {
+      // Absent, not permissive, when the link authored nothing: a distribution with no allowlist
+      // must be framable exactly as it is today, and an empty or catch-all directive would be a
+      // behaviour change for every live embed.
+      res.set('Content-Security-Policy', frameAncestors);
+    }
+    res.send(html);
   }
 
   /**
