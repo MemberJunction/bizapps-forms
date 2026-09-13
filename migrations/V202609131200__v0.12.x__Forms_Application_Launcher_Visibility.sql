@@ -79,22 +79,14 @@ WHERE u.[IsActive] = 1
   -- IsActive = 0 row, and re-adding it would override a choice they made.
   AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[UserApplication] f
                   WHERE f.[UserID] = u.[ID] AND f.[ApplicationID] = @FormsAppID);
-GO
 
--- ── Postconditions ───────────────────────────────────────────────────────────────────────────
--- Assert what the launcher actually reads, so a silently-skipped write (a WHERE that matched
--- nothing, a column renamed under us) fails here rather than surfacing as an app nobody can find
--- and nobody connects back to this file.
-DECLARE @FormsAppID UNIQUEIDENTIFIER = 'BFB97C57-4552-4643-8933-A0B2D76544D8';
-
-IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Application]
-               WHERE ID = @FormsAppID AND DefaultForNewUser = 1)
-    THROW 51151, 'Forms application DefaultForNewUser was not applied.', 1;
-
--- Deliberately asks whether a ROW EXISTS, not whether it is active — mirroring the INSERT's own
--- guard. A user who has deliberately uninstalled Forms keeps `IsActive = 0`, and this migration
--- must not resurrect that choice; an `AND f.[IsActive] = 1` here would THROW on exactly that host
--- and take its whole chain down for a state the migration is correct to have left alone.
+-- Postcondition for the INSERT above lives in THIS batch, not after a GO. A `GO` ends the batch
+-- and gives another connection a window to create a user in between (MJAPI's env-configured
+-- `newUsers.ts` branch provisions from a fixed app-name list that need not include Forms) — that
+-- user would then have >= 1 UserApplication row and no Forms row, tripping THROW 51152 for a state
+-- this migration is otherwise content to leave alone and hard-stopping a stranger's entire chain.
+-- Same ROW-EXISTS-not-IsActive reasoning as the INSERT's own guard: a user who deliberately
+-- uninstalled Forms keeps an IsActive = 0 row, and this must not treat that choice as a failure.
 IF EXISTS (
     SELECT 1 FROM [${mjSchema}].[User] u
     WHERE u.[IsActive] = 1
@@ -102,3 +94,14 @@ IF EXISTS (
       AND NOT EXISTS (SELECT 1 FROM [${mjSchema}].[UserApplication] f
                       WHERE f.[UserID] = u.[ID] AND f.[ApplicationID] = @FormsAppID))
     THROW 51152, 'At least one active user with an existing application list still has no Forms UserApplication row.', 1;
+GO
+
+-- ── Postcondition for step 1 ─────────────────────────────────────────────────────────────────
+-- Assert what the launcher actually reads for new users, so a silently-skipped write (a WHERE
+-- that matched nothing, a column renamed under us) fails here rather than surfacing as an app
+-- nobody can find and nobody connects back to this file.
+DECLARE @FormsAppID UNIQUEIDENTIFIER = 'BFB97C57-4552-4643-8933-A0B2D76544D8';
+
+IF NOT EXISTS (SELECT 1 FROM [${mjSchema}].[Application]
+               WHERE ID = @FormsAppID AND DefaultForNewUser = 1)
+    THROW 51151, 'Forms application DefaultForNewUser was not applied.', 1;
