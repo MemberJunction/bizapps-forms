@@ -10,11 +10,23 @@
  * the CLI finalized the app as `Disabled` while telling the operator to fix their npm auth and
  * `.npmrc`. Neither was involved. See #211.
  *
- * It shipped in 0.5.0 through 0.10.0 because nothing here reads a peer range. A unit test cannot
- * reach this defect: it is a string in a manifest that only the host's resolver ever evaluates,
- * and the repo's own pnpm workspace never evaluates it at all (no `importers:` block records
- * `peerDependencies`, so the lockfile is blind to it too). This gate is the only place the claim
- * gets read before a host reads it.
+ * It shipped in 0.5.0 through 0.10.0 because nothing here ever puts a peer range under load. pnpm
+ * does read them: `.npmrc` sets `auto-install-peers=true`, and this package's importer in
+ * `pnpm-lock.yaml` carries twelve `@memberjunction/*` entries under `dependencies:` that the
+ * manifest declares nowhere but in `peerDependencies`, ten of them recording the peer's own range
+ * verbatim (`core` and `global` show the root `pnpm.overrides` pin instead). What never happens
+ * locally is a CHOICE: `@angular/cdk` is anchored at exactly `21.1.3` in this package's
+ * `devDependencies`, and `21.1.3` satisfies the exact peer and the caret alike, so no resolver here
+ * can tell the two spellings apart. (`strict-peer-dependencies=false` means even a mismatch would
+ * only warn.) A host has no anchor — it brings its own `@angular/cdk` — so the consuming resolver
+ * is the first one the claim is ever tested against, and by then the app is installed and Disabled.
+ *
+ * Two consequences worth keeping straight. The `devDependencies` anchor is load-bearing, not
+ * incidental — it is what holds this workspace on 21.1.3 now that the peer is a caret (`CLAUDE.md`,
+ * Angular pinning model: the anchor "is what actually installs"). And no unit test can reach the
+ * defect, because the difference between `21.1.3` and `^21.1.3` is invisible to every resolver that
+ * already has 21.1.3. This gate reads the claim as written, which is the only check available
+ * before a host reads it.
  *
  * Scope is `peerDependencies` and nothing else, deliberately. Exact `dependencies` in `apps/*` and
  * exact `@angular/*` anchors in `devDependencies` are the documented model (`CLAUDE.md` → Angular
