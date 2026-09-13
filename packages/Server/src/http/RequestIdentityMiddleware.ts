@@ -59,11 +59,12 @@ export function trustedProxyHops(): number {
  * or directly on a route that MJ registers too early to see the global one.
  *
  * WHY THIS IS EXPORTED. MJServer collects `GetPreAuthMiddleware()` into an array at
- * `index.ts:800` but does not `app.use` it until `index.ts:1143`. In the SAME collection loop it
- * calls each middleware's `ConfigureExpressApp` (`index.ts:809`), which is where the respondent
- * host and asset routes register themselves. (The widget-bundle routes were in that set too until
- * #121 moved them to `GetPreAuthMiddleware` to get behind MJ's `compression()`; they are now in
- * the "need nothing" group below.) Express dispatches layers in
+ * `index.ts:815` but does not `app.use` it until `index.ts:1158`. In the SAME collection loop it
+ * calls each middleware's `ConfigureExpressApp` (`index.ts:824`). Only ONE Forms route still
+ * registers there: `POST /f/:slug/resume`. (The widget-bundle routes left that set in #121, and the
+ * respondent host page, the favicon and the public asset read left it in #181 — all four to get
+ * behind MJ's `compression()` at `index.ts:1129`. They are now in the "need nothing" group below,
+ * with the caveat under it.) Express dispatches layers in
  * registration order, so every route added through `ConfigureExpressApp` is already in the stack
  * before the pre-auth handlers arrive and NEVER sees them — `currentRequestIdentity()` inside such
  * a route returns undefined, and any abuse ceiling keyed on it silently admits everyone. A route
@@ -73,7 +74,13 @@ export function trustedProxyHops(): number {
  *
  * Mounting it twice for one request is harmless: `AsyncLocalStorage.run` simply nests, and the
  * inner store wins for the code inside it. Routes reached through `GetPostAuthMiddleware` (the
- * upload endpoint) or the Apollo handler are mounted after `index.ts:1143` and need nothing.
+ * upload endpoint) or the Apollo handler are mounted after `index.ts:1158` and need nothing.
+ *
+ * A `GetPreAuthMiddleware` route needs nothing either — but only while this middleware's own
+ * contribution is mounted first, and that is decided by import order in
+ * `packages/Server/src/index.ts` (ClassFactory order is import order), not by anything structural.
+ * `RespondentHostMiddleware`'s page route therefore keeps its own mount deliberately; see the note
+ * on `hostPageHandler`.
  *
  * `hops` is resolved once at REGISTRATION time, not per request, matching the reasoning on
  * {@link trustedProxyHops}: it describes deployment topology, which does not change while the

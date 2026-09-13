@@ -1,12 +1,20 @@
 /**
  * The `/f/:slug` meter — the per-caller half, and the ordering property it silently depends on.
  *
- * The ordering test is the important one. `RequestIdentityMiddleware.spec.ts` already proves the
- * ALS seam works, but it mounts the pre-auth handler and THEN adds the route, which is the
- * opposite of what MJ does: `ConfigureExpressApp` runs inside MJServer's middleware-collection
- * loop (`index.ts:809`), while the pre-auth handlers it gathers are not `app.use`-d until
- * `index.ts:1143`. Express dispatches layers in registration order, so a route contributed
- * through `ConfigureExpressApp` is registered BEFORE the identity middleware and never sees it.
+ * The ordering test is the important one, and since #181 it guards a different thing than it used
+ * to. `GET /f/:slug` no longer registers through `ConfigureExpressApp` — it is contributed by
+ * `GetPreAuthMiddleware`, in the same `app.use` chain as the global identity handler. What makes
+ * the global copy arrive FIRST is only import order in `packages/Server/src/index.ts`, since
+ * ClassFactory order is import order. So the harness below deliberately builds the adverse order —
+ * the route in the stack before the identity handler — and requires the ceiling to bite anyway,
+ * which is what proves the route's own `requestIdentityHandler()` mount is load-bearing rather
+ * than decorative.
+ *
+ * That order is also still literally MJ's for anything left in the old hook: `ConfigureExpressApp`
+ * runs inside MJServer's middleware-collection loop (`index.ts:824`), while the pre-auth handlers
+ * it gathers are not `app.use`-d until `index.ts:1158`. Express dispatches layers in registration
+ * order, so a route contributed through `ConfigureExpressApp` — `POST /f/:slug/resume` is now the
+ * only Forms one — is registered BEFORE the identity middleware and never sees it.
  *
  * That is not a hypothetical: it is why the meter admitted every request at
  * `FORMS_REDEEM_IP_MAX=3`. `currentRequestIdentity()` returned undefined, `abuseIdentity`
@@ -103,9 +111,9 @@ async function withMjOrderedApp(
   run: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
   const app = express();
-  // 1. MJServer index.ts:809 — inside the collection loop.
+  // 1. MJServer index.ts:824 — inside the collection loop.
   addRoute(app);
-  // 2. MJServer index.ts:1143 — long after every ConfigureExpressApp route already exists.
+  // 2. MJServer index.ts:1158 — long after every ConfigureExpressApp route already exists.
   for (const handler of new RequestIdentityMiddleware().GetPreAuthMiddleware()) {
     app.use(handler);
   }

@@ -10,11 +10,17 @@
  * Mirrors `upload/upload-rate-limit.ts` deliberately:
  *  - Keyed on the resolved peer IP, which is the one caller attribute they did not choose. Keying
  *    on the slug would put the bucket back under the caller's control.
- *    The identity does NOT arrive from the globally mounted `RequestIdentityMiddleware`: this
- *    route registers through `ConfigureExpressApp`, which MJServer runs BEFORE it mounts any
- *    pre-auth handler, so the route mounts `requestIdentityHandler()` itself. Getting this wrong
- *    is invisible — the gate below then takes its "cannot identify the caller" branch forever and
- *    admits everyone while looking installed.
+ *    The identity is NOT taken on trust from the globally mounted `RequestIdentityMiddleware`:
+ *    the route mounts `requestIdentityHandler()` itself. Since #181 that is belt-and-braces rather
+ *    than load-bearing — `GET /f/:slug` moved to `GetPreAuthMiddleware`, so it now sits in the same
+ *    `app.use` chain as the global copy instead of ahead of it — but the global copy is only first
+ *    because `packages/Server/src/index.ts` happens to import `RequestIdentityMiddleware` before
+ *    `RespondentHostMiddleware`, and ClassFactory order is import order. Reorder two lines in a
+ *    barrel file and the local mount is all that is left. Getting this wrong is invisible — the gate
+ *    below then takes its "cannot identify the caller" branch forever and admits everyone while
+ *    looking installed — so the assumption is pinned by a test rather than trusted
+ *    (`__tests__/redeem-rate-limit.spec.ts`, "even when the global identity handler is mounted
+ *    after it").
  *  - The window comes from the shared public-submit config (`FORMS_RATELIMIT_WINDOW_MS`), so a
  *    deployment tuning how long it remembers a caller tunes every public route at once.
  *  - WITH NO IP, THE PER-CALLER GATE DOES NOTHING — on purpose. The only alternative identity is
