@@ -17,7 +17,7 @@
       "Description": "Build, distribute, and analyze forms, surveys, and intake. Author forms with the visual builder or AI, publish public/embed/QR distributions, and review responses as first-class MemberJunction records.",
       "Icon": "fa-solid fa-pen-to-square",
       "Color": "#2F9E44",
-      "DefaultForNewUser": false,
+      "DefaultForNewUser": true,
       "DefaultNavItems": [
         {
           "Label": "Forms",
