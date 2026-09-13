@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import {
     ALLOWED_EXACT_PEERS,
     SCANNED_DIRS,
@@ -36,6 +37,15 @@ test('an explicitly-equal version is exact', () => {
 
 test('surrounding whitespace does not hide an exact version', () => {
     assert.equal(isExactVersion('  21.1.3  '), true);
+});
+
+// npm normalises a leading `v` away, so `v21.1.3` is the same pin written like a git tag.
+test('a v-prefixed version is exact', () => {
+    assert.equal(isExactVersion('v21.1.3'), true);
+});
+
+test('a v-prefixed caret range is not exact', () => {
+    assert.equal(isExactVersion('^v21.1.3'), false);
 });
 
 // ── What must NOT be reported ───────────────────────────────────────────────────────────────────
@@ -201,14 +211,79 @@ test('runCheck reports an allowance that no longer matches anything', () => {
     assert.match(stale[0], /no longer/i);
 });
 
-test('runCheck tolerates a missing scanned directory', () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'peer-ranges-empty-'));
+// The message must not tell the operator to "write a range" for a pair that already has a
+// documented allowance — that advice contradicts the allowance's own reasoning (a range IS the
+// lie for type-graphql's prerelease line). It must instead say the exception has expired and name
+// the version it still expects.
+test('runCheck tells an expired allowance to be re-argued, not to write a range', () => {
+    const allowed = ALLOWED_EXACT_PEERS[0];
+    const root = writeTree({
+        'packages/Server/package.json': {
+            name: allowed.package,
+            peerDependencies: { [allowed.peer]: '2.0.0-rc.4' },
+        },
+    });
     const { violations } = runCheck(root);
+    assert.equal(violations.length, 1);
+    assert.match(violations[0], /expired/i);
+    assert.match(violations[0], new RegExp(allowed.version.replace(/\./g, '\\.')));
+    assert.doesNotMatch(violations[0], /Write a range: "\^/);
+});
+
+// An empty tree has no manifest for the documented type-graphql allowance to match, so `stale` is
+// correctly non-empty here too — this test is only about the scan tolerating a missing directory,
+// not about the allowlist being satisfied, so both outcomes are asserted rather than just one.
+test('runCheck tolerates a missing scanned directory (and correctly reports the allowlist as stale on it)', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'peer-ranges-empty-'));
+    const { violations, stale } = runCheck(root);
     assert.deepEqual(violations, []);
+    assert.equal(stale.length, ALLOWED_EXACT_PEERS.length);
 });
 
 test('the scanned directories are the ones this repo publishes from', () => {
     assert.deepEqual([...SCANNED_DIRS], ['packages', 'apps']);
+});
+
+// ── Fail-fast guards ────────────────────────────────────────────────────────────────────────────
+// Per this repo's design rules, a manifest that cannot be trusted must throw with context, never
+// be swallowed into an empty result. Neither guard below had a test before this.
+
+test('findExactPeers throws a TypeError when the manifest did not parse to an object', () => {
+    assert.throws(() => findExactPeers(null, 'packages/Broken/package.json'), TypeError);
+    assert.throws(
+        () => findExactPeers('not an object', 'packages/Broken/package.json'),
+        (err) => {
+            assert.ok(err instanceof TypeError);
+            assert.match(err.message, /packages\/Broken\/package\.json/);
+            return true;
+        },
+    );
+});
+
+test('runCheck throws a SyntaxError naming the file for invalid JSON', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'peer-ranges-badjson-'));
+    mkdirSync(path.join(root, 'packages/Broken'), { recursive: true });
+    writeFileSync(path.join(root, 'packages/Broken/package.json'), '{ not valid json');
+    assert.throws(
+        () => runCheck(root),
+        (err) => {
+            assert.ok(err instanceof SyntaxError);
+            assert.match(err.message, /packages\/Broken\/package\.json/);
+            return true;
+        },
+    );
+});
+
+// ── The CLI ─────────────────────────────────────────────────────────────────────────────────────
+// main() and its exit code were untested, even though the exit code is the whole point of the CI
+// step. REPO_ROOT is computed from the script's own location, not an argument, so main() cannot be
+// driven against a synthetic tree without inventing a root-override mechanism this gate does not
+// have — so only the clean case (this repo, exit 0) is asserted here, following the pattern in
+// scripts/check-codegen-append.spec.mjs.
+
+test('the CLI exits 0 on this repo and prints the pass line', () => {
+    const out = execFileSync('node', ['scripts/check-peer-ranges.mjs'], { cwd: REPO_ROOT, encoding: 'utf8' });
+    assert.match(out, /Peer-range gate passed \(packages, apps\)\./);
 });
 
 // ── The repo itself ─────────────────────────────────────────────────────────────────────────────

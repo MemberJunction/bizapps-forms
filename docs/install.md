@@ -159,8 +159,11 @@ npm install                          # in the host directory; must exit 0 with n
 mj app enable mj-bizapps-forms
 ```
 
-Upgrading does **not** clear a `Disabled` status by itself — it leaves the status where it found
-it — so a host that has been sitting at `Disabled` still needs the `enable` after the upgrade.
+**Upgrading sets the status, but does not put the app back in service.** A successful
+`mj app upgrade` writes `Active` unconditionally once its npm step succeeds — it never reads the
+status it found. What it does *not* do is switch the host's `dynamicPackages` entries back on; the
+only call that does that lives in `mj app enable`. So an `Active` status after an upgrade is not
+evidence the app loads, and a host that has been sitting at `Disabled` still needs the `enable`.
 
 **Neither `--force` nor `--legacy-peer-deps` is the way past an `ERESOLVE`.** npm offers both, and
 both accept a tree it has just told you is wrong. `--legacy-peer-deps` additionally disables npm's

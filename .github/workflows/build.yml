@@ -227,6 +227,9 @@ jobs:
       # exactly that build installed Forms and got a Disabled app blaming npm auth. Its own spec runs
       # first, and carries the cases (carets, comparator and hyphen ranges, the documented
       # type-graphql allowance) that stop a future "flag everything" passing as a fix.
+      #
+      # Scope note: this answers whether a peer is WRITTEN exact, not whether a host's installed
+      # version can satisfy the range — the `^6.1.0-edge.5` MJ peers are where those two diverge.
       - name: Peer-range gate
         run: npm run lint:peer-ranges:test && npm run lint:peer-ranges
 

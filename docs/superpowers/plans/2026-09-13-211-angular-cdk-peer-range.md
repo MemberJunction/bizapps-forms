@@ -732,7 +732,7 @@ EOF
 
 ### Task 4: The changeset, and telling operators how to get out
 
-The fix reaches a host through a release. It does **not** clear the `Disabled` a host is already in — `mj app upgrade` leaves the status where it found it. Operators need to be told, in the doc they read when installs bite.
+The fix reaches a host through a release. `mj app upgrade` writes `Active` unconditionally once its npm step succeeds — it never reads the status it found — but it never switches the host's `dynamicPackages` entries back on, so a host that was `Disabled` still needs the `enable` afterward. Operators need to be told, in the doc they read when installs bite.
 
 **Files:**
 - Create: `.changeset/a-peer-range-is-a-compatibility-claim.md`
@@ -759,7 +759,7 @@ Create `.changeset/a-peer-range-is-a-compatibility-claim.md`. **`patch`** — no
 
 **The blast radius reached past Forms.** The only way past the `ERESOLVE` is `npm install --legacy-peer-deps`, and that flag disables npm's peer auto-install for the entire tree. A sibling app's required peers then silently fail to install, and it surfaces much later as a bare module-resolution error in the Explorer naming a package nobody was looking at. One exact peer in Forms could take a host's Explorer down through an app Forms does not ship.
 
-**If your Forms app is `Disabled` today**, upgrading is not enough on its own — the upgrade does not clear the status it found. Re-run `npm install` in the host directory (it will now succeed without flags), then `mj app enable mj-bizapps-forms`. `docs/install.md` §7 has the full recovery, including how to tell this apart from a genuine npm auth failure.
+**If your Forms app is `Disabled` today**, upgrading is not enough on its own. The upgrade writes `Active` as soon as its npm step succeeds, but it never switches the host's `dynamicPackages` entries back on — only `mj app enable` does that — so the status goes green while the app still does not load. Re-run `npm install` in the host directory (it will now succeed without flags), then `mj app enable mj-bizapps-forms`. `docs/install.md` §7 has the full recovery, including how to tell this apart from a genuine npm auth failure.
 
 A CI gate now reads every `peerDependencies` block and refuses an exact version, because nothing in this repo could see one before: it is a string only the host's resolver evaluates, the pnpm workspace never evaluates it, and no unit test can reach it — which is how it shipped six times.
 ```
@@ -801,8 +801,11 @@ npm install                          # in the host directory; must exit 0 with n
 mj app enable mj-bizapps-forms
 ```
 
-Upgrading does **not** clear a `Disabled` status by itself — it leaves the status where it found
-it — so a host that has been sitting at `Disabled` still needs the `enable` after the upgrade.
+**Upgrading sets the status, but does not put the app back in service.** A successful
+`mj app upgrade` writes `Active` unconditionally once its npm step succeeds — it never reads the
+status it found. What it does *not* do is switch the host's `dynamicPackages` entries back on; the
+only call that does that lives in `mj app enable`. So an `Active` status after an upgrade is not
+evidence the app loads, and a host that has been sitting at `Disabled` still needs the `enable`.
 
 **Do not reach for `npm install --legacy-peer-deps` to get past an `ERESOLVE`.** It resolves the
 symptom and disables npm's peer auto-install for the whole tree, so *other* apps' required peers
@@ -830,10 +833,11 @@ git add .changeset/a-peer-range-is-a-compatibility-claim.md docs/install.md
 git commit -m "$(cat <<'EOF'
 docs: how to recognise and clear the Disabled this bug leaves behind
 
-The fix reaches a host through a release; it does not clear a status the host
-is already in, because `mj app upgrade` leaves the status where it found it.
-Hosts running Forms 0.5.0-0.10.0 on a 6.1 line newer than CDK 21.1.3 are at
-Disabled now and were told it was npm auth.
+The fix reaches a host through a release; it does not put a Disabled host back
+in service on its own, because `mj app upgrade` writes Active once its npm
+step succeeds without switching dynamicPackages back on, and only `mj app
+enable` does that. Hosts running Forms 0.5.0-0.10.0 on a 6.1 line newer than
+CDK 21.1.3 are at Disabled now and were told it was npm auth.
 
 install.md gains the discriminator the CLI does not print — E401/E403/ENEEDAUTH
 is auth, ERESOLVE is a packaging defect and no credential change will help —
@@ -870,6 +874,7 @@ EOF
 
 Log these; do not build them in this PR.
 
+- **A gate that asks whether a real host can SATISFY a peer range, not merely whether it is written exact.** Every `@memberjunction/*` peer here is `^6.1.0-edge.5`, and a prerelease satisfies a range only when a comparator shares its exact `major.minor.patch` tuple: `satisfies('6.1.0-edge.6', '^6.1.0-edge.5')` is `true` today, but `satisfies('6.2.0-edge.3', '^6.1.0-edge.5')` is `false`. Meanwhile `mj-app.json`'s `mjVersionRange` (`>=6.1.0-edge.5 <7.0.0`) is coerced before evaluation, so `satisfies('6.2.0', …)` is `true` — MJ's own compatibility check passes a host npm then refuses, which is #211 with a wider blast radius. Not built here because the predicate needs a real host to prove against, and that arrives at the next MJ upgrade. Tracked separately.
 - **A gate that checks a peer range actually CONTAINS its `devDependencies` anchor.** `^21.1.3` next to an anchor of `22.0.0` would be a different lie, and this gate would pass it. Real, but not what #211 was, and not worth widening the gate on speculation.
-- **`type-graphql: 2.0.0-beta.3` in `packages/Server`.** Allowlisted with its reasoning rather than changed. It is the same *shape* but not the same bug: MJServer declares that exact version as a direct dependency, so every host has precisely it. It becomes a real hazard only if MJ moves and Forms does not — which the version-keyed allowlist now makes noisy rather than silent.
+- **`type-graphql: 2.0.0-beta.3` in `packages/Server`.** Allowlisted with its reasoning rather than changed. It is the same *shape* but not the same bug: MJServer declares that exact version as a direct dependency, so every host has precisely it. If MJ moves and Forms does not, the gate stays green and nothing here notices — the version key catches the *other* direction, Forms following the pin, by expiring the exception so the reasoning has to be restated.
 - **Anything about `mj app install` exiting 0 on a failed npm step, or its message naming npm auth without diagnosing it.** That is MJ core's CLI, not this repo. `docs/install.md` §7 documents the workaround from the operator's side.

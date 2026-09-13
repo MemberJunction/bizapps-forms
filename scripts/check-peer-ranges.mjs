@@ -62,14 +62,16 @@ export const ALLOWED_EXACT_PEERS = Object.freeze([
  *
  * Everything npm accepts as a range — `^`, `~`, comparators, `||`, hyphen ranges, x-ranges, `*`,
  * `workspace:`, a tag, a URL — is a claim about a set and is therefore fine. Only a bare semver,
- * optionally written `=1.2.3`, pins the host to a single build. Prerelease and build metadata are
- * part of a concrete version (`2.0.0-beta.3` is exactly one release), so they match.
+ * optionally written `=1.2.3` or with a leading `v` the way a git tag is (`v1.2.3`, or both:
+ * `=v1.2.3`), pins the host to a single build — npm normalises the `v` away, so it is the same
+ * pin written like a tag. Prerelease and build metadata are part of a concrete version
+ * (`2.0.0-beta.3` is exactly one release), so they match.
  */
 export function isExactVersion(spec) {
     if (typeof spec !== 'string') {
         return false;
     }
-    return /^=?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(spec.trim());
+    return /^=?v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(spec.trim());
 }
 
 /** True when this package/peer/version triple is a documented, still-current exception. */
@@ -77,6 +79,15 @@ function isAllowed(packageName, peer, version) {
     return ALLOWED_EXACT_PEERS.some(
         (a) => a.package === packageName && a.peer === peer && a.version === version.trim(),
     );
+}
+
+/**
+ * The documented allowance for this package/peer pair, regardless of version — used to tell an
+ * expired allowance (the pin moved, but ALLOWED_EXACT_PEERS was not updated to follow it) apart
+ * from an ordinary, never-allowlisted violation. Undefined when no allowance names this pair.
+ */
+function allowanceFor(packageName, peer) {
+    return ALLOWED_EXACT_PEERS.find((a) => a.package === packageName && a.peer === peer);
 }
 
 /**
@@ -152,13 +163,28 @@ export function runCheck(root) {
                 throw new SyntaxError(`check-peer-ranges: ${relPath} is not valid JSON — ${err.message}`);
             }
             for (const hit of findExactPeers(manifest, relPath)) {
-                violations.push(
-                    `${hit.file}: peerDependencies["${hit.peer}"] is the exact version "${hit.version}". ` +
-                        `A peer range is a compatibility claim, and an exact one claims ${hit.package} works ` +
-                        `against that single build and no other — so npm fails with ERESOLVE on every host ` +
-                        `whose ${hit.peer} differs, 'mj app install' finalizes the app as Disabled, and the ` +
-                        `operator is told to fix their npm auth (see #211). Write a range: "^${hit.version}".`,
-                );
+                const expired = allowanceFor(hit.package, hit.peer);
+                if (expired) {
+                    // This pair has a documented exception, but at a version that no longer matches —
+                    // the allowance's own reasoning is that a RANGE here would be the lie (see
+                    // ALLOWED_EXACT_PEERS), so "write a range" is exactly the wrong advice. The pin
+                    // moved and the exception was not re-argued to follow it.
+                    violations.push(
+                        `${hit.file}: peerDependencies["${hit.peer}"] is "${hit.version}", but ` +
+                            `ALLOWED_EXACT_PEERS documents an exception for ${hit.package} -> ${hit.peer} ` +
+                            `only at "${expired.version}". A range would be the lie that exception exists ` +
+                            `to avoid — the documented exception has simply expired, and must be re-argued ` +
+                            `in ALLOWED_EXACT_PEERS at "${hit.version}" before this can go green again.`,
+                    );
+                } else {
+                    violations.push(
+                        `${hit.file}: peerDependencies["${hit.peer}"] is the exact version "${hit.version}". ` +
+                            `A peer range is a compatibility claim, and an exact one claims ${hit.package} works ` +
+                            `against that single build and no other — so npm fails with ERESOLVE on every host ` +
+                            `whose ${hit.peer} differs, 'mj app install' finalizes the app as Disabled, and the ` +
+                            `operator is told to fix their npm auth (see #211). Write a range: "^${hit.version}".`,
+                    );
+                }
             }
             const peers = manifest.peerDependencies ?? {};
             for (const allowance of ALLOWED_EXACT_PEERS) {
