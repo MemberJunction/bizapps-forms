@@ -180,6 +180,13 @@ export class UploadMiddleware extends BaseServerMiddleware {
   private uploadContextFor(req: Request, contextUser: UserInfo): UploadContext {
     return {
       contextUser,
+      // Rides the request-scoped identity store for the same reason `clientIpHash` does a few
+      // lines down: this route is contributed through `GetPostAuthMiddleware`, which runs AFTER
+      // the pre-auth `requestIdentityHandler`, so the header is reachable here without threading
+      // an Express object into the pure service. Unlike the hash beside it, the caller CHOSE this
+      // -- which is why the service checks it against the AUTHOR's list rather than keying any
+      // abuse ceiling on it.
+      requestOrigin: currentRequestIdentity()?.origin,
       metadataProvider: new Metadata(),
       runViewProvider: new RunView(),
       storage: this.storageEngine(),
