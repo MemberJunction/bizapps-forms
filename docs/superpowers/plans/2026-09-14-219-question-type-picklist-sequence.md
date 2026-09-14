@@ -445,13 +445,27 @@ emits no capture file at all, so convergence is directly observable.
 If no clean room is available, say so in the PR rather than implying it was run — the replay test is
 strong evidence about *what we ship* but it is not a database.
 
-## Out of scope — file separately, do not fix here
+## Out of scope
 
-- **A host that ran `mj codegen` against our schema *before* `V202608301200` and never again** still
-  holds this row under its own id with `Value = 'Signature'`, because that migration's §5 `UPDATE` is
-  keyed on our literal id and missed there too. Such a host offers a value its own CHECK constraint
-  now rejects. That is a *value* defect in the original migration, not a sequence one; this plan's
-  natural-key writes cannot repair it (there is no `Doodle` row to renumber). Worth an issue.
 - **The systemic gap** — nothing in the repo reads `EntityFieldValue` end-state for the other 15
   picklist fields. This plan adds coverage for `QuestionType` only, the one field with a rename
   history. The issue notes the systemic gap is already filed separately.
+
+### Corrected during execution — a population that cannot exist
+
+This plan originally carried a third out-of-scope item: *"a host that ran `mj codegen` against our
+schema before `V202608301200` and never again still holds this row under its own id with
+`Value = 'Signature'` … worth an issue."* **That host cannot exist**, and the note was wrong. Both
+reviewers found it independently and the mechanism was then verified directly:
+
+- `B202606281200` seeds the `QuestionType` `EntityField` row under the literal `0a4ff448-…` **and**
+  its first 15 `EntityFieldValue` rows **in the same file**, and `__mj.EntityFieldValue` carries
+  `FK_EntityFieldValue_EntityField`. A database that had minted its own field id would have failed on
+  that file's INSERTs rather than reaching any later migration.
+- `mj app install` puts our schema in `excludeSchemas`, so a host cannot run CodeGen here at all.
+
+Confirmed on `MJ_I201_Verify`: the field id is `0a4ff448-80df-4d5d-94ec-e315822a1b45` and the FK is
+present. So every host that installed successfully holds the shipped id, `V202608301200` §5's
+literal-id `UPDATE` did land, and there is no stale-`Signature` population to file. No issue was
+opened. The natural-key form in Task 2 remains correct — it is defence in depth and the repo's
+documented direction — but it is not covering a live risk.

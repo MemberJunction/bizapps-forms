@@ -19,6 +19,22 @@ import {
 const MIGRATIONS_DIR = join(__dirname, '..', '..', '..', '..', 'migrations');
 
 /**
+ * Every shipped migration, in apply order, read once.
+ *
+ * Memoized because three separate readers in this file want the same bytes, and the directory is
+ * 36 files including a 15k-line baseline — re-reading it per call made this spec cost ~300ms
+ * against ~5ms for its neighbours.
+ */
+let migrationCache: { file: string; sql: string }[] | null = null;
+function shippedMigrations(): { file: string; sql: string }[] {
+  migrationCache ??= readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((file) => ({ file, sql: readFileSync(join(MIGRATIONS_DIR, file), 'utf8') }));
+  return migrationCache;
+}
+
+/**
  * THE failure this whole pairing exists to prevent: a type the code offers and the database
  * rejects. It surfaces as a `Save()` returning false with a constraint-violation message
  * naming neither the column nor the value, on a question the author just added — and because
@@ -31,11 +47,7 @@ const MIGRATIONS_DIR = join(__dirname, '..', '..', '..', '..', 'migrations');
  * CodeGen derives are a function of exactly these values.
  */
 function checkConstraintTypes(): string[] {
-  const sql = readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith('.sql'))
-    .sort()
-    .map((f) => readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
-    .join('\n');
+  const sql = shippedMigrations().map((m) => m.sql).join('\n');
 
   const matches = [...sql.matchAll(/CK_FormQuestion_QuestionType\]?\s+CHECK\s*\(QuestionType IN \(([^)]*)\)/g)];
   expect(matches.length, 'no migration defines CK_FormQuestion_QuestionType').toBeGreaterThan(0);
@@ -219,8 +231,14 @@ describe('the picklist order a host actually receives', () => {
    * constraint-sync query filters on exactly that list — `getCheckConstraintsSchemaFilter` returns
    * ` WHERE SchemaName NOT IN (…)` (SQLServerCodeGenProvider.ts:2000), consumed at
    * manage-metadata.ts:5470. So CodeGen NEVER reaches `FormQuestion.QuestionType` on a host:
-   * whatever `migrations/` leaves in `EntityFieldValue.Sequence` is the order the designer's
-   * question-type dropdown renders, permanently.
+   * whatever `migrations/` leaves in `EntityFieldValue.Sequence` is the order that value list is
+   * rendered in, permanently.
+   *
+   * WHICH surface: `Sequence` orders a field's `EntityFieldValues` in MJ metadata, so it reaches
+   * every metadata-driven consumer — most visibly Explorer's generated Form Question record form
+   * (`<mj-form-field FieldName="QuestionType">`). It is NOT the Forms builder's "Add content"
+   * palette, which is the hand-authored `Record` in `builder/question-type-catalog.ts` and reads no
+   * core metadata at all. Worth stating, because the builder is the tempting place to go looking.
    *
    * `V202608301200` renamed Signature→Doodle and skipped `Sequence` on the stated premise that
    * "CodeGen re-derives the whole field's sequences … on its next run". There is no next run. The
@@ -239,14 +257,39 @@ describe('the picklist order a host actually receives', () => {
   function shippedPicklist(): Map<string, PicklistRow> {
     const byId = new Map<string, PicklistRow>();
 
-    for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort()) {
-      const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+    for (const { file, sql } of shippedMigrations()) {
+      // Which T-SQL variables in THIS file hold the QuestionType field id. Both the INSERT and the
+      // natural-key UPDATE below are keyed on it, so that a migration renumbering some OTHER
+      // field's picklist cannot be credited to this one. Values are not unique across picklists in
+      // this schema — 'Date' and 'Email' appear in more than one — so matching a bare `@\w+` would
+      // let a foreign write corrupt this replay, in either direction: a spurious red, or a right
+      // number that masks a real QuestionType defect.
+      const fieldVars = new Set(
+        [...sql.matchAll(
+          /DECLARE\s+@(\w+)\s+UNIQUEIDENTIFIER\s*=\s*\([^;]*?ef\.\[?Name\]?\s*=\s*N?'QuestionType'/gis,
+        )].map((m) => m[1].toLowerCase()),
+      );
+      const keyedOnQuestionType = (token: string): boolean =>
+        token.startsWith('@')
+          ? fieldVars.has(token.slice(1).toLowerCase())
+          : token.replace(/'/g, '').toUpperCase() === QUESTION_TYPE_FIELD_ID;
 
       // CodeGen's own INSERT shape, with the EntityField id as a literal.
       for (const m of sql.matchAll(
         /\(\s*'([0-9a-fA-F-]{36})'\s*,\s*'([0-9a-fA-F-]{36})'\s*,\s*(\d+)\s*,\s*'([^']*)'\s*,\s*'([^']*)'/g,
       )) {
         if (m[2].toUpperCase() !== QUESTION_TYPE_FIELD_ID) continue;
+        byId.set(m[1].toLowerCase(), { id: m[1].toLowerCase(), sequence: Number(m[3]), value: m[4] });
+      }
+
+      // The same INSERT with the field id passed as a variable — the shape this repo prefers
+      // (V202608252340) and the one a future question type will almost certainly arrive as.
+      // Without this the replay silently misses a CORRECTLY-authored addition and then fails the
+      // row-count assertion, blaming the wrong change.
+      for (const m of sql.matchAll(
+        /\(\s*'([0-9a-fA-F-]{36})'\s*,\s*(@\w+)\s*,\s*(\d+)\s*,\s*'([^']*)'\s*,\s*'([^']*)'/g,
+      )) {
+        if (!keyedOnQuestionType(m[2])) continue;
         byId.set(m[1].toLowerCase(), { id: m[1].toLowerCase(), sequence: Number(m[3]), value: m[4] });
       }
 
@@ -268,10 +311,12 @@ describe('the picklist order a host actually receives', () => {
 
       // The natural-key re-sequence shape this repo prefers (V202608252340), and the one #219's
       // repair uses: `SET [Sequence] = N WHERE [EntityFieldID] = @Var AND [Value] = 'x'`.
+      // Scoped to this file's QuestionType variable (or the literal field id) for the reason above.
       for (const m of sql.matchAll(
-        /EntityFieldValue\]?\s*\n?\s*SET\s+\[?Sequence\]?\s*=\s*(\d+)\s*\n?\s*WHERE\s+\[?EntityFieldID\]?\s*=\s*@\w+\s+AND\s+\[?Value\]?\s*=\s*'([^']+)'/gi,
+        /EntityFieldValue\]?\s*\n?\s*SET\s+\[?Sequence\]?\s*=\s*(\d+)\s*\n?\s*WHERE\s+\[?EntityFieldID\]?\s*=\s*(@\w+|'[0-9a-fA-F-]{36}')\s+AND\s+\[?Value\]?\s*=\s*'([^']+)'/gi,
       )) {
-        for (const row of byId.values()) if (row.value === m[2]) row.sequence = Number(m[1]);
+        if (!keyedOnQuestionType(m[2])) continue;
+        for (const row of byId.values()) if (row.value === m[3]) row.sequence = Number(m[1]);
       }
     }
 
@@ -291,8 +336,72 @@ describe('the picklist order a host actually receives', () => {
     expect(
       drifted,
       'migrations leave the QuestionType picklist in an order CodeGen would rewrite, and no host ' +
-        'ever runs CodeGen against our schema — so this IS the order the designer renders:\n' +
+        'ever runs CodeGen against our schema — so this IS the order every metadata-driven value ' +
+        'list renders (Explorer\'s generated Form Question form; NOT the builder palette, which is ' +
+        'hand-authored in builder/question-type-catalog.ts):\n' +
         drifted.map((d) => `  ${d.value}: shipped ${d.have}, CodeGen wants ${d.want}`).join('\n'),
     ).toEqual([]);
+  });
+});
+
+describe('the repair migration applies the order it states', () => {
+  /**
+   * The suite above pins the NUMBERS. It reads a regex projection of the SQL, so it cannot see the
+   * mechanism that delivers them — `.claude/rules/testing.md` names exactly this limit ("a test
+   * that reads source text asserts presence, not behaviour").
+   *
+   * Four ways V202609142000 could be broken on a host while that suite stays green, all of which
+   * make every UPDATE match zero rows and exit 0:
+   *
+   *   1. a `GO` between the `DECLARE` and the UPDATEs — `@QuestionTypeFieldID` leaves scope and
+   *      every write silently compares against NULL (the file's own header calls this out);
+   *   2. the wrong schema placeholder on the UPDATEs — writing to a table that is not there;
+   *   3. the entity lookup keyed on the wrong `BaseTable` — THROWs on every host instead;
+   *   4. the `IF … THROW` guard deleted — a missing prerequisite becomes silence again.
+   *
+   * These are structural, so they are checkable structurally. This is presence-testing and says so;
+   * the behavioural proof is applying the file to a database, which no unit test can do here.
+   */
+  const REPAIR = 'V202609142000__v0.12.x__Question_Type_Picklist_Sequence.sql';
+
+  function repairSql(): string {
+    const found = shippedMigrations().find((m) => m.file === REPAIR);
+    expect(found, `${REPAIR} is missing — #219's repair must not be renamed without updating this spec`).toBeDefined();
+    return found!.sql;
+  }
+
+  it('keeps the field lookup and every write in one batch, so the variable stays in scope', () => {
+    const sql = repairSql();
+    const declareAt = sql.indexOf('DECLARE @QuestionTypeFieldID');
+    const lastUpdateAt = sql.lastIndexOf('UPDATE [${mjSchema}].[EntityFieldValue]');
+    expect(declareAt, 'the field lookup').toBeGreaterThan(-1);
+    expect(lastUpdateAt, 'the last renumbering write').toBeGreaterThan(declareAt);
+
+    const between = sql.slice(declareAt, lastUpdateAt);
+    const batchBreak = /^\s*GO\s*$/im.test(between);
+    expect(
+      batchBreak,
+      'a GO between the DECLARE and the last UPDATE puts @QuestionTypeFieldID out of scope: every ' +
+        'write then matches nothing against NULL and the migration still exits 0',
+    ).toBe(false);
+  });
+
+  it('writes every sequence to the core schema, not the app schema', () => {
+    // `EntityFieldValue` lives in core. `${flyway:defaultSchema}` here would target a table that
+    // does not exist there — and a no-op UPDATE against a missing row is indistinguishable from
+    // success in the replay above.
+    const writes = [...repairSql().matchAll(/UPDATE\s+\[([^\]]+)\]\.\[EntityFieldValue\]\s+SET\s+\[?Sequence\]?/gi)];
+    expect(writes.length, 'renumbering writes found').toBe(25);
+    expect([...new Set(writes.map((m) => m[1]))]).toEqual(['${mjSchema}']);
+  });
+
+  it('refuses to run in silence when its prerequisite is missing', () => {
+    const sql = repairSql();
+    // Keyed on BaseTable + SchemaName, never Entity.Name — the entity-name prefix is host-
+    // configurable, so a name lookup matches nothing on a host configured differently.
+    expect(sql).toMatch(/e\.\[BaseTable\]\s*=\s*'FormQuestion'/);
+    expect(sql).toMatch(/e\.\[SchemaName\]\s*=\s*'\$\{flyway:defaultSchema\}'/);
+    expect(sql, 'the missing-EntityField guard').toMatch(/IF\s+@QuestionTypeFieldID\s+IS\s+NULL\s*\n?\s*THROW/i);
+    expect(sql, 'the postcondition that the 25 writes landed').toMatch(/THROW\s+51220/);
   });
 });
