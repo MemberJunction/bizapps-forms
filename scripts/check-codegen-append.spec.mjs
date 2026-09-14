@@ -158,12 +158,23 @@ test('does NOT fire on DDL that ships its output under the banner', () => {
 });
 
 // ── Calibration against this repo's real history ─────────────────────────────────────────────
-// Three migrations are expected to flag, and each is understood. If this list changes, either
+// Four migrations are expected to flag, and each is understood. If this list changes, either
 // the classifier drifted or someone edited history — both need a human.
+//
+// `classifyMigration` (called directly here) doesn't know about OUTPUT_SHIPPED_LATER at all --
+// that lookup lives only in main(), which re-reads the named remedy at headSha and confirms it
+// still carries CodeGen output before suppressing the finding. So all four entries below are
+// raw classifier output, from BEFORE that verified suppression runs: the first two are the
+// pre-existing OUTPUT_SHIPPED_LATER pair (V202608182100, V202608191200), which have always
+// flagged here for the same reason; V202609091600 (#201) is the third such pair's flagged half,
+// newly raised by classifyMigration's PARTIAL-coverage check (the added-column-with-no-
+// EntityField-row case). V202609011500 has no recorded remedy and is a real, still-open gap this
+// classifier finds -- not touched here.
 const KNOWN_HISTORICAL_FLAGS = [
   'migrations/V202608182100__v0.11.x__Element_Parity_And_Screens.sql',
   'migrations/V202608191200__v0.11.x__Ending_Screen_Social_Links.sql',
   'migrations/V202609011500__v0.12.x__Captcha_Opt_In_By_Default.sql',
+  'migrations/V202609091600__v0.12.x__Resume_Own_Response.sql',
 ];
 
 test('the classifier is calibrated against the whole migration directory', () => {

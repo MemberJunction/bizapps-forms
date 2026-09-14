@@ -375,13 +375,20 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
   // so `generated` is true, but a column it added has no EntityField row in it. That is #201 --
   // V202609091600 shipped views, procedures and indexes and no field rows, and every Form Response
   // save failed on a host until V202609121200 repaired it three days later.
+  //
+  // Deliberately NOT consulting OUTPUT_SHIPPED_LATER here. This block only decides whether the
+  // finding EXISTS; whether a recorded remedy excuses it is main()'s job, and main() does it right
+  // -- it reads the remedy file at headSha and re-checks carriesCodeGenOutput before suppressing,
+  // so the map's own contract ("Verified, never trusted") holds. Checking the map in here would
+  // suppress the violation before that verification ever ran, on the map ENTRY alone -- trusted,
+  // not verified, exactly what the map's header warns against.
   if (generated) {
     const reason = findCodeGenNoneReason(sql) ?? '';
     const inserted = new Set(findInsertedEntityFieldNames(sql).map((n) => n.toLowerCase()));
     const uncovered = [...new Set(findAddedColumns(sql))].filter(
       (c) => !inserted.has(c.toLowerCase()) && !new RegExp(`\\b${c}\\b`).test(reason),
     );
-    if (uncovered.length && !OUTPUT_SHIPPED_LATER.has(path.basename(relPath))) {
+    if (uncovered.length) {
       violations.push(
         `${relPath}: adds ${uncovered.join(', ')} but ships no INSERT INTO __mj.EntityField naming ` +
           `${uncovered.length > 1 ? 'those columns' : 'that column'}. The host runs only migrations, ` +
