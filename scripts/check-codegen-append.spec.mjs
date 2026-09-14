@@ -170,8 +170,11 @@ test('does NOT fire on DDL that ships its output under the banner', () => {
 // pre-existing OUTPUT_SHIPPED_LATER pair (V202608182100, V202608191200), which have always
 // flagged here for the same reason; V202609091600 (#201) is the third such pair's flagged half,
 // newly raised by classifyMigration's PARTIAL-coverage check (the added-column-with-no-
-// EntityField-row case). V202609011500 has no recorded remedy and is a real, still-open gap this
-// classifier finds -- not touched here.
+// EntityField-row case). V202609011500 flags only because it hand-writes the three places a
+// column default lives (SQL default constraint, spCreateFormDistribution, EntityField.DefaultValue
+// via UPDATE) and predates the @codegen-none marker -- its header already explains why it ships no
+// CodeGen run (.claude/rules/migrations-codegen.md says the same). It should carry @codegen-none;
+// nothing is actually missing on a host. Not touched here.
 const KNOWN_HISTORICAL_FLAGS = [
   'migrations/V202608182100__v0.11.x__Element_Parity_And_Screens.sql',
   'migrations/V202608191200__v0.11.x__Ending_Screen_Social_Links.sql',

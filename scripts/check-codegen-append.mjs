@@ -73,8 +73,12 @@ export const OUTPUT_SHIPPED_LATER = new Map([
   // Added FormDistribution.AllowDeviceResume and FormResponse.FormDistributionID, shipped views,
   // procedures and indexes for both, and no EntityField row for either -- so `generated` was true
   // and the all-or-nothing check passed while every Form Response save failed on a host (#201).
-  // V202609121200 ships all four rows (the two columns, AllowedOrigins, and the virtual
-  // FormDistribution field), each guarded on the natural key, with Sequence computed as MAX+1.
+  // V202609121200 ships all four EntityField rows (the two columns, AllowedOrigins, and the
+  // virtual FormDistribution field), each guarded on the natural key, with Sequence computed as
+  // MAX+1 -- but suppression here is per-file, and that remedies only the EntityField half of
+  // V202609091600's two violations. The FK column's EntityRelationship row -- V202609091600's
+  // other omission -- ships no relationship at all until this branch's own
+  // V202609141900__v0.12.x__Form_Response_Distribution_Metadata.sql, not here.
   ['V202609091600__v0.12.x__Resume_Own_Response.sql',
    'V202609121200__v0.12.x__Distribution_Allowed_Origins.sql'],
 ]);
@@ -151,6 +155,14 @@ function partColumnName(part) {
  *
  * `ADD CONSTRAINT` is deliberately excluded: a constraint is not a column and owes no EntityField
  * row.
+ *
+ * `CREATE TABLE` is out of scope for this function and for both checks built on it — a table's
+ * own columns are never `ALTER … ADD`ed, so a `CREATE TABLE` that ships views and procedures but
+ * omits an `EntityField` row, or that carries an FK column with no `EntityRelationship`, raises
+ * zero violations here. The risk is lower there than the #201 shape this function exists to catch:
+ * CodeGen's new-table output is appended whole (one block, one PARTIAL-coverage failure would be
+ * obvious), whereas #201 happened because V202609091600 hand-excluded specific field blocks from
+ * output it otherwise shipped in full — a targeted omission a whole-table diff would not produce.
  */
 export function findAddedColumns(sql) {
   const code = stripSqlComments(sql);
