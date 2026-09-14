@@ -180,6 +180,27 @@ export function findInsertedEntityFieldNames(sql) {
   return names;
 }
 
+/**
+ * Columns added in this migration that are foreign keys, in either spelling: the inline
+ * `… REFERENCES …` on the column, or a separate `ADD CONSTRAINT … FOREIGN KEY (col)`.
+ *
+ * Only columns THIS migration adds count. A constraint added over a pre-existing column is a
+ * different change and its relationship, if it needed one, was owed by the migration that added it.
+ */
+export function findAddedForeignKeyColumns(sql) {
+  const code = stripSqlComments(sql);
+  const added = new Set(findAddedColumns(code).map((c) => c.toLowerCase()));
+  const fks = new Set();
+
+  const inline = new RegExp(
+    String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?\w+\]?\s+ADD\s+\[?(\w+)\]?[^;]*?\bREFERENCES\b`, 'gi');
+  for (const m of code.matchAll(inline)) fks.add(m[1].toLowerCase());
+
+  for (const m of code.matchAll(/\bFOREIGN\s+KEY\s*\(\s*\[?(\w+)\]?\s*\)/gi)) fks.add(m[1].toLowerCase());
+
+  return findAddedColumns(code).filter((c) => added.has(c.toLowerCase()) && fks.has(c.toLowerCase()));
+}
+
 /** Index of the `)` closing the `(` at `open`, or -1. */
 function matchingParen(text, open) {
   let depth = 0;
@@ -395,6 +416,37 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
           `so a column with no EntityField row is unwritable there — BaseEntity.Set on it is a silent ` +
           `no-op and the save reports success having written nothing. Append CodeGen's EntityField ` +
           `INSERT for ${uncovered.length > 1 ? 'each' : 'it'}, or state why none is needed: ` +
+          `\`-- ${CODEGEN_NONE_MARKER}: <reason naming the column>\`.`,
+      );
+    }
+
+    // The relationship is a SECOND obligation, not the same one. V202609121200 shipped every
+    // EntityField row and no EntityRelationship, so a host at `next` has the field and no
+    // related-records collection: nothing bundles in the API and nothing renders on the form (#201).
+    const joinFields = new Set(
+      [...stripSqlComments(sql).matchAll(
+        /INSERT\s+INTO\s+\S*\[?EntityRelationship\]?[\s\S]{0,2000}?\bVALUES\b[\s\S]{0,2000}?'(\w+)'\s*[,)]/gi,
+      )].map((m) => m[1].toLowerCase()),
+    );
+    const relatedText = stripSqlComments(sql);
+    const unlinked = findAddedForeignKeyColumns(sql).filter(
+      (c) => !new RegExp(String.raw`\[?EntityRelationship\]?[\s\S]{0,3000}?\b${c}\b`, 'i').test(relatedText)
+             && !joinFields.has(c.toLowerCase())
+             && !new RegExp(`\\b${c}\\b`).test(reason),
+    );
+    // No OUTPUT_SHIPPED_LATER check here, deliberately, and the same reason as the EntityField
+    // block above: `main()` owns suppression for a file with a recorded remedy, and it VERIFIES the
+    // remedy (reads it at headSha, confirms it carries output) before suppressing. It only does
+    // that when classifyMigration returns findings, so swallowing the violation here would skip the
+    // verification the map's own contract promises.
+    if (unlinked.length) {
+      violations.push(
+        `${relPath}: adds the foreign key ${unlinked.join(', ')} but ships no INSERT INTO ` +
+          `__mj.EntityRelationship for it. CodeGen mints that row locally and the host never runs ` +
+          `CodeGen, so the related-records collection does not exist there — it does not bundle in ` +
+          `the API and does not render on the form. Ship the relationship, guarded on ` +
+          `(EntityID, RelatedEntityID, RelatedEntityJoinField) and never on its own ID — the id is ` +
+          `minted per database (lint:distribution CHECK 4, #64). Or state why none is needed: ` +
           `\`-- ${CODEGEN_NONE_MARKER}: <reason naming the column>\`.`,
       );
     }

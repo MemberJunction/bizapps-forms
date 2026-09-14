@@ -29,6 +29,7 @@ import {
   OUTPUT_SHIPPED_LATER,
   findAddedColumns,
   findInsertedEntityFieldNames,
+  findAddedForeignKeyColumns,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -635,6 +636,56 @@ test('@codegen-none naming the column excuses it', () => {
     ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [Scratch] INT NULL;
     -- CodeGen output (appended)
     CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
+});
+
+// ── A SECOND partial case: the FK column has an EntityField row but no EntityRelationship (#201) ──
+// The EntityField row makes the column writable; the EntityRelationship row makes the related-
+// records collection exist. V202609121200 shipped the first and not the second, so a host at
+// `next` today has FormResponse.FormDistributionID and no related-records collection. These fail
+// independently, so they are checked independently -- this block would not have caught the case
+// above, and the block above would not catch this one.
+
+test('findAddedForeignKeyColumns names a column whose ADD carries a REFERENCES clause', () => {
+  const sql = `ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);`;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), ['FormDistributionID']);
+});
+
+test('findAddedForeignKeyColumns also catches the separate ADD CONSTRAINT … FOREIGN KEY form', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD CONSTRAINT FK_FormResponse_FormDistributionID
+      FOREIGN KEY ([FormDistributionID]) REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+  `;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), ['FormDistributionID']);
+});
+
+test('a migration adding an FK column with an EntityField row but no EntityRelationship is a violation', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+  `;
+  const v = classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityRelationship/);
+  assert.match(v[0], /FormDistributionID/);
+});
+
+test('it passes once the EntityRelationship insert is present', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField])
+    VALUES ('c','d','e','FormDistributionID')
   `;
   assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
 });
