@@ -41,7 +41,7 @@ That is correct about *what CodeGen does* and wrong about *whether it ever runs*
 verified in MJ's source, not reasoned about:
 
 1. `mj app install` writes the app schema into the host's `excludeSchemas`
-   (`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1987`, "so CodeGen skips entity
+   (`MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1987-1988`, "so CodeGen skips entity
    discovery, view generation, and Angular component generation for app-owned tables").
 2. CodeGen's constraint-sync query is filtered by exactly that list —
    `getCheckConstraintsSchemaFilter` returns `` ` WHERE SchemaName NOT IN (…)` ``
@@ -63,10 +63,18 @@ A sweep of all 16 picklist fields in the schema found **`QuestionType` is the on
 every other CHECK-constrained field is converged. (`FormResponse.Status` looked drifted only because
 its `Disqualified` row is inserted under a `@variable` field id — a parser gap, not a defect.)
 
-**Impact:** the designer's `QuestionType` dropdown renders with `Doodle` sitting where `Signature`
-used to be instead of between `Date` and `Dropdown`, and 15 other values off by one. Cosmetic, but
-permanent, and it is the migration's own stated contract ("A real run must produce NO diff") that
-this not happen.
+**Impact:** every metadata-driven `QuestionType` value list renders with `Doodle` sitting where
+`Signature` used to be instead of between `Date` and `Dropdown`, and 15 other values off by one.
+Cosmetic, but permanent, and it is the migration's own stated contract ("A real run must produce NO
+diff") that this not happen.
+
+> **Which surface — corrected during execution.** Earlier drafts of this plan, and the first version
+> of the code, said the *builder's* question-type dropdown. That is wrong and both reviewers caught
+> it: `packages/Angular/src/lib/builder/question-type-catalog.ts` is a hand-authored total
+> `Record<FormQuestionType, …>` grouped by palette heading, and no Forms UI code reads
+> `EntityFieldValue` at all. `Sequence` orders a field's `EntityFieldValues` in MJ metadata, so the
+> affected surface is Explorer's generated Form Question record form and any other metadata-driven
+> consumer. Task 1's code block below still carries the original wording; the shipped spec does not.
 
 ---
 
