@@ -120,22 +120,45 @@ export function findAppSchemaDDL(sql) {
 }
 
 /**
+ * Every `ALTER TABLE <app schema>.<table> ADD ...` statement's body, split into its comma-
+ * separated parts (each one either a column definition or an inline `CONSTRAINT ...` clause).
+ *
+ * Shared by `findAddedColumns` and `findAddedForeignKeyColumns` so a column's own part is judged
+ * in isolation from its neighbours, and the two functions read from one parse instead of two
+ * regexes that must independently agree on what "this ADD's columns" means. `ADD` may carry
+ * several comma-separated columns in one statement — CLAUDE.md asks for exactly that ("single
+ * multi-`ADD` `ALTER`s") — so a whole-body view of the ADD is the wrong grain for anything that
+ * needs to know which column a clause belongs to.
+ */
+function parseAddStatements(code) {
+  const re = new RegExp(String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?\w+\]?\s+ADD\s+([^;]*)`, 'gi');
+  const statements = [];
+  for (const m of code.matchAll(re)) statements.push(splitTopLevel(m[1]));
+  return statements;
+}
+
+/**
+ * The column name a `parseAddStatements` part defines, or null for an inline `CONSTRAINT ...`
+ * clause (not a column).
+ */
+function partColumnName(part) {
+  const m = part.match(/^\s*\[?(\w+)\]?/);
+  return m && !/^CONSTRAINT$/i.test(m[1]) ? m[1] : null;
+}
+
+/**
  * Columns an `ALTER TABLE … ADD` introduces, in our schema.
  *
  * `ADD CONSTRAINT` is deliberately excluded: a constraint is not a column and owes no EntityField
- * row. `ADD` may carry several comma-separated columns in one statement — CLAUDE.md asks for exactly
- * that ("single multi-`ADD` `ALTER`s") — so the list is parsed, not assumed to be one name.
+ * row.
  */
 export function findAddedColumns(sql) {
   const code = stripSqlComments(sql);
-  const re = new RegExp(String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?\w+\]?\s+ADD\s+([^;]*)`, 'gi');
   const names = [];
-  for (const m of code.matchAll(re)) {
-    const body = m[1];
-    if (/^\s*CONSTRAINT\b/i.test(body)) continue;
-    for (const part of splitTopLevel(body)) {
-      const name = part.match(/^\s*\[?(\w+)\]?/);
-      if (name && !/^CONSTRAINT$/i.test(name[1])) names.push(name[1]);
+  for (const parts of parseAddStatements(code)) {
+    for (const part of parts) {
+      const name = partColumnName(part);
+      if (name) names.push(name);
     }
   }
   return names;
@@ -155,50 +178,84 @@ function splitTopLevel(text) {
 }
 
 /**
+ * String-literal values at the position of `columnName` in each
+ * `INSERT INTO <schema>.<tableName> (<columns>) VALUES (<tuple>)` this migration ships.
+ *
+ * Positional, not proximity: reads the value out of the VALUES tuple by the column's own index in
+ * the column list, because that is the shape CodeGen emits and the only one that distinguishes
+ * (say) a field's `Name` from its `DisplayName`, or a relationship's `RelatedEntityJoinField` from
+ * its `EntityID`/`RelatedEntityID` GUIDs — rather than assuming the value is merely "nearby".
+ * Shared by `findInsertedEntityFieldNames` and `findInsertedRelationshipJoinFields`.
+ */
+function findInsertedColumnValues(sql, tableName, columnName) {
+  const code = stripSqlComments(sql);
+  const re = new RegExp(String.raw`INSERT\s+INTO\s+\S*\[?${tableName}\]?\s*\(([^)]*)\)\s*VALUES\s*\(`, 'gi');
+  const targetCol = columnName.toLowerCase();
+  const values = [];
+  for (const m of code.matchAll(re)) {
+    const cols = m[1].split(',').map((c) => c.trim().replace(/[[\]]/g, '').toLowerCase());
+    const idx = cols.indexOf(targetCol);
+    if (idx === -1) continue;
+    const open = code.indexOf('(', m.index + m[0].length - 1);
+    const close = matchingParen(code, open);
+    if (close === -1) continue;
+    const tuple = splitTopLevel(code.slice(open + 1, close));
+    const raw = tuple[idx];
+    if (raw === undefined) continue;
+    const lit = raw.trim().match(/^N?'([^']*)'$/);
+    if (lit) values.push(lit[1]);
+  }
+  return values;
+}
+
+/**
  * Column names this migration inserts an `__mj.EntityField` row for.
  *
  * Read from the VALUES list by position of `[Name]` in the column list, because that is the shape
  * CodeGen emits and the only one that distinguishes the field's name from its DisplayName.
  */
 export function findInsertedEntityFieldNames(sql) {
-  const code = stripSqlComments(sql);
-  const re = /INSERT\s+INTO\s+\S*\[?EntityField\]?\s*\(([^)]*)\)\s*VALUES\s*\(/gi;
-  const names = [];
-  for (const m of code.matchAll(re)) {
-    const cols = m[1].split(',').map((c) => c.trim().replace(/[[\]]/g, '').toLowerCase());
-    const nameIdx = cols.indexOf('name');
-    if (nameIdx === -1) continue;
-    const open = code.indexOf('(', m.index + m[0].length - 1);
-    const close = matchingParen(code, open);
-    if (close === -1) continue;
-    const values = splitTopLevel(code.slice(open + 1, close));
-    const raw = values[nameIdx];
-    if (raw === undefined) continue;
-    const lit = raw.trim().match(/^N?'([^']*)'$/);
-    if (lit) names.push(lit[1]);
-  }
-  return names;
+  return findInsertedColumnValues(sql, 'EntityField', 'Name');
+}
+
+/**
+ * Column names this migration inserts an `__mj.EntityRelationship` row's `RelatedEntityJoinField`
+ * as — the FK column that row makes the related-records collection exist for.
+ */
+export function findInsertedRelationshipJoinFields(sql) {
+  return findInsertedColumnValues(sql, 'EntityRelationship', 'RelatedEntityJoinField');
 }
 
 /**
  * Columns added in this migration that are foreign keys, in either spelling: the inline
- * `… REFERENCES …` on the column, or a separate `ADD CONSTRAINT … FOREIGN KEY (col)`.
+ * `… REFERENCES …` on the column's OWN comma-separated part, or a separate
+ * `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY (col)`.
  *
- * Only columns THIS migration adds count. A constraint added over a pre-existing column is a
- * different change and its relationship, if it needed one, was owed by the migration that added it.
+ * Only columns THIS migration adds count, and both spellings are read from `parseAddStatements` —
+ * never a whole-ADD-body or whole-file scan. Whole-body would credit REFERENCES to whichever
+ * column happens to come first after ADD, regardless of which comma-separated part actually
+ * carries it (CLAUDE.md's "single multi-ADD ALTERs" makes a multi-column ADD the normal shape, not
+ * an edge case). Whole-file would let an unrelated CREATE TABLE's own FOREIGN KEY constraint, on a
+ * same-named column, make an unrelated plain ADD read as a foreign key. A constraint added over a
+ * pre-existing column is a different change besides, and its relationship, if it needed one, was
+ * owed by the migration that added the column.
  */
 export function findAddedForeignKeyColumns(sql) {
   const code = stripSqlComments(sql);
-  const added = new Set(findAddedColumns(code).map((c) => c.toLowerCase()));
   const fks = new Set();
 
-  const inline = new RegExp(
-    String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?\w+\]?\s+ADD\s+\[?(\w+)\]?[^;]*?\bREFERENCES\b`, 'gi');
-  for (const m of code.matchAll(inline)) fks.add(m[1].toLowerCase());
+  for (const parts of parseAddStatements(code)) {
+    for (const part of parts) {
+      const name = partColumnName(part);
+      if (name && /\bREFERENCES\b/i.test(part)) fks.add(name.toLowerCase());
+    }
+    for (const part of parts) {
+      const m = part.match(/\bFOREIGN\s+KEY\s*\(\s*\[?(\w+)\]?\s*\)/i);
+      if (m) fks.add(m[1].toLowerCase());
+    }
+  }
 
-  for (const m of code.matchAll(/\bFOREIGN\s+KEY\s*\(\s*\[?(\w+)\]?\s*\)/gi)) fks.add(m[1].toLowerCase());
-
-  return findAddedColumns(code).filter((c) => added.has(c.toLowerCase()) && fks.has(c.toLowerCase()));
+  return findAddedColumns(code).filter((c) => fks.has(c.toLowerCase()));
 }
 
 /** Index of the `)` closing the `(` at `open`, or -1. */
@@ -423,16 +480,17 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
     // The relationship is a SECOND obligation, not the same one. V202609121200 shipped every
     // EntityField row and no EntityRelationship, so a host at `next` has the field and no
     // related-records collection: nothing bundles in the API and nothing renders on the form (#201).
-    const joinFields = new Set(
-      [...stripSqlComments(sql).matchAll(
-        /INSERT\s+INTO\s+\S*\[?EntityRelationship\]?[\s\S]{0,2000}?\bVALUES\b[\s\S]{0,2000}?'(\w+)'\s*[,)]/gi,
-      )].map((m) => m[1].toLowerCase()),
-    );
-    const relatedText = stripSqlComments(sql);
+    //
+    // Positional, not proximity: a column is "linked" only when its name is the actual
+    // RelatedEntityJoinField VALUE of some EntityRelationship INSERT, read by column position
+    // (findInsertedRelationshipJoinFields) -- not merely near the word EntityRelationship
+    // somewhere in the file. A proximity window passed a migration that added TWO FK columns and
+    // shipped a relationship for only the first, because the second column's own (separately
+    // mandatory) EntityField INSERT put its name inside the window regardless of which column the
+    // relationship actually named.
+    const linkedFields = new Set(findInsertedRelationshipJoinFields(sql).map((n) => n.toLowerCase()));
     const unlinked = findAddedForeignKeyColumns(sql).filter(
-      (c) => !new RegExp(String.raw`\[?EntityRelationship\]?[\s\S]{0,3000}?\b${c}\b`, 'i').test(relatedText)
-             && !joinFields.has(c.toLowerCase())
-             && !new RegExp(`\\b${c}\\b`).test(reason),
+      (c) => !linkedFields.has(c.toLowerCase()) && !new RegExp(`\\b${c}\\b`).test(reason),
     );
     // No OUTPUT_SHIPPED_LATER check here, deliberately, and the same reason as the EntityField
     // block above: `main()` owns suppression for a file with a recorded remedy, and it VERIFIES the

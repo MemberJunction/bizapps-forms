@@ -30,6 +30,7 @@ import {
   findAddedColumns,
   findInsertedEntityFieldNames,
   findAddedForeignKeyColumns,
+  findInsertedRelationshipJoinFields,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -688,4 +689,73 @@ test('it passes once the EntityRelationship insert is present', () => {
     VALUES ('c','d','e','FormDistributionID')
   `;
   assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
+});
+
+// ── Fix round 1: three defects a review found by executing the code, not by inspection ──────
+// All three are in the detection internals the brief specified verbatim -- the coordinator ruled
+// the brief's design wrong here and authorised departing from it. Structure (where the check
+// lives, what it reports) is unaffected; only how a column is judged "foreign key" and "linked"
+// changes.
+
+// Critical 1: `findInsertedRelationshipJoinFields` reads EntityRelationship.RelatedEntityJoinField
+// positionally -- the same way `findInsertedEntityFieldNames` reads EntityField.Name -- instead of
+// a proximity window. A proximity window ("is the column's name anywhere within N characters of
+// the word EntityRelationship") is satisfied by ANY nearby EntityField INSERT naming a *different*
+// FK column, because every FK column ships one of those regardless. That let a migration adding
+// TWO FK columns, with an EntityRelationship row for only the first, read as fully linked.
+test('findInsertedRelationshipJoinFields reads the RelatedEntityJoinField value out of an EntityRelationship INSERT', () => {
+  const sql = `
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField])
+    VALUES ('c','d','e','FormDistributionID')
+  `;
+  assert.deepEqual(findInsertedRelationshipJoinFields(sql), ['FormDistributionID']);
+});
+
+test('CRITICAL 1 (was a false pass): two FK columns, EntityRelationship shipped for only the first -- the SECOND is reported, not silently linked by proximity', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD
+      [FormDistributionID] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]),
+      [FormVersionID] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[FormVersion]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField])
+    VALUES ('c','d','e','FormDistributionID')
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('f','g',2,'FormVersionID')
+  `;
+  const v = classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /EntityRelationship/);
+  assert.match(v[0], /FormVersionID/);
+  assert.doesNotMatch(v[0], /FormDistributionID/);
+});
+
+// Critical 2: the inline-REFERENCES check must be evaluated per comma-separated part of the ADD
+// body, not across the whole body -- CLAUDE.md's "single multi-ADD ALTERs" makes a multi-column ADD
+// the expected shape, not an edge case, and the old whole-body regex named whichever column
+// happened to come first after ADD regardless of which one actually carried REFERENCES.
+test('CRITICAL 2 (was misattributed): a multi-column ADD reports the column that actually carries REFERENCES, not just the first name after ADD', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD
+      [ColumnA] INT NULL,
+      [ColumnB] UNIQUEIDENTIFIER NULL REFERENCES [\${flyway:defaultSchema}].[TableB]([ID]);
+  `;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), ['ColumnB']);
+});
+
+// Important 3: the bare `FOREIGN KEY (col)` scan must be scoped to this migration's own
+// `ALTER TABLE … ADD` statements, not the whole file -- otherwise an unrelated CREATE TABLE that
+// happens to constrain a same-named column elsewhere makes a plain ADD read as a foreign key.
+test('IMPORTANT 3 (was over-flagged): an unrelated CREATE TABLE constraining a same-named column does not make a plain ADD read as a foreign key', () => {
+  const sql = `
+    CREATE TABLE [\${flyway:defaultSchema}].[Other] (
+      [ID] UNIQUEIDENTIFIER NOT NULL,
+      [SharedName] UNIQUEIDENTIFIER NULL,
+      CONSTRAINT [FK_Other_SharedName] FOREIGN KEY ([SharedName]) REFERENCES [\${flyway:defaultSchema}].[Elsewhere]([ID])
+    );
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [SharedName] INT NULL;
+  `;
+  assert.deepEqual(findAddedForeignKeyColumns(sql), []);
 });
