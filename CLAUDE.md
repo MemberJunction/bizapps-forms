@@ -120,23 +120,31 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
   creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
   Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
   Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
-- **The release is human-driven by construction, and that is the fix rather than a workaround**
-  (#177). Required status checks are evaluated against the check runs present on the SHA being
-  *introduced*, so a direct push — which introduces a SHA the remote has never seen — can never
-  satisfy them; no retry wins that race. The publish pipeline therefore pushes no branch at all.
-  The version bump rides the `next` → `main` release PR (where all seven checks run normally), and
-  `publish.yml` only builds, publishes to npm and pushes a **tag** — tags are outside both rulesets,
-  which are `target: branch`. A second, manual PR carries `main` back into `next` afterwards,
-  because `strict: true` blocks the following release PR until it lands. Runbook:
-  [`docs/release.md`](docs/release.md). `npm run lint:release-pushes` (inside `build-and-test`)
-  fails any workflow or script that reintroduces a push to `main` or `next`.
-  - The two remedies #177 originally listed both need a permission this repo does not have. A
-    GitHub Actions bypass actor is refused at repo level (`422 — Actor GitHub Actions integration
-    must be part of the ruleset source or owner organization`) and needs an org owner; routing the
-    pushes through workflow-opened PRs needs a PAT or App token, because GitHub does not start
-    workflow runs from `GITHUB_TOKEN`-authored events, so the required contexts would never report
-    on such a PR either. Neither is a prerequisite for anything now — they would only buy back
-    automation the release does not need.
+- **Nothing pushes to `main` or `next` — the release opens pull requests instead** (#177, and the
+  release-automation change of 2026-09-13). Required status checks are evaluated against the check
+  runs present on the SHA being *introduced*, so a direct push — which introduces a SHA the remote
+  has never seen — can never satisfy them; no retry wins that race. That finding is permanent and
+  `npm run lint:release-pushes` (inside `build-and-test`) keeps it enforced.
+  What changed is everything built on top of it. The release is now **one dispatch and two merges**:
+  *Prepare a release* cuts `release/vX.Y.Z`, bumps, and opens the PR into `main`; `publish.yml`
+  publishes, tags, and opens the `main` → `next` back-merge PR. Runbook:
+  [`docs/release.md`](docs/release.md); `npm run release:plan` answers "is a release due?" read-only
+  from any checkout.
+  - **The pull requests are opened by a GitHub App, and that is not a bypass.** It writes only to
+    `release/*` and `chore/backmerge-*`, which are covered by no ruleset
+    (`gh api repos/MemberJunction/bizapps-forms/rules/branches/<branch>` returns `[]` for those and
+    three rules for `main`/`next`). Both rulesets keep `bypass_actors: []`. The App is needed for one
+    reason only: GitHub does not start workflow runs from `GITHUB_TOKEN`-authored events, so the
+    seven required contexts would never report on a PR the default token opened.
+  - **#177's "we lack the permission" conclusion was true when written and is now false** — do not
+    re-derive it. `vars.APP_CLIENT_ID` and `secrets.APP_PRIVATE_KEY` are org-level and already
+    visible to this repo; MJ core uses the same pair. The separate `422 — Actor GitHub Actions
+    integration must be part of the ruleset source or owner organization` refusal was about the
+    *GitHub Actions* integration specifically, and is irrelevant here because this design asks for no
+    bypass at all. Dispatch **Verify the release App token** to confirm the credential is live; it is
+    read-only.
+  - Between the two, the release was a hand-run runbook that **was never once executed** —
+    `v0.10.0` (2026-08-14) was cut by the automation #177 removed, and nothing shipped after it.
 
 ## Build & dev commands
 - `pnpm install` (repo root only — never inside a package dir)

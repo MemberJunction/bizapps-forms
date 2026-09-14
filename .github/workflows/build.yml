@@ -248,6 +248,14 @@ jobs:
       - name: Release plan tests
         run: npm run lint:release-plan:test
 
+      # The other half of the same argument, one step earlier in the release: release-prep.mjs
+      # decides whether a release may be cut at all and what version it is, and #177 left that
+      # decision to a runbook nobody has ever executed. Its spec pins every blocker — including the
+      # stale-`main` one, which is invisible until a release PR refuses to merge — and the
+      # postconditions that catch the prediction disagreeing with what `changeset version` produced.
+      - name: Release prep tests
+        run: npm run lint:release-prep:test
+
       # Duplicated deliberately. The `scope` job above also runs this spec, but `scope` is not
       # itself a required context — a PR that weakened it would show a red X there that blocks
       # nothing. This copy runs inside `build-and-test`, which IS required, so a weakened spec here
