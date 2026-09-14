@@ -27,6 +27,8 @@ import {
   addedMigrations,
   readAt,
   OUTPUT_SHIPPED_LATER,
+  findAddedColumns,
+  findInsertedEntityFieldNames,
 } from './check-codegen-append.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -135,7 +137,7 @@ test('FIRES: a description change that never writes EntityField.Description', ()
 
 test('FIRES: a NEW migration ships CodeGen output with no banner', () => {
   const v = classifyMigration('migrations/V1__x.sql',
-    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_x CHECK (1=1);\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: true });
   assert.equal(v.length, 1);
   assert.match(v[0], /banner/);
@@ -145,13 +147,13 @@ test('does NOT fire on the same file when it is merely modified', () => {
   // History cannot be retrofitted (migrations/README.md,
   // "Add a NEW seed migration; never edit an existing one"), so the banner rule is for new files.
   assert.deepEqual(classifyMigration('migrations/V1__x.sql',
-    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_x CHECK (1=1);\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: false }), []);
 });
 
 test('does NOT fire on DDL that ships its output under the banner', () => {
   assert.deepEqual(classifyMigration('migrations/V1__x.sql',
-    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD X BIT;\n-- CodeGen output (appended)\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
+    'ALTER TABLE [${flyway:defaultSchema}].[Form] ADD CONSTRAINT CK_x CHECK (1=1);\n-- CodeGen output (appended)\nCREATE PROCEDURE [${flyway:defaultSchema}].[spUpdateForm] AS SELECT 1;',
     { isNew: true }), []);
 });
 
@@ -564,4 +566,64 @@ test('OUTPUT_SHIPPED_LATER only names remedies that are real and still carry Cod
     assert.equal(carriesCodeGenOutput(read(remedyPath)), true,
       `${remedyName}: named as ${flaggedName}'s remedy but carries no CodeGen output`);
   }
+});
+
+// ── The PARTIAL case: output shipped, but not for every added column (#201) ─────────────────
+// The all-or-nothing check above (`ddl.length && !generated`) cannot see this: V202609091600
+// shipped views, procedures and indexes and no EntityField rows for the two columns it added --
+// `generated` was true, the gate passed, and every Form Response save failed on a host.
+
+test('findAddedColumns names every column an ALTER TABLE ADD introduces', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormDistribution] ADD [AllowDeviceResume] BIT NOT NULL CONSTRAINT DF_x DEFAULT (1);
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+  `;
+  assert.deepEqual(findAddedColumns(sql).sort(), ['AllowDeviceResume', 'FormDistributionID']);
+});
+
+test('findAddedColumns ignores ADD CONSTRAINT — a constraint is not a column', () => {
+  const sql = `ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD CONSTRAINT FK_x FOREIGN KEY ([FormDistributionID]) REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);`;
+  assert.deepEqual(findAddedColumns(sql), []);
+});
+
+test('findInsertedEntityFieldNames reads the Name value out of an EntityField INSERT', () => {
+  const sql = `
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name],[DisplayName])
+    VALUES ('a','b',1,'AllowDeviceResume','Allow Device Resume')
+  `;
+  assert.deepEqual(findInsertedEntityFieldNames(sql), ['AllowDeviceResume']);
+});
+
+test('a migration that adds a column and ships CodeGen output but no EntityField row for it is a violation', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    CREATE OR ALTER PROCEDURE [\${flyway:defaultSchema}].[spCreateFormResponse] AS SELECT 1;
+  `;
+  const v = classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true });
+  assert.equal(v.length, 1);
+  assert.match(v[0], /FormDistributionID/);
+  assert.match(v[0], /EntityField/);
+});
+
+test('the same migration passes once it ships the EntityField row', () => {
+  const sql = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL;
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+  `;
+  assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
+});
+
+test('@codegen-none naming the column excuses it', () => {
+  const sql = `
+    -- @codegen-none: FormResponse.Scratch is a staging column the entity layer never exposes
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [Scratch] INT NULL;
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  assert.deepEqual(classifyMigration('migrations/V209901010000__test.sql', sql, { isNew: true }), []);
 });

@@ -70,6 +70,13 @@ export const OUTPUT_SHIPPED_LATER = new Map([
   // calls itself "the second half of V202608191200".
   ['V202608191200__v0.11.x__Ending_Screen_Social_Links.sql',
    'V202608191400__v0.11.x__Form_Screen_Social_Links_Metadata.sql'],
+  // Added FormDistribution.AllowDeviceResume and FormResponse.FormDistributionID, shipped views,
+  // procedures and indexes for both, and no EntityField row for either -- so `generated` was true
+  // and the all-or-nothing check passed while every Form Response save failed on a host (#201).
+  // V202609121200 ships all four rows (the two columns, AllowedOrigins, and the virtual
+  // FormDistribution field), each guarded on the natural key, with Sequence computed as MAX+1.
+  ['V202609091600__v0.12.x__Resume_Own_Response.sql',
+   'V202609121200__v0.12.x__Distribution_Allowed_Origins.sql'],
 ]);
 
 /** Strip line and block comments so prose naming a table never trips a check. */
@@ -110,6 +117,77 @@ export function findAppSchemaDDL(sql) {
     for (const m of code.matchAll(re)) found.push(`${what} ${m[1]}`);
   }
   return found;
+}
+
+/**
+ * Columns an `ALTER TABLE … ADD` introduces, in our schema.
+ *
+ * `ADD CONSTRAINT` is deliberately excluded: a constraint is not a column and owes no EntityField
+ * row. `ADD` may carry several comma-separated columns in one statement — CLAUDE.md asks for exactly
+ * that ("single multi-`ADD` `ALTER`s") — so the list is parsed, not assumed to be one name.
+ */
+export function findAddedColumns(sql) {
+  const code = stripSqlComments(sql);
+  const re = new RegExp(String.raw`\bALTER\s+TABLE\s+${APP_SCHEMA}\s*\.\s*\[?\w+\]?\s+ADD\s+([^;]*)`, 'gi');
+  const names = [];
+  for (const m of code.matchAll(re)) {
+    const body = m[1];
+    if (/^\s*CONSTRAINT\b/i.test(body)) continue;
+    for (const part of splitTopLevel(body)) {
+      const name = part.match(/^\s*\[?(\w+)\]?/);
+      if (name && !/^CONSTRAINT$/i.test(name[1])) names.push(name[1]);
+    }
+  }
+  return names;
+}
+
+/** Split on commas that are not inside parentheses — `DECIMAL(18, 2)` must stay one part. */
+function splitTopLevel(text) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth--;
+    else if (text[i] === ',' && depth === 0) { parts.push(text.slice(start, i)); start = i + 1; }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/**
+ * Column names this migration inserts an `__mj.EntityField` row for.
+ *
+ * Read from the VALUES list by position of `[Name]` in the column list, because that is the shape
+ * CodeGen emits and the only one that distinguishes the field's name from its DisplayName.
+ */
+export function findInsertedEntityFieldNames(sql) {
+  const code = stripSqlComments(sql);
+  const re = /INSERT\s+INTO\s+\S*\[?EntityField\]?\s*\(([^)]*)\)\s*VALUES\s*\(/gi;
+  const names = [];
+  for (const m of code.matchAll(re)) {
+    const cols = m[1].split(',').map((c) => c.trim().replace(/[[\]]/g, '').toLowerCase());
+    const nameIdx = cols.indexOf('name');
+    if (nameIdx === -1) continue;
+    const open = code.indexOf('(', m.index + m[0].length - 1);
+    const close = matchingParen(code, open);
+    if (close === -1) continue;
+    const values = splitTopLevel(code.slice(open + 1, close));
+    const raw = values[nameIdx];
+    if (raw === undefined) continue;
+    const lit = raw.trim().match(/^N?'([^']*)'$/);
+    if (lit) names.push(lit[1]);
+  }
+  return names;
+}
+
+/** Index of the `)` closing the `(` at `open`, or -1. */
+function matchingParen(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i;
+  }
+  return -1;
 }
 
 /** Does this migration touch a column description? */
@@ -290,6 +368,28 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
             `inherits an excuse it never earned.`
         );
       }
+    }
+  }
+
+  // The PARTIAL case the all-or-nothing check above cannot see: this file DID ship CodeGen output,
+  // so `generated` is true, but a column it added has no EntityField row in it. That is #201 --
+  // V202609091600 shipped views, procedures and indexes and no field rows, and every Form Response
+  // save failed on a host until V202609121200 repaired it three days later.
+  if (generated) {
+    const reason = findCodeGenNoneReason(sql) ?? '';
+    const inserted = new Set(findInsertedEntityFieldNames(sql).map((n) => n.toLowerCase()));
+    const uncovered = [...new Set(findAddedColumns(sql))].filter(
+      (c) => !inserted.has(c.toLowerCase()) && !new RegExp(`\\b${c}\\b`).test(reason),
+    );
+    if (uncovered.length && !OUTPUT_SHIPPED_LATER.has(path.basename(relPath))) {
+      violations.push(
+        `${relPath}: adds ${uncovered.join(', ')} but ships no INSERT INTO __mj.EntityField naming ` +
+          `${uncovered.length > 1 ? 'those columns' : 'that column'}. The host runs only migrations, ` +
+          `so a column with no EntityField row is unwritable there — BaseEntity.Set on it is a silent ` +
+          `no-op and the save reports success having written nothing. Append CodeGen's EntityField ` +
+          `INSERT for ${uncovered.length > 1 ? 'each' : 'it'}, or state why none is needed: ` +
+          `\`-- ${CODEGEN_NONE_MARKER}: <reason naming the column>\`.`,
+      );
     }
   }
 
