@@ -430,20 +430,38 @@ git commit -m "chore(changeset): minor — this ships a migration (#219)"
 
 ---
 
-## Verification beyond the test suite
+## Verification beyond the test suite — RUN, 2026-09-14
 
-The issue names a stronger check than any unit test can perform, and it should be run before the PR
-leaves draft **if a clean room is available**:
+The issue's own acceptance check was executed, with a control so the pass is not vacuous.
 
-> Rebuild the clean room and run `mj codegen --skipfiles`. The capture must contain **no**
-> `EntityFieldValue` updates.
+**Method.** `MJ_I201_Verify` sits at the `origin/next` Forms frontier and is migrations-only — what a
+real host looks like. Backed it up (`RESTORE FILELISTONLY` first: the logical names are
+`MJ_Forms_SeedProof2_v012`/`_log`, not the database name) and restored **two** clones from the same
+`.bak`, both `ALTER AUTHORIZATION … TO [sa]`:
 
-Recipe: `docs/database-operations.md` (clean-room build), then core `mj migrate -t v<version>`,
-then the leaf-first app chain common → tasks → forms. A second run on an already-converged database
-emits no capture file at all, so convergence is directly observable.
+| database | state | `mj codegen --skipfiles` capture |
+|---|---|---|
+| `MJ_I219_Control` | pre-fix (frontier `V202609141900`, `Doodle` = 20) | **16 `EntityFieldValue` UPDATEs** |
+| `MJ_I219_Verify` | `V202609142000` applied, order 1–25 | **0 `EntityFieldValue` statements** |
+| `MJ_I219_Verify` | second run, same database | **no capture file at all** |
 
-If no clean room is available, say so in the PR rather than implying it was run — the replay test is
-strong evidence about *what we ship* but it is not a database.
+The control's 16 statements are byte-identical to the capture quoted in the issue — `Sequence=5 …
+D4A3D852` (Doodle), `Sequence=6 … 6E88EEEC` (Dropdown), through `Sequence=20 … 753C2962` (ShortText).
+
+**CodeGen demonstrably looked at our schema**, so the zero is a real convergence and not a scoping
+artifact: this repo's `mj.config.cjs` has `includeSchemas: ["__mj_BizAppsForms","__mj_bizappsforms"]`
+and `excludeSchemas: []`. The QuestionType order was still 1–25 after CodeGen finished — it had
+nothing to change.
+
+**What the passing capture did contain** (335 lines, none of it ours): 7 new `EntityField` rows and
+two `EntityField.Sequence` offsets for `MJ_BizApps_Common: Organizations` and
+`… Activity Sync Run Details` — pre-existing drift between the checked-out `bizapps-common` and what
+the clone's common migrations shipped. Unrelated to this change, and worth knowing before someone
+reads a non-empty capture as a failure here.
+
+**Cleanup:** both clones dropped, the `.bak` deleted, `.env` restored to `MJ_ATS_Dev`, and
+`migrations/codegen/` removed — a tracked capture file fails `lint:codegen-append` CHECK 1.
+`MJ_I201_Verify` was never written to.
 
 ## Out of scope
 
