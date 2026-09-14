@@ -470,7 +470,12 @@ And in `classifyMigration`, inside the same `if (generated)` block added in Task
              && !joinFields.has(c.toLowerCase())
              && !new RegExp(`\\b${c}\\b`).test(reason),
     );
-    if (unlinked.length && !OUTPUT_SHIPPED_LATER.has(path.basename(relPath))) {
+    // No OUTPUT_SHIPPED_LATER check here, deliberately, and the same reason as the EntityField
+    // block above: `main()` owns suppression for a file with a recorded remedy, and it VERIFIES the
+    // remedy (reads it at headSha, confirms it carries output) before suppressing. It only does
+    // that when classifyMigration returns findings, so swallowing the violation here would skip the
+    // verification the map's own contract promises.
+    if (unlinked.length) {
       violations.push(
         `${relPath}: adds the foreign key ${unlinked.join(', ')} but ships no INSERT INTO ` +
           `__mj.EntityRelationship for it. CodeGen mints that row locally and the host never runs ` +
@@ -722,7 +727,6 @@ Closes #201"
 ```markdown
 ---
 "@mj-biz-apps/forms-entities": minor
-"@mj-biz-apps/forms-actions": minor
 "@mj-biz-apps/forms-server": minor
 "@mj-biz-apps/forms-ng": minor
 ---
@@ -741,8 +745,10 @@ case: a migration that adds a column must ship the `EntityField` row naming it,
 and one that adds a foreign key must ship its `EntityRelationship` row.
 ```
 
-Match the package list to `.changeset/`'s existing files — copy the four names from a recent one
-rather than typing them from memory.
+Those three names are verified against `.changeset/a-link-can-name-the-sites-that-may-show-it.md` —
+the changeset for `V202609121200`, the very migration this PR completes. This repo has five
+packages, not four; `forms-actions` and `forms-core-entities-server` are deliberately absent, as
+they are in the precedent. Do not add them.
 
 - [ ] **Step 2: Run the full suite before claiming anything**
 
