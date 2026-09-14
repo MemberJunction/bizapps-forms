@@ -440,6 +440,36 @@ Expected: FAIL — `findAddedForeignKeyColumns is not a function`.
 
 - [ ] **Step 3: Implement**
 
+> **Superseded during implementation (do not build from this snippet as written).** All three
+> detection mechanisms below were replaced by commit `9fb6949` ("fix(gates): replace proximity
+> FK-relationship detection with positional parsing"), and the shipped spec carries a named
+> regression test for each. Building from this block reproduces three defects the branch already
+> found and fixed:
+>
+> - the inline-`REFERENCES` regex scans the **whole ADD body**, so on a multi-column `ADD` — the
+>   shape CLAUDE.md mandates — it credits `REFERENCES` to whichever column comes first after `ADD`
+>   rather than the one carrying it (spec: *"CRITICAL 2 (was misattributed)"*);
+> - the bare `FOREIGN KEY (col)` scan runs over the **whole file**, so an unrelated `CREATE TABLE`
+>   constraining a same-named column makes a plain `ADD` read as a foreign key (spec: *"IMPORTANT 3
+>   (was over-flagged)"*);
+> - the `{0,2000}`/`{0,3000}` **proximity window** for "is this column linked to an
+>   EntityRelationship row" is satisfied by any nearby `EntityField` INSERT naming a *different* FK
+>   column, so a migration adding two FK columns with a relationship for only the first read as
+>   fully linked (spec: *"CRITICAL 1 (was a false pass)"*).
+>
+> What shipped instead is positional parsing: `parseAddStatements` judges each comma-separated part
+> of an `ADD` in isolation, and `findInsertedColumnValues` reads a value out of a `VALUES` tuple by
+> the column's index in the INSERT column list. Read `scripts/check-codegen-append.mjs` for the
+> current shape.
+>
+> The prescribed comment and violation message below also claim the missing relationship means
+> "nothing bundles in the API". It does not, at the MJ version this repo pins: MJ 6.1 stopped
+> generating reverse-relationship FieldResolvers
+> (`CodeGenLib/src/Misc/graphql_server_codegen.ts:555`) and the shipped generated schema contains
+> none for any of our relationships. The shipped message says what is actually true —
+> `EntityInfo.RelatedEntities` has no entry for the pair, so the form's section resolves to empty
+> view params and renders nothing.
+
 ```js
 /**
  * Columns added in this migration that are foreign keys, in either spelling: the inline
@@ -537,6 +567,27 @@ Refs #201"
 Mint one fresh UUID for the relationship — `uuidgen | tr 'A-Z' 'a-z'` — and use it in place of
 `<RELATIONSHIP-UUID>` below. Do **not** reuse `09519E97-…` or `552BEC6E-…`; those are two different
 databases' minted ids and neither is portable.
+
+> **Partly superseded during implementation (do not build block 2 from this snippet as written).**
+> Two corrections the shipped migration makes and this snippet does not:
+>
+> - **Block 2 keys its `EntityField` lookup on `Entity.Name`.** Commit `e7a2cd3` ("fix(migrations):
+>   key block 2's EntityField lookup on the id, not the name") replaced that with the `EntityID`
+>   literal. `.claude/rules/migrations-codegen.md:244` states the rule independently — *"Key on
+>   `BaseTable` + `SchemaName`, never on `Entity.Name`. The entity-name prefix is host-configurable
+>   (`mj.config.cjs` → `newEntityDefaults.NameRulesBySchema`), so a name-keyed lookup matches
+>   nothing on a host configured differently."* Because this particular lookup is followed by a
+>   `THROW`, the failure is not a stale comment: on a host whose prefix differs, or whose entity was
+>   renamed in Explorer, the lookup returns NULL and the migration **aborts** — even though blocks 1
+>   and 3 would have been correct.
+> - **The header prose below claims the missing relationship means the collection "does not bundle
+>   in the API".** It does not, at the MJ version this repo pins. MJ 6.1 stopped generating
+>   reverse-relationship FieldResolvers (`CodeGenLib/src/Misc/graphql_server_codegen.ts:555`), and
+>   the shipped generated schema contains none for any of our relationships. `BundleInAPI=1` is
+>   written to match what CodeGen emits, not because it adds a GraphQL field. The real consequence
+>   is the rendering one: `EntityInfo.RelatedEntities` has no entry, so
+>   `BuildRelationshipViewParamsByEntityName` (MJ `base-form-component.ts:722`) returns `{}` and the
+>   form's section renders nothing.
 
 ```sql
 -- =============================================================================================
