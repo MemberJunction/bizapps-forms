@@ -315,6 +315,17 @@ overlapping ones), add:
   }
 ```
 
+> **Superseded during implementation (do not build from this snippet as written).** The shipped
+> code drops the `!OUTPUT_SHIPPED_LATER.has(path.basename(relPath))` half of this condition —
+> commit `66491a7` ("fix(gates): let main() verify the OUTPUT_SHIPPED_LATER remedy, don't assume
+> it"). Checking the map here suppressed the finding on the map ENTRY alone, before `main()` ever
+> read the named remedy at `headSha` and re-checked that it still carries CodeGen output — trusted,
+> not verified, and `main()`'s existing suppression path never even ran (`findings.length` was 0).
+> `classifyMigration` now always raises the PARTIAL-coverage finding when it applies; only `main()`
+> decides whether a recorded remedy excuses it. One consequence, handled deliberately: calling
+> `classifyMigration` directly (as the whole-directory calibration test does) now also flags
+> `V202609091600` — see `KNOWN_HISTORICAL_FLAGS` in `scripts/check-codegen-append.spec.mjs`.
+
 Add the third `OUTPUT_SHIPPED_LATER` entry, with the reason recorded the way the existing two are:
 
 ```js
@@ -542,7 +553,7 @@ databases' minted ids and neither is portable.
 --
 --   1. The EntityRelationship Form Distributions -> Form Responses (One To Many via
 --      FormDistributionID) does not exist. CodeGen minted it on the clean room at 18:20:32,
---      29 seconds after the last migration committed. Without it the related-records collection
+--      28 seconds after the last migration committed. Without it the related-records collection
 --      does not bundle in the API and does not render on the Form Distribution form.
 --
 --   2. EntityField.RelatedEntityNameFieldMap on FormDistributionID is NULL. This one is an ORDERING
