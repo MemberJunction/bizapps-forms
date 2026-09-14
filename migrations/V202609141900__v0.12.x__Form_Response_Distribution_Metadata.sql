@@ -1,5 +1,5 @@
 -- =============================================================================================
--- MJ Forms v0.12.x — the three metadata artifacts a migrations-only host still lacks for
+-- MJ Forms v0.12.x — the three metadata artifacts a migrations-only host still lacks around
 -- FormResponse.FormDistributionID (#201)
 -- =============================================================================================
 -- V202609121200 repaired the EntityField half of #201: all four rows (AllowDeviceResume,
@@ -73,12 +73,14 @@ GO
 -- it looks up. Here the row is guaranteed -- V202609121200 sorts before this file -- so a NULL
 -- lookup means something is wrong with the chain, and this raises instead of skipping. A guard that
 -- turns a missing prerequisite into silence is what produced this defect in the first place.
+-- Keyed on the EntityID literal, same as blocks 1 and 3 -- not on Entity.Name, which is
+-- host-editable metadata: a host that renamed this entity in Explorer would make a name lookup
+-- return NULL here and THROW, aborting the migration, while blocks 1 and 3 would still be correct.
 DECLARE @FormResponseDistributionFieldID UNIQUEIDENTIFIER = (
     SELECT ef.[ID]
       FROM [${mjSchema}].[EntityField] ef
-      JOIN [${mjSchema}].[Entity]      e ON e.[ID] = ef.[EntityID]
-     WHERE e.[Name]  = N'MJ_BizApps_Forms: Form Responses'
-       AND ef.[Name] = N'FormDistributionID');
+     WHERE ef.[EntityID] = '63600739-7165-4BDC-B7D7-19A1B1951DFA'
+       AND ef.[Name]     = N'FormDistributionID');
 
 IF @FormResponseDistributionFieldID IS NULL
     THROW 51201, N'#201: no EntityField row for MJ_BizApps_Forms: Form Responses.FormDistributionID. V202609121200 must have applied before this migration.', 1;
