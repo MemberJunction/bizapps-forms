@@ -124,7 +124,15 @@ ended, and it is folded into a real push's output below rather than carried forw
 | file | in a release tag? | what that means |
 |---|---|---|
 | `V202608081700__v0.8.x__Metadata_Sync.sql` | **yes** — `v0.8.0`, `v0.9.0`, `v0.10.0` | append-only history. Hosts ran it. **Never rewrite or delete it.** |
-| `V202609112116__v0.12.x__Metadata_Sync.sql` | **no** — on `next` only, until `v0.12.0` tags | this release's own consolidated seed. Folds in the two deltas #111 retired, `V202608182130` and `V202608241800`, which reached no host and are now deleted. |
+| `V202609112116__v0.12.x__Metadata_Sync.sql` | **no** — on `next` only, until the next release tags | this release's own consolidated seed. Folds in the two deltas #111 retired, `V202608182130` and `V202608241800`, which reached no host and are now deleted. |
+
+**The `__v<ver>__` in a filename is descriptive, and never a claim about which release ships the
+file.** Flyway orders on the `V<timestamp>` prefix; nothing reads the label. `V202609112116` says
+`v0.12.x` and will ship in whatever version `changeset version` computes from the changesets pending
+at the time — which, as of this writing, is `0.11.0`. This section previously asserted `v0.12.0` as
+fact and was wrong for exactly that reason. The drift is family-wide, not local: `bizapps-caliber`
+is at `v6.2.0` with labels stopping at `v5.5.x`, `bizapps-tasks` at `v1.4.0` with labels stopping at
+`v1.2.x`. **Never infer a release version from a migration filename.**
 
 **The append-only argument covers the first row and nothing else** — an earlier draft of this
 section applied it to all three, which would have frozen two deltas that never shipped and carried
