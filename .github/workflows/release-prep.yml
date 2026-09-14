@@ -172,9 +172,16 @@ jobs:
           # Deliberately NOT `--exit-code`, which answers "no such ref" with 2 and "I could not
           # reach the remote" with 128. Treating both as "it does not exist" would let a dead
           # credential walk past this guard and fail at the push instead, which is precisely the
-          # error this step exists to pre-empt. Empty output means absent; pipefail stops the step
-          # on anything else.
-          if [ -n "$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)" ]; then
+          # error this step exists to pre-empt.
+          #
+          # Captured by ASSIGNMENT, not tested inline as `if [ -n "$(...)" ]`. Errexit is suppressed
+          # for the condition part of an `if`, and a command substitution's status is discarded when
+          # it is only a word inside `[ ... ]` — so the inline form reads an unreachable remote as
+          # "branch absent" and walks into the bump, the commit and the push, which is the exact
+          # conflation the paragraph above rejects. `pipefail` cannot save it: it sets a status
+          # nothing goes on to read. This is the form publish.yml's sibling guard already uses.
+          EXISTING_BRANCH=$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)
+          if [ -n "$EXISTING_BRANCH" ]; then
             echo "::error::$BRANCH already exists on the remote. Either its pull request is already open, or a previous run left it behind — this workflow will not overwrite it."
             exit 1
           fi
