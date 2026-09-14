@@ -12,7 +12,7 @@
 --
 --   1. The EntityRelationship Form Distributions -> Form Responses (One To Many via
 --      FormDistributionID) does not exist. CodeGen minted it on the clean room at 18:20:32,
---      29 seconds after the last migration committed. Without it the related-records collection
+--      28 seconds after the last migration committed. Without it the related-records collection
 --      does not bundle in the API and does not render on the Form Distribution form.
 --
 --   2. EntityField.RelatedEntityNameFieldMap on FormDistributionID is NULL. This one is an ORDERING
