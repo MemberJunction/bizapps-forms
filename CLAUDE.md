@@ -120,11 +120,11 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
   creates *no check run*, so a required check that never reports blocks the PR forever ("Expected —
   Waiting for status"); a job or step skipped by an `if:` reports `skipped`, which counts as passing.
   Both halves were verified on live PRs. Do not move a path filter back up into `on:`.
-- **Nothing pushes to `main` or `next` — the release opens pull requests instead** (#177, and the
-  release-automation change of 2026-09-13). Required status checks are evaluated against the check
-  runs present on the SHA being *introduced*, so a direct push — which introduces a SHA the remote
-  has never seen — can never satisfy them; no retry wins that race. That finding is permanent and
-  `npm run lint:release-pushes` (inside `build-and-test`) keeps it enforced.
+- **Nothing pushes to `main` or `next` — the release opens pull requests instead** (#177, then
+  #218). Required status checks are evaluated against the check runs present on the SHA being
+  *introduced*, so a direct push — which introduces a SHA the remote has never seen — can never
+  satisfy them; no retry wins that race. That finding is permanent and `npm run lint:release-pushes`
+  (inside `build-and-test`) keeps it enforced.
   What changed is everything built on top of it. The release is now **one dispatch and two merges**:
   *Prepare a release* cuts `release/vX.Y.Z`, bumps, and opens the PR into `main`; `publish.yml`
   publishes, tags, and opens the `main` → `next` back-merge PR. Runbook:
@@ -143,7 +143,7 @@ apps/MJAPI            # API-only harness; there is no MJExplorer here
     *GitHub Actions* integration specifically, and is irrelevant here because this design asks for no
     bypass at all. Dispatch **Verify the release App token** to confirm the credential is live; it is
     read-only.
-  - Between the two, the release was a hand-run runbook that **was never once executed** —
+  - Between #177 and #218 the release was a hand-run runbook that **was never once executed** —
     `v0.10.0` (2026-08-14) was cut by the automation #177 removed, and nothing shipped after it.
 
 ## Build & dev commands
