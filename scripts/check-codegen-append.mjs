@@ -54,9 +54,15 @@ export const CODEGEN_NONE_MARKER = '@codegen-none';
 /**
  * Migrations whose CodeGen output legitimately shipped in a LATER migration.
  *
- * Both were already merged — and therefore immutable — when the omission was found, so the only
- * available remedy was a new migration. Verified, never trusted: the named remedy must exist in the
- * diff's head AND actually carry output, so an entry cannot outlive its justification.
+ * Each was already merged — and therefore immutable — when the omission was found, so the only
+ * available remedy was a new migration.
+ *
+ * Verified, never trusted, and verified per OBLIGATION rather than per file: `main()` reads every
+ * named remedy at the diff's head and asks `remedyCovers` whether they actually supply each column's
+ * EntityField row and each added foreign key's EntityRelationship row. Checking only that a remedy
+ * exists and carries *some* CodeGen output is what let one entry silently excuse an obligation the
+ * named file does not contain — V202609091600 owes both, and they ship in two different migrations,
+ * which is why a value may be a LIST.
  *
  * NOT a general escape hatch. For a migration that is still editable, append the output to it.
  */
@@ -80,7 +86,8 @@ export const OUTPUT_SHIPPED_LATER = new Map([
   // other omission -- ships no relationship at all until this branch's own
   // V202609141900__v0.12.x__Form_Response_Distribution_Metadata.sql, not here.
   ['V202609091600__v0.12.x__Resume_Own_Response.sql',
-   'V202609121200__v0.12.x__Distribution_Allowed_Origins.sql'],
+   ['V202609121200__v0.12.x__Distribution_Allowed_Origins.sql',
+    'V202609141900__v0.12.x__Form_Response_Distribution_Metadata.sql']],
 ]);
 
 /** Strip line and block comments so prose naming a table never trips a check. */
@@ -278,6 +285,88 @@ function matchingParen(text, open) {
     else if (text[i] === ')' && --depth === 0) return i;
   }
   return -1;
+}
+
+/**
+ * Which of a flagged migration's obligations its recorded remedies do NOT supply.
+ *
+ * Returns the added columns with no `EntityField` INSERT anywhere (`fields`) and the added foreign
+ * keys with no `EntityRelationship` INSERT naming them (`relationships`), both lower-cased; two
+ * empty arrays means the remedies genuinely cover the file.
+ *
+ * The obligations are counted SEPARATELY because they fail separately and, as V202609091600 proved,
+ * can be remedied by different migrations. A per-file check -- "the named remedy exists and carries
+ * some CodeGen output" -- answers neither question: `carriesCodeGenOutput` is satisfied by any
+ * spCreate/vw/EntityField-INSERT anywhere in the file, so a remedy shipping four EntityField rows
+ * and no relationship reads as covering an unshipped relationship. That is the gate's own defect
+ * class reappearing in its escape hatch.
+ *
+ * The flagged file's own INSERTs count too: an obligation it satisfied itself was never owed to a
+ * remedy, and `@codegen-none` naming the column still excuses it, exactly as in `classifyMigration`.
+ */
+export function remedyCovers(flaggedSql, remedySqls) {
+  const lower = (xs) => xs.map((n) => n.toLowerCase());
+  const shippedFields = new Set([
+    ...lower(findInsertedEntityFieldNames(flaggedSql)),
+    ...remedySqls.flatMap((s) => lower(findInsertedEntityFieldNames(s))),
+  ]);
+  const shippedJoins = new Set([
+    ...lower(findInsertedRelationshipJoinFields(flaggedSql)),
+    ...remedySqls.flatMap((s) => lower(findInsertedRelationshipJoinFields(s))),
+  ]);
+  const reason = findCodeGenNoneReason(flaggedSql) ?? '';
+  const excused = (c) => new RegExp(`\\b${c}\\b`).test(reason);
+
+  return {
+    fields: [...new Set(findAddedColumns(flaggedSql))]
+      .filter((c) => !shippedFields.has(c.toLowerCase()) && !excused(c))
+      .map((c) => c.toLowerCase()),
+    relationships: [...new Set(findAddedForeignKeyColumns(flaggedSql))]
+      .filter((c) => !shippedJoins.has(c.toLowerCase()) && !excused(c))
+      .map((c) => c.toLowerCase()),
+  };
+}
+
+/**
+ * Why a recorded `OUTPUT_SHIPPED_LATER` entry does NOT excuse this migration — empty means suppress.
+ *
+ * Pure on purpose. `main()` owns the I/O (reading each named remedy at the head sha) and this owns
+ * the judgement, so the judgement is reachable from the spec. It was not, and that mattered: with
+ * the decision inlined in `main()`, deleting the coverage branch left the whole suite green, which
+ * is the same "a gate whose spec passes when the gate is broken is not a gate" failure this file
+ * exists to refuse -- and it was found by mutating this module, not by reading it.
+ *
+ * `remedySqls` is positional with `remedyNames`; a null entry means the file was unreadable there.
+ */
+export function suppressionRefusals(relPath, sql, remedyNames, remedySqls, headSha) {
+  const missing = remedyNames.filter((_, i) => remedySqls[i] === null);
+  if (missing.length) {
+    return [
+      `${relPath}: recorded as remedied by ${missing.join(', ')}, but that migration does not ` +
+        `exist at ${headSha}. The columns are unregistered on every host either way.`,
+    ];
+  }
+  if (!remedySqls.some(carriesCodeGenOutput)) {
+    return [
+      `${relPath}: recorded as remedied by ${remedyNames.join(', ')}, but no named migration ` +
+        `carries CodeGen output. The exemption no longer holds.`,
+    ];
+  }
+  // The half a per-file check cannot see: a remedy that carries output, but not the artifact THIS
+  // finding asks for. Suppressing on file identity alone is the gate's own defect class.
+  const uncovered = remedyCovers(sql, remedySqls);
+  const unmet = [
+    ...uncovered.fields.map((c) => `no __mj.EntityField row for ${c}`),
+    ...uncovered.relationships.map((c) => `no __mj.EntityRelationship row for ${c}`),
+  ];
+  if (unmet.length) {
+    return [
+      `${relPath}: recorded as remedied by ${remedyNames.join(', ')}, but those migrations ` +
+        `ship ${unmet.join('; ')}. A remedy must carry the artifact the finding names, not ` +
+        `merely some CodeGen output — record the migration that actually ships it.`,
+    ];
+  }
+  return [];
 }
 
 /** Does this migration touch a column description? */
@@ -491,7 +580,7 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
 
     // The relationship is a SECOND obligation, not the same one. V202609121200 shipped every
     // EntityField row and no EntityRelationship, so a host at `next` has the field and no
-    // related-records collection: nothing bundles in the API and nothing renders on the form (#201).
+    // related-records collection: EntityInfo.RelatedEntities has no entry, so nothing renders it (#201).
     //
     // Positional, not proximity: a column is "linked" only when its name is the actual
     // RelatedEntityJoinField VALUE of some EntityRelationship INSERT, read by column position
@@ -513,8 +602,9 @@ export function classifyMigration(relPath, sql, { isNew = false } = {}) {
       violations.push(
         `${relPath}: adds the foreign key ${unlinked.join(', ')} but ships no INSERT INTO ` +
           `__mj.EntityRelationship for it. CodeGen mints that row locally and the host never runs ` +
-          `CodeGen, so the related-records collection does not exist there — it does not bundle in ` +
-          `the API and does not render on the form. Ship the relationship, guarded on ` +
+          `CodeGen, so the related-records collection does not exist there — EntityInfo.` +
+          `RelatedEntities has no entry for the pair and the form's section resolves to empty view ` +
+          `params, rendering nothing. Ship the relationship, guarded on ` +
           `(EntityID, RelatedEntityID, RelatedEntityJoinField) and never on its own ID — the id is ` +
           `minted per database (lint:distribution CHECK 4, #64). Or state why none is needed: ` +
           `\`-- ${CODEGEN_NONE_MARKER}: <reason naming the column>\`.`,
@@ -632,26 +722,24 @@ function main() {
       const findings = classifyMigration(relPath, sql, { isNew: added.has(relPath) });
       if (findings.length === 0) continue;
 
-      // A merged migration's output may have shipped in a later one — verified, never assumed.
-      const remedy = OUTPUT_SHIPPED_LATER.get(path.basename(relPath));
-      if (remedy) {
-        const remedySql = readAt(headSha, `migrations/${remedy}`, cwd);
-        if (remedySql === null) {
-          violations.push(
-            `${relPath}: recorded as remedied by ${remedy}, but that migration does not exist at ` +
-              `${headSha}. The columns are unregistered on every host either way.`
-          );
-        } else if (!carriesCodeGenOutput(remedySql)) {
-          violations.push(
-            `${relPath}: recorded as remedied by ${remedy}, but that migration carries no CodeGen ` +
-              `output. The exemption no longer holds.`
-          );
-        } else {
-          console.log(
-            `::notice file=migrations/${remedy}::${path.basename(relPath)} ships no output of its ` +
-              `own — it was already merged when that was found; its registration ships here.`
-          );
+      // A merged migration's output may have shipped in a later one — verified, never assumed, and
+      // verified per OBLIGATION. A file can owe two independent things (an EntityField row and an
+      // EntityRelationship row) and they can be remedied by different migrations, so a value may be
+      // a list and every named file is read at headSha before anything is suppressed.
+      const recorded = OUTPUT_SHIPPED_LATER.get(path.basename(relPath));
+      if (recorded) {
+        const remedyNames = Array.isArray(recorded) ? recorded : [recorded];
+        const remedySqls = remedyNames.map((n) => readAt(headSha, `migrations/${n}`, cwd));
+        const refusals = suppressionRefusals(relPath, sql, remedyNames, remedySqls, headSha);
+        if (refusals.length) {
+          violations.push(...refusals);
+          continue;
         }
+        console.log(
+          `::notice file=migrations/${remedyNames[0]}::${path.basename(relPath)} ships no output of ` +
+            `its own — it was already merged when that was found; its registration ships in ` +
+            `${remedyNames.join(', ')}.`
+        );
         continue;
       }
       violations.push(...findings);

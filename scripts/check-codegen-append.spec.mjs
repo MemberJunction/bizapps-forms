@@ -27,6 +27,8 @@ import {
   addedMigrations,
   readAt,
   OUTPUT_SHIPPED_LATER,
+  remedyCovers,
+  suppressionRefusals,
   findAddedColumns,
   findInsertedEntityFieldNames,
   findAddedForeignKeyColumns,
@@ -576,11 +578,15 @@ test('FIRES: OUTPUT_SHIPPED_LATER names a remedy that carries no CodeGen output'
 test('OUTPUT_SHIPPED_LATER only names remedies that are real and still carry CodeGen output', () => {
   const tracked = new Set(execFileSync('git', ['ls-files', 'migrations/*.sql'],
     { cwd: REPO_ROOT, encoding: 'utf8' }).split('\n').filter(Boolean));
-  for (const [flaggedName, remedyName] of OUTPUT_SHIPPED_LATER) {
-    const remedyPath = `migrations/${remedyName}`;
-    assert.ok(tracked.has(remedyPath), `${remedyName}: named as ${flaggedName}'s remedy but is not tracked`);
-    assert.equal(carriesCodeGenOutput(read(remedyPath)), true,
-      `${remedyName}: named as ${flaggedName}'s remedy but carries no CodeGen output`);
+  for (const [flaggedName, recorded] of OUTPUT_SHIPPED_LATER) {
+    const remedyNames = Array.isArray(recorded) ? recorded : [recorded];
+    for (const remedyName of remedyNames) {
+      const remedyPath = `migrations/${remedyName}`;
+      assert.ok(tracked.has(remedyPath), `${remedyName}: named as ${flaggedName}'s remedy but is not tracked`);
+    }
+    // At least one must carry output; coverage of each obligation is asserted separately below.
+    assert.equal(remedyNames.some((n) => carriesCodeGenOutput(read(`migrations/${n}`))), true,
+      `${flaggedName}: no named remedy carries CodeGen output`);
   }
 });
 
@@ -761,4 +767,101 @@ test('IMPORTANT 3 (was over-flagged): an unrelated CREATE TABLE constraining a s
     ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [SharedName] INT NULL;
   `;
   assert.deepEqual(findAddedForeignKeyColumns(sql), []);
+});
+
+// ── The remedy must contain the artifact the finding actually asks for ──────────────────────────
+// Suppression used to be per FILE: one `continue` dropped every finding on a flagged migration as
+// soon as the named remedy carried any CodeGen-shaped statement. That was sound while a file could
+// only owe one thing. It can now owe two independent things -- an EntityField row and an
+// EntityRelationship row -- and V202609091600 owes both, with the two halves shipping in two
+// different migrations. A single-file remedy silently covered the half it does not contain.
+
+test('remedyCovers: a remedy supplying the EntityField row does NOT cover an unshipped relationship', () => {
+  const flagged = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  const fieldOnlyRemedy = `
+    INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name])
+    VALUES ('a','b',1,'FormDistributionID')
+  `;
+  const uncovered = remedyCovers(flagged, [fieldOnlyRemedy]);
+  assert.deepEqual(uncovered.fields, [], 'the EntityField obligation IS covered');
+  assert.deepEqual(uncovered.relationships, ['formdistributionid'],
+    'the EntityRelationship obligation is NOT covered and must be reported');
+});
+
+test('remedyCovers: both obligations covered once a second remedy ships the relationship', () => {
+  const flagged = `
+    ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+      REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+    -- CodeGen output (appended)
+    CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+  `;
+  const fieldRemedy = `INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name]) VALUES ('a','b',1,'FormDistributionID')`;
+  const relRemedy = `INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField]) VALUES ('c','d','e','FormDistributionID')`;
+  const uncovered = remedyCovers(flagged, [fieldRemedy, relRemedy]);
+  assert.deepEqual(uncovered.fields, []);
+  assert.deepEqual(uncovered.relationships, []);
+});
+
+test('OUTPUT_SHIPPED_LATER: every entry names remedies that cover every obligation of the flagged file', () => {
+  // The map is the gate's only escape hatch. An entry that covers one of a file's two obligations
+  // is the same silent pass the gate exists to refuse -- so assert coverage, not mere existence.
+  for (const [flaggedName, remedyNames] of OUTPUT_SHIPPED_LATER) {
+    const flaggedSql = readAt('HEAD', `migrations/${flaggedName}`, REPO_ROOT);
+    assert.ok(flaggedSql, `${flaggedName}: named in OUTPUT_SHIPPED_LATER but not readable at HEAD`);
+    const remedies = (Array.isArray(remedyNames) ? remedyNames : [remedyNames])
+      .map((n) => readAt('HEAD', `migrations/${n}`, REPO_ROOT));
+    for (const [i, sql] of remedies.entries()) {
+      const n = (Array.isArray(remedyNames) ? remedyNames : [remedyNames])[i];
+      assert.ok(sql, `${flaggedName}: remedy ${n} is not readable at HEAD`);
+    }
+    const uncovered = remedyCovers(flaggedSql, remedies);
+    assert.deepEqual(uncovered.fields, [],
+      `${flaggedName}: its remedies ship no EntityField row for ${uncovered.fields.join(', ')}`);
+    assert.deepEqual(uncovered.relationships, [],
+      `${flaggedName}: its remedies ship no EntityRelationship row for ${uncovered.relationships.join(', ')}`);
+  }
+});
+
+// The decision `main()` acts on, tested directly. Mutating the branch that acts on it used to leave
+// this suite entirely green -- the gate's own "a spec that passes on a broken gate is not a gate"
+// rule, applied to its escape hatch.
+
+const FLAGGED_FK = `
+  ALTER TABLE [\${flyway:defaultSchema}].[FormResponse] ADD [FormDistributionID] UNIQUEIDENTIFIER NULL
+    REFERENCES [\${flyway:defaultSchema}].[FormDistribution]([ID]);
+  -- CodeGen output (appended)
+  CREATE OR ALTER VIEW [\${flyway:defaultSchema}].[vwFormResponses] AS SELECT * FROM x;
+`;
+const FIELD_REMEDY = `INSERT INTO [\${mjSchema}].[EntityField] ([ID],[EntityID],[Sequence],[Name]) VALUES ('a','b',1,'FormDistributionID')`;
+const REL_REMEDY = `INSERT INTO [\${mjSchema}].[EntityRelationship] ([ID],[EntityID],[RelatedEntityID],[RelatedEntityJoinField]) VALUES ('c','d','e','FormDistributionID')`;
+
+test('suppressionRefusals REFUSES a remedy that carries output but not the named artifact', () => {
+  const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__field.sql'], [FIELD_REMEDY], 'HEAD');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /no __mj\.EntityRelationship row for formdistributionid/);
+  assert.match(r[0], /not\s+merely some CodeGen output/);
+});
+
+test('suppressionRefusals SUPPRESSES once every obligation is covered across the named remedies', () => {
+  assert.deepEqual(
+    suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__field.sql', 'V3__rel.sql'], [FIELD_REMEDY, REL_REMEDY], 'HEAD'),
+    []);
+});
+
+test('suppressionRefusals names an unreadable remedy rather than silently suppressing', () => {
+  const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__gone.sql'], [null], 'deadbeef');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /V2__gone\.sql/);
+  assert.match(r[0], /does not exist at deadbeef/);
+});
+
+test('suppressionRefusals refuses a remedy set that carries no CodeGen output at all', () => {
+  const r = suppressionRefusals('migrations/V1__x.sql', FLAGGED_FK, ['V2__prose.sql'], ['-- just a comment'], 'HEAD');
+  assert.equal(r.length, 1);
+  assert.match(r[0], /carries CodeGen output/);
 });
