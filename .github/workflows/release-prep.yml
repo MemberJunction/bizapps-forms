@@ -28,7 +28,12 @@
 #            are the parts that need a credential.
 #
 # `dry_run` runs the read half and stops: no branch, no commit, no PR, nothing on the remote.
-name: Release prep
+# The name is the one docs/release.md step 1 tells a human to click, and the two must stay
+# identical: GitHub's Actions sidebar lists a workflow by this field and nothing else, so a
+# name that merely echoes the filename leaves the runbook pointing at a label that is not
+# there. Imperative, matching `Verify the release App token` — these are things you do, not
+# files you have.
+name: Prepare a release
 
 on:
   workflow_dispatch:
@@ -245,7 +250,13 @@ jobs:
             echo
             echo "Merge with a **merge commit**. That triggers \`publish.yml\`, which builds, runs the"
             echo "release-readiness gates, publishes to npm, tags \`v$VERSION\`, and opens the \`main\` -> \`next\`"
-            echo "back-merge PR. That run ends red until the back-merge merges — by design; see \`docs/release.md\`."
+            echo "back-merge PR."
+            echo
+            echo "**A green publish run means it did all of that** — publishing and the back-merge PR both."
+            echo "It goes red only if the back-merge PR could not be opened, and that is worth acting on: the"
+            echo "packages are already on npm and \`v$VERSION\` is already tagged, so the red mark is the only"
+            echo "thing tracking the merge that still has to happen. Do not re-run the publish; read the failed"
+            echo "step and see \`docs/release.md\`."
           } > "$RUNNER_TEMP/release-pr-body.md"
 
       # Minted LATE, immediately before use, and that is load-bearing: an installation token lives
