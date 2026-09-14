@@ -12,8 +12,13 @@
 --
 --   1. The EntityRelationship Form Distributions -> Form Responses (One To Many via
 --      FormDistributionID) does not exist. CodeGen minted it on the clean room at 18:20:32,
---      28 seconds after the last migration committed. Without it the related-records collection
---      does not bundle in the API and does not render on the Form Distribution form.
+--      28 seconds after the last migration committed. Without it EntityInfo.RelatedEntities carries
+--      no entry for the pair, so the Form Distribution form's Form Responses section resolves to
+--      empty view params (MJ base-form-component.ts:722 BuildRelationshipViewParamsByEntityName
+--      returns {} when the lookup misses) and renders nothing. BundleInAPI=1 is written to match
+--      what CodeGen emits, NOT because it adds a GraphQL field: MJ 6.1 stopped generating
+--      reverse-relationship FieldResolvers (CodeGenLib graphql_server_codegen.ts:555), and our
+--      generated schema contains none for any of our 26 BundleInAPI relationships.
 --
 --   2. EntityField.RelatedEntityNameFieldMap on FormDistributionID is NULL. This one is an ORDERING
 --      defect, not an omission: V202609091600 DOES ship the
