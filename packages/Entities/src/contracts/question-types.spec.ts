@@ -15,30 +15,35 @@ import {
   type FormQuestionType,
 } from './question-types';
 
+/** Where the shipped migrations live, from this spec's location in the package. */
+const MIGRATIONS_DIR = join(__dirname, '..', '..', '..', '..', 'migrations');
+
+/**
+ * THE failure this whole pairing exists to prevent: a type the code offers and the database
+ * rejects. It surfaces as a `Save()` returning false with a constraint-violation message
+ * naming neither the column nor the value, on a question the author just added — and because
+ * the builder writes optimistically, the form looks saved until it is reloaded.
+ *
+ * Reads the LAST migration that redefines the constraint rather than a fixed filename, so
+ * this keeps working the next time the list grows.
+ *
+ * At module scope because the picklist-order suite below needs the same list: the sequences
+ * CodeGen derives are a function of exactly these values.
+ */
+function checkConstraintTypes(): string[] {
+  const sql = readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => readFileSync(join(MIGRATIONS_DIR, f), 'utf8'))
+    .join('\n');
+
+  const matches = [...sql.matchAll(/CK_FormQuestion_QuestionType\]?\s+CHECK\s*\(QuestionType IN \(([^)]*)\)/g)];
+  expect(matches.length, 'no migration defines CK_FormQuestion_QuestionType').toBeGreaterThan(0);
+
+  return [...matches[matches.length - 1][1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+}
+
 describe('the taxonomy and the CHECK constraint', () => {
-  /**
-   * THE failure this whole pairing exists to prevent: a type the code offers and the database
-   * rejects. It surfaces as a `Save()` returning false with a constraint-violation message
-   * naming neither the column nor the value, on a question the author just added — and because
-   * the builder writes optimistically, the form looks saved until it is reloaded.
-   *
-   * Reads the LAST migration that redefines the constraint rather than a fixed filename, so
-   * this keeps working the next time the list grows.
-   */
-  function checkConstraintTypes(): string[] {
-    const dir = join(__dirname, '..', '..', '..', '..', 'migrations');
-    const sql = readdirSync(dir)
-      .filter((f) => f.endsWith('.sql'))
-      .sort()
-      .map((f) => readFileSync(join(dir, f), 'utf8'))
-      .join('\n');
-
-    const matches = [...sql.matchAll(/CK_FormQuestion_QuestionType\]?\s+CHECK\s*\(QuestionType IN \(([^)]*)\)/g)];
-    expect(matches.length, 'no migration defines CK_FormQuestion_QuestionType').toBeGreaterThan(0);
-
-    return [...matches[matches.length - 1][1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-  }
-
   it('offers exactly the types the database accepts', () => {
     expect([...checkConstraintTypes()].sort()).toEqual([...FORM_QUESTION_TYPES].sort());
   });
@@ -204,5 +209,90 @@ describe('the taxonomy and the generated entity', () => {
     const field = mjBizAppsFormsFormQuestionSchema.shape.QuestionType;
     const generated = field.options.map((o) => o.value as string);
     expect([...generated].sort()).toEqual([...FORM_QUESTION_TYPES].sort());
+  });
+});
+
+describe('the picklist order a host actually receives', () => {
+  /**
+   * #219. `mj app install` writes our schema into the host's `excludeSchemas`
+   * (MJ/packages/OpenApp/Engine/src/install/install-orchestrator.ts:1987), and CodeGen's
+   * constraint-sync query filters on exactly that list — `getCheckConstraintsSchemaFilter` returns
+   * ` WHERE SchemaName NOT IN (…)` (SQLServerCodeGenProvider.ts:2000), consumed at
+   * manage-metadata.ts:5470. So CodeGen NEVER reaches `FormQuestion.QuestionType` on a host:
+   * whatever `migrations/` leaves in `EntityFieldValue.Sequence` is the order the designer's
+   * question-type dropdown renders, permanently.
+   *
+   * `V202608301200` renamed Signature→Doodle and skipped `Sequence` on the stated premise that
+   * "CodeGen re-derives the whole field's sequences … on its next run". There is no next run. The
+   * rename moved the value from alphabetical slot 20 to slot 5 and left 16 of 25 rows wrong.
+   *
+   * This replays every migration's writes to that picklist and holds the end state to CodeGen's
+   * own rule, read from `syncEntityFieldValues` (manage-metadata.ts:5656): sort the parsed CHECK
+   * values with a bare `Array.prototype.sort()`, then `Sequence = 1 + index`, matching rows BY
+   * VALUE — never by row id, which a host may have minted itself.
+   */
+  const QUESTION_TYPE_FIELD_ID = '0A4FF448-80DF-4D5D-94EC-E315822A1B45';
+
+  type PicklistRow = { id: string; sequence: number; value: string };
+
+  /** The end state of the QuestionType picklist after every shipped migration, keyed by value. */
+  function shippedPicklist(): Map<string, PicklistRow> {
+    const byId = new Map<string, PicklistRow>();
+
+    for (const file of readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort()) {
+      const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
+
+      // CodeGen's own INSERT shape, with the EntityField id as a literal.
+      for (const m of sql.matchAll(
+        /\(\s*'([0-9a-fA-F-]{36})'\s*,\s*'([0-9a-fA-F-]{36})'\s*,\s*(\d+)\s*,\s*'([^']*)'\s*,\s*'([^']*)'/g,
+      )) {
+        if (m[2].toUpperCase() !== QUESTION_TYPE_FIELD_ID) continue;
+        byId.set(m[1].toLowerCase(), { id: m[1].toLowerCase(), sequence: Number(m[3]), value: m[4] });
+      }
+
+      // CodeGen's own re-sequence shape: `SET Sequence=N WHERE ID='…'`.
+      for (const m of sql.matchAll(
+        /EntityFieldValue\]?\s+SET\s+\[?Sequence\]?\s*=\s*(\d+)\s+WHERE\s+\[?ID\]?\s*=\s*'([0-9a-fA-F-]{36})'/gi,
+      )) {
+        const row = byId.get(m[2].toLowerCase());
+        if (row) row.sequence = Number(m[1]);
+      }
+
+      // The Signature→Doodle rename: `SET [Value] = 'x', [Code] = 'x' WHERE [ID] = '…'`.
+      for (const m of sql.matchAll(
+        /EntityFieldValue\]?\s*\n?\s*SET\s+\[?Value\]?\s*=\s*'([^']*)'\s*,\s*\[?Code\]?\s*=\s*'([^']*)'\s*\n?\s*WHERE\s+\[?ID\]?\s*=\s*'([0-9a-fA-F-]{36})'/gi,
+      )) {
+        const row = byId.get(m[3].toLowerCase());
+        if (row) row.value = m[1];
+      }
+
+      // The natural-key re-sequence shape this repo prefers (V202608252340), and the one #219's
+      // repair uses: `SET [Sequence] = N WHERE [EntityFieldID] = @Var AND [Value] = 'x'`.
+      for (const m of sql.matchAll(
+        /EntityFieldValue\]?\s*\n?\s*SET\s+\[?Sequence\]?\s*=\s*(\d+)\s*\n?\s*WHERE\s+\[?EntityFieldID\]?\s*=\s*@\w+\s+AND\s+\[?Value\]?\s*=\s*'([^']+)'/gi,
+      )) {
+        for (const row of byId.values()) if (row.value === m[2]) row.sequence = Number(m[1]);
+      }
+    }
+
+    return new Map([...byId.values()].map((r) => [r.value, r]));
+  }
+
+  it('leaves every QuestionType row at the sequence CodeGen would derive', () => {
+    const ordered = [...checkConstraintTypes()].sort(); // CodeGen: bare Array.prototype.sort()
+    const shipped = shippedPicklist();
+
+    expect(shipped.size, 'shipped picklist row count').toBe(ordered.length);
+
+    const drifted = ordered
+      .map((value, index) => ({ value, want: index + 1, have: shipped.get(value)?.sequence }))
+      .filter((r) => r.have !== r.want);
+
+    expect(
+      drifted,
+      'migrations leave the QuestionType picklist in an order CodeGen would rewrite, and no host ' +
+        'ever runs CodeGen against our schema — so this IS the order the designer renders:\n' +
+        drifted.map((d) => `  ${d.value}: shipped ${d.have}, CodeGen wants ${d.want}`).join('\n'),
+    ).toEqual([]);
   });
 });
