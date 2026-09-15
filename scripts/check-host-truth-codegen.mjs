@@ -29,6 +29,24 @@
  * We compare the folder before and after, so a capture a developer already had staged is neither
  * destroyed nor mistaken for our answer.
  *
+ * ── WHY CODEGEN RUNS TWICE ──────────────────────────────────────────────────────────────────────
+ * A clean room is not ours alone. Forms' baseline needs bizapps-common and bizapps-tasks for its
+ * foreign keys, and at the pinned CLI those schemas' own unshipped metadata lands in the capture
+ * too — measured here: 5 EntityField INSERTs and 2 UPDATEs for `MJ_BizApps_Common: Organizations`
+ * and `Activity Sync Run Details`, none of it ours. A gate that reported a neighbour's defect would
+ * be permanently red and would get turned off, which is the failure mode this repository keeps
+ * re-fixing.
+ *
+ * It cannot be filtered out afterwards: the capture writes `${mjSchema}.EntityField` keyed by an
+ * opaque EntityID and carries no schema marker at all (checked). Filtering on our `${flyway:…}`
+ * placeholder instead would pass a metadata-only defect — exactly #219's shape — straight through.
+ * Naming the siblings in `excludeSchemas` does not stop it either (also checked).
+ *
+ * So the special case is removed rather than filtered: CodeGen runs ONCE before our migrations, to
+ * settle everything we do not own, and once after. Only the second capture is the verdict, and by
+ * construction it can only contain what applying OUR migrations left unsaid. That is the question
+ * the gate is actually for.
+ *
  * ── WHY THIS SCRIPT HOLDS NO DATABASE CONNECTION ────────────────────────────────────────────────
  * It takes an EXISTING, EMPTY database and never creates or drops one. `.env` on a dev machine points
  * at the shared database MJ's host serves; a check that could DROP DATABASE is one bug away from
@@ -244,6 +262,34 @@ function checkPreconditions(options) {
   }
 }
 
+/**
+ * One CodeGen database pass, checked for having actually happened.
+ *
+ * The exit code alone is not enough and neither is the absence of a capture: a run that died before
+ * the database pass also writes nothing, and silence from a run that never looked would read as
+ * convergence. So the CLI's own machine-readable result document is the gate, and anything we cannot
+ * read there fails closed.
+ */
+function runCodegenPass({ label, database }) {
+  const stdout = runMj({
+    label,
+    // No --skip-commands / --no-ai: neither flag exists in the pinned CLI (6.1.0-edge.5), only in
+    // MJ source. Passing them fails the run outright with "Nonexistent flags" — which is how CI
+    // caught that a developer machine resolves @memberjunction/cli to the MJ source checkout while
+    // CI installs the lockfile's published version.
+    args: ['codegen', '--skipfiles', '--no-banner', '--format', 'json'],
+    database,
+    timeout: STEP_TIMEOUT_MS.codegen,
+  });
+  const result = readCliResult(stdout);
+  if (!result || result.command !== 'codegen' || result.success !== true || result.data?.skippedDb !== false) {
+    throw new Error(
+      `${label}: could not confirm CodeGen ran its database pass, so its silence proves nothing. Its ` +
+        `result document was ${result ? JSON.stringify(result) : 'absent from stdout'}.`,
+    );
+  }
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   checkPreconditions(options);
@@ -252,7 +298,10 @@ function main() {
   const capture = captureDirectory();
   const before = listCaptures(capture);
 
-  console.log(`Host-truth build of ${options.database}: core ${coreTag}, then common, tasks, forms, then CodeGen.`);
+  console.log(
+    `Host-truth build of ${options.database}: core ${coreTag}, common, tasks, CodeGen (settle), ` +
+      'our migrations, CodeGen (verdict).',
+  );
 
   const coreOut = runMj({ label: `core migrations (${coreTag})`, args: ['migrate', '-t', coreTag], database: options.database, timeout: STEP_TIMEOUT_MS.migrateCore });
   const start = readMigrateStart(coreOut);
@@ -265,26 +314,23 @@ function main() {
 
   runMj({ label: 'bizapps-common migrations', args: ['migrate', '--schema', '__mj_BizAppsCommon', '--dir', options.commonMigrations], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
   runMj({ label: 'bizapps-tasks migrations', args: ['migrate', '--schema', '__mj_BizAppsTasks', '--dir', options.tasksMigrations], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
-  runMj({ label: 'this repo\'s migrations', args: ['migrate', '--schema', '__mj_BizAppsForms', '--dir', './migrations'], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
 
-  const codegenOut = runMj({
-    label: 'CodeGen, database pass only',
-    // --skip-commands: the AFTER commands build four packages, which makes the exit code report
-    // unrelated build failures. --no-ai: advanced generation is LLM-driven and an assertion cannot
-    // rest on non-reproducible output.
-    args: ['codegen', '--skipfiles', '--skip-commands', '--no-ai', '--no-banner', '--format', 'json'],
-    database: options.database,
-    timeout: STEP_TIMEOUT_MS.codegen,
-  });
-  const result = readCliResult(codegenOut);
-  if (!result || result.command !== 'codegen' || result.success !== true || result.data?.skippedDb !== false) {
-    throw new Error(
-      'Could not confirm CodeGen ran its database pass, so its silence proves nothing. Its result ' +
-        `document was ${result ? JSON.stringify(result) : 'absent from stdout'}.`,
-    );
+  runCodegenPass({ label: 'CodeGen pass 1 — settling the schemas we do not own', database: options.database });
+  const settled = newCaptureFiles({ before, after: listCaptures(capture) });
+  for (const name of settled) {
+    const statements = summarizeCapture(readFileSync(path.join(capture, name), 'utf8'));
+    const total = statements.reduce((sum, { count }) => sum + count, 0);
+    console.log(`   pass 1 settled ${total} statement(s) belonging to core, bizapps-common or bizapps-tasks — not our verdict.`);
   }
 
-  const appeared = newCaptureFiles({ before, after: listCaptures(capture) });
+  runMj({ label: 'this repo\'s migrations', args: ['migrate', '--schema', '__mj_BizAppsForms', '--dir', './migrations'], database: options.database, timeout: STEP_TIMEOUT_MS.migrateApp });
+
+  // The verdict's baseline is the folder as pass 1 left it, so pass 1's own capture is not mistaken
+  // for ours.
+  const beforeVerdict = listCaptures(capture);
+  runCodegenPass({ label: 'CodeGen pass 2 — the verdict', database: options.database });
+
+  const appeared = newCaptureFiles({ before: beforeVerdict, after: listCaptures(capture) });
   if (appeared.length === 0) {
     console.log(`\n✅ Converged. What this repo ships builds a database CodeGen wants to change nothing about.`);
     console.log(`   ${options.database} is still there; drop it when you are done with it.`);

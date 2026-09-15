@@ -1212,3 +1212,59 @@ EOF
   that: bare `mj` is the stale homebrew 5.49.0 binary here.
 - **The issue's "61 lines" is a filtered count**; the actual capture is 1017 lines. The plan uses the
   measured number.
+
+---
+
+## Corrections the first CI run forced (2026-09-15)
+
+The plan above was verified locally and was still wrong in two ways that only a real CI run could
+show. Both are recorded here rather than quietly edited above, because the *reason* they were missed
+is the more useful half.
+
+### 1. The locally-verified flags do not exist in the pinned CLI
+
+`mj codegen --skip-commands --no-ai` was chosen on measured evidence — it made the exit code
+trustworthy and the run deterministic. CI answered:
+
+```
+Error: Nonexistent flags: --skip-commands, --no-ai
+```
+
+**Cause.** On a developer machine `node_modules/@memberjunction/cli` is a **symlink to the MJ source
+checkout** (`../../MJ/packages/MJCLI`, version `6.1.0`), because this repo is linked into the shared
+`mj dev workspace`. CI installs `pnpm-lock.yaml`'s published `6.1.0-edge.5`, whose `codegen` offers
+only `--format`, `-v`, `--no-banner`, `--interactive`, `--skipdb`, `--skipfiles` and
+`--force-advanced-gen`. So **any local `mj` behaviour verified on this estate is verified against MJ
+source, not against the version the repo depends on.**
+
+The fix is `--skipfiles --no-banner --format json`, and the way to check a claim like this is to
+install the pinned CLI somewhere disposable and ask it:
+
+```bash
+mkdir /tmp/edge5 && cd /tmp/edge5 && npm i @memberjunction/cli@6.1.0-edge.5
+./node_modules/.bin/mj codegen --help
+```
+
+Losing `--skip-commands` means CodeGen's AFTER commands (four `pnpm run build`s) run on each pass, so
+a package build failure now fails this gate too. Losing `--no-ai` means advanced generation is not
+suppressed; it changed nothing on three consecutive clean-room runs, and CI carries no AI credentials.
+
+### 2. The verdict was measuring the neighbours
+
+On a clean room built and CodeGen'd entirely by the pinned CLI, the capture contained **only
+`__mj_BizAppsCommon`** entities — `Organizations` and `Activity Sync Run Details`, 5 `EntityField`
+INSERTs and 2 UPDATEs — and nothing of ours. Forms converges; the siblings do not. A gate that went
+red on a neighbour's defect would be permanently red, and a permanently red gate gets turned off.
+
+Three fixes were tried and measured:
+
+| Attempt | Result |
+|---|---|
+| Filter the capture text by schema | **Impossible** — it writes `${mjSchema}.EntityField` keyed by an opaque `EntityID` and carries no schema marker at all. |
+| Filter on our `${flyway:defaultSchema}` placeholder | **Unsafe** — a metadata-only defect (#219's exact shape) produces no DDL, so it would pass straight through. |
+| Name the siblings in `mj.config.cjs` `excludeSchemas` | **No effect** — byte-identical capture. |
+
+So the special case was removed instead of filtered: **CodeGen runs once before our migrations and
+once after.** Pass 1 settles everything we do not own; pass 2 can only contain what applying our
+migrations left unsaid. Measured on a pure edge.5 clean room: pass 1 captured the 7 sibling
+statements, pass 2 captured **nothing**. Cost is one extra ~25s pass.
