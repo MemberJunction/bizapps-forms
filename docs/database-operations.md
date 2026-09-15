@@ -222,8 +222,11 @@ host does — every other gate here reads the repository — and it is the quest
 when #201 and #219 shipped.
 
 ```bash
-# One empty database, owned by [sa]. The check never creates or drops one, so it can never be
-# pointed at a real database by mistake; it refuses the database named in .env outright.
+# One empty database, owned by [sa], and a DIFFERENT one each time. The check never creates or drops
+# a database, and it refuses the one named in .env before it spawns anything — but its "must be
+# empty" check can only run AFTER `mj migrate` has reported the watermark, and that same command
+# applies everything newer than it. So a non-empty database that is not the .env one gets the core
+# chain applied and is refused afterwards. Drop MJ_HostTruth between runs.
 docker exec sql-mj-it /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$DB_PASSWORD" -C -Q \
   "CREATE DATABASE [MJ_HostTruth]; ALTER AUTHORIZATION ON DATABASE::[MJ_HostTruth] TO [sa];"
 
@@ -234,8 +237,10 @@ npm run check:host-truth -- --database MJ_HostTruth \
 
 It takes ~7 minutes, exits 0 on `✅ Converged`, and on failure names every statement CodeGen wanted —
 which is the SQL a host would need and will never run, because `mj app install` excludes
-`__mj_BizAppsForms` from the host's CodeGen. `.github/workflows/host-truth-gate.yml` runs it nightly
-and on pull requests that touch `migrations/`, `metadata/` or `mj.config.cjs`.
+`__mj_BizAppsForms` from the host's CodeGen. `.github/workflows/host-truth-gate.yml` runs it nightly,
+on manual dispatch, and on pull requests touching any of the eight paths it reads: `migrations/`,
+`metadata/`, `mj.config.cjs`, `mj-app.json`, `package.json`, `pnpm-lock.yaml`, `scripts/` and
+`.github/workflows/`.
 
 **It runs CodeGen twice, and only the second run is the verdict.** A clean room is not ours alone —
 Forms' baseline needs common and tasks for its foreign keys, and at the pinned CLI those schemas'
