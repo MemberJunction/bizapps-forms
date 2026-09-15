@@ -10,10 +10,10 @@ article quotes a button that no longer exists.
 **Architecture:** A folder of Markdown rendered by a single Docsify `index.html`. No build step, no
 new workspace dependency. One house rule — bold means on-screen text — makes documentation rot
 mechanically detectable, and `scripts/check-help-docs.mjs` enforces it from inside the already-required
-`build-and-test` job.
+`changes_and_migrations` job — not `build-and-test`, which a docs-only pull request skips (see Task 2).
 
-**Tech Stack:** Markdown, Docsify 5.0.0 from jsDelivr, Node 24 stdlib for the gate, Vitest for the
-gate's tests, Playwright for screenshot capture.
+**Tech Stack:** Markdown, Docsify 5.0.0 from jsDelivr, Node 24 stdlib for the gate, `node --test` for
+the gate's tests, Playwright for screenshot capture.
 
 **Spec:** [`docs/superpowers/specs/2026-09-15-help-center-design.md`](../specs/2026-09-15-help-center-design.md)
 
@@ -617,7 +617,7 @@ Both must pass. `check-ui-tokens.mjs` scans this package, so add no literal colo
 - [ ] **Step 4: Run the whole gate set**
 
 ```bash
-npm run check:help && npm run check:ui-tokens
+npm run lint:help && npm run lint:ui
 ```
 
 - [ ] **Step 5: Commit**
@@ -639,7 +639,7 @@ the articles, a page that reads as a feature tour rather than a task.
 - [ ] **Step 2: Run everything**
 
 ```bash
-npm run check:help && npx vitest run scripts/check-help-docs.spec.mjs
+npm run lint:help && npm run lint:help:test
 ```
 
 - [ ] **Step 3: Push, fixing the tracking branch**

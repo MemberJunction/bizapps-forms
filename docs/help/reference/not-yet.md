@@ -47,7 +47,10 @@ its own link with its own limit, if you can keep them apart —
 
 ## Resuming a half-finished response on another device
 
-Answers come back on the browser and the device they were typed on, and nowhere else. There is no
+Answers come back on the browser and the device they were typed on, and nowhere else. That much you
+can promise: somebody who reopens your link in the same browser on the same device gets their
+answers back on their own, with no account and no code to keep, for about a fortnight — or until the
+link closes, or they clear that browser's site data, whichever comes first. There is no
 email carrying somebody back into a part-finished response, on any device. *Instead:* keep a form
 short enough to finish in one sitting, and tell respondents to finish where they started —
 [Questions respondents ask](respondent-questions.md) says it in their words.

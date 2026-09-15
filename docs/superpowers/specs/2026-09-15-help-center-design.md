@@ -76,12 +76,27 @@ The allowlist exists because some on-screen text is composed at runtime (`Page <
 MJ core rather than this repository. Every entry carries a reason.
 
 The same script checks that internal links and images resolve, and that every article is reachable
-from the sidebar.
+from the sidebar. It also checks the return direction: the five help-centre URLs in
+`packages/Angular/src/lib/shared/help-links.ts`, which the in-product empty states send a stuck
+reader to, must each name an article that exists on disk.
 
-**It is wired into the existing `build-and-test` job, not a new workflow.** The seven required
-checks are fixed in a repository ruleset that nobody, including administrators, can bypass. A new
-workflow would not be required, and making it required is an administrator action. Adding a step to
-a job that is already required gets enforcement immediately and for free.
+**It is wired into an existing required job, not a new workflow.** The seven required checks are
+fixed in a repository ruleset that nobody, including administrators, can bypass. A new workflow
+would not be required, and making it required is an administrator action. Adding a step to a job
+that is already required gets enforcement immediately and for free.
+
+**That job is `changes_and_migrations` in `.github/workflows/changes.yml`, and specifically NOT
+`build-and-test`.** `build-and-test` is gated by a `scope` job whose prefix list (pinned by
+`scripts/check-paths-touched.spec.mjs`) deliberately excludes `docs/`, because an article does not
+need a thirty-minute build. So on a docs-only pull request that decider answers `false`, the job
+reports `skipped`, and a required status check counts `skipped` as PASSING. Wiring the gate there
+would mean the only pull requests it exists to check are exactly the ones it never runs on — a green
+required check over a gate that did not execute. `changes_and_migrations` runs unconditionally on
+every pull request to `next` and `main`, and is already checked out with Node 24, which the gate
+needs nothing more than.
+
+The gate's **unit tests** do live in `build-and-test`, and correctly: they only need to run when the
+gate itself changes, and `scripts/` IS in the path decider's list.
 
 ## Decision 3 — orientation screenshots, not step screenshots
 
@@ -138,8 +153,9 @@ Recorded in `docs/help/STYLE.md`, enforced by review and, where mechanical, by t
 
 ## Verification
 
-- `npm run check:help` passes, inside `build-and-test`.
-- Unit tests for the gate's pure functions, following this repository's `.spec.mjs` convention.
+- `npm run lint:help` passes, inside `changes_and_migrations`.
+- `npm run lint:help:test` passes, inside `build-and-test` — unit tests for the gate's pure
+  functions, following this repository's `node --test` + `.spec.mjs` convention.
 - The rendered site is loaded in a browser and read, on desktop and at phone width, before merge.
 - The tutorial is executed against the running product, not written from the source.
 
