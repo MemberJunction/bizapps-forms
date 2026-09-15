@@ -3,8 +3,10 @@
 # that reads the artefact rather than the repository, and issue #220 for the two defects that reached
 # every host because nothing did.
 #
-# NOT a required status check, deliberately. It needs a SQL Server, two sibling checkouts and ~15
-# minutes, which is the wrong shape for every pull request. It runs nightly on the default branch, on
+# NOT a required status check, deliberately. It needs a SQL Server service container, two sibling
+# checkouts and ~8 minutes — measured, not estimated: the three runs of this workflow took 5.9, 6.1
+# and 7.7 minutes. That is ~3x the slowest required check (build-and-test, 2m45s) and ~30x the other
+# six (9-16s), which is the wrong shape for every pull request. It runs nightly on the default branch, on
 # demand, and on the pull requests that touch what it reads. Promote it into publish.yml alongside
 # check:release-seed once it has a track record; that is the other half of #220's own suggestion.
 name: Host-truth CodeGen convergence
@@ -84,8 +86,8 @@ jobs:
         env:
           ACCEPT_EULA: 'Y'
           # Not a secret. This container exists for the length of one job, is reachable only from it,
-          # and is thrown away with the runner. A repository secret here would buy nothing and would
-          # make the workflow unrunnable from a fork or a fresh clone.
+          # and is thrown away with the runner, so a repository secret here would protect nothing
+          # that is worth protecting and would add a value a fresh clone has to be told about.
           MSSQL_SA_PASSWORD: 'HostTruth!2026#ci'
         ports:
           - 1433:1433
@@ -180,9 +182,11 @@ jobs:
           } > .env
 
       # Provisioning is the caller's job — the check itself holds no database connection and cannot
-      # drop anything, which is what keeps it from ever being pointed at a real database by mistake.
-      # Owned by [sa]: MJ's core baseline dies ~12 batches in otherwise, with an error that says
-      # nothing about ownership.
+      # create or drop one, so it can never DESTROY a real database. (It can still migrate one it is
+      # pointed at: its emptiness check reads `mj migrate`'s own output and therefore lands after
+      # that command has run. Here that is moot — the name is unique per run and the server dies with
+      # the job.) Owned by [sa]: MJ's core baseline dies ~12 batches in otherwise, with an error that
+      # says nothing about ownership.
       - name: Create the empty clean-room database
         run: |
           SQL_CONTAINER=$(docker ps --filter "ancestor=mcr.microsoft.com/mssql/server:2022-latest" --format '{{.ID}}' | head -n1)
