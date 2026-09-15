@@ -43,10 +43,21 @@ compulsory also wears a **Required** badge, and one carrying logic wears **Condi
 **Branches**, or **Rule is broken** if something it depends on has gone.
 
 Moving a question can break a rule, because a rule may only read a question that comes *before* it.
-When a move does that, a banner appears above the canvas naming the question and how many rules it
-broke — `Moved "Your email". This broke 2 rules on "Your email".` — with **Undo** beside it, which
-puts the question back. The banner does not time out. If you dismiss it with **Dismiss** and the
-rules stay broken, the form will refuse to publish: see [Show, skip and branch](logic.md).
+When a move does that, a banner appears above the canvas saying what you moved, how many rules it
+cost, and where to go and look. Which of those three it can tell you depends on where the damage
+landed:
+
+- On another question — `Moved "Your email". This broke 2 rules on "Your postcode".` This is the
+  usual one. You moved a question later, and a rule that was reading it is now in front of it.
+- On the question you moved — `Moved "Your email". This broke 1 rule on it.` It does not repeat the
+  name, which would read as a mistake.
+- On more than one — `Moved "Your email". This broke 3 rules — the affected questions are badged.`
+  Past one, a list in a banner is a list nobody reads, so it sends you to the badges on the canvas
+  instead.
+
+**Undo** sits beside the banner and puts the question back where it was. The banner does not time
+out. If you dismiss it with **Dismiss** and the rules stay broken, the form will refuse to publish:
+see [Show, skip and branch](logic.md).
 
 ## Related
 

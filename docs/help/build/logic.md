@@ -35,9 +35,10 @@ that was reading it.
 ## Open the logic for a question
 
 1. Click the question on the canvas. **Question settings** opens on the right.
-2. Scroll to the **BRANCH** heading near the foot of the panel. Under it you will see
-   **No rules yet. This item always shows.** and a button reading **Add**. Once the question carries
-   rules, the same button reads **Edit** and the rules are summarised above it.
+2. Scroll to the **BRANCH** heading near the foot of the panel. A button sits on the same line, to
+   the right of the heading, and it reads **Add** while the question has no rules. Under the two,
+   **No rules yet. This item always shows.** Once the question does carry rules, that line is
+   replaced by a summary of them and the button reads **Edit**.
 3. Press it. **Edit logic** opens, with the subtitle telling you what it covers — when the question
    appears, and where the respondent goes next.
 4. Use **Show this question** to decide whether the question appears at all. It is a pair of
