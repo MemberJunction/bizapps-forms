@@ -1,7 +1,27 @@
 # Host-truth CodeGen convergence check — Implementation Plan (#220)
 
+> **⚠️ SUPERSEDED IN PART — the task blocks below are the plan as authored, not a description of what
+> shipped.** Executing it corrected the plan in the five ways set out under "Corrections" at the end
+> of this document, and the blocks below were deliberately left unedited. The shipped files are the truth:
+> `scripts/check-host-truth-codegen.mjs`, `.github/workflows/host-truth-gate.yml` and
+> `docs/database-operations.md` §4. Read this document for *why* the work was shaped the way it was,
+> and the "Corrections" section at the end for what a real CI run changed.
+>
+> Specifically, do **NOT** copy from the task blocks below:
+> **(1)** Task 1's and Task 2's script blocks pass `--skipfiles --skip-commands --no-ai`; the pinned
+> CLI (`6.1.0-edge.5`) has no `--skip-commands` and no `--no-ai` and refuses the run outright — see
+> Corrections §1. **(2)** Those same blocks run CodeGen ONCE; the shipped script runs it twice, and
+> only the second pass is the verdict — see Corrections §2. **(3)** Task 3's workflow block omits
+> `package_json_file: bizapps-forms/package.json` on `pnpm/action-setup`, without which the step
+> fails with "No pnpm version is specified" — see Corrections §3. **(4)** It omits the
+> `pnpm run build:packages` step, without which CodeGen's AFTER commands fail with
+> `TS2307: Cannot find module '@mj-biz-apps/forms-core-entities-server'` — also Corrections §3.
+> **(5)** It mints an org GitHub App token to check out the siblings; that step is gone, because the
+> siblings are public and need none — see Corrections §4.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan
-> task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. The blocks are drafts, not
+> dictation: reconcile each against the shipped file named above before writing it.
 
 **Goal:** Ship a check that builds a database from **only what this repo ships**, runs CodeGen against
 it, and fails when CodeGen wants to change anything — the one question no existing gate asks, and the
@@ -81,9 +101,14 @@ Reproduction was run end-to-end before this plan was written. Everything here wa
    only 3 lines — but neither is needed, because the script does not provision. See "Why the script
    never touches SQL directly" below.
 
-10. **`bizapps-common` and `bizapps-tasks` are PRIVATE repos.** CI must check them out with a token;
-    `secrets.GITHUB_TOKEN` cannot read another repository. The repo already uses the org-level GitHub
-    App (`vars.APP_CLIENT_ID` / `secrets.APP_PRIVATE_KEY`, `publish.yml:285`).
+10. **`bizapps-common` and `bizapps-tasks` are PUBLIC repos and need no token.** *Corrected in place,
+    2026-09-15: this fact originally read "are PRIVATE repos … CI must check them out with a token",
+    and it was never true.* `gh repo view` reports `visibility: PUBLIC` for both (and for
+    `bizapps-forms`), an unauthenticated `git ls-remote` against both succeeds, and `CLAUDE.md:47`
+    already describes them as "free OSS and part of our stack". `actions/checkout` defaults its
+    `token` to `github.token`, which reads any public repository, so the plain three-checkout layout
+    is all CI needs. This is corrected rather than recorded below because it was a mis-stated fact,
+    not a design that changed — and it sits under a heading telling the reader not to re-derive it.
 
 ### Why the script never touches SQL directly
 
@@ -829,9 +854,11 @@ Design notes the implementer must not "simplify" away:
 - **The three checkouts mirror the local layout** — `bizapps-forms/`, `bizapps-common/`,
   `bizapps-tasks/` side by side — so the script's own `../bizapps-*/migrations` defaults are what CI
   exercises. A CI-only path shape is a second thing to keep right.
-- **The siblings are private repos**, so they need the org GitHub App token; `secrets.GITHUB_TOKEN`
-  cannot read them. If the App is not installed on them, the token step fails loudly — which is the
-  correct outcome, not something to paper over.
+- ~~**The siblings are private repos**, so they need the org GitHub App token.~~ **Wrong, and
+  corrected 2026-09-15 — see Corrections §4.** All three repositories are public; an unauthenticated
+  `git ls-remote` against both siblings succeeds, and `actions/checkout` defaults its `token` to
+  `github.token`, which reads any public repository. The App-token step the block below still shows
+  is gone from the shipped workflow. It was also the only step a fork pull request could never run.
 - **`.env` is generated from the values below.** The CLI reads DB settings from the environment via
   dotenv, and a real `.env` is the shape every local run uses.
 
@@ -1217,9 +1244,11 @@ EOF
 
 ## Corrections the first CI run forced (2026-09-15)
 
-The plan above was verified locally and was still wrong in two ways that only a real CI run could
-show. Both are recorded here rather than quietly edited above, because the *reason* they were missed
-is the more useful half.
+The plan above was verified locally and was still wrong in the five ways below — things only a real
+CI run, or a check of something the plan filed as a verified fact, could show. They are recorded here rather than
+quietly edited above, because the *reason* they were missed is the more useful half. The head of this
+document carries a pointer to this section, because a correction a thousand lines below the block it
+supersedes is one a top-down reader reaches too late.
 
 ### 1. The locally-verified flags do not exist in the pinned CLI
 
@@ -1268,3 +1297,53 @@ So the special case was removed instead of filtered: **CodeGen runs once before 
 once after.** Pass 1 settles everything we do not own; pass 2 can only contain what applying our
 migrations left unsaid. Measured on a pure edge.5 clean room: pass 1 captured the 7 sibling
 statements, pass 2 captured **nothing**. Cost is one extra ~25s pass.
+
+### 3. The workflow needed two steps the plan's block never had
+
+The second CI run reached CodeGen and died in its AFTER commands:
+
+```
+TS2307: Cannot find module '@mj-biz-apps/forms-core-entities-server'
+```
+
+Two separate omissions in Task 3's block, both found by running it rather than reading it:
+
+- **`pnpm/action-setup` needs `package_json_file: bizapps-forms/package.json`.** The three checkouts
+  live in subdirectories, so there is no `package.json` at the workspace root for the action to read
+  `packageManager` from, and it fails with "No pnpm version is specified" rather than defaulting to
+  anything. This one was fixed in the workflow the moment it was written (`0b0bdb3`) and never
+  back-ported into the block above.
+- **`pnpm run build:packages` must run before CodeGen.** Losing `--skip-commands` (§1) means every
+  `mj codegen` executes `mj.config.cjs`'s AFTER commands, which build Entities, Actions, Server and
+  Angular — but **not** CoreEntitiesServer, which Server imports in five places. On a fresh checkout
+  nothing has produced its `dist/`, so Server's build dies before the gate has a verdict. Building
+  the whole `@mj-biz-apps/forms-*` set first leaves the AFTER commands a cheap no-op.
+
+CoreEntitiesServer is the package everything forgets: `scripts/link-worktree-deps.mjs` omitted it too, and
+the root `CLAUDE.md` already records Caliber's `bump-pins.sh` omitting it.
+
+### 4. The siblings are not private, so the App token was never needed
+
+Task 3's design notes and "Verified fact" 10 both asserted that `bizapps-common` and `bizapps-tasks`
+are private and that CI must mint an org GitHub App token to check them out. **All three
+repositories are public.** `gh repo view` reports `visibility: PUBLIC` for each, an unauthenticated
+`git ls-remote` against both siblings succeeds, and `CLAUDE.md:47` already called them "free OSS and
+part of our stack" — the claim was one `gh repo view` away from being checked and was filed under a
+heading saying not to re-derive it.
+
+The token step is gone. `actions/checkout` defaults its `token` to `github.token`, which reads any
+public repository, so the plain three-checkout layout is all CI needs. It was also the only thing in
+the job a pull request from a fork could never run, since forks are given no secrets — and this was
+the repo's only `pull_request`-triggered workflow touching `secrets.APP_PRIVATE_KEY`.
+
+### 5. The cost figure was written before any run and never revisited
+
+The workflow header justified "NOT a required status check" with "~15 minutes". Measured across all
+three runs of this workflow the job takes **5.9–7.7 minutes**, and the green run on the final HEAD
+was **7m40s** — even after §2 added a whole second CodeGen pass and §3 added a build step, both of
+which should have pushed it up. Four other figures in this same branch already said ~6–7 minutes;
+only the one carrying a design decision said 15.
+
+The decision survives its premise and is unchanged: 7m40s is still ~3x the slowest required check
+(`build-and-test` at 2m45s) and ~30x the other six (9–16s), and the job needs a SQL Server service
+container. Only the number is corrected.
