@@ -20,6 +20,10 @@ ending with a real answer from a real link, which is the fastest way to understa
   phone before anyone else does.
 - [Share](share/publish.md) — publish, create a link, embed it, print a QR code, set limits, and
   work out why a link is not opening.
+- [Responses](responses/read-responses.md) — read what came back, export it, see the patterns, and
+  find the files people attached.
+- [Automate](automate/after-submit.md) — what happens after someone submits, and how to make more
+  happen.
 - [Glossary](reference/glossary.md) — every word this help uses that you might not already have a
   meaning for, in the sense MJ Forms means it.
 
@@ -33,10 +37,6 @@ ending with a real answer from a real link, which is the fastest way to understa
   the commit that adds the first article it links to. When this comment is empty, delete it, and
   put the "The sections" heading back above the list.
 
-  - [Responses](responses/read-responses.md) — read what came back, export it, see the patterns, and
-    find the files people attached.
-  - [Automate](automate/after-submit.md) — what happens after someone submits, and how to make more
-    happen.
   - [Reference](reference/glossary.md) — the words this help uses, the questions respondents send
     you, and what MJ Forms cannot do yet.
 

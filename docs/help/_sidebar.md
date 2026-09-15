@@ -50,6 +50,17 @@
   - [Require a captcha](/share/captcha.md)
   - [Why a link is not working](/share/why-a-link-is-not-working.md)
 
+- Responses
+  - [Read responses](/responses/read-responses.md)
+  - [Export responses](/responses/export.md)
+  - [Read the insights](/responses/insights.md)
+  - [Find uploaded files](/responses/files.md)
+
+- Automate
+  - [What happens after submit](/automate/after-submit.md)
+  - [Save answers into a record](/automate/save-into-a-record.md)
+  - [Run an action or an agent](/automate/actions-and-agents.md)
+
 - Reference
   - [Glossary](/reference/glossary.md)
 
@@ -57,17 +68,6 @@
   THE PLANNED RUNNING ORDER — fixed once, here, rather than renegotiated seven times by seven
   contributors appending to the end of a file. Each line moves up into the list above in the commit
   that adds its article. When this comment is empty, delete it.
-
-  - Responses
-    - [Read responses](/responses/read-responses.md)
-    - [Export responses](/responses/export.md)
-    - [Read the insights](/responses/insights.md)
-    - [Find uploaded files](/responses/files.md)
-
-  - Automate
-    - [What happens after submit](/automate/after-submit.md)
-    - [Save answers into a record](/automate/save-into-a-record.md)
-    - [Run an action or an agent](/automate/actions-and-agents.md)
 
   - Reference
     - [Questions respondents ask](/reference/respondent-questions.md)
